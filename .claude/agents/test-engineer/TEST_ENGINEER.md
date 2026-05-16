@@ -260,6 +260,45 @@ cd packages/vm-agent && go test -cover ./...    # With coverage
 cd packages/vm-agent && go test -v ./internal/auth/  # Verbose specific package
 ```
 
+## Vertical Slice Testing (Mandatory for Cross-Boundary Features)
+
+Most features in this codebase cross system boundaries (API to D1, Worker to DO, Worker to VM agent, UI to API). When generating tests for these features, you MUST write vertical slice tests — not isolated unit tests with empty mocks.
+
+### What This Means
+
+1. **Identify all systems the feature touches** before writing any test. Ask: "What boundaries does data cross?"
+2. **Mock at system boundaries only** (D1, HTTP to VM agent, DO stubs) — not at internal function boundaries
+3. **Every mock must carry realistic state**: full entity shapes, valid foreign key relationships, enough variety to exercise branching logic
+4. **Assert the end-to-end outcome AND the boundary payloads**: verify both what the user sees and what was sent to each mocked system
+
+### Required State Setup
+
+For each mocked boundary, set up state that reflects what the real system would contain at that point:
+
+| Boundary | State to carry in mock |
+|----------|----------------------|
+| D1 queries | Rows in all referenced tables with valid foreign keys and realistic field values |
+| Durable Object | Internal DO state (sessions, messages, alarms) reflecting prior operations |
+| VM agent HTTP | Response with full workspace/session metadata (not just `{ id: 'ws-1' }`) |
+| API client (UI tests) | Full API response shape including nested objects, arrays, and status fields |
+
+### Anti-Patterns (BANNED)
+
+- `vi.fn().mockResolvedValue({})` — empty mock objects prove nothing
+- Mocking internal helpers instead of system boundaries — exercise your own code
+- Testing one layer when the feature spans three — if the route, service, and DB are all involved, the test must cover the full path
+- Stubs that return entities with only an `id` field — real entities have `status`, `ip`, `projectId`, etc.; code that reads those fields gets silent `undefined`
+
+### Checklist
+
+- [ ] All system boundaries identified for the feature
+- [ ] At least one test exercises the full vertical slice (entry point to final outcome)
+- [ ] Mocks carry realistic state with valid relationships between entities
+- [ ] Both success and error paths tested at each boundary
+- [ ] State variety: mocks include enough data to exercise branching (e.g., multiple nodes, active + inactive credentials)
+
+See `.claude/rules/35-vertical-slice-testing.md` for the full rule with examples and boundary pair reference.
+
 ## Test Quality Checklist
 
 When generating tests, ensure:
@@ -272,6 +311,7 @@ When generating tests, ensure:
 - [ ] Mocks reset between tests if needed
 - [ ] Test names describe the scenario clearly
 - [ ] No hardcoded secrets (use mock values)
+- [ ] For cross-boundary features: at least one vertical slice test with realistic mock state (see above)
 
 ## Output Format
 

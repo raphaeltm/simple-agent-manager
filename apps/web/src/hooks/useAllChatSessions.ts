@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatSessionResponse } from '../lib/api';
+import type { ChatSessionListItem } from '../lib/api';
 import { listChatSessions,listProjects } from '../lib/api';
 import { getLastActivity } from '../lib/chat-session-utils';
 
@@ -16,7 +16,7 @@ const SESSION_LIMIT = parseInt(
   import.meta.env.VITE_ALL_CHATS_SESSION_LIMIT || String(DEFAULT_SESSION_LIMIT),
 );
 
-export interface EnrichedChatSession extends ChatSessionResponse {
+export interface EnrichedChatSession extends ChatSessionListItem {
   projectId: string;
   projectName: string;
 }

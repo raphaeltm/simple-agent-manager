@@ -1,12 +1,19 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -293,4 +300,171 @@ func TestHandleGitCredentialUsesWorkspaceScopedTokenAndWorkspaceID(t *testing.T)
 	if got != want {
 		t.Fatalf("unexpected body:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+func TestHandleGitCredentialAcceptsValidWorkspaceCallbackJWTWithoutRuntimeToken(t *testing.T) {
+	t.Parallel()
+
+	validator, key := testGitCredentialJWTValidator(t)
+	workspaceToken := signGitCredentialCallbackToken(t, key, "ws-jwt", time.Now().Add(time.Hour))
+
+	var requestedAuth string
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"ghs_jwt_token","expiresAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlane.URL,
+			CallbackToken:   "node-callback-token",
+		},
+		workspaces:   map[string]*WorkspaceRuntime{},
+		jwtValidator: validator,
+		workspaceMu:  sync.RWMutex{},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-jwt", nil)
+	req.Header.Set("Authorization", "Bearer "+workspaceToken)
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if requestedAuth != "Bearer "+workspaceToken {
+		t.Fatalf("expected control plane to receive workspace JWT, got %q", requestedAuth)
+	}
+}
+
+func TestHandleGitCredentialRejectsWrongWorkspaceCallbackJWT(t *testing.T) {
+	t.Parallel()
+
+	validator, key := testGitCredentialJWTValidator(t)
+	workspaceToken := signGitCredentialCallbackToken(t, key, "ws-other", time.Now().Add(time.Hour))
+
+	controlPlaneCalled := false
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		controlPlaneCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlane.URL,
+			CallbackToken:   "node-callback-token",
+		},
+		workspaces:   map[string]*WorkspaceRuntime{},
+		jwtValidator: validator,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-jwt", nil)
+	req.Header.Set("Authorization", "Bearer "+workspaceToken)
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if controlPlaneCalled {
+		t.Fatal("control plane should not be called for wrong-workspace callback JWT")
+	}
+}
+
+func TestHandleGitCredentialRejectsExpiredWorkspaceCallbackJWT(t *testing.T) {
+	t.Parallel()
+
+	validator, key := testGitCredentialJWTValidator(t)
+	workspaceToken := signGitCredentialCallbackToken(t, key, "ws-jwt", time.Now().Add(-time.Minute))
+
+	s := &Server{
+		config: &config.Config{
+			CallbackToken: "node-callback-token",
+		},
+		workspaces:   map[string]*WorkspaceRuntime{},
+		jwtValidator: validator,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-jwt", nil)
+	req.Header.Set("Authorization", "Bearer "+workspaceToken)
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func testGitCredentialJWTValidator(t *testing.T) (*auth.JWTValidator, *rsa.PrivateKey) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+
+	pubKey := privateKey.Public().(*rsa.PublicKey)
+	jwksJSON := buildGitCredentialJWKSJSON(pubKey)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwksJSON)
+	}))
+	t.Cleanup(server.Close)
+
+	validator, err := auth.NewJWTValidator(server.URL, "node-123", "test-issuer", "workspace-terminal")
+	if err != nil {
+		t.Fatalf("create validator: %v", err)
+	}
+	t.Cleanup(validator.Close)
+
+	return validator, privateKey
+}
+
+func buildGitCredentialJWKSJSON(pub *rsa.PublicKey) []byte {
+	n := base64.RawURLEncoding.EncodeToString(pub.N.Bytes())
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes())
+	data, _ := json.Marshal(map[string]any{
+		"keys": []map[string]any{{
+			"kty": "RSA",
+			"alg": "RS256",
+			"use": "sig",
+			"kid": "test-key-1",
+			"n":   n,
+			"e":   e,
+		}},
+	})
+	return data
+}
+
+func signGitCredentialCallbackToken(
+	t *testing.T,
+	key *rsa.PrivateKey,
+	workspaceID string,
+	expiresAt time.Time,
+) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   workspaceID,
+			Audience:  jwt.ClaimStrings{"workspace-callback"},
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		Workspace: workspaceID,
+		Type:      "callback",
+		Scope:     "workspace",
+	})
+	token.Header["kid"] = "test-key-1"
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signed
 }

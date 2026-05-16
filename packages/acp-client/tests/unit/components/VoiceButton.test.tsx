@@ -57,7 +57,11 @@ describe('VoiceButton', () => {
     originalMediaRecorder = globalThis.MediaRecorder;
 
     // Setup MediaRecorder mock
-    (globalThis as any).MediaRecorder = MockMediaRecorder;
+    Object.defineProperty(globalThis, 'MediaRecorder', {
+      value: MockMediaRecorder,
+      writable: true,
+      configurable: true,
+    });
 
     // Setup getUserMedia mock
     Object.defineProperty(navigator, 'mediaDevices', {
@@ -81,7 +85,11 @@ describe('VoiceButton', () => {
       writable: true,
       configurable: true,
     });
-    (globalThis as any).MediaRecorder = originalMediaRecorder;
+    Object.defineProperty(globalThis, 'MediaRecorder', {
+      value: originalMediaRecorder,
+      writable: true,
+      configurable: true,
+    });
   });
 
   it('renders with microphone icon in idle state', () => {

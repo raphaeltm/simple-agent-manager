@@ -11,6 +11,7 @@ import (
 )
 
 const nodeManagementAudience = "node-management"
+const workspaceCallbackAudience = "workspace-callback"
 
 // Claims represents JWT claims accepted by the node agent.
 type Claims struct {
@@ -18,6 +19,7 @@ type Claims struct {
 	Workspace string `json:"workspace,omitempty"`
 	Node      string `json:"node,omitempty"`
 	Type      string `json:"type,omitempty"`
+	Scope     string `json:"scope,omitempty"`
 }
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.
@@ -92,6 +94,18 @@ func validateAudience(claims *Claims, expectedAudience string) error {
 	return fmt.Errorf("invalid audience: expected %s", expectedAudience)
 }
 
+func validateWorkspaceClaim(claims *Claims, workspaceID string) error {
+	if claims.Workspace == "" {
+		return fmt.Errorf("workspace claim is required")
+	}
+
+	if workspaceID != "" && claims.Workspace != workspaceID {
+		return fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
+	}
+
+	return nil
+}
+
 // Validate validates a token using the default audience.
 func (v *JWTValidator) Validate(tokenString string) (*Claims, error) {
 	claims, err := v.parse(tokenString)
@@ -113,12 +127,37 @@ func (v *JWTValidator) ValidateWorkspaceToken(tokenString, workspaceID string) (
 		return nil, err
 	}
 
-	if claims.Workspace == "" {
-		return nil, fmt.Errorf("workspace claim is required")
+	if err := validateWorkspaceClaim(claims, workspaceID); err != nil {
+		return nil, err
 	}
 
-	if workspaceID != "" && claims.Workspace != workspaceID {
-		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
+	return claims, nil
+}
+
+// ValidateWorkspaceCallbackToken validates a workspace-scoped VM callback token.
+func (v *JWTValidator) ValidateWorkspaceCallbackToken(tokenString, workspaceID string) (*Claims, error) {
+	claims, err := v.parse(tokenString)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateAudience(claims, workspaceCallbackAudience); err != nil {
+		return nil, err
+	}
+	if err := validateWorkspaceClaim(claims, workspaceID); err != nil {
+		return nil, err
+	}
+	if claims.ExpiresAt == nil {
+		return nil, fmt.Errorf("expiration claim is required")
+	}
+	if claims.Subject != claims.Workspace {
+		return nil, fmt.Errorf("subject must match workspace claim")
+	}
+	if claims.Type != "callback" {
+		return nil, fmt.Errorf("callback token type is required")
+	}
+	if claims.Scope != "workspace" {
+		return nil, fmt.Errorf("workspace callback scope is required")
 	}
 
 	return claims, nil

@@ -2,6 +2,7 @@ import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 
 import type { ChatMessageResponse, ChatSessionResponse } from '../../lib/api';
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -161,7 +162,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         }
       }
     } else if (msg.role === 'tool') {
-      const meta = msg.toolMetadata as Record<string, unknown> | null;
+      const meta = maybeJsonRecord(msg.toolMetadata);
       const toolCallId = meta && typeof meta.toolCallId === 'string' ? meta.toolCallId : '';
       const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
       // Build a meaningful title: prefer the explicit title from metadata,

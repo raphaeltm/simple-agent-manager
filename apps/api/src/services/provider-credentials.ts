@@ -5,6 +5,8 @@ import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { decrypt } from './encryption';
 import { getPlatformCloudCredential } from './platform-credentials';
 
@@ -44,7 +46,7 @@ export function serializeCredentialToken(
  */
 export function extractScalewaySecretKey(decryptedToken: string): string | null {
   try {
-    const parsed = JSON.parse(decryptedToken) as Record<string, unknown>;
+    const parsed = expectJsonRecord(JSON.parse(decryptedToken), 'provider.scaleway_credential');
     if (typeof parsed?.secretKey === 'string' && parsed.secretKey) {
       return parsed.secretKey;
     }
@@ -93,10 +95,7 @@ export function buildProviderConfig(
       } catch {
         throw new Error('Invalid Scaleway credential format: malformed stored data');
       }
-      if (!parsed || typeof parsed !== 'object') {
-        throw new Error('Invalid Scaleway credential format: expected JSON object');
-      }
-      const obj = parsed as Record<string, unknown>;
+      const obj = expectJsonRecord(parsed, 'provider.scaleway_credential');
       if (typeof obj?.secretKey !== 'string' || !obj.secretKey || typeof obj?.projectId !== 'string' || !obj.projectId) {
         throw new Error('Invalid Scaleway credential format: missing secretKey or projectId');
       }
@@ -121,10 +120,7 @@ export function parseGcpCredential(decryptedToken: string): GcpOidcCredential {
   } catch {
     throw new Error('Invalid GCP credential format: malformed stored data');
   }
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Invalid GCP credential format: expected JSON object');
-  }
-  const obj = parsed as Record<string, unknown>;
+  const obj = expectJsonRecord(parsed, 'provider.gcp_credential');
   if (
     typeof obj?.gcpProjectId !== 'string' || !obj.gcpProjectId ||
     typeof obj?.gcpProjectNumber !== 'string' || !obj.gcpProjectNumber ||
@@ -200,7 +196,7 @@ export async function createProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: { KV: KVNamespace; BASE_DOMAIN: string; JWT_PRIVATE_KEY: string; JWT_PUBLIC_KEY: string; GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string; GCP_TOKEN_CACHE_TTL_SECONDS?: string; GCP_API_TIMEOUT_MS?: string; GCP_OPERATION_POLL_TIMEOUT_MS?: string } & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // 1. Try user's own credential first
@@ -226,7 +222,7 @@ export async function createProviderForUser(
     if (providerName === 'gcp') {
       const gcpCred = parseGcpCredential(decryptedToken);
       const { getGcpAccessToken } = await import('./gcp-sts');
-      const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env as any);
+      const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env);
 
       const provider = new GcpProvider(
         gcpCred.gcpProjectId,
@@ -252,7 +248,7 @@ export async function createProviderForUser(
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
     // Use a synthetic user ID for platform credentials in token cache
-    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env as any);
+    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env);
 
     const provider = new GcpProvider(
       gcpCred.gcpProjectId,

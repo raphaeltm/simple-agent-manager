@@ -1,5 +1,7 @@
 import { useCallback, useEffect,useRef, useState } from 'react';
 
+import { readResponseJsonRecord, requireString } from '../runtime-validation';
+
 export type AudioPlaybackState = 'idle' | 'loading' | 'playing' | 'paused';
 
 export interface UseAudioPlaybackOptions {
@@ -221,11 +223,16 @@ export function useAudioPlayback({
       });
 
       if (!synthesizeRes.ok) {
-        const errData = await synthesizeRes.json().catch(() => null) as { message?: string } | null;
-        throw new Error(errData?.message || `Synthesis failed: ${synthesizeRes.status}`);
+        const errData = await synthesizeRes.json().catch(() => null);
+        const message = errData && typeof errData === 'object' && 'message' in errData && typeof errData.message === 'string'
+          ? errData.message
+          : null;
+        throw new Error(message || `Synthesis failed: ${synthesizeRes.status}`);
       }
 
-      const { audioUrl, summarized: wasSummarized } = await synthesizeRes.json() as { audioUrl: string; summarized?: boolean };
+      const synthesizeData = await readResponseJsonRecord(synthesizeRes, 'acp.audio.synthesize');
+      const audioUrl = requireString(synthesizeData, 'audioUrl', 'acp.audio.synthesize');
+      const wasSummarized = synthesizeData.summarized === true;
       setSummarized(wasSummarized ?? false);
 
       // Step 2: Fetch the audio blob

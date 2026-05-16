@@ -1,5 +1,8 @@
+import * as v from 'valibot';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -9,6 +12,31 @@ const DEFAULT_DNS_TTL = 60;
 
 /** Default timeout for Cloudflare API calls (per Constitution Principle XI) */
 const DEFAULT_CF_API_TIMEOUT_MS = 30_000;
+
+const cloudflareErrorSchema = v.object({
+  errors: v.optional(v.array(v.object({ message: v.string() }))),
+});
+
+const dnsRecordIdResponseSchema = v.object({
+  result: v.object({ id: v.string() }),
+});
+
+const dnsRecordListResponseSchema = v.object({
+  result: v.array(v.object({
+    id: v.string(),
+    name: v.string(),
+    type: v.string(),
+  })),
+});
+
+async function readCloudflareError(response: Response, fallback: string): Promise<string> {
+  try {
+    const error = await readResponseJson(response, cloudflareErrorSchema, 'cloudflare.dns.error');
+    return error.errors?.[0]?.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /**
  * Get DNS TTL from env or use default (per constitution principle XI).
@@ -108,12 +136,10 @@ export async function createDNSRecord(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to create DNS record: ${response.status}`;
-    throw new Error(message);
+    throw new Error(await readCloudflareError(response, `Failed to create DNS record: ${response.status}`));
   }
 
-  const data = await response.json() as { result: { id: string } };
+  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.create_record');
   return data.result.id;
 }
 
@@ -138,9 +164,7 @@ export async function deleteDNSRecord(
 
   // Ignore 404 errors (record already deleted)
   if (!response.ok && response.status !== 404) {
-    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to delete DNS record: ${response.status}`;
-    throw new Error(message);
+    throw new Error(await readCloudflareError(response, `Failed to delete DNS record: ${response.status}`));
   }
 }
 
@@ -169,9 +193,7 @@ export async function updateDNSRecord(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to update DNS record: ${response.status}`;
-    throw new Error(message);
+    throw new Error(await readCloudflareError(response, `Failed to update DNS record: ${response.status}`));
   }
 }
 
@@ -212,7 +234,7 @@ export async function cleanupWorkspaceDNSRecords(
       continue;
     }
 
-    const data = await response.json() as { result: Array<{ id: string; name: string; type: string }> };
+    const data = await readResponseJson(response, dnsRecordListResponseSchema, 'cloudflare.dns.cleanup_records');
     const records = data.result || [];
 
     for (const record of records) {
@@ -282,12 +304,10 @@ export async function createNodeBackendDNSRecord(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
-    const message = error.errors?.[0]?.message || `Failed to create backend DNS record: ${response.status}`;
-    throw new Error(message);
+    throw new Error(await readCloudflareError(response, `Failed to create backend DNS record: ${response.status}`));
   }
 
-  const data = await response.json() as { result: { id: string } };
+  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.create_backend_record');
   return data.result.id;
 }
 

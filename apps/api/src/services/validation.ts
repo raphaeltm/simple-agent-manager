@@ -1,5 +1,7 @@
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+
 const ANTHROPIC_API_KEY_PREFIX = 'sk-ant-api';
 const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
 
@@ -57,13 +59,13 @@ function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
 export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonValidation {
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(credential);
+    parsed = expectJsonRecord(JSON.parse(credential), 'openai_codex.auth_json');
   } catch {
     return { valid: false, error: 'Invalid JSON. Paste the full contents of ~/.codex/auth.json' };
   }
 
   // Hard requirement: must have a tokens object with at least access_token
-  const tokens = parsed.tokens as Record<string, unknown> | undefined;
+  const tokens = maybeJsonRecord(parsed.tokens) ?? undefined;
   if (!tokens || typeof tokens !== 'object') {
     return { valid: false, error: 'Missing "tokens" object. Paste the full contents of ~/.codex/auth.json' };
   }
@@ -99,8 +101,11 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
   if (typeof tokens.id_token === 'string') {
     const idClaims = decodeJwtPayload(tokens.id_token);
     if (idClaims) {
-      const authNamespace = idClaims['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
-      planType = authNamespace?.chatgpt_plan_type as string | undefined;
+      const authNamespace = maybeJsonRecord(idClaims['https://api.openai.com/auth']);
+      planType =
+        typeof authNamespace?.chatgpt_plan_type === 'string'
+          ? authNamespace.chatgpt_plan_type
+          : undefined;
     }
   }
 

@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
@@ -9,6 +11,13 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 const googleAuthRoutes = new Hono<{ Bindings: Env }>();
+
+const googleTokenResponseSchema = v.object({
+  access_token: v.string(),
+  token_type: v.optional(v.string()),
+  expires_in: v.optional(v.number()),
+  scope: v.optional(v.string()),
+});
 
 /**
  * GET /auth/google/authorize - Start Google OAuth flow for GCP integration.
@@ -83,7 +92,9 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
 
   let storedState: { userId: string };
   try {
-    storedState = JSON.parse(storedStateRaw) as { userId: string };
+    const parsed = expectJsonRecord(JSON.parse(storedStateRaw), 'google_oauth.state');
+    if (typeof parsed.userId !== 'string') throw new Error('Invalid state structure');
+    storedState = { userId: parsed.userId };
   } catch {
     await c.env.KV.delete(`google-oauth-state:${state}`);
     return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state format')}`);
@@ -115,20 +126,20 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   });
 
   if (!tokenResponse.ok) {
-    const errBody = await tokenResponse.json().catch(() => ({})) as { error?: string };
+    const errPayload: unknown = await tokenResponse.json().catch(() => ({}));
+    const errBody = maybeJsonRecord(errPayload) ?? {};
     log.error('google_auth.token_exchange_failed', {
       status: tokenResponse.status,
-      error: errBody.error ?? 'unknown',
+      error: typeof errBody.error === 'string' ? errBody.error : 'unknown',
     });
     return c.redirect(`${appUrl}?gcp_error=token_exchange_failed`);
   }
 
-  const tokenData = (await tokenResponse.json()) as {
-    access_token: string;
-    token_type: string;
-    expires_in: number;
-    scope: string;
-  };
+  const tokenData = await readResponseJson(
+    tokenResponse,
+    googleTokenResponseSchema,
+    'google_oauth.token_response',
+  );
 
   // Store the OAuth token server-side in KV with a short-lived opaque handle.
   const handle = crypto.randomUUID();

@@ -14,4 +14,5 @@ Use:
 
 1. Read CLAUDE_AGENT.md.
 2. Follow its checklist and constraints.
-3. Report results with concrete file references.
+3. For any test that crosses system boundaries, follow the vertical slice testing rule in `.claude/rules/35-vertical-slice-testing.md`.
+4. Report results with concrete file references.

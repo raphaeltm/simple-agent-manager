@@ -2,6 +2,7 @@ import { useCallback, useEffect,useRef, useState } from 'react';
 
 import type { AcpErrorCode } from '../errors';
 import { errorCodeFromCloseCode, errorCodeFromMessage, getErrorMeta } from '../errors';
+import { maybeJsonRecord } from '../runtime-validation';
 import type { AgentSessionStatus, AgentStatusMessage, LifecycleEventCallback,SessionStateMessage } from '../transport/types';
 import type { AcpTransport } from '../transport/websocket';
 import { createAcpWebSocketTransport } from '../transport/websocket';
@@ -97,7 +98,8 @@ function isGatewayErrorMessage(data: unknown): data is GatewayErrorMessage {
   if (!data || typeof data !== 'object') {
     return false;
   }
-  const record = data as Record<string, unknown>;
+  const record = maybeJsonRecord(data);
+  if (!record) return false;
   return typeof record.error === 'string' &&
     (typeof record.message === 'string' || record.message === undefined);
 }

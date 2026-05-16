@@ -1,5 +1,6 @@
 import { useCallback, useRef,useState } from 'react';
 
+import { expectJsonRecord } from '../runtime-validation';
 import type { SlashCommand } from '../types';
 import type { AcpMessage } from './useAcpSession';
 
@@ -519,7 +520,7 @@ function extractToolCallText(value: unknown, depth = 0): string {
     return '';
   }
 
-  const record = value as Record<string, unknown>;
+  const record = expectJsonRecord(value, 'acp.tool_call_content');
   const preferredKeys = ['text', 'output', 'diff', 'content', 'stdout', 'stderr', 'message', 'result'];
   for (const key of preferredKeys) {
     const parsed = extractToolCallText(record[key], depth + 1).trim();

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getRateLimit,rateLimit } from '../middleware/rate-limit';
@@ -90,9 +91,12 @@ clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) =>
 
   // Log each entry individually for CF observability searchability
   for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') continue;
-
-    const e = entry as Record<string, unknown>;
+    let e: Record<string, unknown>;
+    try {
+      e = expectJsonRecord(entry, 'client-errors.entry');
+    } catch {
+      continue;
+    }
 
     // Validate required fields
     const message = typeof e.message === 'string' ? e.message : null;
@@ -123,7 +127,7 @@ clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) =>
       level: level as PersistErrorInput['level'],
       message,
       stack: typeof e.stack === 'string' ? e.stack : null,
-      context: e.context && typeof e.context === 'object' ? e.context as Record<string, unknown> : null,
+      context: maybeJsonRecord(e.context),
       userId,
       ipAddress: ip,
       userAgent: typeof e.userAgent === 'string' ? e.userAgent : null,

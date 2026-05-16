@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
 import { useNotifications } from '../hooks/useNotifications';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 
 const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {
   icon: typeof CheckCircle2;
@@ -143,8 +144,10 @@ export function NotificationCenter() {
     for (const n of filteredNotifications) {
       const key = n.projectId ?? 'none';
       if (!groupMap.has(key)) {
-        const projectName = (n.metadata as Record<string, unknown> | null)?.projectName as string | undefined
-          ?? (n.projectId ? `Project ${n.projectId.slice(0, 8)}` : 'General');
+        const metadataProjectName = maybeJsonRecord(n.metadata)?.projectName;
+        const projectName = typeof metadataProjectName === 'string'
+          ? metadataProjectName
+          : (n.projectId ? `Project ${n.projectId.slice(0, 8)}` : 'General');
         groupMap.set(key, { projectId: n.projectId, projectName, notifications: [] });
       }
       groupMap.get(key)!.notifications.push(n);

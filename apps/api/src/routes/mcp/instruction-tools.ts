@@ -439,7 +439,7 @@ export async function handleRequestHumanInput(
         notificationService.getProjectName(env, tokenData.projectId),
         notificationService.getChatSessionId(env, tokenData.workspaceId),
       ]);
-      await notificationService.notifyNeedsInput(env as any, tokenData.userId, {
+      await notificationService.notifyNeedsInput(env, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,

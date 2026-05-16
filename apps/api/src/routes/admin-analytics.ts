@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getForwardStatus } from '../services/analytics-forward';
@@ -15,6 +17,10 @@ const DEFAULT_RETENTION_WEEKS = 12;
 const DEFAULT_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT = 20;
 /** Analytics Engine hard cap on result rows; queries without explicit LIMIT silently truncate here. */
 const MAX_RETENTION_QUERY_ROWS = 10_000;
+const analyticsSqlResponseSchema = v.object({
+  data: v.optional(v.array(v.unknown())),
+  meta: v.optional(v.array(v.unknown())),
+});
 
 /** Parse an integer env var with validation; returns fallback on NaN or non-positive values. */
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -95,7 +101,7 @@ async function queryAnalyticsEngine(
     throw errors.internal(`Analytics Engine query failed: ${response.status}`);
   }
 
-  const body = await response.json() as { data?: unknown[]; meta?: unknown[] };
+  const body = await readResponseJson(response, analyticsSqlResponseSchema, 'analytics.sql');
   // Return only the data rows — do not leak internal column metadata to the client
   return body.data ?? [];
 }

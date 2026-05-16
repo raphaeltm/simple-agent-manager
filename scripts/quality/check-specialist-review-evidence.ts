@@ -42,6 +42,55 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parsePullRequestPayload(raw: string): {
+  body: string;
+  labels: Array<{ name: string }>;
+  htmlUrl?: string;
+} {
+  const payload: unknown = JSON.parse(raw);
+  if (!isRecord(payload)) {
+    fail('GitHub event payload must be an object.');
+  }
+
+  const pullRequest = payload.pull_request;
+  if (!isRecord(pullRequest)) {
+    fail('GitHub event payload is missing pull_request.');
+  }
+
+  const body = pullRequest.body;
+  if (body !== undefined && body !== null && typeof body !== 'string') {
+    fail('GitHub event pull_request.body must be a string when present.');
+  }
+
+  const htmlUrl = pullRequest.html_url;
+  if (htmlUrl !== undefined && typeof htmlUrl !== 'string') {
+    fail('GitHub event pull_request.html_url must be a string when present.');
+  }
+
+  const rawLabels = pullRequest.labels;
+  if (rawLabels !== undefined && !Array.isArray(rawLabels)) {
+    fail('GitHub event pull_request.labels must be an array when present.');
+  }
+
+  const labels =
+    rawLabels?.map((label, index) => {
+      if (!isRecord(label) || typeof label.name !== 'string') {
+        fail(`GitHub event pull_request.labels[${index}].name must be a string.`);
+      }
+      return { name: label.name };
+    }) ?? [];
+
+  return {
+    body: body ?? '',
+    labels,
+    htmlUrl,
+  };
+}
+
 /**
  * Extract the Specialist Review Evidence section from PR body.
  */
@@ -232,16 +281,10 @@ function main(): void {
     fail('GITHUB_EVENT_PATH is missing.');
   }
 
-  const payload = JSON.parse(readFileSync(eventPath, 'utf8')) as {
-    pull_request?: {
-      body?: string | null;
-      html_url?: string;
-      labels?: Array<{ name: string }>;
-    };
-  };
+  const payload = parsePullRequestPayload(readFileSync(eventPath, 'utf8'));
 
-  const body = payload.pull_request?.body ?? '';
-  const labels = payload.pull_request?.labels ?? [];
+  const body = payload.body;
+  const labels = payload.labels;
 
   if (!body.trim()) {
     // Empty body — defer to preflight evidence check to flag this
@@ -275,8 +318,8 @@ function main(): void {
       `Reviewers: ${result.reviewers.map((r) => `${r.reviewer} (${r.status})`).join(', ')}`
     );
   }
-  if (payload.pull_request?.html_url) {
-    console.log(`PR: ${payload.pull_request.html_url}`);
+  if (payload.htmlUrl) {
+    console.log(`PR: ${payload.htmlUrl}`);
   }
 }
 

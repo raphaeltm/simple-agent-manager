@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
-import type { ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { SessionList } from './SessionList';
@@ -21,7 +21,7 @@ export function MobileSessionDrawer({
   taskTitleMap = new Map(),
   taskInfoMap = new Map(),
 }: {
-  sessions: ChatSessionResponse[];
+  sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
   onFork: (session: ChatSessionResponse) => void;
@@ -37,8 +37,8 @@ export function MobileSessionDrawer({
   const [mobileShowStale, setMobileShowStale] = useState(false);
 
   const { recent, stale } = useMemo(() => {
-    const r: ChatSessionResponse[] = [];
-    const s: ChatSessionResponse[] = [];
+    const r: ChatSessionListItem[] = [];
+    const s: ChatSessionListItem[] = [];
     for (const sess of sessions) {
       if (isStaleSession(sess)) s.push(sess);
       else r.push(sess);

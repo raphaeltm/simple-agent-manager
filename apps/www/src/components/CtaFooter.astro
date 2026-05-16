@@ -7,9 +7,9 @@ const currentYear = new Date().getFullYear();
 <section class="cta-section">
   <div class="container">
     <div class="cta-content animate-on-scroll">
-      <h2 class="cta-title">Ready to run coding agents on your own infrastructure?</h2>
+      <h2 class="cta-title">Ready to run multi-agent workflows at scale?</h2>
       <p class="cta-subtitle">
-        Self-host on Cloudflare's free tier. Bring your own cloud. Your agents, your code.
+        Self-host on Cloudflare's free tier. Bring your own cloud. Your agents, your infrastructure.
       </p>
       <div class="cta-actions">
         <a href={appUrl} class="btn-cta btn-cta-primary">
@@ -64,6 +64,13 @@ const currentYear = new Date().getFullYear();
     text-align: center;
     max-width: 600px;
     margin: 0 auto;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 80px rgba(22, 163, 74, 0.06);
+    padding: 48px 32px;
   }
 
   .cta-title {
@@ -104,24 +111,28 @@ const currentYear = new Date().getFullYear();
   .btn-cta-primary {
     background: var(--color-accent);
     color: white;
+    box-shadow: 0 0 20px rgba(22, 163, 74, 0.3), 0 0 60px rgba(22, 163, 74, 0.1);
   }
 
   .btn-cta-primary:hover {
     background: var(--color-accent-hover);
     color: white;
     transform: translateY(-1px);
+    box-shadow: 0 0 30px rgba(22, 163, 74, 0.4), 0 0 80px rgba(22, 163, 74, 0.15);
   }
 
   .btn-cta-secondary {
-    background: var(--color-bg-surface);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
     color: var(--color-fg-primary);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--glass-border);
   }
 
   .btn-cta-secondary:hover {
-    background: var(--color-bg-surface-hover);
+    background: var(--glass-bg-subtle);
     color: var(--color-fg-primary);
-    border-color: var(--color-fg-dim);
+    border-color: var(--glass-border-hover);
   }
 
   /* Footer */

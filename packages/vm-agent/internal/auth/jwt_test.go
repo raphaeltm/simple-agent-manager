@@ -73,6 +73,25 @@ func signToken(t *testing.T, key *rsa.PrivateKey, claims Claims) string {
 	return signed
 }
 
+func signWorkspaceCallbackToken(t *testing.T, key *rsa.PrivateKey, mutate func(*Claims)) string {
+	t.Helper()
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   "ws-123",
+			Audience:  jwt.ClaimStrings{"workspace-callback"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+		Workspace: "ws-123",
+		Type:      "callback",
+		Scope:     "workspace",
+	}
+	if mutate != nil {
+		mutate(&claims)
+	}
+	return signToken(t, key, claims)
+}
+
 func TestValidateNodeManagementToken_WorkspaceBypass(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +285,82 @@ func TestJWTValidation_CoreProperties(t *testing.T) {
 		_, err = validator.ValidateNodeManagementToken(tokenStr, "")
 		if err == nil {
 			t.Fatal("expected error for token signed with unknown key")
+		}
+	})
+}
+
+func TestValidateWorkspaceCallbackToken(t *testing.T) {
+	t.Parallel()
+
+	const nodeID = "node-123"
+	validator, key := testJWKS(t, nodeID)
+
+	t.Run("matching workspace callback token accepted", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signWorkspaceCallbackToken(t, key, nil)
+
+		claims, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if claims.Workspace != "ws-123" {
+			t.Fatalf("expected workspace ws-123, got %q", claims.Workspace)
+		}
+	})
+
+	t.Run("wrong audience rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Audience = jwt.ClaimStrings{"workspace-terminal"}
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected wrong audience to be rejected")
+		}
+	})
+
+	t.Run("wrong workspace rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Subject = "ws-other"
+			claims.Workspace = "ws-other"
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected wrong workspace to be rejected")
+		}
+	})
+
+	t.Run("node scoped callback rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Scope = "node"
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected node-scoped callback token to be rejected")
+		}
+	})
+
+	t.Run("missing expiration rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.ExpiresAt = nil
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected missing expiration to be rejected")
+		}
+	})
+
+	t.Run("subject mismatch rejected", func(t *testing.T) {
+		t.Parallel()
+		tokenStr := signWorkspaceCallbackToken(t, key, func(claims *Claims) {
+			claims.Subject = "not-the-workspace"
+		})
+
+		if _, err := validator.ValidateWorkspaceCallbackToken(tokenStr, "ws-123"); err == nil {
+			t.Fatal("expected subject mismatch to be rejected")
 		}
 	})
 }

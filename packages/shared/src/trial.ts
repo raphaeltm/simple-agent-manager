@@ -119,7 +119,9 @@ export interface TrialStartedEvent {
 export interface TrialProgressEvent {
   type: 'trial.progress';
   /** Short human-facing status ("Cloning repo…", "Analyzing structure…"). */
-  stage: string;
+  stage?: string;
+  /** Legacy/internal progress text used by older producers and tests. */
+  message?: string;
   /** 0..1 progress hint. Undefined when the stage has no numeric progress. */
   progress?: number;
   at: number;
@@ -142,9 +144,9 @@ export interface TrialIdeaEvent {
 
 export interface TrialReadyEvent {
   type: 'trial.ready';
-  trialId: string;
+  trialId?: string;
   projectId: string;
-  workspaceUrl: string;
+  workspaceUrl?: string;
   at: number;
 }
 
@@ -162,10 +164,60 @@ export interface TrialAgentActivityEvent {
 
 export interface TrialErrorEvent {
   type: 'trial.error';
-  error: TrialErrorCode;
+  error: string;
   message: string;
   at: number;
 }
+
+export const TrialEventSchema = v.variant('type', [
+  v.object({
+    type: v.literal('trial.started'),
+    trialId: v.string(),
+    projectId: v.string(),
+    repoUrl: v.string(),
+    startedAt: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.progress'),
+    stage: v.optional(v.string()),
+    message: v.optional(v.string()),
+    progress: v.optional(v.number()),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.knowledge'),
+    entity: v.string(),
+    observation: v.string(),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.idea'),
+    ideaId: v.string(),
+    title: v.string(),
+    summary: v.string(),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.ready'),
+    trialId: v.optional(v.string()),
+    projectId: v.string(),
+    workspaceUrl: v.optional(v.string()),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.agent_activity'),
+    role: v.picklist(['assistant', 'tool', 'thinking']),
+    text: v.string(),
+    toolName: v.optional(v.string()),
+    at: v.number(),
+  }),
+  v.object({
+    type: v.literal('trial.error'),
+    error: v.string(),
+    message: v.string(),
+    at: v.number(),
+  }),
+]);
 
 export type TrialEvent =
   | TrialStartedEvent
@@ -175,6 +227,10 @@ export type TrialEvent =
   | TrialReadyEvent
   | TrialAgentActivityEvent
   | TrialErrorEvent;
+
+export function parseTrialEvent(value: unknown): TrialEvent {
+  return v.parse(TrialEventSchema, value);
+}
 
 // ---------------------------------------------------------------------------
 // UI-facing idea shape (derived from TrialIdeaEvent)

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { expectJsonRecord } from '../lib/runtime-validation';
+
 export type ProjectConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 const BASE_RECONNECT_DELAY = 1000;
@@ -112,8 +114,8 @@ export function useProjectWebSocket({
         if (!mountedRef.current || wsRef.current !== ws) return;
 
         try {
-          const data = JSON.parse(event.data as string) as { type?: string };
-          if (data.type && SESSION_LIFECYCLE_EVENTS.has(data.type)) {
+          const data = expectJsonRecord(JSON.parse(String(event.data)), 'project.websocket.message');
+          if (typeof data.type === 'string' && SESSION_LIFECYCLE_EVENTS.has(data.type)) {
             debouncedSessionChange();
           }
         } catch {

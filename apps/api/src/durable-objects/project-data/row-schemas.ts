@@ -9,6 +9,8 @@
 import type { AcpSession } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
+
 // =============================================================================
 // Generic parse helpers
 // =============================================================================
@@ -299,7 +301,7 @@ const textEncoder = new TextEncoder();
 
 export function stripToolMetadataContent(meta: unknown): unknown {
   if (!meta || typeof meta !== 'object') return meta;
-  const obj = meta as Record<string, unknown>;
+  const obj = expectJsonRecord(meta, 'project-data.tool_metadata');
   const contentArray = obj.content;
   if (!Array.isArray(contentArray) || contentArray.length === 0) return meta;
 
@@ -661,7 +663,7 @@ export function parseMailboxMessageRow(row: unknown): AgentMailboxMessage {
     messageClass: r.message_class as AgentMailboxMessage['messageClass'],
     deliveryState: r.delivery_state as AgentMailboxMessage['deliveryState'],
     content: r.content,
-    metadata: safeParseJson(r.metadata) as Record<string, unknown> | null,
+    metadata: r.metadata ? expectJsonRecord(safeParseJson(r.metadata), 'mailbox_message.metadata') : null,
     ackRequired: r.ack_required === 1,
     ackTimeoutMs: r.ack_timeout_ms,
     deliveryAttempts: r.delivery_attempts,

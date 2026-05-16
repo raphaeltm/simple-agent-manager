@@ -7,7 +7,7 @@
  * write updates are not atomic under concurrent requests.
  */
 
-import type { UpdateAiBudgetRequest, UserAiBudgetSettings } from '@simple-agent-manager/shared';
+import type { UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
   AI_BUDGET_SETTINGS_KV_PREFIX,
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
@@ -22,6 +22,7 @@ import {
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 
 export interface TokenBudget {
   inputTokens: number;
@@ -111,9 +112,10 @@ export async function deleteUserBudgetSettings(
 
 /** Validate and normalize budget update request. Returns validated settings or throws. */
 export function validateBudgetUpdate(
-  body: UpdateAiBudgetRequest,
+  body: unknown,
   env: Env,
 ): UserAiBudgetSettings {
+  const request = expectJsonRecord(body, 'usage.ai.budget');
   const maxDailyTokens = parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10)
     || DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT;
   const minDailyTokens = parseInt(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT || '', 10)
@@ -130,38 +132,38 @@ export function validateBudgetUpdate(
     alertThresholdPercent: DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
   };
 
-  if (body.dailyInputTokenLimit !== undefined) {
-    if (body.dailyInputTokenLimit !== null) {
-      if (typeof body.dailyInputTokenLimit !== 'number' || body.dailyInputTokenLimit < minDailyTokens || body.dailyInputTokenLimit > maxDailyTokens) {
+  if (request.dailyInputTokenLimit !== undefined) {
+    if (request.dailyInputTokenLimit !== null) {
+      if (typeof request.dailyInputTokenLimit !== 'number' || request.dailyInputTokenLimit < minDailyTokens || request.dailyInputTokenLimit > maxDailyTokens) {
         throw new Error(`dailyInputTokenLimit must be between ${minDailyTokens} and ${maxDailyTokens}`);
       }
-      settings.dailyInputTokenLimit = Math.floor(body.dailyInputTokenLimit);
+      settings.dailyInputTokenLimit = Math.floor(request.dailyInputTokenLimit);
     }
   }
 
-  if (body.dailyOutputTokenLimit !== undefined) {
-    if (body.dailyOutputTokenLimit !== null) {
-      if (typeof body.dailyOutputTokenLimit !== 'number' || body.dailyOutputTokenLimit < minDailyTokens || body.dailyOutputTokenLimit > maxDailyTokens) {
+  if (request.dailyOutputTokenLimit !== undefined) {
+    if (request.dailyOutputTokenLimit !== null) {
+      if (typeof request.dailyOutputTokenLimit !== 'number' || request.dailyOutputTokenLimit < minDailyTokens || request.dailyOutputTokenLimit > maxDailyTokens) {
         throw new Error(`dailyOutputTokenLimit must be between ${minDailyTokens} and ${maxDailyTokens}`);
       }
-      settings.dailyOutputTokenLimit = Math.floor(body.dailyOutputTokenLimit);
+      settings.dailyOutputTokenLimit = Math.floor(request.dailyOutputTokenLimit);
     }
   }
 
-  if (body.monthlyCostCapUsd !== undefined) {
-    if (body.monthlyCostCapUsd !== null) {
-      if (typeof body.monthlyCostCapUsd !== 'number' || body.monthlyCostCapUsd < minMonthlyCap || body.monthlyCostCapUsd > maxMonthlyCap) {
+  if (request.monthlyCostCapUsd !== undefined) {
+    if (request.monthlyCostCapUsd !== null) {
+      if (typeof request.monthlyCostCapUsd !== 'number' || request.monthlyCostCapUsd < minMonthlyCap || request.monthlyCostCapUsd > maxMonthlyCap) {
         throw new Error(`monthlyCostCapUsd must be between ${minMonthlyCap} and ${maxMonthlyCap}`);
       }
-      settings.monthlyCostCapUsd = Math.round(body.monthlyCostCapUsd * 100) / 100;
+      settings.monthlyCostCapUsd = Math.round(request.monthlyCostCapUsd * 100) / 100;
     }
   }
 
-  if (body.alertThresholdPercent !== undefined) {
-    if (typeof body.alertThresholdPercent !== 'number' || body.alertThresholdPercent < 1 || body.alertThresholdPercent > 100) {
+  if (request.alertThresholdPercent !== undefined) {
+    if (typeof request.alertThresholdPercent !== 'number' || request.alertThresholdPercent < 1 || request.alertThresholdPercent > 100) {
       throw new Error('alertThresholdPercent must be between 1 and 100');
     }
-    settings.alertThresholdPercent = Math.floor(body.alertThresholdPercent);
+    settings.alertThresholdPercent = Math.floor(request.alertThresholdPercent);
   }
 
   return settings;

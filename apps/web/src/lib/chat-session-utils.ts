@@ -1,7 +1,7 @@
 /**
  * Shared chat session state helpers used by ProjectChat, Chats page, and other components.
  */
-import type { ChatSessionResponse } from './api';
+import type { ChatSessionListItem, ChatSessionResponse } from './api';
 
 /** Sessions with no activity in this window are considered stale and hidden by default (ms). */
 const DEFAULT_STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
@@ -13,12 +13,12 @@ export const STALE_SESSION_THRESHOLD_MS = parseInt(
 export type SessionState = 'active' | 'idle' | 'terminated';
 
 /** Whether the associated task (if any) has reached a terminal state. */
-function isTaskTerminal(session: ChatSessionResponse): boolean {
-  const s = session.task?.status;
+function isTaskTerminal(session: ChatSessionListItem): boolean {
+  const s = (session as ChatSessionResponse).task?.status;
   return s === 'failed' || s === 'completed' || s === 'cancelled';
 }
 
-export function getSessionState(session: ChatSessionResponse): SessionState {
+export function getSessionState(session: ChatSessionListItem): SessionState {
   if (session.status === 'stopped' || session.status === 'failed') return 'terminated';
   // If the task reached a terminal state but the session DO wasn't updated
   // (e.g., best-effort RPC failed during deploy), treat as terminated.
@@ -56,19 +56,19 @@ export const STATE_LABELS: Record<SessionState, string> = {
  * Excludes stopped/terminated sessions so that the "active chats" framing is accurate.
  * Callers should also apply isStaleSession() to remove old inactive sessions.
  */
-export function isActiveSession(session: ChatSessionResponse): boolean {
+export function isActiveSession(session: ChatSessionListItem): boolean {
   if (session.status === 'stopped' || session.status === 'failed') return false;
   if (isTaskTerminal(session)) return false;
   return true;
 }
 
 /** Returns the most relevant activity timestamp for a session. */
-export function getLastActivity(session: ChatSessionResponse): number {
+export function getLastActivity(session: ChatSessionListItem): number {
   return session.lastMessageAt ?? session.startedAt;
 }
 
 /** Whether a session is "stale" — no activity within the threshold window. */
-export function isStaleSession(session: ChatSessionResponse): boolean {
+export function isStaleSession(session: ChatSessionListItem): boolean {
   return Date.now() - getLastActivity(session) > STALE_SESSION_THRESHOLD_MS;
 }
 
@@ -79,9 +79,10 @@ export function isStaleSession(session: ChatSessionResponse): boolean {
 export type SessionMode = 'task' | 'conversation';
 
 /** Whether this session is task-mode or conversation-mode. */
-export function getSessionMode(session: ChatSessionResponse): SessionMode {
-  if (session.task?.taskMode === 'task') return 'task';
-  if (session.task?.taskMode === 'conversation') return 'conversation';
+export function getSessionMode(session: ChatSessionListItem): SessionMode {
+  const taskMode = (session as ChatSessionResponse).task?.taskMode;
+  if (taskMode === 'task') return 'task';
+  if (taskMode === 'conversation') return 'conversation';
   // Fallback: if there's a task association, treat as task
   return session.taskId ? 'task' : 'conversation';
 }

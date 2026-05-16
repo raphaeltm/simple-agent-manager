@@ -1,21 +1,15 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from './db/schema';
 import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
+import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
 
 const log = createModuleLogger('auth');
-
-interface GitHubUserResponse {
-  id: number | string;
-  login?: string | null;
-  name?: string | null;
-  email?: string | null;
-  avatar_url?: string | null;
-}
 
 interface GitHubEmailResponse {
   email: string;
@@ -24,6 +18,20 @@ interface GitHubEmailResponse {
 }
 
 const GITHUB_API_VERSION = '2022-11-28';
+
+const githubUserSchema = v.object({
+  id: v.union([v.number(), v.string()]),
+  login: v.optional(v.nullable(v.string())),
+  name: v.optional(v.nullable(v.string())),
+  email: v.optional(v.nullable(v.string())),
+  avatar_url: v.optional(v.nullable(v.string())),
+});
+
+const githubEmailSchema = v.object({
+  email: v.string(),
+  primary: v.boolean(),
+  verified: v.boolean(),
+});
 
 function githubApiHeaders(accessToken: string): HeadersInit {
   return {
@@ -120,7 +128,7 @@ export function createAuth(env: Env) {
             return null;
           }
 
-          const user = await userRes.json() as GitHubUserResponse;
+          const user = await readResponseJson(userRes, githubUserSchema, 'github.user');
           let email = normalizeEmail(user.email);
 
           // Resolve the user's primary email from /user/emails.
@@ -130,12 +138,8 @@ export function createAuth(env: Env) {
               headers: githubApiHeaders(accessToken),
             });
             if (emailsRes.ok) {
-              const emailsData = await emailsRes.json();
-              if (Array.isArray(emailsData)) {
-                email = selectPrimaryGitHubEmail(email, emailsData as GitHubEmailResponse[]);
-              } else {
-                log.error('github_emails_non_array', { data: JSON.stringify(emailsData) });
-              }
+              const emailsData = await readResponseJson(emailsRes, v.array(githubEmailSchema), 'github.user_emails');
+              email = selectPrimaryGitHubEmail(email, emailsData);
             } else {
               const errorBody = await emailsRes.text();
               if (emailsRes.status === 403 || emailsRes.status === 404) {

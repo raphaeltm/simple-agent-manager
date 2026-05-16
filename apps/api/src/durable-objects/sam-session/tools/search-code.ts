@@ -6,6 +6,7 @@
  */
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
+import { expectJsonRecord } from '../../../lib/runtime-validation';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { getUserGitHubToken, parseRepository, resolveProjectWithOwnership } from './helpers';
 
@@ -145,30 +146,35 @@ export async function searchCode(
       };
     }
 
-    const data = (await res.json()) as {
-      total_count?: number;
-      items?: Array<{
-        name: string;
-        path: string;
-        html_url: string;
-        repository?: { full_name: string };
-        text_matches?: Array<{
-          fragment: string;
-          matches: Array<{ text: string; indices: number[] }>;
-        }>;
-      }>;
-    };
+    const data = expectJsonRecord(await res.json(), 'github.code_search');
+    const items = Array.isArray(data.items) ? data.items : [];
 
-    const results = (data.items ?? []).map((item) => ({
-      file: item.path,
-      name: item.name,
-      url: item.html_url,
-      matches: item.text_matches?.map((tm) => tm.fragment) ?? [],
-    }));
+    const results = items.flatMap((rawItem) => {
+      const item = expectJsonRecord(rawItem, 'github.code_search.item');
+      if (
+        typeof item.path !== 'string' ||
+        typeof item.name !== 'string' ||
+        typeof item.html_url !== 'string'
+      ) {
+        return [];
+      }
+      const textMatches = Array.isArray(item.text_matches) ? item.text_matches : [];
+      return [
+        {
+          file: item.path,
+          name: item.name,
+          url: item.html_url,
+          matches: textMatches.flatMap((rawMatch) => {
+            const match = expectJsonRecord(rawMatch, 'github.code_search.text_match');
+            return typeof match.fragment === 'string' ? [match.fragment] : [];
+          }),
+        },
+      ];
+    });
 
     return {
       results,
-      totalCount: data.total_count ?? 0,
+      totalCount: typeof data.total_count === 'number' ? data.total_count : 0,
       count: results.length,
       query: input.query.trim(),
       repository: project.repository,

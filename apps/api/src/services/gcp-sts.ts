@@ -8,8 +8,10 @@ import {
   DEFAULT_GCP_STS_TOKEN_URL,
   DEFAULT_GCP_TOKEN_CACHE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { readResponseJson } from '../lib/runtime-validation';
 import { GcpApiError } from './gcp-errors';
 import { signIdentityToken } from './jwt';
 
@@ -23,6 +25,17 @@ interface SaTokenResponse {
   accessToken: string;
   expireTime: string;
 }
+
+const stsTokenResponseSchema = v.object({
+  access_token: v.string(),
+  token_type: v.string(),
+  expires_in: v.number(),
+});
+
+const saTokenResponseSchema = v.object({
+  accessToken: v.string(),
+  expireTime: v.string(),
+});
 
 /**
  * Get a GCP access token for Compute Engine operations via OIDC token exchange.
@@ -98,7 +111,11 @@ export async function getGcpAccessToken(
     throw new GcpApiError({ step: 'sts_exchange', message: `GCP STS token exchange failed (${stsResponse.status})`, statusCode: stsResponse.status, rawBody: errorBody });
   }
 
-  const stsData = (await stsResponse.json()) as StsTokenResponse;
+  const stsData: StsTokenResponse = await readResponseJson(
+    stsResponse,
+    stsTokenResponseSchema,
+    'gcp.sts.token_response',
+  );
 
   // Step 3: Impersonate service account for Compute Engine access
   const saUrl = `${gcpIamCredentialsBaseUrl}/${credential.serviceAccountEmail}:generateAccessToken`;
@@ -123,7 +140,11 @@ export async function getGcpAccessToken(
     throw new GcpApiError({ step: 'sa_impersonation', message: `GCP SA impersonation failed (${saResponse.status})`, statusCode: saResponse.status, rawBody: errorBody });
   }
 
-  const saData = (await saResponse.json()) as SaTokenResponse;
+  const saData: SaTokenResponse = await readResponseJson(
+    saResponse,
+    saTokenResponseSchema,
+    'gcp.iam_credentials.access_token_response',
+  );
 
   // Cache the access token in KV
   await env.KV.put(cacheKey, saData.accessToken, {

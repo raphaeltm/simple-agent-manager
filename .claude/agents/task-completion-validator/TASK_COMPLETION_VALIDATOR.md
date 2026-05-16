@@ -145,6 +145,26 @@ git diff main...HEAD | grep -B5 -A2 "\.limit(1)"
 
 **FAIL condition**: A function selects from a set of resources without the caller specifying which one, and no test exercises the multi-resource case.
 
+#### Check F: Vertical Slice Test Coverage
+
+If the feature crosses 2+ system boundaries (API to D1, Worker to DO, Worker to VM agent, UI to API, cron to D1+DO):
+- Does at least one test exercise the full vertical slice from entry point to final outcome?
+- Do the mocks at each boundary carry realistic state (full entity shapes, valid foreign key relationships, enough variety to exercise branching)?
+- Does the test assert both the final user-visible outcome AND the payloads sent to mocked boundaries?
+
+```bash
+# Find test files in the diff
+git diff main...HEAD --name-only | grep -E '\.test\.(ts|tsx|go)$'
+
+# Check for empty mock patterns (red flag)
+git diff main...HEAD -- '*.test.*' | grep -E 'mockResolvedValue\(\s*\{\s*\}\s*\)|as D1Database|as KVNamespace'
+
+# Check for realistic state setup (good sign)
+git diff main...HEAD -- '*.test.*' | grep -E 'make(Project|Node|Workspace|Task|Credential)|createTest(Db|App|Env)'
+```
+
+**FAIL condition**: A feature crosses 2+ boundaries but every test either (a) mocks internal functions instead of system boundaries, (b) uses empty mock objects or minimal stubs without realistic state, or (c) only tests one layer in isolation. See `.claude/rules/35-vertical-slice-testing.md`.
+
 ### Step 4: Generate Report
 
 ## Output Format

@@ -24,6 +24,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
@@ -118,13 +119,13 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-anthropic.messages');
   } catch {
     return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
   }
 
   // --- Validate model (must be an Anthropic model) ---
-  const modelId = body.model as string | undefined;
+  const modelId = typeof body.model === 'string' ? body.model : undefined;
   if (!modelId) {
     return anthropicError('model is required', 'invalid_request_error', 400);
   }
@@ -318,12 +319,12 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   // --- Parse and validate request body ---
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-anthropic.count_tokens');
   } catch {
     return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
   }
 
-  const modelId = body.model as string | undefined;
+  const modelId = typeof body.model === 'string' ? body.model : undefined;
   if (!modelId) {
     return anthropicError('model is required', 'invalid_request_error', 400);
   }

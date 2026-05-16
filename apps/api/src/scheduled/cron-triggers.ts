@@ -22,6 +22,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { cronToNextFire } from '../services/cron-utils';
 import { submitTriggeredTask } from '../services/trigger-submit';
@@ -185,7 +186,7 @@ async function processTrigger(
     sequenceNumber
   );
 
-  const rendered = renderTemplate(trigger.promptTemplate, context as unknown as Record<string, unknown>);
+  const rendered = renderTemplate(trigger.promptTemplate, expectJsonRecord(context, 'trigger.template_context'));
 
   // Create execution record (status: queued)
   await db.insert(schema.triggerExecutions).values({

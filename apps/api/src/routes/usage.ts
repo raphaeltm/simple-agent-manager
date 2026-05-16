@@ -1,5 +1,4 @@
 import type {
-  UpdateAiBudgetRequest,
   UserAiBudgetResponse,
   UserAiUsageResponse,
   UserQuotaStatusResponse,
@@ -11,6 +10,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import {
   aggregateByDay,
@@ -252,9 +252,9 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
 usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
 
-  let body: UpdateAiBudgetRequest;
+  let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as UpdateAiBudgetRequest;
+    body = await readRequestJsonRecord(c.req.raw, 'usage.ai.budget');
   } catch {
     return c.json({ error: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
   }

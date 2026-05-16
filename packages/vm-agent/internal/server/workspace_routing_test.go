@@ -334,6 +334,9 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open store: %v", err)
 	}
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
+	}
 	defer store.Close()
 
 	// Pre-populate metadata as if the workspace was previously created.
@@ -345,6 +348,7 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 		ContainerUser:     "vscode",
 		ContainerLabelVal: "/workspace/WS_RECONNECT",
 		WorkspaceDir:      "/workspace/WS_RECONNECT",
+		CallbackToken:     "persisted-callback-token",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
@@ -378,6 +382,9 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 	}
 	if runtime.WorkspaceDir != "/workspace/WS_RECONNECT" {
 		t.Errorf("expected WorkspaceDir '/workspace/WS_RECONNECT', got %q", runtime.WorkspaceDir)
+	}
+	if runtime.CallbackToken != "persisted-callback-token" {
+		t.Errorf("expected CallbackToken hydrated from SQLite, got %q", runtime.CallbackToken)
 	}
 }
 
@@ -415,6 +422,9 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open store: %v", err)
 	}
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
+	}
 	defer store.Close()
 
 	s := &Server{
@@ -427,7 +437,7 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 	}
 
 	// Create workspace with lightweight=true
-	s.upsertWorkspaceRuntime("WS_PERSIST_LIGHT", "octo/repo", "main", "creating", "", workspaceRuntimeOpts{
+	s.upsertWorkspaceRuntime("WS_PERSIST_LIGHT", "octo/repo", "main", "creating", "runtime-callback-token", workspaceRuntimeOpts{
 		Lightweight: true,
 	})
 
@@ -441,6 +451,9 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 	}
 	if !meta.Lightweight {
 		t.Error("expected Lightweight=true in persisted metadata, got false")
+	}
+	if meta.CallbackToken != "runtime-callback-token" {
+		t.Errorf("expected CallbackToken persisted, got %q", meta.CallbackToken)
 	}
 }
 
@@ -517,6 +530,9 @@ func TestUpsertWorkspaceRuntimePersistsMetadata(t *testing.T) {
 	store, err := persistence.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open store: %v", err)
+	}
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
 	}
 	defer store.Close()
 

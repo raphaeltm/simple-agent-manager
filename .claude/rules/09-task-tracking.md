@@ -27,7 +27,7 @@ Findings that exist only in the Research section without a corresponding checkli
 
 ## Task Completion Validation (Mandatory Before Archive)
 
-Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run the `task-completion-validator` agent (`.claude/agents/task-completion-validator/`). This agent performs five cross-reference checks:
+Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run the `task-completion-validator` agent (`.claude/agents/task-completion-validator/`). This agent performs six cross-reference checks:
 
 | Check | What it catches |
 |-------|----------------|
@@ -36,6 +36,7 @@ Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run th
 | **C: Criteria → Tests** | Acceptance criteria with no test or manual verification |
 | **D: UI → Backend** | UI form fields that collect input but never send it to the API |
 | **E: Multi-Resource** | Selection functions that pick from a set without a discriminator |
+| **F: Vertical Slice** | Cross-boundary features tested only in isolation with empty mocks instead of vertical slice tests with realistic state (see `35-vertical-slice-testing.md`) |
 
 ### Validation Rules
 

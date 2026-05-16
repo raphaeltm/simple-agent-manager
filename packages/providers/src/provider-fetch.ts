@@ -1,4 +1,5 @@
 import { ProviderError } from './types';
+import { expectObject } from './validation-core';
 
 const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 
@@ -47,8 +48,12 @@ export async function providerFetch(
         const body = await response.text();
         // Try parsing as JSON for structured error messages
         try {
-          const json = JSON.parse(body) as { error?: { message?: string }; message?: string };
-          errorMessage = json.error?.message || json.message || body;
+          const json = expectObject(JSON.parse(body), 'provider', 'error_response');
+          const error = json.error ? expectObject(json.error, 'provider', 'error_response.error') : null;
+          errorMessage =
+            (typeof error?.message === 'string' ? error.message : undefined) ||
+            (typeof json.message === 'string' ? json.message : undefined) ||
+            body;
         } catch {
           errorMessage = body || `HTTP ${response.status}`;
         }

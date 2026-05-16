@@ -3,6 +3,7 @@ package persistence
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,6 +11,13 @@ func tempDBPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "test.db")
+}
+
+func configureTestTokenEncryption(t *testing.T, store *Store) {
+	t.Helper()
+	if err := store.SetCallbackTokenEncryptionSecret("node-callback-token-secret"); err != nil {
+		t.Fatalf("SetCallbackTokenEncryptionSecret: %v", err)
+	}
 }
 
 func TestOpenAndClose(t *testing.T) {
@@ -445,6 +453,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer store.Close()
+	configureTestTokenEncryption(t, store)
 
 	// Initially no metadata
 	meta, err := store.GetWorkspaceMetadata("ws-1")
@@ -464,6 +473,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerUser:     "vscode",
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
+		CallbackToken:     "workspace-callback-token",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
@@ -495,6 +505,16 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	if meta.WorkspaceDir != "/workspace/ws-1" {
 		t.Errorf("expected WorkspaceDir '/workspace/ws-1', got %q", meta.WorkspaceDir)
 	}
+	if meta.CallbackToken != "workspace-callback-token" {
+		t.Errorf("expected CallbackToken to round-trip, got %q", meta.CallbackToken)
+	}
+	var rawCallbackToken string
+	if err := store.db.QueryRow("SELECT callback_token FROM workspace_metadata WHERE workspace_id = ?", "ws-1").Scan(&rawCallbackToken); err != nil {
+		t.Fatalf("read raw callback token: %v", err)
+	}
+	if rawCallbackToken == "workspace-callback-token" || !strings.HasPrefix(rawCallbackToken, encryptedCallbackTokenPrefix) {
+		t.Fatalf("expected encrypted callback token in SQLite, got %q", rawCallbackToken)
+	}
 	if meta.UpdatedAt == "" {
 		t.Error("expected non-empty UpdatedAt")
 	}
@@ -508,6 +528,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerUser:     "root",
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
+		CallbackToken:     "updated-callback-token",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata overwrite: %v", err)
@@ -522,6 +543,9 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	}
 	if meta.ContainerUser != "root" {
 		t.Errorf("expected ContainerUser 'root' after overwrite, got %q", meta.ContainerUser)
+	}
+	if meta.CallbackToken != "updated-callback-token" {
+		t.Errorf("expected updated CallbackToken after overwrite, got %q", meta.CallbackToken)
 	}
 }
 
@@ -794,6 +818,45 @@ func TestMigrationV6AddsLightweightColumn(t *testing.T) {
 	}
 	if !meta.Lightweight {
 		t.Error("expected Lightweight=true persisted after reopen")
+	}
+}
+
+func TestMigrationV7AddsCallbackTokenColumn(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	configureTestTokenEncryption(t, store)
+
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:      "ws-1",
+		Repository:       "octo/repo",
+		ContainerWorkDir: "/workspaces/repo",
+		CallbackToken:    "persisted-callback-token",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata with callback token: %v", err)
+	}
+	store.Close()
+
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen after migration v7: %v", err)
+	}
+	defer store2.Close()
+	configureTestTokenEncryption(t, store2)
+
+	meta, err := store2.GetWorkspaceMetadata("ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata after reopen: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata to survive reopen")
+	}
+	if meta.CallbackToken != "persisted-callback-token" {
+		t.Fatalf("expected CallbackToken to survive reopen, got %q", meta.CallbackToken)
 	}
 }
 

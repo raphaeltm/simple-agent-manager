@@ -23,10 +23,12 @@ import {
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readRequestJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
@@ -48,6 +50,24 @@ import { checkTokenBudget } from '../services/ai-token-budget';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
+
+const anthropicContentBlockSchema = v.variant('type', [
+  v.object({ type: v.literal('text'), text: v.string() }),
+  v.object({ type: v.literal('tool_use'), id: v.string(), name: v.string(), input: v.unknown() }),
+]);
+
+const anthropicResponseSchema = v.object({
+  id: v.string(),
+  type: v.literal('message'),
+  role: v.literal('assistant'),
+  content: v.array(anthropicContentBlockSchema),
+  model: v.string(),
+  stop_reason: v.nullable(v.string()),
+  usage: v.object({
+    input_tokens: v.number(),
+    output_tokens: v.number(),
+  }),
+});
 
 // =============================================================================
 // Model Routing
@@ -244,8 +264,8 @@ async function forwardToAnthropic(
 
   // Non-streaming: translate response
   if (!body.stream) {
-    const anthropicResponse = await response.json() as Record<string, unknown>;
-    const openAIResponse = translateResponseToOpenAI(anthropicResponse as never);
+    const anthropicResponse = await readResponseJson(response, anthropicResponseSchema, 'ai-proxy.anthropic_response');
+    const openAIResponse = translateResponseToOpenAI(anthropicResponse);
     return new Response(JSON.stringify(openAIResponse), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -394,7 +414,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.chat_completions');
   } catch {
     return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
   }
@@ -405,7 +425,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   // --- Resolve and validate model ---
-  const modelId = await resolveModelId(body.model as string | undefined, c.env);
+  const modelId = await resolveModelId(typeof body.model === 'string' ? body.model : undefined, c.env);
   const allowedModels = getAllowedModels(c.env);
   if (!allowedModels.has(modelId)) {
     return c.json({

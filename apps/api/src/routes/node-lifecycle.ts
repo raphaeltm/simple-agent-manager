@@ -12,6 +12,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
@@ -325,9 +326,12 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
 
   // Log each entry individually for CF observability searchability
   for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') continue;
-
-    const e = entry as Record<string, unknown>;
+    let e: Record<string, unknown>;
+    try {
+      e = expectJsonRecord(entry, 'node-lifecycle.error.entry');
+    } catch {
+      continue;
+    }
 
     // Validate required fields
     const message = typeof e.message === 'string' ? e.message : null;
@@ -347,7 +351,7 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
       stack: typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
       workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
       timestamp: typeof e.timestamp === 'string' ? e.timestamp : null,
-      context: e.context && typeof e.context === 'object' ? e.context : null,
+      context: maybeJsonRecord(e.context),
       nodeId,
     });
 
@@ -357,7 +361,7 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
       level: level as PersistErrorInput['level'],
       message,
       stack: typeof e.stack === 'string' ? e.stack : null,
-      context: e.context && typeof e.context === 'object' ? e.context as Record<string, unknown> : null,
+      context: maybeJsonRecord(e.context),
       nodeId,
       workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
       timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() || Date.now() : Date.now(),

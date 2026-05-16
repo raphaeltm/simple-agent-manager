@@ -37,6 +37,7 @@ Before marking feature work complete:
 - [ ] Unit tests added/updated for all changed behavior
 - [ ] Integration tests added where cross-layer behavior exists
 - [ ] Capability test verifies complete happy path across system boundaries (see `10-e2e-verification.md`)
+- [ ] For cross-boundary features: at least one vertical slice test mocks at each system boundary with realistic state and asserts the end-to-end outcome (see `35-vertical-slice-testing.md`)
 - [ ] E2E coverage added or explicitly justified as not applicable
 - [ ] Local test run passes for impacted packages
 - [ ] CI test checks are expected to pass with the changes

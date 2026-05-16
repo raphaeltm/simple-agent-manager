@@ -25,6 +25,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   AIProxyAuthError,
@@ -127,12 +128,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-passthrough.anthropic.messages');
   } catch {
     return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
   }
 
-  const modelId = body.model as string | undefined;
+  const modelId = typeof body.model === 'string' ? body.model : undefined;
   if (!modelId) {
     return anthropicError('model is required', 'invalid_request_error', 400);
   }
@@ -274,12 +275,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
 
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-passthrough.anthropic.count_tokens');
   } catch {
     return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
   }
 
-  const modelId = body.model as string | undefined;
+  const modelId = typeof body.model === 'string' ? body.model : undefined;
   if (!modelId || !isAnthropicModel(modelId)) {
     return anthropicError('model is required and must be an Anthropic model (claude-*)', 'invalid_request_error', 400);
   }
@@ -376,7 +377,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
 
   let body: Record<string, unknown>;
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-passthrough.openai.chat_completions');
   } catch {
     return openaiError('Invalid JSON body', 'invalid_request_error', 400);
   }
@@ -385,7 +386,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     return openaiError('messages array is required', 'invalid_request_error', 400);
   }
 
-  const modelId = body.model as string | undefined;
+  const modelId = typeof body.model === 'string' ? body.model : undefined;
   if (!modelId) {
     return openaiError('model is required', 'invalid_request_error', 400);
   }

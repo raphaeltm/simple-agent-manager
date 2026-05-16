@@ -9,6 +9,7 @@ import {
   markAllNotificationsRead as apiMarkAllRead,
   markNotificationRead as apiMarkRead,
 } from '../lib/api';
+import { expectJsonRecord } from '../lib/runtime-validation';
 
 const RECONNECT_BASE_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
@@ -138,7 +139,8 @@ export function useNotifications(): UseNotificationsReturn {
         ws.onmessage = (event) => {
           if (!mountedRef.current) return;
           try {
-            const msg = JSON.parse(event.data) as NotificationWsMessage;
+            const rawMsg = expectJsonRecord(JSON.parse(event.data), 'notifications.websocket.message');
+            const msg = rawMsg as unknown as NotificationWsMessage;
 
             switch (msg.type) {
               case 'notification.new':

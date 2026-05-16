@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
 
@@ -49,14 +50,14 @@ authRoutes.get('/me', async (c) => {
     throw errors.unauthorized('Not authenticated');
   }
 
-  const user = session.user as Record<string, unknown>;
+  const user = expectJsonRecord(session.user, 'auth.me.session.user');
   return c.json({
     id: session.user.id,
     email: session.user.email,
     name: session.user.name,
     avatarUrl: session.user.image,
-    role: (user.role as string) ?? 'user',
-    status: (user.status as string) ?? 'active',
+    role: typeof user.role === 'string' ? user.role : 'user',
+    status: typeof user.status === 'string' ? user.status : 'active',
     createdAt: session.user.createdAt,
   });
 });

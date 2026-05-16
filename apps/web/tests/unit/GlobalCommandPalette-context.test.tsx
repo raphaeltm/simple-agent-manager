@@ -46,14 +46,7 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
             workspaceId: 'ws-1',
             taskId: 'task-1',
             workspaceUrl: 'https://ws-abc.example.com',
-            task: {
-              outputPrUrl: 'https://github.com/org/repo/pull/42',
-              outputBranch: 'fix-auth',
-              outputSummary: null,
-              finalizedAt: null,
-              executionStep: null,
-              errorMessage: null,
-            },
+            // Note: task embed (with outputPrUrl) is only on detail endpoint, not list
           },
           {
             id: 'sess-2',
@@ -205,7 +198,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     expect(labels.some((l) => l?.includes('View Task'))).toBe(true);
   });
 
-  it('shows "Open PR" when session task has outputPrUrl', async () => {
+  it('"Open PR" is not available from list data (task embed only on detail endpoint)', async () => {
     mockPathname = '/projects/p1/chat/sess-1';
     renderPalette();
 
@@ -215,7 +208,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
 
     const options = screen.getAllByRole('option');
     const labels = options.map((o) => o.textContent);
-    expect(labels.some((l) => l?.includes('Open PR'))).toBe(true);
+    // outputPrUrl is only available via the detail endpoint, not the list endpoint
+    expect(labels.some((l) => l?.includes('Open PR'))).toBe(false);
   });
 
   it('does not show workspace/task actions for session without them', async () => {

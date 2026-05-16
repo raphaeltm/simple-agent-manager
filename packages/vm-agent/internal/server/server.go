@@ -343,12 +343,20 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Open persistence store for cross-device session state.
 	// Ensure the parent directory exists.
-	if err := os.MkdirAll(filepath.Dir(cfg.PersistenceDBPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfg.PersistenceDBPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create persistence directory: %w", err)
 	}
 	store, err := persistence.Open(cfg.PersistenceDBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open persistence store: %w", err)
+	}
+	if err := os.Chmod(cfg.PersistenceDBPath, 0o600); err != nil {
+		return nil, fmt.Errorf("restrict persistence store permissions: %w", err)
+	}
+	if cfg.CallbackToken != "" {
+		if err := store.SetCallbackTokenEncryptionSecret(cfg.CallbackToken); err != nil {
+			return nil, fmt.Errorf("configure persistence token encryption: %w", err)
+		}
 	}
 
 	// Per-workspace message reporters for chat message persistence.

@@ -34,6 +34,7 @@ import * as schema from '../../db/schema';
 import type { TrialCounterTryIncrementResult } from '../../durable-objects/trial-counter';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { rateLimitTrialCreate } from '../../middleware/rate-limit';
 import {
   buildClaimCookie,
@@ -102,12 +103,9 @@ export async function probeGithubRepo(
     );
     if (resp.status === 404) return { ok: false, reason: 'repo_not_found' };
     if (!resp.ok) return { ok: false, reason: 'repo_not_found' };
-    const body = (await resp.json()) as {
-      private?: boolean;
-      size?: number;
-    };
+    const body = expectJsonRecord(await resp.json(), 'github.repo_probe');
     if (body.private === true) return { ok: false, reason: 'repo_private' };
-    const sizeKb = Number(body.size ?? 0);
+    const sizeKb = typeof body.size === 'number' ? body.size : 0;
     if (sizeKb > opts.maxKb) return { ok: false, reason: 'repo_too_large' };
     return { ok: true, sizeKb, private: false };
   } catch {

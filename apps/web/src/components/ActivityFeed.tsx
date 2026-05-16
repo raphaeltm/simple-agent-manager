@@ -1,4 +1,5 @@
 import type { ActivityEventResponse } from '../lib/api';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { formatRelativeTime } from '../lib/time-utils';
 
 interface ActivityFeedProps {
@@ -48,7 +49,7 @@ function getEventColor(eventType: string): string {
 }
 
 function formatEventDescription(event: ActivityEventResponse): string {
-  const payload = event.payload as Record<string, unknown> | null;
+  const payload = maybeJsonRecord(event.payload);
 
   switch (event.eventType) {
     case 'workspace.created': {

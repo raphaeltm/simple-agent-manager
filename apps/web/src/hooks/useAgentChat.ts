@@ -8,6 +8,7 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { API_URL } from '../lib/api/client';
+import { expectJsonRecord } from '../lib/runtime-validation';
 
 export interface ChatMessage {
   id: string;
@@ -67,12 +68,14 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
           setIsLoadingHistory(false);
           return;
         }
-        const convData = (await convResp.json()) as {
-          conversations: Array<{ id: string; title: string | null }>;
-        };
+        const convData = expectJsonRecord(await convResp.json(), 'agent_chat.conversations');
         if (cancelled) return;
 
-        const conv = convData.conversations[0];
+        const conversations = Array.isArray(convData.conversations) ? convData.conversations : [];
+        const convRecord = conversations[0]
+          ? expectJsonRecord(conversations[0], 'agent_chat.conversations[0]')
+          : null;
+        const conv = convRecord && typeof convRecord.id === 'string' ? { id: convRecord.id } : null;
         if (!conv) {
           setIsLoadingHistory(false);
           return;
@@ -88,21 +91,21 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
           setIsLoadingHistory(false);
           return;
         }
-        const msgData = (await msgResp.json()) as {
-          messages: Array<{
-            id: string;
-            role: string;
-            content: string;
-            tool_calls_json: string | null;
-            tool_call_id: string | null;
-            sequence: number;
-            created_at: string;
-          }>;
-        };
+        const msgData = expectJsonRecord(await msgResp.json(), 'agent_chat.messages');
         if (cancelled) return;
 
         const mapped: ChatMessage[] = [];
-        for (const row of msgData.messages) {
+        const rows = Array.isArray(msgData.messages) ? msgData.messages : [];
+        for (const rawRow of rows) {
+          const row = expectJsonRecord(rawRow, 'agent_chat.message');
+          if (
+            typeof row.id !== 'string' ||
+            typeof row.role !== 'string' ||
+            typeof row.content !== 'string' ||
+            typeof row.created_at !== 'string'
+          ) {
+            continue;
+          }
           if (row.role === 'user') {
             mapped.push({
               id: row.id,
@@ -112,14 +115,17 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
             });
           } else if (row.role === 'assistant') {
             let toolCalls: Array<{ name: string; result?: unknown }> | undefined;
-            if (row.tool_calls_json) {
+            const toolCallsJson =
+              typeof row.tool_calls_json === 'string' ? row.tool_calls_json : null;
+            if (toolCallsJson) {
               try {
-                const parsed = JSON.parse(row.tool_calls_json) as Array<{
-                  id: string;
-                  name: string;
-                  input: unknown;
-                }>;
-                toolCalls = parsed.map((tc) => ({ name: tc.name }));
+                const parsed = JSON.parse(toolCallsJson);
+                if (Array.isArray(parsed)) {
+                  toolCalls = parsed.flatMap((tc, index) => {
+                    const record = expectJsonRecord(tc, `agent-chat.tool_calls[${index}]`);
+                    return typeof record.name === 'string' ? [{ name: record.name }] : [];
+                  });
+                }
               } catch {
                 // ignore parse errors
               }
@@ -131,7 +137,7 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
               timestamp: formatTimestamp(row.created_at),
               toolCalls,
             });
-          } else if (row.role === 'tool_result' && row.tool_call_id) {
+          } else if (row.role === 'tool_result' && typeof row.tool_call_id === 'string') {
             const lastAgent = [...mapped].reverse().find((m) => m.role === 'agent' && m.toolCalls);
             if (lastAgent?.toolCalls) {
               const pendingCall = lastAgent.toolCalls.find((tc) => !tc.result);
@@ -225,7 +231,7 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
 
           let event: Record<string, unknown>;
           try {
-            event = JSON.parse(data) as Record<string, unknown>;
+            event = expectJsonRecord(JSON.parse(data), 'agent-chat.stream.event');
           } catch {
             continue;
           }

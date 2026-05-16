@@ -8,11 +8,13 @@
  */
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { readResponseJson } from '../../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { decrypt } from '../../services/encryption';
 import {
@@ -39,6 +41,20 @@ const DEFAULT_CI_RUNS_LIMIT = 10;
 const DEFAULT_DEPLOY_RUNS_LIMIT = 5;
 /** Max size (bytes) for diagnostic data in report_environment_issue. Override via WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES. */
 const DEFAULT_DIAGNOSTIC_MAX_BYTES = 4096;
+
+const githubWorkflowRunSchema = v.object({
+  id: v.number(),
+  name: v.optional(v.string()),
+  status: v.string(),
+  conclusion: v.nullable(v.string()),
+  html_url: v.string(),
+  created_at: v.string(),
+  head_branch: v.optional(v.string()),
+});
+
+const githubWorkflowRunsSchema = v.object({
+  workflow_runs: v.optional(v.array(githubWorkflowRunSchema)),
+});
 
 function getGitHubApiTimeout(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_TOOL_GITHUB_TIMEOUT_MS, DEFAULT_GITHUB_API_TIMEOUT_MS);
@@ -368,10 +384,10 @@ export async function handleGetCiStatus(
       });
     }
 
-    const data = await res.json() as { workflow_runs?: Array<{ id: number; name: string; status: string; conclusion: string | null; html_url: string; created_at: string }> };
+    const data = await readResponseJson(res, githubWorkflowRunsSchema, 'github.workspace_tool.workflow_runs');
     const runs = (data.workflow_runs ?? []).map((r) => ({
       id: r.id,
-      name: r.name,
+      name: r.name ?? '',
       status: r.status,
       conclusion: r.conclusion,
       url: r.html_url,
@@ -571,11 +587,11 @@ async function fetchWorkflowRuns(
       return { error: `GitHub API returned ${res.status}` };
     }
 
-    const data = await res.json() as { workflow_runs?: Array<{ id: number; status: string; conclusion: string | null; head_branch: string; html_url: string; created_at: string }> };
+    const data = await readResponseJson(res, githubWorkflowRunsSchema, 'github.workspace_tool.deploy_runs');
     const runs = data.workflow_runs ?? [];
 
     const lastDeploy = runs[0]
-      ? { status: runs[0].status, conclusion: runs[0].conclusion, branch: runs[0].head_branch, url: runs[0].html_url, createdAt: runs[0].created_at }
+      ? { status: runs[0].status, conclusion: runs[0].conclusion, branch: runs[0].head_branch ?? '', url: runs[0].html_url, createdAt: runs[0].created_at }
       : null;
 
     const isDeploying = runs.some((r) => r.status === 'in_progress' || r.status === 'queued');

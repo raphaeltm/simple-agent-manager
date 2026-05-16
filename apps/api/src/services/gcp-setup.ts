@@ -5,8 +5,10 @@ import {
   DEFAULT_GCP_WIF_POOL_ID,
   DEFAULT_GCP_WIF_PROVIDER_ID,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { readResponseJson } from '../lib/runtime-validation';
 import { GcpApiError } from './gcp-errors';
 
 const RESOURCE_MANAGER_URL = 'https://cloudresourcemanager.googleapis.com/v1';
@@ -23,6 +25,55 @@ interface GcpProject {
 interface GcpProjectListResponse {
   projects?: GcpProject[];
   nextPageToken?: string;
+}
+
+const gcpProjectSchema = v.object({
+  projectId: v.string(),
+  projectNumber: v.string(),
+  name: v.string(),
+  lifecycleState: v.string(),
+});
+
+const gcpProjectNumberResponseSchema = v.object({
+  projectNumber: v.string(),
+});
+
+const gcpProjectListResponseSchema = v.object({
+  projects: v.optional(v.array(gcpProjectSchema)),
+  nextPageToken: v.optional(v.string()),
+});
+
+const gcpOperationSchema = v.object({
+  name: v.optional(v.string()),
+  done: v.optional(v.boolean()),
+});
+
+const iamBindingSchema = v.object({
+  role: v.string(),
+  members: v.array(v.string()),
+});
+
+const serviceAccountPolicySchema = v.object({
+  bindings: v.optional(v.array(iamBindingSchema)),
+  etag: v.string(),
+});
+
+const projectPolicySchema = v.object({
+  bindings: v.optional(v.array(iamBindingSchema)),
+  etag: v.string(),
+  version: v.optional(v.number()),
+});
+
+const pollOperationSchema = v.object({
+  done: v.optional(v.boolean()),
+  error: v.optional(v.object({ message: v.string() })),
+});
+
+function requireOperationName(op: { name?: string }, context: string): string {
+  if (!op.name) {
+    throw new GcpApiError({ step: context, message: 'GCP operation response missing name' });
+  }
+  return op.name;
 }
 
 /**
@@ -60,7 +111,11 @@ export async function listGcpProjects(
       throw new GcpApiError({ step: 'list_projects', message: `Failed to list GCP projects (${res.status})`, statusCode: res.status, rawBody: body });
     }
 
-    const data = (await res.json()) as GcpProjectListResponse;
+    const data: GcpProjectListResponse = await readResponseJson(
+      res,
+      gcpProjectListResponseSchema,
+      'gcp.resource_manager.list_projects',
+    );
     if (data.projects) {
       for (const p of data.projects) {
         projects.push({
@@ -94,7 +149,11 @@ export async function getProjectNumber(
     throw new GcpApiError({ step: 'get_project_number', message: `Failed to get project info (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
-  const data = (await res.json()) as GcpProject;
+  const data = await readResponseJson(
+    res,
+    gcpProjectNumberResponseSchema,
+    'gcp.resource_manager.project',
+  );
   return data.projectNumber;
 }
 
@@ -133,9 +192,9 @@ export async function enableApis(
   }
 
   // Poll the long-running operation
-  const op = (await res.json()) as { name: string; done?: boolean };
+  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.service_usage.batch_enable');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'enable_apis'), timeoutMs);
   }
 }
 
@@ -172,9 +231,9 @@ export async function createWifPool(
     throw new GcpApiError({ step: 'create_wif_pool', message: `Failed to create WIF pool (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
-  const op = (await res.json()) as { name: string; done?: boolean };
+  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_wif_pool');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'create_wif_pool'), timeoutMs);
   }
 
   return `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}`;
@@ -239,9 +298,9 @@ export async function createOidcProvider(
     throw new GcpApiError({ step: 'create_oidc_provider', message: `Failed to create OIDC provider (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
-  const op = (await res.json()) as { name: string; done?: boolean };
+  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_oidc_provider');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'create_oidc_provider'), timeoutMs);
   }
 }
 
@@ -293,9 +352,9 @@ export async function updateOidcProvider(
     throw new GcpApiError({ step: 'update_oidc_provider', message: `Failed to update OIDC provider (${res.status})`, statusCode: res.status, rawBody: body });
   }
 
-  const op = (await res.json()) as { name: string; done?: boolean };
+  const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.update_oidc_provider');
   if (!op.done) {
-    await pollOperation(oauthToken, op.name, timeoutMs);
+    await pollOperation(oauthToken, requireOperationName(op, 'update_oidc_provider'), timeoutMs);
   }
 }
 
@@ -373,10 +432,11 @@ export async function grantWifUserOnSa(
     throw new GcpApiError({ step: 'grant_wif_user', message: `Failed to get SA IAM policy (${getRes.status})`, statusCode: getRes.status, rawBody: body });
   }
 
-  const policy = (await getRes.json()) as {
-    bindings?: Array<{ role: string; members: string[] }>;
-    etag: string;
-  };
+  const policy = await readResponseJson(
+    getRes,
+    serviceAccountPolicySchema,
+    'gcp.iam.service_account_policy',
+  );
 
   // Use subject-scoped principal to prevent cross-project impersonation.
   // The `sub` claim in the identity token is `project:${samProjectId}`, so the principal
@@ -450,11 +510,7 @@ export async function grantProjectRoles(
     throw new GcpApiError({ step: 'grant_project_roles', message: `Failed to get project IAM policy (${getRes.status})`, statusCode: getRes.status, rawBody: body });
   }
 
-  const policy = (await getRes.json()) as {
-    bindings?: Array<{ role: string; members: string[] }>;
-    etag: string;
-    version?: number;
-  };
+  const policy = await readResponseJson(getRes, projectPolicySchema, 'gcp.resource_manager.policy');
 
   const member = `serviceAccount:${saEmail}`;
   const bindings = [...(policy.bindings || [])];
@@ -593,7 +649,7 @@ export async function pollOperation(
       throw new GcpApiError({ step: 'poll_operation', message: `Failed to poll operation (${res.status})`, statusCode: res.status, rawBody: body });
     }
 
-    const op = (await res.json()) as { done?: boolean; error?: { message: string } };
+    const op = await readResponseJson(res, pollOperationSchema, 'gcp.operation.poll');
     if (op.error) {
       throw new GcpApiError({ step: 'poll_operation', message: 'GCP operation failed', rawBody: op.error.message });
     }

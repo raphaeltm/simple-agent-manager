@@ -14,13 +14,14 @@
  *     runaway connections
  */
 
-import type { TrialEvent } from '@simple-agent-manager/shared';
-import { TRIAL_COOKIE_FINGERPRINT_NAME } from '@simple-agent-manager/shared';
+import { TRIAL_COOKIE_FINGERPRINT_NAME, TrialEventSchema } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { readResponseJson } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import {
   checkRateLimit,
@@ -32,6 +33,12 @@ import { verifyFingerprint } from '../../services/trial/cookies';
 import { readTrial } from '../../services/trial/trial-store';
 
 const eventsRoutes = new Hono<{ Bindings: Env }>();
+
+const trialEventPollResponseSchema = v.object({
+  events: v.array(v.object({ cursor: v.number(), event: TrialEventSchema })),
+  cursor: v.number(),
+  closed: v.boolean(),
+});
 
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const DEFAULT_POLL_TIMEOUT_MS = 15_000;
@@ -147,11 +154,11 @@ eventsRoutes.get('/:trialId/events', async (c) => {
             break;
           }
 
-          const data = (await pollResp.json()) as {
-            events: { cursor: number; event: TrialEvent }[];
-            cursor: number;
-            closed: boolean;
-          };
+          const data = await readResponseJson(
+            pollResp,
+            trialEventPollResponseSchema,
+            'trial.events.poll_response',
+          );
 
           for (const { cursor: c2, event } of data.events) {
             enqueue(encoder.encode(formatSse(event)));

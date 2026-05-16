@@ -206,8 +206,10 @@ export type {
   ActivityEventsListResponse,
   ChatMessageResponse,
   ChatSessionDetailResponse,
+  ChatSessionListItem,
   ChatSessionListResponse,
   ChatSessionResponse,
+  ChatSessionTaskEmbed,
   SessionSummaryResponse,
 } from './sessions';
 export {

@@ -117,6 +117,7 @@ Execute the checklist from the task file. Follow these rules:
    - Respect build order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
    - Update documentation in the same commit as code changes
    - Write tests that prove the feature works
+   - For features crossing system boundaries: write at least one vertical slice test that mocks at each boundary with realistic state (see `.claude/rules/35-vertical-slice-testing.md`)
    - No hardcoded values (constitution Principle XI)
 
 3. **Push frequently.** After every meaningful unit of work:

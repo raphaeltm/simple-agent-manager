@@ -5,6 +5,7 @@
  * an Anthropic model (claude-*), the proxy must translate to/from Anthropic's
  * Messages API format before forwarding through the AI Gateway's /anthropic path.
  */
+import { maybeJsonRecord } from '../lib/runtime-validation';
 
 // =============================================================================
 // Types
@@ -348,8 +349,8 @@ function translateStreamEvent(
 
   switch (type) {
     case 'message_start': {
-      const msg = event.message as Record<string, unknown> | undefined;
-      const id = (msg?.id as string) || `chatcmpl-${Date.now()}`;
+      const msg = maybeJsonRecord(event.message);
+      const id = typeof msg?.id === 'string' ? msg.id : `chatcmpl-${Date.now()}`;
       return {
         messageId: id,
         chunk: {
@@ -367,7 +368,7 @@ function translateStreamEvent(
     }
 
     case 'content_block_start': {
-      const block = event.content_block as Record<string, unknown> | undefined;
+      const block = maybeJsonRecord(event.content_block);
       if (block?.type === 'tool_use') {
         const newIndex = toolCallIndex;
         return {
@@ -382,9 +383,9 @@ function translateStreamEvent(
               delta: {
                 tool_calls: [{
                   index: newIndex,
-                  id: block.id as string,
+                  id: typeof block.id === 'string' ? block.id : `call_${crypto.randomUUID().slice(0, 8)}`,
                   type: 'function',
-                  function: { name: block.name as string, arguments: '' },
+                  function: { name: typeof block.name === 'string' ? block.name : '', arguments: '' },
                 }],
               },
               finish_reason: null,
@@ -396,7 +397,7 @@ function translateStreamEvent(
     }
 
     case 'content_block_delta': {
-      const delta = event.delta as Record<string, unknown> | undefined;
+      const delta = maybeJsonRecord(event.delta);
       if (!delta) return null;
 
       if (delta.type === 'text_delta') {
@@ -408,7 +409,7 @@ function translateStreamEvent(
             model,
             choices: [{
               index: 0,
-              delta: { content: delta.text as string },
+              delta: { content: typeof delta.text === 'string' ? delta.text : '' },
               finish_reason: null,
             }],
           },
@@ -427,7 +428,7 @@ function translateStreamEvent(
               delta: {
                 tool_calls: [{
                   index: toolCallIndex - 1,
-                  function: { arguments: delta.partial_json as string },
+                  function: { arguments: typeof delta.partial_json === 'string' ? delta.partial_json : '' },
                 }],
               },
               finish_reason: null,
@@ -440,8 +441,8 @@ function translateStreamEvent(
     }
 
     case 'message_delta': {
-      const delta = event.delta as Record<string, unknown> | undefined;
-      const stopReason = delta?.stop_reason as string | null;
+      const delta = maybeJsonRecord(event.delta);
+      const stopReason = typeof delta?.stop_reason === 'string' ? delta.stop_reason : null;
       return {
         chunk: {
           id: `chatcmpl-${messageId}`,
@@ -453,7 +454,7 @@ function translateStreamEvent(
             delta: {},
             finish_reason: mapStopReason(stopReason),
           }],
-          usage: event.usage as Record<string, unknown> | undefined,
+          usage: maybeJsonRecord(event.usage) ?? undefined,
         },
       };
     }

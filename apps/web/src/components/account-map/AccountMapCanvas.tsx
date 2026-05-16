@@ -18,6 +18,7 @@ import {
 } from '@xyflow/react';
 import { type FC, useCallback, useEffect, useRef,useState } from 'react';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { AnimatedFlowEdge } from './edges/AnimatedFlowEdge';
 import { IdeaNode } from './nodes/IdeaNode';
 import { NodeVMNode } from './nodes/NodeVMNode';
@@ -158,7 +159,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
           <div className="sam-type-secondary text-fg-primary font-medium mb-1 truncate">
             {(tooltip.node.data?.label as string) ?? 'Entity'}
           </div>
-          <TooltipDetails data={tooltip.node.data as Record<string, unknown>} />
+          <TooltipDetails data={expectJsonRecord(tooltip.node.data, 'account-map.tooltip.node.data')} />
         </div>
       )}
 

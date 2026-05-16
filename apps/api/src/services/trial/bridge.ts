@@ -15,6 +15,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { emitTrialEventForProject } from './trial-runner';
 import { readTrialByProject } from './trial-store';
 
@@ -125,15 +126,15 @@ export async function bridgeAgentActivity(
       if (!text) continue;
 
       const toolName =
-        msg.role === 'tool' && msg.toolMetadata && typeof msg.toolMetadata === 'object'
-          ? (msg.toolMetadata as Record<string, unknown>).toolName as string | undefined
+        msg.role === 'tool'
+          ? maybeJsonRecord(msg.toolMetadata)?.toolName
           : undefined;
 
       await emitTrialEventForProject(env, projectId, {
         type: 'trial.agent_activity',
         role: msg.role as 'assistant' | 'tool' | 'thinking',
         text: text.length > 200 ? text.slice(0, 200) + '…' : text,
-        ...(toolName ? { toolName } : {}),
+        ...(typeof toolName === 'string' && toolName ? { toolName } : {}),
         at: Date.now(),
       });
     }

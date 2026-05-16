@@ -1,8 +1,15 @@
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { parseWithSchema } from '../lib/runtime-validation';
 
 const agentRoutes = new Hono<{ Bindings: Env }>();
+
+const agentVersionSchema = v.object({
+  version: v.string(),
+  buildDate: v.string(),
+});
 
 // Agent binary names by OS/arch
 const AGENT_BINARIES: Record<string, string> = {
@@ -77,7 +84,7 @@ agentRoutes.get('/version', async (c) => {
     return c.json({ version: 'unknown', available: false });
   }
 
-  const versionInfo = await metadata.json() as { version: string; buildDate: string };
+  const versionInfo = parseWithSchema(agentVersionSchema, await metadata.json(), 'agent.version_metadata');
   return c.json({ ...versionInfo, available: true });
 });
 

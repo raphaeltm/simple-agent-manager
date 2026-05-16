@@ -11,6 +11,8 @@
  *   setUserId(user.id)         // after auth
  */
 
+import { expectJsonRecord } from './runtime-validation';
+
 interface AnalyticsEvent {
   event: string;
   page: string;
@@ -132,7 +134,12 @@ function captureUtmParams(): UtmParams {
     // Check sessionStorage first (already captured this session)
     const cached = sessionStorage.getItem(UTM_KEY);
     if (cached) {
-      return JSON.parse(cached) as UtmParams;
+      const parsed = expectJsonRecord(JSON.parse(cached), 'analytics.utm_cache');
+      return {
+        source: typeof parsed.source === 'string' ? parsed.source : '',
+        medium: typeof parsed.medium === 'string' ? parsed.medium : '',
+        campaign: typeof parsed.campaign === 'string' ? parsed.campaign : '',
+      };
     }
 
     // Extract from current URL

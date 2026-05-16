@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { readResponseJsonRecord } from '../../lib/runtime-validation';
+
 export type VoiceState = 'idle' | 'recording' | 'processing' | 'error';
 
 export function useVoiceInput(opts: {
@@ -126,8 +128,8 @@ export function useVoiceInput(opts: {
           });
 
           if (!resp.ok) throw new Error(`Transcription failed (${resp.status})`);
-          const data = (await resp.json()) as { text: string };
-          if (data.text) onTranscription(data.text);
+          const data = await readResponseJsonRecord(resp, 'sam_prototype.voice.transcribe');
+          if (typeof data.text === 'string' && data.text.length > 0) onTranscription(data.text);
           setState('idle');
         } catch (err) {
           setState('error');

@@ -40,6 +40,31 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown, path: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`${path} must be an object`);
+  }
+  return value;
+}
+
+function requireString(value: unknown, path: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${path} must be a non-empty string`);
+  }
+  return value;
+}
+
+function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
+  if (!isRecord(value)) {
+    throw new Error(`${path} must be a TOML table`);
+  }
+  return value as TOML.JsonMap;
+}
+
 // ============================================================================
 // Pulumi
 // ============================================================================
@@ -54,7 +79,7 @@ function getPulumiOutputs(stack: string): PulumiOutputs {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    const parsed = JSON.parse(output) as PulumiOutputs;
+    const parsed: unknown = JSON.parse(output);
     validatePulumiOutputs(parsed);
     return parsed;
   } catch (error) {
@@ -63,7 +88,8 @@ function getPulumiOutputs(stack: string): PulumiOutputs {
   }
 }
 
-export function validatePulumiOutputs(outputs: PulumiOutputs): void {
+export function validatePulumiOutputs(outputs: unknown): asserts outputs is PulumiOutputs {
+  const record = requireRecord(outputs, 'Pulumi outputs');
   const required: Array<{ key: keyof PulumiOutputs; label: string }> = [
     { key: 'd1DatabaseId', label: 'D1 Database ID' },
     { key: 'd1DatabaseName', label: 'D1 Database Name' },
@@ -76,8 +102,8 @@ export function validatePulumiOutputs(outputs: PulumiOutputs): void {
   ];
 
   const missing = required.filter(({ key }) => {
-    const value = outputs[key];
-    return value === undefined || value === null || value === '';
+    const value = record[key];
+    return typeof value !== 'string' || value.length === 0;
   });
 
   if (missing.length > 0) {
@@ -85,7 +111,13 @@ export function validatePulumiOutputs(outputs: PulumiOutputs): void {
     throw new Error(`Pulumi outputs missing required fields:\n${labels}`);
   }
 
-  if (!outputs.stackSummary?.baseDomain) {
+  const stackSummary = requireRecord(record.stackSummary, 'Pulumi outputs.stackSummary');
+  requireString(stackSummary.baseDomain, 'Pulumi outputs.stackSummary.baseDomain');
+  requireRecord(stackSummary.resources, 'Pulumi outputs.stackSummary.resources');
+  requireRecord(record.dnsIds, 'Pulumi outputs.dnsIds');
+  requireRecord(record.hostnames, 'Pulumi outputs.hostnames');
+
+  if (!record.stackSummary || !stackSummary.baseDomain) {
     throw new Error('Pulumi outputs missing required field: stackSummary.baseDomain');
   }
 }
@@ -274,7 +306,8 @@ function syncTailWorkerConfig(stack: string, accountId: string, envKey: string):
 
   if (!config.env) config.env = {};
 
-  (config.env as Record<string, unknown>)[envKey] = {
+  const envConfig = ensureTomlMap(config.env, 'tail worker env config');
+  envConfig[envKey] = {
     name: tailWorkerName,
     account_id: accountId,
     services: [{ binding: 'API_WORKER', service: apiWorkerName }],
