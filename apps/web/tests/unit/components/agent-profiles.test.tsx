@@ -354,6 +354,19 @@ describe('ProfileFormDialog', () => {
     expect(screen.getByDisplayValue('5')).toBeInTheDocument();
   });
 
+  it('offers GPT-5.5 Pro for OpenAI Codex profiles', async () => {
+    const user = userEvent.setup();
+    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5' });
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} />,
+    );
+
+    await user.click(screen.getByLabelText('Model'));
+
+    expect(screen.getByText('GPT-5.5 Pro')).toBeInTheDocument();
+    expect(screen.getByText('gpt-5.5-pro')).toBeInTheDocument();
+  });
+
   it('shows error when onSave rejects', async () => {
     const user = userEvent.setup();
     const failingSave = vi.fn().mockRejectedValue(new Error('Server error'));

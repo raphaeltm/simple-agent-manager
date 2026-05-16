@@ -14,6 +14,8 @@ describe('model-catalog', () => {
     it('returns grouped models for openai-codex', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
+      expect(groups[0]!.models.some((m) => m.id === 'gpt-5.5-pro')).toBe(true);
+      expect(groups[0]!.models.some((m) => m.id === 'gpt-5.5')).toBe(true);
       expect(groups[0]!.models.some((m) => m.id === 'gpt-5.4')).toBe(true);
     });
 
@@ -61,7 +63,7 @@ describe('model-catalog', () => {
     });
 
     it('returns true for a codex model under openai-codex', () => {
-      expect(isKnownModel('openai-codex', 'gpt-5.4')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-5.5-pro')).toBe(true);
     });
 
     it('returns false for a custom/unknown model', () => {
