@@ -8,7 +8,7 @@
  */
 import { Hono } from 'hono';
 
-import * as schema from '../db/schema';
+// Table: session_summaries — see apps/api/src/db/schema.ts:sessionSummaries
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 
@@ -153,8 +153,5 @@ function mapSessionSummaryRow(row: SessionSummaryD1Row) {
     updatedAt: row.updated_at,
   };
 }
-
-// Ensure schema import is used (prevents tree-shaking and serves as documentation)
-void schema;
 
 export { chatsRoutes };

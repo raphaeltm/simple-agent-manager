@@ -839,6 +839,10 @@ export class ProjectData extends DurableObject<Env> {
       )
     );
 
-    await this.env.DATABASE.batch(stmts);
+    // D1 batch limit is 100 statements; chunk if needed
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
+      await this.env.DATABASE.batch(stmts.slice(i, i + BATCH_SIZE));
+    }
   }
 }
