@@ -236,33 +236,36 @@ githubRoutes.post('/webhook', async (c) => {
     const installation = optionalJsonRecord(data.installation, 'github.webhook.installation');
     const sender = optionalJsonRecord(data.sender, 'github.webhook.sender');
 
-    if (action === 'created' && sender?.id != null && installation?.id != null) {
-      // Find user by GitHub ID (from the sender who installed the app)
-      const users = await db
-        .select()
-        .from(schema.users)
-        .where(eq(schema.users.githubId, String(sender.id)))
-        .limit(1);
+    if (action === 'created' && installation?.id != null) {
+      const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
+      const canonicalAccount = getCanonicalAccountInput(
+        String(installation.id),
+        account?.type,
+        account?.login
+      );
+      await upsertCanonicalInstallationAccount(db, canonicalAccount, now);
 
-      const foundUser = users[0];
-      if (foundUser) {
-        const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
-        const canonicalAccount = getCanonicalAccountInput(
-          String(installation.id),
-          account?.type,
-          account?.login
-        );
-        await upsertCanonicalInstallationAccount(db, canonicalAccount, now);
-        // Create installation record
-        await db.insert(schema.githubInstallations).values({
-          id: ulid(),
-          userId: foundUser.id,
-          installationId: String(installation.id),
-          accountType: canonicalAccount.accountType,
-          accountName: canonicalAccount.accountName,
-          createdAt: now,
-          updatedAt: now,
-        });
+      if (sender?.id != null) {
+        // Find user by GitHub ID (from the sender who installed the app)
+        const users = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.githubId, String(sender.id)))
+          .limit(1);
+
+        const foundUser = users[0];
+        if (foundUser) {
+          // Create installation record
+          await db.insert(schema.githubInstallations).values({
+            id: ulid(),
+            userId: foundUser.id,
+            installationId: String(installation.id),
+            accountType: canonicalAccount.accountType,
+            accountName: canonicalAccount.accountName,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       }
     } else if (action === 'deleted' && installation?.id != null) {
       const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');

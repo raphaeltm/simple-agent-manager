@@ -603,6 +603,40 @@ describe('GitHub App installation sharing', () => {
     expect(insertedCanonicalRows()).toHaveLength(0);
   });
 
+  it('records canonical state from installation-created webhook even without a SAM user link', async () => {
+    limitResponses.push([]);
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: {
+        id: 120081765,
+        account: { login: 'effprop', type: 'Organization' },
+      },
+      sender: { id: 987654 },
+    });
+
+    const res = await app.request('/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-hub-signature-256': 'sha256=test',
+        'x-github-event': 'installation',
+        'content-type': 'application/json',
+      },
+      body: payload,
+    }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(insertedCanonicalRows()).toEqual([
+      expect.objectContaining({
+        installationId: '120081765',
+        accountType: 'organization',
+        accountName: 'effprop',
+        accountNameNormalized: 'effprop',
+        uninstalledAt: null,
+      }),
+    ]);
+    expect(insertedPerUserRows()).toHaveLength(0);
+  });
+
   it('tombstones canonical state and removes per-user links on GitHub uninstall webhook', async () => {
     const payload = JSON.stringify({
       action: 'deleted',
