@@ -249,6 +249,9 @@ export async function scheduleWorkspaceCreateOnNode(
       gitUserName,
       gitUserEmail,
     });
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET dispatched_at = ? WHERE id = ?`
+    ).bind(new Date().toISOString(), workspaceId).run();
   } catch (err) {
     await db
       .update(schema.workspaces)

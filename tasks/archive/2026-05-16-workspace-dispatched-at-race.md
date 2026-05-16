@@ -16,13 +16,13 @@ TaskRunner-created workspaces are inserted into D1 with `status = 'creating'` an
 
 ## Implementation Checklist
 
-- [ ] Add migration `0049_workspace_dispatched_at.sql` with nullable `dispatched_at`.
-- [ ] Add `dispatchedAt` to the Drizzle `workspaces` schema.
-- [ ] Set `dispatched_at` after successful TaskRunner VM agent workspace dispatch.
-- [ ] Set `dispatched_at` after successful UI/manual workspace dispatch.
-- [ ] Filter node-lifecycle ready replay to `creating` workspaces with `dispatched_at IS NULL`.
-- [ ] Add integration coverage for ready-handler skip/replay behavior and TaskRunner dispatch marking.
-- [ ] Run migration safety and typecheck.
+- [x] Add migration `0050_workspace_dispatched_at.sql` with nullable `dispatched_at`.
+- [x] Add `dispatchedAt` to the Drizzle `workspaces` schema.
+- [x] Set `dispatched_at` after successful TaskRunner VM agent workspace dispatch.
+- [x] Set `dispatched_at` after successful UI/manual workspace dispatch.
+- [x] Filter node-lifecycle ready replay to `creating` workspaces with `dispatched_at IS NULL`.
+- [x] Add integration coverage for ready-handler skip/replay behavior and TaskRunner dispatch marking.
+- [x] Run migration safety and typecheck.
 
 ## Acceptance Criteria
 
