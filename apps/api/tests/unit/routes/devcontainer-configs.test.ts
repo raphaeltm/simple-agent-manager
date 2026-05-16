@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { parseDevcontainerConfigs } from '../../../src/routes/projects/devcontainer-configs';
+import {
+  devcontainerConfigRoutes,
+  parseDevcontainerConfigs,
+} from '../../../src/routes/projects/devcontainer-configs';
 
 // =============================================================================
 // Unit tests for parseDevcontainerConfigs (pure function)
@@ -155,8 +158,6 @@ vi.mock('../../../src/routes/projects/_helpers', () => ({
 vi.mock('../../../src/services/github-app', () => ({
   getInstallationToken: mockGetInstallationToken,
 }));
-
-import { devcontainerConfigRoutes } from '../../../src/routes/projects/devcontainer-configs';
 
 const BASE_URL = 'https://api.test.example.com';
 

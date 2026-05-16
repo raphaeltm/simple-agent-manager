@@ -42,6 +42,51 @@ interface GitTreeResponse {
   truncated: boolean;
 }
 
+interface GitHubContentsEntry {
+  name: string;
+  type: string;
+}
+
+const GITHUB_API_HEADERS = {
+  Accept: 'application/vnd.github+json',
+  'X-GitHub-Api-Version': '2022-11-28',
+  'User-Agent': 'Simple-Agent-Manager',
+} as const;
+
+function isValidDevcontainerConfigName(name: string): boolean {
+  return (
+    DEVCONTAINER_CONFIG_NAME_REGEX.test(name) &&
+    name.length <= DEVCONTAINER_CONFIG_NAME_MAX_LENGTH
+  );
+}
+
+function makeGitHubHeaders(token: string): HeadersInit {
+  return {
+    ...GITHUB_API_HEADERS,
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+function makeContentsUrl(owner: string, repo: string, path: string, branch: string): string {
+  const encodedPath = path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
+}
+
+async function githubPathExists(
+  owner: string,
+  repo: string,
+  path: string,
+  branch: string,
+  headers: HeadersInit,
+): Promise<boolean> {
+  const response = await fetch(makeContentsUrl(owner, repo, path, branch), { headers });
+  return response.ok;
+}
+
 /**
  * Extract devcontainer config information from a GitHub git tree response.
  */
@@ -62,20 +107,55 @@ export function parseDevcontainerConfigs(tree: GitTreeEntry[]): {
     }
 
     // Named configs: .devcontainer/<name>/devcontainer.json
-    const match = entry.path.match(/^\.devcontainer\/([^/]+)\/devcontainer\.json$/);
+    const match = /^\.devcontainer\/([^/]+)\/devcontainer\.json$/.exec(entry.path);
     if (!match) continue;
 
-    const name = match[1]!;
+    const name = match[1];
+    if (!name) continue;
 
     // Validate name against shared constants
-    if (!DEVCONTAINER_CONFIG_NAME_REGEX.test(name)) continue;
-    if (name.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) continue;
+    if (!isValidDevcontainerConfigName(name)) continue;
 
     configs.push({ name, path: entry.path });
   }
 
   configs.sort((a, b) => a.name.localeCompare(b.name));
   return { defaultConfigExists, configs };
+}
+
+async function fetchDevcontainerDirectory(
+  owner: string,
+  repo: string,
+  branch: string,
+  headers: HeadersInit,
+): Promise<GitHubContentsEntry[]> {
+  const response = await fetch(makeContentsUrl(owner, repo, '.devcontainer', branch), { headers });
+  if (!response.ok) return [];
+
+  const entries = await response.json() as GitHubContentsEntry[];
+  return Array.isArray(entries) ? entries : [];
+}
+
+async function findFallbackNamedConfigs(
+  owner: string,
+  repo: string,
+  branch: string,
+  headers: HeadersInit,
+  entries: GitHubContentsEntry[],
+): Promise<DevcontainerConfigEntry[]> {
+  const configs: DevcontainerConfigEntry[] = [];
+
+  for (const entry of entries) {
+    if (entry.type !== 'dir' || !isValidDevcontainerConfigName(entry.name)) continue;
+
+    const path = `.devcontainer/${entry.name}/devcontainer.json`;
+    const exists = await githubPathExists(owner, repo, path, branch, headers);
+    if (exists) {
+      configs.push({ name: entry.name, path });
+    }
+  }
+
+  return configs.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -87,59 +167,15 @@ async function fetchDevcontainerConfigsFallback(
   branch: string,
   token: string,
 ): Promise<{ defaultConfigExists: boolean; configs: DevcontainerConfigEntry[] }> {
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'Simple-Agent-Manager',
-  };
-
-  let defaultConfigExists = false;
-  const configs: DevcontainerConfigEntry[] = [];
-
-  // Check root .devcontainer.json
-  const rootResp = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/.devcontainer.json?ref=${encodeURIComponent(branch)}`,
-    { headers },
+  const headers = makeGitHubHeaders(token);
+  const rootDefaultExists = await githubPathExists(owner, repo, '.devcontainer.json', branch, headers);
+  const entries = await fetchDevcontainerDirectory(owner, repo, branch, headers);
+  const directoryDefaultExists = entries.some(
+    (entry) => entry.name === 'devcontainer.json' && entry.type === 'file',
   );
-  if (rootResp.ok) {
-    defaultConfigExists = true;
-  }
+  const configs = await findFallbackNamedConfigs(owner, repo, branch, headers, entries);
 
-  // Check .devcontainer directory
-  const dirResp = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/.devcontainer?ref=${encodeURIComponent(branch)}`,
-    { headers },
-  );
-
-  if (dirResp.ok) {
-    const entries = await dirResp.json() as Array<{ name: string; type: string }>;
-    for (const entry of entries) {
-      if (entry.name === 'devcontainer.json' && entry.type === 'file') {
-        defaultConfigExists = true;
-        continue;
-      }
-      if (entry.type !== 'dir') continue;
-
-      const name = entry.name;
-      if (!DEVCONTAINER_CONFIG_NAME_REGEX.test(name)) continue;
-      if (name.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) continue;
-
-      // Check if subdirectory contains devcontainer.json
-      const subResp = await fetch(
-        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/.devcontainer/${encodeURIComponent(name)}/devcontainer.json?ref=${encodeURIComponent(branch)}`,
-        { headers },
-      );
-      if (subResp.ok) {
-        configs.push({
-          name,
-          path: `.devcontainer/${name}/devcontainer.json`,
-        });
-      }
-    }
-  }
-
-  configs.sort((a, b) => a.name.localeCompare(b.name));
+  const defaultConfigExists = rootDefaultExists || directoryDefaultExists;
   return { defaultConfigExists, configs };
 }
 
@@ -175,10 +211,8 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
       `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
       {
         headers: {
+          ...GITHUB_API_HEADERS,
           Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'Simple-Agent-Manager',
         },
       },
     );
