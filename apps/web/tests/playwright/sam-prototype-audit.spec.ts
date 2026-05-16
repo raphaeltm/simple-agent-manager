@@ -172,6 +172,56 @@ async function captureOverview(page: Page, screenshotName: string) {
   await assertNoOverflow(page);
 }
 
+const commonChatScenarios = [
+  {
+    name: 'chat with text response',
+    chatResponse: 'text',
+    message: 'Hello SAM',
+    screenshotBase: 'sam-text-response',
+  },
+  {
+    name: 'chat with tool use response',
+    chatResponse: 'tool_use',
+    message: 'Show my projects',
+    screenshotBase: 'sam-tool-use',
+  },
+  {
+    name: 'long text wraps correctly',
+    chatResponse: 'long_text',
+    message: 'Give me a detailed analysis',
+    screenshotBase: 'sam-long-text',
+  },
+  {
+    name: 'onboarding cards render and wrap correctly',
+    chatResponse: 'onboarding_cards',
+    message: 'Help me get started',
+    screenshotBase: 'sam-onboarding-cards',
+    expectedButton: 'Open Settings',
+  },
+] as const;
+
+function registerChatScenarioTests(
+  suffix: 'mobile' | 'desktop',
+  extraScenarios: Array<{
+    name: string;
+    chatResponse: NonNullable<Parameters<typeof setupSamMocks>[1]>['chatResponse'];
+    message: string;
+    screenshotBase: string;
+  }> = [],
+) {
+  for (const scenario of [...commonChatScenarios, ...extraScenarios]) {
+    test(scenario.name, async ({ page }) => {
+      await captureChatScenario(page, {
+        chatResponse: scenario.chatResponse,
+        message: scenario.message,
+        screenshotName: `${scenario.screenshotBase}-${suffix}`,
+        viaButton: suffix === 'mobile' && scenario.chatResponse === 'text',
+        expectedButton: 'expectedButton' in scenario ? scenario.expectedButton : undefined,
+      });
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Mobile Tests (default viewport from playwright.config.ts)
 // ---------------------------------------------------------------------------
@@ -191,47 +241,14 @@ test.describe('SAM Prototype — Mobile', () => {
     await assertNoOverflow(page);
   });
 
-  test('chat with text response', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'text',
-      message: 'Hello SAM',
-      screenshotName: 'sam-text-response-mobile',
-      viaButton: true,
-    });
-  });
-
-  test('chat with tool use response', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'tool_use',
-      message: 'Show my projects',
-      screenshotName: 'sam-tool-use-mobile',
-    });
-  });
-
-  test('chat with error response', async ({ page }) => {
-    await captureChatScenario(page, {
+  registerChatScenarioTests('mobile', [
+    {
+      name: 'chat with error response',
       chatResponse: 'error',
       message: 'Break things',
-      screenshotName: 'sam-error-response-mobile',
-    });
-  });
-
-  test('long text wraps correctly', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'long_text',
-      message: 'Give me a detailed analysis',
-      screenshotName: 'sam-long-text-mobile',
-    });
-  });
-
-  test('onboarding cards render and wrap correctly', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'onboarding_cards',
-      message: 'Help me get started',
-      screenshotName: 'sam-onboarding-cards-mobile',
-      expectedButton: 'Open Settings',
-    });
-  });
+      screenshotBase: 'sam-error-response',
+    },
+  ]);
 
   test('overview tab shows project cards', async ({ page }) => {
     await captureOverview(page, 'sam-overview-mobile');
@@ -277,38 +294,7 @@ test.describe('SAM Prototype — Desktop', () => {
     await assertNoOverflow(page);
   });
 
-  test('chat with text response', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'text',
-      message: 'Hello SAM',
-      screenshotName: 'sam-text-response-desktop',
-    });
-  });
-
-  test('chat with tool use response', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'tool_use',
-      message: 'Show my projects',
-      screenshotName: 'sam-tool-use-desktop',
-    });
-  });
-
-  test('long text wraps correctly', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'long_text',
-      message: 'Give me a detailed analysis',
-      screenshotName: 'sam-long-text-desktop',
-    });
-  });
-
-  test('onboarding cards render and wrap correctly', async ({ page }) => {
-    await captureChatScenario(page, {
-      chatResponse: 'onboarding_cards',
-      message: 'Help me get started',
-      screenshotName: 'sam-onboarding-cards-desktop',
-      expectedButton: 'Open Settings',
-    });
-  });
+  registerChatScenarioTests('desktop');
 
   test('overview tab shows project cards', async ({ page }) => {
     await captureOverview(page, 'sam-overview-desktop');
