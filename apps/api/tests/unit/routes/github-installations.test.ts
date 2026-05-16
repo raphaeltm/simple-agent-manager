@@ -8,6 +8,7 @@ import {
   getAuthenticatedUserOrganizations,
   getUserAccessibleInstallations,
   verifyUserInstallationAccess,
+  verifyWebhookSignature,
 } from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getAuthenticatedUserOrganizations: vi.fn(),
   getUserAccessibleInstallations: vi.fn(),
   verifyUserInstallationAccess: vi.fn(),
+  verifyWebhookSignature: vi.fn(),
   optionalAuthUser: null as null | {
     id: string;
     role: string;
@@ -24,6 +26,8 @@ const mocks = vi.hoisted(() => ({
     avatarUrl: string | null;
   },
   insertError: null as unknown,
+  deletedRows: [] as unknown[],
+  updatedRows: [] as unknown[],
   log: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -74,7 +78,7 @@ vi.mock('../../../src/services/github-app', async () => {
     verifyUserInstallationAccess: mocks.verifyUserInstallationAccess,
     getInstallationRepositories: vi.fn(),
     getRepositoryBranches: vi.fn(),
-    verifyWebhookSignature: vi.fn(),
+    verifyWebhookSignature: mocks.verifyWebhookSignature,
   };
 });
 
@@ -83,6 +87,7 @@ describe('GitHub App installation sharing', () => {
   let whereResponses: unknown[][];
   let limitResponses: unknown[][];
   let insertedRows: unknown[];
+  let upsertedRows: unknown[];
   const mockEnv = {
     DATABASE: {} as D1Database,
     BASE_DOMAIN: 'example.com',
@@ -90,6 +95,7 @@ describe('GitHub App installation sharing', () => {
     GITHUB_CLIENT_SECRET: 'secret',
     GITHUB_APP_ID: 'app-id',
     GITHUB_APP_PRIVATE_KEY: 'key',
+    ENCRYPTION_KEY: 'webhook-secret',
   } as Env;
 
   beforeEach(() => {
@@ -97,12 +103,16 @@ describe('GitHub App installation sharing', () => {
     whereResponses = [];
     limitResponses = [];
     insertedRows = [];
+    upsertedRows = [];
+    mocks.deletedRows = [];
+    mocks.updatedRows = [];
     mocks.optionalAuthUser = { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null };
     mocks.insertError = null;
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
     mocks.getAuthenticatedUserOrganizations.mockResolvedValue([]);
     mocks.getUserAccessibleInstallations.mockResolvedValue([]);
     mocks.verifyUserInstallationAccess.mockResolvedValue(true);
+    mocks.verifyWebhookSignature.mockResolvedValue(true);
 
     const makeSelectBuilder = () => {
       const fromBuilder = {
@@ -119,17 +129,47 @@ describe('GitHub App installation sharing', () => {
 
     const makeInsertBuilder = () => ({
       values: vi.fn((row: unknown) => {
-        if (mocks.insertError) {
+        if (mocks.insertError && row && typeof row === 'object' && 'userId' in row) {
           throw mocks.insertError;
         }
         insertedRows.push(row);
-        return Promise.resolve(undefined);
+        const builder = {
+          onConflictDoUpdate: vi.fn((config: unknown) => {
+            upsertedRows.push({ row, config });
+            return Promise.resolve(undefined);
+          }),
+        };
+        return builder;
       }),
+    });
+
+    const makeDeleteBuilder = () => ({
+      where: vi.fn(() => {
+        mocks.deletedRows.push({ type: 'where' });
+        return Object.assign(Promise.resolve(undefined), {
+          returning: vi.fn(() => {
+            const rows = whereResponses.shift() ?? [];
+            mocks.deletedRows.push({ type: 'returning', rows });
+            return Promise.resolve(rows);
+          }),
+        });
+      }),
+    });
+
+    const makeUpdateBuilder = () => ({
+      set: vi.fn((row: unknown) => ({
+        where: vi.fn(() => {
+          mocks.updatedRows.push(row);
+          return Promise.resolve(undefined);
+        }),
+      })),
     });
 
     const mockDB = {
       select: vi.fn(() => makeSelectBuilder()),
       insert: vi.fn(() => makeInsertBuilder()),
+      delete: vi.fn(() => makeDeleteBuilder()),
+      update: vi.fn(() => makeUpdateBuilder()),
     };
 
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
@@ -163,11 +203,11 @@ describe('GitHub App installation sharing', () => {
   });
 
   const sharedEffpropCandidateRow = () => ({
-    id: 'inst-row-effprop-other-user',
-    userId: 'user-2',
     installationId: '120081765',
     accountType: 'organization',
     accountName: 'effprop',
+    normalizedAccountName: 'effprop',
+    uninstalledAt: null,
     createdAt: '2026-05-08T00:00:00.000Z',
     updatedAt: '2026-05-08T00:00:00.000Z',
   });
@@ -186,6 +226,11 @@ describe('GitHub App installation sharing', () => {
       { id: 222, account: { login: 'acme', type: 'Organization' } },
     ]);
   };
+
+  const perUserRows = () => insertedRows.filter((row) => row && typeof row === 'object' && 'userId' in row);
+
+  const canonicalRows = () =>
+    insertedRows.filter((row) => row && typeof row === 'object' && 'normalizedAccountName' in row);
 
   const expectOnlyExistingInstallation = async (res: Response) => {
     expect(res.status).toBe(200);
@@ -215,8 +260,16 @@ describe('GitHub App installation sharing', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('https://app.example.com/settings?github_app=installed');
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]).toMatchObject({
+    expect(canonicalRows()).toHaveLength(1);
+    expect(canonicalRows()[0]).toMatchObject({
+      installationId: '123',
+      accountType: 'organization',
+      accountName: 'acme',
+      normalizedAccountName: 'acme',
+      uninstalledAt: null,
+    });
+    expect(perUserRows()).toHaveLength(1);
+    expect(perUserRows()[0]).toMatchObject({
       userId: 'user-1',
       installationId: '123',
       accountType: 'organization',
@@ -255,6 +308,31 @@ describe('GitHub App installation sharing', () => {
       accountName: 'acme',
       accountType: 'Organization',
     });
+  });
+
+  it('allows two SAM users to link the same GitHub organization installation', async () => {
+    limitResponses.push([], []);
+    mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
+
+    const first = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
+    mocks.optionalAuthUser = {
+      id: 'user-2',
+      role: 'user',
+      status: 'active',
+      email: 'two@example.com',
+      name: 'User Two',
+      avatarUrl: null,
+    };
+    const second = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
+
+    expect(first.status).toBe(302);
+    expect(second.status).toBe(302);
+    expect(canonicalRows()).toHaveLength(2);
+    expect(perUserRows()).toHaveLength(2);
+    expect(perUserRows()).toEqual([
+      expect.objectContaining({ userId: 'user-1', installationId: '123' }),
+      expect.objectContaining({ userId: 'user-2', installationId: '123' }),
+    ]);
   });
 
   it('rejects spoofed callback installation IDs not accessible to the GitHub user', async () => {
@@ -347,6 +425,84 @@ describe('GitHub App installation sharing', () => {
     expect(insertedRows).toHaveLength(0);
   });
 
+  it('unlinks only the current user row without touching canonical state', async () => {
+    whereResponses.push([existingInstallationRow()]);
+
+    const res = await app.request('/api/github/installations/inst-row-111', { method: 'DELETE' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+    expect(mocks.deletedRows).toEqual([
+      { type: 'where' },
+      { type: 'returning', rows: [existingInstallationRow()] },
+    ]);
+    expect(mocks.updatedRows).toEqual([]);
+  });
+
+  it('webhook created upserts canonical installation state before any user link', async () => {
+    limitResponses.push([]);
+
+    const res = await app.request(
+      '/api/github/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'x-hub-signature-256': 'sha256=valid',
+          'x-github-event': 'installation',
+        },
+        body: JSON.stringify({
+          action: 'created',
+          installation: {
+            id: 120081765,
+            account: { login: 'effprop', type: 'Organization' },
+          },
+          sender: { id: 42 },
+        }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(200);
+    expect(verifyWebhookSignature).toHaveBeenCalled();
+    expect(canonicalRows()).toEqual([
+      expect.objectContaining({
+        installationId: '120081765',
+        accountType: 'organization',
+        accountName: 'effprop',
+        normalizedAccountName: 'effprop',
+        uninstalledAt: null,
+      }),
+    ]);
+    expect(perUserRows()).toHaveLength(0);
+  });
+
+  it('webhook uninstall removes per-user links and tombstones canonical state', async () => {
+    const res = await app.request(
+      '/api/github/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'x-hub-signature-256': 'sha256=valid',
+          'x-github-event': 'installation',
+        },
+        body: JSON.stringify({
+          action: 'deleted',
+          installation: { id: 120081765 },
+        }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.deletedRows).toEqual([{ type: 'where' }]);
+    expect(mocks.updatedRows).toEqual([
+      expect.objectContaining({
+        uninstalledAt: expect.any(String),
+        updatedAt: expect.any(String),
+      }),
+    ]);
+  });
+
   it('logs BetterAuth token lookup failures without logging token values', async () => {
     mocks.getAccessToken.mockRejectedValue(new Error('BetterAuth unavailable'));
 
@@ -397,8 +553,13 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]).toMatchObject({
+    expect(canonicalRows()).toHaveLength(2);
+    expect(canonicalRows()).toEqual([
+      expect.objectContaining({ installationId: '111', normalizedAccountName: 'existing' }),
+      expect.objectContaining({ installationId: '222', normalizedAccountName: 'acme' }),
+    ]);
+    expect(perUserRows()).toHaveLength(1);
+    expect(perUserRows()[0]).toMatchObject({
       userId: 'user-1',
       installationId: '222',
       accountType: 'organization',
@@ -452,8 +613,8 @@ describe('GitHub App installation sharing', () => {
       installationId: '120081765',
       accountName: 'effprop',
     });
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]).toMatchObject({
+    expect(perUserRows()).toHaveLength(1);
+    expect(perUserRows()[0]).toMatchObject({
       userId: 'user-1',
       installationId: '120081765',
       accountType: 'organization',

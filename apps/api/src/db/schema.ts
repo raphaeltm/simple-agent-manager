@@ -230,6 +230,32 @@ export const githubInstallations = sqliteTable(
   })
 );
 
+// Canonical GitHub App installation account state keyed by GitHub's external
+// installation id. Per-user unlink/account deletion must only remove rows from
+// `github_installations`; org discovery relies on these rows remaining until
+// GitHub sends an installation.deleted webhook.
+export const githubInstallationAccounts = sqliteTable(
+  'github_installation_accounts',
+  {
+    installationId: text('installation_id').primaryKey(),
+    accountType: text('account_type').notNull(),
+    accountName: text('account_name').notNull(),
+    normalizedAccountName: text('normalized_account_name').notNull(),
+    uninstalledAt: text('uninstalled_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    activeAccountLookupIdx: index('idx_github_installation_accounts_lookup')
+      .on(table.accountType, table.normalizedAccountName)
+      .where(sql`uninstalled_at IS NULL`),
+  })
+);
+
 // =============================================================================
 // Projects
 // =============================================================================
@@ -1019,6 +1045,8 @@ export type Credential = typeof credentials.$inferSelect;
 export type NewCredential = typeof credentials.$inferInsert;
 export type GitHubInstallation = typeof githubInstallations.$inferSelect;
 export type NewGitHubInstallation = typeof githubInstallations.$inferInsert;
+export type GitHubInstallationAccount = typeof githubInstallationAccounts.$inferSelect;
+export type NewGitHubInstallationAccount = typeof githubInstallationAccounts.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;

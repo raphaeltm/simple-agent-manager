@@ -1,5 +1,5 @@
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
-import { and,eq,inArray,ne,sql } from 'drizzle-orm';
+import { and,eq,inArray,sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context,Hono } from 'hono';
 
@@ -24,7 +24,8 @@ import {
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
-type GitHubInstallationRow = typeof schema.githubInstallations.$inferSelect;
+type GitHubInstallationAccountRow = typeof schema.githubInstallationAccounts.$inferSelect;
+type GitHubDb = ReturnType<typeof drizzle<typeof schema>>;
 
 /**
  * GET /api/github/installations - List user's GitHub App installations
@@ -235,6 +236,18 @@ githubRoutes.post('/webhook', async (c) => {
     const installation = optionalJsonRecord(data.installation, 'github.webhook.installation');
     const sender = optionalJsonRecord(data.sender, 'github.webhook.sender');
 
+    if (action === 'created' && installation?.id != null) {
+      const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
+      if (account?.login != null) {
+        await upsertCanonicalInstallationAccount(db, {
+          installationId: String(installation.id),
+          accountType: getCanonicalAccountType(account.type),
+          accountName: String(account.login),
+          now,
+        });
+      }
+    }
+
     if (action === 'created' && sender?.id != null && installation?.id != null) {
       // Find user by GitHub ID (from the sender who installed the app)
       const users = await db
@@ -246,22 +259,23 @@ githubRoutes.post('/webhook', async (c) => {
       const foundUser = users[0];
       if (foundUser) {
         const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
-        // Create installation record
-        await db.insert(schema.githubInstallations).values({
-          id: ulid(),
+        await insertUserInstallationLink(db, {
           userId: foundUser.id,
           installationId: String(installation.id),
-          accountType: account?.type === 'Organization' ? 'organization' : 'personal',
+          accountType: getCanonicalAccountType(account?.type),
           accountName: String(account?.login ?? ''),
-          createdAt: now,
-          updatedAt: now,
+          now,
         });
       }
     } else if (action === 'deleted' && installation?.id != null) {
-      // Remove installation record
+      // GitHub-source-of-truth uninstall: remove every per-user link and
+      // tombstone canonical account state. This is intentionally broader than
+      // per-user SAM unlink/account deletion, which must never touch canonical
+      // org installation state.
       await db
         .delete(schema.githubInstallations)
         .where(eq(schema.githubInstallations.installationId, String(installation.id)));
+      await tombstoneCanonicalInstallationAccount(db, String(installation.id), now);
     }
   }
 
@@ -336,7 +350,14 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     )
     .limit(1);
 
-  if (existing.length > 0) {
+  const existingInstallation = existing[0];
+  if (existingInstallation) {
+    await upsertCanonicalInstallationAccount(db, {
+      installationId,
+      accountType: existingInstallation.accountType,
+      accountName: existingInstallation.accountName,
+      now,
+    });
     log.info('github.installation_callback.insert_result', {
       userId: auth.user.id,
       installationId,
@@ -383,14 +404,19 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     }
 
     insertAttempted = true;
-    await db.insert(schema.githubInstallations).values({
-      id: ulid(),
-      userId: auth.user.id,
-      installationId: installationId,
-      accountType: accessibleInstallation.account.type === 'Organization' ? 'organization' : 'personal',
+    const accountType = getCanonicalAccountType(accessibleInstallation.account.type);
+    await upsertCanonicalInstallationAccount(db, {
+      installationId,
+      accountType,
       accountName: accessibleInstallation.account.login,
-      createdAt: now,
-      updatedAt: now,
+      now,
+    });
+    await insertUserInstallationLink(db, {
+      userId: auth.user.id,
+      installationId,
+      accountType,
+      accountName: accessibleInstallation.account.login,
+      now,
     });
     log.info('github.installation_callback.insert_result', {
       userId: auth.user.id,
@@ -436,6 +462,8 @@ githubRoutes.delete('/installations/:id', requireAuth(), requireApproved(), asyn
   const installationId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
+  // Per-user unlink only. Do not delete `github_installation_accounts` here:
+  // org installation discovery for other SAM users depends on canonical rows.
   const result = await db
     .delete(schema.githubInstallations)
     .where(
@@ -460,7 +488,7 @@ githubRoutes.delete('/installations/:id', requireAuth(), requireApproved(), asyn
  * records for installations the authenticated GitHub account can access.
  */
 async function syncUserInstallations(
-  db: ReturnType<typeof drizzle<typeof schema>>,
+  db: GitHubDb,
   userId: string,
   accessToken: string
 ): Promise<void> {
@@ -468,8 +496,80 @@ async function syncUserInstallations(
   await syncSharedOrgInstallations(db, userId, accessToken);
 }
 
+interface InstallationAccountInput {
+  installationId: string;
+  accountType: string;
+  accountName: string;
+  now: string;
+}
+
+interface UserInstallationLinkInput extends InstallationAccountInput {
+  userId: string;
+}
+
+async function upsertCanonicalInstallationAccount(
+  db: GitHubDb,
+  input: InstallationAccountInput
+): Promise<void> {
+  const accountType = getCanonicalAccountType(input.accountType);
+  await db
+    .insert(schema.githubInstallationAccounts)
+    .values({
+      installationId: input.installationId,
+      accountType,
+      accountName: input.accountName,
+      normalizedAccountName: input.accountName.toLowerCase(),
+      uninstalledAt: null,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .onConflictDoUpdate({
+      target: schema.githubInstallationAccounts.installationId,
+      set: {
+        accountType,
+        accountName: input.accountName,
+        normalizedAccountName: input.accountName.toLowerCase(),
+        uninstalledAt: null,
+        updatedAt: input.now,
+      },
+    });
+}
+
+async function tombstoneCanonicalInstallationAccount(
+  db: GitHubDb,
+  installationId: string,
+  now: string
+): Promise<void> {
+  await db
+    .update(schema.githubInstallationAccounts)
+    .set({
+      uninstalledAt: now,
+      updatedAt: now,
+    })
+    .where(eq(schema.githubInstallationAccounts.installationId, installationId));
+}
+
+async function insertUserInstallationLink(
+  db: GitHubDb,
+  input: UserInstallationLinkInput
+): Promise<void> {
+  await db.insert(schema.githubInstallations).values({
+    id: ulid(),
+    userId: input.userId,
+    installationId: input.installationId,
+    accountType: getCanonicalAccountType(input.accountType),
+    accountName: input.accountName,
+    createdAt: input.now,
+    updatedAt: input.now,
+  });
+}
+
+function getCanonicalAccountType(accountType: unknown): 'organization' | 'personal' {
+  return accountType === 'Organization' || accountType === 'organization' ? 'organization' : 'personal';
+}
+
 async function syncDirectUserInstallations(
-  db: ReturnType<typeof drizzle<typeof schema>>,
+  db: GitHubDb,
   userId: string,
   accessToken: string
 ): Promise<void> {
@@ -507,23 +607,27 @@ async function syncDirectUserInstallations(
       installations: summarizeAccessibleInstallations(missingInstallations),
     });
 
-    if (missingInstallations.length === 0) return;
-
     const now = new Date().toISOString();
+    for (const inst of accessibleInstallations) {
+      await upsertCanonicalInstallationAccount(db, {
+        installationId: String(inst.id),
+        accountType: getCanonicalAccountType(inst.account.type),
+        accountName: inst.account.login,
+        now,
+      });
+    }
+
+    if (missingInstallations.length === 0) return;
 
     for (const inst of missingInstallations) {
       try {
-        await db
-          .insert(schema.githubInstallations)
-          .values({
-            id: ulid(),
-            userId,
-            installationId: String(inst.id),
-            accountType: inst.account.type === 'Organization' ? 'organization' : 'personal',
-            accountName: inst.account.login,
-            createdAt: now,
-            updatedAt: now,
-          })
+        await insertUserInstallationLink(db, {
+          userId,
+          installationId: String(inst.id),
+          accountType: getCanonicalAccountType(inst.account.type),
+          accountName: inst.account.login,
+          now,
+        });
         log.info('github.installations_sync.insert_result', {
           userId,
           installationId: String(inst.id),
@@ -558,7 +662,7 @@ async function syncDirectUserInstallations(
 }
 
 async function syncSharedOrgInstallations(
-  db: ReturnType<typeof drizzle<typeof schema>>,
+  db: GitHubDb,
   userId: string,
   accessToken: string
 ): Promise<void> {
@@ -578,7 +682,6 @@ async function syncSharedOrgInstallations(
     const existingInstallationIds = await getExistingInstallationIds(db, userId);
     const candidates = await getSharedOrgInstallationCandidates(
       db,
-      userId,
       orgLogins,
       existingInstallationIds
     );
@@ -598,7 +701,7 @@ async function syncSharedOrgInstallations(
 }
 
 async function getExistingInstallationIds(
-  db: ReturnType<typeof drizzle<typeof schema>>,
+  db: GitHubDb,
   userId: string
 ): Promise<Set<string>> {
   const existingRecords = await db
@@ -610,24 +713,23 @@ async function getExistingInstallationIds(
 }
 
 async function getSharedOrgInstallationCandidates(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  userId: string,
+  db: GitHubDb,
   orgLogins: string[],
   existingInstallationIds: Set<string>
-): Promise<GitHubInstallationRow[]> {
+): Promise<GitHubInstallationAccountRow[]> {
   const normalizedOrgLogins = orgLogins.map((login) => login.toLowerCase());
   const knownOrgInstallations = await db
     .select()
-    .from(schema.githubInstallations)
+    .from(schema.githubInstallationAccounts)
     .where(
       and(
-        eq(schema.githubInstallations.accountType, 'organization'),
-        ne(schema.githubInstallations.userId, userId),
-        inArray(sql<string>`lower(${schema.githubInstallations.accountName})`, normalizedOrgLogins)
+        eq(schema.githubInstallationAccounts.accountType, 'organization'),
+        sql`${schema.githubInstallationAccounts.uninstalledAt} IS NULL`,
+        inArray(schema.githubInstallationAccounts.normalizedAccountName, normalizedOrgLogins)
       )
     );
 
-  const candidates = new Map<string, GitHubInstallationRow>();
+  const candidates = new Map<string, GitHubInstallationAccountRow>();
   for (const installation of knownOrgInstallations) {
     if (!existingInstallationIds.has(installation.installationId)) {
       candidates.set(installation.installationId, installation);
@@ -637,10 +739,10 @@ async function getSharedOrgInstallationCandidates(
 }
 
 async function insertVerifiedSharedInstallations(
-  db: ReturnType<typeof drizzle<typeof schema>>,
+  db: GitHubDb,
   userId: string,
   accessToken: string,
-  candidates: GitHubInstallationRow[]
+  candidates: GitHubInstallationAccountRow[]
 ): Promise<void> {
   const now = new Date().toISOString();
   for (const candidate of candidates) {
@@ -673,20 +775,18 @@ async function insertVerifiedSharedInstallations(
 }
 
 async function insertSharedInstallation(
-  db: ReturnType<typeof drizzle<typeof schema>>,
+  db: GitHubDb,
   userId: string,
-  candidate: GitHubInstallationRow,
+  candidate: GitHubInstallationAccountRow,
   now: string
 ): Promise<void> {
   try {
-    await db.insert(schema.githubInstallations).values({
-      id: ulid(),
+    await insertUserInstallationLink(db, {
       userId,
       installationId: candidate.installationId,
       accountType: 'organization',
       accountName: candidate.accountName,
-      createdAt: now,
-      updatedAt: now,
+      now,
     });
     log.info('github.shared_org_installations.insert_result', {
       userId,
@@ -756,7 +856,9 @@ function summarizeAccessibleInstallations(installations: UserAccessibleInstallat
   }));
 }
 
-function summarizeInstallationRows(installations: GitHubInstallationRow[]): Array<{
+function summarizeInstallationRows(
+  installations: Array<{ installationId: string; accountName: string }>
+): Array<{
   installationId: string;
   accountName: string;
 }> {
