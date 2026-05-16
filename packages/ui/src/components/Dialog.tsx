@@ -45,13 +45,13 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
     >
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- backdrop overlay; keyboard dismiss handled by Escape listener above */}
       <div
-        className="fixed inset-0 bg-overlay transition-opacity duration-150 ease-in-out"
+        className="fixed inset-0 bg-overlay glass-backdrop-dim transition-opacity duration-150 ease-in-out"
         onClick={onClose}
       />
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className={`relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg border border-border-default bg-surface shadow-overlay ${maxWidthClasses[maxWidth]}`}
+        className={`relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg glass-modal shadow-overlay ${maxWidthClasses[maxWidth]}`}
       >
         <div className="overflow-y-auto p-6 flex-1">
           {children}

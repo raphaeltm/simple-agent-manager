@@ -47,7 +47,7 @@ export const Toast: FC<ToastProps> = ({ toast, onDismiss }) => {
       role="status"
       aria-live="polite"
       data-testid={`toast-${toast.variant}`}
-      className={`flex items-center gap-2.5 rounded-md border px-3.5 py-2.5 text-sm font-medium shadow-dropdown max-w-[400px] w-full animate-[sam-toast-slide-in_200ms_ease-out] ${config.classes} ${config.borderClass}`}
+      className={`flex items-center gap-2.5 rounded-md glass-surface px-3.5 py-2.5 text-sm font-medium shadow-dropdown max-w-[400px] w-full animate-[sam-toast-slide-in_200ms_ease-out] ${config.classes} ${config.borderClass}`}
     >
       <span className="shrink-0 text-base">{config.icon}</span>
       <span className="flex-1 leading-[1.4]">{toast.message}</span>

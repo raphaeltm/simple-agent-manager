@@ -38,7 +38,7 @@ export function Alert({
 
   return (
     <div
-      className={`flex items-center justify-between gap-3 rounded-md border p-4 text-sm ${v.container} ${className}`}
+      className={`flex items-center justify-between gap-3 rounded-md glass-chrome p-4 text-sm ${v.container} ${className}`}
       role="alert"
       data-testid={testId}
     >

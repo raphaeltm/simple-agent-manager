@@ -12,9 +12,9 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-accent text-fg-on-accent border border-transparent',
-  secondary: 'bg-surface text-fg-primary border border-border-default',
+  secondary: 'bg-surface text-fg-primary border border-border-default hover:bg-[rgba(8,15,12,0.3)] hover:backdrop-blur-sm',
   danger: 'bg-danger text-fg-on-accent border border-transparent',
-  ghost: 'bg-transparent text-fg-primary border border-border-default',
+  ghost: 'bg-transparent text-fg-primary border border-border-default hover:bg-[rgba(34,197,94,0.05)] hover:backdrop-blur-sm',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
