@@ -118,6 +118,32 @@ export function mergeRuntimeAssetRows(
   };
 }
 
+export async function resolveRuntimeEnvRows(
+  rows: Array<{ key: string; storedValue: string; valueIv: string | null; isSecret: boolean }>,
+  encryptionKey: string
+): Promise<WorkspaceRuntimeEnvVar[]> {
+  return Promise.all(rows.map(async (row) => ({
+    key: row.key,
+    value: row.isSecret
+      ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
+      : row.storedValue,
+    isSecret: row.isSecret,
+  })));
+}
+
+export async function resolveRuntimeFileRows(
+  rows: Array<{ path: string; storedContent: string; contentIv: string | null; isSecret: boolean }>,
+  encryptionKey: string
+): Promise<WorkspaceRuntimeFile[]> {
+  return Promise.all(rows.map(async (row) => ({
+    path: row.path,
+    content: row.isSecret
+      ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
+      : row.storedContent,
+    isSecret: row.isSecret,
+  })));
+}
+
 export async function getProfileRuntimeAssets(
   db: Db,
   profileId: string,
@@ -156,20 +182,8 @@ export async function getProfileRuntimeAssets(
   ]);
 
   return {
-    envVars: await Promise.all(envRows.map(async (row) => ({
-      key: row.key,
-      value: row.isSecret
-        ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
-        : row.storedValue,
-      isSecret: row.isSecret,
-    }))),
-    files: await Promise.all(fileRows.map(async (row) => ({
-      path: row.path,
-      content: row.isSecret
-        ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
-        : row.storedContent,
-      isSecret: row.isSecret,
-    }))),
+    envVars: await resolveRuntimeEnvRows(envRows, encryptionKey),
+    files: await resolveRuntimeFileRows(fileRows, encryptionKey),
   };
 }
 

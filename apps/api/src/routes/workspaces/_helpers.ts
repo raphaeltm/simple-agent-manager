@@ -9,12 +9,13 @@ import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { decrypt } from '../../services/encryption';
 import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import {
   getProfileRuntimeAssets,
   mergeRuntimeAssetRows,
+  resolveRuntimeEnvRows,
+  resolveRuntimeFileRows,
   type RuntimeAssetRows,
 } from '../../services/profile-runtime-assets';
 
@@ -196,20 +197,8 @@ export async function getWorkspaceRuntimeAssets(
   ]);
 
   const projectAssets: RuntimeAssetRows = {
-    envVars: await Promise.all(envRows.map(async (row) => ({
-      key: row.key,
-      value: row.isSecret
-        ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
-        : row.storedValue,
-      isSecret: row.isSecret,
-    }))),
-    files: await Promise.all(fileRows.map(async (row) => ({
-      path: row.path,
-      content: row.isSecret
-        ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
-        : row.storedContent,
-      isSecret: row.isSecret,
-    }))),
+    envVars: await resolveRuntimeEnvRows(envRows, encryptionKey),
+    files: await resolveRuntimeFileRows(fileRows, encryptionKey),
   };
 
   const profileId = await getWorkspaceTaskProfileId(db, workspace.id, workspace.projectId, workspace.userId);
