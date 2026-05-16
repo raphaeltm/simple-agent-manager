@@ -1582,6 +1582,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 
 	cfg := &config.Config{
 		WorkspaceDir:        t.TempDir(),
@@ -1634,6 +1635,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 
 	cfg := &config.Config{
 		WorkspaceDir:        t.TempDir(),
@@ -1690,6 +1692,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 
 	cfg := &config.Config{
 		WorkspaceDir:        t.TempDir(),
@@ -1741,6 +1744,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 	t.Setenv("MOCK_CHOWN_LOG", chownLog)
 
 	cfg := &config.Config{
@@ -1794,6 +1798,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 	t.Setenv("MOCK_CHOWN_LOG", chownLog)
 
 	cfg := &config.Config{
