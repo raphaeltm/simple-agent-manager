@@ -564,7 +564,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   return (
     <>
       {/* Backdrop */}
-      <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim border-0 backdrop-blur-[8px] z-dialog-backdrop" />
+      <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
 
       {/* Palette dialog */}
       <div
@@ -572,7 +572,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         role="dialog"
         aria-label="Command palette"
         aria-modal="true"
-        className="fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] glass-modal rounded-lg shadow-overlay z-command-palette flex flex-col overflow-hidden"
+        className="glass-panel-container fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] glass-modal rounded-lg shadow-overlay z-command-palette flex flex-col overflow-hidden"
       >
         {/* Search input */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-default bg-[rgba(0,0,0,0.2)]">

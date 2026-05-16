@@ -279,7 +279,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
 
       {/* Panel */}
       <div
-        className="fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden
+        className="glass-panel-container glass-composited fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden
           inset-0
           md:inset-y-0 md:left-auto md:right-0 md:w-[min(560px,50vw)]
           before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"

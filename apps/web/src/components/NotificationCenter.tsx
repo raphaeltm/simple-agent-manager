@@ -185,7 +185,7 @@ export function NotificationCenter() {
           role="dialog"
           aria-label="Notifications"
           style={panelStyle}
-          className="fixed inset-x-4 sm:inset-x-auto sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] glass-surface rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
+          className="glass-panel-container glass-composited fixed inset-x-4 sm:inset-x-auto sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] glass-surface rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">

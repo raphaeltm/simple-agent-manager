@@ -250,7 +250,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                   behavior: 'smooth',
                 });
               }}
-              className={`absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-[bottom] duration-200 ${lc.agentActivity !== 'idle' ? 'bottom-14' : 'bottom-3'}`}
+              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page"
+              data-agent-active={lc.agentActivity !== 'idle'}
               aria-label="Scroll to bottom"
             >
               <ChevronDown size={16} className="text-fg-muted" />

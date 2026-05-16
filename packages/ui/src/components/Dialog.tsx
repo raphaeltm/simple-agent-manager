@@ -51,7 +51,7 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className={`relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg glass-modal shadow-overlay ${maxWidthClasses[maxWidth]}`}
+        className={`glass-panel-container glass-composited relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg glass-modal shadow-overlay ${maxWidthClasses[maxWidth]}`}
       >
         <div className="overflow-y-auto p-6 flex-1">
           {children}

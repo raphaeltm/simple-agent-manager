@@ -104,12 +104,16 @@
 
 @keyframes task-running-glow {
   0%, 100% {
-    box-shadow:
-      0 0 0 1px rgba(34, 197, 94, 0.18),
-      0 0 18px rgba(34, 197, 94, 0.12);
+    opacity: 0.92;
   }
 
   50% {
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  .animate-\[task-running-glow_2\.4s_ease-in-out_infinite\] {
     box-shadow:
       0 0 0 1px rgba(34, 197, 94, 0.34),
       0 0 28px rgba(34, 197, 94, 0.24);
@@ -138,32 +142,65 @@
     transition:
       background-color 0.15s ease,
       border-color 0.15s ease,
-      box-shadow 0.15s ease,
-      backdrop-filter 0.15s ease;
+      box-shadow 0.15s ease;
   }
 
   .glass-chrome {
     background-color: var(--sam-glass-bg-chrome);
-    -webkit-backdrop-filter: blur(var(--sam-glass-blur-chrome)) saturate(var(--sam-glass-saturate));
-    backdrop-filter: blur(var(--sam-glass-blur-chrome)) saturate(var(--sam-glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-chrome))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-chrome))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-surface {
     background-color: var(--sam-glass-bg-surface);
-    -webkit-backdrop-filter: blur(var(--sam-glass-blur-surface)) saturate(var(--sam-glass-saturate));
-    backdrop-filter: blur(var(--sam-glass-blur-surface)) saturate(var(--sam-glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-surface))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-surface))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-modal {
     background-color: var(--sam-glass-bg-modal);
-    -webkit-backdrop-filter: blur(var(--sam-glass-blur-modal)) saturate(var(--sam-glass-saturate));
-    backdrop-filter: blur(var(--sam-glass-blur-modal)) saturate(var(--sam-glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-modal))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-modal))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-backdrop-dim {
     background-color: var(--sam-glass-backdrop-dim);
-    -webkit-backdrop-filter: blur(var(--sam-glass-backdrop-blur)) saturate(var(--sam-glass-saturate));
-    backdrop-filter: blur(var(--sam-glass-backdrop-blur)) saturate(var(--sam-glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-backdrop-blur))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-backdrop-blur))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+  }
+
+  .glass-chrome .glass-surface,
+  .glass-chrome .glass-modal,
+  .glass-surface .glass-surface,
+  .glass-surface .glass-modal,
+  .glass-modal .glass-surface,
+  .glass-modal .glass-modal {
+    background-color: rgba(8, 15, 12, 0.5);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .glass-panel-container {
+    contain: paint;
+  }
+
+  .glass-composited {
+    transform: translateZ(0);
+  }
+
+  .sam-main-content {
+    contain: layout style;
+  }
+
+  .sam-scroll-button {
+    bottom: 0.75rem;
+    transition:
+      transform 200ms ease,
+      background-color 150ms ease;
+  }
+
+  .sam-scroll-button[data-agent-active='true'] {
+    transform: translate3d(0, -2.75rem, 0);
   }
 
   .glass-card-glow {
