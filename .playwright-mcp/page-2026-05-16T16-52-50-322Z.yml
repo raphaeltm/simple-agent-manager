@@ -1,0 +1,108 @@
+- generic [ref=e1]:
+  - generic [ref=e17]:
+    - banner [ref=e18]:
+      - link "SAM" [ref=e19] [cursor=pointer]:
+        - /url: /sam
+        - img "SAM" [ref=e20]
+      - generic [ref=e21]:
+        - button "Open command palette" [ref=e22] [cursor=pointer]:
+          - img [ref=e23]
+        - button "Recent chats" [expanded] [active] [ref=e27] [cursor=pointer]:
+          - img [ref=e28]
+        - button "Notifications, 5 total unread" [ref=e31] [cursor=pointer]:
+          - img [ref=e32]
+        - button "Open navigation menu" [ref=e35] [cursor=pointer]:
+          - img [ref=e36]
+    - main [ref=e37]:
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - button "Project settings" [ref=e110] [cursor=pointer]:
+            - img [ref=e111]
+          - generic [ref=e114]: CrewAI
+          - button "Open chat list" [ref=e115] [cursor=pointer]:
+            - img [ref=e116]
+        - generic [ref=e1925]:
+          - generic [ref=e1926]:
+            - generic [ref=e1927]:
+              - generic [ref=e1928]: List the files in the current directory and echo "hello from staging test"
+              - generic [ref=e1929]:
+                - button "Retry task" [ref=e1930] [cursor=pointer]:
+                  - img [ref=e1931]
+                - button "Fork session" [ref=e1934] [cursor=pointer]:
+                  - img [ref=e1935]
+              - generic [ref=e1940]: Stopped
+              - button "Hide session details" [expanded] [ref=e2139] [cursor=pointer]:
+                - img [ref=e2140]
+            - generic [ref=e2142]:
+              - generic [ref=e2143]:
+                - generic [ref=e2144]:
+                  - img [ref=e2145]
+                  - text: References
+                - generic [ref=e2148]:
+                  - button "Task 01KRJY...DH5J" [ref=e2149] [cursor=pointer]:
+                    - img [ref=e2151]
+                    - generic [ref=e2154]: Task
+                    - generic [ref=e2155]: 01KRJY...DH5J
+                    - img [ref=e2157]
+                  - button "Session 4c6bff...93bb" [ref=e2160] [cursor=pointer]:
+                    - img [ref=e2162]
+                    - generic [ref=e2165]: Session
+                    - generic [ref=e2166]: 4c6bff...93bb
+                    - img [ref=e2168]
+                  - button "Workspace 01KRJY...KD95" [ref=e2171] [cursor=pointer]:
+                    - generic [ref=e2172]: Workspace
+                    - generic [ref=e2173]: 01KRJY...KD95
+                    - img [ref=e2175]
+                  - button "ACP 01KRJZ...HQ5Z" [ref=e2178] [cursor=pointer]:
+                    - generic [ref=e2179]: ACP
+                    - generic [ref=e2180]: 01KRJZ...HQ5Z
+                    - img [ref=e2182]
+              - generic [ref=e2185]:
+                - generic [ref=e2186]:
+                  - img [ref=e2187]
+                  - generic [ref=e2190]: opencode
+                - generic [ref=e2191]:
+                  - img [ref=e2192]
+                  - text: Task
+              - generic [ref=e2195]:
+                - generic [ref=e2196]: Failed
+                - generic [ref=e2197]:
+                  - img [ref=e2198]
+                  - text: May 14, 09:58 AM
+                - generic [ref=e2201]:
+                  - img [ref=e2202]
+                  - text: 8h 12m
+              - generic [ref=e2205]: Loading infrastructure details...
+          - generic [ref=e1945]: "Task failed: Task exceeded hard timeout of 480 minutes (no heartbeat grace). Last step: awaiting_followup."
+          - log "Conversation" [ref=e1946]:
+            - generic [ref=e1949]:
+              - paragraph [ref=e1955]: List the files in the current directory and echo "hello from staging test"
+              - region "System message" [ref=e1959]:
+                - generic [ref=e1961]: System
+                - generic [ref=e1962]: Task execution started — the agent is working on your request.
+              - generic [ref=e1967]:
+                - paragraph [ref=e1968]: List the files in the current directory and echo "hello from staging test"
+                - separator [ref=e1969]
+                - paragraph [ref=e1970]:
+                  - text: "IMPORTANT: Before starting any work, you MUST call the"
+                  - code [ref=e1971]: get_instructions
+                  - text: tool from the sam-mcp MCP server. This provides your task context, project information, output branch name, and instructions for reporting progress. Do not proceed until you have called this tool and read its response.
+              - generic [ref=e1975]:
+                - generic [ref=e1976]:
+                  - paragraph [ref=e1977]: "We can run the following bash commands in parallel to list the files in the current directory and echo \"hello from staging test\":"
+                  - paragraph [ref=e1978]: "{\"name\": \"bash\", \"parameters\": {\"command\": \"ls\", \"description\": \"Lists files in current directory\"}}; {\"name\": \"bash\", \"parameters\": {\"command\": \"echo \"hello from staging test\"\", \"description\": \"Echoes a message\"}}"
+                - generic [ref=e1980]:
+                  - button "Message info" [ref=e1981] [cursor=pointer]:
+                    - img [ref=e1982]
+                  - button "Read aloud" [ref=e1984] [cursor=pointer]:
+                    - img [ref=e1985]
+                  - button "Copy message" [ref=e1989] [cursor=pointer]:
+                    - img [ref=e1990]
+          - generic [ref=e1993]: This session has ended.
+  - menu "Recent chats" [ref=e2206]:
+    - heading "Recent Chats" [level=3] [ref=e2208]
+    - generic "Recent chat sessions" [ref=e2209]:
+      - generic [ref=e2210]:
+        - img [ref=e2211]
+        - generic [ref=e2213]: No active chats
+        - paragraph [ref=e2214]: Start a conversation in any project to see it here.
