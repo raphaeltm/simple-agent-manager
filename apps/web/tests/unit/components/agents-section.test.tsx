@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getAgentSettings: vi.fn(),
   saveAgentCredential: vi.fn(),
   deleteAgentCredential: vi.fn(),
+  deleteAgentCredentialByKind: vi.fn(),
   saveAgentSettings: vi.fn(),
   deleteAgentSettings: vi.fn(),
 }));
@@ -18,6 +19,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getAgentSettings: mocks.getAgentSettings,
   saveAgentCredential: mocks.saveAgentCredential,
   deleteAgentCredential: mocks.deleteAgentCredential,
+  deleteAgentCredentialByKind: mocks.deleteAgentCredentialByKind,
   saveAgentSettings: mocks.saveAgentSettings,
   deleteAgentSettings: mocks.deleteAgentSettings,
 }));
@@ -174,7 +176,7 @@ describe('AgentsSection', () => {
     });
   });
 
-  it('calls deleteAgentCredential when the Remove button is clicked on an active credential', async () => {
+  it('deletes only the active credential kind and keeps a remaining credential configured', async () => {
     mocks.listAgentCredentials.mockResolvedValue({
       credentials: [
         {
@@ -186,9 +188,19 @@ describe('AgentsSection', () => {
           createdAt: '2026-04-01T00:00:00Z',
           updatedAt: '2026-04-01T00:00:00Z',
         },
+        {
+          id: 'cred-claude-oauth',
+          agentType: 'claude-code',
+          credentialKind: 'oauth-token',
+          maskedKey: 'oauth-****wxyz',
+          isActive: false,
+          label: 'Pro/Max Subscription',
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
       ],
     });
-    mocks.deleteAgentCredential.mockResolvedValue(undefined);
+    mocks.deleteAgentCredentialByKind.mockResolvedValue(undefined);
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
@@ -208,7 +220,13 @@ describe('AgentsSection', () => {
       fireEvent.click(removeButton);
 
       await waitFor(() => {
-        expect(mocks.deleteAgentCredential).toHaveBeenCalledWith('claude-code');
+        expect(mocks.deleteAgentCredentialByKind).toHaveBeenCalledWith('claude-code', 'api-key');
+        expect(mocks.deleteAgentCredential).not.toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('oauth-****wxyz')).toBeInTheDocument();
+        expect(screen.getByText('Pro/Max Subscription')).toBeInTheDocument();
       });
     } finally {
       confirmSpy.mockRestore();

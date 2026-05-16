@@ -20,12 +20,12 @@ This contradicts the UI confirmation copy and the backend API shape. If a user h
 
 ## Implementation Checklist
 
-- [ ] Replace the user-scope Agents UI delete call with `deleteAgentCredentialByKind(agentType, credentialKind)`.
-- [ ] Update local credential state after deletion so only the removed kind disappears.
-- [ ] Preserve configured status when another credential kind remains.
-- [ ] Update the focused unit test to cover an agent with both `api-key` and `oauth-token`, deleting one kind.
-- [ ] Run focused tests for `AgentsSection`.
-- [ ] Run required quality checks for the affected workspace.
+- [x] Replace the user-scope Agents UI delete call with `deleteAgentCredentialByKind(agentType, credentialKind)`.
+- [x] Update local credential state after deletion so only the removed kind disappears.
+- [x] Preserve configured status when another credential kind remains.
+- [x] Update the focused unit test to cover an agent with both `api-key` and `oauth-token`, deleting one kind.
+- [x] Run focused tests for `AgentsSection`.
+- [x] Run required quality checks for the affected workspace.
 
 ## Acceptance Criteria
 
