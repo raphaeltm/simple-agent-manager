@@ -66,53 +66,53 @@ func TestGetContainerIDSelectsNewestMatchingContainer(t *testing.T) {
 	}
 }
 
-func TestFindContainerByLabelSelectsLowerIDWhenTimestampsMatch(t *testing.T) {
+func TestFindContainerByLabelSortsCandidates(t *testing.T) {
 	createdAt := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
-	restore := stubDockerDiscovery(
-		func(labelKey, labelValue string) ([]containerCandidate, error) {
-			if labelKey != "devcontainer.local_folder" || labelValue != "/workspace" {
-				t.Fatalf("unexpected label %s=%s", labelKey, labelValue)
-			}
-			return []containerCandidate{
+	tests := []struct {
+		name       string
+		candidates []containerCandidate
+		want       string
+	}{
+		{
+			name: "same timestamp selects lower ID",
+			candidates: []containerCandidate{
 				{id: "bbb", createdAt: createdAt},
 				{id: "aaa", createdAt: createdAt},
-			}, nil
+			},
+			want: "aaa",
 		},
-		func(string) bool { return true },
-		func(string) (string, error) { return "172.17.0.2", nil },
-	)
-	defer restore()
-
-	id, err := FindContainerByLabel(context.Background(), "devcontainer.local_folder", "/workspace")
-	if err != nil {
-		t.Fatalf("FindContainerByLabel failed: %v", err)
-	}
-	if id != "aaa" {
-		t.Fatalf("expected lower container ID, got %q", id)
-	}
-}
-
-func TestFindContainerByLabelSelectsNewestContainer(t *testing.T) {
-	older := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
-	newer := older.Add(time.Minute)
-	restore := stubDockerDiscovery(
-		func(string, string) ([]containerCandidate, error) {
-			return []containerCandidate{
-				{id: "newer", createdAt: newer},
-				{id: "older", createdAt: older},
-			}, nil
+		{
+			name: "different timestamps selects newest",
+			candidates: []containerCandidate{
+				{id: "newer", createdAt: createdAt.Add(time.Minute)},
+				{id: "older", createdAt: createdAt},
+			},
+			want: "newer",
 		},
-		func(string) bool { return true },
-		func(string) (string, error) { return "172.17.0.2", nil },
-	)
-	defer restore()
-
-	id, err := FindContainerByLabel(context.Background(), "devcontainer.local_folder", "/workspace")
-	if err != nil {
-		t.Fatalf("FindContainerByLabel failed: %v", err)
 	}
-	if id != "newer" {
-		t.Fatalf("expected newest container, got %q", id)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restore := stubDockerDiscovery(
+				func(labelKey, labelValue string) ([]containerCandidate, error) {
+					if labelKey != "devcontainer.local_folder" || labelValue != "/workspace" {
+						t.Fatalf("unexpected label %s=%s", labelKey, labelValue)
+					}
+					return tt.candidates, nil
+				},
+				func(string) bool { return true },
+				func(string) (string, error) { return "172.17.0.2", nil },
+			)
+			defer restore()
+
+			id, err := FindContainerByLabel(context.Background(), "devcontainer.local_folder", "/workspace")
+			if err != nil {
+				t.Fatalf("FindContainerByLabel failed: %v", err)
+			}
+			if id != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, id)
+			}
+		})
 	}
 }
 
