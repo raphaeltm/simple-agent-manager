@@ -1,0 +1,138 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]: S
+    - generic [ref=e5]:
+      - button "Search" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - button "Recent chats" [ref=e10] [cursor=pointer]:
+        - img [ref=e11]
+      - button "Notifications" [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+      - button "Menu" [ref=e17] [cursor=pointer]:
+        - img [ref=e18]
+  - generic [ref=e21]:
+    - generic [ref=e22]:
+      - button [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+      - generic [ref=e27]: CrewAI
+      - button [ref=e28] [cursor=pointer]:
+        - img [ref=e29]
+    - generic [ref=e31]:
+      - generic [ref=e33] [cursor=pointer]:
+        - generic [ref=e34]: Implement user authentication flow
+        - generic [ref=e35]:
+          - button "Retry" [ref=e36]:
+            - img [ref=e37]
+          - button "Fork" [ref=e40]:
+            - img [ref=e41]
+        - generic [ref=e46]: Active
+        - button [ref=e48]:
+          - img [ref=e49]
+      - generic [ref=e51]:
+        - generic [ref=e130]:
+          - generic [ref=e131]:
+            - generic [ref=e132]:
+              - img [ref=e133]
+              - text: References
+            - generic [ref=e135]:
+              - button "Task 01KRJY...DH5J" [ref=e136] [cursor=pointer]:
+                - generic [ref=e137]: Task
+                - text: 01KRJY...DH5J
+              - button "Session 4c6bff...93bb" [ref=e138] [cursor=pointer]:
+                - generic [ref=e139]: Session
+                - text: 4c6bff...93bb
+              - button "Workspace 01KRJY...KD95" [ref=e140] [cursor=pointer]:
+                - generic [ref=e141]: Workspace
+                - text: 01KRJY...KD95
+              - button "ACP 01KRJZ...HQ5Z" [ref=e142] [cursor=pointer]:
+                - generic [ref=e143]: ACP
+                - text: 01KRJZ...HQ5Z
+          - generic [ref=e144]:
+            - img [ref=e145]
+            - generic [ref=e147]: Claude Code
+            - img [ref=e149]
+            - generic [ref=e151]: Task
+          - generic [ref=e152]:
+            - generic [ref=e153]: In Progress
+            - img [ref=e155]
+            - generic [ref=e158]: May 16, 10:32 AM
+            - img [ref=e160]
+            - generic [ref=e162]: 1h 24m
+          - generic [ref=e163]:
+            - button "Workspace" [ref=e164] [cursor=pointer]:
+              - img [ref=e165]
+              - text: Workspace
+            - button "Files" [ref=e168] [cursor=pointer]:
+              - img [ref=e169]
+              - text: Files
+            - button "Git" [ref=e171] [cursor=pointer]:
+              - img [ref=e172]
+              - text: Git
+            - button "Complete" [ref=e175] [cursor=pointer]:
+              - img [ref=e176]
+              - text: Complete
+        - generic [ref=e52]:
+          - generic [ref=e54]: Implement a complete user authentication flow with GitHub OAuth. Include login, logout, session management, and protected routes.
+          - generic [ref=e56]: Task execution started — the agent is working on your request.
+          - generic [ref=e58] [cursor=pointer]:
+            - img [ref=e60]
+            - generic [ref=e62]: bash
+            - img [ref=e64]
+          - generic [ref=e66]:
+            - generic [ref=e67]:
+              - text: I'll implement the GitHub OAuth authentication flow. Let me start by setting up the auth routes and session management.
+              - text: First, I'll install the required dependencies and create the auth middleware.
+            - generic [ref=e68]:
+              - button "Info" [ref=e69] [cursor=pointer]:
+                - img [ref=e70]
+              - button "Read aloud" [ref=e72] [cursor=pointer]:
+                - img [ref=e73]
+              - button "Copy" [ref=e75] [cursor=pointer]:
+                - img [ref=e76]
+          - generic [ref=e80] [cursor=pointer]:
+            - img [ref=e82]
+            - generic [ref=e84]: Edit
+            - img [ref=e86]
+          - generic [ref=e89] [cursor=pointer]:
+            - img [ref=e91]
+            - generic [ref=e93]: Write
+            - img [ref=e95]
+          - generic [ref=e97]:
+            - generic [ref=e98]:
+              - text: "I've set up the core auth infrastructure:"
+              - text: "1."
+              - strong [ref=e99]: OAuth callback handler
+              - text: — exchanges authorization code for tokens via PKCE
+              - text: "2."
+              - strong [ref=e100]: Session management
+              - text: — stores sessions in KV with secure httpOnly cookies
+              - text: "3."
+              - strong [ref=e101]: Auth middleware
+              - text: —
+              - code [ref=e102]: requireAuth()
+              - text: validates sessions and attaches
+              - code [ref=e103]: userId
+              - text: "4."
+              - strong [ref=e104]: Protected routes
+              - text: — all
+              - code [ref=e105]: /api/projects/*
+              - text: routes now require authentication
+              - text: Now let me add the frontend login flow and route guards.
+            - generic [ref=e106]:
+              - button "Info" [ref=e107] [cursor=pointer]:
+                - img [ref=e108]
+              - button "Read aloud" [ref=e110] [cursor=pointer]:
+                - img [ref=e111]
+              - button "Copy" [ref=e113] [cursor=pointer]:
+                - img [ref=e114]
+      - generic [ref=e117]:
+        - generic [ref=e119]: Agent is working...
+        - button "Cancel" [ref=e120] [cursor=pointer]
+      - generic [ref=e121]:
+        - button "Attach" [ref=e122] [cursor=pointer]:
+          - img [ref=e123]
+        - textbox "Send a follow-up message..." [ref=e125]
+        - button "Voice" [ref=e126] [cursor=pointer]:
+          - img [ref=e127]
+        - button:
+          - img

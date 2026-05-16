@@ -1,0 +1,194 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: S
+      - generic [ref=e6]:
+        - button "Recent chats" [ref=e7] [cursor=pointer]:
+          - img [ref=e8]
+        - button "Notifications" [ref=e10] [cursor=pointer]:
+          - img [ref=e11]
+    - button "Search... Ctrl+K" [ref=e14] [cursor=pointer]:
+      - img [ref=e15]
+      - generic [ref=e18]: Search...
+      - generic [ref=e19]: Ctrl+K
+    - generic [ref=e20]:
+      - generic [ref=e21]: CrewAI
+      - button "Chat" [ref=e22] [cursor=pointer]:
+        - img [ref=e24]
+        - text: Chat
+      - button "Agent" [ref=e26] [cursor=pointer]:
+        - img [ref=e28]
+        - text: Agent
+      - button "Library" [ref=e31] [cursor=pointer]:
+        - img [ref=e33]
+        - text: Library
+      - button "Ideas" [ref=e36] [cursor=pointer]:
+        - img [ref=e38]
+        - text: Ideas
+      - button "Knowledge" [ref=e40] [cursor=pointer]:
+        - img [ref=e42]
+        - text: Knowledge
+      - button "Notifications" [ref=e45] [cursor=pointer]:
+        - img [ref=e47]
+        - text: Notifications
+      - button "Triggers" [ref=e49] [cursor=pointer]:
+        - img [ref=e51]
+        - text: Triggers
+      - button "Profiles" [ref=e54] [cursor=pointer]:
+        - img [ref=e56]
+        - text: Profiles
+      - button "Activity" [ref=e59] [cursor=pointer]:
+        - img [ref=e61]
+        - text: Activity
+      - button "Settings" [ref=e63] [cursor=pointer]:
+        - img [ref=e65]
+        - text: Settings
+    - generic [ref=e68]:
+      - generic [ref=e69]: S
+      - generic [ref=e70]: serverspresentation
+  - generic [ref=e71]:
+    - generic [ref=e72]:
+      - generic [ref=e73]:
+        - generic [ref=e74]: CrewAI
+        - button "Project status" [ref=e75] [cursor=pointer]:
+          - img [ref=e76]
+        - button "Triggers" [ref=e81] [cursor=pointer]:
+          - img [ref=e82]
+        - button "Settings" [ref=e85] [cursor=pointer]:
+          - img [ref=e86]
+      - button "+ New Chat" [ref=e89] [cursor=pointer]
+      - generic [ref=e90]:
+        - img [ref=e91]
+        - textbox "Search chats..." [ref=e94]
+      - generic [ref=e95]:
+        - generic [ref=e96] [cursor=pointer]:
+          - generic [ref=e97]:
+            - img [ref=e99]
+            - generic [ref=e101]: Implement user authentication flow
+          - generic [ref=e102]:
+            - generic [ref=e103]:
+              - img [ref=e104]
+              - text: Task
+            - generic [ref=e107]: Running
+            - generic [ref=e108]: 2m ago
+        - generic [ref=e109] [cursor=pointer]:
+          - generic [ref=e110]:
+            - img [ref=e112]
+            - generic [ref=e115]: Fix database connection pooling issue
+          - generic [ref=e116]:
+            - generic [ref=e117]:
+              - img [ref=e118]
+              - text: Task
+            - generic [ref=e121]: 15m ago
+        - generic [ref=e122] [cursor=pointer]:
+          - generic [ref=e123]:
+            - img [ref=e125]
+            - generic [ref=e127]: Add dark mode toggle to settings
+          - generic [ref=e128]:
+            - generic [ref=e129]:
+              - img [ref=e130]
+              - text: Chat
+            - generic [ref=e132]: 1h ago
+        - generic [ref=e133] [cursor=pointer]:
+          - generic [ref=e134]:
+            - img [ref=e136]
+            - generic [ref=e138]: Refactor API error handling middleware
+          - generic [ref=e139]:
+            - generic [ref=e140]:
+              - img [ref=e141]
+              - text: Task
+            - generic [ref=e144]: 3h ago
+          - button "Continue" [ref=e145]:
+            - img [ref=e146]
+            - text: Continue
+        - generic [ref=e151] [cursor=pointer]:
+          - generic [ref=e152]:
+            - img [ref=e154]
+            - generic [ref=e157]: Write integration tests for payment flow
+          - generic [ref=e158]:
+            - generic [ref=e159]:
+              - img [ref=e160]
+              - text: Task
+            - generic [ref=e163]: 5h ago
+          - button "Continue" [ref=e164]:
+            - img [ref=e165]
+            - text: Continue
+        - button "Older (5)" [ref=e170] [cursor=pointer]:
+          - img [ref=e171]
+          - text: Older (5)
+    - generic [ref=e174]:
+      - generic [ref=e176]:
+        - generic [ref=e177]: Implement user authentication flow
+        - generic [ref=e178]:
+          - button "Retry" [ref=e179] [cursor=pointer]:
+            - img [ref=e180]
+          - button "Fork" [ref=e183] [cursor=pointer]:
+            - img [ref=e184]
+        - generic [ref=e189]: Active
+        - button [ref=e191] [cursor=pointer]:
+          - img [ref=e192]
+      - generic [ref=e194]:
+        - generic [ref=e196]: Implement a complete user authentication flow with GitHub OAuth. Include login, logout, session management, and protected routes.
+        - generic [ref=e198]: Task execution started — the agent is working on your request.
+        - generic [ref=e200] [cursor=pointer]:
+          - img [ref=e202]
+          - generic [ref=e204]: bash
+          - img [ref=e206]
+        - generic [ref=e208]:
+          - generic [ref=e209]:
+            - text: I'll implement the GitHub OAuth authentication flow. Let me start by setting up the auth routes and session management.
+            - text: First, I'll install the required dependencies and create the auth middleware.
+          - generic [ref=e210]:
+            - button "Info" [ref=e211] [cursor=pointer]:
+              - img [ref=e212]
+            - button "Read aloud" [ref=e214] [cursor=pointer]:
+              - img [ref=e215]
+            - button "Copy" [ref=e217] [cursor=pointer]:
+              - img [ref=e218]
+        - generic [ref=e222] [cursor=pointer]:
+          - img [ref=e224]
+          - generic [ref=e226]: Edit
+          - img [ref=e228]
+        - generic [ref=e231] [cursor=pointer]:
+          - img [ref=e233]
+          - generic [ref=e235]: Write
+          - img [ref=e237]
+        - generic [ref=e239]:
+          - generic [ref=e240]:
+            - text: "I've set up the core auth infrastructure:"
+            - text: "1."
+            - strong [ref=e241]: OAuth callback handler
+            - text: — exchanges authorization code for tokens via PKCE
+            - text: "2."
+            - strong [ref=e242]: Session management
+            - text: — stores sessions in KV with secure httpOnly cookies
+            - text: "3."
+            - strong [ref=e243]: Auth middleware
+            - text: —
+            - code [ref=e244]: requireAuth()
+            - text: validates sessions and attaches
+            - code [ref=e245]: userId
+            - text: "4."
+            - strong [ref=e246]: Protected routes
+            - text: — all
+            - code [ref=e247]: /api/projects/*
+            - text: routes now require authentication
+            - text: Now let me add the frontend login flow and route guards.
+          - generic [ref=e248]:
+            - button "Info" [ref=e249] [cursor=pointer]:
+              - img [ref=e250]
+            - button "Read aloud" [ref=e252] [cursor=pointer]:
+              - img [ref=e253]
+            - button "Copy" [ref=e255] [cursor=pointer]:
+              - img [ref=e256]
+      - generic [ref=e259]:
+        - generic [ref=e261]: Agent is working...
+        - button "Cancel" [ref=e262] [cursor=pointer]
+      - generic [ref=e263]:
+        - button "Attach" [ref=e264] [cursor=pointer]:
+          - img [ref=e265]
+        - textbox "Send a follow-up message..." [ref=e267]
+        - button "Voice" [ref=e268] [cursor=pointer]:
+          - img [ref=e269]
+        - button:
+          - img
