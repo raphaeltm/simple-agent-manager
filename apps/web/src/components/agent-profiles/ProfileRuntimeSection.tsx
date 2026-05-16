@@ -185,6 +185,7 @@ export const ProfileRuntimeSection: FC<ProfileRuntimeSectionProps> = ({
               Secret
             </label>
             <Button
+              type="button"
               variant="secondary"
               size="sm"
               onClick={() => void handleAddEnvVar()}
@@ -276,6 +277,7 @@ export const ProfileRuntimeSection: FC<ProfileRuntimeSectionProps> = ({
               Secret file content
             </label>
             <Button
+              type="button"
               variant="secondary"
               size="sm"
               onClick={() => void handleAddFile()}
