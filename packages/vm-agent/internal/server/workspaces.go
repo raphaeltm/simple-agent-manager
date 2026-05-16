@@ -242,6 +242,7 @@ func (s *Server) buildTimeoutDiagnostics(err error) (string, *resourceDiagnostic
 
 func (s *Server) startWorkspaceProvision(
 	runtime *WorkspaceRuntime,
+	provisionRuntime WorkspaceRuntime,
 	failureType string,
 	failureMessage string,
 	successType string,
@@ -258,11 +259,12 @@ func (s *Server) startWorkspaceProvision(
 			s.workspaceMu.Unlock()
 		}()
 
-		recoveryMode, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
+		recoveryMode, err := s.provisionWorkspaceRuntime(context.Background(), &provisionRuntime)
+		s.applyProvisionedContainerUser(provisionRuntime.ID, provisionRuntime.ContainerUser)
 
 		// Mark the boot log broadcaster as complete and schedule cleanup.
 		// This notifies connected WebSocket clients that provisioning is done.
-		if broadcaster := s.bootLogBroadcasters.Get(runtime.ID); broadcaster != nil {
+		if broadcaster := s.bootLogBroadcasters.Get(provisionRuntime.ID); broadcaster != nil {
 			broadcaster.MarkComplete()
 		}
 
@@ -277,11 +279,11 @@ func (s *Server) startWorkspaceProvision(
 				if nextStatus == "" {
 					nextStatus = "running"
 				}
-				s.casWorkspaceStatus(runtime.ID, []string{"creating"}, nextStatus)
-				s.markReadyCallbackPending(runtime.ID, nextStatus)
+				s.casWorkspaceStatus(provisionRuntime.ID, []string{"creating"}, nextStatus)
+				s.markReadyCallbackPending(provisionRuntime.ID, nextStatus)
 
 				slog.Warn("Workspace ready but callback failed — will retry on next heartbeat",
-					"workspace", runtime.ID,
+					"workspace", provisionRuntime.ID,
 					"status", nextStatus,
 					"callbackError", cbErr.Err,
 				)
@@ -294,26 +296,26 @@ func (s *Server) startWorkspaceProvision(
 				if nextStatus == "recovery" {
 					successDetail["recoveryMode"] = true
 				}
-				s.appendNodeEvent(runtime.ID, "warn", successType, successMessage+" (callback pending)", successDetail)
+				s.appendNodeEvent(provisionRuntime.ID, "warn", successType, successMessage+" (callback pending)", successDetail)
 
 				// Start port scanner — workspace is functional
-				s.StartPortScanner(runtime.ID)
+				s.StartPortScanner(provisionRuntime.ID)
 				return
 			}
 
 			// Real provisioning failure.
 			// CAS: only transition to error if still in "creating" state.
 			// If the workspace was stopped/deleted while provisioning, skip.
-			s.casWorkspaceStatus(runtime.ID, []string{"creating"}, "error")
+			s.casWorkspaceStatus(provisionRuntime.ID, []string{"creating"}, "error")
 
 			// Enrich timeout errors with resource diagnostics so the user
 			// knows whether the VM was under-resourced.
 			errorMsg, diag := s.buildTimeoutDiagnostics(err)
 
-			callbackToken := s.callbackTokenForWorkspace(runtime.ID)
+			callbackToken := s.callbackTokenForWorkspace(provisionRuntime.ID)
 			if callbackToken != "" {
-				if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), runtime.ID, callbackToken, errorMsg); callbackErr != nil {
-					slog.Error("Provisioning-failed callback error", "workspace", runtime.ID, "error", callbackErr)
+				if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), provisionRuntime.ID, callbackToken, errorMsg); callbackErr != nil {
+					slog.Error("Provisioning-failed callback error", "workspace", provisionRuntime.ID, "error", callbackErr)
 				}
 			}
 
@@ -326,7 +328,7 @@ func (s *Server) startWorkspaceProvision(
 				failureDetail["resourceDiagnostics"] = diag
 			}
 
-			s.appendNodeEvent(runtime.ID, "error", failureType, failureMessage, failureDetail)
+			s.appendNodeEvent(provisionRuntime.ID, "error", failureType, failureMessage, failureDetail)
 			return
 		}
 
@@ -337,8 +339,8 @@ func (s *Server) startWorkspaceProvision(
 
 		// CAS: only transition to a ready state if still in "creating" state.
 		// Prevents overwriting "stopped" if user stopped workspace during provisioning.
-		if !s.casWorkspaceStatus(runtime.ID, []string{"creating"}, nextStatus) {
-			slog.Warn("Provisioning completed but status already changed from creating, skipping transition", "workspace", runtime.ID, "targetStatus", nextStatus)
+		if !s.casWorkspaceStatus(provisionRuntime.ID, []string{"creating"}, nextStatus) {
+			slog.Warn("Provisioning completed but status already changed from creating, skipping transition", "workspace", provisionRuntime.ID, "targetStatus", nextStatus)
 			return
 		}
 
@@ -351,13 +353,40 @@ func (s *Server) startWorkspaceProvision(
 			successDetail["recoveryMode"] = true
 		}
 
-		s.appendNodeEvent(runtime.ID, "info", successType, successMessage, successDetail)
+		s.appendNodeEvent(provisionRuntime.ID, "info", successType, successMessage, successDetail)
 
 		// Start port scanner for the newly provisioned workspace.
 		// This is the dynamic-workspace counterpart to the boot-time scanner
 		// started in OnBootstrapComplete (server.go).
-		s.StartPortScanner(runtime.ID)
+		s.StartPortScanner(provisionRuntime.ID)
 	}()
+}
+
+func (s *Server) snapshotWorkspaceRuntime(runtime *WorkspaceRuntime) WorkspaceRuntime {
+	if runtime == nil {
+		return WorkspaceRuntime{}
+	}
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	return *runtime
+}
+
+func (s *Server) applyProvisionedContainerUser(workspaceID string, detected string) {
+	nextUser := strings.TrimSpace(detected)
+	if workspaceID == "" || nextUser == "" {
+		return
+	}
+
+	s.workspaceMu.Lock()
+	runtime := s.workspaces[workspaceID]
+	if runtime == nil || strings.TrimSpace(runtime.ContainerUser) == nextUser {
+		s.workspaceMu.Unlock()
+		return
+	}
+	runtime.ContainerUser = nextUser
+	s.workspaceMu.Unlock()
+
+	s.rebuildWorkspacePTYManager(runtime)
 }
 
 func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -432,6 +461,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runtime.ProvisioningActive = true
+	provisionRuntime := *runtime
 	s.workspaceMu.Unlock()
 
 	// Note: Per-workspace message reporter is created lazily in
@@ -453,6 +483,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	s.startWorkspaceProvision(
 		runtime,
+		provisionRuntime,
 		"workspace.provisioning_failed",
 		"Workspace provisioning failed",
 		"workspace.created",
@@ -546,6 +577,7 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 
 	s.startWorkspaceProvision(
 		runtime,
+		s.snapshotWorkspaceRuntime(runtime),
 		"workspace.restart_failed",
 		"Workspace restart failed",
 		"workspace.restarted",
@@ -584,6 +616,7 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 
 	s.startWorkspaceProvision(
 		runtime,
+		s.snapshotWorkspaceRuntime(runtime),
 		"workspace.rebuild_failed",
 		"Workspace rebuild failed",
 		"workspace.rebuilt",
