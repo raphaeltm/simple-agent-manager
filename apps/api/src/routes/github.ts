@@ -17,15 +17,25 @@ import {
   getInstallationRepositories,
   getRepositoryBranches,
   getUserAccessibleInstallations,
-  type UserAccessibleInstallation,
   verifyUserInstallationAccess,
   verifyWebhookSignature,
 } from '../services/github-app';
+import {
+  getCanonicalAccountInput,
+  type GitHubDb,
+  type GitHubInstallationAccountRow,
+  normalizeAccountType,
+  tombstoneCanonicalInstallationAccount,
+  upsertCanonicalInstallationAccount,
+} from '../services/github-installation-accounts';
+import {
+  getTokenType,
+  isDatabaseConflictError,
+  summarizeAccessibleInstallations,
+  summarizeInstallationRows,
+} from '../services/github-route-helpers';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
-
-type GitHubDb = ReturnType<typeof drizzle<typeof schema>>;
-type GitHubInstallationAccountRow = typeof schema.githubInstallationAccounts.$inferSelect;
 
 /**
  * GET /api/github/installations - List user's GitHub App installations
@@ -76,9 +86,7 @@ githubRoutes.get('/install-url', requireAuth(), requireApproved(), async (c) => 
   return c.json({ url });
 });
 
-/**
- * GET /api/github/repositories - List repositories from installations
- */
+/** GET /api/github/repositories - List repositories from installations */
 githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const installationRowId = c.req.query('installation_id');
@@ -202,9 +210,7 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
   }
 });
 
-/**
- * POST /api/github/webhook - Handle GitHub App webhooks
- */
+/** POST /api/github/webhook - Handle GitHub App webhooks */
 githubRoutes.post('/webhook', async (c) => {
   const signature = c.req.header('x-hub-signature-256');
   const event = c.req.header('x-github-event');
@@ -310,11 +316,7 @@ githubRoutes.post('/webhook', async (c) => {
   return c.json({ received: true });
 });
 
-/**
- * GET /api/github/callback - Handle callback after GitHub App installation
- * This is called when user is redirected back after installing the GitHub App.
- * The Setup URL in GitHub App settings should point here.
- */
+/** GET /api/github/callback - Handle callback after GitHub App installation */
 githubRoutes.get('/callback', optionalAuth(), async (c) => {
   const installationId = c.req.query('installation_id');
   const settingsUrl = `https://app.${c.env.BASE_DOMAIN}/settings`;
@@ -759,90 +761,6 @@ async function insertSharedInstallation(
   }
 }
 
-type CanonicalInstallationAccountInput = {
-  installationId: string;
-  accountType: 'personal' | 'organization';
-  accountName: string;
-};
-
-async function upsertCanonicalInstallationAccount(
-  db: GitHubDb,
-  account: CanonicalInstallationAccountInput,
-  now: string
-): Promise<void> {
-  await db
-    .insert(schema.githubInstallationAccounts)
-    .values({
-      installationId: account.installationId,
-      accountType: account.accountType,
-      accountName: account.accountName,
-      accountNameNormalized: normalizeAccountName(account.accountName),
-      createdAt: now,
-      updatedAt: now,
-      uninstalledAt: null,
-    })
-    .onConflictDoUpdate({
-      target: schema.githubInstallationAccounts.installationId,
-      set: {
-        accountType: account.accountType,
-        accountName: account.accountName,
-        accountNameNormalized: normalizeAccountName(account.accountName),
-        updatedAt: now,
-        uninstalledAt: null,
-      },
-    });
-}
-
-async function tombstoneCanonicalInstallationAccount(
-  db: GitHubDb,
-  account: CanonicalInstallationAccountInput,
-  now: string
-): Promise<void> {
-  await db
-    .insert(schema.githubInstallationAccounts)
-    .values({
-      installationId: account.installationId,
-      accountType: account.accountType,
-      accountName: account.accountName,
-      accountNameNormalized: normalizeAccountName(account.accountName),
-      createdAt: now,
-      updatedAt: now,
-      uninstalledAt: now,
-    })
-    .onConflictDoUpdate({
-      target: schema.githubInstallationAccounts.installationId,
-      set: {
-        accountType: account.accountType,
-        accountName: account.accountName,
-        accountNameNormalized: normalizeAccountName(account.accountName),
-        updatedAt: now,
-        uninstalledAt: now,
-      },
-    });
-}
-
-function getCanonicalAccountInput(
-  installationId: string,
-  accountType: unknown,
-  accountName: unknown
-): CanonicalInstallationAccountInput {
-  return {
-    installationId,
-    accountType: normalizeAccountType(accountType),
-    accountName: typeof accountName === 'string' ? accountName : '',
-  };
-}
-
-function normalizeAccountType(accountType: unknown): 'personal' | 'organization' {
-  return typeof accountType === 'string' && accountType.toLowerCase() === 'organization'
-    ? 'organization'
-    : 'personal';
-}
-
-function normalizeAccountName(accountName: string): string {
-  return accountName.toLowerCase();
-}
-
 /**
  * Get the current user's GitHub access token from BetterAuth.
  * BetterAuth owns OAuth token encryption/refresh; callers should not read the
@@ -873,41 +791,6 @@ async function getGitHubUserAccessToken(
     });
     return null;
   }
-}
-
-function summarizeAccessibleInstallations(installations: UserAccessibleInstallation[]): Array<{
-  installationId: string;
-  accountName: string;
-  accountType: string;
-}> {
-  return installations.map((inst) => ({
-    installationId: String(inst.id),
-    accountName: inst.account.login,
-    accountType: inst.account.type,
-  }));
-}
-
-function summarizeInstallationRows(installations: GitHubInstallationAccountRow[]): Array<{
-  installationId: string;
-  accountName: string;
-}> {
-  return installations.map((inst) => ({
-    installationId: inst.installationId,
-    accountName: inst.accountName,
-  }));
-}
-
-function getTokenType(token: unknown): string | null {
-  if (!token || typeof token !== 'object' || !('tokenType' in token)) {
-    return null;
-  }
-  const tokenType = token.tokenType;
-  return typeof tokenType === 'string' ? tokenType : null;
-}
-
-function isDatabaseConflictError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /unique|already exists|conflict/i.test(message);
 }
 
 export { githubRoutes };
