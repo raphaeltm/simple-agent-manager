@@ -7,6 +7,28 @@ import {
   parseDevcontainerConfigs,
 } from '../../../src/routes/projects/devcontainer-configs';
 
+const MIXED_DEVCONTAINER_TREE = [
+  { path: '.devcontainer/devcontainer.json', type: 'blob' },
+  { path: '.devcontainer/python/devcontainer.json', type: 'blob' },
+  { path: '.devcontainer/node/devcontainer.json', type: 'blob' },
+  { path: 'src/main.ts', type: 'blob' },
+];
+
+const EXPECTED_NODE_PYTHON_CONFIGS = [
+  { name: 'node', path: '.devcontainer/node/devcontainer.json' },
+  { name: 'python', path: '.devcontainer/python/devcontainer.json' },
+];
+
+const INVALID_NAME_TREE = [
+  { path: '.devcontainer/../evil/devcontainer.json', type: 'blob' },
+  { path: '.devcontainer/valid-name/devcontainer.json', type: 'blob' },
+  { path: '.devcontainer/-leading-hyphen/devcontainer.json', type: 'blob' },
+];
+
+const EXPECTED_VALID_NAME_CONFIGS = [
+  { name: 'valid-name', path: '.devcontainer/valid-name/devcontainer.json' },
+];
+
 // =============================================================================
 // Unit tests for parseDevcontainerConfigs (pure function)
 // =============================================================================
@@ -60,15 +82,8 @@ describe('parseDevcontainerConfigs', () => {
   });
 
   it('ignores names with invalid characters', () => {
-    const tree = [
-      { path: '.devcontainer/../evil/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/has space/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/valid-name/devcontainer.json', type: 'blob' },
-    ];
-    const result = parseDevcontainerConfigs(tree);
-    expect(result.configs).toEqual([
-      { name: 'valid-name', path: '.devcontainer/valid-name/devcontainer.json' },
-    ]);
+    const result = parseDevcontainerConfigs(INVALID_NAME_TREE);
+    expect(result.configs).toEqual(EXPECTED_VALID_NAME_CONFIGS);
   });
 
   it('ignores names starting with hyphen or underscore', () => {
@@ -92,18 +107,9 @@ describe('parseDevcontainerConfigs', () => {
   });
 
   it('handles mixed default and named configs', () => {
-    const tree = [
-      { path: '.devcontainer/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/python/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/node/devcontainer.json', type: 'blob' },
-      { path: 'src/main.ts', type: 'blob' },
-    ];
-    const result = parseDevcontainerConfigs(tree);
+    const result = parseDevcontainerConfigs(MIXED_DEVCONTAINER_TREE);
     expect(result.defaultConfigExists).toBe(true);
-    expect(result.configs).toEqual([
-      { name: 'node', path: '.devcontainer/node/devcontainer.json' },
-      { name: 'python', path: '.devcontainer/python/devcontainer.json' },
-    ]);
+    expect(result.configs).toEqual(EXPECTED_NODE_PYTHON_CONFIGS);
   });
 
   it('returns empty for a tree with no devcontainer files', () => {
@@ -222,12 +228,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
 
   it('returns named configs from a GitHub repo tree', async () => {
     setupGithubProject();
-    stubTreeResponse([
-      { path: '.devcontainer/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/python/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/node/devcontainer.json', type: 'blob' },
-      { path: 'src/main.ts', type: 'blob' },
-    ]);
+    stubTreeResponse(MIXED_DEVCONTAINER_TREE);
 
     const res = await requestConfigs(app);
     expect(res.status).toBe(200);
@@ -236,10 +237,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
     expect(body.repository).toBe('owner/repo');
     expect(body.branch).toBe('main');
     expect(body.defaultConfigExists).toBe(true);
-    expect(body.configs).toEqual([
-      { name: 'node', path: '.devcontainer/node/devcontainer.json' },
-      { name: 'python', path: '.devcontainer/python/devcontainer.json' },
-    ]);
+    expect(body.configs).toEqual(EXPECTED_NODE_PYTHON_CONFIGS);
   });
 
   it('returns unsupported for non-GitHub projects', async () => {
@@ -289,18 +287,12 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
 
   it('filters out invalid config names', async () => {
     setupGithubProject();
-    stubTreeResponse([
-      { path: '.devcontainer/../evil/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/valid-name/devcontainer.json', type: 'blob' },
-      { path: '.devcontainer/-leading-hyphen/devcontainer.json', type: 'blob' },
-    ]);
+    stubTreeResponse(INVALID_NAME_TREE);
 
     const res = await requestConfigs(app);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.configs).toEqual([
-      { name: 'valid-name', path: '.devcontainer/valid-name/devcontainer.json' },
-    ]);
+    expect(body.configs).toEqual(EXPECTED_VALID_NAME_CONFIGS);
   });
 
   it('does not leak tokens in error responses', async () => {
