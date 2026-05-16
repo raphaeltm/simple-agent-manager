@@ -33,24 +33,13 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
     { id: 'n1', name: 'node-hetzner-1' },
     { id: 'n2', name: 'node-hetzner-2' },
   ]),
-  listChatSessions: vi.fn().mockImplementation((projectId: string) => {
-    const sessionsByProject: Record<string, { sessions: Array<{ id: string; topic: string | null; createdAt: number; status: string; messageCount: number; startedAt: number; endedAt: number | null; workspaceId: string | null; taskId: string | null }>; total: number }> = {
-      p1: {
-        sessions: [
-          { id: 's1', topic: 'Fix auth bug', createdAt: 1000, status: 'active', messageCount: 5, startedAt: 1000, endedAt: null, workspaceId: null, taskId: null },
-          { id: 's2', topic: null, createdAt: 500, status: 'stopped', messageCount: 2, startedAt: 500, endedAt: 600, workspaceId: null, taskId: null },
-        ],
-        total: 2,
-      },
-      p2: {
-        sessions: [
-          { id: 's3', topic: 'Refactor dashboard layout', createdAt: 2000, status: 'active', messageCount: 10, startedAt: 2000, endedAt: null, workspaceId: null, taskId: null },
-        ],
-        total: 1,
-      },
-      p3: { sessions: [], total: 0 },
-    };
-    return Promise.resolve(sessionsByProject[projectId] || { sessions: [], total: 0 });
+  getAllChats: vi.fn().mockResolvedValue({
+    sessions: [
+      { id: 's1', topic: 'Fix auth bug', projectId: 'p1', projectName: 'My API Worker', userId: 'user-1', status: 'active', messageCount: 5, startedAt: 1000, lastMessageAt: 1000, agentCompletedAt: null, endedAt: null, updatedAt: 1000, workspaceId: null, taskId: null },
+      { id: 's2', topic: null, projectId: 'p1', projectName: 'My API Worker', userId: 'user-1', status: 'stopped', messageCount: 2, startedAt: 500, lastMessageAt: 600, agentCompletedAt: null, endedAt: 600, updatedAt: 600, workspaceId: null, taskId: null },
+      { id: 's3', topic: 'Refactor dashboard layout', projectId: 'p2', projectName: 'Frontend Dashboard', userId: 'user-1', status: 'active', messageCount: 10, startedAt: 2000, lastMessageAt: 2000, agentCompletedAt: null, endedAt: null, updatedAt: 2000, workspaceId: null, taskId: null },
+    ],
+    total: 3,
   }),
 }));
 
@@ -783,11 +772,9 @@ describe('GlobalCommandPalette', () => {
   });
 
   it('gracefully handles chat session fetch failure', async () => {
-    const { listChatSessions } = await import('../../src/lib/api');
-    // Reject all per-project session fetches (one per project)
-    vi.mocked(listChatSessions)
-      .mockRejectedValueOnce(new Error('Network error'))
-      .mockRejectedValueOnce(new Error('Network error'))
+    const { getAllChats } = await import('../../src/lib/api');
+    // Reject the single cross-project chat fetch
+    vi.mocked(getAllChats)
       .mockRejectedValueOnce(new Error('Network error'));
 
     renderPalette();

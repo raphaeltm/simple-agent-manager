@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { useCommandPaletteContext } from '../../../src/hooks/useCommandPaletteContext';
-import type { ChatSessionResponse } from '../../../src/lib/api';
+import type { SessionSummaryItem } from '../../../src/lib/api';
 
 // ── Mocks ──
 
@@ -30,8 +30,8 @@ vi.mock('../../../src/components/NavSidebar', () => ({
 // ── Test Data ──
 
 function makeSession(
-  overrides: Partial<ChatSessionResponse & { projectId: string; projectName: string }> = {},
-): ChatSessionResponse & { projectId: string; projectName: string } {
+  overrides: Partial<SessionSummaryItem & { createdAt: number }> = {},
+): SessionSummaryItem & { createdAt: number } {
   return {
     id: 'sess-1',
     workspaceId: null,
@@ -44,7 +44,10 @@ function makeSession(
     createdAt: 1000,
     projectId: 'p1',
     projectName: 'My Project',
-    workspaceUrl: null,
+    userId: 'user-1',
+    lastMessageAt: null,
+    agentCompletedAt: null,
+    updatedAt: 1000,
     ...overrides,
   };
 }
@@ -55,7 +58,7 @@ const defaultProjects = [
 ];
 
 function renderContextHook(options?: {
-  chatSessions?: Array<ChatSessionResponse & { projectId: string; projectName: string }>;
+  chatSessions?: Array<SessionSummaryItem & { createdAt: number }>;
   projects?: Array<{ id: string; name: string }>;
 }) {
   const result = renderHook(() =>
@@ -162,14 +165,14 @@ describe('useCommandPaletteContext', () => {
 
   // ── Context Actions: Session Scope ──
 
-  it('shows "Go to Workspace" when session has workspaceUrl', () => {
+  it('shows "Go to Workspace" when session has workspaceId', () => {
     mockPathname = '/projects/p1/chat/sess-1';
 
     const sessions = [
       makeSession({
         id: 'sess-1',
         projectId: 'p1',
-        workspaceUrl: 'https://ws-abc.example.com',
+        workspaceId: 'ws-abc',
       }),
     ];
 
@@ -178,10 +181,10 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('Go to Workspace');
   });
 
-  it('does not show "Go to Workspace" when session has no workspaceUrl', () => {
+  it('does not show "Go to Workspace" when session has no workspaceId', () => {
     mockPathname = '/projects/p1/chat/sess-1';
 
-    const sessions = [makeSession({ id: 'sess-1', projectId: 'p1', workspaceUrl: null })];
+    const sessions = [makeSession({ id: 'sess-1', projectId: 'p1', workspaceId: null })];
 
     const { result } = renderContextHook({ chatSessions: sessions });
     const labels = result.current.contextActions.map((a) => a.label);
@@ -226,7 +229,7 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('Go to Linked Chat');
   });
 
-  it('shows "Go to Task\'s Workspace" in task context when linked session has workspaceUrl', () => {
+  it('shows "Go to Task\'s Workspace" in task context when linked session has workspaceId', () => {
     mockPathname = '/projects/p1/ideas/task-42';
 
     const sessions = [
@@ -234,7 +237,7 @@ describe('useCommandPaletteContext', () => {
         id: 'sess-1',
         projectId: 'p1',
         taskId: 'task-42',
-        workspaceUrl: 'https://ws-abc.example.com',
+        workspaceId: 'ws-abc',
       }),
     ];
 
@@ -264,7 +267,7 @@ describe('useCommandPaletteContext', () => {
       makeSession({
         id: 'sess-1',
         projectId: 'p1',
-        workspaceUrl: 'https://ws-abc.example.com',
+        workspaceId: 'ws-abc',
         taskId: 'task-42',
       }),
     ];
@@ -278,15 +281,14 @@ describe('useCommandPaletteContext', () => {
 
   // ── window.open assertions ──
 
-  it('"Go to Workspace" calls window.open with correct URL', () => {
+  it('"Go to Workspace" calls navigate with correct path', () => {
     mockPathname = '/projects/p1/chat/sess-1';
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
 
     const sessions = [
       makeSession({
         id: 'sess-1',
         projectId: 'p1',
-        workspaceUrl: 'https://ws-abc.example.com',
+        workspaceId: 'ws-abc',
       }),
     ];
 
@@ -294,8 +296,7 @@ describe('useCommandPaletteContext', () => {
     const wsAction = result.current.contextActions.find((a) => a.id === 'ctx-go-to-workspace');
     wsAction?.action();
 
-    expect(openSpy).toHaveBeenCalledWith('https://ws-abc.example.com', '_blank');
-    openSpy.mockRestore();
+    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws-abc');
   });
 
   it('"Open PR" action is not available (outputPrUrl only on detail endpoint, not list)', () => {
@@ -338,7 +339,7 @@ describe('useCommandPaletteContext', () => {
     mockPathname = '/projects/p1/chat/sess-1';
 
     const sessions = [
-      makeSession({ id: 'sess-1', projectId: 'p2', workspaceUrl: 'https://ws-abc.example.com' }),
+      makeSession({ id: 'sess-1', projectId: 'p2', workspaceId: 'ws-abc' }),
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });

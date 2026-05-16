@@ -3,7 +3,6 @@
  * Enables single-query cross-project session listing (recent chats, /chats page, command palette).
  */
 import { createModuleLogger } from '../../lib/logger';
-
 import type { Env } from './types';
 
 const log = createModuleLogger('session_summary_sync');

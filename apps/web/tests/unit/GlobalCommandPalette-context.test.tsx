@@ -31,55 +31,58 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
     ],
   }),
   listNodes: vi.fn().mockResolvedValue([]),
-  listChatSessions: vi.fn().mockImplementation((projectId: string) => {
-    const sessionsByProject: Record<string, { sessions: Array<Record<string, unknown>>; total: number }> = {
-      p1: {
-        sessions: [
-          {
-            id: 'sess-1',
-            topic: 'Fix auth bug',
-            createdAt: 2000,
-            status: 'active',
-            messageCount: 5,
-            startedAt: 1000,
-            endedAt: null,
-            workspaceId: 'ws-1',
-            taskId: 'task-1',
-            workspaceUrl: 'https://ws-abc.example.com',
-            // Note: task embed (with outputPrUrl) is only on detail endpoint, not list
-          },
-          {
-            id: 'sess-2',
-            topic: 'Code review',
-            createdAt: 1000,
-            status: 'stopped',
-            messageCount: 2,
-            startedAt: 500,
-            endedAt: 600,
-            workspaceId: null,
-            taskId: null,
-          },
-        ],
-        total: 2,
+  getAllChats: vi.fn().mockResolvedValue({
+    sessions: [
+      {
+        id: 'sess-1',
+        topic: 'Fix auth bug',
+        projectId: 'p1',
+        projectName: 'My API Worker',
+        userId: 'user-1',
+        status: 'active',
+        messageCount: 5,
+        startedAt: 1000,
+        lastMessageAt: 2000,
+        agentCompletedAt: null,
+        endedAt: null,
+        updatedAt: 2000,
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
       },
-      p2: {
-        sessions: [
-          {
-            id: 'sess-3',
-            topic: 'Refactor layout',
-            createdAt: 3000,
-            status: 'active',
-            messageCount: 10,
-            startedAt: 2000,
-            endedAt: null,
-            workspaceId: null,
-            taskId: null,
-          },
-        ],
-        total: 1,
+      {
+        id: 'sess-2',
+        topic: 'Code review',
+        projectId: 'p1',
+        projectName: 'My API Worker',
+        userId: 'user-1',
+        status: 'stopped',
+        messageCount: 2,
+        startedAt: 500,
+        lastMessageAt: 600,
+        agentCompletedAt: null,
+        endedAt: 600,
+        updatedAt: 600,
+        workspaceId: null,
+        taskId: null,
       },
-    };
-    return Promise.resolve(sessionsByProject[projectId] || { sessions: [], total: 0 });
+      {
+        id: 'sess-3',
+        topic: 'Refactor layout',
+        projectId: 'p2',
+        projectName: 'Frontend Dashboard',
+        userId: 'user-1',
+        status: 'active',
+        messageCount: 10,
+        startedAt: 2000,
+        lastMessageAt: 3000,
+        agentCompletedAt: null,
+        endedAt: null,
+        updatedAt: 3000,
+        workspaceId: null,
+        taskId: null,
+      },
+    ],
+    total: 3,
   }),
 }));
 
@@ -172,7 +175,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
 
   // ── Session context ──
 
-  it('shows "Go to Workspace" when in a session with workspaceUrl', async () => {
+  it('shows "Go to Workspace" when in a session with workspaceId', async () => {
     mockPathname = '/projects/p1/chat/sess-1';
     renderPalette();
 
