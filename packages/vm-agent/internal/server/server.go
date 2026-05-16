@@ -133,6 +133,7 @@ type WorkspaceRuntime struct {
 	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
 	DevcontainerConfigName string // Named devcontainer config (subdirectory under .devcontainer/)
 	DevcontainerCache      DevcontainerCacheCredentials
+	ProvisioningActive     bool
 	PTY                    *pty.Manager
 
 	// ReadyCallbackPending is true when the workspace provisioned successfully but

@@ -18,14 +18,14 @@ Two concurrent `POST /workspaces` requests for the same workspace ID can both up
 
 ## Checklist
 
-- [ ] Add `ProvisioningActive bool` to `WorkspaceRuntime`.
-- [ ] Add an atomic duplicate-provisioning check/set in `handleCreateWorkspace` immediately after `upsertWorkspaceRuntime`.
-- [ ] Return idempotent `202 {"workspaceId": ..., "status": "creating"}` when a create request arrives while provisioning is active.
-- [ ] Clear `ProvisioningActive` with a defer at the top of the `startWorkspaceProvision` goroutine.
-- [ ] Add concurrent create coverage proving only one provisioning run starts for duplicate workspace creates.
-- [ ] Add coverage proving a later create can start provisioning again after the first provisioning run completes and clears the flag.
-- [ ] Run focused VM agent tests.
-- [ ] Run relevant repo quality checks or document blockers.
+- [x] Add `ProvisioningActive bool` to `WorkspaceRuntime`.
+- [x] Add an atomic duplicate-provisioning check/set in `handleCreateWorkspace` immediately after `upsertWorkspaceRuntime`.
+- [x] Return idempotent `202 {"workspaceId": ..., "status": "creating"}` when a create request arrives while provisioning is active.
+- [x] Clear `ProvisioningActive` with a defer at the top of the `startWorkspaceProvision` goroutine.
+- [x] Add concurrent create coverage proving only one provisioning run starts for duplicate workspace creates.
+- [x] Add coverage proving a later create can start provisioning again after the first provisioning run completes and clears the flag.
+- [ ] Run focused VM agent tests. Blocked locally: `go` and `gofmt` are not installed in this workspace.
+- [x] Run relevant repo quality checks or document blockers.
 
 ## Acceptance Criteria
 

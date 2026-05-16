@@ -249,6 +249,15 @@ func (s *Server) startWorkspaceProvision(
 	detail map[string]interface{},
 ) {
 	go func() {
+		defer func() {
+			if runtime == nil {
+				return
+			}
+			s.workspaceMu.Lock()
+			runtime.ProvisioningActive = false
+			s.workspaceMu.Unlock()
+		}()
+
 		recoveryMode, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
 
 		// Mark the boot log broadcaster as complete and schedule cleanup.
@@ -410,6 +419,20 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			Ref:      strings.TrimSpace(body.DevcontainerCache.Ref),
 		},
 	})
+
+	s.workspaceMu.Lock()
+	if runtime.ProvisioningActive {
+		s.workspaceMu.Unlock()
+		slog.Warn("Workspace provisioning already in flight, returning idempotent 202",
+			"workspace", runtime.ID)
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"workspaceId": runtime.ID,
+			"status":      "creating",
+		})
+		return
+	}
+	runtime.ProvisioningActive = true
+	s.workspaceMu.Unlock()
 
 	// Note: Per-workspace message reporter is created lazily in
 	// handleStartAgentSession when the chatSessionID becomes available.
