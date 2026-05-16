@@ -1,0 +1,177 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]: S
+    - generic [ref=e5]:
+      - button "Search" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - button "Recent chats" [ref=e10] [cursor=pointer]:
+        - img [ref=e11]
+      - button "Notifications" [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+      - button "Menu" [active] [ref=e17] [cursor=pointer]:
+        - img [ref=e18]
+  - generic [ref=e21]:
+    - generic [ref=e22]:
+      - button [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+      - generic [ref=e27]: CrewAI
+      - button [ref=e28] [cursor=pointer]:
+        - img [ref=e29]
+    - generic [ref=e31]:
+      - generic [ref=e33] [cursor=pointer]:
+        - generic [ref=e34]: Implement user authentication flow
+        - generic [ref=e35]:
+          - button "Retry" [ref=e36]:
+            - img [ref=e37]
+          - button "Fork" [ref=e40]:
+            - img [ref=e41]
+        - generic [ref=e46]: Active
+        - button [ref=e48]:
+          - img [ref=e49]
+      - generic [ref=e51]:
+        - generic [ref=e53]: Implement a complete user authentication flow with GitHub OAuth. Include login, logout, session management, and protected routes.
+        - generic [ref=e55]: Task execution started — the agent is working on your request.
+        - generic [ref=e57] [cursor=pointer]:
+          - img [ref=e59]
+          - generic [ref=e61]: bash
+          - img [ref=e63]
+        - generic [ref=e65]:
+          - generic [ref=e66]:
+            - text: I'll implement the GitHub OAuth authentication flow. Let me start by setting up the auth routes and session management.
+            - text: First, I'll install the required dependencies and create the auth middleware.
+          - generic [ref=e67]:
+            - button "Info" [ref=e68] [cursor=pointer]:
+              - img [ref=e69]
+            - button "Read aloud" [ref=e71] [cursor=pointer]:
+              - img [ref=e72]
+            - button "Copy" [ref=e74] [cursor=pointer]:
+              - img [ref=e75]
+        - generic [ref=e79] [cursor=pointer]:
+          - img [ref=e81]
+          - generic [ref=e83]: Edit
+          - img [ref=e85]
+        - generic [ref=e88] [cursor=pointer]:
+          - img [ref=e90]
+          - generic [ref=e92]: Write
+          - img [ref=e94]
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - text: "I've set up the core auth infrastructure:"
+            - text: "1."
+            - strong [ref=e98]: OAuth callback handler
+            - text: — exchanges authorization code for tokens via PKCE
+            - text: "2."
+            - strong [ref=e99]: Session management
+            - text: — stores sessions in KV with secure httpOnly cookies
+            - text: "3."
+            - strong [ref=e100]: Auth middleware
+            - text: —
+            - code [ref=e101]: requireAuth()
+            - text: validates sessions and attaches
+            - code [ref=e102]: userId
+            - text: "4."
+            - strong [ref=e103]: Protected routes
+            - text: — all
+            - code [ref=e104]: /api/projects/*
+            - text: routes now require authentication
+            - text: Now let me add the frontend login flow and route guards.
+          - generic [ref=e105]:
+            - button "Info" [ref=e106] [cursor=pointer]:
+              - img [ref=e107]
+            - button "Read aloud" [ref=e109] [cursor=pointer]:
+              - img [ref=e110]
+            - button "Copy" [ref=e112] [cursor=pointer]:
+              - img [ref=e113]
+      - generic [ref=e116]:
+        - generic [ref=e118]: Agent is working...
+        - button "Cancel" [ref=e119] [cursor=pointer]
+      - generic [ref=e120]:
+        - button "Attach" [ref=e121] [cursor=pointer]:
+          - img [ref=e122]
+        - textbox "Send a follow-up message..." [ref=e124]
+        - button "Voice" [ref=e125] [cursor=pointer]:
+          - img [ref=e126]
+        - button:
+          - img
+  - generic [ref=e266]:
+    - generic [ref=e267]:
+      - generic [ref=e268]: S
+      - generic [ref=e269]:
+        - generic [ref=e270]: serverspresentation2025
+        - generic [ref=e271]: raphael+serverspresentation@ephemerecreative.ca
+      - button [ref=e272] [cursor=pointer]:
+        - img [ref=e273]
+    - button "Back to Projects" [ref=e275] [cursor=pointer]:
+      - img [ref=e276]
+      - text: Back to Projects
+    - generic [ref=e278]: CrewAI
+    - generic [ref=e279]:
+      - button "Chat" [ref=e280] [cursor=pointer]:
+        - img [ref=e282]
+        - text: Chat
+      - button "Agent" [ref=e284] [cursor=pointer]:
+        - img [ref=e286]
+        - text: Agent
+      - button "Library" [ref=e289] [cursor=pointer]:
+        - img [ref=e291]
+        - text: Library
+      - button "Ideas" [ref=e293] [cursor=pointer]:
+        - img [ref=e295]
+        - text: Ideas
+      - button "Knowledge" [ref=e297] [cursor=pointer]:
+        - img [ref=e299]
+        - text: Knowledge
+      - button "Notifications" [ref=e302] [cursor=pointer]:
+        - img [ref=e304]
+        - text: Notifications
+      - button "Triggers" [ref=e306] [cursor=pointer]:
+        - img [ref=e308]
+        - text: Triggers
+      - button "Profiles" [ref=e311] [cursor=pointer]:
+        - img [ref=e313]
+        - text: Profiles
+      - button "Activity" [ref=e316] [cursor=pointer]:
+        - img [ref=e318]
+        - text: Activity
+      - button "Settings" [ref=e320] [cursor=pointer]:
+        - img [ref=e322]
+        - text: Settings
+      - generic [ref=e325]:
+        - generic [ref=e326]: Global
+        - button "Home" [ref=e327] [cursor=pointer]:
+          - img [ref=e329]
+          - text: Home
+        - button "SAM" [ref=e331] [cursor=pointer]:
+          - img [ref=e333]
+          - text: SAM
+        - button "Chats" [ref=e336] [cursor=pointer]:
+          - img [ref=e338]
+          - text: Chats
+        - button "Projects" [ref=e340] [cursor=pointer]:
+          - img [ref=e342]
+          - text: Projects
+        - button "Map" [ref=e344] [cursor=pointer]:
+          - img [ref=e346]
+          - text: Map
+        - button "Settings" [ref=e349] [cursor=pointer]:
+          - img [ref=e351]
+          - text: Settings
+      - generic [ref=e354]:
+        - button "Recent Projects" [ref=e355] [cursor=pointer]:
+          - img [ref=e356]
+          - text: Recent Projects
+        - button "C CrewAI 4h" [ref=e358] [cursor=pointer]:
+          - generic [ref=e359]: C
+          - text: CrewAI
+          - generic [ref=e360]: 4h
+        - button "E elysia 2d" [ref=e361] [cursor=pointer]:
+          - generic [ref=e362]: E
+          - text: elysia
+          - generic [ref=e363]: 2d
+        - button "C CrewAI Org 1mo" [ref=e364] [cursor=pointer]:
+          - generic [ref=e365]: C
+          - text: CrewAI Org
+          - generic [ref=e366]: 1mo
+    - button "Sign out" [ref=e367] [cursor=pointer]:
+      - img [ref=e368]
+      - text: Sign out

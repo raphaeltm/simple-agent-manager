@@ -1,0 +1,95 @@
+- generic [ref=e2]:
+  - banner [ref=e272]:
+    - generic [ref=e273]: S
+    - generic [ref=e274]:
+      - button "Search" [ref=e275] [cursor=pointer]:
+        - img [ref=e276]
+      - button "Recent chats" [ref=e279] [cursor=pointer]:
+        - img [ref=e280]
+      - button "Notifications" [ref=e282] [cursor=pointer]:
+        - img [ref=e283]
+      - button "Menu" [ref=e286] [cursor=pointer]:
+        - img [ref=e287]
+  - generic [ref=e173]:
+    - generic [ref=e289]:
+      - button [ref=e290] [cursor=pointer]:
+        - img [ref=e291]
+      - generic [ref=e294]: CrewAI
+      - button [ref=e295] [cursor=pointer]:
+        - img [ref=e296]
+    - generic [ref=e174]:
+      - generic [ref=e176]:
+        - generic [ref=e177]: Implement user authentication flow
+        - generic [ref=e178]:
+          - button "Retry" [ref=e179] [cursor=pointer]:
+            - img [ref=e180]
+          - button "Fork" [ref=e183] [cursor=pointer]:
+            - img [ref=e184]
+        - generic [ref=e189]: Active
+        - button [ref=e191] [cursor=pointer]:
+          - img [ref=e192]
+      - generic [ref=e194]:
+        - generic [ref=e196]: Implement a complete user authentication flow with GitHub OAuth. Include login, logout, session management, and protected routes.
+        - generic [ref=e198]: Task execution started — the agent is working on your request.
+        - generic [ref=e200] [cursor=pointer]:
+          - img [ref=e202]
+          - generic [ref=e204]: bash
+          - img [ref=e206]
+        - generic [ref=e208]:
+          - generic [ref=e209]:
+            - text: I'll implement the GitHub OAuth authentication flow. Let me start by setting up the auth routes and session management.
+            - text: First, I'll install the required dependencies and create the auth middleware.
+          - generic [ref=e210]:
+            - button "Info" [ref=e211] [cursor=pointer]:
+              - img [ref=e212]
+            - button "Read aloud" [ref=e214] [cursor=pointer]:
+              - img [ref=e215]
+            - button "Copy" [ref=e217] [cursor=pointer]:
+              - img [ref=e218]
+        - generic [ref=e222] [cursor=pointer]:
+          - img [ref=e224]
+          - generic [ref=e226]: Edit
+          - img [ref=e228]
+        - generic [ref=e231] [cursor=pointer]:
+          - img [ref=e233]
+          - generic [ref=e235]: Write
+          - img [ref=e237]
+        - generic [ref=e239]:
+          - generic [ref=e240]:
+            - text: "I've set up the core auth infrastructure:"
+            - text: "1."
+            - strong [ref=e241]: OAuth callback handler
+            - text: — exchanges authorization code for tokens via PKCE
+            - text: "2."
+            - strong [ref=e242]: Session management
+            - text: — stores sessions in KV with secure httpOnly cookies
+            - text: "3."
+            - strong [ref=e243]: Auth middleware
+            - text: —
+            - code [ref=e244]: requireAuth()
+            - text: validates sessions and attaches
+            - code [ref=e245]: userId
+            - text: "4."
+            - strong [ref=e246]: Protected routes
+            - text: — all
+            - code [ref=e247]: /api/projects/*
+            - text: routes now require authentication
+            - text: Now let me add the frontend login flow and route guards.
+          - generic [ref=e248]:
+            - button "Info" [ref=e249] [cursor=pointer]:
+              - img [ref=e250]
+            - button "Read aloud" [ref=e252] [cursor=pointer]:
+              - img [ref=e253]
+            - button "Copy" [ref=e255] [cursor=pointer]:
+              - img [ref=e256]
+      - generic [ref=e259]:
+        - generic [ref=e261]: Agent is working...
+        - button "Cancel" [ref=e262] [cursor=pointer]
+      - generic [ref=e263]:
+        - button "Attach" [ref=e264] [cursor=pointer]:
+          - img [ref=e265]
+        - textbox "Send a follow-up message..." [ref=e267]
+        - button "Voice" [ref=e268] [cursor=pointer]:
+          - img [ref=e269]
+        - button:
+          - img
