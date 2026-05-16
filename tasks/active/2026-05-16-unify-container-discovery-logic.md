@@ -16,14 +16,14 @@ This can inject environment variables or credentials into one container while th
 
 ## Implementation Checklist
 
-- [ ] Add package-level `sortCandidates` helper in the `container` package and update `discover()` to use it.
-- [ ] Add exported stateless `FindContainerByLabel(ctx, labelKey, labelValue)` in the `container` package.
-- [ ] Keep a code comment noting the current Docker delegate does not use `exec.CommandContext` directly.
-- [ ] Replace bootstrap `findDevcontainerID()` body with a call to `container.FindContainerByLabel`.
-- [ ] Add unit coverage for tie-breaking by lower container ID.
-- [ ] Add unit coverage for selecting the newest candidate.
-- [ ] Add unit coverage for no matching candidates returning an error.
-- [ ] Verify focused VM agent tests, including the existing bootstrap integration test where feasible.
+- [x] Add package-level `sortCandidates` helper in the `container` package and update `discover()` to use it.
+- [x] Add exported stateless `FindContainerByLabel(ctx, labelKey, labelValue)` in the `container` package.
+- [x] Keep a code comment noting the current Docker delegate does not use `exec.CommandContext` directly.
+- [x] Replace bootstrap `findDevcontainerID()` body with a call to `container.FindContainerByLabel`.
+- [x] Add unit coverage for tie-breaking by lower container ID.
+- [x] Add unit coverage for selecting the newest candidate.
+- [x] Add unit coverage for no matching candidates returning an error.
+- [x] Verify focused VM agent tests, including the existing bootstrap integration test where feasible.
 
 ## Acceptance Criteria
 
@@ -32,3 +32,8 @@ This can inject environment variables or credentials into one container while th
 - Duplicate containers with different timestamps resolve to the newest container in both paths.
 - No-candidate behavior still returns a clear error.
 - Existing `findDevcontainerID(ctx, cfg)` call sites remain unchanged.
+
+## Verification
+
+- `git diff --check` passed.
+- `go test ./internal/container ./internal/bootstrap -run 'TestFindContainerByLabel|TestGetContainerIDSelectsNewestMatchingContainer|TestIntegration_FindDevcontainerID'` could not run in this workspace because `go`/`gofmt` are not installed on PATH and no `gofmt` binary exists under `/usr/local`, `/usr/bin`, or `/opt`.

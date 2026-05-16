@@ -2,6 +2,7 @@
 package container
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -47,6 +48,30 @@ type Discovery struct {
 	bridgeIPForID string
 	bridgeIPCheck time.Time
 	bridgeIPTTL   time.Duration
+}
+
+// FindContainerByLabel returns the container ID for the newest container matching
+// the given label. Unlike Discovery.GetContainerID, this is stateless (no caching)
+// and respects context cancellation. Use this for one-shot lookups in bootstrap.
+func FindContainerByLabel(ctx context.Context, labelKey, labelValue string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	// The Docker-backed delegate currently uses exec.Command rather than
+	// exec.CommandContext, so cancellation is checked around the one-shot query.
+	candidates, err := listRunningContainersByLabel(labelKey, labelValue)
+	if err != nil {
+		return "", fmt.Errorf("failed to query docker: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no running devcontainer found (label: %s=%s)", labelKey, labelValue)
+	}
+	sortCandidates(candidates)
+	return candidates[0].id, nil
 }
 
 // Config holds configuration for container discovery.
@@ -131,12 +156,7 @@ func (d *Discovery) discover() (string, error) {
 		return "", fmt.Errorf("no running devcontainer found (label: %s=%s)", d.labelKey, d.labelValue)
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if !candidates[i].createdAt.Equal(candidates[j].createdAt) {
-			return candidates[i].createdAt.After(candidates[j].createdAt)
-		}
-		return candidates[i].id < candidates[j].id
-	})
+	sortCandidates(candidates)
 
 	id := candidates[0].id
 	d.mu.Lock()
@@ -149,6 +169,15 @@ func (d *Discovery) discover() (string, error) {
 
 	slog.Info("Discovered devcontainer", "containerID", id, "matches", len(candidates))
 	return id, nil
+}
+
+func sortCandidates(candidates []containerCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].createdAt.Equal(candidates[j].createdAt) {
+			return candidates[i].createdAt.After(candidates[j].createdAt)
+		}
+		return candidates[i].id < candidates[j].id
+	})
 }
 
 func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containerCandidate, error) {

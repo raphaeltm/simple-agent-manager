@@ -1,7 +1,9 @@
 package container
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,6 +63,75 @@ func TestGetContainerIDSelectsNewestMatchingContainer(t *testing.T) {
 	}
 	if id != "newer" {
 		t.Fatalf("expected newest container, got %q", id)
+	}
+}
+
+func TestFindContainerByLabelSelectsLowerIDWhenTimestampsMatch(t *testing.T) {
+	createdAt := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	restore := stubDockerDiscovery(
+		func(labelKey, labelValue string) ([]containerCandidate, error) {
+			if labelKey != "devcontainer.local_folder" || labelValue != "/workspace" {
+				t.Fatalf("unexpected label %s=%s", labelKey, labelValue)
+			}
+			return []containerCandidate{
+				{id: "bbb", createdAt: createdAt},
+				{id: "aaa", createdAt: createdAt},
+			}, nil
+		},
+		func(string) bool { return true },
+		func(string) (string, error) { return "172.17.0.2", nil },
+	)
+	defer restore()
+
+	id, err := FindContainerByLabel(context.Background(), "devcontainer.local_folder", "/workspace")
+	if err != nil {
+		t.Fatalf("FindContainerByLabel failed: %v", err)
+	}
+	if id != "aaa" {
+		t.Fatalf("expected lower container ID, got %q", id)
+	}
+}
+
+func TestFindContainerByLabelSelectsNewestContainer(t *testing.T) {
+	older := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Minute)
+	restore := stubDockerDiscovery(
+		func(string, string) ([]containerCandidate, error) {
+			return []containerCandidate{
+				{id: "newer", createdAt: newer},
+				{id: "older", createdAt: older},
+			}, nil
+		},
+		func(string) bool { return true },
+		func(string) (string, error) { return "172.17.0.2", nil },
+	)
+	defer restore()
+
+	id, err := FindContainerByLabel(context.Background(), "devcontainer.local_folder", "/workspace")
+	if err != nil {
+		t.Fatalf("FindContainerByLabel failed: %v", err)
+	}
+	if id != "newer" {
+		t.Fatalf("expected newest container, got %q", id)
+	}
+}
+
+func TestFindContainerByLabelReturnsErrorWhenNoCandidates(t *testing.T) {
+	restore := stubDockerDiscovery(
+		func(string, string) ([]containerCandidate, error) {
+			return nil, nil
+		},
+		func(string) bool { return true },
+		func(string) (string, error) { return "172.17.0.2", nil },
+	)
+	defer restore()
+
+	_, err := FindContainerByLabel(context.Background(), "devcontainer.local_folder", "/missing")
+	if err == nil {
+		t.Fatal("expected error when no container candidates match")
+	}
+	if !strings.Contains(err.Error(), "no running devcontainer found") {
+		t.Fatalf("expected no-candidates error, got %v", err)
 	}
 }
 
