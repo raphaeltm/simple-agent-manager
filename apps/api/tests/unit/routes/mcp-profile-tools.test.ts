@@ -4,10 +4,13 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import {
   extractProfileFields,
+  handleAddProfileEnvVar,
   handleCreateAgentProfile,
   handleDeleteAgentProfile,
   handleGetAgentProfile,
   handleListAgentProfiles,
+  handleListProfileEnvVars,
+  handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from '../../../src/routes/mcp/profile-tools';
 
@@ -23,6 +26,17 @@ vi.mock('../../../src/services/agent-profiles', () => ({
   deleteProfile: vi.fn(),
 }));
 
+vi.mock('../../../src/services/profile-runtime-assets', () => ({
+  buildProfileRuntimeConfigResponse: vi.fn(),
+  deleteProfileRuntimeEnvVar: vi.fn(),
+  requireOwnedProjectScopedProfile: vi.fn(),
+  upsertProfileRuntimeEnvVar: vi.fn(),
+}));
+
+vi.mock('../../../src/lib/secrets', () => ({
+  getCredentialEncryptionKey: vi.fn(() => 'test-encryption-key'),
+}));
+
 // Mock logger
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
@@ -30,6 +44,7 @@ vi.mock('../../../src/lib/logger', () => ({
 
 // Import mocked service after vi.mock
 import * as agentProfileService from '../../../src/services/agent-profiles';
+import * as profileRuntimeService from '../../../src/services/profile-runtime-assets';
 
 const tokenData: McpTokenData = {
   taskId: 'task-123',
@@ -44,6 +59,8 @@ const mockEnv = {
   DEFAULT_TASK_AGENT_TYPE: 'opencode',
   BUILTIN_PROFILE_SONNET_MODEL: '',
   BUILTIN_PROFILE_OPUS_MODEL: '',
+  MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES: '1024',
+  MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT: '10',
 } as unknown as Parameters<typeof handleListAgentProfiles>[3];
 
 function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
@@ -75,6 +92,11 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
 describe('MCP Profile Tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(profileRuntimeService.requireOwnedProjectScopedProfile).mockResolvedValue(makeProfile());
+    vi.mocked(profileRuntimeService.buildProfileRuntimeConfigResponse).mockResolvedValue({
+      envVars: [],
+      files: [],
+    });
   });
 
   // ─── list_agent_profiles ──────────────────────────────────────────
@@ -415,6 +437,105 @@ describe('MCP Profile Tools', () => {
       const result = await handleDeleteAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to delete profile');
+    });
+  });
+
+  // ─── profile runtime env var tools ───────────────────────────────
+
+  describe('profile runtime env var MCP tools', () => {
+    it('lists profile env vars with secrets masked by the runtime response builder', async () => {
+      vi.mocked(profileRuntimeService.buildProfileRuntimeConfigResponse).mockResolvedValue({
+        envVars: [
+          {
+            key: 'API_TOKEN',
+            value: null,
+            isSecret: true,
+            hasValue: true,
+            createdAt: '2026-05-16T00:00:00Z',
+            updatedAt: '2026-05-16T00:00:00Z',
+          },
+        ],
+        files: [],
+      });
+
+      const result = await handleListProfileEnvVars(1, { profileId: 'prof-1' }, tokenData, mockEnv);
+
+      expect(result.error).toBeUndefined();
+      expect(profileRuntimeService.requireOwnedProjectScopedProfile).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-456',
+        'prof-1',
+        'user-789',
+      );
+      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      expect(content.envVars).toEqual([
+        expect.objectContaining({ key: 'API_TOKEN', value: null, isSecret: true, hasValue: true }),
+      ]);
+    });
+
+    it('adds a profile env var after validating ownership, key, size, and secret flag', async () => {
+      const result = await handleAddProfileEnvVar(1, {
+        profileId: 'prof-1',
+        key: 'API_TOKEN',
+        value: 'plain-secret',
+        isSecret: true,
+      }, tokenData, mockEnv);
+
+      expect(result.error).toBeUndefined();
+      expect(profileRuntimeService.requireOwnedProjectScopedProfile).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-456',
+        'prof-1',
+        'user-789',
+      );
+      expect(profileRuntimeService.upsertProfileRuntimeEnvVar).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          profileId: 'prof-1',
+          userId: 'user-789',
+          envKey: 'API_TOKEN',
+          value: 'plain-secret',
+          isSecret: true,
+          maxCount: 10,
+          encryptionKey: 'test-encryption-key',
+        }),
+      );
+      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      expect(content).toEqual({ updated: true, profileId: 'prof-1', key: 'API_TOKEN', isSecret: true });
+    });
+
+    it('rejects invalid profile env var keys before writing', async () => {
+      const result = await handleAddProfileEnvVar(1, {
+        profileId: 'prof-1',
+        key: 'bad-key',
+        value: 'value',
+      }, tokenData, mockEnv);
+
+      expect(result.error!.code).toBe(-32602);
+      expect(profileRuntimeService.upsertProfileRuntimeEnvVar).not.toHaveBeenCalled();
+    });
+
+    it('removes a profile env var after validating profile ownership', async () => {
+      const result = await handleRemoveProfileEnvVar(1, {
+        profileId: 'prof-1',
+        key: 'API_TOKEN',
+      }, tokenData, mockEnv);
+
+      expect(result.error).toBeUndefined();
+      expect(profileRuntimeService.requireOwnedProjectScopedProfile).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-456',
+        'prof-1',
+        'user-789',
+      );
+      expect(profileRuntimeService.deleteProfileRuntimeEnvVar).toHaveBeenCalledWith(
+        expect.anything(),
+        'prof-1',
+        'user-789',
+        'API_TOKEN',
+      );
+      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      expect(content).toEqual({ deleted: true, profileId: 'prof-1', key: 'API_TOKEN' });
     });
   });
 
