@@ -358,7 +358,7 @@ func (s *Server) startWorkspaceProvision(
 		// Start port scanner for the newly provisioned workspace.
 		// This is the dynamic-workspace counterpart to the boot-time scanner
 		// started in OnBootstrapComplete (server.go).
-		s.StartPortScanner(provisionRuntime.ID)
+		s.StartPortScanner(runtime.ID)
 	}()
 }
 
