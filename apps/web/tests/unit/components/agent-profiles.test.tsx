@@ -1,11 +1,26 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { render, screen, waitFor,within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { ProfileFormDialog } from '../../../src/components/agent-profiles/ProfileFormDialog';
 import { ProfileList } from '../../../src/components/agent-profiles/ProfileList';
 import { ProfileSelector } from '../../../src/components/agent-profiles/ProfileSelector';
+import { ToastProvider } from '../../../src/hooks/useToast';
+
+// Mock the profile runtime API so ProfileRuntimeSection doesn't make real requests
+vi.mock('../../../src/lib/api', () => ({
+  getProfileRuntimeConfig: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
+  upsertProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
+  deleteProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
+  upsertProfileRuntimeFile: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
+  deleteProfileRuntimeFile: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
+}));
+
+function Wrapper({ children }: { children: ReactNode }) {
+  return <ToastProvider>{children}</ToastProvider>;
+}
 
 // ---------------------------------------------------------------------------
 // Test data
@@ -135,6 +150,7 @@ describe('ProfileList', () => {
     onCreateProfile: vi.fn().mockResolvedValue(makeProfile()),
     onUpdateProfile: vi.fn().mockResolvedValue(makeProfile()),
     onDeleteProfile: vi.fn().mockResolvedValue(undefined),
+    projectId: 'proj-test-1',
   };
 
   beforeEach(() => {
@@ -142,34 +158,34 @@ describe('ProfileList', () => {
   });
 
   it('renders all profiles with their names', () => {
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     expect(screen.getByText('Fast Implementer')).toBeInTheDocument();
     expect(screen.getByText('Deep Planner')).toBeInTheDocument();
     expect(screen.getByText('default')).toBeInTheDocument();
   });
 
   it('shows built-in badge for built-in profiles', () => {
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     expect(screen.getByText('built-in')).toBeInTheDocument();
   });
 
   it('shows loading spinner when loading', () => {
-    render(<ProfileList {...defaultProps} loading={true} profiles={[]} />);
+    render(<ProfileList {...defaultProps} loading={true} profiles={[]} />, { wrapper: Wrapper });
     expect(screen.queryByText('Fast Implementer')).not.toBeInTheDocument();
   });
 
   it('shows error message when there is an error', () => {
-    render(<ProfileList {...defaultProps} error="Failed to load" profiles={[]} />);
+    render(<ProfileList {...defaultProps} error="Failed to load" profiles={[]} />, { wrapper: Wrapper });
     expect(screen.getByText('Failed to load')).toBeInTheDocument();
   });
 
   it('shows empty state when no profiles exist', () => {
-    render(<ProfileList {...defaultProps} profiles={[]} />);
+    render(<ProfileList {...defaultProps} profiles={[]} />, { wrapper: Wrapper });
     expect(screen.getByText(/no profiles yet/i)).toBeInTheDocument();
   });
 
   it('shows edit/delete buttons for all profiles including built-in', () => {
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     const editButtons = screen.getAllByLabelText(/^Edit /);
     expect(editButtons).toHaveLength(3); // All profiles including built-in
     const deleteButtons = screen.getAllByLabelText(/^Delete /);
@@ -178,28 +194,28 @@ describe('ProfileList', () => {
 
   it('opens create dialog when New Profile is clicked', async () => {
     const user = userEvent.setup();
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     await user.click(screen.getByText(/new profile/i));
     expect(screen.getByText('Create Agent Profile')).toBeInTheDocument();
   });
 
   it('opens edit dialog when edit button is clicked', async () => {
     const user = userEvent.setup();
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Edit Fast Implementer'));
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('opens edit dialog for built-in profile', async () => {
     const user = userEvent.setup();
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Edit default'));
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('shows delete confirmation when delete button is clicked', async () => {
     const user = userEvent.setup();
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Delete Fast Implementer'));
     expect(screen.getByText('Confirm')).toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
@@ -208,7 +224,7 @@ describe('ProfileList', () => {
   it('calls onDeleteProfile for built-in profile when confirmed', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
-    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />);
+    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Delete default'));
     await user.click(screen.getByLabelText('Confirm delete default'));
     expect(onDelete).toHaveBeenCalledWith('prof-builtin');
@@ -217,7 +233,7 @@ describe('ProfileList', () => {
   it('calls onDeleteProfile when delete is confirmed', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
-    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />);
+    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Delete Fast Implementer'));
     await user.click(screen.getByText('Confirm'));
     expect(onDelete).toHaveBeenCalledWith('prof-1');
@@ -226,14 +242,14 @@ describe('ProfileList', () => {
   it('does not call onDeleteProfile when cancel is clicked', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
-    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />);
+    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Delete Fast Implementer'));
     await user.click(screen.getByText('Cancel'));
     expect(onDelete).not.toHaveBeenCalled();
   });
 
   it('shows profile metadata: agent type, model, permission mode', () => {
-    render(<ProfileList {...defaultProps} />);
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
     expect(screen.getAllByText('claude-code').length).toBeGreaterThan(0);
     expect(screen.getAllByText('claude-sonnet-4-5-20250929').length).toBeGreaterThan(0);
     expect(screen.getAllByText('acceptEdits').length).toBeGreaterThan(0);
@@ -242,7 +258,7 @@ describe('ProfileList', () => {
   it('shows delete error in role="alert" when onDeleteProfile rejects', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockRejectedValue(new Error('Cannot delete: in use'));
-    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />);
+    render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Delete Fast Implementer'));
     await user.click(screen.getByText('Confirm'));
     await screen.findByRole('alert');
@@ -252,7 +268,7 @@ describe('ProfileList', () => {
   it('calls onCreateProfile via dialog form submission', async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn().mockResolvedValue(makeProfile({ id: 'prof-new', name: 'New Prof' }));
-    render(<ProfileList {...defaultProps} onCreateProfile={onCreate} />);
+    render(<ProfileList {...defaultProps} onCreateProfile={onCreate} />, { wrapper: Wrapper });
     await user.click(screen.getByText(/new profile/i));
     // Fill the name field
     const nameInput = screen.getByPlaceholderText('e.g. Fast Implementer');
@@ -269,7 +285,7 @@ describe('ProfileList', () => {
   it('calls onUpdateProfile via dialog edit submission', async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn().mockResolvedValue(makeProfile());
-    render(<ProfileList {...defaultProps} onUpdateProfile={onUpdate} />);
+    render(<ProfileList {...defaultProps} onUpdateProfile={onUpdate} />, { wrapper: Wrapper });
     await user.click(screen.getByLabelText('Edit Fast Implementer'));
     // Name should be pre-filled
     const nameInput = screen.getByDisplayValue('Fast Implementer');
@@ -302,7 +318,7 @@ describe('ProfileFormDialog', () => {
   it('shows validation error when name is empty on submit', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     await user.click(screen.getByText('Create Profile'));
     expect(screen.getByRole('alert')).toHaveTextContent('Profile name is required');
@@ -312,7 +328,7 @@ describe('ProfileFormDialog', () => {
   it('shows validation error when name is only whitespace', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     const nameInput = screen.getByPlaceholderText('e.g. Fast Implementer');
     await user.type(nameInput, '   ');
@@ -324,7 +340,7 @@ describe('ProfileFormDialog', () => {
   it('calls onSave with correct payload in create mode', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test Profile');
     await user.type(screen.getByPlaceholderText('What this profile is for...'), 'A test');
@@ -345,7 +361,7 @@ describe('ProfileFormDialog', () => {
   it('pre-populates fields in edit mode', () => {
     const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', maxTurns: 5 });
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     expect(screen.getByDisplayValue('My Profile')).toBeInTheDocument();
     expect(screen.getByDisplayValue('desc')).toBeInTheDocument();
@@ -358,7 +374,7 @@ describe('ProfileFormDialog', () => {
     const user = userEvent.setup();
     const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5' });
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
 
     await user.click(screen.getByLabelText('Model'));
@@ -371,7 +387,7 @@ describe('ProfileFormDialog', () => {
     const user = userEvent.setup();
     const failingSave = vi.fn().mockRejectedValue(new Error('Server error'));
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={failingSave} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={failingSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test');
     await user.click(screen.getByText('Create Profile'));
@@ -384,7 +400,7 @@ describe('ProfileFormDialog', () => {
   it('calls onClose when Cancel is clicked without saving', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     await user.click(screen.getByText('Cancel'));
     expect(defaultOnClose).toHaveBeenCalled();
@@ -394,7 +410,7 @@ describe('ProfileFormDialog', () => {
   it('parses numeric fields correctly', async () => {
     const user = userEvent.setup();
     render(
-      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} />,
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Numeric Test');
     // Set max turns and timeout
