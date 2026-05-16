@@ -178,6 +178,32 @@ function makeProject(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function setupGithubProject(options: {
+  token?: string;
+  project?: Record<string, unknown>;
+} = {}) {
+  const token = options.token ?? 'ghs_test';
+  mockRequireOwnedProject.mockResolvedValue(makeProject(options.project));
+  mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
+  mockGetInstallationToken.mockResolvedValue({
+    token,
+    expiresAt: '2026-12-01T00:00:00Z',
+  });
+  return token;
+}
+
+function stubTreeResponse(tree: Array<{ path: string; type: string }>) {
+  const mockFetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ tree, truncated: false }), { status: 200 }),
+  );
+  vi.stubGlobal('fetch', mockFetch);
+  return mockFetch;
+}
+
+async function requestConfigs(app: Hono<{ Bindings: Env }>) {
+  return app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+}
+
 describe('GET /projects/:projectId/devcontainer-configs', () => {
   let app: Hono<{ Bindings: Env }>;
 
@@ -195,24 +221,15 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   });
 
   it('returns named configs from a GitHub repo tree', async () => {
-    mockRequireOwnedProject.mockResolvedValue(makeProject());
-    mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
-    mockGetInstallationToken.mockResolvedValue({ token: 'ghs_test', expiresAt: '2026-12-01T00:00:00Z' });
+    setupGithubProject();
+    stubTreeResponse([
+      { path: '.devcontainer/devcontainer.json', type: 'blob' },
+      { path: '.devcontainer/python/devcontainer.json', type: 'blob' },
+      { path: '.devcontainer/node/devcontainer.json', type: 'blob' },
+      { path: 'src/main.ts', type: 'blob' },
+    ]);
 
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        tree: [
-          { path: '.devcontainer/devcontainer.json', type: 'blob' },
-          { path: '.devcontainer/python/devcontainer.json', type: 'blob' },
-          { path: '.devcontainer/node/devcontainer.json', type: 'blob' },
-          { path: 'src/main.ts', type: 'blob' },
-        ],
-        truncated: false,
-      }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', mockFetch);
-
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.provider).toBe('github');
@@ -228,7 +245,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   it('returns unsupported for non-GitHub projects', async () => {
     mockRequireOwnedProject.mockResolvedValue(makeProject({ repoProvider: 'artifacts' }));
 
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.unsupported).toBe(true);
@@ -240,42 +257,30 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
       Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' }),
     );
 
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(404);
   });
 
   it('returns 502 when GitHub API fails', async () => {
-    mockRequireOwnedProject.mockResolvedValue(makeProject());
-    mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
-    mockGetInstallationToken.mockResolvedValue({ token: 'ghs_test', expiresAt: '2026-12-01T00:00:00Z' });
+    const token = setupGithubProject();
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response('Not Found', { status: 404 }),
     ));
 
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.error).toBe('GITHUB_API_ERROR');
     // Must not contain the installation token
-    expect(JSON.stringify(body)).not.toContain('ghs_test');
+    expect(JSON.stringify(body)).not.toContain(token);
   });
 
   it('returns no named configs when only default exists', async () => {
-    mockRequireOwnedProject.mockResolvedValue(makeProject());
-    mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
-    mockGetInstallationToken.mockResolvedValue({ token: 'ghs_test', expiresAt: '2026-12-01T00:00:00Z' });
+    setupGithubProject();
+    stubTreeResponse([{ path: '.devcontainer.json', type: 'blob' }]);
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        tree: [
-          { path: '.devcontainer.json', type: 'blob' },
-        ],
-        truncated: false,
-      }), { status: 200 }),
-    ));
-
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.defaultConfigExists).toBe(true);
@@ -283,22 +288,14 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   });
 
   it('filters out invalid config names', async () => {
-    mockRequireOwnedProject.mockResolvedValue(makeProject());
-    mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
-    mockGetInstallationToken.mockResolvedValue({ token: 'ghs_test', expiresAt: '2026-12-01T00:00:00Z' });
+    setupGithubProject();
+    stubTreeResponse([
+      { path: '.devcontainer/../evil/devcontainer.json', type: 'blob' },
+      { path: '.devcontainer/valid-name/devcontainer.json', type: 'blob' },
+      { path: '.devcontainer/-leading-hyphen/devcontainer.json', type: 'blob' },
+    ]);
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        tree: [
-          { path: '.devcontainer/../evil/devcontainer.json', type: 'blob' },
-          { path: '.devcontainer/valid-name/devcontainer.json', type: 'blob' },
-          { path: '.devcontainer/-leading-hyphen/devcontainer.json', type: 'blob' },
-        ],
-        truncated: false,
-      }), { status: 200 }),
-    ));
-
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.configs).toEqual([
@@ -307,15 +304,13 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   });
 
   it('does not leak tokens in error responses', async () => {
-    mockRequireOwnedProject.mockResolvedValue(makeProject());
-    mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
-    mockGetInstallationToken.mockResolvedValue({ token: 'ghs_secret_token_value', expiresAt: '2026-12-01T00:00:00Z' });
+    const token = setupGithubProject({ token: 'ghs_secret_token_value' });
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
 
-    const res = await app.request(`${BASE_URL}/proj-1/devcontainer-configs`, {}, makeEnv());
+    const res = await requestConfigs(app);
     expect(res.status).toBe(502);
     const text = await res.text();
-    expect(text).not.toContain('ghs_secret_token_value');
+    expect(text).not.toContain(token);
   });
 });
