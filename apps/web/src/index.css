@@ -38,8 +38,8 @@
   }
 
   html, body, #root {
-    min-height: var(--sam-app-height);
-    overflow-x: hidden;
+    height: var(--sam-app-height);
+    overflow: hidden;
     max-width: 100vw;
   }
 

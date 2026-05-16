@@ -194,7 +194,7 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
+        <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
           {children ?? <Outlet />}
         </main>
 
@@ -227,8 +227,8 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <AppShellContext.Provider value={shellContext}>
-    <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: '1fr auto' }}>
-      <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 overflow-y-auto" style={{ gridRow: '1' }}>
+    <div className="grid bg-canvas h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
+      <aside className="flex flex-col border-r border-border-default bg-surface overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
           <img src="/sam-head.png" alt="SAM" className="h-6 w-6 object-contain" />
           <div className="flex items-center gap-1">
