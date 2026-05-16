@@ -27,6 +27,14 @@ Two concurrent `POST /workspaces` requests for the same workspace ID can both up
 - [ ] Run focused VM agent tests. Blocked locally: `go` and `gofmt` are not installed in this workspace.
 - [x] Run relevant repo quality checks or document blockers.
 
+## Validation
+
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with existing warnings.
+- `pnpm test` passed.
+- `pnpm build` exited successfully; the direct `pnpm --filter @simple-agent-manager/www build` rerun also passed after Turbo replayed a stale cached Astro error log.
+- Focused VM agent tests and `gofmt` were blocked locally because `go` and `gofmt` are not installed in this workspace.
+
 ## Acceptance Criteria
 
 - Duplicate concurrent creates for the same workspace ID are idempotent and do not launch duplicate provisioning goroutines.
