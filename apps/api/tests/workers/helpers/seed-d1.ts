@@ -38,7 +38,7 @@ export async function seedInstallation(
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installation_accounts
-       (installation_id, account_type, account_name, account_name_normalized, created_at, updated_at)
+       (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
      VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
   )
     .bind(externalInstallationId, accountName, accountName)

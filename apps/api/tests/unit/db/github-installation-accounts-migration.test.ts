@@ -35,7 +35,7 @@ describe('github_installation_accounts migration', () => {
 
     const rows = db
       .prepare(`
-        SELECT installation_id, account_type, account_name, account_name_normalized, uninstalled_at
+        SELECT installation_id, account_type, account_name, normalized_account_name, uninstalled_at
         FROM github_installation_accounts
         ORDER BY installation_id
       `)
@@ -46,14 +46,14 @@ describe('github_installation_accounts migration', () => {
         installation_id: '120081765',
         account_type: 'organization',
         account_name: 'EffProp',
-        account_name_normalized: 'effprop',
+        normalized_account_name: 'effprop',
         uninstalled_at: null,
       },
       {
         installation_id: '42',
         account_type: 'personal',
         account_name: 'octocat',
-        account_name_normalized: 'octocat',
+        normalized_account_name: 'octocat',
         uninstalled_at: null,
       },
     ]);

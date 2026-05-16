@@ -211,7 +211,7 @@ export const githubInstallationAccounts = sqliteTable(
     installationId: text('installation_id').primaryKey(),
     accountType: text('account_type').notNull(),
     accountName: text('account_name').notNull(),
-    accountNameNormalized: text('account_name_normalized').notNull(),
+    accountNameNormalized: text('normalized_account_name').notNull(),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -221,7 +221,7 @@ export const githubInstallationAccounts = sqliteTable(
     uninstalledAt: text('uninstalled_at'),
   },
   (table) => ({
-    activeLookupIdx: index('idx_github_installation_accounts_active_lookup')
+    activeLookupIdx: index('idx_github_installation_accounts_lookup')
       .on(table.accountType, table.accountNameNormalized)
       .where(sql`uninstalled_at IS NULL`),
   })

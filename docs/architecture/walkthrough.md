@@ -357,7 +357,7 @@ erDiagram
         text installation_id PK
         text account_type "personal|organization"
         text account_name
-        text account_name_normalized
+        text normalized_account_name
         text uninstalled_at
     }
 

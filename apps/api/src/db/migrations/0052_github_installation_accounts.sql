@@ -10,14 +10,14 @@ CREATE TABLE IF NOT EXISTS github_installation_accounts (
   installation_id TEXT PRIMARY KEY,
   account_type TEXT NOT NULL,
   account_name TEXT NOT NULL,
-  account_name_normalized TEXT NOT NULL,
+  normalized_account_name TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   uninstalled_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_github_installation_accounts_active_lookup
-  ON github_installation_accounts (account_type, account_name_normalized)
+CREATE INDEX IF NOT EXISTS idx_github_installation_accounts_lookup
+  ON github_installation_accounts (account_type, normalized_account_name)
   WHERE uninstalled_at IS NULL;
 
 WITH ranked_installations AS (
@@ -28,7 +28,7 @@ WITH ranked_installations AS (
       ELSE 'personal'
     END AS account_type,
     account_name,
-    lower(account_name) AS account_name_normalized,
+    lower(account_name) AS normalized_account_name,
     created_at,
     updated_at,
     ROW_NUMBER() OVER (
@@ -43,7 +43,7 @@ INSERT INTO github_installation_accounts (
   installation_id,
   account_type,
   account_name,
-  account_name_normalized,
+  normalized_account_name,
   created_at,
   updated_at,
   uninstalled_at
@@ -52,7 +52,7 @@ SELECT
   installation_id,
   account_type,
   account_name,
-  account_name_normalized,
+  normalized_account_name,
   created_at,
   updated_at,
   NULL
@@ -61,6 +61,6 @@ WHERE rank = 1
 ON CONFLICT(installation_id) DO UPDATE SET
   account_type = excluded.account_type,
   account_name = excluded.account_name,
-  account_name_normalized = excluded.account_name_normalized,
+  normalized_account_name = excluded.normalized_account_name,
   updated_at = excluded.updated_at,
   uninstalled_at = NULL;
