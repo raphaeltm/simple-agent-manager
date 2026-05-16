@@ -29,6 +29,25 @@ describe('profile runtime routes', () => {
   let limitResponses: any[];
   let whereResponses: any[];
   let orderByResponses: any[];
+  const runtimeBindings = {
+    DATABASE: {} as any,
+    ENCRYPTION_KEY: 'test-key',
+  } as Env;
+
+  const profileRow = { id: 'prof-1', projectId: 'proj-1', userId: 'user-1' };
+
+  const envVarRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    envKey: 'API_TOKEN',
+    storedValue: 'enc-value',
+    valueIv: 'enc-iv',
+    isSecret: true,
+    createdAt: '2026-05-16T00:00:00.000Z',
+    updatedAt: '2026-05-16T00:00:00.000Z',
+    ...overrides,
+  });
+
+  const requestRuntime = (path: string, init: RequestInit) =>
+    app.request(`/api/projects/proj-1/agent-profiles/prof-1/runtime${path}`, init, runtimeBindings);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -77,27 +96,10 @@ describe('profile runtime routes', () => {
   });
 
   it('lists profile env vars with secret values masked', async () => {
-    limitResponses.push([{ id: 'prof-1', projectId: 'proj-1', userId: 'user-1' }]);
-    orderByResponses.push(
-      [
-        {
-          envKey: 'API_TOKEN',
-          storedValue: 'encrypted-token',
-          valueIv: 'iv',
-          isSecret: true,
-          createdAt: '2026-05-16T00:00:00.000Z',
-          updatedAt: '2026-05-16T00:00:00.000Z',
-        },
-      ],
-      []
-    );
+    limitResponses.push([profileRow]);
+    orderByResponses.push([envVarRow({ storedValue: 'encrypted-token', valueIv: 'iv' })], []);
 
-    const res = await app.request('/api/projects/proj-1/agent-profiles/prof-1/runtime/env-vars', {
-      method: 'GET',
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'test-key',
-    } as Env);
+    const res = await requestRuntime('/env-vars', { method: 'GET' });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -113,32 +115,17 @@ describe('profile runtime routes', () => {
 
   it('creates encrypted secret profile env vars', async () => {
     limitResponses.push(
-      [{ id: 'prof-1', projectId: 'proj-1', userId: 'user-1' }],
+      [profileRow],
       []
     );
     whereResponses.push([{ count: 0 }]);
-    orderByResponses.push(
-      [
-        {
-          envKey: 'API_TOKEN',
-          storedValue: 'enc-value',
-          valueIv: 'enc-iv',
-          isSecret: true,
-          createdAt: '2026-05-16T00:00:00.000Z',
-          updatedAt: '2026-05-16T00:00:00.000Z',
-        },
-      ],
-      []
-    );
+    orderByResponses.push([envVarRow()], []);
 
-    const res = await app.request('/api/projects/proj-1/agent-profiles/prof-1/runtime/env-vars', {
+    const res = await requestRuntime('/env-vars', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: 'API_TOKEN', value: 'plain-secret', isSecret: true }),
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'test-key',
-    } as Env);
+    });
 
     expect(res.status).toBe(200);
     expect(mocks.encrypt).toHaveBeenCalledWith('plain-secret', 'test-key');
@@ -158,24 +145,18 @@ describe('profile runtime routes', () => {
 
     const res = await app.request('/api/projects/proj-1/agent-profiles/other-prof/runtime/env-vars', {
       method: 'GET',
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'test-key',
-    } as Env);
+    }, runtimeBindings);
 
     expect(res.status).toBe(404);
   });
 
   it('deletes profile env vars after validating the key', async () => {
-    limitResponses.push([{ id: 'prof-1', projectId: 'proj-1', userId: 'user-1' }]);
+    limitResponses.push([profileRow]);
     orderByResponses.push([], []);
 
-    const res = await app.request('/api/projects/proj-1/agent-profiles/prof-1/runtime/env-vars/API_TOKEN', {
+    const res = await requestRuntime('/env-vars/API_TOKEN', {
       method: 'DELETE',
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'test-key',
-    } as Env);
+    });
 
     expect(res.status).toBe(200);
     expect(mockDB.delete).toHaveBeenCalled();

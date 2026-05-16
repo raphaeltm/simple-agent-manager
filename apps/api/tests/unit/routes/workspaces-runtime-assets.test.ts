@@ -27,6 +27,16 @@ vi.mock('../../../src/services/encryption', () => ({
 
 describe('workspaces runtime-assets callback route', () => {
   let app: Hono<{ Bindings: Env }>;
+  const runtimeBindings = {
+    DATABASE: {} as any,
+    ENCRYPTION_KEY: 'enc-key',
+  } as Env;
+
+  const requestRuntimeAssets = () =>
+    app.request('/api/workspaces/WS_1/runtime-assets', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer callback-token' },
+    }, runtimeBindings);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -98,13 +108,7 @@ describe('workspaces runtime-assets callback route', () => {
       }),
     });
 
-    const res = await app.request('/api/workspaces/WS_1/runtime-assets', {
-      method: 'GET',
-      headers: { Authorization: 'Bearer callback-token' },
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'enc-key',
-    } as Env);
+    const res = await requestRuntimeAssets();
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -193,13 +197,7 @@ describe('workspaces runtime-assets callback route', () => {
       }),
     });
 
-    const res = await app.request('/api/workspaces/WS_1/runtime-assets', {
-      method: 'GET',
-      headers: { Authorization: 'Bearer callback-token' },
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'enc-key',
-    } as Env);
+    const res = await requestRuntimeAssets();
 
     expect(res.status).toBe(200);
     const body = await res.json();
