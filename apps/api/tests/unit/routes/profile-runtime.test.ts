@@ -1,9 +1,10 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { profileRuntimeRoutes } from '../../../src/routes/profile-runtime';
+import { createRouteTestApp } from './route-test-app';
 
 const mocks = vi.hoisted(() => ({
   requireOwnedProject: vi.fn(),
@@ -84,15 +85,10 @@ describe('profile runtime routes', () => {
     mocks.requireOwnedProject.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
     mocks.encrypt.mockResolvedValue({ ciphertext: 'enc-value', iv: 'enc-iv' });
 
-    app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => {
-      const appError = err as { statusCode?: number; error?: string; message?: string };
-      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-      }
-      return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-    });
-    app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileRuntimeRoutes);
+    app = createRouteTestApp(
+      '/api/projects/:projectId/agent-profiles/:profileId/runtime',
+      profileRuntimeRoutes
+    );
   });
 
   it('lists profile env vars with secret values masked', async () => {
