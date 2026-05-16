@@ -50,6 +50,7 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
       Voice
     </button>
   ),
+  MentionPalette: () => null,
   SlashCommandPalette: () => null,
   CLIENT_COMMANDS: [],
   getAllStaticCommands: () => [],
