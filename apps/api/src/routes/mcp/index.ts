@@ -90,10 +90,13 @@ import {
   handleUpdatePolicy,
 } from './policy-tools';
 import {
+  handleAddProfileEnvVar,
   handleCreateAgentProfile,
   handleDeleteAgentProfile,
   handleGetAgentProfile,
   handleListAgentProfiles,
+  handleListProfileEnvVars,
+  handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
 import {
@@ -329,6 +332,12 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleUpdateAgentProfile(requestId, toolArgs, tokenData, c.env));
         case 'delete_agent_profile':
           return c.json(await handleDeleteAgentProfile(requestId, toolArgs, tokenData, c.env));
+        case 'add_profile_env_var':
+          return c.json(await handleAddProfileEnvVar(requestId, toolArgs, tokenData, c.env));
+        case 'remove_profile_env_var':
+          return c.json(await handleRemoveProfileEnvVar(requestId, toolArgs, tokenData, c.env));
+        case 'list_profile_env_vars':
+          return c.json(await handleListProfileEnvVars(requestId, toolArgs, tokenData, c.env));
         // ─── Onboarding tools ─────────────────────────────────────────
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content

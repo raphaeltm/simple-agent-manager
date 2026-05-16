@@ -9,7 +9,16 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import * as agentProfileService from '../../services/agent-profiles';
+import { getRuntimeLimits } from '../../services/limits';
+import {
+  buildProfileRuntimeConfigResponse,
+  deleteProfileRuntimeEnvVar,
+  requireOwnedProjectScopedProfile,
+  upsertProfileRuntimeEnvVar,
+} from '../../services/profile-runtime-assets';
+import { byteLength, PROJECT_ENV_KEY_PATTERN } from '../projects/_helpers';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -259,4 +268,127 @@ export async function handleDeleteAgentProfile(
     log.error('mcp.delete_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to delete profile: ${(err as Error).message}`);
   }
+}
+
+export async function handleListProfileEnvVars(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const profileId = getProfileIdParam(params);
+  if (!profileId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'profileId is required');
+  }
+
+  try {
+    const db = drizzle(env.DATABASE, { schema });
+    await requireOwnedProjectScopedProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    const response = await buildProfileRuntimeConfigResponse(db, profileId, tokenData.userId);
+
+    return jsonRpcSuccess(requestId, {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ envVars: response.envVars }, null, 2),
+      }],
+    });
+  } catch (err) {
+    return profileRuntimeError(requestId, err, 'list_profile_env_vars', profileId);
+  }
+}
+
+export async function handleAddProfileEnvVar(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const profileId = getProfileIdParam(params);
+  const key = typeof params.key === 'string' ? params.key.trim() : '';
+  const value = typeof params.value === 'string' ? params.value : null;
+  if (!profileId) return jsonRpcError(requestId, INVALID_PARAMS, 'profileId is required');
+  if (!PROJECT_ENV_KEY_PATTERN.test(key)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'key must match [A-Za-z_][A-Za-z0-9_]*');
+  }
+  if (value === null) return jsonRpcError(requestId, INVALID_PARAMS, 'value is required');
+
+  const limits = getRuntimeLimits(env);
+  if (byteLength(value) > limits.maxProjectRuntimeEnvValueBytes) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
+    );
+  }
+
+  try {
+    const db = drizzle(env.DATABASE, { schema });
+    await requireOwnedProjectScopedProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    await upsertProfileRuntimeEnvVar(db, {
+      profileId,
+      userId: tokenData.userId,
+      envKey: key,
+      value,
+      isSecret: Boolean(params.isSecret),
+      maxCount: limits.maxProjectRuntimeEnvVarsPerProject,
+      encryptionKey: getCredentialEncryptionKey(env),
+    });
+
+    return jsonRpcSuccess(requestId, {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ updated: true, profileId, key, isSecret: Boolean(params.isSecret) }, null, 2),
+      }],
+    });
+  } catch (err) {
+    return profileRuntimeError(requestId, err, 'add_profile_env_var', profileId);
+  }
+}
+
+export async function handleRemoveProfileEnvVar(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const profileId = getProfileIdParam(params);
+  const key = typeof params.key === 'string' ? params.key.trim() : '';
+  if (!profileId) return jsonRpcError(requestId, INVALID_PARAMS, 'profileId is required');
+  if (!PROJECT_ENV_KEY_PATTERN.test(key)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'key must match [A-Za-z_][A-Za-z0-9_]*');
+  }
+
+  try {
+    const db = drizzle(env.DATABASE, { schema });
+    await requireOwnedProjectScopedProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    await deleteProfileRuntimeEnvVar(db, profileId, tokenData.userId, key);
+
+    return jsonRpcSuccess(requestId, {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ deleted: true, profileId, key }, null, 2),
+      }],
+    });
+  } catch (err) {
+    return profileRuntimeError(requestId, err, 'remove_profile_env_var', profileId);
+  }
+}
+
+function getProfileIdParam(params: Record<string, unknown>): string {
+  return typeof params.profileId === 'string' ? params.profileId.trim() : '';
+}
+
+function profileRuntimeError(
+  requestId: string | number | null,
+  err: unknown,
+  toolName: string,
+  profileId: string
+): JsonRpcResponse {
+  const status = (err as { statusCode?: number }).statusCode;
+  if (status === 400 || status === 404) {
+    return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
+  }
+
+  log.error(`mcp.${toolName}_failed`, { profileId, error: String(err) });
+  return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to ${toolName}: ${(err as Error).message}`);
 }

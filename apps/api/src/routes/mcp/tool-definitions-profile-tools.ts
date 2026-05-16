@@ -153,4 +153,68 @@ export const PROFILE_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'add_profile_env_var',
+    description:
+      'Set or update a runtime environment variable scoped to an agent profile. ' +
+      'When a task uses this profile, profile env vars override project env vars with the same key.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        profileId: {
+          type: 'string',
+          description: 'The project-scoped agent profile ID',
+        },
+        key: {
+          type: 'string',
+          description: 'Environment variable key, matching [A-Za-z_][A-Za-z0-9_]*',
+        },
+        value: {
+          type: 'string',
+          description: 'Environment variable value',
+        },
+        isSecret: {
+          type: 'boolean',
+          description: 'Encrypt the value at rest and mask it in list responses',
+        },
+      },
+      required: ['profileId', 'key', 'value'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'remove_profile_env_var',
+    description: 'Remove a runtime environment variable from an agent profile.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        profileId: {
+          type: 'string',
+          description: 'The project-scoped agent profile ID',
+        },
+        key: {
+          type: 'string',
+          description: 'Environment variable key to remove',
+        },
+      },
+      required: ['profileId', 'key'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_profile_env_vars',
+    description:
+      'List runtime environment variables scoped to an agent profile. Secret values are masked.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        profileId: {
+          type: 'string',
+          description: 'The project-scoped agent profile ID',
+        },
+      },
+      required: ['profileId'],
+      additionalProperties: false,
+    },
+  },
 ];

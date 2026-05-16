@@ -20,15 +20,15 @@ The referenced design note `docs/notes/2026-05-16-layered-env-secrets-data-flow.
 
 ## Checklist
 
-- [ ] Add additive D1 migration for `profile_runtime_env_vars` and `profile_runtime_files`.
-- [ ] Add Drizzle schema tables and inferred types.
-- [ ] Add shared profile runtime service/helper functions for profile ownership validation, CRUD response masking, decryption, and project/profile merge.
-- [ ] Add HTTP routes for profile runtime env var and file CRUD.
-- [ ] Mount the new routes under `/api/projects/:projectId/agent-profiles/:profileId/runtime/...`.
-- [ ] Persist resolved profile ID on direct task submission.
-- [ ] Merge project + profile runtime assets in the workspace runtime callback, with profile overrides.
-- [ ] Add MCP tools to add, remove, and list profile env vars.
-- [ ] Add unit/integration tests for merge behavior, CRUD validation, secret encryption, and dispatch/runtime asset propagation.
+- [x] Add additive D1 migration for `profile_runtime_env_vars` and `profile_runtime_files`.
+- [x] Add Drizzle schema tables and inferred types.
+- [x] Add shared profile runtime service/helper functions for profile ownership validation, CRUD response masking, decryption, and project/profile merge.
+- [x] Add HTTP routes for profile runtime env var and file CRUD.
+- [x] Mount the new routes under `/api/projects/:projectId/agent-profiles/:profileId/runtime/...`.
+- [x] Persist resolved profile ID on direct task submission.
+- [x] Merge project + profile runtime assets in the workspace runtime callback, with profile overrides.
+- [x] Add MCP tools to add, remove, and list profile env vars.
+- [x] Add unit/integration tests for merge behavior, CRUD validation, secret encryption, and dispatch/runtime asset propagation.
 - [ ] Run quality checks and migration safety checks.
 
 ## Acceptance Criteria

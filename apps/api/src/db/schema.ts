@@ -816,6 +816,71 @@ export const agentProfiles = sqliteTable(
 export type AgentProfileRow = typeof agentProfiles.$inferSelect;
 export type NewAgentProfileRow = typeof agentProfiles.$inferInsert;
 
+/** Per-profile runtime environment variables injected into task workspaces.
+ *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
+export const profileRuntimeEnvVars = sqliteTable(
+  'profile_runtime_env_vars',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => agentProfiles.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    envKey: text('env_key').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext value. */
+    storedValue: text('stored_value').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (value stored in plaintext). */
+    valueIv: text('value_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    profileKeyUnique: uniqueIndex('idx_profile_runtime_env_profile_key').on(table.profileId, table.envKey),
+    userProfileIdx: index('idx_profile_runtime_env_user_profile').on(table.userId, table.profileId),
+  })
+);
+
+/** Per-profile runtime files injected into task workspaces.
+ *  Secret files are AES-256-GCM encrypted; non-secret files are stored in plaintext. */
+export const profileRuntimeFiles = sqliteTable(
+  'profile_runtime_files',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => agentProfiles.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    filePath: text('file_path').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext content. */
+    storedContent: text('stored_content').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (content stored in plaintext). */
+    contentIv: text('content_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    profilePathUnique: uniqueIndex('idx_profile_runtime_files_profile_path').on(
+      table.profileId,
+      table.filePath
+    ),
+    userProfileIdx: index('idx_profile_runtime_files_user_profile').on(table.userId, table.profileId),
+  })
+);
+
 // =============================================================================
 // UI Governance
 // =============================================================================
@@ -1027,6 +1092,10 @@ export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;
 export type NewProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferInsert;
 export type ProjectRuntimeFile = typeof projectRuntimeFiles.$inferSelect;
 export type NewProjectRuntimeFile = typeof projectRuntimeFiles.$inferInsert;
+export type ProfileRuntimeEnvVar = typeof profileRuntimeEnvVars.$inferSelect;
+export type NewProfileRuntimeEnvVar = typeof profileRuntimeEnvVars.$inferInsert;
+export type ProfileRuntimeFile = typeof profileRuntimeFiles.$inferSelect;
+export type NewProfileRuntimeFile = typeof profileRuntimeFiles.$inferInsert;
 export type Mission = typeof missions.$inferSelect;
 export type NewMission = typeof missions.$inferInsert;
 export type Task = typeof tasks.$inferSelect;

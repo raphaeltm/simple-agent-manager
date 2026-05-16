@@ -12,6 +12,11 @@ import { errors } from '../../middleware/error';
 import { decrypt } from '../../services/encryption';
 import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
+import {
+  getProfileRuntimeAssets,
+  mergeRuntimeAssetRows,
+  type RuntimeAssetRows,
+} from '../../services/profile-runtime-assets';
 
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
 
@@ -190,35 +195,72 @@ export async function getWorkspaceRuntimeAssets(
       ),
   ]);
 
-  const envVars: WorkspaceRuntimeAssetsResponse['envVars'] = [];
-  for (const row of envRows) {
-    const value = row.isSecret
-      ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
-      : row.storedValue;
-    envVars.push({
+  const projectAssets: RuntimeAssetRows = {
+    envVars: await Promise.all(envRows.map(async (row) => ({
       key: row.key,
-      value,
+      value: row.isSecret
+        ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
+        : row.storedValue,
       isSecret: row.isSecret,
-    });
-  }
-
-  const files: WorkspaceRuntimeAssetsResponse['files'] = [];
-  for (const row of fileRows) {
-    const content = row.isSecret
-      ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
-      : row.storedContent;
-    files.push({
+    }))),
+    files: await Promise.all(fileRows.map(async (row) => ({
       path: row.path,
-      content,
+      content: row.isSecret
+        ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
+        : row.storedContent,
       isSecret: row.isSecret,
-    });
-  }
+    }))),
+  };
+
+  const profileId = await getWorkspaceTaskProfileId(db, workspace.id, workspace.projectId, workspace.userId);
+  const profileAssets = profileId
+    ? await getProfileRuntimeAssets(db, profileId, workspace.userId, encryptionKey)
+    : { envVars: [], files: [] };
+  const mergedAssets = mergeRuntimeAssetRows(projectAssets, profileAssets);
 
   return {
     workspaceId: workspace.id,
-    envVars,
-    files,
+    envVars: mergedAssets.envVars,
+    files: mergedAssets.files,
   };
+}
+
+async function getWorkspaceTaskProfileId(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  projectId: string,
+  userId: string
+): Promise<string | null> {
+  const taskRows = await db
+    .select({ profileId: schema.tasks.agentProfileHint })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.workspaceId, workspaceId),
+        eq(schema.tasks.projectId, projectId),
+        eq(schema.tasks.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const profileId = taskRows[0]?.profileId;
+  if (!profileId) {
+    return null;
+  }
+
+  const profileRows = await db
+    .select({ id: schema.agentProfiles.id })
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.id, profileId),
+        eq(schema.agentProfiles.projectId, projectId),
+        eq(schema.agentProfiles.userId, userId)
+      )
+    )
+    .limit(1);
+
+  return profileRows[0]?.id ?? null;
 }
 
 export async function scheduleWorkspaceCreateOnNode(

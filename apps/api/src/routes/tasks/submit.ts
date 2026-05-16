@@ -276,6 +276,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     status: 'queued',
     executionStep: 'node_selection',
     priority: 0,
+    agentProfileHint: resolvedProfile?.profileId ?? null,
     taskMode,
     outputBranch: branchName,
     createdBy: userId,

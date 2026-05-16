@@ -74,6 +74,15 @@ describe('workspaces runtime-assets callback route', () => {
             }),
           };
         }
+        if (selectCall === 4) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          };
+        }
         return {
           from: vi.fn().mockReturnValue({
             where: vi.fn().mockResolvedValue([
@@ -107,5 +116,102 @@ describe('workspaces runtime-assets callback route', () => {
       { path: '.env.local', content: 'FOO=bar', isSecret: false },
     ]);
     expect(mocks.decrypt).toHaveBeenCalledWith('encrypted-value', 'iv', 'enc-key');
+  });
+
+  it('merges profile runtime assets over project runtime assets', async () => {
+    let selectCall = 0;
+    (drizzle as any).mockReturnValue({
+      select: vi.fn(() => {
+        selectCall += 1;
+        if (selectCall === 1) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([
+                  { id: 'WS_1', userId: 'user-1', projectId: 'proj-1' },
+                ]),
+              }),
+            }),
+          };
+        }
+        if (selectCall === 2) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockResolvedValue([
+                { key: 'API_TOKEN', storedValue: 'project-token', valueIv: null, isSecret: false },
+                { key: 'SHARED_KEY', storedValue: 'project-value', valueIv: null, isSecret: false },
+              ]),
+            }),
+          };
+        }
+        if (selectCall === 3) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockResolvedValue([
+                { path: '.env', storedContent: 'PROJECT=1', contentIv: null, isSecret: false },
+                { path: 'shared.txt', storedContent: 'project-file', contentIv: null, isSecret: false },
+              ]),
+            }),
+          };
+        }
+        if (selectCall === 4) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([{ profileId: 'prof-1' }]),
+              }),
+            }),
+          };
+        }
+        if (selectCall === 5) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([{ id: 'prof-1' }]),
+              }),
+            }),
+          };
+        }
+        if (selectCall === 6) {
+          return {
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockResolvedValue([
+                { key: 'SHARED_KEY', storedValue: 'profile-value', valueIv: null, isSecret: false },
+                { key: 'PROFILE_ONLY', storedValue: 'profile-only', valueIv: null, isSecret: false },
+              ]),
+            }),
+          };
+        }
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockResolvedValue([
+              { path: 'shared.txt', storedContent: 'profile-file', contentIv: null, isSecret: false },
+              { path: 'profile.txt', storedContent: 'profile-only-file', contentIv: null, isSecret: false },
+            ]),
+          }),
+        };
+      }),
+    });
+
+    const res = await app.request('/api/workspaces/WS_1/runtime-assets', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer callback-token' },
+    }, {
+      DATABASE: {} as any,
+      ENCRYPTION_KEY: 'enc-key',
+    } as Env);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.envVars).toEqual([
+      { key: 'API_TOKEN', value: 'project-token', isSecret: false },
+      { key: 'SHARED_KEY', value: 'profile-value', isSecret: false },
+      { key: 'PROFILE_ONLY', value: 'profile-only', isSecret: false },
+    ]);
+    expect(body.files).toEqual([
+      { path: '.env', content: 'PROJECT=1', isSecret: false },
+      { path: 'shared.txt', content: 'profile-file', isSecret: false },
+      { path: 'profile.txt', content: 'profile-only-file', isSecret: false },
+    ]);
   });
 });
