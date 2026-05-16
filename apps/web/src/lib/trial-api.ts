@@ -32,8 +32,18 @@ const ERROR_COPY: Record<TrialErrorCode, string> = {
   existing_trial: 'You already have an active trial — resuming it now.',
 };
 
-export function trialErrorMessage(code: TrialErrorCode, fallback?: string): string {
-  return ERROR_COPY[code] ?? fallback ?? 'Something went wrong. Please try again.';
+function isTrialErrorCode(code: unknown): code is TrialErrorCode {
+  return typeof code === 'string' && code in ERROR_COPY;
+}
+
+function normalizeTrialErrorCode(code: unknown): TrialErrorCode {
+  return isTrialErrorCode(code) ? code : 'invalid_url';
+}
+
+export function trialErrorMessage(code: string, fallback?: string): string {
+  return isTrialErrorCode(code)
+    ? ERROR_COPY[code]
+    : fallback ?? 'Something went wrong. Please try again.';
 }
 
 /**
@@ -97,7 +107,7 @@ export async function createTrial(repoUrl: string): Promise<CreateTrialResult> {
   }
 
   // Error branch — normalize.
-  const code = (typeof raw.error === 'string' ? raw.error : 'invalid_url') as TrialErrorCode;
+  const code = normalizeTrialErrorCode(raw.error);
   const message =
     typeof raw.message === 'string' ? raw.message : trialErrorMessage(code);
 
