@@ -1582,7 +1582,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
-	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
+	useMockDockerCLI(t, mockDocker, "missing read-configuration user")
 
 	cfg := &config.Config{
 		WorkspaceDir:        t.TempDir(),
@@ -1635,7 +1635,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
-	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
+	useMockDockerCLI(t, mockDocker, "metadata label fallback")
 
 	cfg := &config.Config{
 		WorkspaceDir:        t.TempDir(),
@@ -1692,7 +1692,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
-	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
+	useMockDockerCLI(t, mockDocker, "docker exec fallback")
 
 	cfg := &config.Config{
 		WorkspaceDir:        t.TempDir(),
@@ -1744,7 +1744,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
-	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
+	useMockDockerCLI(t, mockDocker, "ownership mismatch")
 	t.Setenv("MOCK_CHOWN_LOG", chownLog)
 
 	cfg := &config.Config{
@@ -1798,7 +1798,7 @@ exit 1
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
-	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
+	useMockDockerCLI(t, mockDocker, "ownership already correct")
 	t.Setenv("MOCK_CHOWN_LOG", chownLog)
 
 	cfg := &config.Config{
@@ -1812,6 +1812,11 @@ exit 1
 	if _, err := os.Stat(chownLog); !os.IsNotExist(err) {
 		t.Fatalf("expected chown to be skipped, got %v", err)
 	}
+}
+
+func useMockDockerCLI(t *testing.T, mockDocker string, _ string) {
+	t.Helper()
+	t.Setenv("SAM_DOCKER_CLI_PATH", mockDocker)
 }
 
 func TestNormalizeMergedLifecycleCommands(t *testing.T) {
