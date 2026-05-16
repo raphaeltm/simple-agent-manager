@@ -219,7 +219,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
             overscan={200}
             itemContent={(index, item) => (
-              <div className="px-4 pb-3">
+              <div className="sam-message-entry px-4 pb-3">
                 <AcpConversationItemView
                   item={item}
                   onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}

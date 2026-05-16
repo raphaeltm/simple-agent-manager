@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -53,14 +53,21 @@ export function MobileNavDrawer({
   onToggleGlobalNav,
 }: MobileNavDrawerProps) {
   const [infraOpen, setInfraOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleClose = useCallback(() => {
+    if (isClosing) return;
+    setIsClosing(true);
+    window.setTimeout(onClose, 250);
+  }, [isClosing, onClose]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [handleClose]);
 
   // Determine if we're in project context with toggle capability
   const canToggle = Boolean(projectName && globalNavItems && onToggleGlobalNav);
@@ -74,10 +81,11 @@ export function MobileNavDrawer({
     <>
       {/* Backdrop */}
       <div
+        role="presentation"
         data-testid="mobile-nav-backdrop"
-        onClick={onClose}
-        className="fixed inset-0 glass-backdrop-dim border-0 z-drawer-backdrop"
-        style={{ animation: 'sam-drawer-fade-in 0.15s ease-out' }}
+        onClick={handleClose}
+        className="sam-glass-drawer-backdrop fixed inset-0 glass-backdrop-dim border-0 z-drawer-backdrop"
+        data-state={isClosing ? 'closing' : 'open'}
       />
 
       {/* Panel */}
@@ -86,8 +94,8 @@ export function MobileNavDrawer({
         aria-modal="true"
         aria-label="Navigation menu"
         data-testid="mobile-nav-panel"
-        className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
-        style={{ animation: 'sam-drawer-slide-in 0.2s ease-out' }}
+        className="sam-glass-drawer-panel fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
+        data-state={isClosing ? 'closing' : 'open'}
       >
         {/* Header: user info + close */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-border-default">
@@ -111,7 +119,7 @@ export function MobileNavDrawer({
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="Close navigation"
             className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-fg-muted cursor-pointer shrink-0 rounded-sm ${FOCUS_RING}`}
           >

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MobileNavDrawer } from '../../../src/components/MobileNavDrawer';
 
@@ -19,6 +19,12 @@ const defaultProps = {
 describe('MobileNavDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
   it('renders a dialog with navigation links', () => {
@@ -86,6 +92,9 @@ describe('MobileNavDrawer', () => {
 
     fireEvent.click(screen.getByTestId('mobile-nav-backdrop'));
 
+    expect(screen.getByTestId('mobile-nav-panel')).toHaveAttribute('data-state', 'closing');
+    act(() => vi.advanceTimersByTime(250));
+
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -94,6 +103,9 @@ describe('MobileNavDrawer', () => {
 
     fireEvent.click(screen.getByLabelText('Close navigation'));
 
+    expect(screen.getByTestId('mobile-nav-panel')).toHaveAttribute('data-state', 'closing');
+    act(() => vi.advanceTimersByTime(250));
+
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -101,6 +113,9 @@ describe('MobileNavDrawer', () => {
     render(<MobileNavDrawer {...defaultProps} />);
 
     fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.getByTestId('mobile-nav-panel')).toHaveAttribute('data-state', 'closing');
+    act(() => vi.advanceTimersByTime(250));
 
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });

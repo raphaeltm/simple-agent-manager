@@ -32,12 +32,15 @@ interface StatusBadgeProps {
   label?: string;
 }
 
+const pulsingStatuses = new Set(['active', 'connected', 'healthy', 'in_progress', 'running']);
+
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   const config = statusConfig[status] ?? { label: 'Unknown', bg: '#e5e7eb', fg: '#1f2937' };
+  const pulseClass = pulsingStatuses.has(status) ? ' sam-status-pulse' : '';
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold"
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold${pulseClass}`}
       style={{ backgroundColor: config.bg, color: config.fg }}
     >
       {label ?? config.label}
