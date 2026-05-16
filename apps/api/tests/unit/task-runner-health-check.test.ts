@@ -15,6 +15,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { isNodeAgentReadyForWorkspaceDispatch } from '../../src/durable-objects/task-runner/readiness';
+
 const doSource = [
   'index.ts',
   'types.ts',
@@ -39,6 +41,7 @@ describe('verifyNodeAgentHealthy helper', () => {
   it('queries D1 for health_status and last_heartbeat_at', () => {
     expect(section).toContain('health_status');
     expect(section).toContain('last_heartbeat_at');
+    expect(section).toContain('agent_ready_at');
     expect(section).toContain('rc.env.DATABASE.prepare');
   });
 
@@ -75,6 +78,7 @@ describe('handleNodeAgentReady D1-based health check', () => {
     expect(agentReadySection).toContain('rc.env.DATABASE.prepare');
     expect(agentReadySection).toContain('health_status');
     expect(agentReadySection).toContain('last_heartbeat_at');
+    expect(agentReadySection).toContain('agent_ready_at');
   });
 
   it('does NOT fetch the VM agent directly (same-zone bypass)', () => {
@@ -83,7 +87,7 @@ describe('handleNodeAgentReady D1-based health check', () => {
   });
 
   it('verifies heartbeat is recent (not stale from previous boot)', () => {
-    expect(agentReadySection).toContain('heartbeatIsRecent');
+    expect(agentReadySection).toContain('isNodeAgentReadyForWorkspaceDispatch');
     expect(agentReadySection).toContain('agentReadyStartedAt');
   });
 
@@ -102,6 +106,90 @@ describe('handleNodeAgentReady D1-based health check', () => {
   it('documents the same-zone routing issue in comments', () => {
     expect(agentReadySection).toContain('same-zone routing');
     expect(agentReadySection).toContain('wildcard Worker route');
+  });
+});
+
+describe('isNodeAgentReadyForWorkspaceDispatch', () => {
+  const waitStartedAt = Date.parse('2026-05-16T15:30:30.000Z');
+  const isoAt = (offsetMs: number) => new Date(waitStartedAt + offsetMs).toISOString();
+  const readyRow = (
+    overrides: Partial<NonNullable<Parameters<typeof isNodeAgentReadyForWorkspaceDispatch>[0]>>
+  ) => ({
+    status: 'running',
+    health_status: 'healthy',
+    last_heartbeat_at: isoAt(5_000),
+    agent_ready_at: isoAt(5_000),
+    ...overrides,
+  });
+
+  it('recreates the debug-package failure: early heartbeat alone is not workspace-ready', () => {
+    const earlyHeartbeatOnly = readyRow({
+      agent_ready_at: null,
+    });
+
+    expect(isNodeAgentReadyForWorkspaceDispatch(earlyHeartbeatOnly, waitStartedAt)).toBe(false);
+  });
+
+  it('allows workspace dispatch after the VM agent sends /ready', () => {
+    const afterReady = readyRow({
+      last_heartbeat_at: isoAt(80_000),
+      agent_ready_at: isoAt(79_000),
+    });
+
+    expect(isNodeAgentReadyForWorkspaceDispatch(afterReady, waitStartedAt)).toBe(true);
+  });
+
+  it('does not accept a stale /ready signal from an earlier provisioning cycle', () => {
+    const staleReady = readyRow({
+      agent_ready_at: isoAt(-120_000),
+    });
+
+    expect(isNodeAgentReadyForWorkspaceDispatch(staleReady, waitStartedAt)).toBe(false);
+  });
+
+  it('rejects unhealthy, creating, and malformed node records', () => {
+    expect(isNodeAgentReadyForWorkspaceDispatch(null, waitStartedAt)).toBe(false);
+    expect(isNodeAgentReadyForWorkspaceDispatch(readyRow({
+      status: 'creating',
+    }), waitStartedAt)).toBe(false);
+    expect(isNodeAgentReadyForWorkspaceDispatch(readyRow({
+      health_status: 'unhealthy',
+    }), waitStartedAt)).toBe(false);
+    expect(isNodeAgentReadyForWorkspaceDispatch(readyRow({
+      last_heartbeat_at: 'not-a-date',
+    }), waitStartedAt)).toBe(false);
+  });
+
+  it('matches the readiness invariant across randomized signal timings', () => {
+    let seed = 0x5a17;
+    const next = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+
+    for (let i = 0; i < 250; i += 1) {
+      const heartbeatOffset = Math.floor(next() * 240_000) - 120_000;
+      const readyOffset = Math.floor(next() * 240_000) - 120_000;
+      const status = next() < 0.1 ? 'creating' : 'running';
+      const healthStatus = next() < 0.1 ? 'stale' : 'healthy';
+      const missingReady = next() < 0.2;
+      const missingHeartbeat = next() < 0.1;
+
+      const row = readyRow({
+        status,
+        health_status: healthStatus,
+        last_heartbeat_at: missingHeartbeat ? null : isoAt(heartbeatOffset),
+        agent_ready_at: missingReady ? null : isoAt(readyOffset),
+      });
+      const expected = status === 'running'
+        && healthStatus === 'healthy'
+        && row.last_heartbeat_at !== null
+        && row.agent_ready_at !== null
+        && heartbeatOffset > -30_000
+        && readyOffset > -30_000;
+
+      expect(isNodeAgentReadyForWorkspaceDispatch(row, waitStartedAt)).toBe(expected);
+    }
   });
 });
 

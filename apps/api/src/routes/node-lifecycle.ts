@@ -67,6 +67,7 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
       status: 'running',
       healthStatus: 'healthy',
       lastHeartbeatAt: now,
+      agentReadyAt: now,
       updatedAt: now,
     })
     .where(eq(schema.nodes.id, nodeId));

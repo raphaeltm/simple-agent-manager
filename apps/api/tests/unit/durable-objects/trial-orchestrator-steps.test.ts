@@ -77,7 +77,7 @@ vi.mock('../../../src/services/limits', () => ({
   getRuntimeLimits: vi.fn(() => ({ nodeHeartbeatStaleSeconds: 120 })),
 }));
 
-const { handleRunning, handleDiscoveryAgentStart, handleNodeProvisioning } = await import(
+const { handleRunning, handleDiscoveryAgentStart, handleNodeProvisioning, handleNodeAgentReady } = await import(
   '../../../src/durable-objects/trial-orchestrator/steps'
 );
 
@@ -116,18 +116,24 @@ function makeCtx(storage: Storage = new Map()) {
       put: vi.fn(async (k: string, v: unknown) => {
         storage.set(k, v);
       }),
+      setAlarm: vi.fn(async () => {}),
     },
     _storage: storage,
   };
 }
 
 function makeRc(ctx: ReturnType<typeof makeCtx>, advanced: string[]) {
+  const firstMock = vi.fn(async () => null);
+  const bindMock = vi.fn(() => ({
+    run: vi.fn(async () => {}),
+    first: firstMock,
+  }));
+  const prepareMock = vi.fn(() => ({ bind: bindMock }));
+
   return {
     env: {
       DATABASE: {
-        prepare: vi.fn(() => ({
-          bind: vi.fn(() => ({ run: vi.fn(async () => {}) })),
-        })),
+        prepare: prepareMock,
       },
     } as unknown as Parameters<typeof handleRunning>[1]['env'],
     ctx: ctx as unknown as Parameters<typeof handleRunning>[1]['ctx'],
@@ -142,6 +148,7 @@ function makeRc(ctx: ReturnType<typeof makeCtx>, advanced: string[]) {
     getWorkspaceReadyPollIntervalMs: () => 5_000,
     getNodeReadyTimeoutMs: () => 180_000,
     getHeartbeatSkewMs: () => 30_000,
+    _dbFirst: firstMock,
   } as unknown as Parameters<typeof handleRunning>[1];
 }
 
@@ -191,6 +198,61 @@ describe('handleNodeProvisioning', () => {
     expect(state.nodeId).toBe('node_new_123');
     expect(state.autoProvisionedNode).toBe(true);
     expect(advanced).toEqual(['node_agent_ready']);
+  });
+});
+
+describe('handleNodeAgentReady', () => {
+  function setupNodeAgentReady(
+    nodeId: string,
+    dbRow: { last_heartbeat_at: string; agent_ready_at: string | null }
+  ) {
+    const ctx = makeCtx();
+    const advanced: string[] = [];
+    const rc = makeRc(ctx, advanced) as Parameters<typeof handleNodeAgentReady>[1] & {
+      _dbFirst: ReturnType<typeof vi.fn>;
+    };
+    const waitStartedAt = Date.now() - 5_000;
+    const state = makeState({
+      currentStep: 'node_agent_ready',
+      nodeId,
+      nodeAgentReadyStartedAt: waitStartedAt,
+    });
+    rc._dbFirst.mockResolvedValue({
+      status: 'running',
+      health_status: 'healthy',
+      ...dbRow,
+    });
+    return { advanced, ctx, rc, state, waitStartedAt };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not advance on an early heartbeat without a /ready signal', async () => {
+    const waitStartedAt = Date.now() - 5_000;
+    const { advanced, ctx, rc, state } = setupNodeAgentReady('node_early', {
+      last_heartbeat_at: new Date(waitStartedAt + 1_000).toISOString(),
+      agent_ready_at: null,
+    });
+
+    await handleNodeAgentReady(state, rc);
+
+    expect(advanced).toEqual([]);
+    expect(ctx.storage.setAlarm).toHaveBeenCalled();
+  });
+
+  it('advances after the VM agent sends a fresh /ready signal', async () => {
+    const waitStartedAt = Date.now() - 5_000;
+    const { advanced, ctx, rc, state } = setupNodeAgentReady('node_ready', {
+      last_heartbeat_at: new Date(waitStartedAt + 2_000).toISOString(),
+      agent_ready_at: new Date(waitStartedAt + 1_000).toISOString(),
+    });
+
+    await handleNodeAgentReady(state, rc);
+
+    expect(advanced).toEqual(['workspace_creation']);
+    expect(ctx.storage.setAlarm).not.toHaveBeenCalled();
   });
 });
 

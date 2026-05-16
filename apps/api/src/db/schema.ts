@@ -594,6 +594,8 @@ export const nodes = sqliteTable(
     ipAddress: text('ip_address'),
     backendDnsRecordId: text('backend_dns_record_id'),
     lastHeartbeatAt: text('last_heartbeat_at'),
+    /** ISO-8601 timestamp from VM agent /ready after system provisioning completes. */
+    agentReadyAt: text('agent_ready_at'),
     healthStatus: text('health_status').notNull().default('unhealthy'),
     heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
     lastMetrics: text('last_metrics'),
