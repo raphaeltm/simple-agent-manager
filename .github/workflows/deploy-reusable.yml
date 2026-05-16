@@ -361,7 +361,7 @@ jobs:
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
         run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env ${{ inputs.environment }} 2>&1) || {
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
             echo "$OUTPUT"
             exit 1
           }
@@ -374,6 +374,7 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
 
       # Tail Worker must deploy AFTER API Worker (service binding dependency)
       - name: Deploy Tail Worker
@@ -402,13 +403,14 @@ jobs:
       - name: Re-deploy API Worker (with tail_consumers)
         if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
         run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env ${{ inputs.environment }} 2>&1) || {
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
             echo "$OUTPUT"
             exit 1
           }
           echo "$OUTPUT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
 
       - name: Deploy Web UI
         if: ${{ inputs.dry_run != true }}
@@ -625,7 +627,7 @@ jobs:
       - name: Re-deploy API Worker (after secrets)
         if: ${{ inputs.dry_run != true }}
         run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env ${{ inputs.environment }} 2>&1) || {
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
             echo "$OUTPUT"
             exit 1
           }
@@ -638,6 +640,7 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
 
       # ========================================
       # Phase 4: VM Agent
