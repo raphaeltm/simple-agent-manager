@@ -328,7 +328,9 @@ a { color: inherit; text-decoration: none; }
 /* MESSAGES */
 .messages-area {
   flex: 1; min-height: 0; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 16px 14px; display: flex; flex-direction: column; gap: 14px;
+  overscroll-behavior: contain;
 }
 .message { display: flex; flex-direction: column; gap: 4px; }
 .message.user { align-items: flex-end; }
@@ -498,9 +500,9 @@ a { color: inherit; text-decoration: none; }
 }
 .drawer-panel .glass-surface {
   flex: 1; display: flex; flex-direction: column;
-  background: rgba(8, 15, 12, 0.72);
-  backdrop-filter: blur(28px) saturate(1.4);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  background: rgba(8, 15, 12, 0.55);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
   border-left: 1px solid rgba(34, 197, 94, 0.2);
   border-radius: var(--radius-xl) 0 0 var(--radius-xl);
   box-shadow:
@@ -552,7 +554,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--sam-fg-dimmed); pointer-events: none;
 }
 
-.session-list { flex: 1; overflow-y: auto; min-height: 0; }
+.session-list { flex: 1; overflow-y: auto; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .session-item {
   display: flex; flex-direction: column; gap: 2px;
   padding: 10px 14px; border-bottom: 1px solid rgba(34,197,94,0.05);
@@ -595,9 +597,9 @@ a { color: inherit; text-decoration: none; }
 }
 .nav-drawer-panel .glass-surface {
   flex: 1; display: flex; flex-direction: column;
-  background: rgba(8, 15, 12, 0.74);
-  backdrop-filter: blur(28px) saturate(1.4);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  background: rgba(8, 15, 12, 0.55);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
   border-left: 1px solid rgba(34, 197, 94, 0.22);
   border-radius: var(--radius-xl) 0 0 var(--radius-xl);
   box-shadow:
@@ -651,7 +653,7 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 0.05em; color: var(--sam-fg-dimmed);
 }
 
-.nav-items { flex: 1; overflow-y: auto; padding: 4px 0; }
+.nav-items { flex: 1; overflow-y: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 16px; font-size: 13px; font-weight: 500;
@@ -922,7 +924,7 @@ a { color: inherit; text-decoration: none; }
       <div class="error-banner" id="errorBanner" style="display:none;">Task failed: workspace provisioning timeout.</div>
 
       <!-- Messages + floating details overlay wrapper -->
-      <div style="flex:1;min-height:0;position:relative;">
+      <div style="flex:1;min-height:0;position:relative;overflow:hidden;display:flex;flex-direction:column;">
         <!-- Floating glass details panel — overlays messages -->
         <div class="session-details-float" id="sessionDetailsFloat">
           <div>
@@ -1065,6 +1067,11 @@ const MESSAGES = [
   { role:'tool', name:'Edit', content:'apps/api/src/routes/auth.ts — Added OAuth callback handler, session cookie management, and PKCE flow.' },
   { role:'tool', name:'Write', content:'apps/api/src/middleware/requireAuth.ts — Created auth middleware that validates session tokens.' },
   { role:'assistant', content:"I've set up the core auth infrastructure:\n\n1. **OAuth callback handler** — exchanges authorization code for tokens via PKCE\n2. **Session management** — stores sessions in KV with secure httpOnly cookies\n3. **Auth middleware** — `requireAuth()` validates sessions and attaches `userId`\n4. **Protected routes** — all `/api/projects/*` routes now require authentication\n\nNow let me add the frontend login flow and route guards." },
+  { role:'tool', name:'Write', content:'apps/web/src/lib/auth.ts — Created auth client with login/logout helpers and session state.' },
+  { role:'tool', name:'Write', content:'apps/web/src/components/AuthProvider.tsx — React context for auth state with automatic token refresh.' },
+  { role:'assistant', content:"The frontend auth layer is complete. I've added:\n\n- **AuthProvider** context that wraps the app and manages session state\n- **useAuth()** hook for accessing the current user\n- **ProtectedRoute** component that redirects to login if unauthenticated\n- **Login page** with GitHub OAuth button and PKCE flow\n\nLet me run the tests to verify everything works together." },
+  { role:'tool', name:'bash', content:'pnpm test -- --filter auth\n\n✓ auth middleware validates session cookies (12ms)\n✓ auth middleware rejects expired sessions (8ms)\n✓ OAuth callback exchanges code for tokens (45ms)\n✓ OAuth callback creates new user on first login (38ms)\n✓ protected routes return 401 without session (5ms)\n✓ login flow redirects to GitHub with PKCE (15ms)\n\n6 tests passed' },
+  { role:'assistant', content:"All authentication tests pass. The implementation is complete:\n\n- Backend: OAuth callback, session management, auth middleware\n- Frontend: AuthProvider, login page, protected routes\n- Tests: 6 unit tests covering the critical paths\n\nShall I push the changes and create a PR?" },
 ];
 
 let selectedId = '1';
