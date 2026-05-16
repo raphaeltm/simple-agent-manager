@@ -17,7 +17,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { FC } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 
 /* ===================================================================
    Shared styles — glassmorphism from Prototype B
@@ -26,7 +26,7 @@ import { useCallback, useEffect, useState } from 'react';
 const cardBase: React.CSSProperties = {
   background: 'rgba(19, 32, 29, 0.85)',
   border: '1px solid rgba(60, 180, 120, 0.2)',
-  borderRadius: '20px',
+  borderRadius: '8px',
   padding: '24px 20px',
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
@@ -37,8 +37,9 @@ const cardBase: React.CSSProperties = {
 const buttonPrimary: React.CSSProperties = {
   background: 'rgba(60, 180, 120, 0.25)',
   border: '1px solid rgba(60, 180, 120, 0.4)',
-  borderRadius: '12px',
+  borderRadius: '8px',
   padding: '10px 20px',
+  minHeight: '44px',
   color: 'rgba(120, 220, 170, 0.95)',
   fontWeight: 600,
   fontSize: '0.875rem',
@@ -89,6 +90,109 @@ type OnboardingCardData =
   | SetupChecklistData
   | ActionCardData
   | CelebrationCardData;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isSafeNavigateHref(href: string): boolean {
+  return href.startsWith('/') && !href.startsWith('//');
+}
+
+function isSafeExternalHref(href: string): boolean {
+  try {
+    const url = new URL(href);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isSetupStep(value: unknown): value is SetupChecklistData['steps'][number] {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.key) &&
+    isNonEmptyString(value.label) &&
+    typeof value.done === 'boolean'
+  );
+}
+
+function parseOnboardingCardData(json: string): OnboardingCardData | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed) || !isNonEmptyString(parsed.type)) {
+    return null;
+  }
+
+  if (
+    parsed.type === 'welcome' &&
+    isNonEmptyString(parsed.title) &&
+    isNonEmptyString(parsed.message)
+  ) {
+    return {
+      type: 'welcome',
+      title: parsed.title,
+      message: parsed.message,
+    };
+  }
+
+  if (
+    parsed.type === 'setup-checklist' &&
+    Array.isArray(parsed.steps) &&
+    parsed.steps.every(isSetupStep)
+  ) {
+    return {
+      type: 'setup-checklist',
+      steps: parsed.steps,
+    };
+  }
+
+  if (
+    parsed.type === 'action' &&
+    isNonEmptyString(parsed.title) &&
+    isNonEmptyString(parsed.message) &&
+    isNonEmptyString(parsed.href) &&
+    isNonEmptyString(parsed.buttonLabel) &&
+    (parsed.action === 'navigate' || parsed.action === 'link')
+  ) {
+    const safeHref =
+      parsed.action === 'navigate'
+        ? isSafeNavigateHref(parsed.href)
+        : isSafeExternalHref(parsed.href);
+    if (!safeHref) return null;
+    return {
+      type: 'action',
+      title: parsed.title,
+      message: parsed.message,
+      action: parsed.action,
+      href: parsed.href,
+      buttonLabel: parsed.buttonLabel,
+    };
+  }
+
+  if (
+    parsed.type === 'celebration' &&
+    isNonEmptyString(parsed.title) &&
+    isNonEmptyString(parsed.message)
+  ) {
+    return {
+      type: 'celebration',
+      title: parsed.title,
+      message: parsed.message,
+    };
+  }
+
+  return null;
+}
 
 /* ===================================================================
    Welcome Card
@@ -186,7 +290,7 @@ const SetupChecklistCard: FC<{ data: SetupChecklistData }> = ({ data }) => {
           return (
             <div
               key={step.key}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
               style={{
                 background: step.done
                   ? 'rgba(60, 180, 120, 0.08)'
@@ -269,15 +373,7 @@ const ActionCard: FC<{ data: ActionCardData }> = ({ data }) => {
    Celebration Card
    =================================================================== */
 
-const CelebrationCard: FC<{ data: CelebrationCardData }> = ({ data }) => {
-  const [showConfetti, setShowConfetti] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setShowConfetti(true), 200);
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
+const CelebrationCard: FC<{ data: CelebrationCardData }> = ({ data }) => (
     <div
       style={{
         ...cardBase,
@@ -293,7 +389,7 @@ const CelebrationCard: FC<{ data: CelebrationCardData }> = ({ data }) => {
         style={{
           background:
             'radial-gradient(ellipse at center, rgba(60, 180, 120, 0.08), transparent 70%)',
-          animation: showConfetti ? 'celebration-breathe 3s ease-in-out infinite' : 'none',
+          animation: 'celebration-breathe 3s ease-in-out infinite',
         }}
       />
       <div className="relative flex items-start gap-3">
@@ -322,29 +418,24 @@ const CelebrationCard: FC<{ data: CelebrationCardData }> = ({ data }) => {
         </div>
       </div>
     </div>
-  );
-};
+);
 
 /* ===================================================================
    Main renderer — parses JSON and dispatches to the right card
    =================================================================== */
 
 export function renderOnboardingCard(json: string): React.ReactNode {
-  try {
-    const data = JSON.parse(json) as OnboardingCardData;
-    switch (data.type) {
-      case 'welcome':
-        return <WelcomeCard data={data} />;
-      case 'setup-checklist':
-        return <SetupChecklistCard data={data} />;
-      case 'action':
-        return <ActionCard data={data} />;
-      case 'celebration':
-        return <CelebrationCard data={data} />;
-      default:
-        return null;
-    }
-  } catch {
-    return null;
+  const data = parseOnboardingCardData(json);
+  if (!data) return null;
+
+  switch (data.type) {
+    case 'welcome':
+      return <WelcomeCard data={data} />;
+    case 'setup-checklist':
+      return <SetupChecklistCard data={data} />;
+    case 'action':
+      return <ActionCard data={data} />;
+    case 'celebration':
+      return <CelebrationCard data={data} />;
   }
 }

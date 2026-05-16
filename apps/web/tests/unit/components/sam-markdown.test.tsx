@@ -93,6 +93,61 @@ describe('SamMarkdown', () => {
     const { container } = render(<SamMarkdown content="test" />);
     expect(container.querySelector('.sam-markdown')).not.toBeNull();
   });
+
+  it('renders onboarding-card fences as interactive cards', () => {
+    const md = [
+      '```onboarding-card',
+      '{"type":"setup-checklist","steps":[{"key":"cloud_provider","label":"Cloud credentials","done":true},{"key":"agent_key","label":"Agent API key","done":false}]}',
+      '```',
+    ].join('\n');
+
+    render(<SamMarkdown content={md} />);
+
+    expect(screen.getByText('Setup progress')).toBeInTheDocument();
+    expect(screen.getByText('1/2')).toBeInTheDocument();
+    expect(screen.getByText('Cloud credentials')).toBeInTheDocument();
+    expect(screen.getByText('Agent API key')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /onboarding-card code block/i })).not.toBeInTheDocument();
+  });
+
+  it('renders action onboarding cards with clickable buttons', () => {
+    const md = [
+      '```onboarding-card',
+      '{"type":"action","title":"Add credentials","message":"Open settings to add credentials.","action":"navigate","href":"/settings","buttonLabel":"Open Settings"}',
+      '```',
+    ].join('\n');
+
+    render(<SamMarkdown content={md} />);
+
+    expect(screen.getByText('Add credentials')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open Settings/i })).toBeInTheDocument();
+  });
+
+  it('falls back to a code block for malformed onboarding-card JSON', () => {
+    const md = [
+      '```onboarding-card',
+      '{"type":"setup-checklist","steps":[{"key":"cloud_provider","label":"Missing done"}]}',
+      '```',
+    ].join('\n');
+
+    render(<SamMarkdown content={md} />);
+
+    expect(screen.getByRole('group', { name: /onboarding-card code block/i })).toBeInTheDocument();
+    expect(screen.queryByText('Setup progress')).not.toBeInTheDocument();
+  });
+
+  it('rejects unsafe action card URLs', () => {
+    const md = [
+      '```onboarding-card',
+      '{"type":"action","title":"Unsafe","message":"Bad URL","action":"link","href":"javascript:alert(1)","buttonLabel":"Open"}',
+      '```',
+    ].join('\n');
+
+    render(<SamMarkdown content={md} />);
+
+    expect(screen.getByRole('group', { name: /onboarding-card code block/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+  });
 });
 
 describe('CopyButton (via SamMarkdown)', () => {

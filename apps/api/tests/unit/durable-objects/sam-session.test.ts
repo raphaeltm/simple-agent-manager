@@ -228,7 +228,7 @@ describe('SAM Tool Definitions', () => {
   it('exports tool definitions in Anthropic native format', async () => {
     const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
 
-    expect(SAM_TOOLS).toHaveLength(29);
+    expect(SAM_TOOLS).toHaveLength(30);
 
     for (const tool of SAM_TOOLS) {
       expect(tool).toHaveProperty('name');
@@ -243,6 +243,7 @@ describe('SAM Tool Definitions', () => {
     expect(names).toContain('get_project_status');
     expect(names).toContain('search_tasks');
     expect(names).toContain('search_conversation_history');
+    expect(names).toContain('get_account_setup_status');
   });
 
   it('get_project_status requires projectId', async () => {
