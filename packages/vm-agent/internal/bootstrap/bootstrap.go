@@ -22,6 +22,7 @@ import (
 	"github.com/workspace/vm-agent/internal/cache"
 	"github.com/workspace/vm-agent/internal/callbackretry"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 const (
@@ -2403,19 +2404,7 @@ func writeCacheOnlyOverrideConfig(cacheFrom string) (string, error) {
 }
 
 func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error) {
-	filter := fmt.Sprintf("label=%s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", filter)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("docker ps failed: %w", err)
-	}
-
-	candidates := strings.Fields(string(output))
-	if len(candidates) == 0 {
-		return "", fmt.Errorf("no running devcontainer found for label %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
-	}
-
-	return candidates[0], nil
+	return container.FindContainerByLabel(ctx, cfg.ContainerLabelKey, cfg.ContainerLabelValue)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
