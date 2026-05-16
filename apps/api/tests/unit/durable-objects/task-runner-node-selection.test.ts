@@ -18,7 +18,11 @@ type D1ResultMap = {
     last_metrics: string | null;
   }>;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
-  healthByNode?: Record<string, { health_status: string | null; last_heartbeat_at: string | null }>;
+  healthByNode?: Record<string, {
+    health_status: string | null;
+    last_heartbeat_at: string | null;
+    agent_ready_at: string | null;
+  }>;
 };
 
 function createStatement(sql: string, results: D1ResultMap) {
@@ -35,7 +39,7 @@ function createStatement(sql: string, results: D1ResultMap) {
       if (sql.includes('SELECT status, warm_since FROM nodes')) {
         return Promise.resolve(results.freshWarmNode ?? null);
       }
-      if (sql.includes('SELECT health_status, last_heartbeat_at FROM nodes')) {
+      if (sql.includes('SELECT health_status, last_heartbeat_at, agent_ready_at FROM nodes')) {
         return Promise.resolve(results.healthByNode?.[String(bound[0])] ?? null);
       }
       return Promise.resolve(null);
@@ -196,6 +200,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
         'node-large': {
           health_status: 'healthy',
           last_heartbeat_at: new Date().toISOString(),
+          agent_ready_at: new Date().toISOString(),
         },
       },
     });

@@ -356,7 +356,8 @@ describe('handleNodeAgentReady', () => {
       doSource.indexOf('export async function handleNodeAgentReady('),
       doSource.indexOf('export async function handleWorkspaceCreation(')
     );
-    expect(section).toContain('heartbeatIsRecent');
+    expect(section).toContain('isNodeAgentReadyForWorkspaceDispatch');
+    expect(section).toContain('agent_ready_at');
     expect(section).toContain('agentReadyStartedAt');
   });
 

@@ -264,7 +264,8 @@ describe('TaskRunner DO step handlers', () => {
     it('checks agent health via D1 heartbeat records', () => {
       expect(doSource).toContain('health_status');
       expect(doSource).toContain('last_heartbeat_at');
-      expect(doSource).toContain('heartbeatIsRecent');
+      expect(doSource).toContain('agent_ready_at');
+      expect(doSource).toContain('isNodeAgentReadyForWorkspaceDispatch');
     });
 
     it('schedules poll alarm if not ready', () => {

@@ -14,6 +14,7 @@ import {
 import { log } from '../../lib/logger';
 import type { NodeLifecycle } from '../node-lifecycle';
 import { parseEnvInt } from './helpers';
+import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 // =========================================================================
@@ -270,38 +271,37 @@ export async function handleNodeAgentReady(
   // POST /api/nodes/:id/ready on startup and POST /api/nodes/:id/heartbeat
   // periodically, which update healthStatus and lastHeartbeatAt in D1.
   const node = await rc.env.DATABASE.prepare(
-    `SELECT health_status, last_heartbeat_at, status FROM nodes WHERE id = ?`
+    `SELECT health_status, last_heartbeat_at, agent_ready_at, status FROM nodes WHERE id = ?`
   )
     .bind(state.stepResults.nodeId)
     .first<{
       health_status: string | null;
       last_heartbeat_at: string | null;
+      agent_ready_at: string | null;
       status: string;
     }>();
 
+  if (isNodeAgentReadyForWorkspaceDispatch(node, state.agentReadyStartedAt!)) {
+    log.info('task_runner_do.step.node_agent_ready', {
+      taskId: state.taskId,
+      nodeId: state.stepResults.nodeId,
+      elapsedMs: elapsed,
+      lastHeartbeatAt: node?.last_heartbeat_at,
+      agentReadyAt: node?.agent_ready_at,
+    });
+    await rc.advanceToStep(state, 'workspace_creation');
+    return;
+  }
+
   if (node?.health_status === 'healthy' && node.last_heartbeat_at) {
-    // Verify the heartbeat is recent (not stale from a previous boot)
-    const heartbeatTime = new Date(node.last_heartbeat_at).getTime();
-    const heartbeatIsRecent = heartbeatTime > state.agentReadyStartedAt! - 30_000;
-
-    if (heartbeatIsRecent) {
-      log.info('task_runner_do.step.node_agent_ready', {
-        taskId: state.taskId,
-        nodeId: state.stepResults.nodeId,
-        elapsedMs: elapsed,
-        lastHeartbeatAt: node.last_heartbeat_at,
-      });
-      await rc.advanceToStep(state, 'workspace_creation');
-      return;
-    }
-
     log.info('task_runner_do.step.node_agent_ready.stale_heartbeat', {
       taskId: state.taskId,
       nodeId: state.stepResults.nodeId,
       elapsedMs: elapsed,
       lastHeartbeatAt: node.last_heartbeat_at,
+      agentReadyAt: node.agent_ready_at,
       agentReadyStartedAt: new Date(state.agentReadyStartedAt!).toISOString(),
-      message: 'Node has heartbeat but it predates this provisioning cycle',
+      message: 'Node has heartbeat but no fresh /ready signal for this provisioning cycle',
     });
   }
 
@@ -325,15 +325,16 @@ export async function verifyNodeAgentHealthy(
 ): Promise<boolean> {
   try {
     const node = await rc.env.DATABASE.prepare(
-      `SELECT health_status, last_heartbeat_at FROM nodes WHERE id = ?`
+      `SELECT health_status, last_heartbeat_at, agent_ready_at FROM nodes WHERE id = ?`
     )
       .bind(nodeId)
       .first<{
         health_status: string | null;
         last_heartbeat_at: string | null;
+        agent_ready_at: string | null;
       }>();
 
-    if (!node || node.health_status !== 'healthy' || !node.last_heartbeat_at) {
+    if (!node || node.health_status !== 'healthy' || !node.last_heartbeat_at || !node.agent_ready_at) {
       return false;
     }
 
