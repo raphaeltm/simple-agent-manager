@@ -112,6 +112,66 @@ export async function listChatSessions(
   return request<ChatSessionListResponse>(endpoint);
 }
 
+// =============================================================================
+// Cross-Project Chat Sessions (D1 session_summaries)
+// =============================================================================
+
+export interface SessionSummaryItem {
+  id: string;
+  projectId: string;
+  projectName: string;
+  userId: string;
+  status: string;
+  topic: string | null;
+  taskId: string | null;
+  workspaceId: string | null;
+  messageCount: number;
+  startedAt: number;
+  lastMessageAt: number | null;
+  agentCompletedAt: number | null;
+  endedAt: number | null;
+  updatedAt: number;
+}
+
+export interface RecentChatsApiResponse {
+  sessions: SessionSummaryItem[];
+  totalActive: number;
+}
+
+export interface AllChatsApiResponse {
+  sessions: SessionSummaryItem[];
+  total: number;
+}
+
+/** Fetch recent active sessions across all projects (single D1 query). */
+export async function getRecentChats(
+  params: { limit?: number; staleThreshold?: number } = {}
+): Promise<RecentChatsApiResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params.staleThreshold !== undefined) searchParams.set('staleThreshold', String(params.staleThreshold));
+
+  const qs = searchParams.toString();
+  return request<RecentChatsApiResponse>(qs ? `/api/chats/recent?${qs}` : '/api/chats/recent');
+}
+
+/** Fetch all sessions across all projects with pagination (single D1 query). */
+export async function getAllChats(
+  params: { limit?: number; offset?: number; status?: string } = {}
+): Promise<AllChatsApiResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+  if (params.status) searchParams.set('status', params.status);
+
+  const qs = searchParams.toString();
+  return request<AllChatsApiResponse>(qs ? `/api/chats?${qs}` : '/api/chats');
+}
+
+// =============================================================================
+// Per-Project Chat Session Detail
+// =============================================================================
+
 export async function getChatSession(
   projectId: string,
   sessionId: string,

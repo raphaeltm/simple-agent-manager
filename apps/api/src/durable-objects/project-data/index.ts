@@ -772,5 +772,73 @@ export class ProjectData extends DurableObject<Env> {
       await this.env.DATABASE.prepare('UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?')
         .bind(summary.lastActivityAt, summary.activeSessionCount, new Date().toISOString(), projectId).run();
     } catch (err) { log.error('d1_summary_sync_failed', { projectId, ...serializeError(err) }); }
+
+    // Sync session summaries to D1 for cross-project queries
+    try {
+      await this.syncSessionSummariesToD1(projectId);
+    } catch (err) { log.error('d1_session_summary_sync_failed', { projectId, ...serializeError(err) }); }
+  }
+
+  /**
+   * Batch-sync all session metadata from DO SQLite to D1 session_summaries table.
+   * Only syncs sessions updated in the last 24 hours to limit batch size on active projects.
+   */
+  private async syncSessionSummariesToD1(projectId: string): Promise<void> {
+    // Look up the project owner from D1
+    const projectRow = await this.env.DATABASE.prepare('SELECT user_id FROM projects WHERE id = ?')
+      .bind(projectId).first<{ user_id: string }>();
+    if (!projectRow) return;
+    const userId = projectRow.user_id;
+
+    // Fetch recently-updated sessions from DO SQLite (last 24h)
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const rows = this.sql.exec(
+      `SELECT id, workspace_id, task_id, topic, status, message_count,
+              started_at, ended_at, updated_at, agent_completed_at,
+              (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
+       FROM chat_sessions
+       WHERE updated_at > ?
+       ORDER BY updated_at DESC
+       LIMIT 200`,
+      cutoff
+    ).toArray();
+
+    if (rows.length === 0) return;
+
+    // Batch upsert using D1 batch API
+    const stmts = rows.map((row) =>
+      this.env.DATABASE.prepare(
+        `INSERT INTO session_summaries
+           (id, project_id, user_id, status, topic, task_id, workspace_id,
+            message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           status = excluded.status,
+           topic = excluded.topic,
+           task_id = excluded.task_id,
+           workspace_id = excluded.workspace_id,
+           message_count = excluded.message_count,
+           last_message_at = excluded.last_message_at,
+           agent_completed_at = excluded.agent_completed_at,
+           ended_at = excluded.ended_at,
+           updated_at = excluded.updated_at`
+      ).bind(
+        row.id as string,
+        projectId,
+        userId,
+        row.status as string,
+        row.topic as string | null,
+        row.task_id as string | null,
+        row.workspace_id as string | null,
+        row.message_count as number,
+        row.started_at as number,
+        (row.last_message_at as number | null) ?? null,
+        row.agent_completed_at as number | null,
+        row.ended_at as number | null,
+        row.updated_at as number
+      )
+    );
+
+    await this.env.DATABASE.batch(stmts);
   }
 }

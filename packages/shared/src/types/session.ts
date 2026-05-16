@@ -61,6 +61,34 @@ export interface ChatMessage {
   createdAt: number;
 }
 
+/** D1 read-optimized session summary for cross-project queries. */
+export interface SessionSummary {
+  id: string;
+  projectId: string;
+  projectName: string;
+  userId: string;
+  status: string;
+  topic: string | null;
+  taskId: string | null;
+  workspaceId: string | null;
+  messageCount: number;
+  startedAt: number;
+  lastMessageAt: number | null;
+  agentCompletedAt: number | null;
+  endedAt: number | null;
+  updatedAt: number;
+}
+
+export interface RecentChatsResponse {
+  sessions: SessionSummary[];
+  totalActive: number;
+}
+
+export interface AllChatsResponse {
+  sessions: SessionSummary[];
+  total: number;
+}
+
 /** Many-to-many link between a chat session and an idea (task). */
 export interface SessionIdeaLink {
   sessionId: string;

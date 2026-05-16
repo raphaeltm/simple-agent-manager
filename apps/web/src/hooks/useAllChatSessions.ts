@@ -1,24 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatSessionListItem } from '../lib/api';
-import { listChatSessions,listProjects } from '../lib/api';
-import { getLastActivity } from '../lib/chat-session-utils';
+import type { SessionSummaryItem } from '../lib/api';
+import { getAllChats } from '../lib/api';
 
-/** Default max projects to fetch. Override via VITE_ALL_CHATS_PROJECT_LIMIT. */
-const DEFAULT_PROJECT_LIMIT = 50;
-/** Default max sessions per project. Override via VITE_ALL_CHATS_SESSION_LIMIT. */
-const DEFAULT_SESSION_LIMIT = 20;
-
-const PROJECT_LIMIT = parseInt(
-  import.meta.env.VITE_ALL_CHATS_PROJECT_LIMIT || String(DEFAULT_PROJECT_LIMIT),
-);
-const SESSION_LIMIT = parseInt(
-  import.meta.env.VITE_ALL_CHATS_SESSION_LIMIT || String(DEFAULT_SESSION_LIMIT),
-);
-
-export interface EnrichedChatSession extends ChatSessionListItem {
-  projectId: string;
-  projectName: string;
+export interface EnrichedChatSession extends SessionSummaryItem {
+  /** Compat: maps to startedAt for ChatSessionListItem consumers. */
+  createdAt: number;
 }
 
 interface UseAllChatSessionsResult {
@@ -29,8 +16,8 @@ interface UseAllChatSessionsResult {
 }
 
 /**
- * Fetches chat sessions from all projects via fan-out (list projects → listChatSessions per project).
- * Returns sessions enriched with projectId/projectName, sorted by lastMessageAt DESC.
+ * Fetches all chat sessions across all projects via a single D1 query.
+ * Returns sessions enriched with projectId/projectName, sorted by recency.
  */
 export function useAllChatSessions(): UseAllChatSessionsResult {
   const [sessions, setSessions] = useState<EnrichedChatSession[]>([]);
@@ -46,31 +33,15 @@ export function useAllChatSessions(): UseAllChatSessionsResult {
     setError(null);
 
     try {
-      const projectsRes = await listProjects(PROJECT_LIMIT);
+      const res = await getAllChats({ limit: 100 });
       if (cancelledRef.current || id !== fetchIdRef.current) return;
 
-      const projectList = 'projects' in projectsRes ? projectsRes.projects : [];
-
-      const sessionResults = await Promise.all(
-        projectList.map((project) =>
-          listChatSessions(project.id, { limit: SESSION_LIMIT })
-            .then((res) =>
-              res.sessions.map((s) => ({
-                ...s,
-                projectId: project.id,
-                projectName: project.name,
-              })),
-            )
-            .catch(() => [] as EnrichedChatSession[]),
-        ),
+      setSessions(
+        res.sessions.map((s) => ({
+          ...s,
+          createdAt: s.startedAt,
+        })),
       );
-
-      if (cancelledRef.current || id !== fetchIdRef.current) return;
-
-      const allSessions = sessionResults.flat();
-      allSessions.sort((a, b) => getLastActivity(b) - getLastActivity(a));
-
-      setSessions(allSessions);
       setLoading(false);
     } catch {
       if (!cancelledRef.current && id === fetchIdRef.current) {

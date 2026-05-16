@@ -1,21 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatSessionListItem } from '../lib/api';
-import { listChatSessions, listProjects } from '../lib/api';
-import {
-  getLastActivity,
-  isActiveSession,
-  isStaleSession,
-} from '../lib/chat-session-utils';
+import type { SessionSummaryItem } from '../lib/api';
+import { getRecentChats } from '../lib/api';
+import { STALE_SESSION_THRESHOLD_MS } from '../lib/chat-session-utils';
 
 /** Default polling interval when dropdown is open (ms). Override via VITE_RECENT_CHATS_POLL_MS. */
 const DEFAULT_POLL_MS = 30_000;
 /** Max sessions to show in the dropdown. Override via VITE_RECENT_CHATS_LIMIT. */
 const DEFAULT_DISPLAY_LIMIT = 8;
-/** Max projects to query. Override via VITE_RECENT_CHATS_PROJECT_LIMIT. */
-const DEFAULT_PROJECT_LIMIT = 50;
-/** Max sessions per project to query. */
-const SESSION_LIMIT = 10;
 
 const POLL_MS = parseInt(
   import.meta.env.VITE_RECENT_CHATS_POLL_MS || String(DEFAULT_POLL_MS),
@@ -23,13 +15,10 @@ const POLL_MS = parseInt(
 const DISPLAY_LIMIT = parseInt(
   import.meta.env.VITE_RECENT_CHATS_LIMIT || String(DEFAULT_DISPLAY_LIMIT),
 );
-const PROJECT_LIMIT = parseInt(
-  import.meta.env.VITE_RECENT_CHATS_PROJECT_LIMIT || String(DEFAULT_PROJECT_LIMIT),
-);
 
-export interface RecentChat extends ChatSessionListItem {
-  projectId: string;
-  projectName: string;
+export interface RecentChat extends SessionSummaryItem {
+  /** Compat: maps to startedAt for ChatSessionListItem consumers. */
+  createdAt: number;
 }
 
 interface UseRecentChatsResult {
@@ -41,7 +30,7 @@ interface UseRecentChatsResult {
 }
 
 /**
- * Fetches recent active chat sessions across all projects.
+ * Fetches recent active chat sessions across all projects via a single D1 query.
  * Polls at a configurable interval when `enabled` is true and the tab is visible.
  */
 export function useRecentChats(enabled: boolean): UseRecentChatsResult {
@@ -64,33 +53,19 @@ export function useRecentChats(enabled: boolean): UseRecentChatsResult {
     setError(null);
 
     try {
-      const projectsRes = await listProjects(PROJECT_LIMIT);
+      const res = await getRecentChats({
+        limit: DISPLAY_LIMIT,
+        staleThreshold: STALE_SESSION_THRESHOLD_MS,
+      });
       if (cancelledRef.current || id !== fetchIdRef.current) return;
 
-      const projectList = 'projects' in projectsRes ? projectsRes.projects : [];
-
-      const sessionResults = await Promise.all(
-        projectList.map((project) =>
-          listChatSessions(project.id, { limit: SESSION_LIMIT })
-            .then((res) =>
-              res.sessions.map((s) => ({
-                ...s,
-                projectId: project.id,
-                projectName: project.name,
-              })),
-            )
-            .catch(() => [] as RecentChat[]),
-        ),
+      setActiveCount(res.totalActive);
+      setChats(
+        res.sessions.map((s) => ({
+          ...s,
+          createdAt: s.startedAt,
+        })),
       );
-
-      if (cancelledRef.current || id !== fetchIdRef.current) return;
-
-      const allSessions = sessionResults.flat();
-      const active = allSessions.filter((s) => !isStaleSession(s) && isActiveSession(s));
-      active.sort((a, b) => getLastActivity(b) - getLastActivity(a));
-
-      setActiveCount(active.length);
-      setChats(active.slice(0, DISPLAY_LIMIT));
       setLoading(false);
       hasFetchedRef.current = true;
     } catch {

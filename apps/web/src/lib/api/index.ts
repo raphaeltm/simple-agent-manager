@@ -204,18 +204,23 @@ export { getProviderCatalog } from './providers';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
+  AllChatsApiResponse,
   ChatMessageResponse,
   ChatSessionDetailResponse,
   ChatSessionListItem,
   ChatSessionListResponse,
   ChatSessionResponse,
   ChatSessionTaskEmbed,
+  RecentChatsApiResponse,
+  SessionSummaryItem,
   SessionSummaryResponse,
 } from './sessions';
 export {
   cancelAgentPrompt,
   createChatSession,
+  getAllChats,
   getChatSession,
+  getRecentChats,
   listActivityEvents,
   listChatSessions,
   resetIdleTimer,

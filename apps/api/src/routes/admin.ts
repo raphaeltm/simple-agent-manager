@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
+import type { ProjectData as ProjectDataDO } from '../durable-objects/project-data';
 import type { Env } from '../env';
 import { getUserId,requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -416,6 +417,89 @@ adminRoutes.get('/health/details', (c) => {
     limits,
     bindings,
     ...(missingBindings.length > 0 && { missingBindings }),
+  });
+});
+
+/**
+ * POST /api/admin/backfill-session-summaries
+ * One-time backfill: fans out to all project DOs to read sessions,
+ * then bulk-inserts into D1 session_summaries.
+ */
+adminRoutes.post('/backfill-session-summaries', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  // Get all projects with their owners
+  const projects = await db
+    .select({ id: schema.projects.id, userId: schema.projects.userId })
+    .from(schema.projects)
+    .all();
+
+  let totalSynced = 0;
+  const projectErrors: Array<{ projectId: string; error: string }> = [];
+
+  for (const project of projects) {
+    try {
+      const doId = c.env.PROJECT_DATA.idFromName(project.id);
+      const stub = c.env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectDataDO>;
+
+      // List all sessions from the DO (up to 1000)
+      const result = await stub.listSessions(null, 1000, 0) as { sessions: Record<string, unknown>[]; total: number };
+
+      if (result.sessions.length === 0) continue;
+
+      // Batch upsert to D1
+      const stmts = result.sessions.map((session: Record<string, unknown>) =>
+        c.env.DATABASE.prepare(
+          `INSERT INTO session_summaries
+             (id, project_id, user_id, status, topic, task_id, workspace_id,
+              message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             status = excluded.status,
+             topic = excluded.topic,
+             task_id = excluded.task_id,
+             workspace_id = excluded.workspace_id,
+             message_count = excluded.message_count,
+             last_message_at = excluded.last_message_at,
+             agent_completed_at = excluded.agent_completed_at,
+             ended_at = excluded.ended_at,
+             updated_at = excluded.updated_at`
+        ).bind(
+          session.id as string,
+          project.id,
+          project.userId,
+          session.status as string,
+          (session.topic as string | null) ?? null,
+          (session.taskId as string | null) ?? null,
+          (session.workspaceId as string | null) ?? null,
+          (session.messageCount as number) ?? 0,
+          (session.startedAt as number) ?? Date.now(),
+          (session.lastMessageAt as number | null) ?? null,
+          (session.agentCompletedAt as number | null) ?? null,
+          (session.endedAt as number | null) ?? null,
+          (session.updatedAt ?? session.startedAt ?? Date.now()) as number
+        )
+      );
+
+      // D1 batch limit is 100 statements; chunk if needed
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
+        await c.env.DATABASE.batch(stmts.slice(i, i + BATCH_SIZE));
+      }
+
+      totalSynced += result.sessions.length;
+    } catch (err) {
+      projectErrors.push({
+        projectId: project.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return c.json({
+    totalProjects: projects.length,
+    totalSessionsSynced: totalSynced,
+    errors: projectErrors,
   });
 });
 

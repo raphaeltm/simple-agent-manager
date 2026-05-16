@@ -54,43 +54,43 @@ With 20 projects = 21 HTTP requests per load. Each DO RPC runs N+2 SQL queries +
 ## Implementation Checklist
 
 ### Phase 1: D1 Migration + Schema
-- [ ] Create `0049_session_summaries.sql` with table + indexes
-- [ ] Add Drizzle schema definition in `apps/api/src/db/schema.ts`
+- [x] Create `0049_session_summaries.sql` with table + indexes
+- [x] Add Drizzle schema definition in `apps/api/src/db/schema.ts`
 
 ### Phase 2: Shared Types
-- [ ] Add `SessionSummary` type to `packages/shared/src/types/session.ts`
-- [ ] Export from `packages/shared/src/types/index.ts`
+- [x] Add `SessionSummary` type to `packages/shared/src/types/session.ts`
+- [x] Export from `packages/shared/src/types/index.ts`
 
 ### Phase 3: D1 Write Path (DO → D1 Sync)
-- [ ] Create `apps/api/src/services/session-summary-sync.ts` with upsert/update functions
-- [ ] Add session-level sync to `ProjectData.syncSummaryToD1()` (piggyback on existing debounce)
-- [ ] Sync on: session created (INSERT), stopped/failed (UPDATE status, ended_at), topic change (UPDATE topic), workspace linked (UPDATE workspace_id), agent completed (UPDATE agent_completed_at)
-- [ ] Start with status-transition-only sync for message_count/last_message_at (option 1)
+- [x] Create `apps/api/src/services/session-summary-sync.ts` with upsert/update functions
+- [x] Add session-level sync to `ProjectData.syncSummaryToD1()` (piggyback on existing debounce)
+- [x] Sync on: session created (INSERT), stopped/failed (UPDATE status, ended_at), topic change (UPDATE topic), workspace linked (UPDATE workspace_id), agent completed (UPDATE agent_completed_at)
+- [x] Start with status-transition-only sync for message_count/last_message_at (option 1)
 
 ### Phase 4: API Endpoints
-- [ ] Create `apps/api/src/routes/chats.ts` with cross-project chat routes
-- [ ] `GET /api/chats/recent?limit=8&status=active&staleThreshold=10800000` — single D1 query for popover
-- [ ] `GET /api/chats?limit=50&offset=0` — paginated all-sessions for /chats page
-- [ ] Both join with projects table for project_name, scoped to authenticated user
-- [ ] Mount in `apps/api/src/index.ts`
+- [x] Create `apps/api/src/routes/chats.ts` with cross-project chat routes
+- [x] `GET /api/chats/recent?limit=8&status=active&staleThreshold=10800000` — single D1 query for popover
+- [x] `GET /api/chats?limit=50&offset=0` — paginated all-sessions for /chats page
+- [x] Both join with projects table for project_name, scoped to authenticated user
+- [x] Mount in `apps/api/src/index.ts`
 
 ### Phase 5: Admin Backfill Endpoint
-- [ ] Add `POST /api/admin/backfill-session-summaries` to admin routes
-- [ ] Fan out to all DOs, read sessions, write to D1
+- [x] Add `POST /api/admin/backfill-session-summaries` to admin routes
+- [x] Fan out to all DOs, read sessions, write to D1
 
 ### Phase 6: Frontend Changes
-- [ ] Add `getRecentChats()` and `getAllChats()` API functions in `apps/web/src/lib/api/sessions.ts`
-- [ ] Rewrite `useRecentChats.ts` to use `GET /api/chats/recent` (single request)
-- [ ] Rewrite `useAllChatSessions.ts` to use `GET /api/chats` (single request)
-- [ ] Ensure `RecentChat` / `EnrichedChatSession` types still satisfy consumers
-- [ ] Delete fan-out code from both hooks
+- [x] Add `getRecentChats()` and `getAllChats()` API functions in `apps/web/src/lib/api/sessions.ts`
+- [x] Rewrite `useRecentChats.ts` to use `GET /api/chats/recent` (single request)
+- [x] Rewrite `useAllChatSessions.ts` to use `GET /api/chats` (single request)
+- [x] Ensure `RecentChat` / `EnrichedChatSession` types still satisfy consumers
+- [x] Delete fan-out code from both hooks
 
 ### Phase 7: Tests
-- [ ] Integration test for `GET /api/chats/recent` — verifies D1 query, user scoping, filtering
-- [ ] Integration test for `GET /api/chats` — verifies pagination, sorting
-- [ ] Integration test for session summary sync — verifies D1 rows created/updated on session mutations
-- [ ] Unit test for the backfill admin endpoint
-- [ ] Frontend hook tests — verify new hooks use the new API
+- [x] Integration test for `GET /api/chats/recent` — verifies D1 query, user scoping, filtering
+- [x] Integration test for `GET /api/chats` — verifies pagination, sorting
+- [ ] Integration test for session summary sync — verifies D1 rows created/updated on session mutations (deferred: requires full DO test harness with D1 binding; sync is tested end-to-end via staging)
+- [ ] Unit test for the backfill admin endpoint (deferred: endpoint relies on DO RPC which requires Miniflare DO binding)
+- [ ] Frontend hook tests — verify new hooks use the new API (deferred: hooks are thin wrappers over API calls; verified via staging)
 
 ## Acceptance Criteria
 

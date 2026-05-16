@@ -1446,3 +1446,44 @@ export const trials = sqliteTable(
 
 export type TrialRow = typeof trials.$inferSelect;
 export type NewTrialRow = typeof trials.$inferInsert;
+
+// =============================================================================
+// Session Summaries (D1 read-optimized index for cross-project session queries)
+// =============================================================================
+
+export const sessionSummaries = sqliteTable(
+  'session_summaries',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('active'),
+    topic: text('topic'),
+    taskId: text('task_id'),
+    workspaceId: text('workspace_id'),
+    messageCount: integer('message_count').notNull().default(0),
+    startedAt: integer('started_at').notNull(),
+    lastMessageAt: integer('last_message_at'),
+    agentCompletedAt: integer('agent_completed_at'),
+    endedAt: integer('ended_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    userRecentIdx: index('idx_session_summaries_user_recent').on(
+      table.userId,
+      table.status,
+      table.updatedAt
+    ),
+    projectIdx: index('idx_session_summaries_project').on(
+      table.projectId,
+      table.updatedAt
+    ),
+  })
+);
+
+export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
+export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
