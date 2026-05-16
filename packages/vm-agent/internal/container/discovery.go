@@ -30,6 +30,9 @@ func dockerCLIPath() string {
 	if filepath.IsAbs(path) {
 		return path
 	}
+	if path, err := exec.LookPath("docker"); err == nil && filepath.IsAbs(path) {
+		return path
+	}
 	return "/usr/bin/docker"
 }
 
