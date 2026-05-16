@@ -32,10 +32,6 @@ import type {
   ToolContext,
 } from './types';
 
-// =============================================================================
-// System prompt
-// =============================================================================
-
 export const SAM_SYSTEM_PROMPT = `You are SAM — Simple Agent Manager. You are a senior engineering manager who orchestrates AI coding agents across multiple projects.
 
 You have access to all of the user's projects, tasks, missions, and agents. You can dispatch work, check progress, coordinate multi-project efforts, and answer questions about what's happening across their engineering organization.
@@ -149,17 +145,9 @@ When guiding users through onboarding steps, use special markdown code blocks to
 
 Use these cards to make the onboarding visual and interactive. Mix them naturally into your conversational messages.`;
 
-// =============================================================================
-// SSE encoding
-// =============================================================================
-
 function encodeSseEvent(event: SamSseEvent): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
 }
-
-// =============================================================================
-// Model detection
-// =============================================================================
 
 function isAnthropicModel(model: string): boolean {
   return model.startsWith('claude-');
@@ -169,18 +157,10 @@ function isWorkersAIModel(model: string): boolean {
   return model.startsWith('@cf/') || model.startsWith('@hf/');
 }
 
-// =============================================================================
-// OpenAI message/tool types
-// =============================================================================
-
 interface OpenAITool {
   type: 'function';
   function: { name: string; description: string; parameters: unknown };
 }
-
-// =============================================================================
-// Format converters
-// =============================================================================
 
 /** Convert Anthropic-format tool definitions to OpenAI function-calling format. */
 function toOpenAITools(tools: AnthropicToolDef[]): OpenAITool[] {
@@ -250,10 +230,6 @@ function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
   return messages;
 }
 
-// =============================================================================
-// Gateway URL builders
-// =============================================================================
-
 function buildWorkersAIGatewayUrl(env: Env): string {
   const gatewayId = env.AI_GATEWAY_ID;
   if (gatewayId) {
@@ -270,10 +246,6 @@ function buildAnthropicGatewayUrl(env: Env): string {
   return 'https://api.anthropic.com/v1/messages';
 }
 
-// =============================================================================
-// Credential helpers
-// =============================================================================
-
 async function getAnthropicApiKey(env: Env): Promise<string> {
   const { drizzle } = await import('drizzle-orm/d1');
   const db = drizzle(env.DATABASE);
@@ -284,10 +256,6 @@ async function getAnthropicApiKey(env: Env): Promise<string> {
   }
   return cred.credential;
 }
-
-// =============================================================================
-// LLM call — routes to Workers AI or Anthropic based on model prefix
-// =============================================================================
 
 /** Default fetch timeout for LLM calls (configurable via SAM_LLM_TIMEOUT_MS). */
 const DEFAULT_LLM_TIMEOUT_MS = 120_000;
@@ -429,10 +397,6 @@ async function callWorkersAILLM(
     }),
   });
 }
-
-// =============================================================================
-// Stream parsers
-// =============================================================================
 
 /**
  * Process an Anthropic SSE stream (native Anthropic event format).
@@ -628,10 +592,6 @@ async function processOpenAIStream(
 
   return { textContent, toolCalls };
 }
-
-// =============================================================================
-// Agent loop
-// =============================================================================
 
 /** Configuration for a customized agent loop. */
 export interface AgentLoopOptions {
