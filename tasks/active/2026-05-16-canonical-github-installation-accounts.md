@@ -34,7 +34,7 @@ If the only linked SAM user for an org installation unlinks or deletes their acc
 - [x] Update shared org discovery to read active canonical organization rows narrowed by signed-in user's org memberships, then verify candidates with the user's token before creating per-user rows.
 - [x] Preserve per-user unlink semantics and document that account deletion must delete only per-user `github_installations` rows.
 - [x] Add focused tests for canonical upsert/backfill behavior, multi-user linking, per-user unlink isolation, canonical shared discovery, and uninstall cleanup.
-- [ ] Run migration safety, lint/typecheck/tests/build.
+- [x] Run migration safety, lint/typecheck/tests/build.
 - [ ] Run required specialist reviews and staging verification before PR/merge.
 
 ## Acceptance Criteria
