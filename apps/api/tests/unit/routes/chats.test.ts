@@ -4,7 +4,7 @@
  * Mounts chatsRoutes on a Hono app, mocks auth + D1, and verifies HTTP behavior.
  */
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
@@ -34,8 +34,6 @@ function makeMockD1(options: {
 }
 
 describe('chats routes', () => {
-  let app: Hono<{ Bindings: Env }>;
-
   function buildApp(db: D1Database) {
     const a = new Hono<{ Bindings: Env }>();
     a.onError((err, c) => {
