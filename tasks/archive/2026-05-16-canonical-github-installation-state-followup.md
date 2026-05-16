@@ -49,14 +49,14 @@ organization row for the same external installation.
 
 ## Implementation Checklist
 
-- [ ] Add a forward D1 repair migration that reselects canonical metadata from
+- [x] Add a forward D1 repair migration that reselects canonical metadata from
   existing per-user links, deduping by external `installation_id` and preferring
   organization rows over personal rows.
-- [ ] Keep the migration additive/idempotent and avoid destructive table
+- [x] Keep the migration additive/idempotent and avoid destructive table
   changes.
-- [ ] Extend the migration test to apply the canonical migration sequence and
+- [x] Extend the migration test to apply the canonical migration sequence and
   prove organization metadata wins over a newer personal duplicate.
-- [ ] Run focused API tests and migration safety checks.
+- [x] Run focused API tests and migration safety checks.
 - [ ] Run required specialist reviews and staging verification before PR/merge.
 
 ## Acceptance Criteria
