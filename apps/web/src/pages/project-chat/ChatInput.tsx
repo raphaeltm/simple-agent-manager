@@ -504,6 +504,7 @@ export function ChatInput({
           onSave={async (data) => {
             await onUpdateProfile(selectedProfile.id, data as UpdateAgentProfileRequest);
           }}
+          projectId={projectId}
         />
       )}
     </div>

@@ -75,11 +75,16 @@ export {
   listAgentProfiles,
   listAgents,
   listProjectAgentCredentials,
+  deleteProfileRuntimeEnvVar,
+  deleteProfileRuntimeFile,
+  getProfileRuntimeConfig,
   saveAgentCredential,
   saveAgentSettings,
   saveProjectAgentCredential,
   toggleAgentCredential,
   updateAgentProfile,
+  upsertProfileRuntimeEnvVar,
+  upsertProfileRuntimeFile,
 } from './agents';
 export { getCurrentUser } from './auth';
 export { API_URL, ApiClientError, request } from './client';

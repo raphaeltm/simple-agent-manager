@@ -4,6 +4,7 @@ import { Button, Dialog,Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect,useState } from 'react';
 
 import { ModelSelect } from '../ModelSelect';
+import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
 const DEFAULT_AGENT_TYPE = AGENT_CATALOG[0]!.id;
@@ -14,6 +15,8 @@ interface ProfileFormDialogProps {
   /** If provided, the form is in edit mode. Otherwise create mode. */
   profile?: AgentProfile | null;
   onSave: (data: CreateAgentProfileRequest | UpdateAgentProfileRequest) => Promise<void>;
+  /** Required for loading profile runtime assets in edit mode. */
+  projectId: string;
 }
 
 const PERMISSION_MODES = [
@@ -48,6 +51,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   onClose,
   profile,
   onSave,
+  projectId,
 }) => {
   const isEdit = !!profile;
 
@@ -333,6 +337,19 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           </label>
         </div>
       </div>
+
+      {/* Runtime Environment (edit mode only) */}
+      {isEdit && profile && (
+        <>
+          <div className="border-t border-border-default pt-3 mt-3">
+            <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">Runtime Environment</span>
+            <p className="m-0 mt-1 text-xs text-fg-muted">
+              Env vars and files injected into workspaces using this profile.
+            </p>
+          </div>
+          <ProfileRuntimeSection projectId={projectId} profileId={profile.id} />
+        </>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2 mt-6 justify-end">

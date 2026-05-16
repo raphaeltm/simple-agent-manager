@@ -487,6 +487,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           onSave={async (data) => {
             await handleUpdateProfile(selectedProfile.id, data as UpdateAgentProfileRequest);
           }}
+          projectId={projectId}
         />
       )}
     </div>

@@ -14,6 +14,8 @@ interface ProfileListProps {
   onDeleteProfile: (profileId: string) => Promise<void>;
   /** Hide the built-in header when the parent provides its own heading */
   hideHeader?: boolean;
+  /** Project ID — needed for profile runtime asset management */
+  projectId: string;
 }
 
 export const ProfileList: FC<ProfileListProps> = ({
@@ -24,6 +26,7 @@ export const ProfileList: FC<ProfileListProps> = ({
   onUpdateProfile,
   onDeleteProfile,
   hideHeader,
+  projectId,
 }) => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<AgentProfile | null>(null);
@@ -189,6 +192,7 @@ export const ProfileList: FC<ProfileListProps> = ({
         onClose={() => { setFormOpen(false); setEditingProfile(null); }}
         profile={editingProfile}
         onSave={handleSave}
+        projectId={projectId}
       />
     </div>
   );

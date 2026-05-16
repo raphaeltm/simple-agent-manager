@@ -24,6 +24,7 @@ export function ProjectProfiles() {
         onUpdateProfile={updateProfile}
         onDeleteProfile={deleteProfile}
         hideHeader
+        projectId={projectId}
       />
     </div>
   );

@@ -4,9 +4,12 @@ import type {
   AgentProfile,
   AgentSettingsResponse,
   CreateAgentProfileRequest,
+  ProjectRuntimeConfigResponse,
   SaveAgentCredentialRequest,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpsertProjectRuntimeEnvVarRequest,
+  UpsertProjectRuntimeFileRequest,
 } from '@simple-agent-manager/shared';
 
 import { API_URL, request } from './client';
@@ -180,4 +183,68 @@ export async function deleteAgentProfile(
   await request(`/api/projects/${projectId}/agent-profiles/${profileId}`, {
     method: 'DELETE',
   });
+}
+
+// =============================================================================
+// Profile Runtime Assets (Env Vars & Files)
+// =============================================================================
+
+export async function getProfileRuntimeConfig(
+  projectId: string,
+  profileId: string,
+): Promise<ProjectRuntimeConfigResponse> {
+  const [envRes, filesRes] = await Promise.all([
+    request<{ envVars: ProjectRuntimeConfigResponse['envVars'] }>(
+      `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars`,
+    ),
+    request<{ files: ProjectRuntimeConfigResponse['files'] }>(
+      `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files`,
+    ),
+  ]);
+  return { envVars: envRes.envVars, files: filesRes.files };
+}
+
+export async function upsertProfileRuntimeEnvVar(
+  projectId: string,
+  profileId: string,
+  data: UpsertProjectRuntimeEnvVarRequest,
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(
+    `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars`,
+    { method: 'POST', body: JSON.stringify(data) },
+  );
+}
+
+export async function deleteProfileRuntimeEnvVar(
+  projectId: string,
+  profileId: string,
+  envKey: string,
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(
+    `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars/${encodeURIComponent(envKey)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function upsertProfileRuntimeFile(
+  projectId: string,
+  profileId: string,
+  data: UpsertProjectRuntimeFileRequest,
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(
+    `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files`,
+    { method: 'POST', body: JSON.stringify(data) },
+  );
+}
+
+export async function deleteProfileRuntimeFile(
+  projectId: string,
+  profileId: string,
+  path: string,
+): Promise<ProjectRuntimeConfigResponse> {
+  const params = new URLSearchParams({ path });
+  return request<ProjectRuntimeConfigResponse>(
+    `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files?${params.toString()}`,
+    { method: 'DELETE' },
+  );
 }
