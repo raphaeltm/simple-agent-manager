@@ -59,6 +59,8 @@ const CODEX_MODELS: ModelGroup[] = [
   {
     label: 'GPT-5 (Latest)',
     models: [
+      { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro', group: 'GPT-5 (Latest)' },
+      { id: 'gpt-5.5', name: 'GPT-5.5', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.4', name: 'GPT-5.4', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', group: 'GPT-5 (Latest)' },
