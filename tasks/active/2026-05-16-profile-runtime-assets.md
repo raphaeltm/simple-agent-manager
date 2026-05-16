@@ -29,7 +29,7 @@ The referenced design note `docs/notes/2026-05-16-layered-env-secrets-data-flow.
 - [x] Merge project + profile runtime assets in the workspace runtime callback, with profile overrides.
 - [x] Add MCP tools to add, remove, and list profile env vars.
 - [x] Add unit/integration tests for merge behavior, CRUD validation, secret encryption, and dispatch/runtime asset propagation.
-- [ ] Run quality checks and migration safety checks.
+- [x] Run quality checks and migration safety checks.
 
 ## Acceptance Criteria
 
