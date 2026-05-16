@@ -1,4 +1,5 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
+import { Card } from '@simple-agent-manager/ui';
 import {
   AlertCircle,
   Calendar,
@@ -57,9 +58,10 @@ export const TriggerCard: FC<TriggerCardProps> = ({
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
+  const disabledClass = trigger.status === 'disabled' ? 'opacity-60' : '';
 
   return (
-    <div className="border border-border-default rounded-lg p-4 bg-surface hover:bg-surface-hover transition-colors duration-150">
+    <Card variant="glass" className={`p-4 hover:bg-surface-hover transition-colors duration-150 ${disabledClass}`}>
       {/* Header row: name + status */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -176,6 +178,6 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           View History
         </button>
       </div>
-    </div>
+    </Card>
   );
 };

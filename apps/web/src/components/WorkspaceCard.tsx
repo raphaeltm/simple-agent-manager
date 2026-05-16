@@ -75,7 +75,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
   const overflowItems = getWorkspaceActions(workspace, { onStop, onRestart, onDelete });
 
   return (
-    <Card className="transition-[border-color] duration-150" style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
+    <Card variant="glass" className="transition-[border-color] duration-150" style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
       <div className="flex items-center gap-3">
         {/* Main content */}
         <div className="flex-1 min-w-0 flex items-center gap-3">

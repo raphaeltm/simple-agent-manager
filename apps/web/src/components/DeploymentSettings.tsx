@@ -148,7 +148,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
 
   if (loading) {
     return (
-      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+      <section className="bg-[rgba(8,15,12,0.3)] backdrop-blur-[12px] rounded-lg border border-[rgba(34,197,94,0.08)] p-4 grid gap-3">
         <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>
           Deploy to Cloud
         </HeadingTag>
@@ -161,7 +161,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
   }
 
   return (
-    <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+    <section className="bg-[rgba(8,15,12,0.3)] backdrop-blur-[12px] rounded-lg border border-[rgba(34,197,94,0.08)] p-4 grid gap-3">
       <div>
         <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>
           Deploy to Cloud

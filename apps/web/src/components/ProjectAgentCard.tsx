@@ -16,7 +16,7 @@ import {
   AGENT_PERMISSION_MODE_LABELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
-import { Alert, Button, StatusBadge } from '@simple-agent-manager/ui';
+import { Alert, Button, Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useEffect, useState } from 'react';
 
 import { AgentKeyCard } from './AgentKeyCard';
@@ -138,8 +138,9 @@ export function ProjectAgentCard({
     hasCredentialOverride || hasUserCredential ? 'connected' : 'disconnected';
 
   return (
-    <div
-      className="border border-border-default rounded-md p-4 flex flex-col gap-4"
+    <Card
+      variant="glass"
+      className="p-4 flex flex-col gap-4"
       data-testid={`project-agent-card-${agent.id}`}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -282,6 +283,6 @@ export function ProjectAgentCard({
           </Button>
         </div>
       </section>
-    </div>
+    </Card>
   );
 }

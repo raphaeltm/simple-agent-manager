@@ -102,6 +102,27 @@
   .min-h-screen { min-height: var(--sam-app-height); }
 }
 
+@keyframes task-running-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(34, 197, 94, 0.18),
+      0 0 18px rgba(34, 197, 94, 0.12);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(34, 197, 94, 0.34),
+      0 0 28px rgba(34, 197, 94, 0.24);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[task-running-glow_2\.4s_ease-in-out_infinite\] {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}
+
 /* ── Divide utility (uses SAM border color) ── */
 @layer utilities {
   .divide-y > * + * { border-top: 1px solid var(--sam-color-border-default); }

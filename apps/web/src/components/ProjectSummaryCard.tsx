@@ -49,7 +49,7 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/projects/${project.id}`); } }}
     >
-    <Card className="py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))]">
+    <Card variant="glass" className="py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))]">
       <div className="flex items-center gap-3">
         {/* Status + main info */}
         <div className="flex-1 min-w-0 flex items-center gap-3">

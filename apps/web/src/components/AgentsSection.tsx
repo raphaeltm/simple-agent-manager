@@ -161,7 +161,7 @@ export function AgentsSection() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="bg-[rgba(8,15,12,0.3)] backdrop-blur-[12px] rounded-lg border border-[rgba(34,197,94,0.08)] p-4 flex flex-col gap-4">
       {agents.map((agent) => {
         const agentCredentials = credentials.filter((c) => c.agentType === agent.id);
         return (

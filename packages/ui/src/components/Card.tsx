@@ -1,9 +1,7 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { ComponentPropsWithoutRef } from 'react';
 
-interface CardProps {
-  children: ReactNode;
+interface CardProps extends ComponentPropsWithoutRef<'div'> {
   className?: string;
-  style?: CSSProperties;
   variant?: 'default' | 'glass';
 }
 
@@ -12,11 +10,11 @@ const variantClasses: Record<NonNullable<CardProps['variant']>, string> = {
   glass: 'glass-surface glass-card-glow',
 };
 
-export function Card({ children, className = '', style, variant = 'default' }: CardProps) {
+export function Card({ children, className = '', variant = 'default', ...props }: CardProps) {
   return (
     <div
       className={`${variantClasses[variant]} rounded-lg shadow-sm ${className}`}
-      style={style}
+      {...props}
     >
       {children}
     </div>
