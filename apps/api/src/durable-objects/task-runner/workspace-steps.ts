@@ -165,6 +165,9 @@ async function createAndProvisionWorkspace(
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
   await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId);
+  await rc.env.DATABASE.prepare(
+    `UPDATE workspaces SET dispatched_at = ? WHERE id = ?`
+  ).bind(new Date().toISOString(), workspaceId).run();
   await rc.ctx.storage.put('state', state);
 }
 
