@@ -1,8 +1,9 @@
 -- Canonical GitHub App installation account state.
 --
--- `github_installations` remains the per-user SAM linkage table. Do not use
--- account deletion or per-user unlink flows to remove rows from this table:
--- shared organization installation discovery depends on this canonical state.
+-- `github_installations` remains the per-user SAM linkage table. Account
+-- deletion or per-user unlink flows may delete those per-user rows, but must
+-- never remove canonical `github_installation_accounts` rows: shared
+-- organization installation discovery depends on this canonical state.
 
 CREATE TABLE IF NOT EXISTS github_installation_accounts (
   installation_id TEXT PRIMARY KEY,

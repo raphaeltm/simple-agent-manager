@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { githubRoutes } from '../../../src/routes/github';
 import {
@@ -28,6 +29,10 @@ const mocks = vi.hoisted(() => ({
   insertError: null as unknown,
   deletedRows: [] as unknown[],
   updatedRows: [] as unknown[],
+  selectTables: [] as string[],
+  insertTables: [] as string[],
+  deleteTables: [] as string[],
+  updateTables: [] as string[],
   log: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -106,6 +111,10 @@ describe('GitHub App installation sharing', () => {
     upsertedRows = [];
     mocks.deletedRows = [];
     mocks.updatedRows = [];
+    mocks.selectTables = [];
+    mocks.insertTables = [];
+    mocks.deleteTables = [];
+    mocks.updateTables = [];
     mocks.optionalAuthUser = { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null };
     mocks.insertError = null;
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
@@ -113,6 +122,13 @@ describe('GitHub App installation sharing', () => {
     mocks.getUserAccessibleInstallations.mockResolvedValue([]);
     mocks.verifyUserInstallationAccess.mockResolvedValue(true);
     mocks.verifyWebhookSignature.mockResolvedValue(true);
+
+    const getTableName = (table: unknown): string => {
+      if (table === schema.githubInstallations) return 'github_installations';
+      if (table === schema.githubInstallationAccounts) return 'github_installation_accounts';
+      if (table === schema.users) return 'users';
+      return 'unknown';
+    };
 
     const makeSelectBuilder = () => {
       const fromBuilder = {
@@ -123,15 +139,19 @@ describe('GitHub App installation sharing', () => {
         ),
       };
       return {
-        from: vi.fn(() => fromBuilder),
+        from: vi.fn((table: unknown) => {
+          mocks.selectTables.push(getTableName(table));
+          return fromBuilder;
+        }),
       };
     };
 
-    const makeInsertBuilder = () => ({
+    const makeInsertBuilder = (table: unknown) => ({
       values: vi.fn((row: unknown) => {
         if (mocks.insertError && row && typeof row === 'object' && 'userId' in row) {
           throw mocks.insertError;
         }
+        mocks.insertTables.push(getTableName(table));
         insertedRows.push(row);
         const builder = {
           onConflictDoUpdate: vi.fn((config: unknown) => {
@@ -143,9 +163,10 @@ describe('GitHub App installation sharing', () => {
       }),
     });
 
-    const makeDeleteBuilder = () => ({
+    const makeDeleteBuilder = (table: unknown) => ({
       where: vi.fn(() => {
-        mocks.deletedRows.push({ type: 'where' });
+        mocks.deleteTables.push(getTableName(table));
+        mocks.deletedRows.push({ type: 'where', table: getTableName(table) });
         return Object.assign(Promise.resolve(undefined), {
           returning: vi.fn(() => {
             const rows = whereResponses.shift() ?? [];
@@ -156,10 +177,11 @@ describe('GitHub App installation sharing', () => {
       }),
     });
 
-    const makeUpdateBuilder = () => ({
+    const makeUpdateBuilder = (table: unknown) => ({
       set: vi.fn((row: unknown) => ({
         where: vi.fn(() => {
-          mocks.updatedRows.push(row);
+          mocks.updateTables.push(getTableName(table));
+          mocks.updatedRows.push({ table: getTableName(table), row });
           return Promise.resolve(undefined);
         }),
       })),
@@ -167,9 +189,9 @@ describe('GitHub App installation sharing', () => {
 
     const mockDB = {
       select: vi.fn(() => makeSelectBuilder()),
-      insert: vi.fn(() => makeInsertBuilder()),
-      delete: vi.fn(() => makeDeleteBuilder()),
-      update: vi.fn(() => makeUpdateBuilder()),
+      insert: vi.fn((table: unknown) => makeInsertBuilder(table)),
+      delete: vi.fn((table: unknown) => makeDeleteBuilder(table)),
+      update: vi.fn((table: unknown) => makeUpdateBuilder(table)),
     };
 
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
@@ -433,9 +455,11 @@ describe('GitHub App installation sharing', () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true });
     expect(mocks.deletedRows).toEqual([
-      { type: 'where' },
+      { type: 'where', table: 'github_installations' },
       { type: 'returning', rows: [existingInstallationRow()] },
     ]);
+    expect(mocks.deleteTables).toEqual(['github_installations']);
+    expect(mocks.updateTables).toEqual([]);
     expect(mocks.updatedRows).toEqual([]);
   });
 
@@ -494,11 +518,16 @@ describe('GitHub App installation sharing', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(mocks.deletedRows).toEqual([{ type: 'where' }]);
+    expect(mocks.deletedRows).toEqual([{ type: 'where', table: 'github_installations' }]);
+    expect(mocks.deleteTables).toEqual(['github_installations']);
+    expect(mocks.updateTables).toEqual(['github_installation_accounts']);
     expect(mocks.updatedRows).toEqual([
       expect.objectContaining({
-        uninstalledAt: expect.any(String),
-        updatedAt: expect.any(String),
+        table: 'github_installation_accounts',
+        row: expect.objectContaining({
+          uninstalledAt: expect.any(String),
+          updatedAt: expect.any(String),
+        }),
       }),
     ]);
   });
@@ -607,6 +636,7 @@ describe('GitHub App installation sharing', () => {
       flow: 'shared-org-discovery',
       userId: 'user-1',
     });
+    expect(mocks.selectTables).toContain('github_installation_accounts');
     expect(verifyUserInstallationAccess).toHaveBeenCalledWith('github-user-token', '120081765', {
       flow: 'shared-org-discovery',
       userId: 'user-1',
