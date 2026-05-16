@@ -806,6 +806,77 @@ a { color: inherit; text-decoration: none; }
   transition: background 0.15s, border-color 0.15s;
 }
 .agent-working .cancel-btn:hover { background: var(--sam-danger-tint); border-color: rgba(239,68,68,0.3); }
+
+/* ─── Accessibility: Reduced Transparency ─── */
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface,
+  .session-header,
+  .follow-up-area {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(8, 15, 12, 0.95) !important;
+  }
+  .glass-surface::before,
+  .glass-surface::after,
+  .session-header::before,
+  .session-header::after {
+    display: none !important;
+  }
+}
+
+/* ─── Accessibility: High Contrast ─── */
+@media (prefers-contrast: more) {
+  .glass-surface,
+  .session-header,
+  .follow-up-area {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #0a0f0d !important;
+    border-color: rgba(34, 197, 94, 0.4) !important;
+  }
+  .glass-surface::before,
+  .glass-surface::after,
+  .session-header::before,
+  .session-header::after {
+    display: none !important;
+  }
+  .message-content,
+  .message-text {
+    color: #fff !important;
+  }
+  .message-time,
+  .session-meta {
+    color: #ccc !important;
+  }
+}
+
+/* ─── Accessibility: Reduced Motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  .drawer-panel,
+  .nav-drawer-panel,
+  .session-details {
+    transition: none !important;
+  }
+}
+
+/* ─── Fallback: No backdrop-filter support ─── */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-surface,
+  .session-header,
+  .follow-up-area {
+    background: rgba(8, 15, 12, 0.92) !important;
+  }
+  .glass-surface::before,
+  .glass-surface::after,
+  .session-header::before,
+  .session-header::after {
+    display: none !important;
+  }
+}
 </style>
 </head>
 <body>
