@@ -15,6 +15,35 @@
   --sam-color-bg-inset: #0e1a17;
   --sam-color-bg-page: #0e1a17;
 
+  /* Glass backdrop blur values */
+  --sam-glass-blur-chrome: 20px;
+  --sam-glass-blur-surface: 24px;
+  --sam-glass-blur-modal: 24px;
+
+  /* Glass background colors (rgba base: 8, 15, 12) */
+  --sam-glass-bg-chrome: rgba(8, 15, 12, 0.55);
+  --sam-glass-bg-surface: rgba(8, 15, 12, 0.65);
+  --sam-glass-bg-modal: rgba(8, 15, 12, 0.55);
+
+  /* Glass saturate multiplier */
+  --sam-glass-saturate: 1.35;
+
+  /* Edge glow properties */
+  --sam-glass-glow-color: rgba(34, 197, 94, 0.5);
+  --sam-glass-glow-width: 3px;
+  --sam-glass-glow-blur: 2px;
+
+  /* Glass border */
+  --sam-glass-border-color: rgba(34, 197, 94, 0.12);
+  --sam-glass-border-width: 1px;
+
+  /* Inner wash */
+  --sam-glass-wash-opacity: 0.05;
+
+  /* Backdrop dim for modals */
+  --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.5);
+  --sam-glass-backdrop-blur: 4px;
+
   --sam-space-1: 4px;
   --sam-space-2: 8px;
   --sam-space-3: 12px;

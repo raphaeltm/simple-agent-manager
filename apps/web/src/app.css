@@ -16,6 +16,14 @@
   --color-overlay: var(--sam-color-bg-overlay);
   --color-page: var(--sam-color-bg-page);
 
+  /* ── Glass Colors ── */
+  --color-glass-chrome: var(--sam-glass-bg-chrome);
+  --color-glass-surface: var(--sam-glass-bg-surface);
+  --color-glass-modal: var(--sam-glass-bg-modal);
+  --color-glass-backdrop-dim: var(--sam-glass-backdrop-dim);
+  --color-glass-border: var(--sam-glass-border-color);
+  --color-glass-glow: var(--sam-glass-glow-color);
+
   /* ── Foreground / Text Colors ── */
   --color-fg-primary: var(--sam-color-fg-primary);
   --color-fg-muted: var(--sam-color-fg-muted);
@@ -75,6 +83,17 @@
   --shadow-dropdown: var(--sam-shadow-dropdown);
   --shadow-overlay: var(--sam-shadow-overlay);
   --shadow-tooltip: var(--sam-shadow-tooltip);
+
+  /* ── Glass Effects ── */
+  --blur-glass-chrome: var(--sam-glass-blur-chrome);
+  --blur-glass-surface: var(--sam-glass-blur-surface);
+  --blur-glass-modal: var(--sam-glass-blur-modal);
+  --blur-glass-backdrop: var(--sam-glass-backdrop-blur);
+  --glass-saturate: var(--sam-glass-saturate);
+  --glass-glow-width: var(--sam-glass-glow-width);
+  --glass-glow-blur: var(--sam-glass-glow-blur);
+  --glass-border-width: var(--sam-glass-border-width);
+  --glass-wash-opacity: var(--sam-glass-wash-opacity);
 
   /* ── Border Radius ── */
   --radius-sm: var(--sam-radius-sm);
