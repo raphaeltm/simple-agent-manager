@@ -102,7 +102,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   search_code: searchCode as ToolHandler,
   get_file_content: getFileContent as ToolHandler,
   // Onboarding
-  get_account_setup_status: getAccountSetupStatus as ToolHandler,
+  get_account_setup_status: getAccountSetupStatus,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */

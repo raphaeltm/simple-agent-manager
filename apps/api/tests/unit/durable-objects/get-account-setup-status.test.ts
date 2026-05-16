@@ -71,14 +71,14 @@ function mockDrizzleResults(results: {
       .mockReturnValueOnce(queryReturning(results.credentials ?? []))
       .mockReturnValueOnce(queryReturning(results.installations ?? []))
       .mockReturnValueOnce(queryReturning(results.projects ?? [])),
-  } as never);
+  });
 }
 
 function buildCtx(userId = 'user-123'): ToolContext {
   return {
     env: {
-      DATABASE: {} as D1Database,
-    } as Record<string, unknown>,
+      DATABASE: {},
+    },
     userId,
   };
 }

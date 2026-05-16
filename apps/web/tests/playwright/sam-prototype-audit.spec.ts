@@ -122,118 +122,119 @@ async function setupSamMocks(
   });
 }
 
+const chatInput = (page: Page) => page.locator('textarea[placeholder="Ask SAM anything..."]');
+
+async function openSam(page: Page, options?: Parameters<typeof setupSamMocks>[1]) {
+  await setupSamMocks(page, options);
+  await page.goto('/sam');
+  await page.waitForTimeout(500);
+}
+
+async function sendChatMessage(page: Page, message: string, viaButton = false) {
+  const input = chatInput(page);
+  await input.fill(message);
+
+  if (viaButton) {
+    const sendButton = page.locator('button').filter({ has: page.locator('svg.lucide-send') });
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+  } else {
+    await page.keyboard.press('Enter');
+  }
+
+  await page.waitForTimeout(1000);
+}
+
+async function captureChatScenario(
+  page: Page,
+  options: {
+    chatResponse: NonNullable<Parameters<typeof setupSamMocks>[1]>['chatResponse'];
+    message: string;
+    screenshotName: string;
+    viaButton?: boolean;
+    expectedButton?: string;
+  },
+) {
+  await openSam(page, { chatResponse: options.chatResponse });
+  await sendChatMessage(page, options.message, options.viaButton);
+  if (options.expectedButton) {
+    await expect(page.getByRole('button', { name: options.expectedButton })).toBeVisible();
+  }
+  await screenshot(page, options.screenshotName);
+  await assertNoOverflow(page);
+}
+
+async function captureOverview(page: Page, screenshotName: string) {
+  await openSam(page);
+  await page.getByText('Overview', { exact: true }).click();
+  await page.waitForTimeout(500);
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+}
+
 // ---------------------------------------------------------------------------
 // Mobile Tests (default viewport from playwright.config.ts)
 // ---------------------------------------------------------------------------
 
 test.describe('SAM Prototype — Mobile', () => {
-  test.beforeEach((_fixtures, testInfo) => {
+  test.beforeEach(({ page: _page }, testInfo) => {
+    void _page;
     test.skip(!testInfo.project.name.includes('iPhone SE'), 'Mobile suite only runs in the mobile project');
   });
 
   test('empty state renders chat input', async ({ page }) => {
-    await setupSamMocks(page);
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
+    await openSam(page);
 
-    // Chat input should be visible
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await expect(input).toBeVisible();
+    await expect(chatInput(page)).toBeVisible();
 
     await screenshot(page, 'sam-empty-state-mobile');
     await assertNoOverflow(page);
   });
 
   test('chat with text response', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'text' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    // Type a message
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Hello SAM');
-
-    // Send button should be enabled
-    const sendButton = page.locator('button').filter({ has: page.locator('svg.lucide-send') });
-    await expect(sendButton).toBeEnabled();
-
-    // Click send
-    await sendButton.click();
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-text-response-mobile');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'text',
+      message: 'Hello SAM',
+      screenshotName: 'sam-text-response-mobile',
+      viaButton: true,
+    });
   });
 
   test('chat with tool use response', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'tool_use' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Show my projects');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-tool-use-mobile');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'tool_use',
+      message: 'Show my projects',
+      screenshotName: 'sam-tool-use-mobile',
+    });
   });
 
   test('chat with error response', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'error' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Break things');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-error-response-mobile');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'error',
+      message: 'Break things',
+      screenshotName: 'sam-error-response-mobile',
+    });
   });
 
   test('long text wraps correctly', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'long_text' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Give me a detailed analysis');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-long-text-mobile');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'long_text',
+      message: 'Give me a detailed analysis',
+      screenshotName: 'sam-long-text-mobile',
+    });
   });
 
   test('onboarding cards render and wrap correctly', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'onboarding_cards' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Help me get started');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await expect(page.getByRole('button', { name: 'Open Settings' })).toBeVisible();
-    await screenshot(page, 'sam-onboarding-cards-mobile');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'onboarding_cards',
+      message: 'Help me get started',
+      screenshotName: 'sam-onboarding-cards-mobile',
+      expectedButton: 'Open Settings',
+    });
   });
 
   test('overview tab shows project cards', async ({ page }) => {
-    await setupSamMocks(page);
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    // Click Overview tab
-    const overviewTab = page.getByText('Overview', { exact: true });
-    await overviewTab.click();
-    await page.waitForTimeout(500);
-
-    await screenshot(page, 'sam-overview-mobile');
-    await assertNoOverflow(page);
+    await captureOverview(page, 'sam-overview-mobile');
   });
 
   test('project detail drawer', async ({ page }) => {
@@ -261,90 +262,55 @@ test.describe('SAM Prototype — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('SAM Prototype — Desktop', () => {
-  test.beforeEach((_fixtures, testInfo) => {
+  test.beforeEach(({ page: _page }, testInfo) => {
+    void _page;
     test.skip(!testInfo.project.name.includes('Desktop'), 'Desktop suite only runs in the desktop project');
   });
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('empty state renders chat input', async ({ page }) => {
-    await setupSamMocks(page);
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
+    await openSam(page);
 
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await expect(input).toBeVisible();
+    await expect(chatInput(page)).toBeVisible();
 
     await screenshot(page, 'sam-empty-state-desktop');
     await assertNoOverflow(page);
   });
 
   test('chat with text response', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'text' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Hello SAM');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-text-response-desktop');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'text',
+      message: 'Hello SAM',
+      screenshotName: 'sam-text-response-desktop',
+    });
   });
 
   test('chat with tool use response', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'tool_use' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Show my projects');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-tool-use-desktop');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'tool_use',
+      message: 'Show my projects',
+      screenshotName: 'sam-tool-use-desktop',
+    });
   });
 
   test('long text wraps correctly', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'long_text' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Give me a detailed analysis');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await screenshot(page, 'sam-long-text-desktop');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'long_text',
+      message: 'Give me a detailed analysis',
+      screenshotName: 'sam-long-text-desktop',
+    });
   });
 
   test('onboarding cards render and wrap correctly', async ({ page }) => {
-    await setupSamMocks(page, { chatResponse: 'onboarding_cards' });
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const input = page.locator('textarea[placeholder="Ask SAM anything..."]');
-    await input.fill('Help me get started');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
-    await expect(page.getByRole('button', { name: 'Open Settings' })).toBeVisible();
-    await screenshot(page, 'sam-onboarding-cards-desktop');
-    await assertNoOverflow(page);
+    await captureChatScenario(page, {
+      chatResponse: 'onboarding_cards',
+      message: 'Help me get started',
+      screenshotName: 'sam-onboarding-cards-desktop',
+      expectedButton: 'Open Settings',
+    });
   });
 
   test('overview tab shows project cards', async ({ page }) => {
-    await setupSamMocks(page);
-    await page.goto('/sam');
-    await page.waitForTimeout(500);
-
-    const overviewTab = page.getByText('Overview', { exact: true });
-    await overviewTab.click();
-    await page.waitForTimeout(500);
-
-    await screenshot(page, 'sam-overview-desktop');
-    await assertNoOverflow(page);
+    await captureOverview(page, 'sam-overview-desktop');
   });
 });

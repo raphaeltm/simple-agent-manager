@@ -341,9 +341,9 @@ const SetupChecklistCard: FC<{ data: SetupChecklistData }> = ({ data }) => {
 const ActionCard: FC<{ data: ActionCardData }> = ({ data }) => {
   const handleClick = useCallback(() => {
     if (data.action === 'navigate') {
-      window.location.href = data.href;
+      globalThis.location.href = data.href;
     } else {
-      window.open(data.href, '_blank', 'noopener,noreferrer');
+      globalThis.open(data.href, '_blank', 'noopener,noreferrer');
     }
   }, [data.action, data.href]);
 
