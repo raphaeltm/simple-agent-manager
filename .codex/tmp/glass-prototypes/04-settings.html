@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  /* Settings-specific styles */
+  select.input {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b8a7f' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+
+  .provider-card-header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    margin-bottom: var(--sp-5);
+  }
+
+  .provider-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+
+  .provider-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .provider-desc {
+    font-size: 13px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+
+  .form-row {
+    margin-bottom: var(--sp-5);
+  }
+
+  .form-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .token-field {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+  }
+
+  .token-field .input {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+
+  .add-provider-card {
+    border: 2px dashed var(--border);
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .add-provider-card::before {
+    display: none;
+  }
+
+  .add-provider-card:hover {
+    border-color: var(--glass-border-hover);
+    background: rgba(19, 32, 29, 0.15);
+  }
+
+  .add-provider-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-glass);
+    border: 1px solid var(--glass-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    color: var(--fg-dim);
+    margin-bottom: var(--sp-3);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: var(--sp-5) 0;
+  }
+
+  @media (max-width: 768px) {
+    .token-field {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .token-field .form-actions {
+      justify-content: flex-end;
+    }
+
+    .tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    .tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab {
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- Mobile Header -->
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">SAM</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <div class="avatar">R</div>
+    <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">S</div>
+      <div class="logo-text">SAM</div>
+    </div>
+
+    <div style="position:relative;margin-bottom:var(--sp-4)">
+      <input class="input input-glass" style="min-height:36px;padding:6px 12px 6px 32px;font-size:13px;border-radius:var(--radius-sm)" placeholder="Search...">
+      <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg-dim);font-size:14px">&#128269;</span>
+    </div>
+
+    <a class="nav-item">
+      <span>&#9632;</span> Dashboard
+    </a>
+    <a class="nav-item">
+      <span>&#128193;</span> Projects
+    </a>
+    <a class="nav-item active">
+      <span>&#9881;</span> Settings
+    </a>
+    <a class="nav-item">
+      <span>&#9638;</span> Nodes
+    </a>
+    <a class="nav-item">
+      <span>&#128187;</span> Workspaces
+    </a>
+
+    <div class="nav-section-label">Projects</div>
+    <div class="sidebar-project"><div class="dot"></div> simple-agent-manager</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--info)"></div> marketing-site</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--warning)"></div> docs-toolkit</div>
+
+    <div class="sidebar-bottom">
+      <div class="user-pill">
+        <div class="avatar">R</div>
+        <span style="font-size:13px;color:var(--fg-muted)">Raphael</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-subtitle">Manage your cloud providers, integrations, and preferences.</p>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active">Cloud Provider</div>
+      <div class="tab">GitHub</div>
+      <div class="tab">Agents</div>
+      <div class="tab">Notifications</div>
+      <div class="tab">Usage</div>
+      <div class="tab">Tokens</div>
+    </div>
+
+    <!-- Cloud Provider Tab Content -->
+    <div class="card-grid card-grid-2">
+
+      <!-- Hetzner Cloud Card -->
+      <div class="glass card">
+        <div class="provider-card-header">
+          <div class="provider-icon" style="background:rgba(213,63,63,0.1);border:1px solid rgba(213,63,63,0.15)">
+            <span style="color:#d53f3f;font-weight:700;font-size:18px">H</span>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div class="flex items-center gap-3">
+              <span class="provider-name">Hetzner Cloud</span>
+              <span class="badge badge-success">&#9679; Connected</span>
+            </div>
+            <p class="provider-desc">EU cloud infrastructure provider</p>
+          </div>
+        </div>
+
+        <!-- API Token -->
+        <div class="form-row">
+          <label class="label">API Token</label>
+          <div class="token-field">
+            <input class="input input-glass" type="password" value="hc-xxxxxxxxxxxxxxxxxxxxxxxxxxk7f2" readonly style="color:var(--fg-dim)">
+            <div class="form-actions">
+              <button class="btn btn-glass btn-sm">Update</button>
+              <button class="btn btn-danger btn-sm">Revoke</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Default Region -->
+        <div class="form-row">
+          <label class="label">Default Region</label>
+          <select class="input input-glass">
+            <option selected>Falkenstein (fsn1)</option>
+            <option>Nuremberg (nbg1)</option>
+            <option>Helsinki (hel1)</option>
+            <option>Ashburn (ash)</option>
+            <option>Hillsboro (hil)</option>
+            <option>Singapore (sin)</option>
+          </select>
+        </div>
+
+        <!-- Default VM Size -->
+        <div class="form-row">
+          <label class="label">Default VM Size</label>
+          <select class="input input-glass">
+            <option>CX11 (1 vCPU, 2GB)</option>
+            <option selected>CX22 (2 vCPU, 4GB)</option>
+            <option>CX32 (4 vCPU, 8GB)</option>
+            <option>CX42 (8 vCPU, 16GB)</option>
+            <option>CX52 (16 vCPU, 32GB)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Add Provider Card -->
+      <div class="add-provider-card card" style="border-radius:var(--radius-lg)">
+        <div class="add-provider-icon">+</div>
+        <span style="font-size:14px;font-weight:500;color:var(--fg-muted);margin-bottom:var(--sp-1)">Connect a cloud provider</span>
+        <span class="text-xs text-dim">Hetzner, Scaleway, and more</span>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

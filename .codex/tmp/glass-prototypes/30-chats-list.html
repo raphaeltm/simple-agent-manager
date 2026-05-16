@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chats — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Chats</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item active"><span>&#128172;</span> Chats</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:800px">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Recent Chats</h1>
+        <p class="page-subtitle">All agent conversations across projects.</p>
+      </div>
+      <input class="input" style="max-width:220px" placeholder="Search chats...">
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
+      <!-- Chat 1 -->
+      <a class="glass card" style="text-decoration:none;color:inherit;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(52,211,153,0.2)'" onmouseout="this.style.borderColor='rgba(52,211,153,0.08)'">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="badge badge-success" style="font-size:10px">Active</span>
+            <span class="font-semibold text-sm">Fix login redirect loop</span>
+          </div>
+          <span class="text-xs text-dim">12 min ago</span>
+        </div>
+        <div class="text-xs text-muted mb-2">simple-agent-manager &middot; 8 messages</div>
+        <div class="text-sm text-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">I've identified the issue — the useEffect in LoginPage.tsx is redirecting back to...</div>
+      </a>
+
+      <!-- Chat 2 -->
+      <a class="glass card" style="text-decoration:none;color:inherit;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(52,211,153,0.2)'" onmouseout="this.style.borderColor='rgba(52,211,153,0.08)'">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="badge badge-info" style="font-size:10px">Running</span>
+            <span class="font-semibold text-sm">Upgrade Drizzle to v0.35</span>
+          </div>
+          <span class="text-xs text-dim">28 min ago</span>
+        </div>
+        <div class="text-xs text-muted mb-2">simple-agent-manager &middot; 14 messages</div>
+        <div class="text-sm text-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Running the migration tests now. 12 of 15 tests passing, fixing the remaining 3...</div>
+      </a>
+
+      <!-- Chat 3 -->
+      <a class="glass card" style="text-decoration:none;color:inherit;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(52,211,153,0.2)'" onmouseout="this.style.borderColor='rgba(52,211,153,0.08)'">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="badge badge-neutral" style="font-size:10px">Completed</span>
+            <span class="font-semibold text-sm">Add dark mode toggle</span>
+          </div>
+          <span class="text-xs text-dim">1 hour ago</span>
+        </div>
+        <div class="text-xs text-muted mb-2">simple-agent-manager &middot; 22 messages</div>
+        <div class="text-sm text-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">PR #1031 has been merged. The dark mode toggle is now available in the settings panel.</div>
+      </a>
+
+      <!-- Chat 4 -->
+      <a class="glass card" style="text-decoration:none;color:inherit;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(52,211,153,0.2)'" onmouseout="this.style.borderColor='rgba(52,211,153,0.08)'">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="badge badge-error" style="font-size:10px">Failed</span>
+            <span class="font-semibold text-sm">Optimize Docker layer caching</span>
+          </div>
+          <span class="text-xs text-dim">2 hours ago</span>
+        </div>
+        <div class="text-xs text-muted mb-2">simple-agent-manager &middot; 6 messages</div>
+        <div class="text-sm text-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The workspace ran out of disk space while building the Docker image. Need a larger VM...</div>
+      </a>
+
+      <!-- Chat 5 -->
+      <a class="glass card" style="text-decoration:none;color:inherit;cursor:pointer;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(52,211,153,0.2)'" onmouseout="this.style.borderColor='rgba(52,211,153,0.08)'">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="badge badge-neutral" style="font-size:10px">Completed</span>
+            <span class="font-semibold text-sm">Setup CI pipeline</span>
+          </div>
+          <span class="text-xs text-dim">Yesterday</span>
+        </div>
+        <div class="text-xs text-muted mb-2">sam-website &middot; 18 messages</div>
+        <div class="text-sm text-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">CI pipeline is configured with lint, typecheck, test, and build steps. Runs on all PRs.</div>
+      </a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

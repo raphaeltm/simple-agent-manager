@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Settings — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <span style="color:var(--fg-muted);cursor:pointer">&larr;</span>
+    <span class="font-semibold" style="font-size:15px">Project Settings</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <div style="position:relative;margin-bottom:var(--sp-4)"><input class="input input-glass" style="min-height:36px;padding:6px 12px 6px 32px;font-size:13px" placeholder="Search..."><span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg-dim);font-size:14px">&#128269;</span></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item active"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+    <div class="nav-section-label">simple-agent-manager</div>
+    <a class="nav-item"><span>&#128172;</span> Chat</a>
+    <a class="nav-item"><span>&#128161;</span> Ideas</a>
+    <a class="nav-item"><span>&#128218;</span> Library</a>
+    <a class="nav-item"><span>&#127793;</span> Knowledge</a>
+    <a class="nav-item active"><span>&#9881;</span> Settings</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <p class="text-sm text-muted mb-2" style="cursor:pointer">&larr; simple-agent-manager</p>
+        <h1 class="page-title">Project Settings</h1>
+      </div>
+    </div>
+
+    <!-- General -->
+    <div class="glass card mb-6">
+      <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--sp-4)">General</h3>
+      <div class="mb-4">
+        <label class="label">Project Name</label>
+        <input class="input" value="simple-agent-manager">
+      </div>
+      <div class="mb-4">
+        <label class="label">Repository</label>
+        <div class="flex items-center gap-3">
+          <input class="input" value="raphaeltm/simple-agent-manager" style="flex:1" disabled>
+          <button class="btn btn-glass btn-sm">Change</button>
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="label">Description</label>
+        <textarea class="input" style="min-height:80px">Serverless monorepo platform for ephemeral AI coding agent environments.</textarea>
+      </div>
+    </div>
+
+    <!-- Workspace Defaults -->
+    <div class="glass card mb-6">
+      <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--sp-4)">Workspace Defaults</h3>
+      <div class="mb-4">
+        <label class="label">Default VM Size</label>
+        <select class="input" style="appearance:auto">
+          <option>CX22 (2 vCPU, 4 GB RAM)</option>
+          <option selected>CX32 (4 vCPU, 8 GB RAM)</option>
+          <option>CX42 (8 vCPU, 16 GB RAM)</option>
+        </select>
+      </div>
+      <div class="mb-4">
+        <label class="label">Default Agent</label>
+        <select class="input" style="appearance:auto">
+          <option selected>Claude Code</option>
+          <option>Codex</option>
+        </select>
+      </div>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <label class="label" style="margin-bottom:0">Auto-provision nodes</label>
+          <p class="text-xs text-dim">Automatically create nodes when dispatching tasks</p>
+        </div>
+        <div class="toggle active"></div>
+      </div>
+    </div>
+
+    <!-- Environment Variables -->
+    <div class="glass card mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 style="font-size:15px;font-weight:600">Environment Variables</h3>
+        <button class="btn btn-glass btn-sm">+ Add Variable</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr><th>Key</th><th>Value</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code style="font-family:var(--font-mono);font-size:13px;color:#34d399">NODE_ENV</code></td>
+              <td><span class="text-muted">development</span></td>
+              <td style="text-align:right"><button class="btn btn-ghost btn-sm">&#128465;</button></td>
+            </tr>
+            <tr>
+              <td><code style="font-family:var(--font-mono);font-size:13px;color:#34d399">DATABASE_URL</code></td>
+              <td><span class="text-muted">••••••••••</span></td>
+              <td style="text-align:right"><button class="btn btn-ghost btn-sm">&#128465;</button></td>
+            </tr>
+            <tr>
+              <td><code style="font-family:var(--font-mono);font-size:13px;color:#34d399">GITHUB_TOKEN</code></td>
+              <td><span class="text-muted">••••••••••</span></td>
+              <td style="text-align:right"><button class="btn btn-ghost btn-sm">&#128465;</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="glass card" style="border-color:rgba(239,68,68,0.2)">
+      <h3 style="font-size:15px;font-weight:600;color:var(--danger);margin-bottom:var(--sp-4)">Danger Zone</h3>
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="font-medium" style="font-size:14px">Delete Project</p>
+          <p class="text-xs text-dim">Permanently delete this project and all associated data.</p>
+        </div>
+        <button class="btn btn-danger">Delete Project</button>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Try SAM — Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  body {
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 0%, rgba(22, 163, 74, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 80% 70%, rgba(52, 211, 153, 0.04) 0%, transparent 60%),
+      var(--bg-canvas);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  .trial-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-6);
+    text-align: center;
+  }
+  .trial-card {
+    max-width: 480px;
+    width: 100%;
+    padding: var(--sp-8);
+  }
+  .trial-chat {
+    max-width: 700px;
+    width: 100%;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+  }
+  @media (max-width: 768px) {
+    .trial-chat { height: calc(100vh - 120px); }
+    .trial-card { padding: var(--sp-6); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav style="display:flex;align-items:center;justify-content:space-between;padding:var(--sp-4) var(--sp-6)">
+  <div class="flex items-center gap-3">
+    <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff">S</div>
+    <span style="font-weight:700;font-size:17px">SAM</span>
+  </div>
+  <div class="flex items-center gap-3">
+    <button class="btn btn-glass btn-sm">Sign In</button>
+  </div>
+</nav>
+
+<div class="trial-container">
+  <!-- Trial Gate Card -->
+  <div class="glass trial-card mb-8" style="margin-bottom:var(--sp-12)">
+    <div style="width:56px;height:56px;border-radius:var(--radius-lg);background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:24px;color:#fff;margin:0 auto var(--sp-4)">S</div>
+    <h1 style="font-size:1.5rem;font-weight:700;margin-bottom:var(--sp-2)">Try SAM</h1>
+    <p class="text-muted mb-6" style="margin-bottom:var(--sp-6)">Experience AI-powered coding agents in seconds. No account required.</p>
+
+    <div class="mb-4" style="margin-bottom:var(--sp-4)">
+      <label class="label" style="text-align:left">What would you like to build?</label>
+      <textarea class="input" style="min-height:80px" placeholder="Describe a coding task... e.g., 'Create a REST API with authentication using Express and JWT'"></textarea>
+    </div>
+
+    <div class="mb-4" style="margin-bottom:var(--sp-4)">
+      <label class="label" style="text-align:left">Repository (optional)</label>
+      <input class="input" placeholder="https://github.com/user/repo">
+    </div>
+
+    <button class="btn btn-primary btn-lg w-full" style="margin-bottom:var(--sp-4)">Start Trial</button>
+
+    <div class="flex items-center justify-center gap-4 text-xs text-dim">
+      <span>&#128337; ~2 min setup</span>
+      <span>&#128274; No credit card</span>
+      <span>&#9889; 3 free tasks</span>
+    </div>
+  </div>
+
+  <!-- Trial Chat (shown after starting) -->
+  <div class="glass trial-chat" style="display:none">
+    <div style="padding:var(--sp-4);border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div class="font-semibold" style="font-size:15px">Trial Session</div>
+        <div class="text-xs text-dim">2 of 3 tasks remaining</div>
+      </div>
+      <span class="badge badge-success">Agent Active</span>
+    </div>
+
+    <div class="chat-messages" style="flex:1">
+      <div class="chat-bubble user">Create a simple Express API with JWT authentication</div>
+      <div class="chat-bubble assistant">
+        I'll set up an Express API with JWT auth. Let me create the project structure...<br><br>
+        <div class="tool-call" style="margin-top:8px">
+          <span class="tool-name">Write</span> src/index.ts
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <input class="input" placeholder="Send a message...">
+        <button class="btn btn-primary">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Logs — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .log-line { font-family: var(--font-mono); font-size: 12px; padding: 2px var(--sp-2); border-bottom: 1px solid rgba(255,255,255,0.03); display: flex; gap: var(--sp-3); line-height: 1.6; }
+  .log-time { color: var(--fg-dim); white-space: nowrap; min-width: 85px; }
+  .log-level { min-width: 44px; font-weight: 600; }
+  .log-level.info { color: var(--info); }
+  .log-level.warn { color: var(--warning); }
+  .log-level.error { color: var(--danger); }
+  .log-level.debug { color: var(--fg-dim); }
+  .log-msg { color: var(--fg-muted); word-break: break-all; }
+  .log-msg .highlight { color: #34d399; }
+</style>
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Admin / Logs</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">Admin</div>
+    <a class="nav-item"><span>&#128200;</span> Overview</a>
+    <a class="nav-item"><span>&#128101;</span> Users</a>
+    <a class="nav-item"><span>&#128176;</span> Costs</a>
+    <a class="nav-item"><span>&#128680;</span> Errors</a>
+    <a class="nav-item active"><span>&#128203;</span> Logs</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Live Logs</h1>
+        <p class="page-subtitle">Real-time Worker and Durable Object log stream.</p>
+      </div>
+      <div class="flex gap-2">
+        <select class="input" style="max-width:140px;font-size:13px">
+          <option>All Levels</option>
+          <option>Error</option>
+          <option>Warn</option>
+          <option>Info</option>
+          <option>Debug</option>
+        </select>
+        <input class="input" style="max-width:180px" placeholder="Filter...">
+        <button class="btn btn-primary btn-sm" style="position:relative">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger);margin-right:6px;animation:pulse 1.5s infinite"></span>
+          Live
+        </button>
+      </div>
+    </div>
+
+    <div class="glass card" style="padding:0;overflow:hidden">
+      <div style="max-height:600px;overflow-y:auto;padding:var(--sp-2) 0">
+        <div class="log-line">
+          <span class="log-time">14:32:01</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Incoming request <span class="highlight">POST /api/projects/proj-abc/tasks</span> from user <span class="highlight">usr_raphael</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:01</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">TaskRunner DO started for task <span class="highlight">task_drizzle_upgrade</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:02</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Selecting node for workspace: provider=hetzner vmSize=cx32</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:02</span>
+          <span class="log-level debug">DEBUG</span>
+          <span class="log-msg">Found warm node <span class="highlight">node-fsn1-02</span> — reusing</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:03</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Creating workspace <span class="highlight">ws-drizzle-01</span> on node <span class="highlight">node-fsn1-02</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:04</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">DNS record created: <span class="highlight">ws-drizzle-01.sammy.party</span> → 168.119.42.7</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:05</span>
+          <span class="log-level warn">WARN</span>
+          <span class="log-msg">Heartbeat delayed for node <span class="highlight">node-fsn1-01</span> — last seen 45s ago</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:06</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Agent session started: type=claude-code sessionId=<span class="highlight">sess_abc123</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:08</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">ACP handshake complete for session <span class="highlight">sess_abc123</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:10</span>
+          <span class="log-level error">ERROR</span>
+          <span class="log-msg">Workspace <span class="highlight">ws-docker-cache</span> failed: disk space exhausted (96% used)</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:12</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Cron: checking 3 warm nodes for idle timeout</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:12</span>
+          <span class="log-level debug">DEBUG</span>
+          <span class="log-msg">Node <span class="highlight">node-fsn1-03</span> warm for 28m — keeping (timeout: 30m)</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:15</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Message persisted: session=<span class="highlight">sess_abc123</span> role=assistant tokens=1,247</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:18</span>
+          <span class="log-level info">INFO</span>
+          <span class="log-msg">Tool call: <span class="highlight">Edit</span> file=src/db/schema.ts lines=142-158</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">14:32:20</span>
+          <span class="log-level warn">WARN</span>
+          <span class="log-msg">Rate limit approaching for user <span class="highlight">usr_alice</span>: 420/500 tokens today</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

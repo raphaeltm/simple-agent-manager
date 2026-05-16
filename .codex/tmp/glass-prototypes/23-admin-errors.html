@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Errors — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Admin / Errors</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">Admin</div>
+    <a class="nav-item"><span>&#128200;</span> Overview</a>
+    <a class="nav-item"><span>&#128101;</span> Users</a>
+    <a class="nav-item"><span>&#128176;</span> Costs</a>
+    <a class="nav-item"><span>&#128202;</span> Usage</a>
+    <a class="nav-item active"><span>&#128680;</span> Errors</a>
+    <a class="nav-item"><span>&#128203;</span> Logs</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Error Log</h1>
+        <p class="page-subtitle">Structured errors from the API Worker and Durable Objects.</p>
+      </div>
+      <div class="flex gap-2">
+        <input class="input" style="max-width:200px" placeholder="Filter errors...">
+        <button class="btn btn-glass btn-sm">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Error Stats -->
+    <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); margin-bottom: var(--sp-6);">
+      <div class="glass card stat-card">
+        <div class="stat-label">Last 24h</div>
+        <div class="stat-value" style="color:var(--danger)">12</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Last 7d</div>
+        <div class="stat-value" style="color:var(--warning)">38</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Unresolved</div>
+        <div class="stat-value">5</div>
+      </div>
+    </div>
+
+    <!-- Error List -->
+    <div class="glass card">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
+        <!-- Error 1 -->
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);border-left:3px solid var(--danger)">
+          <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:var(--sp-2)">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-error">500</span>
+              <span class="text-sm font-medium">TypeError: Cannot read properties of null</span>
+            </div>
+            <span class="text-xs text-dim">3 min ago</span>
+          </div>
+          <div class="text-xs text-muted mb-2">POST /api/projects/proj-abc/tasks — task-runner.ts:142</div>
+          <code style="font-family:var(--font-mono);font-size:11px;color:var(--fg-dim);display:block;white-space:pre-wrap;background:var(--bg-inset);padding:var(--sp-2);border-radius:4px;max-height:60px;overflow:hidden">at TaskRunner.handleDispatch (task-runner.ts:142:18)
+at async Object.fetch (index.ts:45:12)</code>
+        </div>
+
+        <!-- Error 2 -->
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);border-left:3px solid var(--warning)">
+          <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:var(--sp-2)">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-warning">429</span>
+              <span class="text-sm font-medium">Rate limit exceeded</span>
+            </div>
+            <span class="text-xs text-dim">18 min ago</span>
+          </div>
+          <div class="text-xs text-muted">POST /api/projects/proj-xyz/sessions/chat — rate-limit.ts:28</div>
+        </div>
+
+        <!-- Error 3 -->
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);border-left:3px solid var(--danger)">
+          <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:var(--sp-2)">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-error">502</span>
+              <span class="text-sm font-medium">VM agent unreachable</span>
+            </div>
+            <span class="text-xs text-dim">42 min ago</span>
+          </div>
+          <div class="text-xs text-muted">GET /api/nodes/node-fsn1-01/health — node-health.ts:67</div>
+        </div>
+
+        <!-- Error 4 -->
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);border-left:3px solid var(--warning)">
+          <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:var(--sp-2)">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-warning">400</span>
+              <span class="text-sm font-medium">Invalid session token format</span>
+            </div>
+            <span class="text-xs text-dim">1 hour ago</span>
+          </div>
+          <div class="text-xs text-muted">POST /api/auth/callback — auth.ts:89</div>
+        </div>
+
+        <!-- Error 5 -->
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);border-left:3px solid var(--danger)">
+          <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:var(--sp-2)">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-error">500</span>
+              <span class="text-sm font-medium">D1 query timeout</span>
+            </div>
+            <span class="text-xs text-dim">2 hours ago</span>
+          </div>
+          <div class="text-xs text-muted">GET /api/admin/analytics — analytics-service.ts:201</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

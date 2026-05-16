@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Graph — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .knowledge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-4); }
+  .entity-node { padding: var(--sp-4); }
+  .entity-type { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .observation-list { list-style: none; padding: 0; }
+  .observation-list li { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; color: var(--fg-muted); line-height: 1.5; }
+  .observation-list li:last-child { border-bottom: none; }
+  .confidence-bar { width: 40px; height: 4px; background: var(--bg-inset); border-radius: 2px; display: inline-block; }
+  .confidence-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+  @media (max-width: 768px) { .knowledge-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <span style="color:var(--fg-muted);cursor:pointer">&larr;</span>
+    <span class="font-semibold" style="font-size:15px">Knowledge</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item active"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+    <div class="nav-section-label">simple-agent-manager</div>
+    <a class="nav-item"><span>&#128172;</span> Chat</a>
+    <a class="nav-item"><span>&#128161;</span> Ideas</a>
+    <a class="nav-item"><span>&#128218;</span> Library</a>
+    <a class="nav-item active"><span>&#127793;</span> Knowledge</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <p class="text-sm text-muted mb-2">&larr; simple-agent-manager</p>
+        <h1 class="page-title">Knowledge Graph</h1>
+        <p class="page-subtitle">What agents have learned about this project.</p>
+      </div>
+      <div class="flex gap-2">
+        <input class="input" style="max-width:240px" placeholder="Search knowledge...">
+        <button class="btn btn-glass">+ Add</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));margin-bottom:var(--sp-6)">
+      <div class="glass card stat-card">
+        <div class="stat-label">Entities</div>
+        <div class="stat-value" style="font-size:1.5rem">12</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Observations</div>
+        <div class="stat-value" style="font-size:1.5rem">47</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Relations</div>
+        <div class="stat-value" style="font-size:1.5rem">8</div>
+      </div>
+    </div>
+
+    <!-- Entity Cards -->
+    <div class="knowledge-grid">
+      <div class="glass entity-node">
+        <div class="flex items-center justify-between mb-2">
+          <span class="entity-type" style="color:var(--accent)">Preference</span>
+          <span class="text-xs text-dim">5 observations</span>
+        </div>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--sp-3)">CodeQuality</h3>
+        <ul class="observation-list">
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Dislikes functions over 100 lines</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:95%"></div></div>
+            </div>
+          </li>
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Prefers Valibot over Zod</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:90%"></div></div>
+            </div>
+          </li>
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Skeptical of React useEffect</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:85%"></div></div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="glass entity-node">
+        <div class="flex items-center justify-between mb-2">
+          <span class="entity-type" style="color:var(--info)">Context</span>
+          <span class="text-xs text-dim">8 observations</span>
+        </div>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--sp-3)">Architecture</h3>
+        <ul class="observation-list">
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Prefers one agent per workspace</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:90%"></div></div>
+            </div>
+          </li>
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Hetzner VMs with OS-level firewalls</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:85%"></div></div>
+            </div>
+          </li>
+          <li>
+            <div class="flex items-center justify-between">
+              <span>No separate dev environment</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:95%"></div></div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="glass entity-node">
+        <div class="flex items-center justify-between mb-2">
+          <span class="entity-type" style="color:#bb9af7">Preference</span>
+          <span class="text-xs text-dim">4 observations</span>
+        </div>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--sp-3)">Branding</h3>
+        <ul class="observation-list">
+          <li>
+            <div class="flex items-center justify-between">
+              <span>SAM = Samwise Gamgee reference</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:95%"></div></div>
+            </div>
+          </li>
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Smallpath AI as public brand</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:97%"></div></div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="glass entity-node">
+        <div class="flex items-center justify-between mb-2">
+          <span class="entity-type" style="color:var(--warning)">Context</span>
+          <span class="text-xs text-dim">3 observations</span>
+        </div>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--sp-3)">BusinessStrategy</h3>
+        <ul class="observation-list">
+          <li>
+            <div class="flex items-center justify-between">
+              <span>Cost-plus pricing (~1.2x markup)</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:90%"></div></div>
+            </div>
+          </li>
+          <li>
+            <div class="flex items-center justify-between">
+              <span>AGPL for open-source protection</span>
+              <div class="confidence-bar"><div class="confidence-fill" style="width:85%"></div></div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

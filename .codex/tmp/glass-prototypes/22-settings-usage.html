@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings Usage — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .usage-bar { height: 8px; background: var(--bg-inset); border-radius: 4px; overflow: hidden; }
+  .usage-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .usage-fill.green { background: linear-gradient(90deg, var(--accent), #34d399); }
+  .usage-fill.yellow { background: linear-gradient(90deg, #eab308, #facc15); }
+  .usage-fill.red { background: linear-gradient(90deg, #ef4444, #f87171); }
+</style>
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Settings / Usage</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item active"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">Settings</div>
+    <a class="nav-item"><span>&#9729;</span> Cloud Provider</a>
+    <a class="nav-item"><span>&#128025;</span> GitHub</a>
+    <a class="nav-item"><span>&#129302;</span> Agents</a>
+    <a class="nav-item"><span>&#128276;</span> Notifications</a>
+    <a class="nav-item active"><span>&#128202;</span> Usage</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:800px">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Usage & Budgets</h1>
+        <p class="page-subtitle">Monitor your AI token usage and configure budget controls.</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-glass btn-sm">Today</button>
+        <button class="btn btn-ghost btn-sm">7 days</button>
+        <button class="btn btn-ghost btn-sm">30 days</button>
+      </div>
+    </div>
+
+    <!-- Budget Summary -->
+    <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: var(--sp-8);">
+      <div class="glass card stat-card">
+        <div class="stat-label">Today's Usage</div>
+        <div class="stat-value">142K</div>
+        <div class="stat-trend" style="color:var(--fg-dim)">tokens used</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Daily Budget</div>
+        <div class="stat-value">500K</div>
+        <div class="stat-trend up">28% used</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Monthly Cost</div>
+        <div class="stat-value">$34.20</div>
+        <div class="stat-trend" style="color:var(--fg-dim)">of $100 cap</div>
+      </div>
+    </div>
+
+    <!-- Daily Budget -->
+    <h2 class="section-title">Daily Token Budget</h2>
+    <div class="glass card mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium">142,000 / 500,000 tokens</span>
+        <span class="text-sm text-muted">28%</span>
+      </div>
+      <div class="usage-bar mb-4">
+        <div class="usage-fill green" style="width:28%"></div>
+      </div>
+      <div>
+        <label class="label">Set daily limit</label>
+        <div class="flex gap-2">
+          <input class="input" type="number" value="500000" style="flex:1">
+          <button class="btn btn-primary btn-sm">Update</button>
+        </div>
+        <div class="text-xs text-dim" style="margin-top:4px">Agents will be paused when the daily limit is reached. Resets at midnight UTC.</div>
+      </div>
+    </div>
+
+    <!-- Monthly Cost Cap -->
+    <h2 class="section-title">Monthly Cost Cap</h2>
+    <div class="glass card mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium">$34.20 / $100.00</span>
+        <span class="text-sm text-muted">34%</span>
+      </div>
+      <div class="usage-bar mb-4">
+        <div class="usage-fill green" style="width:34%"></div>
+      </div>
+      <div>
+        <label class="label">Set monthly cap</label>
+        <div class="flex gap-2">
+          <input class="input" type="number" value="100" style="flex:1">
+          <button class="btn btn-primary btn-sm">Update</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Usage by Model -->
+    <h2 class="section-title">Usage by Model (Today)</h2>
+    <div class="glass card mb-6">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-4)">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-sm font-medium">Claude Opus 4</span>
+            <span class="text-xs text-muted">82,400 tokens — $1.24</span>
+          </div>
+          <div class="usage-bar"><div class="usage-fill green" style="width:58%"></div></div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-sm font-medium">Claude Sonnet 4</span>
+            <span class="text-xs text-muted">45,200 tokens — $0.34</span>
+          </div>
+          <div class="usage-bar"><div class="usage-fill green" style="width:32%"></div></div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-sm font-medium">Gemma 4 26B</span>
+            <span class="text-xs text-muted">14,400 tokens — $0.02</span>
+          </div>
+          <div class="usage-bar"><div class="usage-fill green" style="width:10%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Budget Alerts -->
+    <h2 class="section-title">Budget Alerts</h2>
+    <div class="glass card">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
+        <label style="display:flex;align-items:center;gap:var(--sp-3);cursor:pointer">
+          <input type="checkbox" checked style="accent-color:var(--accent)">
+          <div>
+            <div class="text-sm font-medium">Warn at 80% daily budget</div>
+            <div class="text-xs text-muted">Send notification when approaching daily limit</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:var(--sp-3);cursor:pointer">
+          <input type="checkbox" checked style="accent-color:var(--accent)">
+          <div>
+            <div class="text-sm font-medium">Warn at 90% monthly cap</div>
+            <div class="text-xs text-muted">Send notification when approaching monthly cost cap</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:var(--sp-3);cursor:pointer">
+          <input type="checkbox" style="accent-color:var(--accent)">
+          <div>
+            <div class="text-sm font-medium">Hard stop at monthly cap</div>
+            <div class="text-xs text-muted">Immediately stop all agents when monthly cap is reached</div>
+          </div>
+        </label>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

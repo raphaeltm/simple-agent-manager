@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Projects — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Projects</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <button class="btn btn-primary btn-sm">+ New</button>
+    <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <div style="position:relative;margin-bottom:var(--sp-4)"><input class="input input-glass" style="min-height:36px;padding:6px 12px 6px 32px;font-size:13px" placeholder="Search..."><span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg-dim);font-size:14px">&#128269;</span></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item active"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+    <div class="nav-section-label">Projects</div>
+    <div class="sidebar-project"><div class="dot"></div> simple-agent-manager</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--info)"></div> marketing-site</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--warning)"></div> docs-toolkit</div>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Projects</h1>
+        <p class="page-subtitle">Manage your repositories and agent workspaces.</p>
+      </div>
+      <button class="btn btn-primary">+ New Project</button>
+    </div>
+
+    <!-- Search & Filter -->
+    <div class="flex items-center gap-3 mb-6">
+      <input class="input" style="max-width:320px" placeholder="Filter projects...">
+      <div class="flex gap-2">
+        <button class="btn btn-glass btn-sm">All</button>
+        <button class="btn btn-ghost btn-sm">Active</button>
+        <button class="btn btn-ghost btn-sm">Archived</button>
+      </div>
+    </div>
+
+    <div class="card-grid card-grid-2">
+      <!-- Project 1 -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="flex items-center gap-3 mb-4">
+          <div style="width:44px;height:44px;border-radius:var(--radius-md);background:var(--accent-tint);border:1px solid rgba(22,163,74,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">&#128295;</div>
+          <div style="flex:1;min-width:0">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size:15px;font-weight:600" class="truncate">simple-agent-manager</h3>
+              <span class="badge badge-success" style="flex-shrink:0">Active</span>
+            </div>
+            <p class="text-xs text-dim truncate">raphaeltm/simple-agent-manager</p>
+          </div>
+        </div>
+        <p class="text-sm text-muted mb-4">Serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner VMs.</p>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>&#9679; 5 tasks</span>
+          <span>&#128187; 2 workspaces</span>
+          <span>&#128337; 12m ago</span>
+        </div>
+      </div>
+
+      <!-- Project 2 -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="flex items-center gap-3 mb-4">
+          <div style="width:44px;height:44px;border-radius:var(--radius-md);background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">&#127760;</div>
+          <div style="flex:1;min-width:0">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size:15px;font-weight:600" class="truncate">marketing-site</h3>
+              <span class="badge badge-success" style="flex-shrink:0">Active</span>
+            </div>
+            <p class="text-xs text-dim truncate">raphaeltm/marketing-site</p>
+          </div>
+        </div>
+        <p class="text-sm text-muted mb-4">Astro + Starlight marketing website with blog, docs, and landing pages.</p>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>&#9679; 2 tasks</span>
+          <span>&#128187; 1 workspace</span>
+          <span>&#128337; 2h ago</span>
+        </div>
+      </div>
+
+      <!-- Project 3 -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="flex items-center gap-3 mb-4">
+          <div style="width:44px;height:44px;border-radius:var(--radius-md);background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">&#128214;</div>
+          <div style="flex:1;min-width:0">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size:15px;font-weight:600" class="truncate">docs-toolkit</h3>
+              <span class="badge badge-neutral" style="flex-shrink:0">Idle</span>
+            </div>
+            <p class="text-xs text-dim truncate">raphaeltm/docs-toolkit</p>
+          </div>
+        </div>
+        <p class="text-sm text-muted mb-4">Internal documentation toolkit with auto-generated API references and search.</p>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>&#9679; 0 tasks</span>
+          <span>&#128187; 0 workspaces</span>
+          <span>&#128337; 3d ago</span>
+        </div>
+      </div>
+
+      <!-- Project 4 -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="flex items-center gap-3 mb-4">
+          <div style="width:44px;height:44px;border-radius:var(--radius-md);background:rgba(187,154,247,0.08);border:1px solid rgba(187,154,247,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">&#128640;</div>
+          <div style="flex:1;min-width:0">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size:15px;font-weight:600" class="truncate">api-gateway</h3>
+              <span class="badge badge-success" style="flex-shrink:0">Active</span>
+            </div>
+            <p class="text-xs text-dim truncate">raphaeltm/api-gateway</p>
+          </div>
+        </div>
+        <p class="text-sm text-muted mb-4">Edge-first API gateway with rate limiting, auth, and usage tracking.</p>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>&#9679; 3 tasks</span>
+          <span>&#128187; 1 workspace</span>
+          <span>&#128337; 1h ago</span>
+        </div>
+      </div>
+
+      <!-- Project 5 -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="flex items-center gap-3 mb-4">
+          <div style="width:44px;height:44px;border-radius:var(--radius-md);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">&#128274;</div>
+          <div style="flex:1;min-width:0">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size:15px;font-weight:600" class="truncate">auth-service</h3>
+              <span class="badge badge-neutral" style="flex-shrink:0">Archived</span>
+            </div>
+            <p class="text-xs text-dim truncate">raphaeltm/auth-service</p>
+          </div>
+        </div>
+        <p class="text-sm text-muted mb-4">Standalone authentication microservice — deprecated, now integrated into SAM.</p>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>&#9679; 0 tasks</span>
+          <span>&#128187; 0 workspaces</span>
+          <span>&#128337; 2w ago</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workspace - ws-fix-login-redirect | SAM</title>
+  <link rel="stylesheet" href="glass-base.css">
+  <style>
+    /* ═══ FULL-WIDTH LAYOUT (no sidebar) ═══ */
+    .workspace-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ═══ WORKSPACE HEADER BAR ═══ */
+    .workspace-header {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      padding: var(--sp-3) var(--sp-6);
+      background: rgba(11, 17, 16, 0.7);
+      backdrop-filter: blur(var(--glass-blur-heavy));
+      -webkit-backdrop-filter: blur(var(--glass-blur-heavy));
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--fg-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .back-btn:hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--fg-primary);
+    }
+
+    .workspace-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--fg-primary);
+      font-family: var(--font-mono);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      min-width: 0;
+      flex: 1;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      flex-shrink: 0;
+    }
+
+    /* ═══ SPLIT PANELS ═══ */
+    .workspace-panels {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .panel-terminal {
+      flex: 0 0 60%;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border-subtle);
+      min-width: 0;
+    }
+
+    .panel-chat {
+      flex: 0 0 40%;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    /* ═══ TERMINAL PANEL ═══ */
+    .terminal-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sp-2) var(--sp-4);
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(11, 17, 16, 0.4);
+      flex-shrink: 0;
+    }
+
+    .terminal-panel-header .tab-row {
+      display: flex;
+      gap: var(--sp-1);
+    }
+
+    .terminal-tab {
+      padding: var(--sp-1) var(--sp-3);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--fg-dim);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+      background: transparent;
+    }
+
+    .terminal-tab:hover {
+      color: var(--fg-muted);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .terminal-tab.active {
+      color: var(--fg-primary);
+      background: rgba(255,255,255,0.06);
+    }
+
+    .terminal-container {
+      flex: 1;
+      background: #1a1b26;
+      overflow-y: auto;
+      padding: var(--sp-4) var(--sp-5);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      color: #a9b1d6;
+    }
+
+    .terminal-container .prompt {
+      color: #7aa2f7;
+    }
+
+    .terminal-container .command {
+      color: #c0caf5;
+    }
+
+    .terminal-container .output {
+      color: #787c99;
+    }
+
+    .terminal-container .output-branch {
+      color: #bb9af7;
+    }
+
+    .terminal-container .output-modified {
+      color: #e0af68;
+    }
+
+    .terminal-container .output-success {
+      color: #9ece6a;
+    }
+
+    .terminal-container .output-agent {
+      color: #7dcfff;
+    }
+
+    .terminal-container .line {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .terminal-container .cursor-block {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #c0caf5;
+      animation: cursor-blink 1s step-end infinite;
+      vertical-align: text-bottom;
+      margin-left: 2px;
+    }
+
+    @keyframes cursor-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    /* ═══ CHAT / AGENT PANEL ═══ */
+    .chat-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sp-3) var(--sp-4);
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(11, 17, 16, 0.4);
+      flex-shrink: 0;
+    }
+
+    .chat-panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--fg-primary);
+    }
+
+    .chat-panel-meta {
+      font-size: 12px;
+      color: var(--fg-dim);
+    }
+
+    .agent-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--sp-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-4);
+    }
+
+    .agent-msg {
+      display: flex;
+      gap: var(--sp-3);
+    }
+
+    .agent-msg .agent-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .agent-avatar.assistant-avatar {
+      background: linear-gradient(135deg, rgba(22, 163, 74, 0.3), rgba(52, 211, 153, 0.2));
+      border: 1px solid rgba(52, 211, 153, 0.2);
+      color: #34d399;
+    }
+
+    .agent-avatar.user-avatar {
+      background: linear-gradient(135deg, #1a2e29, #29423b);
+      border: 1px solid var(--glass-border);
+      color: var(--fg-muted);
+    }
+
+    .agent-msg .msg-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .msg-role {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--fg-muted);
+      margin-bottom: var(--sp-1);
+    }
+
+    .msg-role .timestamp {
+      font-weight: 400;
+      color: var(--fg-dim);
+      margin-left: var(--sp-2);
+    }
+
+    .msg-text {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--fg-primary);
+    }
+
+    .msg-text p {
+      margin-bottom: var(--sp-2);
+    }
+
+    .msg-text p:last-child {
+      margin-bottom: 0;
+    }
+
+    .msg-text code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(14, 26, 23, 0.6);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #34d399;
+    }
+
+    .msg-tool-call {
+      background: rgba(14, 26, 23, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: var(--sp-2) var(--sp-3);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--fg-dim);
+      margin-top: var(--sp-2);
+      margin-bottom: var(--sp-2);
+    }
+
+    .msg-tool-call .tool-label {
+      color: #34d399;
+      font-weight: 600;
+    }
+
+    .msg-tool-call .tool-file {
+      color: #7aa2f7;
+    }
+
+    /* Agent typing indicator */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: var(--sp-2) 0;
+    }
+
+    .typing-dots {
+      display: flex;
+      gap: 4px;
+    }
+
+    .typing-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--fg-dim);
+      animation: typing-bounce 1.4s infinite;
+    }
+
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typing-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    .chat-input-bar {
+      padding: var(--sp-3) var(--sp-4);
+      border-top: 1px solid var(--border-subtle);
+      background: rgba(11, 17, 16, 0.4);
+      flex-shrink: 0;
+    }
+
+    .chat-input-row {
+      display: flex;
+      gap: var(--sp-2);
+      align-items: flex-end;
+    }
+
+    .chat-input-row .input {
+      flex: 1;
+      min-height: 36px;
+      padding: var(--sp-2) var(--sp-3);
+      font-size: 13px;
+    }
+
+    .chat-input-row .btn {
+      min-height: 36px;
+      padding: var(--sp-2) var(--sp-3);
+    }
+
+    /* ═══ STATUS DOT in badge ═══ */
+    .badge .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: status-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes status-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ═══ MOBILE RESPONSIVE ═══ */
+    @media (max-width: 768px) {
+      .workspace-header {
+        padding: var(--sp-3) var(--sp-4);
+        gap: var(--sp-3);
+      }
+
+      .workspace-name {
+        font-size: 14px;
+      }
+
+      .header-actions .btn span.btn-label {
+        display: none;
+      }
+
+      .workspace-panels {
+        flex-direction: column;
+      }
+
+      .panel-terminal {
+        flex: 0 0 55%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .panel-chat {
+        flex: 1;
+      }
+
+      .terminal-container {
+        font-size: 11px;
+        padding: var(--sp-3);
+      }
+
+      .agent-messages {
+        padding: var(--sp-3);
+      }
+    }
+
+    /* ═══ DESKTOP HEADER HIDES MOBILE ═══ */
+    @media (min-width: 769px) {
+      .mobile-header {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Mobile header -->
+  <div class="mobile-header">
+    <div class="flex items-center gap-3">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <span class="font-semibold" style="font-family: var(--font-mono); font-size: 13px;">ws-fix-login-redirect</span>
+    </div>
+    <span class="badge badge-success"><span class="status-dot"></span> Running</span>
+  </div>
+
+  <div class="workspace-shell">
+    <!-- ═══ HEADER BAR ═══ -->
+    <div class="workspace-header">
+      <div class="header-left">
+        <button class="back-btn" title="Back to project">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <span class="workspace-name">ws-fix-login-redirect</span>
+        <span class="badge badge-success"><span class="status-dot"></span> Running</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          <span class="btn-label">Stop</span>
+        </button>
+        <button class="btn btn-ghost btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          <span class="btn-label">Restart</span>
+        </button>
+        <button class="btn btn-danger btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span class="btn-label">Delete</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══ SPLIT PANELS ═══ -->
+    <div class="workspace-panels">
+
+      <!-- ═══ LEFT: TERMINAL ═══ -->
+      <div class="panel-terminal">
+        <div class="terminal-panel-header">
+          <div class="tab-row">
+            <button class="terminal-tab active">Terminal</button>
+            <button class="terminal-tab">Logs</button>
+            <button class="terminal-tab">Files</button>
+          </div>
+          <span class="text-xs text-dim">bash - 120x40</span>
+        </div>
+        <div class="terminal-container">
+          <div class="line"><span class="prompt">sam@ws-fix-login ~/project $</span> <span class="command">claude --version</span></div>
+          <div class="line"><span class="output-success">Claude Code v1.2.3</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="prompt">sam@ws-fix-login ~/project $</span> <span class="command">git status</span></div>
+          <div class="line"><span class="output">On branch </span><span class="output-branch">fix/login-redirect</span></div>
+          <div class="line"><span class="output">Changes not staged for commit:</span></div>
+          <div class="line"><span class="output">  (use "git add &lt;file&gt;..." to update what will be committed)</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="output-modified">        modified:   apps/api/src/routes/auth.ts</span></div>
+          <div class="line"><span class="output-modified">        modified:   apps/api/tests/auth.test.ts</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="output">no changes added to commit (use "git add" to stage)</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="prompt">sam@ws-fix-login ~/project $</span> <span class="command">claude "Fix the OAuth redirect loop on Safari"</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="output-agent">I'll investigate the OAuth callback redirect issue on Safari.</span></div>
+          <div class="line"><span class="output-agent">Let me start by reading the auth route handler...</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="output">  Read </span><span class="output-branch">apps/api/src/routes/auth.ts</span></div>
+          <div class="line"><span class="output">  Read </span><span class="output-branch">apps/api/src/middleware/session.ts</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="output-agent">Found it. The issue is in the OAuth callback handler. Safari's ITP</span></div>
+          <div class="line"><span class="output-agent">blocks the session cookie because it's set during a cross-origin</span></div>
+          <div class="line"><span class="output-agent">redirect. The fix is to use SameSite=None with Secure flag and</span></div>
+          <div class="line"><span class="output-agent">partition the cookie storage...</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="output">  Edit </span><span class="output-branch">apps/api/src/routes/auth.ts</span> <span class="output">(lines 47-63)</span></div>
+          <div class="line"><span class="output">  Edit </span><span class="output-branch">apps/api/src/middleware/session.ts</span> <span class="output">(lines 12-18)</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line"><span class="prompt">sam@ws-fix-login ~/project $</span> <span class="cursor-block"></span></div>
+        </div>
+      </div>
+
+      <!-- ═══ RIGHT: AGENT CHAT ═══ -->
+      <div class="panel-chat">
+        <div class="chat-panel-header">
+          <div>
+            <div class="chat-panel-title">ACP Session</div>
+            <div class="chat-panel-meta">Claude Code -- active for 3m 42s</div>
+          </div>
+          <span class="badge badge-success"><span class="status-dot"></span> Active</span>
+        </div>
+
+        <div class="agent-messages">
+          <!-- User message -->
+          <div class="agent-msg">
+            <div class="agent-avatar user-avatar">U</div>
+            <div class="msg-content">
+              <div class="msg-role">You <span class="timestamp">3 min ago</span></div>
+              <div class="msg-text">
+                <p>Fix the OAuth redirect loop on Safari. Users on Safari 17+ get stuck in an infinite redirect after GitHub OAuth callback.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Assistant message -->
+          <div class="agent-msg">
+            <div class="agent-avatar assistant-avatar">C</div>
+            <div class="msg-content">
+              <div class="msg-role">Claude <span class="timestamp">3 min ago</span></div>
+              <div class="msg-text">
+                <p>I'll investigate the OAuth callback redirect issue on Safari. Let me start by reading the auth route handler and session middleware.</p>
+              </div>
+              <div class="msg-tool-call">
+                <span class="tool-label">Read</span> <span class="tool-file">apps/api/src/routes/auth.ts</span>
+              </div>
+              <div class="msg-tool-call">
+                <span class="tool-label">Read</span> <span class="tool-file">apps/api/src/middleware/session.ts</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Assistant follow-up -->
+          <div class="agent-msg">
+            <div class="agent-avatar assistant-avatar">C</div>
+            <div class="msg-content">
+              <div class="msg-role">Claude <span class="timestamp">2 min ago</span></div>
+              <div class="msg-text">
+                <p>Found the root cause. Safari's Intelligent Tracking Prevention (ITP) blocks the session cookie because it's set during a cross-origin redirect from GitHub. The cookie uses <code>SameSite=Lax</code>, which Safari treats differently during the OAuth callback flow.</p>
+                <p>The fix involves two changes:</p>
+                <p>1. Set <code>SameSite=None; Secure</code> on the session cookie during the OAuth callback specifically</p>
+                <p>2. Add cookie partitioning support via <code>Partitioned</code> attribute for CHIPS compatibility</p>
+              </div>
+              <div class="msg-tool-call">
+                <span class="tool-label">Edit</span> <span class="tool-file">apps/api/src/routes/auth.ts</span> (lines 47-63)
+              </div>
+              <div class="msg-tool-call">
+                <span class="tool-label">Edit</span> <span class="tool-file">apps/api/src/middleware/session.ts</span> (lines 12-18)
+              </div>
+            </div>
+          </div>
+
+          <!-- Assistant current -->
+          <div class="agent-msg">
+            <div class="agent-avatar assistant-avatar">C</div>
+            <div class="msg-content">
+              <div class="msg-role">Claude <span class="timestamp">just now</span></div>
+              <div class="msg-text">
+                <p>Now let me update the tests to cover the Safari-specific cookie behavior...</p>
+              </div>
+              <div class="typing-indicator">
+                <div class="typing-dots">
+                  <span></span><span></span><span></span>
+                </div>
+                <span class="text-xs text-dim">Working...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat input -->
+        <div class="chat-input-bar">
+          <div class="chat-input-row">
+            <input type="text" class="input input-glass" placeholder="Send a message to the agent...">
+            <button class="btn btn-primary btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

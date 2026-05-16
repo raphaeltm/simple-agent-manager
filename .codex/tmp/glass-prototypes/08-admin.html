@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Overview — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .health-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .health-row:last-child { border-bottom: none; }
+  .health-row .service-name {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--fg-primary);
+  }
+  .health-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .health-dot.green { background: var(--success); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+  .health-dot.yellow { background: var(--warning); box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+  .health-dot.red { background: var(--danger); box-shadow: 0 0 6px rgba(239,68,68,0.4); }
+  .health-status {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .health-status.healthy { color: var(--success); }
+  .health-status.degraded { color: var(--warning); }
+  .health-status.unhealthy { color: var(--danger); }
+
+  .activity-item {
+    display: flex;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .activity-text {
+    font-size: 13px;
+    color: var(--fg-primary);
+    line-height: 1.5;
+  }
+  .activity-text .dim { color: var(--fg-dim); }
+  .activity-time {
+    font-size: 12px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+
+  td .mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg-muted);
+  }
+  td .error-msg {
+    max-width: 320px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status-code {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 8px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+  }
+  .status-code.s4xx {
+    background: rgba(245,158,11,0.1);
+    color: var(--warning);
+    border: 1px solid rgba(245,158,11,0.15);
+  }
+  .status-code.s5xx {
+    background: rgba(239,68,68,0.1);
+    color: var(--danger);
+    border: 1px solid rgba(239,68,68,0.15);
+  }
+</style>
+</head>
+<body>
+
+<!-- Mobile Header -->
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">SAM</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <div class="avatar">R</div>
+    <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">S</div>
+      <div class="logo-text">SAM</div>
+    </div>
+
+    <div style="position:relative;margin-bottom:var(--sp-4)">
+      <input class="input input-glass" style="min-height:36px;padding:6px 12px 6px 32px;font-size:13px;border-radius:var(--radius-sm)" placeholder="Search...">
+      <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg-dim);font-size:14px">&#128269;</span>
+    </div>
+
+    <a class="nav-item">
+      <span>&#9632;</span> Dashboard
+    </a>
+    <a class="nav-item">
+      <span>&#128193;</span> Projects
+    </a>
+    <a class="nav-item">
+      <span>&#9881;</span> Settings
+    </a>
+    <a class="nav-item">
+      <span>&#9638;</span> Nodes
+    </a>
+    <a class="nav-item">
+      <span>&#128187;</span> Workspaces
+    </a>
+
+    <div class="nav-section-label">Projects</div>
+    <div class="sidebar-project"><div class="dot"></div> simple-agent-manager</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--info)"></div> marketing-site</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--warning)"></div> docs-toolkit</div>
+
+    <div class="nav-section-label">Admin</div>
+    <a class="nav-item active">
+      <span>&#9673;</span> Overview
+    </a>
+    <a class="nav-item">
+      <span>&#128100;</span> Users
+    </a>
+    <a class="nav-item">
+      <span>&#128273;</span> Credentials
+    </a>
+    <a class="nav-item">
+      <span>&#129302;</span> AI Proxy
+    </a>
+    <a class="nav-item">
+      <span>&#128176;</span> Costs
+    </a>
+    <a class="nav-item">
+      <span>&#128200;</span> Usage
+    </a>
+    <a class="nav-item">
+      <span>&#9888;</span> Errors
+    </a>
+    <a class="nav-item">
+      <span>&#128220;</span> Logs
+    </a>
+    <a class="nav-item">
+      <span>&#128225;</span> Stream
+    </a>
+
+    <div class="sidebar-bottom">
+      <div class="user-pill">
+        <div class="avatar">R</div>
+        <span style="font-size:13px;color:var(--fg-muted)">Raphael</span>
+        <span class="badge badge-warning" style="margin-left:auto;font-size:10px">Admin</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Admin Overview</h1>
+        <p class="page-subtitle">Platform health, usage metrics, and recent activity.</p>
+      </div>
+      <button class="btn btn-glass btn-sm">
+        &#8635; Refresh
+      </button>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="card-grid mb-8" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
+      <div class="glass card stat-card">
+        <div class="stat-label">Total Users</div>
+        <div class="stat-value">24</div>
+        <div class="stat-trend up">&#9650; 3 this week</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Active Nodes</div>
+        <div class="stat-value">8</div>
+        <div class="stat-trend" style="color:var(--fg-dim)">2 warm, 6 running</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Running Workspaces</div>
+        <div class="stat-value">12</div>
+        <div class="stat-trend up">&#9650; 4 from yesterday</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">API Requests (24h)</div>
+        <div class="stat-value">45.2K</div>
+        <div class="stat-trend down">&#9660; 8% vs avg</div>
+      </div>
+    </div>
+
+    <!-- Platform Health -->
+    <h2 class="section-title">Platform Health</h2>
+    <div class="glass mb-8" style="border-radius:var(--radius-lg)">
+      <div class="health-row">
+        <div class="service-name">
+          <span class="health-dot green"></span>
+          API Worker
+        </div>
+        <span class="health-status healthy">Healthy</span>
+      </div>
+      <div class="health-row">
+        <div class="service-name">
+          <span class="health-dot green"></span>
+          D1 Database
+        </div>
+        <span class="health-status healthy">Healthy</span>
+      </div>
+      <div class="health-row">
+        <div class="service-name">
+          <span class="health-dot green"></span>
+          KV Store
+        </div>
+        <span class="health-status healthy">Healthy</span>
+      </div>
+      <div class="health-row">
+        <div class="service-name">
+          <span class="health-dot green"></span>
+          R2 Storage
+        </div>
+        <span class="health-status healthy">Healthy</span>
+      </div>
+      <div class="health-row">
+        <div class="service-name">
+          <span class="health-dot yellow"></span>
+          VM Agent
+        </div>
+        <span class="health-status degraded">1 unhealthy</span>
+      </div>
+    </div>
+
+    <!-- Recent Errors -->
+    <h2 class="section-title">Recent Errors</h2>
+    <div class="glass mb-8" style="border-radius:var(--radius-lg);overflow:hidden">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Message</th>
+              <th>Route</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="mono">2026-05-16 14:32:08</span></td>
+              <td><span class="error-msg">CORS origin rejected: https://evil-site.example.com</span></td>
+              <td><span class="mono">POST /api/projects</span></td>
+              <td><span class="status-code s4xx">403</span></td>
+            </tr>
+            <tr>
+              <td><span class="mono">2026-05-16 14:28:51</span></td>
+              <td><span class="error-msg">D1 query timeout after 30000ms on tasks table</span></td>
+              <td><span class="mono">GET /api/projects/p-3f8/tasks</span></td>
+              <td><span class="status-code s5xx">500</span></td>
+            </tr>
+            <tr>
+              <td><span class="mono">2026-05-16 14:15:33</span></td>
+              <td><span class="error-msg">VM agent heartbeat missed for node-7a2 (last seen 5m ago)</span></td>
+              <td><span class="mono">CRON /cron/node-health</span></td>
+              <td><span class="status-code s5xx">502</span></td>
+            </tr>
+            <tr>
+              <td><span class="mono">2026-05-16 13:59:17</span></td>
+              <td><span class="error-msg">Rate limit exceeded for user usr-b4e (token-login)</span></td>
+              <td><span class="mono">POST /api/auth/token-login</span></td>
+              <td><span class="status-code s4xx">429</span></td>
+            </tr>
+            <tr>
+              <td><span class="mono">2026-05-16 13:42:05</span></td>
+              <td><span class="error-msg">Workspace ws-9f1 creation failed: Hetzner API 422 — server limit reached</span></td>
+              <td><span class="mono">POST /api/workspaces</span></td>
+              <td><span class="status-code s5xx">502</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <h2 class="section-title">Recent Activity</h2>
+    <div class="glass" style="border-radius:var(--radius-lg)">
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:var(--success)">+</div>
+        <div>
+          <div class="activity-text">
+            <strong>maria.chen</strong> created project <strong>api-refactor</strong>
+          </div>
+          <div class="activity-time">2 minutes ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(96,165,250,0.1);color:var(--info)">&#9654;</div>
+        <div>
+          <div class="activity-text">
+            Task <strong>fix-auth-redirect</strong> dispatched to node <strong>node-3c8</strong>
+          </div>
+          <div class="activity-time">8 minutes ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(245,158,11,0.1);color:var(--warning)">&#9888;</div>
+        <div>
+          <div class="activity-text">
+            Node <strong>node-7a2</strong> entered warm pool <span class="dim">(idle timeout: 30m)</span>
+          </div>
+          <div class="activity-time">14 minutes ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(34,197,94,0.1);color:var(--success)">&#10003;</div>
+        <div>
+          <div class="activity-text">
+            <strong>deploy-staging.yml</strong> completed successfully on branch <strong>feat/budget-controls</strong>
+          </div>
+          <div class="activity-time">23 minutes ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(159,183,174,0.1);color:var(--fg-muted)">&#128100;</div>
+        <div>
+          <div class="activity-text">
+            <strong>alex.dev</strong> logged in via GitHub OAuth
+          </div>
+          <div class="activity-time">41 minutes ago</div>
+        </div>
+      </div>
+      <div class="activity-item">
+        <div class="activity-icon" style="background:rgba(239,68,68,0.1);color:var(--danger)">&#10005;</div>
+        <div>
+          <div class="activity-text">
+            Workspace <strong>ws-9f1</strong> destroyed after task failure <span class="dim">(exit code 1)</span>
+          </div>
+          <div class="activity-time">57 minutes ago</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

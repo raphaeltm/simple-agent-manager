@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Triggers — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <span style="color:var(--fg-muted);cursor:pointer">&larr;</span>
+    <span class="font-semibold" style="font-size:15px">Triggers</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item active"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">simple-agent-manager</div>
+    <a class="nav-item"><span>&#128172;</span> Chat</a>
+    <a class="nav-item"><span>&#128161;</span> Ideas</a>
+    <a class="nav-item active"><span>&#9889;</span> Triggers</a>
+    <a class="nav-item"><span>&#128218;</span> Library</a>
+    <a class="nav-item"><span>&#127793;</span> Knowledge</a>
+    <a class="nav-item"><span>&#128197;</span> Activity</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:800px">
+    <div class="page-header">
+      <div>
+        <p class="text-sm text-muted mb-2">&larr; simple-agent-manager</p>
+        <h1 class="page-title">Triggers</h1>
+        <p class="page-subtitle">Automated task dispatch from GitHub events.</p>
+      </div>
+      <button class="btn btn-primary btn-sm">+ New Trigger</button>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:var(--sp-4)">
+      <!-- Trigger 1 -->
+      <div class="glass card">
+        <div class="flex items-center justify-between mb-3" style="flex-wrap:wrap;gap:var(--sp-2)">
+          <div class="flex items-center gap-3">
+            <span class="badge badge-success">Active</span>
+            <div class="font-semibold" style="font-size:15px">Auto-fix on Issue Label</div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm">Edit</button>
+            <button class="btn btn-ghost btn-sm">Disable</button>
+          </div>
+        </div>
+        <div class="text-sm text-muted mb-3">When an issue is labeled <code style="font-family:var(--font-mono);font-size:12px;color:#34d399">agent-fix</code>, dispatch a task to fix the issue.</div>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>Event: <strong style="color:var(--fg-muted)">issues.labeled</strong></span>
+          <span>Agent: <strong style="color:var(--fg-muted)">Claude Code</strong></span>
+          <span>Runs: <strong style="color:var(--fg-muted)">14</strong></span>
+        </div>
+      </div>
+
+      <!-- Trigger 2 -->
+      <div class="glass card">
+        <div class="flex items-center justify-between mb-3" style="flex-wrap:wrap;gap:var(--sp-2)">
+          <div class="flex items-center gap-3">
+            <span class="badge badge-success">Active</span>
+            <div class="font-semibold" style="font-size:15px">PR Review on Open</div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm">Edit</button>
+            <button class="btn btn-ghost btn-sm">Disable</button>
+          </div>
+        </div>
+        <div class="text-sm text-muted mb-3">When a PR is opened, dispatch an agent to review the code changes and leave comments.</div>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>Event: <strong style="color:var(--fg-muted)">pull_request.opened</strong></span>
+          <span>Agent: <strong style="color:var(--fg-muted)">Claude Code</strong></span>
+          <span>Runs: <strong style="color:var(--fg-muted)">28</strong></span>
+        </div>
+      </div>
+
+      <!-- Trigger 3 -->
+      <div class="glass card" style="opacity:0.6">
+        <div class="flex items-center justify-between mb-3" style="flex-wrap:wrap;gap:var(--sp-2)">
+          <div class="flex items-center gap-3">
+            <span class="badge badge-neutral">Disabled</span>
+            <div class="font-semibold" style="font-size:15px">Nightly Dependency Update</div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm">Edit</button>
+            <button class="btn btn-ghost btn-sm">Enable</button>
+          </div>
+        </div>
+        <div class="text-sm text-muted mb-3">Cron trigger (daily at 03:00 UTC) to check for outdated dependencies and create PRs.</div>
+        <div class="flex items-center gap-4 text-xs text-dim">
+          <span>Event: <strong style="color:var(--fg-muted)">cron (0 3 * * *)</strong></span>
+          <span>Agent: <strong style="color:var(--fg-muted)">Claude Code</strong></span>
+          <span>Runs: <strong style="color:var(--fg-muted)">0</strong></span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

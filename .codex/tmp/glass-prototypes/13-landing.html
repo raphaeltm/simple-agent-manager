@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAM — Landing Page Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  body {
+    background:
+      radial-gradient(ellipse 100% 80% at 50% -20%, rgba(22, 163, 74, 0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 80%, rgba(52, 211, 153, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 30% at 10% 60%, rgba(96, 165, 250, 0.03) 0%, transparent 60%),
+      var(--bg-canvas);
+  }
+
+  .landing-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-4) var(--sp-6);
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .hero {
+    text-align: center;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 80px var(--sp-6) 60px;
+  }
+
+  @media (max-width: 768px) {
+    .hero { padding: 40px var(--sp-4) 40px; }
+    .hero h1 { font-size: 2rem !important; }
+    .hero p { font-size: 1rem !important; }
+    .features-grid { grid-template-columns: 1fr !important; }
+    .cta-row { flex-direction: column !important; }
+  }
+
+  .hero h1 {
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: var(--sp-6);
+    background: linear-gradient(135deg, var(--fg-primary) 0%, #34d399 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero p {
+    font-size: 1.25rem;
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin-bottom: var(--sp-8);
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-6);
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 var(--sp-6) 80px;
+  }
+
+  .feature-card {
+    padding: var(--sp-6);
+  }
+
+  .feature-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: var(--sp-4);
+  }
+
+  .social-proof {
+    text-align: center;
+    padding: 60px var(--sp-6);
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .terminal-demo {
+    max-width: 700px;
+    margin: 0 auto 60px;
+    padding: 0 var(--sp-6);
+  }
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav class="landing-nav">
+  <div class="flex items-center gap-3">
+    <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff">S</div>
+    <span style="font-weight:700;font-size:17px">SAM</span>
+  </div>
+  <div class="flex items-center gap-4">
+    <a href="#" style="font-size:14px;color:var(--fg-muted);text-decoration:none">Docs</a>
+    <a href="#" style="font-size:14px;color:var(--fg-muted);text-decoration:none">Pricing</a>
+    <a href="#" style="font-size:14px;color:var(--fg-muted);text-decoration:none">Blog</a>
+    <button class="btn btn-glass btn-sm">Sign In</button>
+    <button class="btn btn-primary btn-sm">Get Started</button>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="badge badge-success mb-4" style="margin-bottom:var(--sp-4);display:inline-flex">
+    &#9679; Now in public beta
+  </div>
+  <h1>Your AI agents deserve their own workspace</h1>
+  <p>SAM gives every coding agent an isolated VM with full dev tools, terminal access, and real-time collaboration. Deploy in seconds, scale to teams.</p>
+  <div class="cta-row flex items-center justify-center gap-4">
+    <button class="btn btn-primary btn-lg">Try SAM Free</button>
+    <button class="btn btn-glass btn-lg">View Demo</button>
+  </div>
+</section>
+
+<!-- Terminal Demo -->
+<div class="terminal-demo">
+  <div class="terminal-frame">
+    <div class="terminal-header">
+      <div class="terminal-dot red"></div>
+      <div class="terminal-dot yellow"></div>
+      <div class="terminal-dot green"></div>
+      <span style="margin-left:8px;font-size:12px;color:#787c99">sam-workspace</span>
+    </div>
+    <div class="terminal-body" style="min-height:180px">
+      <div><span style="color:#9ece6a">$</span> sam task create "Fix the login redirect bug"</div>
+      <div style="color:#787c99">Creating workspace...</div>
+      <div style="color:#787c99">Provisioning node-fsn1-01 (CX32, 4 vCPU, 8GB)...</div>
+      <div style="color:#9ece6a">&#10003; Workspace ws-fix-login ready in 42s</div>
+      <div style="color:#787c99">Starting Claude Code agent...</div>
+      <div style="color:#7aa2f7">Agent: Investigating OAuth callback in auth.ts...</div>
+      <div style="color:#7aa2f7">Agent: Found redirect loop — Safari SameSite cookie issue</div>
+      <div style="color:#7aa2f7">Agent: Applied fix, running tests...</div>
+      <div style="color:#9ece6a">&#10003; All 47 tests passed. PR #1032 created.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Features -->
+<section class="features-grid">
+  <div class="glass feature-card">
+    <div class="feature-icon" style="background:var(--accent-tint);border:1px solid rgba(22,163,74,0.15)">&#9889;</div>
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:var(--sp-2)">Instant Workspaces</h3>
+    <p class="text-sm text-muted">Spin up isolated dev environments in under a minute. Each agent gets its own VM with Docker, git, and full terminal access.</p>
+  </div>
+
+  <div class="glass feature-card">
+    <div class="feature-icon" style="background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.15)">&#128172;</div>
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:var(--sp-2)">Chat-First UX</h3>
+    <p class="text-sm text-muted">Talk to your agents naturally. See their work in real-time with streaming tool calls, code diffs, and terminal output.</p>
+  </div>
+
+  <div class="glass feature-card">
+    <div class="feature-icon" style="background:rgba(187,154,247,0.08);border:1px solid rgba(187,154,247,0.15)">&#128279;</div>
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:var(--sp-2)">Multi-Agent</h3>
+    <p class="text-sm text-muted">Agents can spawn sub-agents, delegate tasks, and collaborate. Build complex workflows with natural orchestration.</p>
+  </div>
+
+  <div class="glass feature-card">
+    <div class="feature-icon" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.15)">&#128274;</div>
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:var(--sp-2)">Bring Your Own Cloud</h3>
+    <p class="text-sm text-muted">Use your own Hetzner account. Your VMs, your data, your control. We never touch your cloud credentials.</p>
+  </div>
+
+  <div class="glass feature-card">
+    <div class="feature-icon" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15)">&#128200;</div>
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:var(--sp-2)">Usage Tracking</h3>
+    <p class="text-sm text-muted">See exactly how many tokens your agents use, broken down by model and project. Set budgets and cost caps.</p>
+  </div>
+
+  <div class="glass feature-card">
+    <div class="feature-icon" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15)">&#128736;</div>
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:var(--sp-2)">Self-Hostable</h3>
+    <p class="text-sm text-muted">Open source core, deploy anywhere. Run SAM on your own Cloudflare account for full data sovereignty.</p>
+  </div>
+</section>
+
+<!-- Social Proof -->
+<section class="social-proof">
+  <p style="font-size:1.125rem;color:var(--fg-muted);line-height:1.6;font-style:italic">"SAM is what I wished existed when I started running AI agents on real codebases. It just works."</p>
+  <p class="text-sm" style="margin-top:var(--sp-4);color:var(--fg-dim)">— Developer, Early Access</p>
+</section>
+
+<!-- Footer CTA -->
+<section style="text-align:center;padding:40px var(--sp-6) 80px">
+  <h2 style="font-size:1.75rem;font-weight:700;margin-bottom:var(--sp-4)">Ready to let your agents work?</h2>
+  <p class="text-muted mb-6" style="margin-bottom:var(--sp-6)">Start free. No credit card required.</p>
+  <button class="btn btn-primary btn-lg">Get Started</button>
+</section>
+
+</body>
+</html>

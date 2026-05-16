@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modals & Dialogs — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .modal-showcase {
+    display: flex;
+    flex-direction: column;
+    gap: 80px;
+    padding: 40px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .showcase-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--fg-dim);
+    margin-bottom: 16px;
+  }
+  .modal-demo {
+    position: relative;
+    min-height: 400px;
+    background: rgba(0,0,0,0.3);
+    border-radius: var(--radius-xl);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .modal-demo .modal {
+    position: relative;
+    z-index: 1;
+  }
+  /* Drawer demo */
+  .drawer-demo {
+    position: relative;
+    min-height: 500px;
+    background: rgba(0,0,0,0.3);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+  }
+  .drawer-demo .drawer {
+    position: absolute;
+    z-index: 1;
+  }
+  .drawer-demo .drawer-backdrop {
+    position: absolute;
+  }
+</style>
+</head>
+<body>
+
+<div class="modal-showcase">
+
+  <!-- ═══ CONFIRM DIALOG ═══ -->
+  <div>
+    <div class="showcase-label">Confirm Dialog — Delete Project</div>
+    <div class="modal-demo">
+      <div class="modal" style="min-width:440px">
+        <h2 class="modal-title" style="color:var(--danger)">Delete Project</h2>
+        <p style="font-size:14px;color:var(--fg-muted);margin-bottom:var(--sp-4)">
+          Are you sure you want to delete <strong style="color:var(--fg-primary)">simple-agent-manager</strong>?
+          This will permanently remove all workspaces, tasks, chat sessions, and associated data.
+        </p>
+        <div class="alert alert-warning mb-4" style="margin-bottom:var(--sp-4)">
+          &#9888; This action cannot be undone.
+        </div>
+        <div class="mb-4">
+          <label class="label">Type the project name to confirm:</label>
+          <input class="input" placeholder="simple-agent-manager">
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-glass">Cancel</button>
+          <button class="btn btn-danger">Delete Project</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PROFILE FORM DIALOG ═══ -->
+  <div>
+    <div class="showcase-label">Profile Form Dialog — Create Agent Profile</div>
+    <div class="modal-demo">
+      <div class="modal" style="min-width:500px">
+        <h2 class="modal-title">Create Agent Profile</h2>
+        <div class="mb-4">
+          <label class="label">Profile Name</label>
+          <input class="input" value="Backend Specialist">
+        </div>
+        <div class="mb-4">
+          <label class="label">Description</label>
+          <textarea class="input" style="min-height:60px">Optimized for backend TypeScript work with Cloudflare Workers, D1, and Hono.</textarea>
+        </div>
+        <div class="mb-4">
+          <label class="label">Agent Type</label>
+          <select class="input" style="appearance:auto">
+            <option selected>Claude Code</option>
+            <option>Codex</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <label class="label">System Prompt</label>
+          <textarea class="input" style="min-height:100px;font-family:var(--font-mono);font-size:13px">You are a backend specialist focused on Cloudflare Workers, Hono API framework, Drizzle ORM with D1, and TypeScript. Prioritize type safety, performance, and following established patterns in the codebase.</textarea>
+        </div>
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <label class="label" style="margin-bottom:0">Allow file uploads</label>
+            <p class="text-xs text-dim">Let this agent receive file attachments</p>
+          </div>
+          <div class="toggle active"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-glass">Cancel</button>
+          <button class="btn btn-primary">Create Profile</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TASK DELEGATE DIALOG ═══ -->
+  <div>
+    <div class="showcase-label">Task Delegate Dialog</div>
+    <div class="modal-demo">
+      <div class="modal" style="min-width:460px">
+        <h2 class="modal-title">Delegate Task</h2>
+        <p class="text-sm text-muted mb-4">Choose a workspace to delegate this task to:</p>
+
+        <div style="margin-bottom:var(--sp-4)">
+          <label class="label">Task</label>
+          <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+            <div style="font-size:14px;font-weight:500">Implement WebSocket reconnection</div>
+            <div class="text-xs text-dim mt-4" style="margin-top:4px">High priority · simple-agent-manager</div>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <label class="label">Target Workspace</label>
+          <div style="display:flex;flex-direction:column;gap:var(--sp-2)">
+            <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);cursor:pointer;border:1px solid rgba(22,163,74,0.3);background:var(--accent-tint)">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div style="font-size:13px;font-weight:500;font-family:var(--font-mono)">ws-fix-login</div>
+                  <div class="text-xs text-dim">node-fsn1-01 · Running · Claude Code</div>
+                </div>
+                <span style="color:var(--accent)">&#10003;</span>
+              </div>
+            </div>
+            <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4);cursor:pointer">
+              <div>
+                <div style="font-size:13px;font-weight:500;font-family:var(--font-mono)">ws-api-gateway</div>
+                <div class="text-xs text-dim">node-hel1-01 · Running · Claude Code</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-glass">Cancel</button>
+          <button class="btn btn-primary">Delegate</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ FILE PREVIEW MODAL ═══ -->
+  <div>
+    <div class="showcase-label">File Preview Modal</div>
+    <div class="modal-demo" style="min-height:500px">
+      <div class="modal" style="min-width:600px;max-width:700px">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <span style="font-size:18px">&#128196;</span>
+            <div>
+              <h2 class="modal-title" style="margin-bottom:0">architecture-diagram.md</h2>
+              <div class="text-xs text-dim">4.2 KB · Updated 2h ago</div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-glass btn-sm">Source</button>
+            <button class="btn btn-ghost btn-sm">Rendered</button>
+            <button class="btn btn-ghost btn-sm">&#10005;</button>
+          </div>
+        </div>
+        <div class="terminal-frame" style="border-radius:var(--radius-md)">
+          <div class="terminal-body" style="min-height:250px;font-size:13px">
+            <div style="color:#bb9af7"># Architecture Overview</div>
+            <br>
+            <div style="color:#a9b1d6">The platform uses a <span style="color:#e0af68">serverless architecture</span> built on:</div>
+            <br>
+            <div style="color:#a9b1d6">- <span style="color:#9ece6a">**Cloudflare Workers**</span> for the API layer</div>
+            <div style="color:#a9b1d6">- <span style="color:#9ece6a">**Durable Objects**</span> for stateful coordination</div>
+            <div style="color:#a9b1d6">- <span style="color:#9ece6a">**D1**</span> for relational data (SQLite at edge)</div>
+            <div style="color:#a9b1d6">- <span style="color:#9ece6a">**Hetzner VMs**</span> for workspace compute</div>
+            <br>
+            <div style="color:#565f89">```mermaid</div>
+            <div style="color:#a9b1d6">graph TD</div>
+            <div style="color:#a9b1d6">  A[Browser] --> B[CF Worker]</div>
+            <div style="color:#a9b1d6">  B --> C[D1 Database]</div>
+            <div style="color:#a9b1d6">  B --> D[Durable Objects]</div>
+            <div style="color:#a9b1d6">  B --> E[VM Agent]</div>
+            <div style="color:#565f89">```</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-glass">Download</button>
+          <button class="btn btn-primary">Open in Editor</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SETTINGS DRAWER ═══ -->
+  <div>
+    <div class="showcase-label">Settings Drawer (from Project Chat)</div>
+    <div class="drawer-demo">
+      <div class="drawer-backdrop" style="background:rgba(0,0,0,0.4)"></div>
+      <div class="drawer" style="position:absolute;top:0;right:0;bottom:0;width:380px">
+        <div class="flex items-center justify-between mb-6">
+          <h2 style="font-size:1.125rem;font-weight:600">Session Settings</h2>
+          <button class="btn btn-ghost btn-sm">&#10005;</button>
+        </div>
+
+        <div class="mb-6">
+          <label class="label">VM Size</label>
+          <select class="input" style="appearance:auto">
+            <option>CX22 (2 vCPU, 4 GB)</option>
+            <option selected>CX32 (4 vCPU, 8 GB)</option>
+            <option>CX42 (8 vCPU, 16 GB)</option>
+          </select>
+        </div>
+
+        <div class="mb-6">
+          <label class="label">Agent</label>
+          <select class="input" style="appearance:auto">
+            <option selected>Claude Code</option>
+            <option>Codex</option>
+          </select>
+        </div>
+
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <label class="label" style="margin-bottom:0">Auto-provision</label>
+            <p class="text-xs text-dim">Create a new node if needed</p>
+          </div>
+          <div class="toggle active"></div>
+        </div>
+
+        <div class="mb-6">
+          <div class="flex items-center justify-between mb-2">
+            <label class="label" style="margin-bottom:0">Environment Variables</label>
+            <button class="btn btn-ghost btn-sm">+ Add</button>
+          </div>
+          <div class="glass-subtle p-4" style="font-family:var(--font-mono);font-size:12px">
+            <div class="flex items-center justify-between mb-2">
+              <span style="color:#34d399">NODE_ENV</span>
+              <span class="text-dim">development</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span style="color:#34d399">DEBUG</span>
+              <span class="text-dim">true</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="label" style="margin-bottom:0">Attached Files</label>
+            <button class="btn btn-ghost btn-sm">+ Upload</button>
+          </div>
+          <div class="glass-subtle p-4">
+            <div class="flex items-center gap-3 mb-2">
+              <span>&#128196;</span>
+              <div style="flex:1;min-width:0">
+                <div class="text-sm truncate">requirements.txt</div>
+                <div class="text-xs text-dim">1.2 KB</div>
+              </div>
+              <button class="btn btn-ghost btn-sm">&#10005;</button>
+            </div>
+            <div class="flex items-center gap-3">
+              <span>&#128196;</span>
+              <div style="flex:1;min-width:0">
+                <div class="text-sm truncate">schema-draft.sql</div>
+                <div class="text-xs text-dim">3.8 KB</div>
+              </div>
+              <button class="btn btn-ghost btn-sm">&#10005;</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MOBILE NAV DRAWER ═══ -->
+  <div>
+    <div class="showcase-label">Mobile Navigation Drawer</div>
+    <div class="drawer-demo" style="max-width:400px">
+      <div class="drawer-backdrop" style="background:rgba(0,0,0,0.4)"></div>
+      <div class="drawer" style="position:absolute;top:0;right:0;bottom:0;width:280px">
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center gap-3">
+            <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+            <span class="font-semibold">SAM</span>
+          </div>
+          <button class="btn btn-ghost btn-sm">&#10005;</button>
+        </div>
+
+        <a class="nav-item active"><span>&#9632;</span> Dashboard</a>
+        <a class="nav-item"><span>&#128193;</span> Projects</a>
+        <a class="nav-item"><span>&#9881;</span> Settings</a>
+        <a class="nav-item"><span>&#9638;</span> Nodes</a>
+        <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+
+        <div class="nav-section-label">Projects</div>
+        <div class="sidebar-project"><div class="dot"></div> simple-agent-manager</div>
+        <div class="sidebar-project"><div class="dot" style="background:var(--info)"></div> marketing-site</div>
+        <div class="sidebar-project"><div class="dot" style="background:var(--warning)"></div> docs-toolkit</div>
+
+        <div style="margin-top:auto;padding-top:var(--sp-4);border-top:1px solid var(--border-subtle)">
+          <div class="user-pill">
+            <div class="avatar">R</div>
+            <div>
+              <div style="font-size:13px;font-weight:500">Raphael</div>
+              <div class="text-xs text-dim">raphael@example.com</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ LOGIN SHEET ═══ -->
+  <div>
+    <div class="showcase-label">Login Sheet (Trial Gate)</div>
+    <div class="modal-demo" style="min-height:350px;align-items:flex-end">
+      <div class="modal" style="min-width:100%;border-bottom-left-radius:0;border-bottom-right-radius:0;padding:var(--sp-8) var(--sp-6)">
+        <div style="text-align:center">
+          <div style="width:48px;height:48px;border-radius:var(--radius-lg);background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;color:#fff;margin:0 auto var(--sp-4)">S</div>
+          <h2 class="modal-title">Sign in to continue</h2>
+          <p class="text-sm text-muted mb-6" style="margin-bottom:var(--sp-6)">Create an account or sign in to save your work and access all features.</p>
+          <button class="btn btn-glass btn-lg w-full" style="margin-bottom:var(--sp-3)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            Continue with GitHub
+          </button>
+          <p class="text-xs text-dim" style="margin-top:var(--sp-4)">By continuing, you agree to our Terms of Service.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

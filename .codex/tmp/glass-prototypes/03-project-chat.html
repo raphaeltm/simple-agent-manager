@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Chat - SAM</title>
+  <link rel="stylesheet" href="glass-base.css">
+  <style>
+    /* Chat-specific overrides */
+    .chat-sidebar-header {
+      padding: var(--sp-4);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-3);
+    }
+
+    .chat-sidebar-header .back-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+    }
+
+    .chat-sidebar-header .back-arrow {
+      color: var(--fg-muted);
+      cursor: pointer;
+      font-size: 18px;
+      text-decoration: none;
+      transition: color 0.15s;
+      display: flex;
+      align-items: center;
+    }
+
+    .chat-sidebar-header .back-arrow:hover {
+      color: var(--fg-primary);
+    }
+
+    .chat-sidebar-header .project-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--fg-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .session-item .title-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      margin-bottom: var(--sp-1);
+    }
+
+    .session-item .title-row .title {
+      margin-bottom: 0;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .session-item .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .session-item .status-dot.running {
+      background: var(--success);
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    .session-item .status-dot.completed {
+      background: var(--fg-dim);
+    }
+
+    .session-item .status-dot.failed {
+      background: var(--danger);
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Chat header */
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sp-4) var(--sp-6);
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(11, 17, 16, 0.3);
+      backdrop-filter: blur(var(--glass-blur-light));
+      min-height: 56px;
+    }
+
+    .chat-header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      min-width: 0;
+    }
+
+    .chat-header-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--fg-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-header-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      flex-shrink: 0;
+    }
+
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--fg-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      font-size: 16px;
+    }
+
+    .icon-btn:hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--fg-primary);
+      border-color: var(--border-subtle);
+    }
+
+    /* Message styling */
+    .message-group {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+    }
+
+    .message-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0 var(--sp-1);
+    }
+
+    .message-label.user-label {
+      color: var(--fg-dim);
+      align-self: flex-end;
+    }
+
+    .message-label.assistant-label {
+      color: #34d399;
+      align-self: flex-start;
+    }
+
+    .chat-bubble p {
+      margin-bottom: var(--sp-2);
+    }
+
+    .chat-bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .chat-bubble code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #34d399;
+    }
+
+    .chat-bubble .tool-call {
+      margin: var(--sp-3) 0;
+    }
+
+    .chat-bubble .tool-call:last-child {
+      margin-bottom: 0;
+    }
+
+    .code-block {
+      background: rgba(14, 26, 23, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: var(--sp-3) var(--sp-4);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.7;
+      color: #a9b1d6;
+      overflow-x: auto;
+      margin: var(--sp-3) 0;
+    }
+
+    .code-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .code-block .keyword { color: #bb9af7; }
+    .code-block .string { color: #9ece6a; }
+    .code-block .comment { color: #565f89; }
+    .code-block .fn { color: #7aa2f7; }
+
+    /* Chat input */
+    .chat-input-area {
+      background: rgba(11, 17, 16, 0.3);
+    }
+
+    .chat-input-wrapper textarea.input {
+      min-height: 44px;
+      max-height: 160px;
+      resize: none;
+      padding: var(--sp-3) var(--sp-4);
+    }
+
+    .send-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius-sm);
+      background: var(--accent);
+      color: white;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      flex-shrink: 0;
+      font-size: 18px;
+    }
+
+    .send-btn:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+
+    /* Timestamp */
+    .message-time {
+      font-size: 11px;
+      color: var(--fg-dim);
+      padding: 0 var(--sp-1);
+    }
+
+    .message-time.user-time {
+      align-self: flex-end;
+    }
+
+    .message-time.assistant-time {
+      align-self: flex-start;
+    }
+
+    /* Mobile header for chat */
+    .mobile-header .mobile-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--fg-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mobile-header .hamburger {
+      background: none;
+      border: none;
+      color: var(--fg-muted);
+      font-size: 20px;
+      cursor: pointer;
+      padding: var(--sp-1);
+    }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: var(--sp-2) 0;
+    }
+
+    .typing-indicator span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--fg-dim);
+      animation: typing-bounce 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typing-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Mobile header (visible on small screens) -->
+  <div class="mobile-header">
+    <button class="hamburger">&#9776;</button>
+    <span class="mobile-title">Fix login redirect loop</span>
+    <button class="icon-btn" style="border:none;">&#9881;</button>
+  </div>
+
+  <div class="chat-layout">
+
+    <!-- Left panel: Chat sidebar -->
+    <div class="chat-sidebar">
+      <div class="chat-sidebar-header">
+        <div class="back-row">
+          <a href="#" class="back-arrow">&#8592;</a>
+          <span class="project-name">simple-agent-manager</span>
+        </div>
+        <button class="btn btn-primary btn-sm w-full">+ New Chat</button>
+      </div>
+
+      <div class="session-list">
+        <!-- Active session -->
+        <div class="session-item active">
+          <div class="title-row">
+            <div class="title">Fix login redirect loop</div>
+            <span class="status-dot running"></span>
+          </div>
+          <div class="meta flex items-center gap-2">
+            <span class="badge badge-success" style="font-size:10px; padding:1px 6px;">running</span>
+            <span>&middot; 3 min ago</span>
+          </div>
+        </div>
+
+        <div class="session-item">
+          <div class="title-row">
+            <div class="title">Add dark mode toggle</div>
+            <span class="status-dot completed"></span>
+          </div>
+          <div class="meta flex items-center gap-2">
+            <span class="badge badge-neutral" style="font-size:10px; padding:1px 6px;">completed</span>
+            <span>&middot; 2 hours ago</span>
+          </div>
+        </div>
+
+        <div class="session-item">
+          <div class="title-row">
+            <div class="title">Upgrade Drizzle ORM</div>
+            <span class="status-dot running"></span>
+          </div>
+          <div class="meta flex items-center gap-2">
+            <span class="badge badge-success" style="font-size:10px; padding:1px 6px;">running</span>
+            <span>&middot; 18 min ago</span>
+          </div>
+        </div>
+
+        <div class="session-item">
+          <div class="title-row">
+            <div class="title">Refactor auth middleware</div>
+            <span class="status-dot completed"></span>
+          </div>
+          <div class="meta flex items-center gap-2">
+            <span class="badge badge-neutral" style="font-size:10px; padding:1px 6px;">completed</span>
+            <span>&middot; yesterday</span>
+          </div>
+        </div>
+
+        <div class="session-item">
+          <div class="title-row">
+            <div class="title">Debug WebSocket drops</div>
+            <span class="status-dot failed"></span>
+          </div>
+          <div class="meta flex items-center gap-2">
+            <span class="badge badge-danger" style="font-size:10px; padding:1px 6px;">failed</span>
+            <span>&middot; 2 days ago</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main chat area -->
+    <div class="chat-main">
+
+      <!-- Chat header -->
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <span class="chat-header-title">Fix login redirect loop</span>
+          <span class="badge badge-success">running</span>
+        </div>
+        <div class="chat-header-actions">
+          <button class="icon-btn" title="Settings">&#9881;</button>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-messages">
+
+        <!-- User message 1 -->
+        <div class="message-group">
+          <span class="message-label user-label">You</span>
+          <div class="chat-bubble user">
+            The OAuth callback is causing a redirect loop on Safari mobile. Can you investigate and fix this?
+          </div>
+          <span class="message-time user-time">2:34 PM</span>
+        </div>
+
+        <!-- Assistant message 1 -->
+        <div class="message-group">
+          <span class="message-label assistant-label">Claude</span>
+          <div class="chat-bubble assistant">
+            <p>I'll investigate the OAuth redirect loop on Safari mobile. Let me start by reading the auth callback handler to understand the current flow.</p>
+
+            <div class="tool-call">
+              <span class="tool-name">Read file</span> apps/api/src/routes/auth.ts
+            </div>
+
+            <p>I found the issue. The callback handler at <code>handleOAuthCallback()</code> is using <code>document.cookie</code> to set the session token after the OAuth exchange. Safari's Intelligent Tracking Prevention (ITP) blocks third-party cookies by default, which means the session cookie set during the redirect is being silently dropped.</p>
+
+            <p>When the browser follows the redirect to <code>app.${BASE_DOMAIN}/</code>, the session middleware sees no cookie, treats the user as unauthenticated, and redirects back to the OAuth provider &mdash; creating the loop.</p>
+
+            <p>Here's the problematic section:</p>
+
+            <div class="code-block"><span class="comment">// Current (broken on Safari ITP):</span>
+<span class="keyword">const</span> callbackUrl = <span class="fn">buildRedirectUrl</span>(baseDomain);
+<span class="fn">setCookie</span>(c, <span class="string">'session'</span>, token, {
+  <span class="fn">httpOnly</span>: <span class="keyword">true</span>,
+  <span class="fn">secure</span>: <span class="keyword">true</span>,
+  <span class="fn">sameSite</span>: <span class="string">'None'</span>,  <span class="comment">// &lt;-- ITP blocks this</span>
+  <span class="fn">domain</span>: <span class="string">`.${baseDomain}`</span>,
+});
+<span class="keyword">return</span> c.<span class="fn">redirect</span>(callbackUrl);</div>
+
+            <p>The fix is to change <code>sameSite</code> from <code>'None'</code> to <code>'Lax'</code> and ensure the cookie domain matches the redirect target. Safari ITP allows <code>Lax</code> cookies set during top-level navigations, which is exactly what an OAuth callback is.</p>
+          </div>
+          <span class="message-time assistant-time">2:34 PM</span>
+        </div>
+
+        <!-- User message 2 -->
+        <div class="message-group">
+          <span class="message-label user-label">You</span>
+          <div class="chat-bubble user">
+            That looks right. Can you also add a test?
+          </div>
+          <span class="message-time user-time">2:36 PM</span>
+        </div>
+
+        <!-- Assistant message 2 -->
+        <div class="message-group">
+          <span class="message-label assistant-label">Claude</span>
+          <div class="chat-bubble assistant">
+            <p>Absolutely. I'll write a regression test that verifies the cookie attributes and a capability test that exercises the full redirect chain. The key assertions are:</p>
+
+            <div class="tool-call">
+              <span class="tool-name">Write file</span> apps/api/tests/integration/auth-safari-redirect.test.ts
+            </div>
+
+            <p>The test creates a mock OAuth exchange, follows the redirect chain, and asserts three things:</p>
+
+            <p><strong>1.</strong> The <code>Set-Cookie</code> header uses <code>SameSite=Lax</code> (not <code>None</code>).<br>
+            <strong>2.</strong> The redirect target is <code>app.${BASE_DOMAIN}</code> (the app subdomain, never the bare root).<br>
+            <strong>3.</strong> A subsequent request to a protected route with the cookie succeeds with <code>200</code>, not another redirect.</p>
+
+            <div class="code-block"><span class="fn">test</span>(<span class="string">'OAuth callback sets Lax cookie for Safari ITP compat'</span>, <span class="keyword">async</span> () => {
+  <span class="keyword">const</span> res = <span class="keyword">await</span> app.<span class="fn">request</span>(<span class="string">'/api/auth/callback'</span>, {
+    <span class="fn">method</span>: <span class="string">'GET'</span>,
+    <span class="fn">headers</span>: { <span class="string">'User-Agent'</span>: SAFARI_MOBILE_UA },
+  });
+
+  <span class="keyword">const</span> cookie = res.headers.<span class="fn">get</span>(<span class="string">'Set-Cookie'</span>);
+  <span class="fn">expect</span>(cookie).<span class="fn">toContain</span>(<span class="string">'SameSite=Lax'</span>);
+  <span class="fn">expect</span>(cookie).<span class="fn">not</span>.<span class="fn">toContain</span>(<span class="string">'SameSite=None'</span>);
+  <span class="fn">expect</span>(res.status).<span class="fn">toBe</span>(302);
+  <span class="fn">expect</span>(res.headers.<span class="fn">get</span>(<span class="string">'Location'</span>))
+    .<span class="fn">toBe</span>(<span class="string">`https://app.${BASE_DOMAIN}/`</span>);
+});</div>
+
+            <p>I've also added a negative test that verifies a request <em>without</em> the session cookie still gets a <code>401</code>, ensuring the auth middleware isn't accidentally permissive. Both tests are passing locally.</p>
+
+            <div class="typing-indicator">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+          <span class="message-time assistant-time">2:37 PM</span>
+        </div>
+
+      </div>
+
+      <!-- Chat input -->
+      <div class="chat-input-area">
+        <div class="chat-input-wrapper">
+          <textarea class="input input-glass" rows="1" placeholder="Send a message..."></textarea>
+          <button class="send-btn" title="Send">&#10148;</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

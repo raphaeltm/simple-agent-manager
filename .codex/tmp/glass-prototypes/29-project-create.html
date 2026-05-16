@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Project — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <span style="color:var(--fg-muted);cursor:pointer">&larr;</span>
+    <span class="font-semibold" style="font-size:15px">New Project</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item active"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:560px;margin:0 auto">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Create Project</h1>
+        <p class="page-subtitle">Connect a GitHub repository to start dispatching agents.</p>
+      </div>
+    </div>
+
+    <div class="glass card">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-5)">
+        <div>
+          <label class="label">Repository</label>
+          <select class="input">
+            <option value="">Select a repository...</option>
+            <option>smallpath/simple-agent-manager</option>
+            <option>smallpath/sam-website</option>
+            <option>smallpath/docs</option>
+          </select>
+          <div class="text-xs text-dim" style="margin-top:4px">Only repositories with the SAM GitHub App installed are shown.</div>
+        </div>
+
+        <div>
+          <label class="label">Project Name</label>
+          <input class="input" value="simple-agent-manager" placeholder="Auto-generated from repo name">
+        </div>
+
+        <div>
+          <label class="label">Default Branch</label>
+          <input class="input" value="main" placeholder="main">
+        </div>
+
+        <div>
+          <label class="label">Default Agent Type</label>
+          <select class="input">
+            <option selected>Claude Code</option>
+            <option>Codex CLI</option>
+            <option>Gemini CLI</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="label">Default VM Size</label>
+          <div style="display:flex;flex-direction:column;gap:var(--sp-2)">
+            <label class="glass-subtle" style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);cursor:pointer;border-radius:var(--radius-md);border:2px solid transparent">
+              <input type="radio" name="vm" style="accent-color:var(--accent)">
+              <div>
+                <div class="text-sm font-medium">CX22 — 2 vCPU, 4 GB</div>
+                <div class="text-xs text-dim">Light tasks, code review</div>
+              </div>
+            </label>
+            <label class="glass-subtle" style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);cursor:pointer;border-radius:var(--radius-md);border:2px solid var(--accent)">
+              <input type="radio" name="vm" checked style="accent-color:var(--accent)">
+              <div>
+                <div class="text-sm font-medium">CX32 — 4 vCPU, 8 GB</div>
+                <div class="text-xs text-dim">General purpose (recommended)</div>
+              </div>
+            </label>
+            <label class="glass-subtle" style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);cursor:pointer;border-radius:var(--radius-md);border:2px solid transparent">
+              <input type="radio" name="vm" style="accent-color:var(--accent)">
+              <div>
+                <div class="text-sm font-medium">CX42 — 8 vCPU, 16 GB</div>
+                <div class="text-xs text-dim">Large builds, heavy workloads</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-lg w-full">Create Project</button>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

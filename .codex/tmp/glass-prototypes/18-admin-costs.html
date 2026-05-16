@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Costs — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .chart-placeholder {
+    height: 200px;
+    background: var(--bg-inset);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-around;
+    padding: var(--sp-4) var(--sp-6);
+    gap: var(--sp-2);
+  }
+  .chart-bar {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+    min-width: 20px;
+    position: relative;
+  }
+  .chart-bar .label {
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: var(--fg-dim);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Admin / Costs</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">Admin</div>
+    <a class="nav-item"><span>&#128200;</span> Overview</a>
+    <a class="nav-item"><span>&#128101;</span> Users</a>
+    <a class="nav-item active"><span>&#128176;</span> Costs</a>
+    <a class="nav-item"><span>&#128202;</span> Usage</a>
+    <a class="nav-item"><span>&#128680;</span> Errors</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Cost Dashboard</h1>
+        <p class="page-subtitle">Platform costs and projections.</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-glass btn-sm">7 days</button>
+        <button class="btn btn-ghost btn-sm">30 days</button>
+        <button class="btn btn-ghost btn-sm">90 days</button>
+      </div>
+    </div>
+
+    <!-- Cost Stats -->
+    <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: var(--sp-8);">
+      <div class="glass card stat-card">
+        <div class="stat-label">Total (7d)</div>
+        <div class="stat-value">$127.40</div>
+        <div class="stat-trend down">&#9660; 8% vs last week</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">LLM Tokens</div>
+        <div class="stat-value">$89.20</div>
+        <div class="stat-trend" style="color:var(--fg-dim)">70% of total</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Compute (VMs)</div>
+        <div class="stat-value">$34.60</div>
+        <div class="stat-trend" style="color:var(--fg-dim)">27% of total</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Projected (30d)</div>
+        <div class="stat-value">$542</div>
+        <div class="stat-trend up">Based on current rate</div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <h2 class="section-title">Daily Cost Breakdown</h2>
+    <div class="glass card mb-8">
+      <div class="chart-placeholder" style="margin-bottom:28px">
+        <div class="chart-bar" style="height:60%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Mon</span></div>
+        <div class="chart-bar" style="height:75%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Tue</span></div>
+        <div class="chart-bar" style="height:45%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Wed</span></div>
+        <div class="chart-bar" style="height:90%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Thu</span></div>
+        <div class="chart-bar" style="height:80%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Fri</span></div>
+        <div class="chart-bar" style="height:30%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Sat</span></div>
+        <div class="chart-bar" style="height:20%;background:linear-gradient(to top, var(--accent), #34d399)"><span class="label">Sun</span></div>
+      </div>
+    </div>
+
+    <!-- Cost by Model -->
+    <h2 class="section-title">Cost by Model</h2>
+    <div class="glass card mb-6">
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Model</th><th>Tokens</th><th>Cost</th><th>% of Total</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span style="color:var(--fg-primary);font-weight:500">Claude Opus 4</span></td>
+              <td>4.2M</td>
+              <td>$62.40</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:100px;flex-shrink:0"><div class="progress-fill" style="width:70%"></div></div>
+                  <span class="text-sm text-muted">70%</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--fg-primary);font-weight:500">Claude Sonnet 4</span></td>
+              <td>8.1M</td>
+              <td>$18.90</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:100px;flex-shrink:0"><div class="progress-fill" style="width:21%"></div></div>
+                  <span class="text-sm text-muted">21%</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--fg-primary);font-weight:500">Gemma 4 26B</span></td>
+              <td>12.3M</td>
+              <td>$5.40</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:100px;flex-shrink:0"><div class="progress-fill" style="width:6%"></div></div>
+                  <span class="text-sm text-muted">6%</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--fg-primary);font-weight:500">GPT-4.1</span></td>
+              <td>1.8M</td>
+              <td>$2.50</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:100px;flex-shrink:0"><div class="progress-fill" style="width:3%"></div></div>
+                  <span class="text-sm text-muted">3%</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Cost by User -->
+    <h2 class="section-title">Cost by User</h2>
+    <div class="glass card">
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>User</th><th>LLM Cost</th><th>Compute</th><th>Total</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="flex items-center gap-2"><div class="avatar" style="width:24px;height:24px;font-size:10px">R</div> Raphael</td>
+              <td>$52.30</td>
+              <td>$18.40</td>
+              <td style="font-weight:600">$70.70</td>
+            </tr>
+            <tr>
+              <td class="flex items-center gap-2"><div class="avatar" style="width:24px;height:24px;font-size:10px">A</div> Alice</td>
+              <td>$24.10</td>
+              <td>$10.20</td>
+              <td style="font-weight:600">$34.30</td>
+            </tr>
+            <tr>
+              <td class="flex items-center gap-2"><div class="avatar" style="width:24px;height:24px;font-size:10px">M</div> Marco</td>
+              <td>$12.80</td>
+              <td>$6.00</td>
+              <td style="font-weight:600">$18.80</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

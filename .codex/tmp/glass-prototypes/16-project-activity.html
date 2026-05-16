@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before { content: ''; position: absolute; left: 8px; top: 8px; bottom: 8px; width: 2px; background: var(--border-subtle); }
+  .timeline-item { position: relative; padding-bottom: var(--sp-6); }
+  .timeline-dot { position: absolute; left: -24px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg-canvas); }
+  .timeline-dot.green { background: var(--success); }
+  .timeline-dot.blue { background: var(--info); }
+  .timeline-dot.yellow { background: var(--warning); }
+  .timeline-dot.red { background: var(--danger); }
+  .timeline-dot.gray { background: var(--fg-dim); }
+</style>
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <span style="color:var(--fg-muted);cursor:pointer">&larr;</span>
+    <span class="font-semibold" style="font-size:15px">Activity</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item active"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+    <div class="nav-section-label">simple-agent-manager</div>
+    <a class="nav-item"><span>&#128172;</span> Chat</a>
+    <a class="nav-item"><span>&#128161;</span> Ideas</a>
+    <a class="nav-item"><span>&#128218;</span> Library</a>
+    <a class="nav-item"><span>&#127793;</span> Knowledge</a>
+    <a class="nav-item"><span>&#128197;</span> Activity</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:800px">
+    <div class="page-header">
+      <div>
+        <p class="text-sm text-muted mb-2">&larr; simple-agent-manager</p>
+        <h1 class="page-title">Activity</h1>
+        <p class="page-subtitle">Recent events across this project.</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-glass btn-sm">All</button>
+        <button class="btn btn-ghost btn-sm">Tasks</button>
+        <button class="btn btn-ghost btn-sm">Chat</button>
+        <button class="btn btn-ghost btn-sm">Agents</button>
+      </div>
+    </div>
+
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-dot green"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Task completed</span>
+            <span class="text-xs text-dim">12 minutes ago</span>
+          </div>
+          <p class="text-sm text-muted">Agent completed <strong style="color:var(--fg-primary)">"Add dark mode toggle"</strong> — PR #1031 merged.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot blue"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Workspace created</span>
+            <span class="text-xs text-dim">25 minutes ago</span>
+          </div>
+          <p class="text-sm text-muted">Workspace <code style="font-family:var(--font-mono);font-size:12px;color:#34d399">ws-drizzle-upgrade</code> provisioned on node-fsn1-02.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot yellow"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Task dispatched</span>
+            <span class="text-xs text-dim">28 minutes ago</span>
+          </div>
+          <p class="text-sm text-muted"><strong style="color:var(--fg-primary)">"Upgrade Drizzle to v0.35"</strong> dispatched to Claude Code agent.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot green"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Chat message</span>
+            <span class="text-xs text-dim">45 minutes ago</span>
+          </div>
+          <p class="text-sm text-muted">Raphael started a new chat session: <strong style="color:var(--fg-primary)">"Fix login redirect loop"</strong></p>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot red"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Task failed</span>
+            <span class="text-xs text-dim">1 hour ago</span>
+          </div>
+          <p class="text-sm text-muted"><strong style="color:var(--fg-primary)">"Optimize Docker layer caching"</strong> failed — workspace ran out of disk space.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot gray"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Node provisioned</span>
+            <span class="text-xs text-dim">2 hours ago</span>
+          </div>
+          <p class="text-sm text-muted">Node <code style="font-family:var(--font-mono);font-size:12px;color:#34d399">node-fsn1-02</code> (CX32) created in Falkenstein.</p>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-dot green"></div>
+        <div class="glass-subtle" style="padding:var(--sp-3) var(--sp-4)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium">Knowledge added</span>
+            <span class="text-xs text-dim">3 hours ago</span>
+          </div>
+          <p class="text-sm text-muted">Agent learned: <em>"Prefers Valibot over Zod for runtime validation."</em></p>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

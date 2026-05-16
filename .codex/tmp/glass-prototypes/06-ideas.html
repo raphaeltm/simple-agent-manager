@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ideas & Tasks — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: 13px;
+    color: var(--fg-dim);
+    margin-bottom: var(--sp-3);
+  }
+  .breadcrumb a {
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .breadcrumb a:hover { color: var(--fg-primary); }
+  .breadcrumb .sep { color: var(--fg-dim); }
+
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-6);
+    flex-wrap: wrap;
+  }
+  .filter-bar .search-input {
+    flex: 1;
+    min-width: 200px;
+    max-width: 360px;
+    min-height: 36px;
+    padding: var(--sp-2) var(--sp-3) var(--sp-2) 32px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    font-family: var(--font);
+    outline: none;
+    transition: all 0.15s;
+  }
+  .filter-bar .search-input:focus {
+    border-color: rgba(52, 211, 153, 0.4);
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.1);
+  }
+  .filter-bar .search-input::placeholder { color: var(--fg-dim); }
+  .search-wrapper {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+    max-width: 360px;
+  }
+  .search-wrapper .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-dim);
+    font-size: 13px;
+    pointer-events: none;
+  }
+
+  .filter-pills {
+    display: flex;
+    gap: var(--sp-1);
+  }
+  .filter-pill {
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: var(--radius-full);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-pill:hover {
+    background: rgba(255,255,255,0.04);
+    color: var(--fg-primary);
+  }
+  .filter-pill.active {
+    background: var(--accent-tint);
+    color: var(--accent);
+    border-color: rgba(22, 163, 74, 0.2);
+  }
+
+  .ideas-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .idea-card {
+    padding: var(--sp-4) var(--sp-5);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .idea-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-2);
+  }
+  .idea-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-primary);
+    flex: 1;
+    line-height: 1.4;
+  }
+  .idea-desc {
+    font-size: 13px;
+    color: var(--fg-muted);
+    line-height: 1.5;
+    margin-bottom: var(--sp-3);
+  }
+  .idea-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .idea-tags {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--sp-2);
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(159, 183, 174, 0.08);
+    color: var(--fg-dim);
+    border: 1px solid rgba(159, 183, 174, 0.1);
+  }
+  .idea-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+  .idea-meta .assignee {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+
+  .priority-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .priority-high { background: var(--danger); box-shadow: 0 0 6px rgba(239, 68, 68, 0.3); }
+  .priority-medium { background: var(--warning); box-shadow: 0 0 6px rgba(245, 158, 11, 0.2); }
+  .priority-low { background: var(--fg-dim); }
+
+  .badge-in-progress {
+    background: rgba(96, 165, 250, 0.1);
+    color: var(--info);
+    border: 1px solid rgba(96, 165, 250, 0.15);
+  }
+  .badge-open {
+    background: rgba(159, 183, 174, 0.1);
+    color: var(--fg-muted);
+    border: 1px solid rgba(159, 183, 174, 0.12);
+  }
+  .badge-done {
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success);
+    border: 1px solid rgba(34, 197, 94, 0.15);
+  }
+
+  .count-badge {
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(159, 183, 174, 0.12);
+    color: var(--fg-dim);
+    padding: 0 6px;
+    border-radius: var(--radius-full);
+    margin-left: var(--sp-1);
+  }
+
+  /* Project sub-nav highlight */
+  .sidebar-subnav {
+    margin-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .sidebar-subnav .nav-item {
+    font-size: 13px;
+    padding: var(--sp-1) var(--sp-3);
+  }
+
+  @media (max-width: 768px) {
+    .filter-bar { flex-direction: column; align-items: stretch; }
+    .search-wrapper { max-width: 100%; }
+    .filter-pills { overflow-x: auto; flex-wrap: nowrap; }
+    .idea-card { padding: var(--sp-3) var(--sp-4); }
+    .idea-footer { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Mobile Header -->
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">SAM</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <div class="avatar">R</div>
+    <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">S</div>
+      <div class="logo-text">SAM</div>
+    </div>
+
+    <div style="position:relative;margin-bottom:var(--sp-4)">
+      <input class="input input-glass" style="min-height:36px;padding:6px 12px 6px 32px;font-size:13px;border-radius:var(--radius-sm)" placeholder="Search...">
+      <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg-dim);font-size:14px">&#128269;</span>
+    </div>
+
+    <a class="nav-item">
+      <span>&#9632;</span> Dashboard
+    </a>
+    <a class="nav-item active">
+      <span>&#128193;</span> Projects
+    </a>
+
+    <!-- Project sub-nav -->
+    <div class="sidebar-subnav">
+      <a class="nav-item">
+        <span>&#128172;</span> Chat
+      </a>
+      <a class="nav-item active">
+        <span>&#128161;</span> Ideas
+      </a>
+      <a class="nav-item">
+        <span>&#128196;</span> Tasks
+      </a>
+      <a class="nav-item">
+        <span>&#128218;</span> Knowledge
+      </a>
+    </div>
+
+    <a class="nav-item">
+      <span>&#9881;</span> Settings
+    </a>
+    <a class="nav-item">
+      <span>&#9638;</span> Nodes
+    </a>
+    <a class="nav-item">
+      <span>&#128187;</span> Workspaces
+    </a>
+
+    <div class="nav-section-label">Projects</div>
+    <div class="sidebar-project"><div class="dot"></div> simple-agent-manager</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--info)"></div> marketing-site</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--warning)"></div> docs-toolkit</div>
+
+    <div class="sidebar-bottom">
+      <div class="user-pill">
+        <div class="avatar">R</div>
+        <span style="font-size:13px;color:var(--fg-muted)">Raphael</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Breadcrumb -->
+    <div class="breadcrumb">
+      <a href="#">simple-agent-manager</a>
+      <span class="sep">/</span>
+      <span style="color:var(--fg-primary)">Ideas</span>
+    </div>
+
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Ideas & Tasks</h1>
+        <p class="page-subtitle">Track features, improvements, and bug fixes for this project.</p>
+      </div>
+      <button class="btn btn-primary">+ New Idea</button>
+    </div>
+
+    <!-- Filter / Search Bar -->
+    <div class="filter-bar">
+      <div class="search-wrapper">
+        <span class="search-icon">&#128269;</span>
+        <input class="search-input" placeholder="Search ideas...">
+      </div>
+      <div class="filter-pills">
+        <button class="filter-pill active">All <span class="count-badge">6</span></button>
+        <button class="filter-pill">Open <span class="count-badge">3</span></button>
+        <button class="filter-pill">In Progress <span class="count-badge">2</span></button>
+        <button class="filter-pill">Done <span class="count-badge">1</span></button>
+      </div>
+    </div>
+
+    <!-- Ideas List -->
+    <div class="ideas-list">
+
+      <!-- Idea 1: In Progress, High -->
+      <div class="glass glass-hover idea-card">
+        <div class="idea-card-header">
+          <div class="priority-dot priority-high" title="High priority"></div>
+          <div class="idea-title">Implement WebSocket reconnection</div>
+          <span class="badge badge-in-progress">In Progress</span>
+        </div>
+        <p class="idea-desc text-sm">Add automatic WebSocket reconnection with exponential backoff for terminal and chat connections. Handle network interruptions gracefully without losing session state.</p>
+        <div class="idea-footer">
+          <div class="idea-tags">
+            <span class="tag">networking</span>
+            <span class="tag">reliability</span>
+            <span class="tag">terminal</span>
+          </div>
+          <div class="idea-meta">
+            <span class="assignee">
+              <div class="avatar" style="width:18px;height:18px;font-size:9px">A</div>
+              Agent-1
+            </span>
+            <span>May 12, 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Idea 2: Open, Medium -->
+      <div class="glass glass-hover idea-card">
+        <div class="idea-card-header">
+          <div class="priority-dot priority-medium" title="Medium priority"></div>
+          <div class="idea-title">Add file upload to library</div>
+          <span class="badge badge-open">Open</span>
+        </div>
+        <p class="idea-desc text-sm">Allow users to upload files directly to the project library from the chat interface. Support drag-and-drop, clipboard paste, and file picker with progress indicators.</p>
+        <div class="idea-footer">
+          <div class="idea-tags">
+            <span class="tag">feature</span>
+            <span class="tag">library</span>
+            <span class="tag">UX</span>
+          </div>
+          <div class="idea-meta">
+            <span>May 14, 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Idea 3: Done, High -->
+      <div class="glass glass-hover idea-card" style="opacity:0.75">
+        <div class="idea-card-header">
+          <div class="priority-dot priority-high" title="High priority"></div>
+          <div class="idea-title" style="text-decoration:line-through;color:var(--fg-muted)">Refactor credential resolution</div>
+          <span class="badge badge-done">Done</span>
+        </div>
+        <p class="idea-desc text-sm">Refactor the credential resolution logic to support 3-tier fallback: project-scoped, user-scoped, platform default. Add inactive-row blocking and stale-token safety.</p>
+        <div class="idea-footer">
+          <div class="idea-tags">
+            <span class="tag">security</span>
+            <span class="tag">refactor</span>
+            <span class="tag">credentials</span>
+          </div>
+          <div class="idea-meta">
+            <span class="assignee">
+              <div class="avatar" style="width:18px;height:18px;font-size:9px">R</div>
+              Raphael
+            </span>
+            <span>Apr 18, 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Idea 4: In Progress, Medium -->
+      <div class="glass glass-hover idea-card">
+        <div class="idea-card-header">
+          <div class="priority-dot priority-medium" title="Medium priority"></div>
+          <div class="idea-title">Mobile responsive chat layout</div>
+          <span class="badge badge-in-progress">In Progress</span>
+        </div>
+        <p class="idea-desc text-sm">Redesign the project chat layout for mobile viewports. Session sidebar should collapse into a drawer, message bubbles should use full width, and the input area needs a compact mode.</p>
+        <div class="idea-footer">
+          <div class="idea-tags">
+            <span class="tag">mobile</span>
+            <span class="tag">UI</span>
+            <span class="tag">chat</span>
+          </div>
+          <div class="idea-meta">
+            <span class="assignee">
+              <div class="avatar" style="width:18px;height:18px;font-size:9px">A</div>
+              Agent-2
+            </span>
+            <span>May 10, 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Idea 5: Open, Low -->
+      <div class="glass glass-hover idea-card">
+        <div class="idea-card-header">
+          <div class="priority-dot priority-low" title="Low priority"></div>
+          <div class="idea-title">Rate limiting for API endpoints</div>
+          <span class="badge badge-open">Open</span>
+        </div>
+        <p class="idea-desc text-sm">Implement per-user and per-IP rate limiting on public API endpoints using KV-backed sliding window counters. Add configurable limits via environment variables.</p>
+        <div class="idea-footer">
+          <div class="idea-tags">
+            <span class="tag">security</span>
+            <span class="tag">API</span>
+            <span class="tag">infrastructure</span>
+          </div>
+          <div class="idea-meta">
+            <span>May 8, 2026</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Idea 6: Open, Medium -->
+      <div class="glass glass-hover idea-card">
+        <div class="idea-card-header">
+          <div class="priority-dot priority-medium" title="Medium priority"></div>
+          <div class="idea-title">Add Scaleway provider support</div>
+          <span class="badge badge-open">Open</span>
+        </div>
+        <p class="idea-desc text-sm">Implement the Scaleway cloud provider adapter for node provisioning. Include instance type mapping, region selection, and pricing integration for the node creation flow.</p>
+        <div class="idea-footer">
+          <div class="idea-tags">
+            <span class="tag">provider</span>
+            <span class="tag">Scaleway</span>
+            <span class="tag">feature</span>
+          </div>
+          <div class="idea-meta">
+            <span>May 6, 2026</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /ideas-list -->
+
+  </main>
+</div>
+
+</body>
+</html>

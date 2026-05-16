@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workspaces — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Workspaces</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <button class="btn btn-primary btn-sm">+ New</button>
+    <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item active"><span>&#128187;</span> Workspaces</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Workspaces</h1>
+        <p class="page-subtitle">Active coding environments across your nodes.</p>
+      </div>
+      <button class="btn btn-primary">+ New Workspace</button>
+    </div>
+
+    <!-- Filter -->
+    <div class="flex items-center gap-3 mb-6">
+      <input class="input" style="max-width:280px" placeholder="Filter workspaces...">
+      <button class="btn btn-glass btn-sm">All</button>
+      <button class="btn btn-ghost btn-sm">Running</button>
+      <button class="btn btn-ghost btn-sm">Stopped</button>
+    </div>
+
+    <!-- Workspace Table -->
+    <div class="glass card">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Workspace</th>
+              <th>Project</th>
+              <th>Node</th>
+              <th>Status</th>
+              <th>Agent</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div style="font-family:var(--font-mono);font-size:13px;color:var(--fg-primary)">ws-fix-login</div>
+                <div class="text-xs text-dim">ws-a1b2c3d4</div>
+              </td>
+              <td>simple-agent-manager</td>
+              <td style="font-family:var(--font-mono);font-size:13px">node-fsn1-01</td>
+              <td><span class="badge badge-success">Running</span></td>
+              <td>Claude Code</td>
+              <td class="text-dim">12m ago</td>
+              <td><button class="btn btn-ghost btn-sm">&#8943;</button></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-family:var(--font-mono);font-size:13px;color:var(--fg-primary)">ws-dark-mode</div>
+                <div class="text-xs text-dim">ws-e5f6g7h8</div>
+              </td>
+              <td>marketing-site</td>
+              <td style="font-family:var(--font-mono);font-size:13px">node-fsn1-01</td>
+              <td><span class="badge badge-neutral">Stopped</span></td>
+              <td>Claude Code</td>
+              <td class="text-dim">2h ago</td>
+              <td><button class="btn btn-ghost btn-sm">&#8943;</button></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-family:var(--font-mono);font-size:13px;color:var(--fg-primary)">ws-drizzle-upgrade</div>
+                <div class="text-xs text-dim">ws-i9j0k1l2</div>
+              </td>
+              <td>simple-agent-manager</td>
+              <td style="font-family:var(--font-mono);font-size:13px">node-fsn1-02</td>
+              <td><span class="badge badge-warning">Creating</span></td>
+              <td>Codex</td>
+              <td class="text-dim">2m ago</td>
+              <td><button class="btn btn-ghost btn-sm">&#8943;</button></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-family:var(--font-mono);font-size:13px;color:var(--fg-primary)">ws-api-gateway</div>
+                <div class="text-xs text-dim">ws-m3n4o5p6</div>
+              </td>
+              <td>api-gateway</td>
+              <td style="font-family:var(--font-mono);font-size:13px">node-hel1-01</td>
+              <td><span class="badge badge-success">Running</span></td>
+              <td>Claude Code</td>
+              <td class="text-dim">45m ago</td>
+              <td><button class="btn btn-ghost btn-sm">&#8943;</button></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-family:var(--font-mono);font-size:13px;color:var(--fg-primary)">ws-rate-limiter</div>
+                <div class="text-xs text-dim">ws-q7r8s9t0</div>
+              </td>
+              <td>api-gateway</td>
+              <td style="font-family:var(--font-mono);font-size:13px">node-hel1-01</td>
+              <td><span class="badge badge-danger">Failed</span></td>
+              <td>Claude Code</td>
+              <td class="text-dim">1h ago</td>
+              <td><button class="btn btn-ghost btn-sm">&#8943;</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

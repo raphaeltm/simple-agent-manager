@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings Notifications — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Notifications</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item active"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">Settings</div>
+    <a class="nav-item"><span>&#9729;</span> Cloud Provider</a>
+    <a class="nav-item"><span>&#128025;</span> GitHub</a>
+    <a class="nav-item"><span>&#129302;</span> Agents</a>
+    <a class="nav-item active"><span>&#128276;</span> Notifications</a>
+    <a class="nav-item"><span>&#128202;</span> Usage</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:640px">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Notification Preferences</h1>
+        <p class="page-subtitle">Choose how and when you want to be notified.</p>
+      </div>
+    </div>
+
+    <!-- Task Notifications -->
+    <h2 class="section-title">Task Events</h2>
+    <div class="glass card mb-6">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-4)">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Task completed</div>
+            <div class="text-xs text-muted">When an agent finishes a task successfully</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" checked style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--accent);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:23px;bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Task failed</div>
+            <div class="text-xs text-muted">When an agent encounters an error</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" checked style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--accent);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:23px;bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Agent needs input</div>
+            <div class="text-xs text-muted">When an agent is waiting for human response</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" checked style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--accent);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:23px;bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Infrastructure -->
+    <h2 class="section-title">Infrastructure</h2>
+    <div class="glass card mb-6">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-4)">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Node health alerts</div>
+            <div class="text-xs text-muted">When a node becomes unhealthy or unresponsive</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" checked style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--accent);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:23px;bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Workspace provisioning</div>
+            <div class="text-xs text-muted">When new workspaces are created or destroyed</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--bg-inset);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:3px;bottom:3px;background:var(--fg-dim);border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Budget -->
+    <h2 class="section-title">Budget Alerts</h2>
+    <div class="glass card mb-6">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-4)">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Daily budget warning (80%)</div>
+            <div class="text-xs text-muted">Alert when approaching daily token limit</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" checked style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--accent);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:23px;bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Monthly cap warning (90%)</div>
+            <div class="text-xs text-muted">Alert when approaching monthly cost cap</div>
+          </div>
+          <label style="position:relative;display:inline-block;width:44px;height:24px">
+            <input type="checkbox" checked style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;inset:0;background:var(--accent);border-radius:24px;transition:0.3s"></span>
+            <span style="position:absolute;content:'';height:18px;width:18px;left:23px;bottom:3px;background:white;border-radius:50%;transition:0.3s"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delivery Channel -->
+    <h2 class="section-title">Delivery Channel</h2>
+    <div class="glass card">
+      <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
+        <label class="glass-subtle" style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);cursor:pointer;border-radius:var(--radius-md);border:2px solid var(--accent)">
+          <input type="radio" name="channel" checked style="accent-color:var(--accent)">
+          <div>
+            <div class="text-sm font-medium">In-app only</div>
+            <div class="text-xs text-muted">Notifications appear in the app</div>
+          </div>
+        </label>
+        <label class="glass-subtle" style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);cursor:pointer;border-radius:var(--radius-md);border:2px solid transparent">
+          <input type="radio" name="channel" style="accent-color:var(--accent)">
+          <div>
+            <div class="text-sm font-medium">Email</div>
+            <div class="text-xs text-muted">Send to raphael@smallpath.ai</div>
+          </div>
+        </label>
+        <label class="glass-subtle" style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);cursor:pointer;border-radius:var(--radius-md);border:2px solid transparent">
+          <input type="radio" name="channel" style="accent-color:var(--accent)">
+          <div>
+            <div class="text-sm font-medium">Slack webhook</div>
+            <div class="text-xs text-muted">Post to a Slack channel</div>
+          </div>
+        </label>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

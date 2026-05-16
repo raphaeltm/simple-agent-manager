@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nodes — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .node-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: var(--sp-4);
+  }
+  .node-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg-primary);
+    font-family: var(--font-mono);
+    margin-bottom: var(--sp-1);
+  }
+  .node-meta-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .provider-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: rgba(255, 107, 53, 0.1);
+    color: #ff6b35;
+    border: 1px solid rgba(255, 107, 53, 0.15);
+  }
+  .region-label {
+    font-size: 12px;
+    color: var(--fg-dim);
+    font-family: var(--font-mono);
+  }
+  .node-specs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4) 0;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: var(--sp-4);
+  }
+  .spec-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+  }
+  .spec-label {
+    color: var(--fg-dim);
+  }
+  .spec-value {
+    color: var(--fg-primary);
+    font-weight: 500;
+  }
+  .spec-value.mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .cpu-usage-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+  .cpu-label {
+    font-size: 12px;
+    color: var(--fg-dim);
+    min-width: 32px;
+  }
+  .cpu-value {
+    font-size: 12px;
+    color: var(--fg-muted);
+    font-weight: 500;
+    min-width: 32px;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+
+<!-- Mobile Header -->
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">SAM</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <div class="avatar">R</div>
+    <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+  </div>
+</div>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">S</div>
+      <div class="logo-text">SAM</div>
+    </div>
+
+    <div style="position:relative;margin-bottom:var(--sp-4)">
+      <input class="input input-glass" style="min-height:36px;padding:6px 12px 6px 32px;font-size:13px;border-radius:var(--radius-sm)" placeholder="Search...">
+      <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg-dim);font-size:14px">&#128269;</span>
+    </div>
+
+    <a class="nav-item">
+      <span>&#9632;</span> Dashboard
+    </a>
+    <a class="nav-item">
+      <span>&#128193;</span> Projects
+    </a>
+    <a class="nav-item">
+      <span>&#9881;</span> Settings
+    </a>
+    <a class="nav-item active">
+      <span>&#9638;</span> Nodes
+    </a>
+    <a class="nav-item">
+      <span>&#128187;</span> Workspaces
+    </a>
+
+    <div class="nav-section-label">Projects</div>
+    <div class="sidebar-project"><div class="dot"></div> simple-agent-manager</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--info)"></div> marketing-site</div>
+    <div class="sidebar-project"><div class="dot" style="background:var(--warning)"></div> docs-toolkit</div>
+
+    <div class="sidebar-bottom">
+      <div class="user-pill">
+        <div class="avatar">R</div>
+        <span style="font-size:13px;color:var(--fg-muted)">Raphael</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Nodes</h1>
+        <p class="page-subtitle">Your VM infrastructure</p>
+      </div>
+      <button class="btn btn-primary">+ Create Node</button>
+    </div>
+
+    <!-- Node Cards -->
+    <div class="card-grid card-grid-3">
+
+      <!-- Node 1: Active -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="node-card-header">
+          <div>
+            <div class="node-name">node-fsn1-01</div>
+            <div class="node-meta-row">
+              <span class="provider-badge">Hetzner</span>
+              <span class="region-label">fsn1</span>
+            </div>
+          </div>
+          <span class="badge badge-success">&#9679; Active</span>
+        </div>
+
+        <div class="node-specs">
+          <div class="spec-row">
+            <span class="spec-label">VM Size</span>
+            <span class="spec-value">CX22 &middot; 2 vCPU &middot; 4 GB &middot; 40 GB</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">IP Address</span>
+            <span class="spec-value mono">168.119.42.137</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Workspaces</span>
+            <span class="spec-value">2 workspaces</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Uptime</span>
+            <span class="spec-value">3d 14h</span>
+          </div>
+        </div>
+
+        <div class="cpu-usage-row">
+          <span class="cpu-label">CPU</span>
+          <div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:42%"></div></div>
+          <span class="cpu-value">42%</span>
+        </div>
+      </div>
+
+      <!-- Node 2: Creating -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="node-card-header">
+          <div>
+            <div class="node-name">node-nbg1-03</div>
+            <div class="node-meta-row">
+              <span class="provider-badge">Hetzner</span>
+              <span class="region-label">nbg1</span>
+            </div>
+          </div>
+          <span class="badge badge-warning">&#9679; Creating</span>
+        </div>
+
+        <div class="node-specs">
+          <div class="spec-row">
+            <span class="spec-label">VM Size</span>
+            <span class="spec-value">CX22 &middot; 2 vCPU &middot; 4 GB &middot; 40 GB</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">IP Address</span>
+            <span class="spec-value mono">49.12.185.201</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Workspaces</span>
+            <span class="spec-value">0 workspaces</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Uptime</span>
+            <span class="spec-value text-dim" style="color:var(--fg-dim)">&mdash;</span>
+          </div>
+        </div>
+
+        <div class="cpu-usage-row">
+          <span class="cpu-label">CPU</span>
+          <div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:0%"></div></div>
+          <span class="cpu-value">&mdash;</span>
+        </div>
+      </div>
+
+      <!-- Node 3: Warm -->
+      <div class="glass card glass-hover" style="cursor:pointer">
+        <div class="node-card-header">
+          <div>
+            <div class="node-name">node-fsn1-07</div>
+            <div class="node-meta-row">
+              <span class="provider-badge">Hetzner</span>
+              <span class="region-label">fsn1</span>
+            </div>
+          </div>
+          <span class="badge badge-info">&#9679; Warm</span>
+        </div>
+
+        <div class="node-specs">
+          <div class="spec-row">
+            <span class="spec-label">VM Size</span>
+            <span class="spec-value">CX22 &middot; 2 vCPU &middot; 4 GB &middot; 40 GB</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">IP Address</span>
+            <span class="spec-value mono">95.217.11.89</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Workspaces</span>
+            <span class="spec-value">0 workspaces</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Uptime</span>
+            <span class="spec-value">1d 8h</span>
+          </div>
+        </div>
+
+        <div class="cpu-usage-row">
+          <span class="cpu-label">CPU</span>
+          <div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:5%"></div></div>
+          <span class="cpu-value">5%</span>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

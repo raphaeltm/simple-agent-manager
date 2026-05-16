@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings GitHub — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Settings / GitHub</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item active"><span>&#9881;</span> Settings</a>
+    <a class="nav-item"><span>&#9638;</span> Nodes</a>
+    <a class="nav-item"><span>&#128187;</span> Workspaces</a>
+    <div class="nav-section-label">Settings</div>
+    <a class="nav-item"><span>&#9729;</span> Cloud Provider</a>
+    <a class="nav-item active"><span>&#128025;</span> GitHub</a>
+    <a class="nav-item"><span>&#129302;</span> Agents</a>
+    <a class="nav-item"><span>&#128276;</span> Notifications</a>
+    <a class="nav-item"><span>&#128202;</span> Usage</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content" style="max-width:720px">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">GitHub Integration</h1>
+        <p class="page-subtitle">Connect your GitHub account and configure app access.</p>
+      </div>
+    </div>
+
+    <!-- GitHub Account -->
+    <h2 class="section-title">Connected Account</h2>
+    <div class="glass card mb-6">
+      <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:var(--sp-4)">
+        <div class="flex items-center gap-3">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--bg-inset);display:flex;align-items:center;justify-content:center;font-size:24px">&#128025;</div>
+          <div>
+            <div class="font-semibold">raphael-smallpath</div>
+            <div class="text-sm text-muted">Connected via GitHub OAuth</div>
+          </div>
+        </div>
+        <span class="badge badge-success">Connected</span>
+      </div>
+    </div>
+
+    <!-- GitHub App -->
+    <h2 class="section-title">GitHub App</h2>
+    <div class="glass card mb-6">
+      <div class="flex items-center justify-between mb-4" style="flex-wrap:wrap;gap:var(--sp-3)">
+        <div>
+          <div class="font-semibold" style="font-size:15px">SAM Agent Manager</div>
+          <div class="text-sm text-muted">Installed on 3 repositories</div>
+        </div>
+        <span class="badge badge-success">Installed</span>
+      </div>
+      <div style="border-top:1px solid var(--border-subtle);padding-top:var(--sp-4)">
+        <label class="label">Repositories with access</label>
+        <div style="display:flex;flex-direction:column;gap:var(--sp-2)">
+          <div class="glass-subtle" style="padding:var(--sp-2) var(--sp-3);display:flex;align-items:center;justify-content:space-between">
+            <span class="text-sm">smallpath/simple-agent-manager</span>
+            <span class="badge badge-neutral" style="font-size:10px">Private</span>
+          </div>
+          <div class="glass-subtle" style="padding:var(--sp-2) var(--sp-3);display:flex;align-items:center;justify-content:space-between">
+            <span class="text-sm">smallpath/sam-website</span>
+            <span class="badge badge-neutral" style="font-size:10px">Private</span>
+          </div>
+          <div class="glass-subtle" style="padding:var(--sp-2) var(--sp-3);display:flex;align-items:center;justify-content:space-between">
+            <span class="text-sm">smallpath/docs</span>
+            <span class="badge badge-success" style="font-size:10px">Public</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:var(--sp-4)">
+        <button class="btn btn-ghost btn-sm">Manage on GitHub &rarr;</button>
+      </div>
+    </div>
+
+    <!-- Webhook -->
+    <h2 class="section-title">Webhook</h2>
+    <div class="glass card mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-medium">Webhook Status</span>
+        <span class="badge badge-success">Active</span>
+      </div>
+      <div class="text-sm text-muted mb-4">Receives push events, pull request events, and issue comments.</div>
+      <div class="flex items-center gap-3">
+        <div class="text-xs text-dim">Last delivery: 4 minutes ago</div>
+        <div class="text-xs text-dim">Success rate: 100%</div>
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <h2 class="section-title" style="color:var(--danger)">Danger Zone</h2>
+    <div class="glass card" style="border-color:rgba(239,68,68,0.2)">
+      <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:var(--sp-3)">
+        <div>
+          <div class="font-semibold text-sm">Disconnect GitHub</div>
+          <div class="text-xs text-muted">Remove GitHub access. Existing workspaces will lose repo access.</div>
+        </div>
+        <button class="btn btn-sm" style="background:rgba(239,68,68,0.15);color:var(--danger);border:1px solid rgba(239,68,68,0.3)">Disconnect</button>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

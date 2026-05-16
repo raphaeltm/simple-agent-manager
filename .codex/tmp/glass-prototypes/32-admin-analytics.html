@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Analytics — SAM Glass</title>
+<link rel="stylesheet" href="glass-base.css">
+<style>
+  .chart-placeholder {
+    height: 180px;
+    background: var(--bg-inset);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-around;
+    padding: var(--sp-4) var(--sp-3);
+    gap: 4px;
+  }
+  .chart-bar {
+    width: 100%;
+    border-radius: 3px 3px 0 0;
+    min-width: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="mobile-header">
+  <div class="flex items-center gap-3">
+    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff">S</div>
+    <span class="font-semibold" style="font-size:15px">Admin / Analytics</span>
+  </div>
+  <span style="font-size:20px;cursor:pointer;color:var(--fg-muted)">&#9776;</span>
+</div>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-icon">S</div><div class="logo-text">SAM</div></div>
+    <a class="nav-item"><span>&#9632;</span> Dashboard</a>
+    <a class="nav-item"><span>&#128193;</span> Projects</a>
+    <a class="nav-item"><span>&#9881;</span> Settings</a>
+    <div class="nav-section-label">Admin</div>
+    <a class="nav-item"><span>&#128200;</span> Overview</a>
+    <a class="nav-item"><span>&#128101;</span> Users</a>
+    <a class="nav-item"><span>&#128176;</span> Costs</a>
+    <a class="nav-item active"><span>&#128202;</span> Analytics</a>
+    <a class="nav-item"><span>&#128680;</span> Errors</a>
+    <a class="nav-item"><span>&#128203;</span> Logs</a>
+    <div class="sidebar-bottom"><div class="user-pill"><div class="avatar">R</div><span style="font-size:13px;color:var(--fg-muted)">Raphael</span></div></div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Platform Analytics</h1>
+        <p class="page-subtitle">Usage patterns, task success rates, and performance metrics.</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-glass btn-sm">7 days</button>
+        <button class="btn btn-ghost btn-sm">30 days</button>
+        <button class="btn btn-ghost btn-sm">90 days</button>
+      </div>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); margin-bottom: var(--sp-8);">
+      <div class="glass card stat-card">
+        <div class="stat-label">Tasks Completed</div>
+        <div class="stat-value">142</div>
+        <div class="stat-trend up">&#9650; 18% vs last week</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Success Rate</div>
+        <div class="stat-value">87%</div>
+        <div class="stat-trend up">&#9650; 3% vs last week</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Avg Duration</div>
+        <div class="stat-value">23m</div>
+        <div class="stat-trend down">&#9660; 12% faster</div>
+      </div>
+      <div class="glass card stat-card">
+        <div class="stat-label">Active Users</div>
+        <div class="stat-value">8</div>
+        <div class="stat-trend" style="color:var(--fg-dim)">this week</div>
+      </div>
+    </div>
+
+    <!-- Tasks per Day Chart -->
+    <h2 class="section-title">Tasks per Day</h2>
+    <div class="glass card mb-8">
+      <div class="chart-placeholder">
+        <div class="chart-bar" style="height:40%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:65%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:55%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:80%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:70%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:90%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:45%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:35%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:60%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:75%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:50%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:85%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:95%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+        <div class="chart-bar" style="height:60%;background:linear-gradient(to top, var(--accent), #34d399)"></div>
+      </div>
+    </div>
+
+    <!-- Task Outcomes -->
+    <h2 class="section-title">Task Outcomes (7 days)</h2>
+    <div class="glass card mb-6">
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Outcome</th><th>Count</th><th>Percentage</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-success">Completed</span></td>
+              <td>124</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:120px"><div class="progress-fill" style="width:87%"></div></div>
+                  <span class="text-sm text-muted">87%</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-error">Failed</span></td>
+              <td>11</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:120px"><div class="progress-fill" style="width:8%;background:var(--danger)"></div></div>
+                  <span class="text-sm text-muted">8%</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-warning">Cancelled</span></td>
+              <td>5</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:120px"><div class="progress-fill" style="width:4%;background:var(--warning)"></div></div>
+                  <span class="text-sm text-muted">4%</span>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-neutral">Timed Out</span></td>
+              <td>2</td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="progress-bar" style="width:120px"><div class="progress-fill" style="width:1%"></div></div>
+                  <span class="text-sm text-muted">1%</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
