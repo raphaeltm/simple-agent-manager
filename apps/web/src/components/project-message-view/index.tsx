@@ -281,7 +281,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Agent working indicator */}
       {lc.agentActivity !== 'idle' && isActive && (
-        <div role="status" className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+        <div role="status" className="flex items-center gap-2 px-4 py-2 glass-chrome border-x-0 border-b-0 shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Agent is working...</span>
           <button
@@ -333,4 +333,3 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     </div>
   );
 };
-

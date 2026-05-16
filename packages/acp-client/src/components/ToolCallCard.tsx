@@ -11,6 +11,8 @@ interface ToolCallCardProps {
   onFileClick?: (path: string, line?: number | null) => void;
   /** Called to lazy-load tool content when expanding a compact tool call. Returns the content items. */
   onLoadContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
+  /** Optional host styling for context-specific presentation. */
+  className?: string;
 }
 
 /** Status icon for tool call state */
@@ -43,7 +45,7 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * don't affect this component's props.
  */
-export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick, onLoadContent }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick, onLoadContent, className }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [lazyContent, setLazyContent] = useState<ToolCallContentItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -74,7 +76,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   };
 
   return (
-    <div className="my-2 border border-gray-200 rounded-lg overflow-hidden">
+    <div className={`my-2 border overflow-hidden ${className ?? 'border-gray-200 rounded-lg'}`}>
       {/* Header — uses div with role="button" to allow nested interactive elements */}
       <div
         role="button"

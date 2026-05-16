@@ -90,7 +90,7 @@ export function MobileSessionDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="Chat sessions"
-        className="fixed top-0 right-0 bottom-0 bg-surface border-l border-border-default z-drawer flex flex-col"
+        className="fixed top-0 right-0 bottom-0 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         style={{
           width: '85vw',
           maxWidth: 320,

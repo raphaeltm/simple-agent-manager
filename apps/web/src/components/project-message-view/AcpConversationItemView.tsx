@@ -112,7 +112,14 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':
-      return <AcpToolCallCard toolCall={item} onFileClick={onFileClick} onLoadContent={onLoadToolContent} />;
+      return (
+        <AcpToolCallCard
+          toolCall={item}
+          onFileClick={onFileClick}
+          onLoadContent={onLoadToolContent}
+          className={item.contentLoaded === false ? 'glass-surface rounded-md border-border-default' : undefined}
+        />
+      );
     case 'plan':
       return <PlanView plan={item} />;
     case 'system_message':
