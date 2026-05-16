@@ -1,5 +1,5 @@
-import type { SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
-import { SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
+import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
+import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -74,6 +74,7 @@ export function ChatInput({
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
+  const mentionPaletteRef = useRef<MentionPaletteHandle>(null);
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
 
@@ -97,6 +98,27 @@ export function ChatInput({
     !!slashMatch &&
     (slashCommands?.length ?? 0) > 0 &&
     dismissedFilterRef.current !== slashFilter;
+
+  // Mention palette state — triggered by @word anywhere in text.
+  // We track cursor position to detect the @trigger relative to where the user is typing.
+  const [cursorPos, setCursorPos] = useState(0);
+  const mentionDismissedRef = useRef<string | null>(null);
+
+  // Extract the @mention being typed at the current cursor position.
+  // Look backwards from cursor to find the most recent unmatched "@".
+  const textBeforeCursor = value.slice(0, cursorPos);
+  const mentionTriggerMatch = textBeforeCursor.match(/@(\w*)$/);
+  const mentionFilter = mentionTriggerMatch?.[1] ?? '';
+  const mentionTriggerIndex = mentionTriggerMatch?.index ?? -1;
+
+  if (!mentionTriggerMatch && mentionDismissedRef.current !== null) {
+    mentionDismissedRef.current = null;
+  }
+  const showMentionPalette =
+    !!mentionTriggerMatch &&
+    agentProfiles.length > 0 &&
+    !showPalette &&
+    mentionDismissedRef.current !== mentionFilter;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -134,6 +156,36 @@ export function ChatInput({
     inputRef.current?.focus();
   }, [slashFilter]);
 
+  const handleMentionSelect = useCallback(
+    (profile: { id: string; name: string; description: string | null }) => {
+      // Replace the @filter text with @ProfileName at the cursor position.
+      // The name may contain spaces — use @"Multi Word" syntax in that case.
+      const needsQuotes = profile.name.includes(' ');
+      const mention = needsQuotes ? `@"${profile.name}" ` : `@${profile.name} `;
+      const before = value.slice(0, mentionTriggerIndex);
+      const after = value.slice(cursorPos);
+      const newValue = before + mention + after;
+      onChange(newValue);
+      // Move cursor to after the inserted mention
+      const newCursorPos = before.length + mention.length;
+      setCursorPos(newCursorPos);
+      // Set cursor in textarea after React re-renders
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(newCursorPos, newCursorPos);
+        }
+      });
+    },
+    [value, onChange, mentionTriggerIndex, cursorPos],
+  );
+
+  const handleDismissMentionPalette = useCallback(() => {
+    mentionDismissedRef.current = mentionFilter;
+    inputRef.current?.focus();
+  }, [mentionFilter]);
+
   return (
     <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       {error && (
@@ -149,6 +201,16 @@ export function ChatInput({
           onSelect={handleCommandSelect}
           onDismiss={handleDismissPalette}
           visible={showPalette}
+        />
+      )}
+      {agentProfiles.length > 0 && (
+        <MentionPalette
+          ref={mentionPaletteRef}
+          profiles={agentProfiles.map((p) => ({ id: p.id, name: p.name, description: p.description }))}
+          filter={mentionFilter}
+          onSelect={handleMentionSelect}
+          onDismiss={handleDismissMentionPalette}
+          visible={showMentionPalette}
         />
       )}
       {isMobile ? (
@@ -387,10 +449,15 @@ export function ChatInput({
         <textarea
           ref={inputRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setCursorPos(e.target.selectionStart ?? 0);
+          }}
+          onSelect={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {
-            // Delegate to slash command palette first
+            // Delegate to slash command palette first, then mention palette
             if (paletteRef.current?.handleKeyDown(e as unknown as React.KeyboardEvent)) return;
+            if (mentionPaletteRef.current?.handleKeyDown(e as unknown as React.KeyboardEvent)) return;
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) {
               e.preventDefault();
               onSubmit();
@@ -401,9 +468,9 @@ export function ChatInput({
           rows={1}
           role="combobox"
           aria-autocomplete="list"
-          aria-expanded={showPalette}
-          aria-controls={showPalette ? 'slash-palette-listbox' : undefined}
-          aria-activedescendant={showPalette ? paletteRef.current?.activeDescendantId : undefined}
+          aria-expanded={showPalette || showMentionPalette}
+          aria-controls={showPalette ? 'slash-palette-listbox' : showMentionPalette ? 'mention-palette-listbox' : undefined}
+          aria-activedescendant={showPalette ? paletteRef.current?.activeDescendantId : showMentionPalette ? mentionPaletteRef.current?.activeDescendantId : undefined}
           className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto"
         />
         <VoiceButton

@@ -26,6 +26,8 @@ export { AudioPlayer } from './components/AudioPlayer';
 export type { ChatSettingsData, ChatSettingsPanelProps } from './components/ChatSettingsPanel';
 export { ChatSettingsPanel } from './components/ChatSettingsPanel';
 export { FileDiffView } from './components/FileDiffView';
+export type { MentionPaletteHandle, MentionPaletteProps, MentionProfile } from './components/MentionPalette';
+export { MentionPalette } from './components/MentionPalette';
 export type { MessageActionsProps } from './components/MessageActions';
 export { MessageActions } from './components/MessageActions';
 export { MessageBubble } from './components/MessageBubble';

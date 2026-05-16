@@ -459,13 +459,19 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     throw errors.notFound('No running agent session found');
   }
 
+  // Enrich @mentions with agent profile context before forwarding.
+  // The enriched message goes to the agent; the clean message was already
+  // persisted in chat by the VM agent message reporting flow.
+  const { enrichMessageWithMentions } = await import('../services/mention-enrichment');
+  const { enrichedMessage } = await enrichMessageWithMentions(content, db, projectId, userId, c.env);
+
   // Forward the prompt to the VM agent
   const { sendPromptToAgentOnNode } = await import('../services/node-agent');
   const result = await sendPromptToAgentOnNode(
     workspace.nodeId,
     workspace.id,
     agentSession.id,
-    content,
+    enrichedMessage,
     c.env,
     userId
   );
