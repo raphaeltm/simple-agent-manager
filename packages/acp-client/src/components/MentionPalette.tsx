@@ -61,43 +61,47 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
       }
     }, [selectedIndex]);
 
+    const selectCurrentProfile = useCallback(() => {
+      const profile = filtered[selectedIndex];
+      if (profile) onSelect(profile);
+    }, [filtered, selectedIndex, onSelect]);
+
+    const moveSelection = useCallback((direction: 1 | -1) => {
+      setSelectedIndex((prev) => {
+        const lastIndex = filtered.length - 1;
+        if (direction < 0) return prev <= 0 ? lastIndex : prev - 1;
+        return prev >= lastIndex ? 0 : prev + 1;
+      });
+    }, [filtered.length]);
+
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent): boolean => {
         if (!visible || filtered.length === 0) return false;
 
-        switch (e.key) {
-          case 'ArrowUp': {
-            e.preventDefault();
-            setSelectedIndex((prev) => (prev <= 0 ? filtered.length - 1 : prev - 1));
-            return true;
-          }
-          case 'ArrowDown': {
-            e.preventDefault();
-            setSelectedIndex((prev) => (prev >= filtered.length - 1 ? 0 : prev + 1));
-            return true;
-          }
-          case 'Enter': {
-            e.preventDefault();
-            const profile = filtered[selectedIndex];
-            if (profile) onSelect(profile);
-            return true;
-          }
-          case 'Escape': {
-            e.preventDefault();
-            onDismiss();
-            return true;
-          }
-          case 'Tab': {
-            e.preventDefault();
-            const profile = filtered[selectedIndex];
-            if (profile) onSelect(profile);
-            return true;
-          }
-          default:
-            return false;
-        }
+        const handlers: Record<string, () => void> = {
+          ArrowUp: () => moveSelection(-1),
+          ArrowDown: () => moveSelection(1),
+          Enter: selectCurrentProfile,
+          Tab: selectCurrentProfile,
+          Escape: onDismiss,
+        };
+        const handler = handlers[e.key];
+        if (!handler) return false;
+
+        e.preventDefault();
+        handler();
+        return true;
       },
-      [visible, filtered, selectedIndex, onSelect, onDismiss]
+      [visible, filtered.length, moveSelection, selectCurrentProfile, onDismiss]
+    );
+
+    const handleOptionKeyDown = useCallback(
+      (e: React.KeyboardEvent, profile: MentionProfile) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        onSelect(profile);
+      },
+      [onSelect]
     );
 
     const activeDescendantId = filtered[selectedIndex]
@@ -145,7 +149,9 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
                       : 'transparent',
                 }}
                 onClick={() => onSelect(profile)}
+                onKeyDown={(e) => handleOptionKeyDown(e, profile)}
                 onMouseEnter={() => setSelectedIndex(idx)}
+                tabIndex={-1}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
