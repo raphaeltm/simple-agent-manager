@@ -168,7 +168,7 @@ export function AppShell({ children }: AppShellProps) {
     return (
       <AppShellContext.Provider value={shellContext}>
       <div className="flex flex-col bg-canvas h-screen">
-        <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-surface">
+        <header className="relative z-30 flex items-center justify-between px-4 py-2 glass-chrome border-x-0 border-t-0 after:content-[''] after:absolute after:bottom-0 after:left-[10%] after:right-[10%] after:h-0.5 after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.3)_0%,transparent_70%)] after:blur-[1px] after:pointer-events-none">
           {/* Title on the left */}
           <Link to="/sam">
             <img src="/sam-head.png" alt="SAM" className="h-7 w-7 object-contain" />
@@ -228,7 +228,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <AppShellContext.Provider value={shellContext}>
     <div className="grid bg-canvas h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
-      <aside className="flex flex-col border-r border-border-default bg-surface overflow-y-auto" style={{ gridRow: '1' }}>
+      <aside className="flex flex-col glass-chrome border-y-0 border-l-0 overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
           <img src="/sam-head.png" alt="SAM" className="h-6 w-6 object-contain" />
           <div className="flex items-center gap-1">
@@ -255,7 +255,7 @@ export function AppShell({ children }: AppShellProps) {
           projectListSection={desktopProjectListSection}
         />
         {user && (
-          <div className="mt-auto p-3 border-t border-border-default flex items-center gap-2">
+          <div className="mt-auto p-3 border-t border-[rgba(34,197,94,0.12)] bg-[rgba(0,0,0,0.15)] flex items-center gap-2">
             {avatarElement}
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">

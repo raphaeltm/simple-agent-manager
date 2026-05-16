@@ -76,7 +76,7 @@ export function MobileNavDrawer({
       <div
         data-testid="mobile-nav-backdrop"
         onClick={onClose}
-        className="fixed inset-0 bg-overlay z-drawer-backdrop"
+        className="fixed inset-0 glass-backdrop-dim border-0 z-drawer-backdrop"
         style={{ animation: 'sam-drawer-fade-in 0.15s ease-out' }}
       />
 
@@ -86,7 +86,7 @@ export function MobileNavDrawer({
         aria-modal="true"
         aria-label="Navigation menu"
         data-testid="mobile-nav-panel"
-        className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 bg-surface border-l border-border-default z-drawer flex flex-col overflow-hidden"
+        className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         style={{ animation: 'sam-drawer-slide-in 0.2s ease-out' }}
       >
         {/* Header: user info + close */}
@@ -124,9 +124,9 @@ export function MobileNavDrawer({
         {/* Toggle header: Back to Projects / Back to Project Name */}
         {canToggle && (
           <button
-            onClick={onToggleGlobalNav}
-            data-testid="mobile-nav-toggle"
-            className={`flex items-center gap-3 w-full px-5 py-3 bg-transparent border-none border-b border-border-default cursor-pointer text-left text-sm font-medium text-fg-muted hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
+              onClick={onToggleGlobalNav}
+              data-testid="mobile-nav-toggle"
+              className={`flex items-center gap-3 w-full px-5 py-3 bg-transparent border-none border-b border-border-default cursor-pointer text-left text-sm font-medium text-fg-muted hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
             aria-label={showGlobalNav ? `Back to ${projectName} navigation` : 'Show global navigation'}
           >
             {showGlobalNav ? (
@@ -180,8 +180,8 @@ export function MobileNavDrawer({
                     aria-current={active ? 'page' : undefined}
                     className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                       active
-                        ? 'text-accent border-l-accent bg-accent-tint'
-                        : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
+                        ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
+                        : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
                     }`}
                     onClick={() => onNavigate(item.path)}
                   >
@@ -196,7 +196,7 @@ export function MobileNavDrawer({
                 <div className="mt-2">
                   <button
                     onClick={() => setInfraOpen(!infraOpen)}
-                    className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-[120ms] ${FOCUS_RING}`}
+                    className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-[120ms] ${FOCUS_RING}`}
                     aria-expanded={infraOpen}
                     aria-controls="mobile-infra-nav-panel"
                   >
@@ -213,8 +213,8 @@ export function MobileNavDrawer({
                             aria-current={active ? 'page' : undefined}
                             className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                               active
-                                ? 'text-accent border-l-accent bg-accent-tint'
-                                : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
+                                ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
+                                : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
                             }`}
                             onClick={() => onNavigate(item.path)}
                           >
@@ -247,8 +247,8 @@ export function MobileNavDrawer({
                       aria-current={active ? 'page' : undefined}
                       className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                         active
-                          ? 'text-accent border-l-accent bg-accent-tint'
-                          : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
+                          ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
+                          : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
                       }`}
                       onClick={() => onNavigate(item.path)}
                     >
@@ -263,7 +263,7 @@ export function MobileNavDrawer({
                   <div className="mt-2">
                     <button
                       onClick={() => setInfraOpen(!infraOpen)}
-                      className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-[120ms] ${FOCUS_RING}`}
+                      className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-[120ms] ${FOCUS_RING}`}
                       aria-expanded={infraOpen}
                       aria-controls="mobile-infra-nav-panel-global"
                     >
@@ -280,8 +280,8 @@ export function MobileNavDrawer({
                               aria-current={active ? 'page' : undefined}
                               className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                                 active
-                                  ? 'text-accent border-l-accent bg-accent-tint'
-                                  : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
+                                  ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
+                                  : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
                               }`}
                               onClick={() => onNavigate(item.path)}
                             >
@@ -306,7 +306,7 @@ export function MobileNavDrawer({
         <div className="border-t border-border-default py-2">
           <button
             onClick={onSignOut}
-            className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-surface-hover transition-all duration-[120ms] ${FOCUS_RING}`}
+            className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-[rgba(34,197,94,0.04)] transition-all duration-[120ms] ${FOCUS_RING}`}
           >
             <LogOut size={18} />
             Sign out

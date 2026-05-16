@@ -102,7 +102,7 @@ export function RecentChatsDropdown() {
             role="menu"
             aria-label="Recent chats"
             style={panelStyle}
-            className="fixed inset-x-4 sm:inset-x-auto sm:w-[340px] max-h-[calc(100vh-5rem)] sm:max-h-[480px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
+            className="fixed inset-x-4 sm:inset-x-auto sm:w-[340px] max-h-[calc(100vh-5rem)] sm:max-h-[480px] glass-surface rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
@@ -152,7 +152,7 @@ export function RecentChatsDropdown() {
                       role="menuitem"
                       onClick={() => handleChatClick(chat.projectId, chat.id)}
                       aria-label={`${topic}, ${chat.projectName}, ${stateLabel}, ${formatRelativeTime(lastActivity)}`}
-                      className="flex items-center gap-3 w-full px-4 py-2.5 min-h-[44px] bg-transparent border-none border-b border-border-default text-left cursor-pointer hover:bg-surface-hover transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                      className="flex items-center gap-3 w-full px-4 py-2.5 min-h-[44px] bg-transparent border-none border-b border-border-default text-left cursor-pointer hover:bg-[linear-gradient(100deg,rgba(255,255,255,0.03),rgba(34,197,94,0.06),rgba(255,255,255,0.02))] transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                     >
                       {/* State dot */}
                       <span
@@ -189,7 +189,7 @@ export function RecentChatsDropdown() {
               <div className="border-t border-border-default">
                 <button
                   onClick={handleViewAll}
-                  className="w-full min-h-[44px] py-2.5 text-xs text-accent font-medium bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                  className="w-full min-h-[44px] py-2.5 text-xs text-accent font-medium bg-transparent border-none cursor-pointer hover:bg-[linear-gradient(100deg,rgba(255,255,255,0.03),rgba(34,197,94,0.06),rgba(255,255,255,0.02))] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                 >
                   View all chats
                 </button>
