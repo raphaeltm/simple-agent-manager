@@ -2,18 +2,21 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { githubRoutes } from '../../../src/routes/github';
 import {
   getAuthenticatedUserOrganizations,
   getUserAccessibleInstallations,
   verifyUserInstallationAccess,
+  verifyWebhookSignature,
 } from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
   getAuthenticatedUserOrganizations: vi.fn(),
   getUserAccessibleInstallations: vi.fn(),
+  verifyWebhookSignature: vi.fn(),
   verifyUserInstallationAccess: vi.fn(),
   optionalAuthUser: null as null | {
     id: string;
@@ -24,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     avatarUrl: string | null;
   },
   insertError: null as unknown,
+  insertErrorTable: 'all' as 'all' | 'githubInstallations' | 'githubInstallationAccounts',
   log: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -71,10 +75,10 @@ vi.mock('../../../src/services/github-app', async () => {
     ...actual,
     getAuthenticatedUserOrganizations: mocks.getAuthenticatedUserOrganizations,
     getUserAccessibleInstallations: mocks.getUserAccessibleInstallations,
+    verifyWebhookSignature: mocks.verifyWebhookSignature,
     verifyUserInstallationAccess: mocks.verifyUserInstallationAccess,
     getInstallationRepositories: vi.fn(),
     getRepositoryBranches: vi.fn(),
-    verifyWebhookSignature: vi.fn(),
   };
 });
 
@@ -83,6 +87,8 @@ describe('GitHub App installation sharing', () => {
   let whereResponses: unknown[][];
   let limitResponses: unknown[][];
   let insertedRows: unknown[];
+  let deleteResponses: unknown[][];
+  let deletedTables: unknown[];
   const mockEnv = {
     DATABASE: {} as D1Database,
     BASE_DOMAIN: 'example.com',
@@ -90,6 +96,7 @@ describe('GitHub App installation sharing', () => {
     GITHUB_CLIENT_SECRET: 'secret',
     GITHUB_APP_ID: 'app-id',
     GITHUB_APP_PRIVATE_KEY: 'key',
+    ENCRYPTION_KEY: 'webhook-secret',
   } as Env;
 
   beforeEach(() => {
@@ -97,12 +104,16 @@ describe('GitHub App installation sharing', () => {
     whereResponses = [];
     limitResponses = [];
     insertedRows = [];
+    deleteResponses = [];
+    deletedTables = [];
     mocks.optionalAuthUser = { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null };
     mocks.insertError = null;
+    mocks.insertErrorTable = 'all';
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
     mocks.getAuthenticatedUserOrganizations.mockResolvedValue([]);
     mocks.getUserAccessibleInstallations.mockResolvedValue([]);
     mocks.verifyUserInstallationAccess.mockResolvedValue(true);
+    mocks.verifyWebhookSignature.mockResolvedValue(true);
 
     const makeSelectBuilder = () => {
       const fromBuilder = {
@@ -117,19 +128,43 @@ describe('GitHub App installation sharing', () => {
       };
     };
 
-    const makeInsertBuilder = () => ({
+    const tableNameForInsert = (table: unknown) => {
+      if (table === schema.githubInstallations) return 'githubInstallations';
+      if (table === schema.githubInstallationAccounts) return 'githubInstallationAccounts';
+      return 'other';
+    };
+
+    const makeInsertBuilder = (table: unknown) => ({
       values: vi.fn((row: unknown) => {
-        if (mocks.insertError) {
+        const tableName = tableNameForInsert(table);
+        if (
+          mocks.insertError &&
+          (mocks.insertErrorTable === 'all' || mocks.insertErrorTable === tableName)
+        ) {
           throw mocks.insertError;
         }
         insertedRows.push(row);
-        return Promise.resolve(undefined);
+        return {
+          onConflictDoUpdate: vi.fn(() => Promise.resolve(undefined)),
+          onConflictDoNothing: vi.fn(() => Promise.resolve(undefined)),
+        };
       }),
     });
 
+    const makeDeleteBuilder = (table: unknown) => {
+      deletedTables.push(table);
+      const whereResult = Object.assign(Promise.resolve(deleteResponses.shift() ?? []), {
+        returning: vi.fn(() => Promise.resolve(deleteResponses.shift() ?? [])),
+      });
+      return {
+        where: vi.fn(() => whereResult),
+      };
+    };
+
     const mockDB = {
       select: vi.fn(() => makeSelectBuilder()),
-      insert: vi.fn(() => makeInsertBuilder()),
+      insert: vi.fn((table: unknown) => makeInsertBuilder(table)),
+      delete: vi.fn((table: unknown) => makeDeleteBuilder(table)),
     };
 
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
@@ -163,13 +198,13 @@ describe('GitHub App installation sharing', () => {
   });
 
   const sharedEffpropCandidateRow = () => ({
-    id: 'inst-row-effprop-other-user',
-    userId: 'user-2',
     installationId: '120081765',
     accountType: 'organization',
     accountName: 'effprop',
+    accountNameNormalized: 'effprop',
     createdAt: '2026-05-08T00:00:00.000Z',
     updatedAt: '2026-05-08T00:00:00.000Z',
+    uninstalledAt: null,
   });
 
   const sharedEffpropCurrentUserRow = () => ({
@@ -181,6 +216,7 @@ describe('GitHub App installation sharing', () => {
   const mockSyncInsertFailure = (error: Error) => {
     whereResponses.push([{ installationId: '111' }], [existingInstallationRow()]);
     mocks.insertError = error;
+    mocks.insertErrorTable = 'githubInstallations';
     mocks.getUserAccessibleInstallations.mockResolvedValue([
       { id: 111, account: { login: 'existing', type: 'Organization' } },
       { id: 222, account: { login: 'acme', type: 'Organization' } },
@@ -197,6 +233,7 @@ describe('GitHub App installation sharing', () => {
   const callbackInsertFailure = async (error: Error) => {
     limitResponses.push([]);
     mocks.insertError = error;
+    mocks.insertErrorTable = 'githubInstallations';
     mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
 
     const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
@@ -207,6 +244,16 @@ describe('GitHub App installation sharing', () => {
     );
   };
 
+  const insertedPerUserRows = () =>
+    insertedRows.filter((row): row is Record<string, unknown> =>
+      typeof row === 'object' && row !== null && 'userId' in row
+    );
+
+  const insertedCanonicalRows = () =>
+    insertedRows.filter((row): row is Record<string, unknown> =>
+      typeof row === 'object' && row !== null && 'accountNameNormalized' in row
+    );
+
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);
     mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
@@ -215,8 +262,17 @@ describe('GitHub App installation sharing', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('https://app.example.com/settings?github_app=installed');
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]).toMatchObject({
+    expect(insertedCanonicalRows()).toEqual([
+      expect.objectContaining({
+        installationId: '123',
+        accountType: 'organization',
+        accountName: 'acme',
+        accountNameNormalized: 'acme',
+        uninstalledAt: null,
+      }),
+    ]);
+    expect(insertedPerUserRows()).toHaveLength(1);
+    expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
       installationId: '123',
       accountType: 'organization',
@@ -397,8 +453,20 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]).toMatchObject({
+    expect(insertedCanonicalRows()).toEqual([
+      expect.objectContaining({
+        installationId: '111',
+        accountName: 'existing',
+        accountNameNormalized: 'existing',
+      }),
+      expect.objectContaining({
+        installationId: '222',
+        accountName: 'acme',
+        accountNameNormalized: 'acme',
+      }),
+    ]);
+    expect(insertedPerUserRows()).toHaveLength(1);
+    expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
       installationId: '222',
       accountType: 'organization',
@@ -452,8 +520,9 @@ describe('GitHub App installation sharing', () => {
       installationId: '120081765',
       accountName: 'effprop',
     });
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]).toMatchObject({
+    expect(insertedCanonicalRows()).toHaveLength(0);
+    expect(insertedPerUserRows()).toHaveLength(1);
+    expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
       installationId: '120081765',
       accountType: 'organization',
@@ -519,6 +588,53 @@ describe('GitHub App installation sharing', () => {
     await expect(res.json()).resolves.toEqual([
       expect.objectContaining({ installationId: '111' }),
     ]);
+  });
+
+  it('unlinks only the current user per-user installation row', async () => {
+    deleteResponses.push([], [{ id: 'inst-row-effprop-user-1' }]);
+
+    const res = await app.request('/api/github/installations/inst-row-effprop-user-1', {
+      method: 'DELETE',
+    }, mockEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+    expect(deletedTables).toEqual([schema.githubInstallations]);
+    expect(insertedCanonicalRows()).toHaveLength(0);
+  });
+
+  it('tombstones canonical state and removes per-user links on GitHub uninstall webhook', async () => {
+    const payload = JSON.stringify({
+      action: 'deleted',
+      installation: {
+        id: 120081765,
+        account: { login: 'effprop', type: 'Organization' },
+      },
+    });
+
+    const res = await app.request('/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-hub-signature-256': 'sha256=test',
+        'x-github-event': 'installation',
+        'content-type': 'application/json',
+      },
+      body: payload,
+    }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(verifyWebhookSignature).toHaveBeenCalledWith(payload, 'sha256=test', expect.any(String));
+    expect(insertedCanonicalRows()).toEqual([
+      expect.objectContaining({
+        installationId: '120081765',
+        accountType: 'organization',
+        accountName: 'effprop',
+        accountNameNormalized: 'effprop',
+      }),
+    ]);
+    const tombstonedCanonicalRow = insertedCanonicalRows()[0];
+    expect(tombstonedCanonicalRow?.uninstalledAt).toEqual(expect.any(String));
+    expect(deletedTables).toEqual([schema.githubInstallations]);
   });
 
   it('logs sync insert conflicts without blocking the installations response', async () => {

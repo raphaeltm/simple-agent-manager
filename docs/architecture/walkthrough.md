@@ -287,6 +287,7 @@ erDiagram
     users ||--o{ workspaces : "owns"
     users ||--o{ credentials : "has"
     users ||--o{ github_installations : "has"
+    github_installation_accounts ||--o{ github_installations : "linked by external installation_id"
     users ||--o{ sessions : "has"
     users ||--o{ accounts : "has (OAuth)"
     nodes ||--o{ workspaces : "hosts"
@@ -352,14 +353,24 @@ erDiagram
         text label
     }
 
+    github_installation_accounts {
+        text installation_id PK
+        text account_type "personal|organization"
+        text account_name
+        text account_name_normalized
+        text uninstalled_at
+    }
+
     github_installations {
         text id PK
         text user_id FK
-        text installation_id UK
+        text installation_id "external GitHub installation id"
         text account_type "personal|organization"
         text account_name
     }
 ```
+
+`github_installation_accounts` is canonical GitHub-source installation state keyed by the external GitHub App installation id. `github_installations` is only the per-user SAM linkage table used for user-owned projects and workspaces. Account deletion or user unlink flows may delete only the relevant user's `github_installations` rows; they must not delete canonical organization rows in `github_installation_accounts`. Actual GitHub App uninstalls are handled by `installation.deleted` webhook cleanup in `apps/api/src/routes/github.ts`, which tombstones canonical state and removes all per-user links for that external installation.
 
 ### Storage Services
 

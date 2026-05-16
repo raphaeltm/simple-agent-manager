@@ -205,6 +205,31 @@ export const credentials = sqliteTable(
 // =============================================================================
 // GitHub App Installations
 // =============================================================================
+export const githubInstallationAccounts = sqliteTable(
+  'github_installation_accounts',
+  {
+    installationId: text('installation_id').primaryKey(),
+    accountType: text('account_type').notNull(),
+    accountName: text('account_name').notNull(),
+    accountNameNormalized: text('account_name_normalized').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    uninstalledAt: text('uninstalled_at'),
+  },
+  (table) => ({
+    activeLookupIdx: index('idx_github_installation_accounts_active_lookup')
+      .on(table.accountType, table.accountNameNormalized)
+      .where(sql`uninstalled_at IS NULL`),
+  })
+);
+
+// Per-user SAM links to GitHub App installations. Account deletion/unlink flows
+// may remove these rows for the deleting user only; they must not remove
+// canonical shared org state in `github_installation_accounts`.
 export const githubInstallations = sqliteTable(
   'github_installations',
   {

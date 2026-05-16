@@ -33,11 +33,22 @@ export async function seedInstallation(
   userId: string,
   opts?: { installationIdValue?: string; accountName?: string },
 ): Promise<void> {
+  const externalInstallationId = opts?.installationIdValue ?? 'inst-12345';
+  const accountName = opts?.accountName ?? 'test-user';
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO github_installation_accounts
+       (installation_id, account_type, account_name, account_name_normalized, created_at, updated_at)
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
+  )
+    .bind(externalInstallationId, accountName, accountName)
+    .run();
+
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installations (id, user_id, installation_id, account_type, account_name, created_at, updated_at)
      VALUES (?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
   )
-    .bind(installationId, userId, opts?.installationIdValue ?? 'inst-12345', opts?.accountName ?? 'test-user')
+    .bind(installationId, userId, externalInstallationId, accountName)
     .run();
 }
 

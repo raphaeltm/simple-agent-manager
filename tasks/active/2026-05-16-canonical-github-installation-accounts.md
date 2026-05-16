@@ -23,17 +23,17 @@ If the only linked SAM user for an org installation unlinks or deletes their acc
 
 ## Implementation Checklist
 
-- [ ] Add `github_installation_accounts` D1 migration with canonical rows keyed by external `installation_id`, normalized account name, timestamps, and tombstone/uninstalled timestamp.
-- [ ] Backfill canonical rows from existing `github_installations`, deduping by external `installation_id` and preferring active non-sentinel metadata.
-- [ ] Add Drizzle schema and types for `githubInstallationAccounts`.
-- [ ] Add route helpers to upsert canonical installation account state before/alongside per-user link creation.
-- [ ] Update GitHub callback to upsert canonical state before inserting a per-user row.
-- [ ] Update direct sync to upsert canonical state for every accessible installation before inserting missing per-user rows.
-- [ ] Update installation-created webhook flow to upsert canonical state before inserting the installer user's per-user row.
-- [ ] Update installation-deleted webhook flow to remove or tombstone canonical state and remove all per-user links for that external installation.
-- [ ] Update shared org discovery to read active canonical organization rows narrowed by signed-in user's org memberships, then verify candidates with the user's token before creating per-user rows.
-- [ ] Preserve per-user unlink semantics and document that account deletion must delete only per-user `github_installations` rows.
-- [ ] Add focused tests for canonical upsert/backfill behavior, multi-user linking, per-user unlink isolation, canonical shared discovery, and uninstall cleanup.
+- [x] Add `github_installation_accounts` D1 migration with canonical rows keyed by external `installation_id`, normalized account name, timestamps, and tombstone/uninstalled timestamp.
+- [x] Backfill canonical rows from existing `github_installations`, deduping by external `installation_id` and preferring active non-sentinel metadata.
+- [x] Add Drizzle schema and types for `githubInstallationAccounts`.
+- [x] Add route helpers to upsert canonical installation account state before/alongside per-user link creation.
+- [x] Update GitHub callback to upsert canonical state before inserting a per-user row.
+- [x] Update direct sync to upsert canonical state for every accessible installation before inserting missing per-user rows.
+- [x] Update installation-created webhook flow to upsert canonical state before inserting the installer user's per-user row.
+- [x] Update installation-deleted webhook flow to remove or tombstone canonical state and remove all per-user links for that external installation.
+- [x] Update shared org discovery to read active canonical organization rows narrowed by signed-in user's org memberships, then verify candidates with the user's token before creating per-user rows.
+- [x] Preserve per-user unlink semantics and document that account deletion must delete only per-user `github_installations` rows.
+- [x] Add focused tests for canonical upsert/backfill behavior, multi-user linking, per-user unlink isolation, canonical shared discovery, and uninstall cleanup.
 - [ ] Run migration safety, lint/typecheck/tests/build.
 - [ ] Run required specialist reviews and staging verification before PR/merge.
 
