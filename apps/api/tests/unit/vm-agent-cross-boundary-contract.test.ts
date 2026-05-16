@@ -44,16 +44,33 @@ interface MockFetchCapture {
   method: string | null;
 }
 
+const DEFAULT_NODE_AGENT_RESPONSE = { status: 200, body: '{"ok":true}' };
+
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+function getAttachmentTransferTimeout(value: string | undefined): number {
+  const DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS = 60_000;
+  const parsed = Number.parseInt(value ?? String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS), 10);
+  return parsed || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
+}
+
 /**
  * Sets up vi.doMock for the standard nodeAgentRequest dependency trio
  * (jwt, telemetry, fetch-timeout) and returns a capture object for inspecting
  * the outgoing HTTP request. Call vi.resetModules() before this.
  */
 function setupNodeAgentMocks(
-  responseInit: { status: number; body?: string | null } = { status: 200, body: '{"ok":true}' },
+  responseInit?: { status: number; body?: string | null },
   signTokenOverride?: ReturnType<typeof vi.fn>,
 ): MockFetchCapture {
   const capture: MockFetchCapture = { url: null, body: null, headers: null, method: null };
+  const response = responseInit ?? DEFAULT_NODE_AGENT_RESPONSE;
 
   vi.doMock('../../src/services/jwt', () => ({
     signNodeManagementToken: signTokenOverride ?? vi.fn().mockResolvedValue({
@@ -72,10 +89,10 @@ function setupNodeAgentMocks(
       capture.body = (init.body as string) ?? null;
       capture.headers = new Headers(init.headers);
       capture.method = init.method ?? 'GET';
-      const resBody = responseInit.body ?? null;
+      const resBody = response.body ?? null;
       return Promise.resolve(
         new Response(resBody, {
-          status: responseInit.status,
+          status: response.status,
           headers: resBody ? { 'Content-Type': 'application/json' } : undefined,
         }),
       );
@@ -224,23 +241,10 @@ describe('Contract 1: Attachment Transfer (TaskRunner → VM Agent)', () => {
 
   describe('timeout handling', () => {
     it('uses configurable timeout with 60s default', () => {
-      // From workspace-steps.ts:393-397
-      const DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS = 60_000;
-
-      // Without env override
-      const timeout1 = parseInt('' || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS), 10)
-        || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
-      expect(timeout1).toBe(60_000);
-
-      // With env override
-      const timeout2 = parseInt('120000' || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS), 10)
-        || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
-      expect(timeout2).toBe(120_000);
-
-      // With invalid env override falls back to default
-      const timeout3 = parseInt('not-a-number' || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS), 10)
-        || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
-      expect(timeout3).toBe(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS);
+      // Matches workspace-steps.ts:393-397.
+      expect(getAttachmentTransferTimeout(undefined)).toBe(60_000);
+      expect(getAttachmentTransferTimeout('120000')).toBe(120_000);
+      expect(getAttachmentTransferTimeout('not-a-number')).toBe(60_000);
     });
   });
 });
@@ -306,7 +310,7 @@ describe('Contract 2: Agent Activity Callback (VM Agent → API Worker)', () => 
       const projectID = 'proj-abc';
       const sessionID = 'sess-xyz';
 
-      const goUrl = controlPlaneURL.replace(/\/+$/, '') +
+      const goUrl = trimTrailingSlashes(controlPlaneURL) +
         '/api/projects/' + projectID + '/acp-sessions/' + sessionID + '/activity';
 
       // The API route is mounted at:
@@ -323,7 +327,7 @@ describe('Contract 2: Agent Activity Callback (VM Agent → API Worker)', () => 
       const projectID = 'proj-abc';
       const sessionID = 'sess-xyz';
 
-      const goUrl = controlPlaneURL.replace(/\/+$/, '') +
+      const goUrl = trimTrailingSlashes(controlPlaneURL) +
         '/api/projects/' + projectID + '/acp-sessions/' + sessionID + '/activity';
 
       expect(goUrl).toBe('https://api.example.com/api/projects/proj-abc/acp-sessions/sess-xyz/activity');
@@ -360,31 +364,30 @@ describe('Contract 2: Agent Activity Callback (VM Agent → API Worker)', () => 
 
 describe('Contract 3: Credential Sync Callback (VM Agent → API Worker)', () => {
   describe('payload shape matches Go sender', () => {
-    it('validates the payload the VM agent sends', () => {
+    it.each([
+      [
+        'oauth-token credential',
+        {
+          agentType: 'openai-codex',
+          credentialKind: 'oauth-token',
+          credential: '{"tokens":{"access_token":"new-jwt","refresh_token":"rt"}}',
+        },
+      ],
+      [
+        'api-key credential',
+        {
+          agentType: 'claude-code',
+          credentialKind: 'api-key',
+          credential: 'sk-ant-XXXX',
+        },
+      ],
+    ])('validates the %s payload the VM agent sends', (_name, goPayload) => {
       // From workspace_callbacks.go:37-41:
       //   payload := map[string]string{
       //     "agentType":      agentType,
       //     "credentialKind": credentialKind,
       //     "credential":     credential,
       //   }
-      const goPayload = {
-        agentType: 'openai-codex',
-        credentialKind: 'oauth-token',
-        credential: '{"tokens":{"access_token":"new-jwt","refresh_token":"rt"}}',
-      };
-
-      // Must pass the Valibot schema
-      const result = v.safeParse(AgentCredentialSyncSchema, goPayload);
-      expect(result.success).toBe(true);
-    });
-
-    it('validates payload with api-key credential kind', () => {
-      const goPayload = {
-        agentType: 'claude-code',
-        credentialKind: 'api-key',
-        credential: 'sk-ant-XXXX',
-      };
-
       const result = v.safeParse(AgentCredentialSyncSchema, goPayload);
       expect(result.success).toBe(true);
     });
@@ -430,7 +433,7 @@ describe('Contract 3: Credential Sync Callback (VM Agent → API Worker)', () =>
       const controlPlaneURL = 'https://api.example.com';
       const workspaceID = 'ws-abc-123';
 
-      const goUrl = controlPlaneURL.replace(/\/+$/, '') +
+      const goUrl = trimTrailingSlashes(controlPlaneURL) +
         '/api/workspaces/' + encodeURIComponent(workspaceID) + '/agent-credential-sync';
 
       // The API route is mounted at:
@@ -444,7 +447,7 @@ describe('Contract 3: Credential Sync Callback (VM Agent → API Worker)', () =>
       const controlPlaneURL = 'https://api.example.com';
       const workspaceID = 'ws-abc/123';
 
-      const goUrl = controlPlaneURL.replace(/\/+$/, '') +
+      const goUrl = trimTrailingSlashes(controlPlaneURL) +
         '/api/workspaces/' + encodeURIComponent(workspaceID) + '/agent-credential-sync';
 
       expect(goUrl).toContain('ws-abc%2F123');
