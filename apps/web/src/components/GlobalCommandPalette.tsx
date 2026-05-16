@@ -15,8 +15,8 @@ import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation,useNavigate } from 'react-router';
 
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
-import type { ChatSessionListItem } from '../lib/api';
-import { listChatSessions,listNodes, listProjects } from '../lib/api';
+import type { SessionSummaryItem } from '../lib/api';
+import { getAllChats,listNodes, listProjects } from '../lib/api';
 import { fuzzyMatch } from '../lib/fuzzy-match';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { useAuth } from './AuthProvider';
@@ -24,16 +24,11 @@ import { useAuth } from './AuthProvider';
 // ── Configurable limits ──
 
 const DEFAULT_PROJECT_FETCH_LIMIT = 50;
-const DEFAULT_CHAT_FETCH_LIMIT_PER_PROJECT = 20;
 const DEFAULT_MAX_RESULTS_PER_CATEGORY = 10;
 
 const PROJECT_FETCH_LIMIT = parseInt(
   import.meta.env.VITE_CMD_PALETTE_PROJECT_FETCH_LIMIT ||
     String(DEFAULT_PROJECT_FETCH_LIMIT),
-);
-const CHAT_FETCH_LIMIT_PER_PROJECT = parseInt(
-  import.meta.env.VITE_CMD_PALETTE_CHAT_FETCH_LIMIT ||
-    String(DEFAULT_CHAT_FETCH_LIMIT_PER_PROJECT),
 );
 const MAX_RESULTS_PER_CATEGORY = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_RESULTS_PER_CATEGORY ||
@@ -165,7 +160,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [nodes, setNodes] = useState<Array<{ id: string; name: string }>>([]);
   const [chatSessions, setChatSessions] = useState<
-    Array<ChatSessionListItem & { projectId: string; projectName: string }>
+    Array<SessionSummaryItem & { createdAt: number }>
   >([]);
   const [loading, setLoading] = useState(true);
 
@@ -193,25 +188,12 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         const nodeList = Array.isArray(nodesRes) ? nodesRes : [];
         setNodes(nodeList.map((n: { id: string; name: string }) => ({ id: n.id, name: n.name })));
 
-        // Fetch chat sessions from all projects in parallel
-        const sessionResults = await Promise.all(
-          mappedProjects.map((project) =>
-            listChatSessions(project.id, { limit: CHAT_FETCH_LIMIT_PER_PROJECT })
-              .then((res) =>
-                res.sessions.map((s) => ({
-                  ...s,
-                  projectId: project.id,
-                  projectName: project.name,
-                })),
-              )
-              .catch(() => [] as Array<ChatSessionListItem & { projectId: string; projectName: string }>),
-          ),
-        );
+        // Fetch chat sessions via single D1 query (no DO fan-out)
+        const chatsRes = await getAllChats({ limit: 100 }).catch(() => ({ sessions: [], total: 0 }));
         if (!cancelled) {
-          const allSessions = sessionResults.flat();
-          // Sort by createdAt descending (most recent first)
-          allSessions.sort((a, b) => b.createdAt - a.createdAt);
-          setChatSessions(allSessions);
+          setChatSessions(
+            chatsRes.sessions.map((s) => ({ ...s, createdAt: s.startedAt })),
+          );
           setLoading(false);
         }
       } catch {

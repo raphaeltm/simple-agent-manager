@@ -28,111 +28,106 @@ const MOCK_USER = {
 
 const NOW = Date.now();
 
+/** SessionSummaryItem shape — matches the new D1-backed API response. */
 interface SessionOverrides {
   id: string;
   topic?: string | null;
   status?: string;
-  isIdle?: boolean;
   agentCompletedAt?: number | null;
   lastMessageAt?: number;
+  projectId?: string;
+  projectName?: string;
 }
 
 function makeSession(overrides: SessionOverrides) {
+  const lastMessageAt = overrides.lastMessageAt ?? NOW - 30000;
   return {
     id: overrides.id,
-    workspaceId: null,
-    taskId: null,
-    topic: overrides.topic ?? null,
+    projectId: overrides.projectId ?? 'proj-1',
+    projectName: overrides.projectName ?? 'Backend API',
+    userId: 'user-test-1',
     status: overrides.status ?? 'active',
+    topic: overrides.topic ?? null,
+    taskId: null,
+    workspaceId: null,
     messageCount: 5,
-    startedAt: (overrides.lastMessageAt ?? NOW) - 60000,
-    endedAt: null,
-    createdAt: (overrides.lastMessageAt ?? NOW) - 120000,
-    lastMessageAt: overrides.lastMessageAt ?? NOW - 30000,
-    isIdle: overrides.isIdle ?? false,
+    startedAt: lastMessageAt - 60000,
+    lastMessageAt,
     agentCompletedAt: overrides.agentCompletedAt ?? null,
-    isTerminated: overrides.status === 'stopped',
-    workspaceUrl: null,
-    cleanupAt: null,
-    agentSessionId: null,
+    endedAt: overrides.status === 'stopped' ? lastMessageAt : null,
+    updatedAt: lastMessageAt,
   };
 }
 
-const MOCK_PROJECTS = [
-  { id: 'proj-1', name: 'Backend API', repository: 'org/backend', defaultBranch: 'main', userId: 'user-test-1', githubInstallationId: 'inst-1', defaultVmSize: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-  { id: 'proj-2', name: 'Frontend App', repository: 'org/frontend', defaultBranch: 'main', userId: 'user-test-1', githubInstallationId: 'inst-2', defaultVmSize: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-  { id: 'proj-3', name: 'Infrastructure', repository: 'org/infra', defaultBranch: 'main', userId: 'user-test-1', githubInstallationId: 'inst-3', defaultVmSize: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+const NORMAL_SESSIONS = [
+  makeSession({ id: 's1', topic: 'Fix authentication flow', status: 'active', lastMessageAt: NOW - 60000, projectId: 'proj-1', projectName: 'Backend API' }),
+  makeSession({ id: 's2', topic: 'Add user dashboard', status: 'active', agentCompletedAt: NOW - 300000, lastMessageAt: NOW - 300000, projectId: 'proj-1', projectName: 'Backend API' }),
+  makeSession({ id: 's3', topic: 'Refactor component library', status: 'active', lastMessageAt: NOW - 120000, projectId: 'proj-2', projectName: 'Frontend App' }),
+  makeSession({ id: 's4', topic: null, status: 'active', lastMessageAt: NOW - 900000, projectId: 'proj-2', projectName: 'Frontend App' }),
+  makeSession({ id: 's5', topic: 'Terraform modules update', status: 'active', lastMessageAt: NOW - 180000, projectId: 'proj-3', projectName: 'Infrastructure' }),
 ];
 
-const NORMAL_SESSIONS: Record<string, ReturnType<typeof makeSession>[]> = {
-  'proj-1': [
-    makeSession({ id: 's1', topic: 'Fix authentication flow', status: 'active', lastMessageAt: NOW - 60000 }),
-    makeSession({ id: 's2', topic: 'Add user dashboard', status: 'active', isIdle: true, agentCompletedAt: NOW - 300000, lastMessageAt: NOW - 300000 }),
-  ],
-  'proj-2': [
-    makeSession({ id: 's3', topic: 'Refactor component library', status: 'active', lastMessageAt: NOW - 120000 }),
-    makeSession({ id: 's4', topic: null, status: 'active', lastMessageAt: NOW - 900000 }),
-  ],
-  'proj-3': [
-    makeSession({ id: 's5', topic: 'Terraform modules update', status: 'active', lastMessageAt: NOW - 180000 }),
-  ],
-};
+const LONG_TEXT_SESSIONS = [
+  makeSession({
+    id: 'lt1',
+    topic: 'This is an extremely long chat topic that should definitely be truncated because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues',
+    status: 'active',
+    lastMessageAt: NOW - 60000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
+  }),
+  makeSession({
+    id: 'lt2',
+    topic: 'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テキスト',
+    status: 'active',
+    agentCompletedAt: NOW - 120000,
+    lastMessageAt: NOW - 120000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
+  }),
+  makeSession({
+    id: 'lt3',
+    topic: 'x'.repeat(500),
+    status: 'active',
+    lastMessageAt: NOW - 180000,
+    projectId: 'proj-2',
+    projectName: 'Frontend App',
+  }),
+];
 
-const LONG_TEXT_SESSIONS: Record<string, ReturnType<typeof makeSession>[]> = {
-  'proj-1': [
-    makeSession({
-      id: 'lt1',
-      topic: 'This is an extremely long chat topic that should definitely be truncated because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues',
-      status: 'active',
-      lastMessageAt: NOW - 60000,
-    }),
-    makeSession({
-      id: 'lt2',
-      topic: 'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and Japanese text',
-      status: 'active',
-      isIdle: true,
-      agentCompletedAt: NOW - 120000,
-      lastMessageAt: NOW - 120000,
-    }),
-    makeSession({
-      id: 'lt3',
-      topic: 'x'.repeat(500),
-      status: 'active',
-      lastMessageAt: NOW - 180000,
-    }),
-  ],
-  'proj-2': [],
-  'proj-3': [],
-};
-
-const MANY_SESSIONS: Record<string, ReturnType<typeof makeSession>[]> = {
-  'proj-1': Array.from({ length: 10 }, (_, i) =>
+const MANY_SESSIONS = [
+  ...Array.from({ length: 10 }, (_, i) =>
     makeSession({
       id: `many-1-${i}`,
       topic: `Backend task ${i + 1}: ${['Fix API endpoint', 'Add middleware', 'Optimize queries', 'Update schema', 'Add tests'][i % 5]}`,
       status: 'active',
-      isIdle: i % 3 === 0,
       agentCompletedAt: i % 3 === 0 ? NOW - i * 60000 : null,
       lastMessageAt: NOW - i * 60000,
+      projectId: 'proj-1',
+      projectName: 'Backend API',
     }),
   ),
-  'proj-2': Array.from({ length: 10 }, (_, i) =>
+  ...Array.from({ length: 10 }, (_, i) =>
     makeSession({
       id: `many-2-${i}`,
       topic: `Frontend task ${i + 1}: ${['Fix layout', 'Add animation', 'Refactor hooks', 'Add dark mode', 'Update styles'][i % 5]}`,
       status: 'active',
       lastMessageAt: NOW - (i + 10) * 60000,
+      projectId: 'proj-2',
+      projectName: 'Frontend App',
     }),
   ),
-  'proj-3': Array.from({ length: 10 }, (_, i) =>
+  ...Array.from({ length: 10 }, (_, i) =>
     makeSession({
       id: `many-3-${i}`,
       topic: `Infra task ${i + 1}`,
       status: 'active',
       lastMessageAt: NOW - (i + 20) * 60000,
+      projectId: 'proj-3',
+      projectName: 'Infrastructure',
     }),
   ),
-};
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -141,7 +136,7 @@ const MANY_SESSIONS: Record<string, ReturnType<typeof makeSession>[]> = {
 async function setupApiMocks(
   page: Page,
   options: {
-    sessions?: Record<string, ReturnType<typeof makeSession>[]>;
+    sessions?: ReturnType<typeof makeSession>[];
     error?: boolean;
     noProjects?: boolean;
   },
@@ -149,7 +144,7 @@ async function setupApiMocks(
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
 
-    if (url.includes('/api/auth/get-session')) {
+    if (url.includes('/api/auth/')) {
       return route.fulfill({ json: MOCK_USER });
     }
 
@@ -157,23 +152,27 @@ async function setupApiMocks(
       return route.fulfill({ json: { notifications: [], total: 0 } });
     }
 
-    if (url.includes('/api/projects') && !url.includes('/sessions')) {
+    // New D1-backed recent-chats endpoint (used by useRecentChats / dropdown)
+    if (url.includes('/api/chats/recent')) {
       if (options.error) {
         return route.fulfill({ status: 500, json: { error: 'Server error' } });
       }
       if (options.noProjects) {
-        return route.fulfill({ json: { projects: [], total: 0 } });
+        return route.fulfill({ json: { sessions: [], totalActive: 0 } });
       }
-      return route.fulfill({
-        json: { projects: MOCK_PROJECTS, total: MOCK_PROJECTS.length },
-      });
+      const sessions = (options.sessions ?? []).filter(
+        (s) => s.status !== 'stopped' && s.status !== 'failed',
+      );
+      return route.fulfill({ json: { sessions, totalActive: sessions.length } });
     }
 
-    if (url.includes('/sessions')) {
-      const projMatch = url.match(/projects\/([^/]+)\/sessions/);
-      const projId = projMatch?.[1] ?? 'proj-1';
-      const sessions = options.sessions?.[projId] ?? [];
-      return route.fulfill({ json: { sessions } });
+    // New D1-backed all-chats endpoint (used by useAllChatSessions on /chats page)
+    if (url.includes('/api/chats')) {
+      if (options.error) {
+        return route.fulfill({ status: 500, json: { error: 'Server error' } });
+      }
+      const sessions = options.sessions ?? [];
+      return route.fulfill({ json: { sessions, total: sessions.length } });
     }
 
     return route.fulfill({ status: 200, json: {} });
@@ -250,7 +249,7 @@ test.describe('Recent Chats Dropdown — Mobile', () => {
   });
 
   test('empty state — no active chats', async ({ page }) => {
-    await setupApiMocks(page, { sessions: { 'proj-1': [], 'proj-2': [], 'proj-3': [] } });
+    await setupApiMocks(page, { sessions: [] });
     await page.goto('/chats');
     await page.waitForTimeout(800);
 
@@ -398,7 +397,7 @@ test.describe('Recent Chats Dropdown — Desktop', () => {
   });
 
   test('empty state', async ({ page }) => {
-    await setupApiMocks(page, { sessions: { 'proj-1': [], 'proj-2': [], 'proj-3': [] } });
+    await setupApiMocks(page, { sessions: [] });
     await page.goto('/chats');
     await page.waitForTimeout(800);
 

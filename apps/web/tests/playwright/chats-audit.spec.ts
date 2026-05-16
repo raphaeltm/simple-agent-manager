@@ -28,11 +28,11 @@ const MOCK_USER = {
 
 const NOW = Date.now();
 
+/** SessionSummaryItem shape — matches the new D1-backed API response. */
 interface SessionOverrides {
   id: string;
   topic?: string | null;
   status?: string;
-  isIdle?: boolean;
   agentCompletedAt?: number | null;
   lastMessageAt?: number;
   projectId?: string;
@@ -40,36 +40,30 @@ interface SessionOverrides {
 }
 
 function makeSession(overrides: SessionOverrides) {
+  const lastMessageAt = overrides.lastMessageAt ?? NOW - 30000;
   return {
     id: overrides.id,
-    workspaceId: null,
-    taskId: null,
-    topic: overrides.topic ?? null,
+    projectId: overrides.projectId ?? 'proj-1',
+    projectName: overrides.projectName ?? 'Backend API',
+    userId: 'user-test-1',
     status: overrides.status ?? 'active',
+    topic: overrides.topic ?? null,
+    taskId: null,
+    workspaceId: null,
     messageCount: 5,
-    startedAt: (overrides.lastMessageAt ?? NOW) - 60000,
-    endedAt: null,
-    createdAt: (overrides.lastMessageAt ?? NOW) - 120000,
-    lastMessageAt: overrides.lastMessageAt ?? NOW - 30000,
-    isIdle: overrides.isIdle ?? false,
+    startedAt: lastMessageAt - 60000,
+    lastMessageAt,
     agentCompletedAt: overrides.agentCompletedAt ?? null,
-    isTerminated: overrides.status === 'stopped',
-    workspaceUrl: null,
-    cleanupAt: null,
-    agentSessionId: null,
+    endedAt: overrides.status === 'stopped' ? lastMessageAt : null,
+    updatedAt: lastMessageAt,
   };
 }
 
-const MOCK_PROJECTS = [
-  { id: 'proj-1', name: 'Backend API', repository: 'org/backend', defaultBranch: 'main', userId: 'user-test-1', githubInstallationId: 'inst-1', defaultVmSize: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-  { id: 'proj-2', name: 'Frontend App', repository: 'org/frontend', defaultBranch: 'main', userId: 'user-test-1', githubInstallationId: 'inst-2', defaultVmSize: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-];
-
 const NORMAL_SESSIONS = [
-  makeSession({ id: 's1', topic: 'Fix authentication flow', status: 'active', lastMessageAt: NOW - 60000 }),
-  makeSession({ id: 's2', topic: 'Add user dashboard', status: 'active', isIdle: true, agentCompletedAt: NOW - 300000, lastMessageAt: NOW - 300000 }),
-  makeSession({ id: 's3', topic: 'Refactor database layer', status: 'stopped', lastMessageAt: NOW - 600000 }),
-  makeSession({ id: 's4', topic: null, status: 'active', lastMessageAt: NOW - 900000 }),
+  makeSession({ id: 's1', topic: 'Fix authentication flow', status: 'active', lastMessageAt: NOW - 60000, projectId: 'proj-1', projectName: 'Backend API' }),
+  makeSession({ id: 's2', topic: 'Add user dashboard', status: 'active', agentCompletedAt: NOW - 300000, lastMessageAt: NOW - 300000, projectId: 'proj-1', projectName: 'Backend API' }),
+  makeSession({ id: 's3', topic: 'Refactor database layer', status: 'active', lastMessageAt: NOW - 600000, projectId: 'proj-2', projectName: 'Frontend App' }),
+  makeSession({ id: 's4', topic: null, status: 'active', lastMessageAt: NOW - 900000, projectId: 'proj-2', projectName: 'Frontend App' }),
 ];
 
 const LONG_TEXT_SESSIONS = [
@@ -78,32 +72,37 @@ const LONG_TEXT_SESSIONS = [
     topic: 'This is an extremely long chat topic that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues on smaller viewports',
     status: 'active',
     lastMessageAt: NOW - 60000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
   }),
   makeSession({
     id: 'lt2',
-    topic: 'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and Japanese text',
+    topic: 'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テキスト',
     status: 'active',
-    isIdle: true,
     agentCompletedAt: NOW - 120000,
     lastMessageAt: NOW - 120000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
   }),
   makeSession({
     id: 'lt3',
     topic: 'x'.repeat(500),
     status: 'active',
     lastMessageAt: NOW - 180000,
+    projectId: 'proj-2',
+    projectName: 'Frontend App',
   }),
 ];
 
 const MANY_SESSIONS = Array.from({ length: 30 }, (_, i) => {
-  const statuses = ['active', 'active', 'stopped'];
   return makeSession({
     id: `many-${i}`,
     topic: `Session ${i + 1}: ${['Implement feature', 'Fix bug', 'Refactor code', 'Add tests', 'Update docs'][i % 5]} #${i + 1}`,
-    status: statuses[i % statuses.length],
-    isIdle: i % 4 === 0,
+    status: 'active',
     agentCompletedAt: i % 4 === 0 ? NOW - i * 60000 : null,
     lastMessageAt: NOW - i * 60000,
+    projectId: `proj-${(i % 2) + 1}`,
+    projectName: i % 2 === 0 ? 'Backend API' : 'Frontend App',
   });
 });
 
@@ -114,33 +113,41 @@ const MANY_SESSIONS = Array.from({ length: 30 }, (_, i) => {
 async function setupApiMocks(
   page: Page,
   options: {
-    sessions?: Record<string, unknown[]>;
+    sessions?: ReturnType<typeof makeSession>[];
     error?: boolean;
   },
 ) {
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
 
-    if (url.includes('/api/auth/session')) {
+    if (url.includes('/api/auth/')) {
       return route.fulfill({ json: MOCK_USER });
     }
 
-    if (url.includes('/api/projects') && !url.includes('/sessions')) {
-      return route.fulfill({
-        json: { projects: MOCK_PROJECTS, total: MOCK_PROJECTS.length },
-      });
+    if (url.includes('/api/notifications')) {
+      return route.fulfill({ json: { notifications: [], total: 0 } });
     }
 
-    if (url.includes('/sessions')) {
+    // New D1-backed cross-project endpoint (used by useAllChatSessions)
+    if (url.includes('/api/chats') && !url.includes('/recent')) {
       if (options.error) {
         return route.fulfill({ status: 500, json: { error: 'Server error' } });
       }
-      // Extract project ID from URL
-      const projMatch = url.match(/projects\/([^/]+)\/sessions/);
-      const projId = projMatch?.[1] ?? 'proj-1';
-      const sessions = options.sessions?.[projId] ?? [];
+      const sessions = options.sessions ?? [];
       return route.fulfill({
         json: { sessions, total: sessions.length },
+      });
+    }
+
+    // New D1-backed recent-chats endpoint (used by useRecentChats / dropdown)
+    if (url.includes('/api/chats/recent')) {
+      if (options.error) {
+        return route.fulfill({ status: 500, json: { error: 'Server error' } });
+      }
+      const sessions = options.sessions ?? [];
+      const active = sessions.filter((s) => s.status !== 'stopped' && s.status !== 'failed');
+      return route.fulfill({
+        json: { sessions: active, totalActive: active.length },
       });
     }
 
@@ -170,9 +177,7 @@ async function assertNoOverflow(page: Page) {
 
 test.describe('Chats Page — Mobile', () => {
   test('normal data', async ({ page }) => {
-    await setupApiMocks(page, {
-      sessions: { 'proj-1': NORMAL_SESSIONS.slice(0, 2), 'proj-2': NORMAL_SESSIONS.slice(2) },
-    });
+    await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
     await page.goto('/chats');
     await page.waitForSelector('text=Fix authentication flow');
     await assertNoOverflow(page);
@@ -180,9 +185,7 @@ test.describe('Chats Page — Mobile', () => {
   });
 
   test('long text wraps correctly', async ({ page }) => {
-    await setupApiMocks(page, {
-      sessions: { 'proj-1': LONG_TEXT_SESSIONS, 'proj-2': [] },
-    });
+    await setupApiMocks(page, { sessions: LONG_TEXT_SESSIONS });
     await page.goto('/chats');
     await page.waitForTimeout(800);
     await assertNoOverflow(page);
@@ -190,7 +193,7 @@ test.describe('Chats Page — Mobile', () => {
   });
 
   test('empty state', async ({ page }) => {
-    await setupApiMocks(page, { sessions: { 'proj-1': [], 'proj-2': [] } });
+    await setupApiMocks(page, { sessions: [] });
     await page.goto('/chats');
     await page.waitForSelector('text=No active chats');
     await assertNoOverflow(page);
@@ -198,9 +201,7 @@ test.describe('Chats Page — Mobile', () => {
   });
 
   test('many items', async ({ page }) => {
-    await setupApiMocks(page, {
-      sessions: { 'proj-1': MANY_SESSIONS.slice(0, 15), 'proj-2': MANY_SESSIONS.slice(15) },
-    });
+    await setupApiMocks(page, { sessions: MANY_SESSIONS });
     await page.goto('/chats');
     await page.waitForSelector('text=Session 1');
     await assertNoOverflow(page);
@@ -224,9 +225,7 @@ test.describe('Chats Page — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('normal data', async ({ page }) => {
-    await setupApiMocks(page, {
-      sessions: { 'proj-1': NORMAL_SESSIONS.slice(0, 2), 'proj-2': NORMAL_SESSIONS.slice(2) },
-    });
+    await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
     await page.goto('/chats');
     await page.waitForSelector('text=Fix authentication flow');
     await assertNoOverflow(page);
@@ -234,9 +233,7 @@ test.describe('Chats Page — Desktop', () => {
   });
 
   test('long text', async ({ page }) => {
-    await setupApiMocks(page, {
-      sessions: { 'proj-1': LONG_TEXT_SESSIONS, 'proj-2': [] },
-    });
+    await setupApiMocks(page, { sessions: LONG_TEXT_SESSIONS });
     await page.goto('/chats');
     await page.waitForTimeout(800);
     await assertNoOverflow(page);
