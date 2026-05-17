@@ -86,7 +86,7 @@ export const NodeCard: FC<NodeCardProps> = ({
       aria-label={`View node ${node.name}`}
       className="cursor-pointer"
     >
-      <Card className="flex flex-col gap-3" style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
+      <Card variant="glass" className="flex flex-col gap-3" style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
         {/* Header: icon + name + dropdown */}
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-sm bg-info-tint flex items-center justify-center shrink-0">

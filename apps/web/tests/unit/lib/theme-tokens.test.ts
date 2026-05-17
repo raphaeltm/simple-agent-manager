@@ -41,4 +41,8 @@ describe('theme token definitions', () => {
   it('defines shadow tokens for overlays', () => {
     expect(definedVars.has('--sam-shadow-overlay')).toBe(true);
   });
+
+  it('defines the glass blur feature flag token', () => {
+    expect(definedVars.has('--sam-enable-blur')).toBe(true);
+  });
 });

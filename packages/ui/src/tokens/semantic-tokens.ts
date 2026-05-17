@@ -80,6 +80,24 @@ export const zIndexScale = {
   commandPalette: 61,
 } as const;
 
+export const glassTiers = {
+  chrome: {
+    blur: '20px',
+    opacity: 0.55,
+    saturate: 1.35,
+  },
+  surface: {
+    blur: '24px',
+    opacity: 0.65,
+    saturate: 1.35,
+  },
+  modal: {
+    blur: '24px',
+    opacity: 0.55,
+    saturate: 1.35,
+  },
+} as const;
+
 export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
   default: {
     backgroundCanvas: '#0b1110',

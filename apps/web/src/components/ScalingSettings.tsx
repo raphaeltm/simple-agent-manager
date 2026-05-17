@@ -186,7 +186,7 @@ export function ScalingSettings({
   );
 
   return (
-    <section className="border border-border-default rounded-md bg-surface p-4 grid gap-4">
+    <section className="bg-[rgba(8,15,12,0.3)] backdrop-blur-[12px] rounded-lg border border-[rgba(34,197,94,0.08)] p-4 grid gap-4">
       <div>
         <h2 className="sam-type-section-heading m-0 text-fg-primary">Scaling & Scheduling</h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">

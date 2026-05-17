@@ -44,9 +44,9 @@ export function ProjectChat() {
       {/* Desktop sidebar                                                    */}
       {/* ================================================================== */}
       {!isMobile && (
-        <div className="w-72 shrink-0 border-r border-border-default flex flex-col bg-surface">
+        <div className="w-72 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col">
           {/* Sidebar header: project name + action buttons */}
-          <div className="shrink-0 px-3 py-2.5 border-b border-border-default flex items-center gap-2">
+          <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
             <span className="text-sm font-semibold text-fg-primary truncate flex-1">
               {state.project?.name || 'Project'}
             </span>
@@ -92,11 +92,11 @@ export function ProjectChat() {
           </div>
 
           {/* New chat button */}
-          <div className="shrink-0 p-2 border-b border-border-default">
+          <div className="shrink-0 p-2 border-b border-[rgba(34,197,94,0.08)]">
             <button
               type="button"
               onClick={state.handleNewChat}
-              className="w-full py-1.5 px-3 rounded-md border border-border-default bg-transparent cursor-pointer text-fg-primary text-xs font-medium hover:bg-surface-hover transition-colors"
+              className="w-full py-1.5 px-3 rounded-md border border-[rgba(34,197,94,0.15)] bg-transparent cursor-pointer text-fg-primary text-xs font-medium hover:bg-[rgba(34,197,94,0.06)] hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_12px_rgba(22,163,74,0.08)] transition-all"
             >
               + New Chat
             </button>
@@ -109,7 +109,7 @@ export function ProjectChat() {
 
           {/* Search */}
           {state.hasSessions && (
-            <div className="shrink-0 px-2 py-1.5 border-b border-border-default">
+            <div className="shrink-0 px-2 py-1.5 border-b border-[rgba(34,197,94,0.08)]">
               <div className="relative flex items-center">
                 <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
                 <input
@@ -117,7 +117,7 @@ export function ProjectChat() {
                   value={state.searchQuery}
                   onChange={(e) => state.setSearchQuery(e.target.value)}
                   placeholder="Search chats..."
-                  className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-border-default bg-transparent text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent-primary"
+                  className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-[rgba(34,197,94,0.1)] bg-[rgba(10,15,13,0.4)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-[rgba(34,197,94,0.3)] focus:shadow-[0_0_12px_rgba(22,163,74,0.06)] transition-all"
                 />
                 {state.searchQuery && (
                   <button
@@ -151,7 +151,7 @@ export function ProjectChat() {
                   <button
                     type="button"
                     onClick={() => state.setShowStale(!state.effectiveShowStale)}
-                    className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-border-default cursor-pointer hover:bg-surface-hover transition-colors"
+                    className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-[rgba(34,197,94,0.06)] cursor-pointer hover:bg-[rgba(34,197,94,0.04)] transition-colors"
                   >
                     {state.effectiveShowStale ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     <span>Older ({state.filteredStale.length})</span>
@@ -192,7 +192,7 @@ export function ProjectChat() {
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {/* Mobile header bar */}
         {isMobile && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border-default bg-surface">
+          <div className="shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
             <button
               type="button"
               onClick={() => state.setSettingsOpen(!state.settingsOpen)}

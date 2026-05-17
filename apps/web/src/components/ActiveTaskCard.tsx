@@ -28,6 +28,12 @@ function getStepLabel(task: DashboardTask): string | null {
   return null;
 }
 
+function getTaskGlowClass(task: DashboardTask): string {
+  if (task.status === 'failed') return 'shadow-[0_0_0_1px_rgba(239,68,68,0.28),0_0_24px_rgba(239,68,68,0.18)]';
+  if (task.status === 'in_progress' || task.isActive) return 'animate-[task-running-glow_2.4s_ease-in-out_infinite]';
+  return '';
+}
+
 export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
   const navigate = useNavigate();
 
@@ -36,6 +42,7 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
     : `/projects/${task.projectId}/chat`;
 
   const stepLabel = getStepLabel(task);
+  const glowClass = getTaskGlowClass(task);
 
   return (
     <div
@@ -51,7 +58,7 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         }
       }}
     >
-      <Card className="py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors">
+      <Card variant="glass" className={`py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}>
         {/* Top row: status + activity indicator */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <StatusBadge status={task.status} />

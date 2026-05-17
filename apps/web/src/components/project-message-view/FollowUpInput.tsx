@@ -35,7 +35,7 @@ export function FollowUpInput({
   );
 
   return (
-    <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
+    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       <div className="flex gap-2 items-end">
         {onUploadFiles && (
           <>
@@ -76,7 +76,8 @@ export function FollowUpInput({
           placeholder={placeholder}
           disabled={sending}
           rows={1}
-          className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"
+          className="flex-1 p-2 px-3 bg-inset border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] shadow-inner"
+          style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-inset) 88%, black)' }}
         />
         <VoiceButton
           onTranscription={handleTranscription}

@@ -196,7 +196,10 @@ export function SessionHeader({
   }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
 
   return (
-    <div className="border-b border-border-default shrink-0">
+    <div
+      className="relative glass-chrome glass-composited border-t-0 rounded-b-2xl shrink-0 after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
+      style={{ backgroundColor: 'rgba(8, 15, 12, 0.68)', boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
+    >
       {/* Compact row — always visible */}
       <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
@@ -322,7 +325,7 @@ export function SessionHeader({
 
       {/* Expanded details panel */}
       {expanded && hasDetails && (
-        <div className="px-4 py-2 border-t border-border-default bg-inset space-y-2">
+        <div className="border-t border-[rgba(34,197,94,0.08)] px-4 py-2 space-y-2">
           {/* Reference IDs — copyable pills for cross-referencing */}
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">

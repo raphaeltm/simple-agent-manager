@@ -564,7 +564,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   return (
     <>
       {/* Backdrop */}
-      <div onClick={onClose} className="fixed inset-0 bg-overlay z-dialog-backdrop" />
+      <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
 
       {/* Palette dialog */}
       <div
@@ -572,10 +572,10 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         role="dialog"
         aria-label="Command palette"
         aria-modal="true"
-        className="fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] bg-surface border border-border-default rounded-lg shadow-overlay z-command-palette flex flex-col overflow-hidden"
+        className="glass-panel-container fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] glass-modal rounded-lg shadow-overlay z-command-palette flex flex-col overflow-hidden"
       >
         {/* Search input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-default">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-default bg-[rgba(0,0,0,0.2)]">
           <Search size={14} className="text-fg-muted shrink-0" />
           <input
             ref={inputRef}
@@ -637,7 +637,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                     onClick={() => executeResult(result)}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
                     className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors duration-100 ${
-                      isSelected ? 'bg-surface-hover' : 'bg-transparent'
+                      isSelected ? 'bg-[rgba(34,197,94,0.06)]' : 'bg-transparent'
                     }`}
                   >
                     <span className="text-fg-muted shrink-0">{iconForResult(result)}</span>

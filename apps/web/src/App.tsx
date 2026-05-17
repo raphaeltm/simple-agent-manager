@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Outlet,Route, Routes } from 'react-router';
+import type { ReactNode } from 'react';
+import { BrowserRouter, Navigate, Outlet,Route, Routes, useLocation } from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider } from './components/AuthProvider';
@@ -63,9 +64,21 @@ function ProtectedLayout() {
   return (
     <ProtectedRoute>
       <AppShell>
-        <Outlet />
+        <RouteTransition>
+          <Outlet />
+        </RouteTransition>
       </AppShell>
     </ProtectedRoute>
+  );
+}
+
+function RouteTransition({ children }: { children: ReactNode }) {
+  const location = useLocation();
+
+  return (
+    <div key={location.pathname} className="sam-route-transition flex min-h-0 min-w-0 flex-1 flex-col">
+      {children}
+    </div>
   );
 }
 
@@ -153,7 +166,9 @@ export default function App() {
             path="/workspaces/:id"
             element={
               <ProtectedRoute>
-                <Workspace />
+                <RouteTransition>
+                  <Workspace />
+                </RouteTransition>
               </ProtectedRoute>
             }
           />

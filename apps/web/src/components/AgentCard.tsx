@@ -8,7 +8,7 @@ import type {
   SaveAgentCredentialRequest,
   SaveAgentSettingsRequest,
 } from '@simple-agent-manager/shared';
-import { StatusBadge } from '@simple-agent-manager/ui';
+import { Card, StatusBadge } from '@simple-agent-manager/ui';
 
 import { getAgentConnectionSummary } from '../lib/agent-status';
 import { AgentKeyCard } from './AgentKeyCard';
@@ -46,8 +46,9 @@ export function AgentCard({
   const summary = getAgentConnectionSummary(agent, credentials, opencodeProvider, 'user');
 
   return (
-    <div
-      className="border border-border-default rounded-md p-4 flex flex-col gap-4"
+    <Card
+      variant="glass"
+      className="p-4 flex flex-col gap-4"
       data-testid={`agent-card-${agent.id}`}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -97,6 +98,6 @@ export function AgentCard({
           embedded
         />
       </section>
-    </div>
+    </Card>
   );
 }

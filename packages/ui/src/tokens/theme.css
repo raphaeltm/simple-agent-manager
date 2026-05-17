@@ -1,4 +1,6 @@
 :root {
+  --sam-enable-blur: 1;
+
   --sam-color-bg-canvas: #0b1110;
   --sam-color-bg-surface: #13201d;
   --sam-color-fg-primary: #e6f2ee;
@@ -14,6 +16,36 @@
   --sam-color-bg-overlay: rgba(0, 0, 0, 0.6);
   --sam-color-bg-inset: #0e1a17;
   --sam-color-bg-page: #0e1a17;
+
+  /* Glass backdrop blur values */
+  --sam-glass-blur-chrome: 20px;
+  --sam-glass-blur-surface: 24px;
+  --sam-glass-blur-modal: 24px;
+
+  /* Glass background colors (rgba base: 8, 15, 12) */
+  --sam-glass-bg-chrome: rgba(8, 15, 12, 0.55);
+  --sam-glass-bg-surface: rgba(8, 15, 12, 0.65);
+  --sam-glass-bg-modal: rgba(8, 15, 12, 0.55);
+
+  /* Glass saturate multiplier */
+  --sam-glass-saturate: 1.35;
+  --sam-glass-saturate-boost: 35%;
+
+  /* Edge glow properties */
+  --sam-glass-glow-color: rgba(34, 197, 94, 0.5);
+  --sam-glass-glow-width: 3px;
+  --sam-glass-glow-blur: 2px;
+
+  /* Glass border */
+  --sam-glass-border-color: rgba(34, 197, 94, 0.12);
+  --sam-glass-border-width: 1px;
+
+  /* Inner wash */
+  --sam-glass-wash-opacity: 0.05;
+
+  /* Backdrop dim for modals */
+  --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.5);
+  --sam-glass-backdrop-blur: 4px;
 
   --sam-space-1: 4px;
   --sam-space-2: 8px;
@@ -116,6 +148,12 @@
   --sam-space-section: 2rem;
 }
 
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --sam-enable-blur: 0;
+  }
+}
+
 [data-ui-theme='sam'] {
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);
@@ -176,4 +214,150 @@
 @keyframes sam-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes sam-glass-drawer-backdrop-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes sam-glass-drawer-backdrop-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sam-glass-drawer-panel-in {
+    from {
+      opacity: 0;
+      transform: translate3d(100%, 0, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes sam-glass-drawer-panel-out {
+    from {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      opacity: 0;
+      transform: translate3d(100%, 0, 0);
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes glowPulse {
+    0%, 100% { opacity: 0.72; }
+    50% { opacity: 1; }
+  }
+
+  @keyframes sam-route-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .sam-glass-drawer-backdrop {
+    animation: sam-glass-drawer-backdrop-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    will-change: opacity;
+  }
+
+  .sam-glass-drawer-backdrop[data-state='closing'] {
+    animation: sam-glass-drawer-backdrop-out 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+  .sam-glass-drawer-panel {
+    animation: sam-glass-drawer-panel-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    will-change: transform, opacity;
+  }
+
+  .sam-glass-drawer-panel[data-state='closing'] {
+    animation: sam-glass-drawer-panel-out 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+  .sam-glass-card-motion {
+    transform: translateZ(0);
+    transition: transform 200ms ease;
+  }
+
+  .sam-glass-card-motion::before {
+    transition: opacity 200ms ease;
+  }
+
+  .sam-glass-card-motion:hover {
+    transform: translateZ(0) scale(1.01);
+    will-change: transform;
+    border-color: rgba(34, 197, 94, 0.28);
+    box-shadow: 0 0 18px rgba(34, 197, 94, 0.08), var(--sam-shadow-sm);
+  }
+
+  .sam-glass-card-motion:hover::before {
+    opacity: 1;
+  }
+
+  .sam-glass-card-motion:active {
+    transform: translateZ(0) scale(0.99);
+    will-change: transform;
+  }
+
+  .sam-message-entry {
+    animation: slideUp 250ms ease-out both;
+  }
+
+  .sam-message-entry:nth-child(2n) {
+    animation-delay: 50ms;
+  }
+
+  .sam-message-entry:nth-child(3n) {
+    animation-delay: 100ms;
+  }
+
+  .sam-status-pulse {
+    animation: glowPulse 2s ease-in-out infinite;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.42);
+  }
+
+  .sam-route-transition {
+    animation: sam-route-fade-in 200ms ease both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .sam-glass-drawer-backdrop,
+  .sam-glass-drawer-panel,
+  .sam-glass-card-motion,
+  .sam-message-entry,
+  .sam-status-pulse,
+  .sam-route-transition {
+    animation: none !important;
+    transform: none !important;
+    transition-delay: 0ms !important;
+    will-change: auto !important;
+  }
 }

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, useNavigate } from 'react-router';
-import { beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
 
@@ -51,6 +51,10 @@ beforeEach(() => {
     user: { name: 'Test User', email: 'test@example.com', image: null },
     isSuperadmin: false,
   };
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function renderAppShell(path = '/dashboard') {
@@ -319,14 +323,17 @@ describe('AppShell (mobile)', () => {
   });
 
   it('closes the mobile drawer when Escape is pressed', () => {
+    vi.useFakeTimers();
     renderAppShell();
 
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
     expect(screen.getByRole('dialog', { name: 'Navigation menu' })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape' });
+    act(() => vi.advanceTimersByTime(250));
 
     expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it('closes the drawer after navigating to a nav item', () => {
@@ -350,13 +357,16 @@ describe('AppShell (mobile)', () => {
   });
 
   it('closes the drawer when backdrop is clicked', () => {
+    vi.useFakeTimers();
     renderAppShell();
 
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
     expect(screen.getByRole('dialog', { name: 'Navigation menu' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('mobile-nav-backdrop'));
+    act(() => vi.advanceTimersByTime(250));
 
     expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 });

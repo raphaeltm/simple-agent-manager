@@ -190,7 +190,7 @@ export function ChatInput({
   }, [mentionFilter]);
 
   return (
-    <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
+    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       {error && (
         <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
@@ -437,7 +437,7 @@ export function ChatInput({
               type="button"
               onClick={() => (fileInputRef as React.RefObject<HTMLInputElement>)?.current?.click()}
               disabled={submitting || uploading}
-              className="shrink-0 p-2 bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:border-fg-muted cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="shrink-0 p-2 bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               aria-label="Attach files"
               title="Attach files to this task"
             >
@@ -470,7 +470,7 @@ export function ChatInput({
           aria-expanded={showPalette || showMentionPalette}
           aria-controls={showPalette ? 'slash-palette-listbox' : showMentionPalette ? 'mention-palette-listbox' : undefined}
           aria-activedescendant={showPalette ? paletteRef.current?.activeDescendantId : showMentionPalette ? mentionPaletteRef.current?.activeDescendantId : undefined}
-          className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto"
+          className="flex-1 p-2 px-3 bg-[rgba(10,15,13,0.6)] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto focus:border-[rgba(34,197,94,0.35)] focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08),0_0_20px_rgba(22,163,74,0.08)] transition-all"
         />
         <VoiceButton
           onTranscription={handleTranscription}
@@ -481,12 +481,11 @@ export function ChatInput({
           type="button"
           onClick={onSubmit}
           disabled={submitting || !value.trim() || uploading}
-          className="px-3 py-2 border-none rounded-md text-base font-medium whitespace-nowrap"
-          style={{
-            backgroundColor: submitting || !value.trim() || uploading ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
-            color: submitting || !value.trim() || uploading ? 'var(--sam-color-fg-muted)' : 'white',
-            cursor: submitting || !value.trim() || uploading ? 'default' : 'pointer',
-          }}
+          className={`px-3 py-2 border-none rounded-md text-base font-medium whitespace-nowrap transition-all ${
+            submitting || !value.trim() || uploading
+              ? 'bg-inset text-fg-muted cursor-default opacity-50'
+              : 'bg-[linear-gradient(135deg,var(--sam-color-accent-primary),#22c55e)] text-white cursor-pointer shadow-[0_0_16px_rgba(22,163,74,0.3)] hover:shadow-[0_0_24px_rgba(22,163,74,0.4)] hover:scale-[1.03]'
+          }`}
         >
           {submitting ? 'Sending...' : 'Send'}
         </button>

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
@@ -35,6 +35,13 @@ export function MobileSessionDrawer({
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleClose = useCallback(() => {
+    if (isClosing) return;
+    setIsClosing(true);
+    window.setTimeout(onClose, 250);
+  }, [isClosing, onClose]);
 
   const { recent, stale } = useMemo(() => {
     const r: ChatSessionListItem[] = [];
@@ -66,11 +73,11 @@ export function MobileSessionDrawer({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [handleClose]);
 
   // Prevent body scroll — always active while this drawer is mounted
   useScrollLock(true);
@@ -80,9 +87,9 @@ export function MobileSessionDrawer({
       {/* Backdrop */}
       <div
         role="presentation"
-        onClick={onClose}
-        className="fixed inset-0 bg-overlay z-drawer-backdrop"
-        style={{ animation: 'sam-session-drawer-fade-in 0.15s ease-out' }}
+        onClick={handleClose}
+        className="sam-glass-drawer-backdrop fixed inset-0 glass-backdrop-dim border-0 z-drawer-backdrop"
+        data-state={isClosing ? 'closing' : 'open'}
       />
 
       {/* Panel */}
@@ -90,11 +97,11 @@ export function MobileSessionDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="Chat sessions"
-        className="fixed top-0 right-0 bottom-0 bg-surface border-l border-border-default z-drawer flex flex-col"
+        className="sam-glass-drawer-panel glass-panel-container fixed top-0 right-0 bottom-0 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
+        data-state={isClosing ? 'closing' : 'open'}
         style={{
           width: '85vw',
           maxWidth: 320,
-          animation: 'sam-session-drawer-slide-in 0.2s ease-out',
         }}
       >
         {/* Drawer header */}

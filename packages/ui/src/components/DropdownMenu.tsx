@@ -120,7 +120,7 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
         <ul
           id={menuId}
           role="menu"
-          className={`absolute top-full mt-1 min-w-40 py-1 m-0 list-none bg-surface border border-border-default rounded-md shadow-dropdown z-dropdown ${align === 'start' ? 'left-0' : 'right-0'}`}
+          className={`absolute top-full mt-1 min-w-40 py-1 m-0 list-none glass-surface rounded-md shadow-dropdown z-dropdown ${align === 'start' ? 'left-0' : 'right-0'}`}
         >
           {items.map((item, index) => (
             <li key={item.id} role="none">
@@ -133,7 +133,7 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
                 title={item.disabled ? item.disabledReason : undefined}
                 onClick={() => handleItemClick(item)}
                 onKeyDown={(e) => handleItemKeyDown(e, index)}
-                className={`sam-type-secondary flex items-center gap-2 w-full px-3 py-2 border-none bg-transparent text-left cursor-pointer hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${item.variant === 'danger' ? 'text-danger' : 'text-fg-primary'} ${item.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`sam-type-secondary flex items-center gap-2 w-full px-3 py-2 border-none bg-transparent text-left cursor-pointer hover:bg-[rgba(34,197,94,0.06)] focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${item.variant === 'danger' ? 'text-danger' : 'text-fg-primary'} ${item.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {item.icon}
                 {item.label}

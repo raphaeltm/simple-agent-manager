@@ -183,7 +183,8 @@ test.describe('Nav Toggle — Mobile', () => {
     await expect(toggleBtn).toHaveText(/Back to Projects/);
 
     // Should see project nav items
-    const chatBtn = page.getByRole('button', { name: 'Chat' });
+    const panel = page.getByTestId('mobile-nav-panel');
+    const chatBtn = panel.getByRole('button', { name: 'Chat' });
     await expect(chatBtn).toBeVisible();
 
     await screenshot(page, 'nav-toggle-mobile-project-view');
@@ -208,11 +209,12 @@ test.describe('Nav Toggle — Mobile', () => {
     await expect(toggleBtn).toHaveText(/Back to My Project/);
 
     // Should see global nav items
-    const homeBtn = page.getByRole('button', { name: 'Home' });
+    const panel = page.getByTestId('mobile-nav-panel');
+    const homeBtn = panel.getByRole('button', { name: 'Home' });
     await expect(homeBtn).toBeVisible();
-    const projectsBtn = page.getByRole('button', { name: 'Projects' });
+    const projectsBtn = panel.getByRole('button', { name: 'Projects', exact: true });
     await expect(projectsBtn).toBeVisible();
-    const settingsBtn = page.getByTestId('mobile-nav-panel').getByRole('button', { name: 'Settings' });
+    const settingsBtn = panel.getByRole('button', { name: 'Settings' });
     await expect(settingsBtn).toBeVisible();
 
     await screenshot(page, 'nav-toggle-mobile-global-view');
@@ -238,7 +240,8 @@ test.describe('Nav Toggle — Mobile', () => {
 
     // Should show project nav again
     await expect(toggleBtn).toHaveText(/Back to Projects/);
-    const chatBtn = page.getByRole('button', { name: 'Chat' });
+    const panel = page.getByTestId('mobile-nav-panel');
+    const chatBtn = panel.getByRole('button', { name: 'Chat' });
     await expect(chatBtn).toBeVisible();
 
     await screenshot(page, 'nav-toggle-mobile-back-to-project');

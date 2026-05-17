@@ -112,7 +112,7 @@ export function SettingsNotifications() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card variant="glass">
         <div className="p-4">
           <h3 className="text-sm font-semibold text-fg-primary mb-1">
             In-App Notifications

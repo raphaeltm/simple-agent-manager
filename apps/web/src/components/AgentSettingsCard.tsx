@@ -18,7 +18,7 @@ import {
   PLATFORM_AI_MODELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
-import { Alert } from '@simple-agent-manager/ui';
+import { Alert, Card } from '@simple-agent-manager/ui';
 import { useEffect, useState } from 'react';
 
 import { ModelSelect } from './ModelSelect';
@@ -341,11 +341,11 @@ export function AgentSettingsCard({
   }
 
   return (
-    <div className="p-4 rounded-md border border-border-default bg-inset" data-testid={`agent-settings-${agent.id}`}>
+    <Card variant="glass" className="p-4" data-testid={`agent-settings-${agent.id}`}>
       <div className="mb-2 font-semibold text-base text-fg-primary">
         {agent.name}
       </div>
       {body}
-    </div>
+    </Card>
   );
 }

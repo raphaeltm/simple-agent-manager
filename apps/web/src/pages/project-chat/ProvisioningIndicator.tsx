@@ -35,7 +35,7 @@ export function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { sta
   const isFailed = state.status === 'failed';
 
   return (
-    <div className={`shrink-0 px-4 py-3 border-b border-border-default ${isFailed ? 'bg-danger-tint' : 'bg-info-tint'}`}>
+    <div className={`shrink-0 px-4 py-3 border-b ${isFailed ? 'bg-danger-tint border-[rgba(239,68,68,0.12)]' : 'bg-[rgba(22,163,74,0.06)] border-[rgba(34,197,94,0.1)]'}`}>
       <div className="flex items-center gap-2 mb-2">
         {!isTerminal(state.status) && <Spinner size="sm" />}
         <span className={`sam-type-secondary font-medium ${isFailed ? 'text-danger' : 'text-fg-primary'}`}>

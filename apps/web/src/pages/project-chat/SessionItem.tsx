@@ -95,7 +95,7 @@ export function SessionItem({
       className={
         isGrouped
           ? 'block w-full text-left transition-colors duration-100'
-          : `block w-full text-left px-3 py-1.5 border-b border-border-default transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`
+          : `block w-full text-left px-3 py-1.5 border-b border-[rgba(34,197,94,0.06)] transition-all duration-150 ${isSelected ? 'bg-[rgba(22,163,74,0.08)]' : 'hover:bg-[rgba(34,197,94,0.04)]'}`
       }
       style={
         isGrouped
@@ -104,6 +104,9 @@ export function SessionItem({
               borderLeft: isSelected
                 ? '3px solid var(--sam-color-accent-primary)'
                 : '3px solid transparent',
+              boxShadow: isSelected
+                ? 'inset 3px 0 8px -3px rgba(34, 197, 94, 0.3)'
+                : undefined,
             }
       }
     >

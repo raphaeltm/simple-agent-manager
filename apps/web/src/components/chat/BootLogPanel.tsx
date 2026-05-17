@@ -49,10 +49,10 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
 
       {/* Panel */}
       <div
-        className="fixed z-50 bg-canvas flex flex-col shadow-xl
+        className="glass-panel-container glass-composited fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden
           inset-0
           md:inset-y-0 md:left-auto md:right-0 md:w-[min(560px,50vw)]
-          md:border-l md:border-border-default"
+          before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
@@ -60,7 +60,7 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
         aria-label="Boot logs"
       >
         {/* Header */}
-        <header className="flex items-center gap-2 px-3 py-2 border-b border-border-default bg-surface shrink-0 min-h-[44px]">
+        <header className="flex items-center gap-2 px-3 py-2 border-b border-border-default shrink-0 min-h-[44px]">
           <span className="sam-type-secondary font-medium text-fg-primary flex-1">
             Boot Logs
           </span>
@@ -75,7 +75,7 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
         </header>
 
         {/* Log list */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 bg-canvas">
           {logs.length === 0 ? (
             <p className="sam-type-secondary text-fg-muted text-center mt-8">
               Waiting for boot logs...
