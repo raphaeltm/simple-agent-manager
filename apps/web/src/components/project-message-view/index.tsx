@@ -241,7 +241,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           )}
           <Virtuoso
             ref={virtuosoRef}
-            style={{ height: '100%', paddingTop: lc.session ? '48px' : undefined }}
+            style={{ height: '100%' }}
             data={conversationItems}
             firstItemIndex={lc.firstItemIndex}
             initialTopMostItemIndex={conversationItems.length - 1}
@@ -262,13 +262,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               </div>
             )}
             components={{
-              Header: lc.hasMore ? () => (
-                <div className="text-center py-3">
-                  <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
-                    Load earlier messages
-                  </Button>
+              Header: () => (
+                <div style={{ paddingTop: lc.session ? '48px' : undefined }}>
+                  {lc.hasMore && (
+                    <div className="text-center py-3">
+                      <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
+                        Load earlier messages
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              ) : undefined,
+              ),
             }}
           />
 
