@@ -166,7 +166,7 @@ type activityPayload struct {
 	NodeID         string  `json:"nodeId"`
 	PromptStartedAt *int64 `json:"promptStartedAt,omitempty"`
 	AgentType      string  `json:"agentType,omitempty"`
-	RestartCount   int     `json:"restartCount,omitempty"`
+	RestartCount   int     `json:"restartCount"`
 	StatusError    *string `json:"statusError,omitempty"`
 }
 
@@ -174,6 +174,7 @@ type activityPayload struct {
 // Includes one retry with backoff to tolerate transient failures.
 // activity should be "prompting" or "idle".
 func (h *SessionHost) reportActivity(activity string) {
+	// h.config fields are immutable after construction — no lock needed.
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
@@ -206,7 +207,8 @@ func (h *SessionHost) reportActivity(activity string) {
 		now := time.Now().UnixMilli()
 		payload.PromptStartedAt = &now
 	}
-	if activity == "error" || (statusErr != "" && activity != "idle") {
+	// Attach statusErr when prompting and an error is recorded (e.g., from a prior restart).
+	if statusErr != "" && activity == "prompting" {
 		payload.StatusError = &statusErr
 	}
 
@@ -223,20 +225,8 @@ func (h *SessionHost) reportActivity(activity string) {
 		// Attempt with one retry on failure.
 		const maxAttempts = 2
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-
-			req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-			if reqErr != nil {
-				cancel()
-				slog.Warn("reportActivity: request create failed", "error", reqErr)
-				return
-			}
-			req.Header.Set("Authorization", "Bearer "+callbackToken)
-			req.Header.Set("Content-Type", "application/json")
-
-			resp, doErr := h.httpClient().Do(req)
+			statusCode, doErr := h.doActivityRequest(url, body, callbackToken)
 			if doErr != nil {
-				cancel()
 				if attempt < maxAttempts {
 					slog.Debug("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
 					time.Sleep(500 * time.Millisecond)
@@ -245,19 +235,40 @@ func (h *SessionHost) reportActivity(activity string) {
 				slog.Debug("reportActivity: all attempts failed", "error", doErr)
 				return
 			}
-			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
-			cancel()
-
-			if resp.StatusCode >= 500 && attempt < maxAttempts {
-				slog.Debug("reportActivity: server error, retrying", "status", resp.StatusCode)
+			if statusCode >= 500 && attempt < maxAttempts {
+				slog.Debug("reportActivity: server error, retrying", "status", statusCode)
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
-			if resp.StatusCode >= 400 {
-				slog.Debug("reportActivity: non-2xx response", "status", resp.StatusCode)
+			if statusCode >= 400 {
+				slog.Debug("reportActivity: non-2xx response", "status", statusCode)
 			}
 			return
 		}
 	}()
+}
+
+// doActivityRequest performs a single HTTP POST attempt to the activity endpoint.
+// Returns the HTTP status code on success, or an error on network/request failure.
+func (h *SessionHost) doActivityRequest(url string, body []byte, callbackToken string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// bytes.NewReader is created fresh each call so the body is correctly
+	// re-read on retry without needing to seek.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+callbackToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient().Do(req)
+	if err != nil {
+		return 0, err
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+
+	return resp.StatusCode, nil
 }
