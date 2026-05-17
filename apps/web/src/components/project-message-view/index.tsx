@@ -113,7 +113,7 @@ const ElapsedTime: FC<{ startedAt: number }> = ({ startedAt }) => {
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
   }, [startedAt]);
-  return <span className="text-xs text-fg-muted tabular-nums">({elapsed})</span>;
+  return <span className="text-xs text-fg-muted tabular-nums" aria-hidden="true">({elapsed})</span>;
 };
 
 interface ProjectMessageViewProps {
@@ -160,6 +160,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
 
+  // Close plan modal when agent transitions to idle
+  useEffect(() => {
+    if (lc.agentActivity === 'idle') setShowPlanModal(false);
+  }, [lc.agentActivity]);
+
   // Track IDs of user messages that should animate (freshly submitted optimistic messages)
   const [animatedUserMsgIds] = useState(() => new Set<string>());
   const prevMsgCountRef = useRef(0);
@@ -200,6 +205,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     if (lastIdx >= 0 && conversationItems[lastIdx]?.kind === 'agent_message') return lastIdx;
     return -1;
   }, [conversationItems]);
+
+  const planItem = useMemo(
+    () => lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
+    [lc.currentPlan],
+  );
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -355,13 +365,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Agent working indicator with plan button */}
       {lc.agentActivity !== 'idle' && isActive && (
-        <div role="status" className="flex items-center gap-2 px-4 py-2 glass-chrome border-x-0 border-b-0 shrink-0">
+        <div role="status" className="flex flex-wrap items-center gap-2 px-4 py-2 glass-chrome border-x-0 border-b-0 shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Agent is working...</span>
           {lc.promptStartedAt && <ElapsedTime startedAt={lc.promptStartedAt} />}
-          {lc.currentPlan && lc.currentPlan.length > 0 && (
+          {planItem && (
             <StickyPlanButton
-              plan={currentPlanToPlanItem(lc.currentPlan)}
+              plan={planItem}
               onClick={() => setShowPlanModal(true)}
             />
           )}
@@ -369,15 +379,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             type="button"
             onClick={lc.handleCancelPrompt}
             aria-label="Cancel agent"
-            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
           >
             Cancel
           </button>
         </div>
       )}
-      {lc.currentPlan && lc.currentPlan.length > 0 && (
+      {planItem && (
         <PlanModal
-          plan={currentPlanToPlanItem(lc.currentPlan)}
+          plan={planItem}
           isOpen={showPlanModal}
           onClose={() => setShowPlanModal(false)}
         />

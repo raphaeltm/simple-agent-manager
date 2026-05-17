@@ -193,9 +193,9 @@ export function useSessionLifecycle(
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
       setAgentActivity('idle');
     }, []),
-    onAgentActivity: useCallback((activity: 'prompting' | 'idle') => {
+    onAgentActivity: useCallback((activity: 'prompting' | 'idle', promptStartedAt?: number | null) => {
       setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
-      setPromptStartedAt(activity === 'prompting' ? Date.now() : null);
+      setPromptStartedAt(activity === 'prompting' ? (promptStartedAt ?? Date.now()) : null);
       clearTimeout(idleTimerRef.current);
       if (activity === 'prompting') {
         // Safety backstop: if the server never sends "idle" (e.g., crashed or
