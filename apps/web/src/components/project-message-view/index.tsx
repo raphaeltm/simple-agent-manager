@@ -6,8 +6,8 @@
  * TypewriterText animates the latest assistant message; historical messages
  * render instantly.
  */
-import type { ConversationItem, SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent } from '@simple-agent-manager/acp-client';
+import type { ConversationItem, PlanItem, SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import { mapToolCallContent, PlanModal, StickyPlanButton } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, Clock } from 'lucide-react';
@@ -85,6 +85,37 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
+/** Convert session state plan array to PlanItem for StickyPlanButton/PlanModal. */
+function currentPlanToPlanItem(plan: Array<{ content: string; status: string }>): PlanItem {
+  return {
+    kind: 'plan',
+    id: 'session-plan',
+    entries: plan.map((e) => ({
+      content: e.content,
+      priority: 'medium' as const,
+      status: (e.status === 'completed' ? 'completed' : e.status === 'in_progress' ? 'in_progress' : 'pending') as 'pending' | 'in_progress' | 'completed',
+    })),
+    timestamp: Date.now(),
+  };
+}
+
+/** Live elapsed-time display since prompt started. */
+const ElapsedTime: FC<{ startedAt: number }> = ({ startedAt }) => {
+  const [elapsed, setElapsed] = useState('');
+  useEffect(() => {
+    const update = () => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      setElapsed(m > 0 ? `${m}m ${s}s` : `${s}s`);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+  return <span className="text-xs text-fg-muted tabular-nums">({elapsed})</span>;
+};
+
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
@@ -125,6 +156,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   slashCommands = [],
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [showPlanModal, setShowPlanModal] = useState(false);
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
 
@@ -321,11 +353,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Agent working indicator */}
+      {/* Agent working indicator with plan button */}
       {lc.agentActivity !== 'idle' && isActive && (
         <div role="status" className="flex items-center gap-2 px-4 py-2 glass-chrome border-x-0 border-b-0 shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Agent is working...</span>
+          {lc.promptStartedAt && <ElapsedTime startedAt={lc.promptStartedAt} />}
+          {lc.currentPlan && lc.currentPlan.length > 0 && (
+            <StickyPlanButton
+              plan={currentPlanToPlanItem(lc.currentPlan)}
+              onClick={() => setShowPlanModal(true)}
+            />
+          )}
           <button
             type="button"
             onClick={lc.handleCancelPrompt}
@@ -335,6 +374,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             Cancel
           </button>
         </div>
+      )}
+      {lc.currentPlan && lc.currentPlan.length > 0 && (
+        <PlanModal
+          plan={currentPlanToPlanItem(lc.currentPlan)}
+          isOpen={showPlanModal}
+          onClose={() => setShowPlanModal(false)}
+        />
       )}
 
       {/* Input area */}

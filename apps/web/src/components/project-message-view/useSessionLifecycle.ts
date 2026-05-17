@@ -12,7 +12,7 @@ import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
-import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api';
+import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
@@ -56,8 +56,10 @@ export interface UseSessionLifecycleResult {
   showConnectionBanner: boolean;
   retryWs: () => void;
 
-  // Agent activity (derived from message flow)
+  // Agent activity (derived from message flow + server state)
   agentActivity: AgentActivityState;
+  currentPlan: SessionStateSnapshot['currentPlan'];
+  promptStartedAt: number | null;
 
   // Scroll state
   firstItemIndex: number;
@@ -109,9 +111,13 @@ export function useSessionLifecycle(
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // Agent activity state (derived from message flow)
+  // Agent activity state (derived from message flow + server state)
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Plan state (from session state mirror)
+  const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
+  const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
 
   // File panel
   const [filePanel, setFilePanel] = useState<{
@@ -145,6 +151,14 @@ export function useSessionLifecycle(
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
+      // Update current plan from incoming plan messages
+      if (msg.role === 'plan' && msg.content) {
+        try {
+          const parsed = JSON.parse(msg.content);
+          if (Array.isArray(parsed)) setCurrentPlan(parsed);
+        } catch { /* ignore malformed plan */ }
+      }
+
       // Derive agent activity from any non-user message (assistant, tool, thinking, plan).
       // Reset the idle fallback timer on every message role — tool calls and
       // thinking chunks also indicate the agent is active. The 30s timeout is a
@@ -161,9 +175,19 @@ export function useSessionLifecycle(
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
       setAgentActivity('idle');
     }, []),
-    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
+    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
+      // Hydrate activity + plan from server state on reconnect
+      if (state) {
+        if (state.activity === 'prompting') {
+          setAgentActivity('prompting');
+          setPromptStartedAt(state.promptStartedAt ?? null);
+        } else if (state.activity === 'idle') {
+          setAgentActivity('idle');
+        }
+        if (state.currentPlan) setCurrentPlan(state.currentPlan);
+      }
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
@@ -171,6 +195,7 @@ export function useSessionLifecycle(
     }, []),
     onAgentActivity: useCallback((activity: 'prompting' | 'idle') => {
       setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
+      setPromptStartedAt(activity === 'prompting' ? Date.now() : null);
       clearTimeout(idleTimerRef.current);
       if (activity === 'prompting') {
         // Safety backstop: if the server never sends "idle" (e.g., crashed or
@@ -205,6 +230,20 @@ export function useSessionLifecycle(
     return () => clearTimeout(idleTimerRef.current);
   }, []);
 
+  // Hydrate session state from server snapshot
+  const hydrateSessionState = useCallback((state: SessionStateSnapshot | null | undefined) => {
+    if (!state) return;
+    if (state.activity === 'prompting') {
+      setAgentActivity('prompting');
+      setPromptStartedAt(state.promptStartedAt ?? null);
+    } else if (state.activity === 'idle') {
+      setAgentActivity('idle');
+    }
+    if (state.currentPlan) {
+      setCurrentPlan(state.currentPlan);
+    }
+  }, []);
+
   // Load session
   const loadSession = useCallback(async () => {
     try {
@@ -215,12 +254,14 @@ export function useSessionLifecycle(
       setMessages(data.messages);
       setHasMore(data.hasMore);
       if (data.session.task) setTaskEmbed(data.session.task);
+      // Hydrate activity + plan from persisted session state
+      hydrateSessionState(data.state);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
       setLoading(false);
     }
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, hydrateSessionState]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
 
@@ -458,6 +499,8 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    currentPlan,
+    promptStartedAt,
     firstItemIndex,
     showScrollButton,
     setShowScrollButton,

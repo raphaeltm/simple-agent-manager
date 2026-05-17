@@ -3,6 +3,7 @@ import * as activity from './activity';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
 import * as messages from './messages';
+import * as sessionState from './session-state';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.messages');
@@ -34,6 +35,15 @@ export async function persistMessageWithSideEffects(
   const result = messages.persistMessage(sql, env, sessionId, role, content, toolMetadata);
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
+
+  // Extract plan state from plan-role messages
+  if (role === 'plan' && content) {
+    try {
+      sessionState.updateCurrentPlan(sql, sessionId, content);
+    } catch (err) {
+      log.warn('project_data.plan_extraction_failed', { sessionId, error: String(err) });
+    }
+  }
 
   await resolveAttentionForRoles(sql, hooks, sessionId, [{ id: result.id, role }]);
 
@@ -69,6 +79,16 @@ export async function persistMessageBatchWithSideEffects(
 
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
+
+  // Extract latest plan message from the batch to update session state
+  const lastPlanMsg = [...batchMessages].reverse().find((m) => m.role === 'plan' && m.content);
+  if (lastPlanMsg) {
+    try {
+      sessionState.updateCurrentPlan(sql, sessionId, lastPlanMsg.content);
+    } catch (err) {
+      log.warn('project_data.batch_plan_extraction_failed', { sessionId, error: String(err) });
+    }
+  }
 
   await resolveAttentionForRoles(sql, hooks, sessionId, result.persistedMessages);
 

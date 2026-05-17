@@ -318,10 +318,21 @@ chatRoutes.get('/:sessionId', async (c) => {
     });
   }
 
+  // Fetch persisted session state for catch-up (activity, plan, etc.)
+  let state = null;
+  if (agentSessionId) {
+    try {
+      state = await projectDataService.getSessionState(c.env, projectId, agentSessionId);
+    } catch {
+      // Non-fatal — UI falls back to idle default
+    }
+  }
+
   return c.json({
     session: { ...session, agentSessionId, agentType, task },
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
+    state,
   });
 });
 

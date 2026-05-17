@@ -160,8 +160,18 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 	return &result
 }
 
-// reportActivity sends an ephemeral activity signal to the control plane.
-// Fire-and-forget: runs in a goroutine, no retry on failure.
+// activityPayload is the enhanced JSON body sent to the control plane.
+type activityPayload struct {
+	Activity       string  `json:"activity"`
+	NodeID         string  `json:"nodeId"`
+	PromptStartedAt *int64 `json:"promptStartedAt,omitempty"`
+	AgentType      string  `json:"agentType,omitempty"`
+	RestartCount   int     `json:"restartCount,omitempty"`
+	StatusError    *string `json:"statusError,omitempty"`
+}
+
+// reportActivity sends a durable activity signal to the control plane.
+// Includes one retry with backoff to tolerate transient failures.
 // activity should be "prompting" or "idle".
 func (h *SessionHost) reportActivity(activity string) {
 	projectID := h.config.ProjectID
@@ -179,39 +189,75 @@ func (h *SessionHost) reportActivity(activity string) {
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	// Snapshot state under read lock for the enhanced payload.
+	h.mu.RLock()
+	agentType := h.agentType
+	restartCount := h.restartCount
+	statusErr := h.statusErr
+	h.mu.RUnlock()
 
+	payload := activityPayload{
+		Activity:     activity,
+		NodeID:       nodeID,
+		AgentType:    agentType,
+		RestartCount: restartCount,
+	}
+	if activity == "prompting" {
+		now := time.Now().UnixMilli()
+		payload.PromptStartedAt = &now
+	}
+	if activity == "error" || (statusErr != "" && activity != "idle") {
+		payload.StatusError = &statusErr
+	}
+
+	go func() {
 		url := strings.TrimRight(controlPlaneURL, "/") +
 			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity"
 
-		body, err := json.Marshal(map[string]string{
-			"activity": activity,
-			"nodeId":   nodeID,
-		})
+		body, err := json.Marshal(payload)
 		if err != nil {
 			slog.Warn("reportActivity: marshal failed", "error", err)
 			return
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			slog.Warn("reportActivity: request create failed", "error", err)
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+callbackToken)
-		req.Header.Set("Content-Type", "application/json")
+		// Attempt with one retry on failure.
+		const maxAttempts = 2
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
-		resp, err := h.httpClient().Do(req)
-		if err != nil {
-			slog.Debug("reportActivity: request failed", "error", err)
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+			if reqErr != nil {
+				cancel()
+				slog.Warn("reportActivity: request create failed", "error", reqErr)
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+callbackToken)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, doErr := h.httpClient().Do(req)
+			if doErr != nil {
+				cancel()
+				if attempt < maxAttempts {
+					slog.Debug("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
+				slog.Debug("reportActivity: all attempts failed", "error", doErr)
+				return
+			}
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			cancel()
+
+			if resp.StatusCode >= 500 && attempt < maxAttempts {
+				slog.Debug("reportActivity: server error, retrying", "status", resp.StatusCode)
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			if resp.StatusCode >= 400 {
+				slog.Debug("reportActivity: non-2xx response", "status", resp.StatusCode)
+			}
 			return
-		}
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			slog.Debug("reportActivity: non-2xx response", "status", resp.StatusCode)
 		}
 	}()
 }

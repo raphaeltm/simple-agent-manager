@@ -30,6 +30,7 @@ import * as missionState from './missions';
 import * as policies from './policies';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
+import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessions from './sessions';
 import type { Env, SummaryData } from './types';
@@ -312,9 +313,26 @@ export class ProjectData extends DurableObject<Env> {
     await this.scheduleHeartbeatAlarm();
   }
 
-  /** Broadcast ephemeral activity signal — no persistence. */
-  async reportActivity(sessionId: string, activity: string): Promise<void> {
+  /** Persist session state, then broadcast activity signal. */
+  async reportActivity(sessionId: string, activity: string, extra?: {
+    promptStartedAt?: number | null;
+    agentType?: string | null;
+    restartCount?: number | null;
+    statusError?: string | null;
+  }): Promise<void> {
+    sessionState.upsertActivityState(this.sql, sessionId, {
+      activity,
+      promptStartedAt: extra?.promptStartedAt,
+      agentType: extra?.agentType,
+      restartCount: extra?.restartCount,
+      statusError: extra?.statusError,
+    });
     this.broadcastEvent('session.activity', { sessionId, activity }, sessionId);
+  }
+
+  /** Get persisted session state snapshot for catch-up on page load / reconnect. */
+  getSessionState(sessionId: string) {
+    return sessionState.getSessionState(this.sql, sessionId);
   }
 
   async forkAcpSession(sessionId: string, contextSummary: string) {
@@ -420,6 +438,12 @@ export class ProjectData extends DurableObject<Env> {
       this.env,
       (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
     );
+
+    // Session state staleness: auto-heal stuck "prompting" states
+    const healedSessionIds = sessionState.reconcileStaleActivity(this.sql);
+    for (const healedId of healedSessionIds) {
+      this.broadcastEvent('session.activity', { sessionId: healedId, activity: 'idle' }, healedId);
+    }
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);

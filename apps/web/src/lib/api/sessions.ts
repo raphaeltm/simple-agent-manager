@@ -89,10 +89,23 @@ export interface ChatMessageResponse {
   sequence?: number | null;
 }
 
+/** Persisted session state snapshot from the DO (for catch-up on page load). */
+export interface SessionStateSnapshot {
+  activity: 'idle' | 'prompting' | 'starting' | 'error' | 'stopped';
+  activityAt: number;
+  statusError: string | null;
+  currentPlan: Array<{ content: string; status: string }> | null;
+  planUpdatedAt: number | null;
+  promptStartedAt: number | null;
+  agentType: string | null;
+  lastStopReason: string | null;
+}
+
 export interface ChatSessionDetailResponse {
   session: ChatSessionResponse;
   messages: ChatMessageResponse[];
   hasMore: boolean;
+  state?: SessionStateSnapshot | null;
 }
 
 export async function listChatSessions(

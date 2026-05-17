@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatMessageResponse, ChatSessionResponse } from '../lib/api';
+import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../lib/api';
 import { getChatSession } from '../lib/api';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 
@@ -22,7 +22,7 @@ interface UseChatWebSocketOptions {
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
   /** Called when we catch up with missed messages after reconnect. */
-  onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse) => void;
+  onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse, state?: SessionStateSnapshot | null) => void;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
   /** Called when a session.activity event arrives (prompting/idle). */
@@ -226,7 +226,7 @@ export function useChatWebSocket({
   const catchUpMessages = useCallback(async () => {
     try {
       const data = await getChatSession(projectId, sessionId);
-      onCatchUpRef.current(data.messages, data.session);
+      onCatchUpRef.current(data.messages, data.session, data.state);
     } catch {
       // Best-effort catch-up — poll fallback will handle it
     }

@@ -314,6 +314,32 @@ export const ACP_SESSION_DEFAULTS = {
   MAX_FORK_DEPTH: 10,
 } as const;
 
+// =============================================================================
+// Session State Mirror (DO-persisted VM agent state snapshot)
+// =============================================================================
+
+/** Plan entry from the ACP plan message (persisted as JSON array in session_state). */
+export interface PlanEntry {
+  content: string;
+  status: 'in_progress' | 'completed' | 'pending';
+}
+
+/**
+ * Durable snapshot of the VM agent's session state, persisted in the ProjectData DO.
+ * Returned on page load / reconnect so the UI can hydrate immediately without
+ * waiting for the next WebSocket broadcast.
+ */
+export interface SessionStateSnapshot {
+  activity: 'idle' | 'prompting' | 'starting' | 'error' | 'stopped';
+  activityAt: number;
+  statusError: string | null;
+  currentPlan: PlanEntry[] | null;
+  planUpdatedAt: number | null;
+  promptStartedAt: number | null;
+  agentType: string | null;
+  lastStopReason: string | null;
+}
+
 export interface AcpSessionForkRequest {
   contextSummary: string;
 }

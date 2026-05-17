@@ -602,6 +602,25 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '021-session-state-mirror',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS session_state (
+          session_id TEXT PRIMARY KEY,
+          activity TEXT NOT NULL DEFAULT 'idle',
+          activity_at INTEGER NOT NULL,
+          status_error TEXT,
+          current_plan_json TEXT,
+          plan_updated_at INTEGER,
+          prompt_started_at INTEGER,
+          last_stop_reason TEXT,
+          agent_type TEXT,
+          restart_count INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+    },
+  },
 ];
 
 /**

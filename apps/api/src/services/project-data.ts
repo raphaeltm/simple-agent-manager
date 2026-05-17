@@ -446,15 +446,31 @@ export async function updateAcpSessionHeartbeat(
   return stub.updateHeartbeat(sessionId, nodeId);
 }
 
-/** Broadcast ephemeral activity signal — no persistence. */
+/** Persist activity state in DO, then broadcast. */
 export async function reportAcpSessionActivity(
   env: Env,
   projectId: string,
   sessionId: string,
-  activity: string
+  activity: string,
+  extra?: {
+    promptStartedAt?: number | null;
+    agentType?: string | null;
+    restartCount?: number | null;
+    statusError?: string | null;
+  },
 ): Promise<void> {
   const stub = await getStub(env, projectId);
-  await stub.reportActivity(sessionId, activity);
+  await stub.reportActivity(sessionId, activity, extra);
+}
+
+/** Get the persisted session state snapshot (for page load catch-up). */
+export async function getSessionState(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getSessionState(sessionId);
 }
 
 /**

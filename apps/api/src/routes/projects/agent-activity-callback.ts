@@ -62,7 +62,12 @@ agentActivityCallbackRoute.post(
       throw errors.forbidden('Node identity verification failed');
     }
 
-    await projectDataService.reportAcpSessionActivity(c.env, projectId, sessionId, body.activity);
+    await projectDataService.reportAcpSessionActivity(c.env, projectId, sessionId, body.activity, {
+      promptStartedAt: body.promptStartedAt,
+      agentType: body.agentType,
+      restartCount: body.restartCount,
+      statusError: body.statusError,
+    });
     return c.body(null, 204);
   },
 );

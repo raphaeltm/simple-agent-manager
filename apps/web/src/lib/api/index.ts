@@ -218,6 +218,7 @@ export type {
   ChatSessionResponse,
   ChatSessionTaskEmbed,
   RecentChatsApiResponse,
+  SessionStateSnapshot,
   SessionSummaryItem,
   SessionSummaryResponse,
 } from './sessions';
