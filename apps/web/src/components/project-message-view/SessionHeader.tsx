@@ -197,8 +197,8 @@ export function SessionHeader({
 
   return (
     <div
-      className="relative glass-chrome glass-composited border-t-0 rounded-b-2xl shrink-0 after:content-[''] after:absolute after:bottom-0 after:left-[10%] after:right-[10%] after:h-[2px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.35)_0%,transparent_70%)] after:blur-[1px] after:pointer-events-none after:z-10"
-      style={{ boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
+      className="relative glass-chrome glass-composited border-t-0 rounded-b-2xl shrink-0 after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
+      style={{ backgroundColor: 'rgba(8, 15, 12, 0.68)', boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
     >
       {/* Compact row — always visible */}
       <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
