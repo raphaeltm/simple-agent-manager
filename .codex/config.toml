@@ -5,3 +5,14 @@ project_doc_fallback_filenames = ["CLAUDE.md"]
 
 [mcp_servers.cloudflare-observability]
 url = "https://observability.mcp.cloudflare.com/mcp"
+
+# ==============================================================================
+# Hooks — Test Quality Enforcement
+# ==============================================================================
+
+# Stop hook: block task completion if cross-boundary files lack vertical slice tests.
+# Uses the same script as Claude Code for consistency.
+[[hooks.Stop]]
+type = "command"
+command = ".claude/hooks/verify-test-quality.sh"
+timeout = 30000

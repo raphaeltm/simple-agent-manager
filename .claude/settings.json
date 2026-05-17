@@ -35,5 +35,14 @@
       "Bash(cp *)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": ".claude/hooks/verify-test-quality.sh",
+        "timeout": 30000
+      }
+    ]
   }
 }
