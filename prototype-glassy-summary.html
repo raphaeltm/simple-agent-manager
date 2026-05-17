@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glassy Panel Prototype — Summary + Session Header</title>
+<style>
+  :root {
+    --bg-canvas: #0b1110;
+    --bg-surface: #13201d;
+    --bg-surface-hover: #1a2e29;
+    --bg-overlay: rgba(0, 0, 0, 0.6);
+    --bg-inset: #0e1a17;
+    --fg-primary: #e6f2ee;
+    --fg-muted: #9fb7ae;
+    --border-default: #29423b;
+    --accent-primary: #16a34a;
+    --accent-primary-tint: rgba(22, 163, 74, 0.1);
+    --success: #22c55e;
+    --success-fg: #4ade80;
+    --danger: #ef4444;
+    --info: #60a5fa;
+    --info-tint: rgba(96, 165, 250, 0.1);
+    --warning: #f59e0b;
+
+    /* Glass tuning — interactive knobs */
+    --panel-blur: 12px;
+    --panel-bg-opacity: 0.70;
+    --panel-saturate: 1.20;
+    --panel-radius: 10px;
+    --panel-border-opacity: 0.10;
+    --panel-tint-opacity: 0.06;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-canvas);
+    color: var(--fg-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Simulated app shell ── */
+  .app-shell {
+    max-width: 420px;
+    margin: 0 auto;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    border-left: 1px solid var(--border-default);
+    border-right: 1px solid var(--border-default);
+  }
+
+  /* ── Top nav bar (SAM logo + project) ── */
+  .top-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: rgba(8, 15, 12, 0.9);
+    backdrop-filter: blur(20px) saturate(1.35);
+    -webkit-backdrop-filter: blur(20px) saturate(1.35);
+    border-bottom: 1px solid rgba(41, 66, 59, 0.3);
+    z-index: 30;
+    flex-shrink: 0;
+  }
+  .top-nav .logo {
+    width: 26px; height: 26px;
+    background: var(--accent-primary);
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: white;
+  }
+  .top-nav .nav-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    flex: 1;
+  }
+  .top-nav .nav-icons {
+    display: flex; gap: 12px; color: var(--fg-muted);
+  }
+
+  /* ── Session header dropdown (glass panel #1) ── */
+  .session-header {
+    flex-shrink: 0;
+    z-index: 20;
+    overflow: visible;
+    /* Glass properties — must overlap content for blur to work */
+    background: linear-gradient(
+      135deg,
+      rgba(22, 163, 74, var(--panel-tint-opacity)),
+      rgba(8, 15, 12, var(--panel-bg-opacity))
+    );
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-bottom: 1px solid rgba(41, 66, 59, var(--panel-border-opacity));
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(74, 222, 128, 0.03);
+  }
+  .session-header::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 8%;
+    right: 8%;
+    height: 3px;
+    background: radial-gradient(ellipse at center, rgba(34,197,94,0.55) 0%, transparent 70%);
+    filter: blur(2px);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .session-compact {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    min-height: 44px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .session-compact .sess-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .session-compact .profile-badge {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .session-compact .port-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--info-tint);
+    color: var(--info);
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  .session-compact .action-btn {
+    flex-shrink: 0;
+    padding: 6px;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+  .session-compact .action-btn:hover { color: var(--fg-primary); background: rgba(255,255,255,0.04); }
+  .session-compact .state-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .session-compact .state-dot .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .session-compact .chevron {
+    flex-shrink: 0;
+    padding: 4px;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    transition: transform 0.2s;
+  }
+
+  /* Expanded details */
+  .session-details {
+    display: none;
+    padding: 0 16px 12px;
+    border-top: 1px solid rgba(34, 197, 94, 0.08);
+  }
+  .session-header.expanded .session-details { display: block; }
+  .session-header.expanded .chevron { transform: rotate(180deg); }
+
+  .detail-section {
+    padding-top: 8px;
+  }
+  .detail-section + .detail-section {
+    border-top: 1px solid rgba(41, 66, 59, 0.25);
+    margin-top: 8px;
+  }
+  .detail-section-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+
+  /* Copyable ID pills */
+  .id-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-default);
+    background: var(--bg-surface);
+    color: var(--fg-muted);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .id-pill:hover { background: var(--bg-surface-hover); }
+  .id-pill .pill-label {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 10px;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+  .id-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* Context items (key-value rows) */
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    padding: 2px 0;
+  }
+  .ctx-item .ctx-icon { opacity: 0.6; flex-shrink: 0; font-size: 12px; }
+  .ctx-item .ctx-label { font-weight: 500; flex-shrink: 0; }
+  .ctx-item .ctx-val { color: var(--fg-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctx-item .ctx-link { color: var(--accent-primary); text-decoration: none; }
+  .ctx-item .ctx-link:hover { text-decoration: underline; }
+
+  /* Status badges */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .status-badge.completed { background: rgba(34, 197, 94, 0.1); color: var(--success-fg); }
+  .status-badge.in-progress { background: var(--info-tint); color: var(--info); }
+  .status-badge.failed { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+
+  /* Agent info row */
+  .agent-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+  }
+  .agent-info span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .agent-info .val { color: var(--fg-primary); font-weight: 500; }
+
+  /* Action buttons row */
+  .detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 6px;
+  }
+  .detail-actions .btn-ghost {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-default);
+    background: transparent;
+    color: var(--fg-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s;
+  }
+  .detail-actions .btn-ghost:hover { background: var(--bg-surface-hover); border-color: rgba(41, 66, 59, 0.6); }
+  .detail-actions .btn-complete { color: var(--success-fg); }
+
+  /* ── Scroll wrapper — header + messages share this so content scrolls behind header ── */
+  .scroll-wrapper {
+    flex: 1;
+    overflow-y: auto;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header sticks to top of scroll area so messages scroll behind it */
+  .session-header {
+    position: sticky;
+    top: 0;
+  }
+
+  /* ── Messages area ── */
+  .messages-area {
+    flex: 1;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: relative;
+  }
+
+  /* ── Summary panel (glass panel #2) ── */
+  .summary-panel {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 14px 16px;
+    border-radius: var(--panel-radius);
+    border: 1px solid rgba(41, 66, 59, var(--panel-border-opacity));
+    background: linear-gradient(
+      135deg,
+      rgba(22, 163, 74, var(--panel-tint-opacity)),
+      rgba(19, 32, 29, var(--panel-bg-opacity))
+    );
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(74, 222, 128, 0.06);
+    transition: all 0.3s ease;
+  }
+  .summary-panel .summary-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--success-fg);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .summary-panel .summary-text {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--fg-primary);
+  }
+  .summary-panel .summary-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+  }
+  .summary-panel .summary-meta .file-ref {
+    color: var(--success-fg);
+    background: rgba(34, 197, 94, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.6875rem;
+  }
+
+  /* Collapse toggle */
+  .summary-toggle {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.2s;
+    line-height: 1;
+  }
+  .summary-toggle:hover { color: var(--fg-primary); }
+  .summary-panel.collapsed .summary-text,
+  .summary-panel.collapsed .summary-meta { display: none; }
+  .summary-panel.collapsed { padding: 10px 16px; }
+
+  /* ── Chat message bubbles ── */
+  .message {
+    border-radius: 12px;
+    padding: 14px 16px;
+    line-height: 1.5;
+    font-size: 0.9375rem;
+  }
+  .message.assistant {
+    background: rgba(19, 32, 29, 0.6);
+    border: 1px solid rgba(41, 66, 59, 0.4);
+  }
+  .message .msg-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(41, 66, 59, 0.3);
+  }
+  .message .msg-actions button {
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px;
+  }
+
+  /* Tool call blocks */
+  .tool-call {
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: rgba(22, 163, 74, 0.08);
+    border: 1px solid rgba(22, 163, 74, 0.2);
+    font-size: 0.8125rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tool-call .check { color: var(--success-fg); font-size: 16px; }
+  .tool-call .cmd {
+    flex: 1; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tool-call .badge {
+    font-size: 0.6875rem;
+    background: rgba(22, 163, 74, 0.15);
+    color: var(--success-fg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  /* Session ended footer */
+  .session-ended {
+    text-align: center;
+    padding: 16px;
+    font-size: 0.8125rem;
+    color: var(--fg-muted);
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-default);
+    background: var(--bg-canvas);
+  }
+
+  /* ── Controls panel ── */
+  .controls {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(420px, 100vw);
+    background: rgba(11, 17, 16, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-default);
+    padding: 16px;
+    z-index: 100;
+    transition: transform 0.3s ease;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .controls.hidden { transform: translateX(-50%) translateY(100%); }
+  .controls-toggle {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 101;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .controls h3 {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--success-fg);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .controls .target-label {
+    font-size: 0.6875rem;
+    color: var(--fg-muted);
+    margin: 12px 0 6px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(41, 66, 59, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .control-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .control-row label {
+    font-size: 0.8125rem;
+    color: var(--fg-muted);
+    width: 90px;
+    flex-shrink: 0;
+  }
+  .control-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent-primary);
+    height: 4px;
+  }
+  .control-row .value {
+    font-size: 0.75rem;
+    color: var(--fg-primary);
+    font-family: 'SF Mono', monospace;
+    width: 50px;
+    text-align: right;
+  }
+
+  /* Variant buttons */
+  .variant-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .variant-btn {
+    font-size: 0.75rem;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-default);
+    background: rgba(19, 32, 29, 0.5);
+    color: var(--fg-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .variant-btn:hover { border-color: var(--accent-primary); background: rgba(22, 163, 74, 0.1); }
+  .variant-btn.active { border-color: var(--accent-primary); background: rgba(22, 163, 74, 0.15); color: var(--success-fg); }
+
+  /* Link target toggle */
+  .target-toggle {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .target-toggle button {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border-default);
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .target-toggle button.active {
+    border-color: var(--accent-primary);
+    color: var(--success-fg);
+    background: rgba(22, 163, 74, 0.12);
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Top nav -->
+  <div class="top-nav">
+    <div class="logo">S</div>
+    <div class="nav-title">SAM</div>
+    <div class="nav-icons">
+      <span>&#128269;</span>
+      <span>&#128488;</span>
+      <span>&#128276;</span>
+      <span>&#9776;</span>
+    </div>
+  </div>
+
+  <!-- Scroll wrapper: header + messages together so content scrolls behind sticky header -->
+  <div class="scroll-wrapper">
+
+  <!-- SESSION HEADER (glass panel #1) -->
+  <div class="session-header" id="sessionHeader">
+    <div class="session-compact" id="sessionCompact">
+      <span class="sess-title">Publish daily development journ...</span>
+      <span class="profile-badge" style="background: rgba(34,197,94,0.1); color: var(--success-fg);">Full</span>
+      <a class="port-badge" href="#" onclick="return false">&#127760; 8090</a>
+      <a class="port-badge" href="#" onclick="return false">&#127760; 3000</a>
+      <button class="action-btn" title="Retry">&#8634;</button>
+      <button class="action-btn" title="Fork">&#9095;</button>
+      <span class="state-dot" style="color: var(--fg-muted);">
+        <span class="dot"></span> Stopped
+      </span>
+      <button class="chevron" id="sessionChevron">&#9660;</button>
+    </div>
+
+    <!-- Expanded details -->
+    <div class="session-details">
+      <!-- References -->
+      <div class="detail-section">
+        <div class="detail-section-label"># References</div>
+        <div class="id-pills">
+          <span class="id-pill"><span class="pill-label">Task</span> 01KRV7...4JF &#128203;</span>
+          <span class="id-pill"><span class="pill-label">Session</span> bca0dd...a62 &#128203;</span>
+          <span class="id-pill"><span class="pill-label">Workspace</span> 01KRV7...TK &#128203;</span>
+          <span class="id-pill"><span class="pill-label">ACP</span> a8f31c...e7b &#128203;</span>
+        </div>
+      </div>
+
+      <!-- Agent info -->
+      <div class="detail-section">
+        <div class="agent-info">
+          <span>&#129302; <span class="val">Claude Code</span></span>
+          <span>&#9881; <span class="val">Task</span></span>
+          <span>&#128100; <span class="val">default</span></span>
+        </div>
+      </div>
+
+      <!-- Task status + timing -->
+      <div class="detail-section">
+        <div class="agent-info">
+          <span class="status-badge completed">&#10003; Completed</span>
+          <span>&#128339; May 17, 11:25 AM</span>
+          <span>&#9201; 10m 23s</span>
+        </div>
+      </div>
+
+      <!-- PR link -->
+      <div class="detail-section">
+        <div class="agent-info">
+          <a href="#" class="ctx-link" onclick="return false" style="color: var(--accent-primary); font-size: 0.75rem;">View PR</a>
+        </div>
+      </div>
+
+      <!-- Infrastructure context -->
+      <div class="detail-section">
+        <div class="ctx-item">
+          <span class="ctx-icon">&#128230;</span>
+          <span class="ctx-label">Workspace:</span>
+          <a href="#" class="ctx-link" onclick="return false">daily-journal-ws</a>
+          <span class="ctx-val" style="color: var(--fg-muted); margin-left: 4px;">(stopped)</span>
+        </div>
+        <div class="ctx-item">
+          <span class="ctx-icon">&#9881;</span>
+          <span class="ctx-label">VM Size:</span>
+          <span class="ctx-val">Medium (4 CPU, 8GB)</span>
+        </div>
+        <div class="ctx-item">
+          <span class="ctx-icon">&#128421;</span>
+          <span class="ctx-label">Node:</span>
+          <a href="#" class="ctx-link" onclick="return false">sam-hel1-cx22-01</a>
+          <span style="color: var(--success-fg); font-size: 0.75rem; margin-left: 4px;">(healthy)</span>
+        </div>
+        <div class="ctx-item">
+          <span class="ctx-icon">&#9729;</span>
+          <span class="ctx-label">Provider:</span>
+          <span class="ctx-val">Hetzner — hel1</span>
+        </div>
+        <div class="ctx-item">
+          <span class="ctx-icon">&#127760;</span>
+          <span class="ctx-label">Ports:</span>
+          <span class="ctx-val">
+            <a href="#" class="ctx-link" onclick="return false" style="font-family: 'SF Mono', monospace; font-size: 11px;">8090 &#8599;</a>
+            &nbsp;
+            <a href="#" class="ctx-link" onclick="return false" style="font-family: 'SF Mono', monospace; font-size: 11px;">3000 &#8599;</a>
+          </span>
+        </div>
+        <div class="ctx-item">
+          <span class="ctx-icon">&#128268;</span>
+          <span class="ctx-label">Branch:</span>
+          <span class="ctx-val" style="font-family: 'SF Mono', monospace; font-size: 11px;">sam/daily-blog-post-01krv7</span>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="detail-actions">
+        <button class="btn-ghost">&#128194; Files</button>
+        <button class="btn-ghost">&#128268; Git</button>
+        <button class="btn-ghost">&#8599; Workspace</button>
+        <button class="btn-ghost btn-complete">&#10003; Complete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Messages (inside scroll wrapper — no separate overflow) -->
+  <div class="messages-area" id="messagesArea">
+
+    <!-- SUMMARY PANEL (glass panel #2) -->
+    <div class="summary-panel" id="summaryPanel">
+      <button class="summary-toggle" id="summaryToggle" title="Collapse">&#9650;</button>
+      <div class="summary-label">Summary</div>
+      <div class="summary-text">Published SAM's May 17 daily journal post. Created blog entry, built site locally, merged PR #1045, and monitored production deployment.</div>
+      <div class="summary-meta">
+        <span class="file-ref">apps/www/src/content/blog/sams-journal-the-boundaries-got-...</span>
+      </div>
+    </div>
+
+    <!-- Mock chat messages -->
+    <div class="message assistant">
+      GitHub reports PR #1045 as clean with no status checks attached to the branch.
+      <br><br>
+      Since the local website build passed and there are no required checks to wait on, I'm merging the PR and then I'll monitor the production workflow triggered on <code style="background:rgba(22,163,74,0.15);padding:2px 6px;border-radius:4px;font-size:0.8125rem;color:var(--success-fg)">main</code>.
+      <div class="msg-actions">
+        <button title="Info">&#9432;</button>
+        <button title="Audio">&#128266;</button>
+        <button title="Copy">&#128203;</button>
+      </div>
+    </div>
+
+    <div class="tool-call">
+      <span class="check">&#10003;</span>
+      <span class="cmd">gh pr merge 1045 --squash --delete-bran...</span>
+      <span class="badge">execute</span>
+    </div>
+
+    <div class="tool-call">
+      <span class="check">&#10003;</span>
+      <span class="cmd">gh run list --branch main --limit 10 --json ...</span>
+      <span class="badge">execute</span>
+    </div>
+
+    <div class="tool-call">
+      <span class="check">&#10003;</span>
+      <span class="cmd">Tool: sam-mcp/update_task_status</span>
+      <span class="badge" style="visibility:hidden">execute</span>
+    </div>
+
+    <div class="tool-call">
+      <span class="check">&#10003;</span>
+      <span class="cmd">gh run watch 25994612849 --interval 15</span>
+      <span class="badge">execute</span>
+    </div>
+
+    <div class="message assistant">
+      The marketing site deploy is running on <code style="background:rgba(22,163,74,0.15);padding:2px 6px;border-radius:4px;font-size:0.8125rem;color:var(--success-fg)">main</code>; it has installed dependencies and is building the site now. I'm keeping the watcher open until Cloudflare Pages deployment finishes.
+    </div>
+
+    <div class="tool-call">
+      <span class="check">&#10003;</span>
+      <span class="cmd">gh run watch 25994612849 --interval 15</span>
+      <span class="badge">execute</span>
+    </div>
+
+    <div class="message assistant">
+      Production deployment completed successfully. The daily journal post is now live at the marketing site. All workflows green.
+    </div>
+
+    <!-- Extra scroll padding -->
+    <div style="height: 200px;"></div>
+  </div>
+
+  </div><!-- /scroll-wrapper -->
+
+  <div class="session-ended">This session has ended.</div>
+</div>
+
+<!-- Controls toggle button -->
+<button class="controls-toggle" id="controlsToggleBtn" title="Toggle controls">&#9881;</button>
+
+<!-- Interactive controls -->
+<div class="controls" id="controlsPanel">
+  <h3>Glass Tuning</h3>
+
+  <div class="target-toggle">
+    <button class="active" data-target="both">Both</button>
+    <button data-target="header">Header Only</button>
+    <button data-target="summary">Summary Only</button>
+  </div>
+
+  <div class="control-row">
+    <label>Blur</label>
+    <input type="range" id="blurSlider" min="0" max="40" value="12" step="1">
+    <span class="value" id="blurValue">12px</span>
+  </div>
+
+  <div class="control-row">
+    <label>BG Opacity</label>
+    <input type="range" id="opacitySlider" min="0" max="100" value="70" step="1">
+    <span class="value" id="opacityValue">0.70</span>
+  </div>
+
+  <div class="control-row">
+    <label>Saturate</label>
+    <input type="range" id="saturateSlider" min="100" max="200" value="120" step="5">
+    <span class="value" id="saturateValue">1.20</span>
+  </div>
+
+  <div class="control-row">
+    <label>Radius</label>
+    <input type="range" id="radiusSlider" min="0" max="24" value="10" step="1">
+    <span class="value" id="radiusValue">10px</span>
+  </div>
+
+  <div class="control-row">
+    <label>Green Tint</label>
+    <input type="range" id="tintSlider" min="0" max="40" value="6" step="1">
+    <span class="value" id="tintValue">0.06</span>
+  </div>
+
+  <div class="control-row">
+    <label>Border</label>
+    <input type="range" id="borderSlider" min="0" max="50" value="10" step="1">
+    <span class="value" id="borderValue">0.10</span>
+  </div>
+
+  <div class="variant-row">
+    <button class="variant-btn" data-variant="surface">Surface</button>
+    <button class="variant-btn" data-variant="chrome">Chrome</button>
+    <button class="variant-btn" data-variant="modal">Modal</button>
+    <button class="variant-btn" data-variant="frosted">Frosted</button>
+    <button class="variant-btn active" data-variant="subtle">Subtle</button>
+  </div>
+</div>
+
+<script>
+  const summaryPanel = document.getElementById('summaryPanel');
+  const sessionHeader = document.getElementById('sessionHeader');
+  const summaryToggle = document.getElementById('summaryToggle');
+  const sessionCompact = document.getElementById('sessionCompact');
+  const controlsPanel = document.getElementById('controlsPanel');
+  const controlsToggleBtn = document.getElementById('controlsToggleBtn');
+
+  // Collapse/expand summary
+  summaryToggle.addEventListener('click', () => {
+    summaryPanel.classList.toggle('collapsed');
+    summaryToggle.innerHTML = summaryPanel.classList.contains('collapsed') ? '&#9660;' : '&#9650;';
+  });
+
+  // Expand/collapse session header
+  sessionCompact.addEventListener('click', (e) => {
+    if (e.target.closest('.action-btn') || e.target.closest('.port-badge')) return;
+    sessionHeader.classList.toggle('expanded');
+  });
+
+  // Show/hide controls
+  let controlsVisible = true;
+  controlsToggleBtn.addEventListener('click', () => {
+    controlsVisible = !controlsVisible;
+    controlsPanel.classList.toggle('hidden', !controlsVisible);
+  });
+
+  // Target selection (which panels to tune)
+  let tuningTarget = 'both';
+  document.querySelectorAll('.target-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.target-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      tuningTarget = btn.dataset.target;
+      applyValues();
+    });
+  });
+
+  // Sliders
+  const sliders = {
+    blur:     { el: document.getElementById('blurSlider'),     val: document.getElementById('blurValue') },
+    opacity:  { el: document.getElementById('opacitySlider'),  val: document.getElementById('opacityValue') },
+    saturate: { el: document.getElementById('saturateSlider'), val: document.getElementById('saturateValue') },
+    radius:   { el: document.getElementById('radiusSlider'),   val: document.getElementById('radiusValue') },
+    tint:     { el: document.getElementById('tintSlider'),     val: document.getElementById('tintValue') },
+    border:   { el: document.getElementById('borderSlider'),   val: document.getElementById('borderValue') },
+  };
+
+  function applyToPanel(el, blur, opacity, saturate, radius, tint, borderOp, isHeader) {
+    const bf = `blur(${blur}px) saturate(${saturate})`;
+    el.style.backdropFilter = bf;
+    el.style.webkitBackdropFilter = bf;
+    el.style.background = `linear-gradient(135deg, rgba(22, 163, 74, ${tint}), rgba(8, 15, 12, ${opacity}))`;
+    if (!isHeader) {
+      el.style.borderRadius = radius + 'px';
+    }
+    el.style.borderColor = `rgba(41, 66, 59, ${borderOp})`;
+    el.style.boxShadow = `0 4px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(74, 222, 128, ${tint * 0.5})`;
+  }
+
+  function applyValues() {
+    const blur = +sliders.blur.el.value;
+    const opacity = sliders.opacity.el.value / 100;
+    const saturate = sliders.saturate.el.value / 100;
+    const radius = +sliders.radius.el.value;
+    const tint = sliders.tint.el.value / 100;
+    const borderOp = sliders.border.el.value / 100;
+
+    sliders.blur.val.textContent = blur + 'px';
+    sliders.opacity.val.textContent = opacity.toFixed(2);
+    sliders.saturate.val.textContent = saturate.toFixed(2);
+    sliders.radius.val.textContent = radius + 'px';
+    sliders.tint.val.textContent = tint.toFixed(2);
+    sliders.border.val.textContent = borderOp.toFixed(2);
+
+    if (tuningTarget === 'both' || tuningTarget === 'summary') {
+      applyToPanel(summaryPanel, blur, opacity, saturate, radius, tint, borderOp, false);
+    }
+    if (tuningTarget === 'both' || tuningTarget === 'header') {
+      applyToPanel(sessionHeader, blur, opacity, saturate, radius, tint, borderOp, true);
+    }
+  }
+
+  Object.values(sliders).forEach(s => s.el.addEventListener('input', applyValues));
+
+  // Preset variants
+  const variants = {
+    surface:  { blur: 24, opacity: 65, saturate: 135, radius: 12, tint: 12, border: 15 },
+    chrome:   { blur: 20, opacity: 55, saturate: 135, radius: 12, tint: 8,  border: 15 },
+    modal:    { blur: 24, opacity: 55, saturate: 135, radius: 16, tint: 15, border: 20 },
+    frosted:  { blur: 32, opacity: 40, saturate: 150, radius: 14, tint: 18, border: 25 },
+    subtle:   { blur: 12, opacity: 70, saturate: 120, radius: 10, tint: 6,  border: 10 },
+  };
+
+  document.querySelectorAll('.variant-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.variant-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const v = variants[btn.dataset.variant];
+      sliders.blur.el.value = v.blur;
+      sliders.opacity.el.value = v.opacity;
+      sliders.saturate.el.value = v.saturate;
+      sliders.radius.el.value = v.radius;
+      sliders.tint.el.value = v.tint;
+      sliders.border.el.value = v.border;
+      applyValues();
+    });
+  });
+
+  // Init with subtle preset
+  applyValues();
+</script>
+</body>
+</html>
