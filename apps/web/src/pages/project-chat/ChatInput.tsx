@@ -190,7 +190,7 @@ export function ChatInput({
   }, [mentionFilter]);
 
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[12%] before:right-[12%] before:h-0.5 before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.35)_0%,transparent_70%)] before:blur-[1px] before:pointer-events-none">
+    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       {error && (
         <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
