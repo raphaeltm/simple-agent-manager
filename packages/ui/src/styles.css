@@ -5,7 +5,11 @@
 }
 
 [data-ui-theme='sam'] {
-  background: var(--sam-color-bg-canvas);
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%, rgba(16, 185, 129, 0.07) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 50% at 85% 75%, rgba(34, 197, 94, 0.05) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 50% 50%, rgba(6, 78, 59, 0.06) 0%, transparent 60%),
+    var(--sam-color-bg-canvas);
   color: var(--sam-color-fg-primary);
 }
 
