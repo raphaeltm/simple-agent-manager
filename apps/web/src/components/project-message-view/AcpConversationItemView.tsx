@@ -26,7 +26,7 @@ export function SystemMessageBubble({ text }: { text: string }) {
       <div
         role="region"
         aria-label="System message"
-        className="max-w-[90%] min-w-0 rounded-full px-4 py-2 border overflow-hidden"
+        className="max-w-[90%] min-w-0 rounded-lg px-4 py-2 border overflow-hidden"
         style={{
           backgroundColor: 'rgba(22, 163, 74, 0.06)',
           borderColor: 'rgba(34, 197, 94, 0.1)',

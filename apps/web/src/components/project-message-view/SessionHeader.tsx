@@ -196,7 +196,7 @@ export function SessionHeader({
   }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
 
   return (
-    <div className="relative glass-chrome border-x-0 border-t-0 shrink-0 after:content-[''] after:absolute after:bottom-0 after:left-[15%] after:right-[15%] after:h-px after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.2)_0%,transparent_70%)] after:pointer-events-none after:z-10">
+    <div className="relative glass-chrome border-x-0 border-t-0 shrink-0 after:content-[''] after:absolute after:bottom-0 after:left-[15%] after:right-[15%] after:h-px after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.2)_0%,transparent_70%)] after:pointer-events-none after:z-10" style={{ backgroundColor: 'rgba(8, 15, 12, 0.88)' }}>
       {/* Compact row — always visible */}
       <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
