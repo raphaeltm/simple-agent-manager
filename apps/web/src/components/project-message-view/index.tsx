@@ -166,50 +166,82 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Session header */}
-      {lc.session && (
-        <SessionHeader
-          projectId={projectId}
-          session={lc.session}
-          sessionState={lc.sessionState}
-          loading={lc.loading}
-          idleCountdownMs={lc.idleCountdownMs}
-          taskEmbed={lc.taskEmbed}
-          workspace={lc.workspace}
-          node={lc.node}
-          detectedPorts={lc.detectedPorts}
-          onSessionMutated={onSessionMutated}
-          onOpenFiles={lc.handleOpenFileBrowser}
-          onOpenGit={lc.handleOpenGitChanges}
-          onRetry={onRetry}
-          onFork={onFork}
-          lineageText={lineageText}
-        />
-      )}
-
-      {/* Task error/summary display */}
-      {lc.taskEmbed?.errorMessage && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
-          <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
-          <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
-        </div>
-      )}
-      {lc.taskEmbed?.outputSummary && (
-        <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
-      )}
-
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="flex-1 min-h-0 flex items-center justify-center">
-          <span className="text-fg-muted text-sm">
-            {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
-          </span>
+        <div className="flex-1 min-h-0 relative">
+          {/* Floating session header */}
+          {lc.session && (
+            <div className="absolute top-0 left-0 right-0 z-10">
+              <SessionHeader
+                projectId={projectId}
+                session={lc.session}
+                sessionState={lc.sessionState}
+                loading={lc.loading}
+                idleCountdownMs={lc.idleCountdownMs}
+                taskEmbed={lc.taskEmbed}
+                workspace={lc.workspace}
+                node={lc.node}
+                detectedPorts={lc.detectedPorts}
+                onSessionMutated={onSessionMutated}
+                onOpenFiles={lc.handleOpenFileBrowser}
+                onOpenGit={lc.handleOpenGitChanges}
+                onRetry={onRetry}
+                onFork={onFork}
+                lineageText={lineageText}
+              />
+              {lc.taskEmbed?.errorMessage && (
+                <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
+                  <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
+                  <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
+                </div>
+              )}
+              {lc.taskEmbed?.outputSummary && (
+                <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
+              )}
+            </div>
+          )}
+          <div className="flex items-center justify-center h-full">
+            <span className="text-fg-muted text-sm">
+              {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
+            </span>
+          </div>
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
+          {/* Floating session header */}
+          {lc.session && (
+            <div className="absolute top-0 left-0 right-0 z-10">
+              <SessionHeader
+                projectId={projectId}
+                session={lc.session}
+                sessionState={lc.sessionState}
+                loading={lc.loading}
+                idleCountdownMs={lc.idleCountdownMs}
+                taskEmbed={lc.taskEmbed}
+                workspace={lc.workspace}
+                node={lc.node}
+                detectedPorts={lc.detectedPorts}
+                onSessionMutated={onSessionMutated}
+                onOpenFiles={lc.handleOpenFileBrowser}
+                onOpenGit={lc.handleOpenGitChanges}
+                onRetry={onRetry}
+                onFork={onFork}
+                lineageText={lineageText}
+              />
+              {lc.taskEmbed?.errorMessage && (
+                <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
+                  <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
+                  <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
+                </div>
+              )}
+              {lc.taskEmbed?.outputSummary && (
+                <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
+              )}
+            </div>
+          )}
           <Virtuoso
             ref={virtuosoRef}
-            style={{ height: '100%' }}
+            style={{ height: '100%', paddingTop: lc.session ? '48px' : undefined }}
             data={conversationItems}
             firstItemIndex={lc.firstItemIndex}
             initialTopMostItemIndex={conversationItems.length - 1}
