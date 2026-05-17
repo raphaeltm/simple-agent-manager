@@ -5,7 +5,7 @@
  * through DO SQLite to state retrieval — verifying the complete data flow
  * that the UI relies on for hydration.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as sessionState from '../../../src/durable-objects/project-data/session-state';
 

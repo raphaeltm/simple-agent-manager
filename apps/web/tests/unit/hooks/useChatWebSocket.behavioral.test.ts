@@ -298,6 +298,7 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
+      undefined,
     );
   });
 
@@ -721,7 +722,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledOnce();
-    expect(onAgentActivity).toHaveBeenCalledWith('prompting');
+    expect(onAgentActivity).toHaveBeenCalledWith('prompting', null);
   });
 
   it('calls onAgentActivity with "idle" on session.activity event', () => {
@@ -743,7 +744,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledOnce();
-    expect(onAgentActivity).toHaveBeenCalledWith('idle');
+    expect(onAgentActivity).toHaveBeenCalledWith('idle', null);
   });
 
   it('ignores session.activity for different sessions', () => {
