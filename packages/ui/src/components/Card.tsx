@@ -1,6 +1,6 @@
 import type { ComponentPropsWithoutRef } from 'react';
 
-interface CardProps extends ComponentPropsWithoutRef<'div'> {
+export interface CardProps extends ComponentPropsWithoutRef<'div'> {
   className?: string;
   variant?: 'default' | 'glass';
 }

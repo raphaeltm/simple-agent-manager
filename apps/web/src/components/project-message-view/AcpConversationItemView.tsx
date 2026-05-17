@@ -26,10 +26,10 @@ export function SystemMessageBubble({ text }: { text: string }) {
       <div
         role="region"
         aria-label="System message"
-        className="max-w-[90%] min-w-0 rounded-lg px-4 py-3 border overflow-hidden"
+        className="max-w-[90%] min-w-0 rounded-full px-4 py-2 border overflow-hidden"
         style={{
-          backgroundColor: 'var(--sam-color-bg-inset)',
-          borderColor: 'var(--sam-color-border-default)',
+          backgroundColor: 'rgba(22, 163, 74, 0.06)',
+          borderColor: 'rgba(34, 197, 94, 0.1)',
         }}
       >
         <div className="flex items-center gap-1.5 mb-2">
@@ -86,7 +86,7 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
       if (animateUserMessage) {
         return (
           <div className="flex justify-end mb-4">
-            <div className="max-w-[80%] min-w-0 rounded-lg px-4 py-3 bg-blue-600 text-white">
+            <div className="max-w-[80%] min-w-0 rounded-lg px-4 py-3 glass-msg-user">
               <div className="prose prose-sm max-w-none overflow-x-auto break-words">
                 <UserMessageFade text={item.text} />
               </div>
@@ -94,7 +94,7 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
           </div>
         );
       }
-      return <AcpMessageBubble text={item.text} role="user" />;
+      return <AcpMessageBubble text={item.text} role="user" bubbleClassName="glass-msg-user" />;
     case 'agent_message':
       return (
         <AcpMessageBubble
@@ -107,6 +107,7 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}
+          bubbleClassName="glass-msg-assistant"
         />
       );
     case 'thinking':

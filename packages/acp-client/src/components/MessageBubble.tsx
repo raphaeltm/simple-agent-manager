@@ -23,6 +23,8 @@ interface MessageBubbleProps {
   onPlayAudio?: () => void;
   /** Optional callback when a file path link is clicked. Receives path and optional line number. */
   onFileClick?: (path: string, line?: number | null) => void;
+  /** Optional CSS class for the bubble container — allows theming from the app layer. */
+  bubbleClassName?: string;
 }
 
 /**
@@ -199,7 +201,7 @@ function buildAgentMarkdownComponents(
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick, bubbleClassName }: MessageBubbleProps) {
   const isUser = role === 'user';
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
@@ -214,9 +216,11 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
         className={`max-w-[80%] min-w-0 rounded-lg px-4 py-3 ${
-          isUser
-            ? 'bg-blue-600 text-white'
-            : 'bg-white border border-gray-200 text-gray-900'
+          bubbleClassName
+            ? bubbleClassName
+            : isUser
+              ? 'bg-blue-600 text-white'
+              : 'bg-white border border-gray-200 text-gray-900'
         }`}
       >
         <div className="prose prose-sm max-w-none overflow-x-auto break-words">

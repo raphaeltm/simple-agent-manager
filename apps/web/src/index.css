@@ -316,3 +316,22 @@
     backdrop-filter: none;
   }
 }
+
+/* ── Glass message bubbles (overrides acp-client defaults for project chat) ── */
+@layer utilities {
+  .glass-msg-user {
+    background: linear-gradient(135deg, rgba(22, 163, 74, 0.22), rgba(34, 197, 94, 0.1)) !important;
+    border: 1px solid rgba(34, 197, 94, 0.22) !important;
+    border-bottom-right-radius: 4px !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    color: var(--sam-color-fg-primary) !important;
+  }
+
+  .glass-msg-assistant {
+    background: rgba(12, 20, 17, 0.65) !important;
+    border: 1px solid var(--sam-glass-border-color) !important;
+    border-bottom-left-radius: 4px !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    color: var(--sam-color-fg-primary) !important;
+  }
+}
