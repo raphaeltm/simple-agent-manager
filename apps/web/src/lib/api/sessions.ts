@@ -91,7 +91,7 @@ export interface ChatMessageResponse {
 
 /** Persisted session state snapshot from the DO (for catch-up on page load). */
 export interface SessionStateSnapshot {
-  activity: 'idle' | 'prompting' | 'starting' | 'error' | 'stopped';
+  activity: 'idle' | 'prompting' | 'error' | 'stopped';
   activityAt: number;
   statusError: string | null;
   currentPlan: Array<{ content: string; status: string }> | null;

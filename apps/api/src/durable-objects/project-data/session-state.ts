@@ -15,25 +15,6 @@ const log = createModuleLogger('project_data.session_state');
 
 const STALE_ACTIVITY_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes default
 
-// --- Schema Initialization ---
-
-export function ensureSessionStateTable(sql: SqlStorage): void {
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS session_state (
-      session_id TEXT PRIMARY KEY,
-      activity TEXT NOT NULL DEFAULT 'idle',
-      activity_at INTEGER NOT NULL,
-      status_error TEXT,
-      current_plan_json TEXT,
-      plan_updated_at INTEGER,
-      prompt_started_at INTEGER,
-      last_stop_reason TEXT,
-      agent_type TEXT,
-      restart_count INTEGER NOT NULL DEFAULT 0
-    )
-  `);
-}
-
 // --- Write Operations ---
 
 export interface ActivityUpdate {
@@ -69,7 +50,7 @@ export function upsertActivityState(
     now,
     promptStartedAt,
     update.agentType ?? null,
-    update.restartCount ?? 0,
+    update.restartCount ?? null,
     update.statusError ?? null,
   );
 }
@@ -174,7 +155,9 @@ export function reconcileStaleActivity(
 ): string[] {
   const threshold = thresholdMs ?? STALE_ACTIVITY_THRESHOLD_MS;
   const cutoff = Date.now() - threshold;
+  const now = Date.now();
 
+  // Identify stale sessions for broadcast notification
   const staleRows = sql
     .exec(
       `SELECT session_id FROM session_state
@@ -183,16 +166,19 @@ export function reconcileStaleActivity(
     )
     .toArray();
 
-  const healedSessionIds: string[] = [];
-  const now = Date.now();
+  if (staleRows.length === 0) return [];
 
+  // Bulk-heal all stale sessions in a single atomic statement
+  sql.exec(
+    `UPDATE session_state SET activity = 'idle', activity_at = ?
+     WHERE activity = 'prompting' AND activity_at < ?`,
+    now,
+    cutoff,
+  );
+
+  const healedSessionIds: string[] = [];
   for (const row of staleRows) {
     const sessionId = row.session_id as string;
-    sql.exec(
-      `UPDATE session_state SET activity = 'idle', activity_at = ? WHERE session_id = ?`,
-      now,
-      sessionId,
-    );
     healedSessionIds.push(sessionId);
     log.warn('session_state.stale_activity_healed', { sessionId, staleSince: cutoff });
   }

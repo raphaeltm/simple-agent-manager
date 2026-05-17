@@ -440,9 +440,13 @@ export class ProjectData extends DurableObject<Env> {
     );
 
     // Session state staleness: auto-heal stuck "prompting" states
-    const healedSessionIds = sessionState.reconcileStaleActivity(this.sql);
-    for (const healedId of healedSessionIds) {
-      this.broadcastEvent('session.activity', { sessionId: healedId, activity: 'idle' }, healedId);
+    try {
+      const healedSessionIds = sessionState.reconcileStaleActivity(this.sql);
+      for (const healedId of healedSessionIds) {
+        this.broadcastEvent('session.activity', { sessionId: healedId, activity: 'idle' }, healedId);
+      }
+    } catch (err) {
+      log.error('alarm.stale_activity_reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
     }
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
