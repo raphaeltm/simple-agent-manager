@@ -24,6 +24,7 @@ import { AdminUsers } from './pages/AdminUsers';
 import { Chats } from './pages/Chats';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Dashboard } from './pages/Dashboard';
+import { GlassPrototype } from './pages/GlassPrototype';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { IdeasPage } from './pages/IdeasPage';
 import { KnowledgePage } from './pages/KnowledgePage';
@@ -99,6 +100,8 @@ export default function App() {
           <Route path="/try/:trialId" element={<TryDiscovery />} />
           {/* SAM prototype — public, no auth */}
           <Route path="/sam" element={<SamPrototype />} />
+          {/* Glassmorphism panel prototype — public, no auth */}
+          <Route path="/prototype/glass" element={<GlassPrototype />} />
           {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
           {/* Protected routes with AppShell (persistent navigation) */}
