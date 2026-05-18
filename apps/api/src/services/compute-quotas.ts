@@ -14,7 +14,8 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { calculateVcpuHoursForPeriod, getCurrentPeriodBounds } from './compute-usage';
+import { getCurrentPeriodBounds } from './compute-usage';
+import { calculateNodeVcpuHoursForPeriod } from './node-usage';
 
 // =============================================================================
 // Quota Resolution
@@ -91,7 +92,7 @@ export async function checkQuotaForUser(
   }
 
   const { start, end } = getCurrentPeriodBounds();
-  const used = await calculateVcpuHoursForPeriod(
+  const used = await calculateNodeVcpuHoursForPeriod(
     db,
     userId,
     new Date(start),
@@ -339,7 +340,7 @@ export async function listUserQuotasWithUsage(
         source = 'unlimited';
       }
 
-      const currentUsage = await calculateVcpuHoursForPeriod(
+      const currentUsage = await calculateNodeVcpuHoursForPeriod(
         db,
         userId,
         periodStart,

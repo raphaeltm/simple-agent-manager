@@ -93,9 +93,9 @@ describe('compute quota pipeline', () => {
       expect(serviceFile).toContain("source: 'unlimited'");
     });
 
-    it('checkQuotaForUser calls calculateVcpuHoursForPeriod with platform filter', () => {
+    it('checkQuotaForUser calls calculateNodeVcpuHoursForPeriod with platform filter', () => {
       expect(serviceFile).toContain("'platform'");
-      expect(serviceFile).toContain('calculateVcpuHoursForPeriod');
+      expect(serviceFile).toContain('calculateNodeVcpuHoursForPeriod');
     });
 
     it('checkQuotaForUser returns allowed: true for unlimited quota', () => {
