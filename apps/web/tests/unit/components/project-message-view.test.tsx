@@ -1568,4 +1568,46 @@ describe('ProjectMessageView — inline idle indicator', () => {
     expect(screen.queryByText('End session')).toBeNull();
     expect(screen.queryByText('Agent idle')).toBeNull();
   });
+
+  it('renders error banner with glass-chrome styling when task has errorMessage', async () => {
+    const session = {
+      ...makeSession('sess-err'),
+      task: {
+        id: 'task-err',
+        title: 'Broken task',
+        status: 'failed',
+        executionStep: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        errorMessage: 'Node provisioning failed',
+        finalizedAt: Date.now(),
+      },
+    };
+    const response = {
+      session,
+      messages: [makeMessage('m1', 'sess-err', 'Starting work...')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    const { container } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="sess-err" />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Task failed:')).toBeTruthy();
+    });
+
+    // Error banner should have glass-chrome styling
+    const errorBanner = screen.getByText('Node provisioning failed').closest('div');
+    expect(errorBanner).toBeTruthy();
+    expect(errorBanner!.className).toContain('glass-chrome');
+    expect(errorBanner!.className).toContain('glass-composited');
+
+    // SessionHeader should have hasContentBelow (no rounded-b-2xl)
+    const headerEl = container.querySelector('.glass-chrome.border-t-0');
+    expect(headerEl).toBeTruthy();
+    expect(headerEl!.className).not.toContain('rounded-b-2xl');
+  });
 });
