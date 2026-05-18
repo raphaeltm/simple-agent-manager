@@ -8,66 +8,62 @@ excerpt: "I started building a better GitHub Codespaces. Then I realized the who
 draft: true
 ---
 
-I started SAM as a better version of something that already existed. Think GitHub Codespaces, but with first-class AI support and a mobile UI. Cloud workspaces you could access from anywhere, with agent tabs alongside your terminal tabs. It was a familiar shape: the remote IDE, but friendlier to the way I was already working.
+If the AI agent is doing all the work, you don't need an IDE. The file tree, the terminal panes, the tab bar — that's an interface designed for humans who type commands. If you're talking to something that does the typing for you, you need a different shape entirely.
+
+I didn't start with that realization. I started by building what everyone else builds: the old thing, but better.
+
+## The old shape
+
+SAM began as something like GitHub Codespaces, but with first-class AI support. Cloud workspaces you could access from anywhere — including your phone — with AI agent tabs alongside your terminal tabs. A familiar shape: the remote IDE, made friendlier.
 
 And it worked. I was building SAM using SAM. AI tabs were basically my file editor — I'd describe what I wanted, the agent would write the code. Terminal tabs were for running commands. It felt like working in a traditional IDE, except one of my tabs could think.
 
-But something was off. Half the time I needed to run a command, I had to look it up. Or I'd ask an AI outside of SAM to help me figure out the right invocation — because the agents inside SAM were already busy working on other things. I was context-switching between conversations, copy-pasting between terminals, manually coordinating work across multiple agents.
+But I was still working the old way. I had multiple AI conversations going, each doing different things, and when I needed to run something myself — a build, a test, a deploy — the agents were occupied. I'd end up looking things up or asking an AI outside of SAM for help with commands, because my SAM agents were already busy on other tasks. I was the bottleneck, context-switching between conversations and terminals, manually coordinating everything.
 
-At some point the thought formed clearly: in an ideal world, I would never have to run a terminal command. The AI would do all of that.
-
-That's a small thought, but it breaks the whole paradigm. If the agent is doing the work, you don't need an IDE. The file tree, the terminal panes, the tab bar — that's an interface designed for humans who type commands. If you're talking to something that does the typing for you, you need a different shape entirely.
+The realization crept in: in an ideal world, I would never have to run a terminal command. The AI would do all of that. And once you accept that, the whole IDE paradigm stops making sense.
 
 ## Chat eats the IDE
 
-So SAM became chat-forward. The project page went from seven tabs — overview, chat, kanban, tasks, sessions, activity, settings — to one: the conversation. I moved everything into the chat. File browsing. Git diffs. Attachments. Agent output. All inside the conversation you're already having.
+So SAM became chat-forward. The project page went from seven tabs — overview, chat, kanban, tasks, sessions, activity, settings — to one: the conversation. File browsing, git diffs, attachments, agent output — all inside the chat. The workspace still exists underneath: every agent gets a full cloud VM running a [devcontainer](https://containers.dev/) (a Docker-based development environment defined in the repo). But the workspace is infrastructure now, not interface. You tell the agent what you want, it does the work, and you see the results in the conversation. Most users never visit the workspace directly.
 
-The workspace still exists underneath. Every agent gets a full cloud VM running a devcontainer — a real development environment with Docker, git, the full toolchain. But the workspace is infrastructure now, not interface. You tell the agent what you want, it does the work in its environment, and you see the results in the conversation. Most of the time, you never visit the workspace directly.
+This is the kind of design shift that has downstream consequences. If the workspace is invisible, it needs to be fast. So we built devcontainer image caching via Cloudflare's container registry and warm node pooling so a new task can claim a VM that's already running from a previous task in the same project. Provisioning times vary wildly — a complex devcontainer can take twenty minutes to build; a simple one provisions in under a minute — but the trend is toward making it disappear.
 
-This reorientation changed how I thought about provisioning. If the workspace is invisible, it needs to be fast. We built devcontainer image caching, warm node pooling so returning to a project can reuse an already-running VM, and a lightweight workspace profile that uses a pre-built image instead of building a devcontainer from scratch. Provisioning times vary wildly depending on the project — a complex devcontainer can take twenty minutes, a simple one can be under a minute — but the trend is toward making it disappear.
+We also built a lightweight workspace profile: still a devcontainer, but with a pre-specified base image that doesn't require a long build. I originally built this for brainstorming. I found myself talking through architecture with an agent, exploring how other projects solved a problem, poking at parts of the codebase I hadn't looked at in a while. Those conversations were productive, but they didn't need a full devcontainer build. They needed fast access to the repo. Brainstorm first, delegate the real work later.
 
-The lightweight profile turned out to be surprisingly useful for something I didn't originally build it for. I found myself doing a lot of brainstorming — talking through architecture with an agent, exploring how other projects solved a problem, poking at parts of the codebase I hadn't looked at in a while. Those conversations were genuinely productive, but they didn't need a full devcontainer build. They needed a fast workspace with access to the repo. Brainstorm first, delegate the real work later.
+That lightweight profile turned out to be useful for something I hadn't anticipated. But that's the next section.
 
 ## Agents managing agents
 
-Once you're talking to agents instead of typing commands, the next bottleneck is you. You're the one juggling conversations, deciding what to work on next, checking if that other task finished. You're the orchestrator, and you're slow.
+Once you're talking to agents instead of typing commands, the next bottleneck is you. You're the one juggling conversations, deciding what to work on next, checking whether that other task finished. You're the orchestrator, and you're slow.
 
-So I built the obvious thing: let an agent do that.
+So I built the obvious thing: let an agent do that. A lightweight workspace spins up — fast, pre-specified image, access to the repo — and runs an orchestrator agent. It breaks the work into tasks, spins up full workspaces for each one, and coordinates. Real dev environments, each with their own agent working on a focused piece of the problem.
 
-A lightweight workspace spins up — fast startup, pre-built image, access to the repo — and runs an orchestrator agent. That agent reads the mission, breaks it into tasks, and spins up full workspaces for each one. Real dev environments, each with their own agent working on a focused piece of the problem. The orchestrator reads their messages, sends corrections if they drift, stops them if they go off track. The child agents can send messages back. One agent keeping several in line and on track.
+The tools are simple: `dispatch_task` creates a child workspace and starts an agent. `send_message_to_subtask` injects a message into a running child's session. `stop_subtask` shuts one down, with an optional warning first so it can commit its work. `retry_subtask` spins up a replacement with context about what went wrong. `get_pending_messages` lets an agent check for new directives. (I wrote about these in more detail in [Agents Managing Agents](/blog/agents-managing-agents/).)
 
-The tools are simple. `dispatch_task` creates a child workspace and starts an agent. `send_message_to_subtask` injects a message into a running child's session — it shows up as if a human typed it. `stop_subtask` shuts one down (with an optional warning first, so it can commit its work). `retry_subtask` stops a failed child and spins up a replacement with context about what went wrong. `get_pending_messages` lets a child check if the parent has sent any new directives.
+No abstract workflow engine. Just agents talking to agents, using the same conversational pattern that made chat-first work for humans.
 
-No abstract workflow engine. Just agents talking to agents, using the same conversational interface that made chat-first work for humans.
+It's worth being honest about the state of this: it works, and it's genuinely useful, but it's not magic. Agents drift. Tasks fail for dumb reasons. The orchestrator sometimes makes a bad call about how to decompose the work. The tools give you the control surface to course-correct — stop a child, retry it with better instructions, send a mid-task message — but you're still dealing with the inherent messiness of autonomous systems. It's more like managing a team of eager but distractible junior developers than running a deterministic pipeline.
 
 ## Not all agent work is the same
 
-Here's what you discover once agents are managing agents: the orchestrator and the worker have completely different needs.
+Here's the thing you discover once agents are managing agents: the orchestrator and the worker have completely different needs. And this is true for anyone building systems with multiple agents, not just SAM.
 
-The orchestrator needs to think and delegate. It doesn't need to build a devcontainer or run a test suite. It needs to start fast, read the codebase, reason about what to do, and dispatch. That's why the lightweight workspace ended up being perfect for orchestration — I originally built it for brainstorming, but the same properties (fast startup, repo access, no heavy build) are exactly what a coordinator needs.
+The orchestrator needs to think and delegate. It doesn't need Docker, doesn't need to build anything, doesn't need a test suite. It needs to start fast, read the codebase, reason about what to do, and dispatch. That's why the lightweight workspace ended up being perfect for orchestration — I built it for brainstorming, but the same properties (fast startup, repo access, no heavy build) are exactly what a coordinator needs.
 
-The code agent is the opposite. It needs a full dev environment with Docker. It needs a powerful model. You're OK waiting a bit for it to provision because the work it's doing justifies it.
+The code agent is the opposite. It needs a full dev environment. It needs a powerful model. And you're OK waiting for it because the work it does justifies it.
 
-And there's a third kind of work that doesn't need a VM at all. We've been experimenting with a native harness — a minimal Go agent that runs directly on Cloudflare's edge, backed by models like Gemma 4 26B through Workers AI. It's not production-ready, but the idea is to build something very focused on orchestration: fast to start, cheap to run, with just enough tooling to coordinate other agents. We're also exploring Cloudflare's container runtime as another option for agents that need to clone a repo and run CLI tools but don't need a full VM.
+But there's a third kind of work emerging. Coordination, research, and planning don't need a VM at all. We've been experimenting with a native harness — a minimal Go agent we're prototyping locally, backed by models like Gemma 4 26B through Cloudflare Workers AI. It's not production-ready; it's an experiment aimed at building something very focused on lightweight orchestration. We're also exploring Cloudflare's container runtime for agents that need to clone a repo and run tools but don't need a full VM.
 
-SAM already runs multiple agent types. Claude Code and Codex work in full workspaces. The native harness is an experiment on the edge. Per-project credential overrides let you point different projects at different API keys or auth methods. Agent profiles define the model, permission mode, and workspace type for different roles.
+The general principle is broader than SAM: if you're building a system where agents do different kinds of work, treating them all the same is a mistake. A coordinator that takes 90 seconds to boot because it's building a devcontainer it will never use is wasted time. An implementation agent running in a container without Docker can't run the tests. Match the runtime to the work.
 
-But truly matching compute resources to workload — giving the orchestrator a container and the code agent a beefy VM and the research agent just an LLM — that's where we're heading. It's clearly what's required. We're not there yet.
+SAM runs Claude Code and Codex in full workspaces today. Per-project credential overrides let you use different API keys per project. Agent profiles define the model, permission mode, and workspace type. But the real goal — automatically matching compute resources to workload type, giving the orchestrator a container and the code agent a beefy VM — that's what we're building toward.
 
-## Measurement before optimization
+## What's next
 
-Before you can make smart decisions about any of this, you need to see what's actually happening.
+Before you can make smart routing decisions, you need to see what's actually happening. Right now we have token usage tracking by model, cost monitoring, and daily budget controls. That's the starting layer.
 
-We built token usage tracking by model, cost breakdowns by user and project, daily budget controls. Simple measurement. But the real goal is deeper: understanding which kinds of tasks consume which kinds of resources. vCPU and RAM usage per task. Disk pressure. Whether co-locating multiple agents on one VM causes contention. Which models, in which harnesses, produce the best results for which kinds of work.
+The next layer is compute: vCPU and RAM usage per task, disk pressure, whether co-locating multiple agents on one VM causes contention, which models in which configurations produce the best results for which kinds of work. Once you can see the relationship between task type, agent configuration, and resource consumption, you can start helping users build better agent profiles and routing tasks to the right infrastructure automatically.
 
-That's the measurement layer we're building toward. Once you can see the relationship between task type, agent configuration, and resource consumption, you can start making intelligent routing decisions. Help users build better agent profiles. Route tasks to the right kind of infrastructure automatically.
+That's where SAM is heading: not a workspace manager, not an IDE with AI bolted on, but a control plane for AI workloads. Different agents, different runtimes, different capabilities — managed through conversation.
 
-We're not there yet either. Right now it's token dashboards and cost tracking. But measurement comes before optimization, and we're laying the groundwork.
-
-## The shape of the thing
-
-When I started, I thought I was building a workspace manager. A better place to write code, with AI built in. What I actually ended up building is a control plane for AI workloads.
-
-The shift happened gradually. Each step felt like a small extension of the last: make the workspace invisible, let agents talk to each other, support different runtimes, measure what they're doing. But the cumulative effect is a different product entirely. Not an IDE with AI bolted on. A system where agents are the primary actors, operating at different scales, with different capabilities, in different runtimes — and the human steers through conversation.
-
-The way software gets built is changing. The tools should change with it.
+SAM is [open source](https://github.com/raphaeltm/simple-agent-manager). If any of this resonates, come take a look.
