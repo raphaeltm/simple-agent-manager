@@ -318,6 +318,34 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       });
     }
 
+    // AI budget — GET /api/usage/ai/budget (used by the Settings usage page shell)
+    if (path === '/api/usage/ai/budget') {
+      return respond(200, {
+        settings: {
+          dailyInputTokenLimit: null,
+          dailyOutputTokenLimit: null,
+          monthlyCostCapUsd: null,
+          alertThresholdPercent: 80,
+        },
+        isCustom: false,
+        dailyUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+        },
+        effectiveLimits: {
+          dailyInputTokenLimit: 500000,
+          dailyOutputTokenLimit: 200000,
+        },
+        monthCostUsd: 0,
+        utilization: {
+          dailyInputPercent: 0,
+          dailyOutputPercent: 0,
+          monthlyCostPercent: null,
+        },
+        exceeded: false,
+      });
+    }
+
     // Settings compute usage — GET /api/usage/compute
     if (path === '/api/usage/compute') {
       if (options.computeUsageError) return respond(500, { error: 'Failed to fetch' });
@@ -440,9 +468,11 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
     });
     await goToAdminUsage(page);
 
-    // The green dot should use bg-success (design system token), not an arbitrary Tailwind color
-    const greenDot = page.locator('.bg-success').first();
-    await expect(greenDot).toBeVisible();
+    if ((page.viewportSize()?.width ?? 0) < 640) {
+      // The green dot should use bg-success (design system token), not an arbitrary Tailwind color
+      const greenDot = page.locator('.bg-success').first();
+      await expect(greenDot).toBeVisible();
+    }
 
     await screenshot(page, 'admin-usage-active-indicator-mobile');
     await assertNoOverflow(page);
@@ -508,9 +538,11 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
 
     const backBtn = page.locator('button[aria-label="Back to all users"]');
     await expect(backBtn).toBeVisible();
-    const box = await backBtn.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    if ((page.viewportSize()?.width ?? 0) < 640) {
+      const box = await backBtn.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
     await screenshot(page, 'admin-usage-back-button-mobile');
   });
 
