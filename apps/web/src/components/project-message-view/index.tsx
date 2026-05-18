@@ -27,6 +27,22 @@ import { useSessionLifecycle } from './useSessionLifecycle';
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
 
+/** Glass-chrome error banner with red accents, used below the session header. */
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div
+      className="glass-chrome glass-composited px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
+      style={{
+        backgroundColor: 'rgba(15, 8, 8, 0.68)',
+        boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
+      }}
+    >
+      <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
+      <span className="sam-type-caption text-danger break-words">{message}</span>
+    </div>
+  );
+}
+
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
@@ -198,16 +214,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 hasContentBelow={!!lc.taskEmbed?.errorMessage}
               />
               {lc.taskEmbed?.errorMessage && (
-                <div
-                  className="glass-chrome glass-composited px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
-                  style={{
-                    backgroundColor: 'rgba(15, 8, 8, 0.68)',
-                    boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
-                  }}
-                >
-                  <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
-                  <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
-                </div>
+                <ErrorBanner message={lc.taskEmbed.errorMessage} />
               )}
               {lc.taskEmbed?.outputSummary && (
                 <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
@@ -244,16 +251,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 hasContentBelow={!!lc.taskEmbed?.errorMessage}
               />
               {lc.taskEmbed?.errorMessage && (
-                <div
-                  className="glass-chrome glass-composited px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
-                  style={{
-                    backgroundColor: 'rgba(15, 8, 8, 0.68)',
-                    boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
-                  }}
-                >
-                  <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
-                  <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
-                </div>
+                <ErrorBanner message={lc.taskEmbed.errorMessage} />
               )}
               {lc.taskEmbed?.outputSummary && (
                 <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
