@@ -37,6 +37,10 @@ import {
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
+import {
+  attachTokenUsageAccounting,
+  estimateInputTokensFromMessages,
+} from '../services/ai-token-usage-accounting';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -241,9 +245,18 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       responseHeaders.set('Cache-Control', 'no-cache');
     }
 
-    return new Response(upstreamResponse.body, {
+    const response = new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: responseHeaders,
+    });
+    let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
+    try { executionCtx = c.executionCtx; } catch { /* no exec ctx in tests */ }
+    return attachTokenUsageAccounting(response, {
+      env: c.env,
+      userId,
+      format: 'anthropic',
+      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      executionCtx,
     });
   } catch (err) {
     log.error('ai_proxy_anthropic.fetch_error', {

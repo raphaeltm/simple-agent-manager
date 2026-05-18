@@ -36,6 +36,10 @@ import {
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
+import {
+  attachTokenUsageAccounting,
+  estimateInputTokensFromMessages,
+} from '../services/ai-token-usage-accounting';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 
@@ -228,9 +232,18 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     if (contentType) responseHeaders.set('Content-Type', contentType);
     if (isStreaming) responseHeaders.set('Cache-Control', 'no-cache');
 
-    return new Response(upstreamResponse.body, {
+    const response = new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: responseHeaders,
+    });
+    let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
+    try { executionCtx = c.executionCtx; } catch { /* no exec ctx in tests */ }
+    return attachTokenUsageAccounting(response, {
+      env: c.env,
+      userId,
+      format: 'anthropic',
+      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      executionCtx,
     });
   } catch (err) {
     log.error('ai_proxy_passthrough.anthropic.fetch_error', {
@@ -459,9 +472,18 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       responseHeaders.set('X-Accel-Buffering', 'no');
     }
 
-    return new Response(upstreamResponse.body, {
+    const response = new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: responseHeaders,
+    });
+    let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
+    try { executionCtx = c.executionCtx; } catch { /* no exec ctx in tests */ }
+    return attachTokenUsageAccounting(response, {
+      env: c.env,
+      userId,
+      format: 'openai',
+      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      executionCtx,
     });
   } catch (err) {
     log.error('ai_proxy_passthrough.openai.fetch_error', {

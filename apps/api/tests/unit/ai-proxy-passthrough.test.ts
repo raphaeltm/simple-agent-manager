@@ -11,6 +11,7 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 const mockVerifyAIProxyAuth = vi.fn();
 const mockCheckRateLimit = vi.fn();
 const mockCheckTokenBudget = vi.fn();
+const mockIncrementTokenUsage = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({}),
@@ -42,6 +43,7 @@ vi.mock('../../src/middleware/rate-limit', () => ({
 
 vi.mock('../../src/services/ai-token-budget', () => ({
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
+  incrementTokenUsage: (...args: unknown[]) => mockIncrementTokenUsage(...args),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -146,6 +148,43 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(headers['cf-aig-metadata']).toBeDefined();
     });
 
+    it('increments token usage after a successful Anthropic response', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
+      mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 13, outputTokens: 8 });
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hello' }],
+        model: 'claude-sonnet-4-20250514',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 13, output_tokens: 8 },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/anthropic/v1/messages',
+        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+        { 'x-api-key': 'sk-ant-user-key-123' },
+      );
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ id: 'msg_1' });
+      expect(mockIncrementTokenUsage).toHaveBeenCalledWith(
+        expect.anything(),
+        'user1',
+        13,
+        8,
+        expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+      );
+    });
+
     it('applies rate limiting', async () => {
       mockVerifyAIProxyAuth.mockResolvedValueOnce({
         userId: 'user1', workspaceId: 'ws1', projectId: 'proj1',
@@ -225,6 +264,51 @@ describe('AI Proxy Passthrough Routes', () => {
       const headers = init.headers as Record<string, string>;
       expect(headers['Authorization']).toBe('Bearer sk-openai-key-123');
       expect(headers['cf-aig-metadata']).toBeDefined();
+    });
+
+    it('increments token usage and rejects the next over-budget request', async () => {
+      mockVerifyAIProxyAuth
+        .mockResolvedValueOnce({ userId: 'user1', workspaceId: 'ws1', projectId: 'proj1' })
+        .mockResolvedValueOnce({ userId: 'user1', workspaceId: 'ws1', projectId: 'proj1' });
+      mockCheckRateLimit
+        .mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 })
+        .mockResolvedValueOnce({ allowed: true, remaining: 28, resetAt: 9999 });
+      mockCheckTokenBudget
+        .mockResolvedValueOnce({ allowed: true })
+        .mockResolvedValueOnce({ allowed: false });
+      mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 21, outputTokens: 6 });
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'chatcmpl-1',
+        choices: [],
+        usage: { prompt_tokens: 21, completion_tokens: 6 },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+      const first = await postJson(
+        '/ai/proxy/valid-token/openai/v1/chat/completions',
+        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
+        { 'Authorization': 'Bearer sk-openai-key-123' },
+      );
+      expect(first.status).toBe(200);
+      await first.text();
+
+      const second = await postJson(
+        '/ai/proxy/valid-token/openai/v1/chat/completions',
+        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi again' }] },
+        { 'Authorization': 'Bearer sk-openai-key-123' },
+      );
+
+      expect(mockIncrementTokenUsage).toHaveBeenCalledWith(
+        expect.anything(),
+        'user1',
+        21,
+        6,
+        expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+      );
+      expect(second.status).toBe(429);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('returns 401 without Authorization header', async () => {

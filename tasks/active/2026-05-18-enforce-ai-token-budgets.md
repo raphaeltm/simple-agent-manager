@@ -15,13 +15,13 @@ Daily AI token budgets are checked before proxy requests, but successful proxy r
 
 ## Implementation Checklist
 
-- [ ] Add shared token-usage extraction/accounting helpers for OpenAI JSON, Anthropic JSON, OpenAI SSE, and Anthropic SSE.
-- [ ] Wire OpenAI-compatible `/ai/v1/chat/completions` responses for Workers AI, OpenAI, and translated Anthropic paths.
-- [ ] Wire native Anthropic `/ai/anthropic/v1/messages` responses while leaving `/messages/count_tokens` unmetered.
-- [ ] Wire passthrough Anthropic and OpenAI inference responses while leaving passthrough count_tokens unmetered.
-- [ ] Add unit tests for non-streaming extraction and streaming SSE accounting fallbacks.
-- [ ] Add route-level tests proving successful proxy calls increment usage and budget exhaustion returns 429 on the next request.
-- [ ] Run focused tests and the required quality checks.
+- [x] Add shared token-usage extraction/accounting helpers for OpenAI JSON, Anthropic JSON, OpenAI SSE, and Anthropic SSE.
+- [x] Wire OpenAI-compatible `/ai/v1/chat/completions` responses for Workers AI, OpenAI, and translated Anthropic paths.
+- [x] Wire native Anthropic `/ai/anthropic/v1/messages` responses while leaving `/messages/count_tokens` unmetered.
+- [x] Wire passthrough Anthropic and OpenAI inference responses while leaving passthrough count_tokens unmetered.
+- [x] Add unit tests for non-streaming extraction and streaming SSE accounting fallbacks.
+- [x] Add route-level tests proving successful proxy calls increment usage and budget exhaustion returns 429 on the next request.
+- [x] Run focused tests and the required quality checks.
 
 ## Acceptance Criteria
 

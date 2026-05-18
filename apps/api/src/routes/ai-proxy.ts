@@ -47,6 +47,7 @@ import {
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
+import { attachTokenUsageAccounting } from '../services/ai-token-usage-accounting';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
@@ -543,7 +544,15 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       status: response.status,
     });
 
-    return response;
+    let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
+    try { executionCtx = c.executionCtx; } catch { /* no exec ctx in tests */ }
+    return attachTokenUsageAccounting(response, {
+      env: c.env,
+      userId,
+      format: 'openai',
+      fallbackInputTokens: estimatedInputTokens,
+      executionCtx,
+    });
   } catch (err) {
     log.error('ai_proxy.fetch_error', {
       userId,
