@@ -105,6 +105,22 @@ describe('AgentCard', () => {
     expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument();
   });
 
+  it('shows platform OpenCode availability without implying a user key exists', () => {
+    const agent = makeAgent({
+      id: 'opencode',
+      name: 'OpenCode',
+      description: 'OpenCode agent',
+      configured: true,
+      fallbackCredentialSource: 'platform-opencode',
+    });
+
+    renderCard(agent, null, makeSettings('opencode'));
+
+    expect(screen.getByText('Platform AI')).toBeInTheDocument();
+    expect(screen.getByText(/No API key needed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument();
+  });
+
   it('saves configuration via onSaveSettings when Save Settings is clicked', async () => {
     renderCard(makeAgent(), null, makeSettings());
     await waitFor(() => {

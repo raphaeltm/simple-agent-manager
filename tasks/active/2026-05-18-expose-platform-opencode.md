@@ -16,25 +16,25 @@ Project Chat hides OpenCode from the agent selector when a user lacks a dedicate
 
 ## Checklist
 
-- [ ] Extract a neutral platform OpenCode availability helper from `platform-trial.ts`.
-- [ ] Update `/api/agents` to mark OpenCode configured when the platform path is available.
-- [ ] Extend `AgentInfo.fallbackCredentialSource` with `platform-opencode`.
-- [ ] Preserve precedence: dedicated key > Scaleway cloud > platform OpenCode.
-- [ ] Update source-sensitive UI status/copy so platform-backed availability does not imply a user-owned key.
-- [ ] Add API tests for dedicated, Scaleway, platform-only, unavailable, and precedence cases.
-- [ ] Add Project Chat unit coverage showing platform OpenCode appears when the catalog returns it configured.
-- [ ] Run focused quality checks.
+- [x] Extract a neutral platform OpenCode availability helper from `platform-trial.ts`.
+- [x] Update `/api/agents` to mark OpenCode configured when the platform path is available.
+- [x] Extend `AgentInfo.fallbackCredentialSource` with `platform-opencode`.
+- [x] Preserve precedence: dedicated key > Scaleway cloud > platform OpenCode.
+- [x] Update source-sensitive UI status/copy so platform-backed availability does not imply a user-owned key.
+- [x] Add API tests for dedicated, Scaleway, platform-only, unavailable, and precedence cases.
+- [x] Add Project Chat unit coverage showing platform OpenCode appears when the catalog returns it configured.
+- [x] Run focused quality checks.
 
 ## Acceptance Criteria
 
-- [ ] `/api/agents` marks OpenCode configured when platform OpenCode is genuinely available.
-- [ ] Project Chat shows OpenCode whenever the catalog returns it configured through the platform path.
-- [ ] Users with other explicit agent credentials still see OpenCode if platform OpenCode is available.
-- [ ] Catalog precedence matches runtime precedence.
-- [ ] No non-OpenCode agent is affected by the new platform logic.
-- [ ] UI copy does not falsely imply a user-owned key for platform-backed OpenCode.
-- [ ] Scaleway fallback and runtime platform fallback behavior remain intact.
-- [ ] Unit tests cover the key configuration and precedence combinations.
+- [x] `/api/agents` marks OpenCode configured when platform OpenCode is genuinely available.
+- [x] Project Chat shows OpenCode whenever the catalog returns it configured through the platform path.
+- [x] Users with other explicit agent credentials still see OpenCode if platform OpenCode is available.
+- [x] Catalog precedence matches runtime precedence.
+- [x] No non-OpenCode agent is affected by the new platform logic.
+- [x] UI copy does not falsely imply a user-owned key for platform-backed OpenCode.
+- [x] Scaleway fallback and runtime platform fallback behavior remain intact.
+- [x] Unit tests cover the key configuration and precedence combinations.
 
 ## References
 

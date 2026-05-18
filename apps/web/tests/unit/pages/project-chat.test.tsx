@@ -161,6 +161,18 @@ const AGENTS_MULTI = {
     { id: 'openai-codex', name: 'OpenAI Codex', configured: true, supportsAcp: true },
   ],
 };
+const AGENTS_WITH_PLATFORM_OPENCODE = {
+  agents: [
+    { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      configured: true,
+      supportsAcp: true,
+      fallbackCredentialSource: 'platform-opencode',
+    },
+  ],
+};
 
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
@@ -541,6 +553,21 @@ describe('ProjectChat agent type selection', () => {
     expect(select.options[1]!.textContent).toBe('OpenAI Codex');
     // Default is first agent
     expect(select.value).toBe('claude-code');
+  });
+
+  it('shows platform-backed OpenCode when the catalog marks it configured', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_WITH_PLATFORM_OPENCODE);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
+    const optionLabels = Array.from(select.options, (option) => option.textContent);
+    expect(optionLabels).toEqual(['Claude Code', 'OpenCode']);
   });
 
   it('submits task with selected agent type', async () => {

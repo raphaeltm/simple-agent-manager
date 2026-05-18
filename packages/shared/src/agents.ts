@@ -149,8 +149,8 @@ export interface AgentInfo {
   supportsAcp: boolean;
   configured: boolean;
   credentialHelpUrl: string;
-  /** When configured via a cloud provider credential rather than a dedicated agent key */
-  fallbackCredentialSource: 'scaleway-cloud' | null;
+  /** When configured through a fallback path rather than a dedicated agent key */
+  fallbackCredentialSource: 'scaleway-cloud' | 'platform-opencode' | null;
 }
 
 /** Credential kinds supported by agents */

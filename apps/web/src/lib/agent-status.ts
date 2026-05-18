@@ -15,7 +15,8 @@ export interface AgentConnectionSummary {
  * Compute the connection status label for an agent card header.
  *
  * Rules:
- * - OpenCode with `platform` provider → "Platform AI" (connected, no key needed)
+ * - OpenCode with platform provider or platform catalog fallback
+ *   → "Platform AI" (connected, no key needed)
  * - Any active credential → agent-provided label, fallback to kind-based label
  * - Scaleway-cloud fallback (user scope only, OpenCode with scaleway/no-provider)
  *   → "Using Scaleway Cloud Key" (connected)
@@ -34,7 +35,9 @@ export function getAgentConnectionSummary(
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
 
   const isOpenCodePlatform =
-    scope === 'user' && agent.id === 'opencode' && opencodeProvider === 'platform';
+    scope === 'user' &&
+    agent.id === 'opencode' &&
+    (opencodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
   const usesScalewayFallback =
     scope === 'user' &&
     agent.fallbackCredentialSource === 'scaleway-cloud' &&

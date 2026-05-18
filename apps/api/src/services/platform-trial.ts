@@ -18,15 +18,20 @@ export interface TrialStatus {
   dailyTokenUsage: { input: number; output: number } | null;
 }
 
+export interface PlatformOpencodeAvailability {
+  available: boolean;
+  hasInfraCredential: boolean;
+  hasAgentCredential: boolean;
+}
+
 /**
- * Check whether the platform trial is available for the current user.
- * Trial requires: (1) a platform cloud credential exists, and (2) the AI proxy is enabled.
+ * Check whether the platform OpenCode path is available.
+ * Requires: (1) a platform cloud credential exists, and (2) the AI proxy is enabled.
  */
-export async function getTrialStatus(
+export async function getPlatformOpencodeAvailability(
   db: ReturnType<typeof drizzle>,
-  userId: string,
   env: Env,
-): Promise<TrialStatus> {
+): Promise<PlatformOpencodeAvailability> {
   const aiProxyEnabled = (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
 
   // Check for platform cloud credential. Decryption can fail with a DOMException
@@ -51,14 +56,29 @@ export async function getTrialStatus(
   // The AI proxy itself serves as the agent credential (no separate platform agent credential needed)
   const hasAgentCredential = aiProxyEnabled;
 
-  const available = hasInfraCredential && hasAgentCredential;
+  return {
+    available: hasInfraCredential && hasAgentCredential,
+    hasInfraCredential,
+    hasAgentCredential,
+  };
+}
 
-  if (!available) {
+/**
+ * Check whether the platform trial is available for the current user.
+ */
+export async function getTrialStatus(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  env: Env,
+): Promise<TrialStatus> {
+  const availability = await getPlatformOpencodeAvailability(db, env);
+
+  if (!availability.available) {
     return {
       available: false,
       agentType: null,
-      hasInfraCredential,
-      hasAgentCredential,
+      hasInfraCredential: availability.hasInfraCredential,
+      hasAgentCredential: availability.hasAgentCredential,
       dailyTokenBudget: null,
       dailyTokenUsage: null,
     };
@@ -73,8 +93,8 @@ export async function getTrialStatus(
   return {
     available: true,
     agentType: 'opencode',
-    hasInfraCredential,
-    hasAgentCredential,
+    hasInfraCredential: availability.hasInfraCredential,
+    hasAgentCredential: availability.hasAgentCredential,
     dailyTokenBudget: { input: inputLimit, output: outputLimit },
     dailyTokenUsage: { input: usage.inputTokens, output: usage.outputTokens },
   };

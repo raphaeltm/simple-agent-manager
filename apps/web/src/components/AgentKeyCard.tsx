@@ -47,7 +47,10 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider).
   // Project scope does not display provider-derived fallbacks — provider selection is user-scoped,
   // so the project card would be unable to reason about it correctly.
-  const isOpenCodePlatform = scope === 'user' && agent.id === 'opencode' && opencodeProvider === 'platform';
+  const isOpenCodePlatform =
+    scope === 'user' &&
+    agent.id === 'opencode' &&
+    (opencodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
   const usesScalewayFallback =
     scope === 'user' &&
     agent.fallbackCredentialSource === 'scaleway-cloud' &&
