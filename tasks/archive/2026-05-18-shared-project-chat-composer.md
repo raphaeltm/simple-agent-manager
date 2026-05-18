@@ -29,8 +29,24 @@ Backend mention enrichment already applies to both paths, so this task is fronte
 - [x] Add or update unit tests proving the shared composer exposes slash-command and `@mention` autocomplete, auto-grows, sends with Ctrl/Cmd+Enter, and preserves new-chat controls.
 - [x] Add or update tests proving active follow-up inputs expose slash-command and `@mention` autocomplete when profiles/commands are available.
 - [x] Add or run Playwright visual audit coverage for new-chat and active-session composers on mobile 375x667 and desktop 1280x800 with mock normal, long text, many/empty/error/special-character scenarios as applicable.
-- [ ] Run targeted validation during implementation, then full `pnpm lint && pnpm typecheck && pnpm test && pnpm build` before PR.
-- [ ] Run required review skills: `ui-ux-specialist`, `task-completion-validator`, and `constitution-validator` if the implementation introduces configurable/business constants.
+- [x] Run targeted validation during implementation, then full `pnpm lint && pnpm typecheck && pnpm test && pnpm build` before PR.
+- [x] Run required review skills: `ui-ux-specialist`, `task-completion-validator`, and `constitution-validator` if the implementation introduces configurable/business constants.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/project-chat-composer.test.tsx tests/unit/pages/project-chat.test.tsx` — passed.
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/project-chat-composer-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` — passed; screenshots saved under `.codex/tmp/playwright-screenshots/`.
+- `pnpm lint` — passed with existing warnings only.
+- `pnpm typecheck` — passed.
+- `pnpm test` — passed: 19 turbo tasks successful; web unit suite 162 files / 2,094 tests passed.
+- `pnpm build` — passed with existing Vite chunk-size/dynamic-import warnings.
+
+## Review Skill Results
+
+- `ui-ux-specialist`: PASS. Mobile 375x667 and desktop 1280x800 audits cover new-chat long text, slash palette, mention palette, active follow-up slash palette, and active follow-up mention palette. Assertions verified no horizontal overflow and mobile touch targets >= 44px.
+- `test-engineer`: PASS. New unit tests cover shared composer slash selection, mention selection, voice append, auto-grow cap, Ctrl/Cmd+Enter send, and follow-up autocomplete without new-task controls. Playwright test mocks realistic API/project/session/profile/command state through the page boundary.
+- `constitution-validator`: PASS. Introduced constants are UI geometry/test fixture values (`TEXTAREA_MAX_HEIGHT_PX`, 44px touch targets, viewport sizes), not business/configuration limits requiring environment-driven configuration.
+- `task-completion-validator`: PASS. Acceptance criteria map to implemented diff and passing validations; backend mention enrichment was not changed.
 
 ## Acceptance Criteria
 
