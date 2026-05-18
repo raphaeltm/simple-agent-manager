@@ -294,6 +294,8 @@ export function ProjectChat() {
               onCloseConversation={state.handleCloseConversation}
               closingConversation={state.closingConversation}
               closeError={state.closeError}
+              agentProfiles={state.agentProfiles}
+              slashCommands={state.slashCommands}
             />
           </div>
         )}

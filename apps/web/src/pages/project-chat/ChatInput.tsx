@@ -1,14 +1,14 @@
-import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
-import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
+import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { Paperclip, Settings, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Settings } from 'lucide-react';
+import type { MutableRefObject } from 'react';
+import { useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../../components/agent-profiles/ProfileSelector';
 import { DevcontainerConfigSelect } from '../../components/devcontainer/DevcontainerConfigSelect';
+import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { formatFileSize } from '../../lib/file-utils';
 
 interface ChatAttachmentDisplay {
   file: File;
@@ -72,12 +72,9 @@ export function ChatInput({
   attachments?: ChatAttachmentDisplay[];
   onFilesSelected?: (files: FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
-  fileInputRef?: React.RefObject<HTMLInputElement | null>;
+  fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
 }) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const paletteRef = useRef<SlashCommandPaletteHandle>(null);
-  const mentionPaletteRef = useRef<MentionPaletteHandle>(null);
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
 
@@ -86,135 +83,12 @@ export function ChatInput({
     ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
     : null;
 
-  // Slash command palette state.
-  // dismissedFilterRef tracks the exact filter string at the time the user pressed
-  // Escape — the palette stays closed until the filter changes (user types more).
-  const dismissedFilterRef = useRef<string | null>(null);
-  const slashMatch = value.match(/^\/(\S*)$/);
-  const slashFilter = slashMatch?.[1] ?? '';
-  // Clear the dismissed state whenever the input exits slash-command mode entirely
-  // (e.g., user cleared the field) so the next "/" still opens the palette.
-  if (!slashMatch && dismissedFilterRef.current !== null) {
-    dismissedFilterRef.current = null;
-  }
-  const showPalette =
-    !!slashMatch &&
-    (slashCommands?.length ?? 0) > 0 &&
-    dismissedFilterRef.current !== slashFilter;
-
-  // Mention palette state — triggered by @word anywhere in text.
-  // We track cursor position to detect the @trigger relative to where the user is typing.
-  const [cursorPos, setCursorPos] = useState(0);
-  const mentionDismissedRef = useRef<string | null>(null);
-
-  // Extract the @mention being typed at the current cursor position.
-  // Look backwards from cursor to find the most recent unmatched "@".
-  const textBeforeCursor = value.slice(0, cursorPos);
-  const mentionTriggerMatch = textBeforeCursor.match(/@(\w*)$/);
-  const mentionFilter = mentionTriggerMatch?.[1] ?? '';
-  const mentionTriggerIndex = mentionTriggerMatch?.index ?? -1;
-
-  if (!mentionTriggerMatch && mentionDismissedRef.current !== null) {
-    mentionDismissedRef.current = null;
-  }
-  const showMentionPalette =
-    !!mentionTriggerMatch &&
-    agentProfiles.length > 0 &&
-    !showPalette &&
-    mentionDismissedRef.current !== mentionFilter;
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Auto-grow: resize textarea to fit content up to max-height
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-  }, [value]);
-
-  const handleTranscription = useCallback(
-    (text: string) => {
-      const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
-      onChange(value + separator + text);
-      inputRef.current?.focus();
-    },
-    [value, onChange],
-  );
-
-  const handleCommandSelect = useCallback(
-    (cmd: SlashCommand) => {
-      onChange(`/${cmd.name} `);
-      inputRef.current?.focus();
-    },
-    [onChange],
-  );
-
-  const handleDismissPalette = useCallback(() => {
-    // Record the current filter as dismissed so the palette stays closed until
-    // the user changes the input further. Does NOT clear the typed text.
-    dismissedFilterRef.current = slashFilter;
-    inputRef.current?.focus();
-  }, [slashFilter]);
-
-  const handleMentionSelect = useCallback(
-    (profile: { id: string; name: string; description: string | null }) => {
-      // Replace the @filter text with @ProfileName at the cursor position.
-      // The name may contain spaces — use @"Multi Word" syntax in that case.
-      const needsQuotes = profile.name.includes(' ');
-      const mention = needsQuotes ? `@"${profile.name}" ` : `@${profile.name} `;
-      const before = value.slice(0, mentionTriggerIndex);
-      const after = value.slice(cursorPos);
-      const newValue = before + mention + after;
-      onChange(newValue);
-      // Move cursor to after the inserted mention
-      const newCursorPos = before.length + mention.length;
-      setCursorPos(newCursorPos);
-      // Set cursor in textarea after React re-renders
-      requestAnimationFrame(() => {
-        const el = inputRef.current;
-        if (el) {
-          el.focus();
-          el.setSelectionRange(newCursorPos, newCursorPos);
-        }
-      });
-    },
-    [value, onChange, mentionTriggerIndex, cursorPos],
-  );
-
-  const handleDismissMentionPalette = useCallback(() => {
-    mentionDismissedRef.current = mentionFilter;
-    inputRef.current?.focus();
-  }, [mentionFilter]);
-
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       {error && (
         <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
         </div>
-      )}
-      {slashCommands && slashCommands.length > 0 && (
-        <SlashCommandPalette
-          ref={paletteRef}
-          commands={slashCommands}
-          filter={slashFilter}
-          onSelect={handleCommandSelect}
-          onDismiss={handleDismissPalette}
-          visible={showPalette}
-        />
-      )}
-      {agentProfiles.length > 0 && (
-        <MentionPalette
-          ref={mentionPaletteRef}
-          profiles={agentProfiles.map((p) => ({ id: p.id, name: p.name, description: p.description }))}
-          filter={mentionFilter}
-          onSelect={handleMentionSelect}
-          onDismiss={handleDismissMentionPalette}
-          visible={showMentionPalette}
-        />
       )}
       {isMobile ? (
         /* Mobile: compact pill bar — no labels, single row */
@@ -392,109 +266,23 @@ export function ChatInput({
           )}
         </div>
       )}
-      {/* Attachment chips */}
-      {attachments && attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {attachments.map((att, index) => (
-            <div
-              key={`${att.file.name}-${index}`}
-              className="relative flex items-center gap-1.5 py-1 px-2 rounded-sm bg-page border border-border-default text-xs max-w-[220px] overflow-hidden"
-            >
-              <span className="truncate text-fg-primary" title={att.file.name}>{att.file.name}</span>
-              <span className="text-fg-muted shrink-0">
-                {att.status === 'uploading' ? `${att.progress}%` : formatFileSize(att.file.size)}
-              </span>
-              {att.status === 'error' && <span className="text-danger shrink-0" title={att.error}>!</span>}
-              {onRemoveAttachment && (
-                <button
-                  type="button"
-                  onClick={() => onRemoveAttachment(index)}
-                  className="shrink-0 p-0.5 bg-transparent border-none text-fg-muted hover:text-fg-primary cursor-pointer"
-                  aria-label={`Remove ${att.file.name}`}
-                >
-                  <X size={12} />
-                </button>
-              )}
-              {att.status === 'uploading' && (
-                <div className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all" style={{ width: `${att.progress}%` }} />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="flex gap-2 items-end">
-        {/* Attachment button */}
-        {onFilesSelected && (
-          <>
-            <input
-              ref={fileInputRef as React.RefObject<HTMLInputElement>}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => onFilesSelected(e.target.files)}
-            />
-            <button
-              type="button"
-              onClick={() => (fileInputRef as React.RefObject<HTMLInputElement>)?.current?.click()}
-              disabled={submitting || uploading}
-              className="shrink-0 p-2 bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              aria-label="Attach files"
-              title="Attach files to this task"
-            >
-              <Paperclip size={18} />
-            </button>
-          </>
-        )}
-        <textarea
-          ref={inputRef}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setCursorPos(e.target.selectionStart ?? 0);
-          }}
-          onSelect={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onKeyDown={(e) => {
-            // Delegate to slash command palette first, then mention palette
-            if (paletteRef.current?.handleKeyDown(e as unknown as React.KeyboardEvent)) return;
-            if (mentionPaletteRef.current?.handleKeyDown(e as unknown as React.KeyboardEvent)) return;
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) {
-              e.preventDefault();
-              onSubmit();
-            }
-          }}
-          placeholder={placeholder}
-          disabled={submitting}
-          rows={1}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={showPalette || showMentionPalette}
-          aria-controls={showPalette ? 'slash-palette-listbox' : showMentionPalette ? 'mention-palette-listbox' : undefined}
-          aria-activedescendant={showPalette ? paletteRef.current?.activeDescendantId : showMentionPalette ? mentionPaletteRef.current?.activeDescendantId : undefined}
-          className="flex-1 p-2 px-3 bg-[rgba(10,15,13,0.6)] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto focus:border-[rgba(34,197,94,0.35)] focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08),0_0_20px_rgba(22,163,74,0.08)] transition-all"
-        />
-        <VoiceButton
-          onTranscription={handleTranscription}
-          disabled={submitting}
-          apiUrl={transcribeApiUrl}
-        />
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={submitting || !value.trim() || uploading}
-          className={`px-3 py-2 border-none rounded-md text-base font-medium whitespace-nowrap transition-all ${
-            submitting || !value.trim() || uploading
-              ? 'bg-inset text-fg-muted cursor-default opacity-50'
-              : 'bg-[linear-gradient(135deg,var(--sam-color-accent-primary),#22c55e)] text-white cursor-pointer shadow-[0_0_16px_rgba(22,163,74,0.3)] hover:shadow-[0_0_24px_rgba(22,163,74,0.4)] hover:scale-[1.03]'
-          }`}
-        >
-          {submitting ? 'Sending...' : 'Send'}
-        </button>
-      </div>
-      {!isMobile && (
-        <div className="sam-type-caption text-fg-muted mt-1">
-          Press Ctrl+Enter to send, Enter for new line
-        </div>
-      )}
+      <ProjectChatComposer
+        value={value}
+        onChange={onChange}
+        onSend={onSubmit}
+        sending={submitting}
+        placeholder={placeholder}
+        transcribeApiUrl={transcribeApiUrl}
+        slashCommands={slashCommands}
+        agentProfiles={agentProfiles}
+        attachments={attachments}
+        onFilesSelected={onFilesSelected}
+        onRemoveAttachment={onRemoveAttachment}
+        fileInputRef={fileInputRef}
+        uploading={uploading}
+        showShortcutHint={!isMobile}
+        attachTitle="Attach files to this task"
+      />
       {selectedProfile && (
         <ProfileFormDialog
           isOpen={editProfileOpen}
