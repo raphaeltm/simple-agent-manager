@@ -44,3 +44,21 @@ Project Chat hides OpenCode from the agent selector when a user lacks a dedicate
 - `apps/api/src/services/platform-trial.ts`
 - `packages/shared/src/agents.ts`
 - `apps/web/src/pages/project-chat/useProjectChatState.ts`
+
+## Completion Notes
+
+- Shared platform OpenCode availability logic was extracted from `platform-trial.ts`.
+- `/api/agents` now marks OpenCode configured through the platform proxy path when no higher-precedence credential path applies.
+- `AgentInfo.fallbackCredentialSource` now supports `platform-opencode`.
+- Source-sensitive web status/copy treats platform-backed OpenCode as platform availability, not a user-owned key.
+- Task completion validation and specialist reviews found no blocking gaps.
+
+## Validation
+
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/agents-catalog.test.ts`
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/pages/project-chat.test.tsx tests/unit/components/agent-card.test.tsx`
+- `pnpm --dir apps/web exec playwright test tests/playwright/agent-settings-audit.spec.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)'`
