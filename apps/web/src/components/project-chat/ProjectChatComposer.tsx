@@ -2,7 +2,7 @@ import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } fr
 import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Paperclip, X } from 'lucide-react';
-import type { MutableRefObject, RefObject } from 'react';
+import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
@@ -26,7 +26,7 @@ interface ProjectChatComposerProps {
   attachments?: ProjectChatComposerAttachment[];
   onFilesSelected?: (files: FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
-  fileInputRef?: RefObject<HTMLInputElement | null>;
+  fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
   showShortcutHint?: boolean;
   attachTitle?: string;
@@ -100,7 +100,7 @@ export function ProjectChatComposer({
   const setFileInput = useCallback((node: HTMLInputElement | null) => {
     internalFileInputRef.current = node;
     if (fileInputRef) {
-      (fileInputRef as MutableRefObject<HTMLInputElement | null>).current = node;
+      fileInputRef.current = node;
     }
   }, [fileInputRef]);
 

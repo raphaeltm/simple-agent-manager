@@ -1,7 +1,7 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Settings } from 'lucide-react';
-import type { RefObject } from 'react';
+import type { MutableRefObject } from 'react';
 import { useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
@@ -72,7 +72,7 @@ export function ChatInput({
   attachments?: ChatAttachmentDisplay[];
   onFilesSelected?: (files: FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
-  fileInputRef?: RefObject<HTMLInputElement | null>;
+  fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
 }) {
   const isMobile = useIsMobile();
