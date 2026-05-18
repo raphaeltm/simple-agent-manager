@@ -185,6 +185,29 @@ describe('AI Proxy Passthrough Routes', () => {
       );
     });
 
+    it('does not increment token usage for Anthropic count_tokens responses', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ input_tokens: 13 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/anthropic/v1/messages/count_tokens',
+        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+        { 'x-api-key': 'sk-ant-user-key-123' },
+      );
+
+      expect(res.status).toBe(200);
+      await res.text();
+      expect(mockCheckTokenBudget).toHaveBeenCalledOnce();
+      expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
+    });
+
     it('applies rate limiting', async () => {
       mockVerifyAIProxyAuth.mockResolvedValueOnce({
         userId: 'user1', workspaceId: 'ws1', projectId: 'proj1',

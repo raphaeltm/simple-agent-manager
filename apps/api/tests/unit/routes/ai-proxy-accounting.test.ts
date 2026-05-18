@@ -77,6 +77,15 @@ function postChat(body: Record<string, unknown>) {
   }, makeEnv());
 }
 
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -114,5 +123,73 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
       4,
       expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
     );
+  });
+
+  it('increments token usage after a successful streaming response', async () => {
+    mockVerifyAIProxyAuth.mockResolvedValueOnce({
+      userId: 'user1',
+      workspaceId: 'ws1',
+      projectId: 'proj1',
+    });
+    mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+    mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
+    const incremented = new Promise<void>((resolve) => {
+      mockIncrementTokenUsage.mockImplementationOnce(() => {
+        resolve();
+        return Promise.resolve({ inputTokens: 11, outputTokens: 5 });
+      });
+    });
+    mockFetch.mockResolvedValueOnce(new Response(streamFromText([
+      'data: {"choices":[{"delta":{"content":"hi"}}]}',
+      '',
+      'data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":5}}',
+      '',
+      'data: [DONE]',
+      '',
+      '',
+    ].join('\n')), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+
+    const res = await postChat({
+      model: '@cf/test/model',
+      stream: true,
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    await incremented;
+    expect(mockIncrementTokenUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      'user1',
+      11,
+      5,
+      expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+    );
+  });
+
+  it('does not increment token usage for failed upstream responses', async () => {
+    mockVerifyAIProxyAuth.mockResolvedValueOnce({
+      userId: 'user1',
+      workspaceId: 'ws1',
+      projectId: 'proj1',
+    });
+    mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+    mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'upstream failed' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const res = await postChat({
+      model: '@cf/test/model',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(res.status).toBe(500);
+    await res.text();
+    expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
   });
 });

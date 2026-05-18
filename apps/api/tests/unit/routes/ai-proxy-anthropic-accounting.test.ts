@@ -63,6 +63,14 @@ function postMessage(body: Record<string, unknown>) {
   }, { DATABASE: {}, KV: {}, AI_PROXY_ENABLED: 'true' });
 }
 
+function postCountTokens(body: Record<string, unknown>) {
+  return app.request('/ai/anthropic/v1/messages/count_tokens', {
+    method: 'POST',
+    headers: { 'x-api-key': 'ws-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, { DATABASE: {}, KV: {}, AI_PROXY_ENABLED: 'true' });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -108,5 +116,33 @@ describe('native Anthropic AI proxy token accounting', () => {
       5,
       expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
     );
+  });
+
+  it('does not increment token usage for count_tokens responses', async () => {
+    mockVerifyAIProxyAuth.mockResolvedValueOnce({
+      userId: 'user1',
+      workspaceId: 'ws1',
+      projectId: 'proj1',
+    });
+    mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+    mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
+    mockResolveUpstreamAuth.mockResolvedValueOnce({
+      headers: { 'x-api-key': 'platform-key' },
+      billingMode: 'platform-key',
+    });
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ input_tokens: 12 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const res = await postCountTokens({
+      model: 'claude-sonnet-4-20250514',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockCheckTokenBudget).toHaveBeenCalledOnce();
+    expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
   });
 });
