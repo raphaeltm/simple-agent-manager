@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_AI_PROXY_MODEL,
   DEFAULT_SANDBOX_MODEL,
   filterModelsForAgentLoop,
   type ModelAllowedScope,
@@ -21,6 +22,12 @@ describe('AI Model Registry', () => {
     it('has exactly one default model', () => {
       const defaults = PLATFORM_AI_MODELS.filter((m) => m.isDefault);
       expect(defaults).toHaveLength(1);
+    });
+
+    it('keeps the proxy default aligned with the default platform model', () => {
+      const defaultModel = PLATFORM_AI_MODELS.find((m) => m.isDefault);
+
+      expect(defaultModel?.id).toBe(DEFAULT_AI_PROXY_MODEL);
     });
 
     it('has unique model IDs', () => {
@@ -214,6 +221,24 @@ describe('AI Model Registry', () => {
   });
 
   describe('helper functions', () => {
+    it('includes GPT-5.4 Mini with OpenAI Unified Billing metadata', () => {
+      const model = PLATFORM_AI_MODELS.find((m) => m.id === 'gpt-5.4-mini');
+
+      expect(model).toMatchObject({
+        label: 'GPT-5.4 Mini',
+        provider: 'openai',
+        tier: 'standard',
+        costPer1kInputTokens: 0.00075,
+        costPer1kOutputTokens: 0.0045,
+        contextWindow: 400000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'openai-fast',
+        allowedScopes: ['workspace', 'project'],
+        unifiedApiModelId: 'openai/gpt-5.4-mini',
+      });
+    });
+
     it('can look up model by ID', () => {
       const model = PLATFORM_AI_MODELS.find((m) => m.id === 'claude-sonnet-4-6');
       expect(model).toBeDefined();

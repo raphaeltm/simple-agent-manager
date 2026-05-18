@@ -26,7 +26,7 @@ import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { resolveBillingMode } from '../services/ai-billing';
+import { resolveBillingMode, resolveUnifiedBillingToken } from '../services/ai-billing';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 const adminAIProxyRoutes = new Hono<{ Bindings: Env }>();
@@ -83,7 +83,7 @@ adminAIProxyRoutes.get('/config', async (c) => {
     hasPlatformCredential(c.env, 'claude-code'),
     hasPlatformCredential(c.env, 'codex'),
   ]);
-  const hasUnifiedBilling = !!c.env.CF_AIG_TOKEN;
+  const hasUnifiedBilling = !!resolveUnifiedBillingToken(c.env);
   const billingMode = await resolveBillingMode(c.env);
 
   // Effective default: KV override > env var > shared constant
@@ -127,7 +127,7 @@ adminAIProxyRoutes.put('/config', async (c) => {
     throw errors.badRequest(`Unknown model: ${body.defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`);
   }
 
-  const hasUnifiedBilling = !!c.env.CF_AIG_TOKEN;
+  const hasUnifiedBilling = !!resolveUnifiedBillingToken(c.env);
 
   // Anthropic models require a platform credential or Unified Billing
   if (model.provider === 'anthropic' && !hasUnifiedBilling) {
@@ -188,10 +188,10 @@ adminAIProxyRoutes.patch('/config', async (c) => {
   }
 
   // Validate that unified billing can work with available credentials
-  if (body.billingMode === 'unified' && !c.env.CF_AIG_TOKEN) {
+  if (body.billingMode === 'unified' && !resolveUnifiedBillingToken(c.env)) {
     throw errors.badRequest(
-      'Cannot set billing mode to "unified" without CF_AIG_TOKEN configured. '
-      + 'Set CF_AIG_TOKEN as a Worker secret first, or use "auto" mode.',
+      'Cannot set billing mode to "unified" without CF_AIG_TOKEN or CF_API_TOKEN configured. '
+      + 'Set CF_AIG_TOKEN as a Worker secret first, configure CF_API_TOKEN fallback, or use "auto" mode.',
     );
   }
 

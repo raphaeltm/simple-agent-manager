@@ -118,7 +118,7 @@ export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
  * Out-of-box default is a Cloudflare-billed Workers AI model — no separate provider API key required.
  * Admins can override via the AI Proxy admin page (stored in KV) or
  * the AI_PROXY_DEFAULT_MODEL env var. */
-export const DEFAULT_AI_PROXY_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+export const DEFAULT_AI_PROXY_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Default model for Anthropic proxy fallback (Claude Code agent).
  * Override via AI_PROXY_DEFAULT_ANTHROPIC_MODEL env var. */
@@ -187,7 +187,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   {
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
-    isDefault: true,
     provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.00027,
@@ -230,6 +229,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   {
     id: '@cf/google/gemma-4-26b-a4b-it',
     label: 'Gemma 4 26B',
+    isDefault: true,
     provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.0001,
@@ -326,6 +326,20 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'openai-standard',
     allowedScopes: ['workspace', 'project'],
     unifiedApiModelId: 'openai/gpt-4.1',
+  },
+  {
+    id: 'gpt-5.4-mini',
+    label: 'GPT-5.4 Mini',
+    provider: 'openai',
+    tier: 'standard',
+    costPer1kInputTokens: 0.00075,
+    costPer1kOutputTokens: 0.0045,
+    contextWindow: 400000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-fast',
+    allowedScopes: ['workspace', 'project'],
+    unifiedApiModelId: 'openai/gpt-5.4-mini',
   },
   {
     id: 'gpt-5.2',
