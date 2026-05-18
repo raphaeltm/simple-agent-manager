@@ -28,7 +28,7 @@ Backend mention enrichment already applies to both paths, so this task is fronte
 - [x] Pass `agentProfiles` and `slashCommands` from the project chat state into `ProjectMessageView` and then follow-up input without introducing duplicate fetches.
 - [x] Add or update unit tests proving the shared composer exposes slash-command and `@mention` autocomplete, auto-grows, sends with Ctrl/Cmd+Enter, and preserves new-chat controls.
 - [x] Add or update tests proving active follow-up inputs expose slash-command and `@mention` autocomplete when profiles/commands are available.
-- [ ] Add or run Playwright visual audit coverage for new-chat and active-session composers on mobile 375x667 and desktop 1280x800 with mock normal, long text, many/empty/error/special-character scenarios as applicable.
+- [x] Add or run Playwright visual audit coverage for new-chat and active-session composers on mobile 375x667 and desktop 1280x800 with mock normal, long text, many/empty/error/special-character scenarios as applicable.
 - [ ] Run targeted validation during implementation, then full `pnpm lint && pnpm typecheck && pnpm test && pnpm build` before PR.
 - [ ] Run required review skills: `ui-ux-specialist`, `task-completion-validator`, and `constitution-validator` if the implementation introduces configurable/business constants.
 
