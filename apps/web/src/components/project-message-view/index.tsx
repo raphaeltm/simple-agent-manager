@@ -6,8 +6,9 @@
  * TypewriterText animates the latest assistant message; historical messages
  * render instantly.
  */
-import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ConversationItem, SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
+import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, Clock } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,6 +46,10 @@ interface ProjectMessageViewProps {
   closingConversation?: boolean;
   /** Error from a failed close-conversation attempt. */
   closeError?: string | null;
+  /** Agent profiles available for @mention autocomplete in follow-up prompts. */
+  agentProfiles?: AgentProfile[];
+  /** Slash commands available for follow-up prompt autocomplete. */
+  slashCommands?: SlashCommand[];
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -58,6 +63,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onCloseConversation,
   closingConversation,
   closeError,
+  agentProfiles = [],
+  slashCommands = [],
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -347,6 +354,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               ? 'Send a message to resume the agent...'
               : 'Send a message...'}
           transcribeApiUrl={lc.transcribeApiUrl}
+          agentProfiles={agentProfiles}
+          slashCommands={slashCommands}
         />
       )}
       {lc.sessionState === 'terminated' && (

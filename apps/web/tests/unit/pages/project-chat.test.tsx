@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   summarizeSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
+  availableCommands: [] as Array<{ name: string; description: string; source: 'client' | 'static' | 'cached' | 'agent' }>,
   /** Captures the onSessionChange callback passed to useProjectWebSocket. */
   capturedOnSessionChange: null as (() => void) | null,
 }));
@@ -58,7 +59,7 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
 }));
 
 vi.mock('../../../src/hooks/useAvailableCommands', () => ({
-  useAvailableCommands: () => ({ commands: [], isLoading: false, persistCommands: vi.fn() }),
+  useAvailableCommands: () => ({ commands: mocks.availableCommands, isLoading: false, persistCommands: vi.fn() }),
 }));
 
 vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
@@ -181,6 +182,7 @@ describe('ProjectChat new chat button', () => {
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
+    mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
     mocks.summarizeSession.mockResolvedValue({
       summary: 'Summary of previous session',
@@ -782,6 +784,7 @@ describe('ProjectChat close conversation button', () => {
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
     mocks.listAgentProfiles.mockResolvedValue([]);
+    mocks.availableCommands = [];
     mocks.closeConversationTask.mockResolvedValue({});
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
@@ -810,6 +813,47 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
     });
+  });
+
+  it('passes loaded agent profiles and slash commands to active session follow-ups', async () => {
+    const profile = {
+      id: 'profile-1',
+      projectId: PROJECT_ID,
+      userId: 'user-1',
+      name: 'Codex',
+      description: 'Review profile',
+      agentType: 'openai-codex',
+      model: null,
+      permissionMode: null,
+      systemPromptAppend: null,
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      devcontainerConfigName: null,
+      taskMode: null,
+      isBuiltin: false,
+      createdAt: '2026-05-18T00:00:00.000Z',
+      updatedAt: '2026-05-18T00:00:00.000Z',
+    };
+    const command = { name: 'review', description: 'Review changes', source: 'cached' as const };
+    mocks.listAgentProfiles.mockResolvedValue([profile]);
+    mocks.availableCommands = [command];
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [IDLE_SESSION_WITH_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    expect(capturedMessageViewProps.current?.agentProfiles).toEqual([profile]);
+    expect(capturedMessageViewProps.current?.slashCommands).toEqual([command]);
   });
 });
 

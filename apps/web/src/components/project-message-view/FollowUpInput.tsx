@@ -1,6 +1,7 @@
-import { VoiceButton } from '@simple-agent-manager/acp-client';
-import { Paperclip } from 'lucide-react';
-import { useCallback, useRef } from 'react';
+import type { SlashCommand } from '@simple-agent-manager/acp-client';
+import type { AgentProfile } from '@simple-agent-manager/shared';
+
+import { ProjectChatComposer } from '../project-chat/ProjectChatComposer';
 
 /** Follow-up message input for active/idle sessions. */
 export function FollowUpInput({
@@ -12,6 +13,8 @@ export function FollowUpInput({
   uploading,
   placeholder,
   transcribeApiUrl,
+  slashCommands,
+  agentProfiles,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -21,83 +24,26 @@ export function FollowUpInput({
   uploading?: boolean;
   placeholder: string;
   transcribeApiUrl: string;
+  slashCommands?: SlashCommand[];
+  agentProfiles?: AgentProfile[];
 }) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleTranscription = useCallback(
-    (text: string) => {
-      const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
-      onChange(value + separator + text);
-      inputRef.current?.focus();
-    },
-    [value, onChange],
-  );
-
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
-      <div className="flex gap-2 items-end">
-        {onUploadFiles && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  onUploadFiles(e.target.files);
-                  e.target.value = ''; // reset so same file can be re-uploaded
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              aria-label="Attach files"
-              className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-              style={{ opacity: uploading ? 0.5 : 1 }}
-            >
-              <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
-            </button>
-          </>
-        )}
-        <textarea
-          ref={inputRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !sending) {
-              e.preventDefault();
-              onSend();
-            }
-          }}
-          placeholder={placeholder}
-          disabled={sending}
-          rows={1}
-          className="flex-1 p-2 px-3 bg-inset border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] shadow-inner"
-          style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-inset) 88%, black)' }}
-        />
-        <VoiceButton
-          onTranscription={handleTranscription}
-          disabled={sending}
-          apiUrl={transcribeApiUrl}
-        />
-        <button
-          type="button"
-          onClick={onSend}
-          disabled={sending || !value.trim()}
-          className="px-3 py-2 border-none rounded-md text-base font-medium"
-          style={{
-            backgroundColor: sending || !value.trim() ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
-            color: sending || !value.trim() ? 'var(--sam-color-fg-muted)' : 'white',
-            cursor: sending || !value.trim() ? 'default' : 'pointer',
-          }}
-        >
-          Send
-        </button>
-      </div>
+      <ProjectChatComposer
+        value={value}
+        onChange={onChange}
+        onSend={onSend}
+        sending={sending}
+        uploading={uploading}
+        placeholder={placeholder}
+        transcribeApiUrl={transcribeApiUrl}
+        slashCommands={slashCommands}
+        agentProfiles={agentProfiles}
+        onFilesSelected={onUploadFiles ? (files) => {
+          if (files && files.length > 0) onUploadFiles(files);
+        } : undefined}
+        showShortcutHint
+      />
     </div>
   );
 }
