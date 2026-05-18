@@ -42,6 +42,7 @@ import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
+import { GlassPrototype } from './pages/GlassPrototype';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
@@ -99,6 +100,8 @@ export default function App() {
           <Route path="/try/:trialId" element={<TryDiscovery />} />
           {/* SAM prototype — public, no auth */}
           <Route path="/sam" element={<SamPrototype />} />
+          {/* Glassmorphism panel prototype — public, no auth */}
+          <Route path="/prototype/glass" element={<GlassPrototype />} />
           {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
           {/* Protected routes with AppShell (persistent navigation) */}
