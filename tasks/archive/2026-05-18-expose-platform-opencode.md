@@ -52,6 +52,7 @@ Project Chat hides OpenCode from the agent selector when a user lacks a dedicate
 - `AgentInfo.fallbackCredentialSource` now supports `platform-opencode`.
 - Source-sensitive web status/copy treats platform-backed OpenCode as platform availability, not a user-owned key.
 - Task completion validation and specialist reviews found no blocking gaps.
+- The archived task record documents the `AgentInfo` source metadata change for PR preflight evidence.
 
 ## Validation
 
