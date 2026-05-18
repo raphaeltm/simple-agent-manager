@@ -12,24 +12,26 @@ vi.stubGlobal('fetch', mockFetch);
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: () => ({}) }));
 vi.mock('../../../src/db/schema', () => ({}));
-vi.mock('../../../src/services/ai-proxy-shared', () => ({
-  verifyAIProxyAuth: (...args: unknown[]) => mockVerifyAIProxyAuth(...args),
-  extractCallbackToken: (authorization?: string, apiKey?: string) => authorization?.startsWith('Bearer ')
-    ? authorization.slice('Bearer '.length)
-    : apiKey ?? null,
-  AIProxyAuthError: class extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
+vi.mock('../../../src/services/ai-proxy-shared', () => {
+  class RouteAccountingAuthError extends Error {
+    constructor(message: string, readonly statusCode = 401) {
       super(message);
-      this.statusCode = statusCode;
       this.name = 'AIProxyAuthError';
     }
-  },
-  buildAIGatewayMetadata: () => '{"test":"metadata"}',
-  buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
-  buildAnthropicCountTokensUrl: () => 'https://gateway.example.com/anthropic/v1/messages/count_tokens',
-  isAnthropicModel: (id: string) => id.startsWith('claude-'),
-}));
+  }
+
+  return {
+    verifyAIProxyAuth: (...args: unknown[]) => mockVerifyAIProxyAuth(...args),
+    extractCallbackToken: (authorization?: string, apiKey?: string) => (
+      authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : apiKey ?? null
+    ),
+    AIProxyAuthError: RouteAccountingAuthError,
+    buildAIGatewayMetadata: () => '{"test":"metadata"}',
+    buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
+    buildAnthropicCountTokensUrl: () => 'https://gateway.example.com/anthropic/v1/messages/count_tokens',
+    isAnthropicModel: (id: string) => id.startsWith('claude-'),
+  };
+});
 vi.mock('../../../src/middleware/rate-limit', () => ({
   checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
   createRateLimitKey: (prefix: string, userId: string, window: number) => `${prefix}:${userId}:${window}`,

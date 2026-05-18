@@ -18,6 +18,10 @@ export interface TokenUsageAccountingOptions {
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
 }
 
+export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountingOptions {
+  headers: Headers;
+}
+
 export async function accountTokenUsageFromJson(
   payload: unknown,
   options: TokenUsageAccountingOptions,
@@ -75,6 +79,29 @@ export async function attachTokenUsageAccounting(
   }
 
   return new Response(responseText, { status: response.status, headers });
+}
+
+export function optionalExecutionContext(
+  getExecutionCtx: () => Pick<ExecutionContext, 'waitUntil'>,
+): Pick<ExecutionContext, 'waitUntil'> | undefined {
+  try {
+    return getExecutionCtx();
+  } catch {
+    return undefined;
+  }
+}
+
+export function attachUpstreamTokenUsageAccounting(
+  upstreamResponse: Response,
+  options: UpstreamTokenUsageAccountingOptions,
+): Promise<Response> {
+  return attachTokenUsageAccounting(
+    new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      headers: options.headers,
+    }),
+    options,
+  );
 }
 
 export function extractJsonTokenUsage(
