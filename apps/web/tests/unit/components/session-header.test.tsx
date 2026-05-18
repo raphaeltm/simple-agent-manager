@@ -451,4 +451,20 @@ describe('SessionHeader', () => {
     });
     expect(screen.getByLabelText('Fork session')).toBeInTheDocument();
   });
+
+  describe('hasContentBelow prop', () => {
+    it('includes bottom rounding and green glow when hasContentBelow is false (default)', () => {
+      const { container } = renderHeader();
+      const outer = container.firstElementChild as HTMLElement;
+      expect(outer.className).toContain('rounded-b-2xl');
+      expect(outer.className).toContain('after:');
+    });
+
+    it('suppresses bottom rounding and green glow when hasContentBelow is true', () => {
+      const { container } = renderHeader({ hasContentBelow: true });
+      const outer = container.firstElementChild as HTMLElement;
+      expect(outer.className).not.toContain('rounded-b-2xl');
+      expect(outer.className).not.toContain('after:');
+    });
+  });
 });

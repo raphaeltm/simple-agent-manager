@@ -27,6 +27,64 @@ import { useSessionLifecycle } from './useSessionLifecycle';
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
 
+/** Floating session header with optional error banner and summary. */
+function FloatingHeader({
+  projectId, lc, onSessionMutated, onRetry, onFork, lineageText,
+}: {
+  projectId: string;
+  lc: ReturnType<typeof useSessionLifecycle>;
+  onSessionMutated?: () => void;
+  onRetry?: () => void;
+  onFork?: () => void;
+  lineageText?: string;
+}) {
+  if (!lc.session) return null;
+  return (
+    <div className="absolute top-0 left-0 right-0 z-10">
+      <SessionHeader
+        projectId={projectId}
+        session={lc.session}
+        sessionState={lc.sessionState}
+        loading={lc.loading}
+        idleCountdownMs={lc.idleCountdownMs}
+        taskEmbed={lc.taskEmbed}
+        workspace={lc.workspace}
+        node={lc.node}
+        detectedPorts={lc.detectedPorts}
+        onSessionMutated={onSessionMutated}
+        onOpenFiles={lc.handleOpenFileBrowser}
+        onOpenGit={lc.handleOpenGitChanges}
+        onRetry={onRetry}
+        onFork={onFork}
+        lineageText={lineageText}
+        hasContentBelow={!!lc.taskEmbed?.errorMessage}
+      />
+      {lc.taskEmbed?.errorMessage && (
+        <ErrorBanner message={lc.taskEmbed.errorMessage} />
+      )}
+      {lc.taskEmbed?.outputSummary && (
+        <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
+      )}
+    </div>
+  );
+}
+
+/** Glass-chrome error banner with red accents, used below the session header. */
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div
+      className="glass-chrome glass-composited px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
+      style={{
+        backgroundColor: 'rgba(15, 8, 8, 0.68)',
+        boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
+      }}
+    >
+      <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
+      <span className="sam-type-caption text-danger break-words">{message}</span>
+    </div>
+  );
+}
+
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
@@ -176,37 +234,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
         <div className="flex-1 min-h-0 relative">
-          {/* Floating session header */}
-          {lc.session && (
-            <div className="absolute top-0 left-0 right-0 z-10">
-              <SessionHeader
-                projectId={projectId}
-                session={lc.session}
-                sessionState={lc.sessionState}
-                loading={lc.loading}
-                idleCountdownMs={lc.idleCountdownMs}
-                taskEmbed={lc.taskEmbed}
-                workspace={lc.workspace}
-                node={lc.node}
-                detectedPorts={lc.detectedPorts}
-                onSessionMutated={onSessionMutated}
-                onOpenFiles={lc.handleOpenFileBrowser}
-                onOpenGit={lc.handleOpenGitChanges}
-                onRetry={onRetry}
-                onFork={onFork}
-                lineageText={lineageText}
-              />
-              {lc.taskEmbed?.errorMessage && (
-                <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
-                  <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
-                  <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
-                </div>
-              )}
-              {lc.taskEmbed?.outputSummary && (
-                <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
-              )}
-            </div>
-          )}
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
           <div className="flex items-center justify-center h-full">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
@@ -215,37 +243,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
-          {/* Floating session header */}
-          {lc.session && (
-            <div className="absolute top-0 left-0 right-0 z-10">
-              <SessionHeader
-                projectId={projectId}
-                session={lc.session}
-                sessionState={lc.sessionState}
-                loading={lc.loading}
-                idleCountdownMs={lc.idleCountdownMs}
-                taskEmbed={lc.taskEmbed}
-                workspace={lc.workspace}
-                node={lc.node}
-                detectedPorts={lc.detectedPorts}
-                onSessionMutated={onSessionMutated}
-                onOpenFiles={lc.handleOpenFileBrowser}
-                onOpenGit={lc.handleOpenGitChanges}
-                onRetry={onRetry}
-                onFork={onFork}
-                lineageText={lineageText}
-              />
-              {lc.taskEmbed?.errorMessage && (
-                <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
-                  <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
-                  <span className="sam-type-caption text-danger break-words">{lc.taskEmbed.errorMessage}</span>
-                </div>
-              )}
-              {lc.taskEmbed?.outputSummary && (
-                <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
-              )}
-            </div>
-          )}
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
           <Virtuoso
             ref={virtuosoRef}
             style={{ height: '100%' }}
