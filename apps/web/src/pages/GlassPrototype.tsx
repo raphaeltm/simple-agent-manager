@@ -1,19 +1,17 @@
 /**
  * Glassmorphism prototype — unauthed route at /prototype/glass
  *
- * Renders real SessionHeader, TruncatedSummary, and AcpConversationItemView
+ * Renders real SessionHeader and AcpConversationItemView
  * components with mock data to demonstrate glass blur effects.
  * No API calls, no auth required.
  */
-import type { DetectedPort, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
-
+import type { DetectedPort, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { useState } from 'react';
 
-import type { ChatSessionResponse } from '../lib/api';
-import { SessionHeader } from '../components/project-message-view/SessionHeader';
-import { TruncatedSummary } from '../components/chat/TruncatedSummary';
 import { AcpConversationItemView } from '../components/project-message-view/AcpConversationItemView';
+import { SessionHeader } from '../components/project-message-view/SessionHeader';
+import type { ChatSessionResponse } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Mock data
@@ -49,23 +47,37 @@ const MOCK_WORKSPACE: WorkspaceResponse = {
   name: 'glassmorphism-migration',
   displayName: 'glassmorphism-migration',
   status: 'running',
-  vmSize: 'cx22',
+  vmSize: 'small',
   vmLocation: 'fsn1',
   nodeId: 'node-01NODEABC1234567890',
   workspaceProfile: null,
-} as WorkspaceResponse;
+  repository: 'https://github.com/raphaeltm/simple-agent-manager',
+  branch: 'sam/glassmorphism-migration',
+  vmIp: '95.217.1.100',
+  lastActivityAt: new Date().toISOString(),
+  errorMessage: null,
+  createdAt: new Date(Date.now() - 50 * 60_000).toISOString(),
+  updatedAt: new Date().toISOString(),
+};
 
 const MOCK_NODE: NodeResponse = {
   id: 'node-01NODEABC1234567890',
   name: 'sam-fsn1-cx22-a1b2',
-  status: 'active',
+  status: 'running',
   healthStatus: 'healthy',
   cloudProvider: 'hetzner',
-} as NodeResponse;
+  vmSize: 'small',
+  vmLocation: 'fsn1',
+  ipAddress: '95.217.1.100',
+  lastHeartbeatAt: new Date().toISOString(),
+  errorMessage: null,
+  createdAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+  updatedAt: new Date().toISOString(),
+};
 
 const MOCK_PORTS: DetectedPort[] = [
-  { port: 5173, label: 'Vite Dev Server', url: 'https://ws-01ABCDEFGH--5173.example.com', address: '0.0.0.0' },
-  { port: 8787, label: 'Wrangler', url: 'https://ws-01ABCDEFGH--8787.example.com', address: '127.0.0.1' },
+  { port: 5173, label: 'Vite Dev Server', url: 'https://ws-01ABCDEFGH--5173.example.com', address: '0.0.0.0', detectedAt: new Date().toISOString() },
+  { port: 8787, label: 'Wrangler', url: 'https://ws-01ABCDEFGH--8787.example.com', address: '127.0.0.1', detectedAt: new Date().toISOString() },
 ];
 
 const MOCK_SUMMARY =
