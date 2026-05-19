@@ -77,6 +77,14 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantEnvVar:     "MISTRAL_API_KEY",
 			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`,
 		},
+		{
+			name:           "Amp uses API key",
+			agentType:      "amp",
+			credentialKind: "api-key",
+			wantCommand:    "acp-amp",
+			wantEnvVar:     "AMP_API_KEY",
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --python 3.12 --quiet`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -323,6 +331,46 @@ func TestGetAgentCommandInfoMistralVibeIgnoresOAuth(t *testing.T) {
 	}
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q — Mistral Vibe has no OAuth support", info.envVarName, "MISTRAL_API_KEY")
+	}
+}
+
+func TestGetAgentCommandInfoAmp(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("amp", "api-key")
+	if info.command != "acp-amp" {
+		t.Fatalf("command=%q, want %q", info.command, "acp-amp")
+	}
+	if info.envVarName != "AMP_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "AMP_API_KEY")
+	}
+	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --python 3.12 --quiet`
+	if info.installCmd != wantInstall {
+		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
+	}
+	if info.isNpmBased {
+		t.Fatalf("isNpmBased=true, want false (amp uses uv, not npm)")
+	}
+	if len(info.args) != 1 || info.args[0] != "run" {
+		t.Fatalf("args=%v, want [run]", info.args)
+	}
+	if info.injectionMode != "" {
+		t.Fatalf("injectionMode=%q, want empty (env var injection)", info.injectionMode)
+	}
+	if info.authFilePath != "" {
+		t.Fatalf("authFilePath=%q, want empty (no file-based auth)", info.authFilePath)
+	}
+}
+
+func TestGetAgentCommandInfoAmpIgnoresOAuth(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("amp", "oauth-token")
+	if info.command != "acp-amp" {
+		t.Fatalf("command=%q, want %q", info.command, "acp-amp")
+	}
+	if info.envVarName != "AMP_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q - Amp has no OAuth support", info.envVarName, "AMP_API_KEY")
 	}
 }
 
@@ -585,6 +633,15 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 				credentialKind: "api-key",
 			},
 			wantEnvVar: "MISTRAL_API_KEY=mistral-api-key-123",
+		},
+		{
+			name:      "Amp API key uses env var",
+			agentType: "amp",
+			credential: &agentCredential{
+				credential:     "sgamp-api-key-123",
+				credentialKind: "api-key",
+			},
+			wantEnvVar: "AMP_API_KEY=sgamp-api-key-123",
 		},
 	}
 

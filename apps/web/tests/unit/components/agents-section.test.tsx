@@ -48,6 +48,14 @@ const AGENT_LIST = {
       configured: false,
       credentialHelpUrl: 'https://platform.openai.com',
     },
+    {
+      id: 'amp',
+      name: 'Amp',
+      description: "Sourcegraph's managed AI coding agent",
+      supportsAcp: true,
+      configured: false,
+      credentialHelpUrl: 'https://ampcode.com/settings',
+    },
   ],
 };
 
@@ -80,16 +88,18 @@ describe('AgentsSection', () => {
     await waitFor(() => {
       expect(screen.getByTestId('agent-card-claude-code')).toBeInTheDocument();
       expect(screen.getByTestId('agent-card-openai-codex')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-card-amp')).toBeInTheDocument();
     });
     expect(screen.getByText('Claude Code')).toBeInTheDocument();
     expect(screen.getByText('OpenAI Codex')).toBeInTheDocument();
+    expect(screen.getByText('Amp')).toBeInTheDocument();
   });
 
   it('shows Connection and Configuration section headers for each card', async () => {
     render(<AgentsSection />);
     await waitFor(() => {
-      expect(screen.getAllByText('Connection').length).toBe(2);
-      expect(screen.getAllByText('Configuration').length).toBe(2);
+      expect(screen.getAllByText('Connection').length).toBe(3);
+      expect(screen.getAllByText('Configuration').length).toBe(3);
     });
   });
 

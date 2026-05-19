@@ -95,6 +95,22 @@ describe('GET /api/agents', () => {
     });
   });
 
+  it('includes Amp as an API-key agent without proxy fallback', async () => {
+    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
+      agentCredentials: [{ agentType: 'amp' }],
+      scalewayCloudCredentials: [{ id: 'scw-cred' }],
+      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+    }) as ReturnType<typeof drizzle>);
+
+    const { agents } = await listAgents();
+    const amp = agents.find((agent) => agent.id === 'amp');
+
+    expect(amp).toMatchObject({
+      configured: true,
+      fallbackCredentialSource: null,
+    });
+  });
+
   it('marks OpenCode configured via Scaleway fallback before platform fallback', async () => {
     vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
       scalewayCloudCredentials: [{ id: 'scw-cred' }],

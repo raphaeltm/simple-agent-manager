@@ -48,6 +48,24 @@ describe('AGENT_CATALOG', () => {
     expect(opencode!.oauthSupport).toBeUndefined();
   });
 
+  it('includes amp as a supported API-key ACP agent', () => {
+    const amp = AGENT_CATALOG.find((a) => a.id === 'amp');
+    expect(amp).toBeDefined();
+    expect(amp!.name).toBe('Amp');
+    expect(amp!.description).toBe("Sourcegraph's managed AI coding agent");
+    expect(amp!.provider).toBe('amp');
+    expect(amp!.envVarName).toBe('AMP_API_KEY');
+    expect(amp!.acpCommand).toBe('acp-amp');
+    expect(amp!.acpArgs).toEqual(['run']);
+    expect(amp!.supportsAcp).toBe(true);
+    expect(amp!.credentialHelpUrl).toBe('https://ampcode.com/settings');
+    expect(amp!.installCommand).toBe(
+      'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --python 3.12 --quiet'
+    );
+    expect(amp!.fallbackCloudProvider).toBeUndefined();
+    expect(amp!.oauthSupport).toBeUndefined();
+  });
+
   it('mistral-vibe has no OAuth support', () => {
     const mistral = AGENT_CATALOG.find((a) => a.id === 'mistral-vibe');
     expect(mistral!.oauthSupport).toBeUndefined();
@@ -73,6 +91,13 @@ describe('getAgentDefinition', () => {
     expect(def!.provider).toBe('opencode');
   });
 
+  it('returns amp definition', () => {
+    const def = getAgentDefinition('amp');
+    expect(def).toBeDefined();
+    expect(def!.id).toBe('amp');
+    expect(def!.provider).toBe('amp');
+  });
+
   it('returns undefined for unknown agent', () => {
     const def = getAgentDefinition('unknown' as never);
     expect(def).toBeUndefined();
@@ -90,6 +115,7 @@ describe('isValidAgentType', () => {
     expect(isValidAgentType('google-gemini')).toBe(true);
     expect(isValidAgentType('mistral-vibe')).toBe(true);
     expect(isValidAgentType('opencode')).toBe(true);
+    expect(isValidAgentType('amp')).toBe(true);
   });
 
   it('rejects unknown agents', () => {

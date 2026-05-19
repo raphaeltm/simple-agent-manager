@@ -179,6 +179,24 @@ describe('AgentCard', () => {
     });
   });
 
+  it('renders Amp as API-key only with no OAuth setup copy', () => {
+    renderCard(
+      makeAgent({
+        id: 'amp',
+        name: 'Amp',
+        description: "Sourcegraph's managed AI coding agent",
+        credentialHelpUrl: 'https://ampcode.com/settings',
+      }),
+      null,
+      makeSettings('amp'),
+    );
+
+    expect(screen.getByText('Amp')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Enter your Amp API key/i)).toBeInTheDocument();
+    expect(screen.queryByText(/OAuth Token/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ChatGPT Subscription/i)).not.toBeInTheDocument();
+  });
+
   it('shows OpenCode provider select ONLY for the opencode agent', () => {
     const { unmount } = renderCard(makeAgent(), null, makeSettings());
     expect(screen.queryByTestId('opencode-provider-select')).not.toBeInTheDocument();

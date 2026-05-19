@@ -3,10 +3,28 @@
 // =============================================================================
 
 /** Supported agent identifiers */
-export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe' | 'opencode';
+export const AGENT_TYPE_VALUES = [
+  'claude-code',
+  'openai-codex',
+  'google-gemini',
+  'mistral-vibe',
+  'opencode',
+  'amp',
+] as const;
+
+export type AgentType = typeof AGENT_TYPE_VALUES[number];
 
 /** API key provider identifiers */
-export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral' | 'opencode';
+export const AGENT_PROVIDER_VALUES = [
+  'anthropic',
+  'openai',
+  'google',
+  'mistral',
+  'opencode',
+  'amp',
+] as const;
+
+export type AgentProvider = typeof AGENT_PROVIDER_VALUES[number];
 
 // =============================================================================
 // Agent Definition (Configuration Registry)
@@ -124,6 +142,19 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
     fallbackCloudProvider: 'scaleway',
     installCommand: 'npm install -g opencode-ai@1.4.3',
+  },
+  {
+    id: 'amp',
+    name: 'Amp',
+    description: "Sourcegraph's managed AI coding agent",
+    provider: 'amp',
+    envVarName: 'AMP_API_KEY',
+    acpCommand: 'acp-amp',
+    acpArgs: ['run'],
+    supportsAcp: true,
+    credentialHelpUrl: 'https://ampcode.com/settings',
+    installCommand:
+      'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --python 3.12 --quiet',
   },
 ] as const;
 

@@ -16,14 +16,14 @@ SAM should support Amp as a first-class agent. Amp does not currently expose an 
 
 ## Implementation Checklist
 
-- [ ] Add `amp` to the shared agent type, provider type, catalog entry, and catalog tests.
-- [ ] Update API credential validation to derive supported agent types from the shared catalog instead of a stale hardcoded list.
-- [ ] Add API credential/schema tests proving `amp` is accepted and invalid agents are still rejected.
-- [ ] Add VM ACP command metadata for Amp using `acp-amp run`, `AMP_API_KEY`, and a pinned Python install command.
-- [ ] Verify and test generic env injection is sufficient for Amp API-key credentials.
-- [ ] Ensure Amp is not added to SAM AI Gateway proxy fallback paths.
-- [ ] Update web UI tests so Amp renders from the catalog as an API-key agent with no OAuth copy.
-- [ ] Run focused shared, API, VM agent, and web tests.
+- [x] Add `amp` to the shared agent type, provider type, catalog entry, and catalog tests.
+- [x] Update API credential validation to derive supported agent types from the shared catalog instead of a stale hardcoded list.
+- [x] Add API credential/schema tests proving `amp` is accepted and invalid agents are still rejected.
+- [x] Add VM ACP command metadata for Amp using `acp-amp run`, `AMP_API_KEY`, and a pinned Python install command.
+- [x] Verify and test generic env injection is sufficient for Amp API-key credentials.
+- [x] Ensure Amp is not added to SAM AI Gateway proxy fallback paths.
+- [x] Update web UI tests so Amp renders from the catalog as an API-key agent with no OAuth copy.
+- [x] Run focused shared, API, VM agent, and web tests.
 - [ ] Run required quality gates.
 - [ ] Complete specialist reviews for VM agent, API/Cloudflare, credentials/security/env, UI, tests, and task completion.
 - [ ] Deploy to staging and verify where possible. If valid Amp credentials are missing, follow the missing-credentials blocker policy and do not merge.

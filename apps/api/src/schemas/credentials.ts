@@ -1,6 +1,7 @@
+import { AGENT_TYPE_VALUES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-const AgentTypeSchema = v.picklist(['claude-code', 'openai-codex', 'google-gemini', 'mistral-vibe']);
+const AgentTypeSchema = v.picklist(AGENT_TYPE_VALUES);
 const CredentialKindSchema = v.picklist(['api-key', 'oauth-token']);
 
 // Discriminated union for CreateCredentialRequest

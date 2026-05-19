@@ -296,6 +296,46 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig).toBeUndefined();
   });
 
+  it('returns direct Amp credential without AI proxy config', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'sgamp-user-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+    });
+
+    const res = await postAgentKey('amp');
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as {
+      apiKey: string;
+      credentialKind: string;
+      inferenceConfig?: unknown;
+    };
+    expect(json.apiKey).toBe('sgamp-user-key');
+    expect(json.credentialKind).toBe('api-key');
+    expect(json.inferenceConfig).toBeUndefined();
+  });
+
+  it('does not fall back to platform proxy for Amp without a credential', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+
+    const res = await postAgentKey('amp');
+
+    expect(res.status).toBe(404);
+    const json = await res.json() as { message: string };
+    expect(json.message).toBe('Agent credential');
+  });
+
   it('returns passthrough proxy config for codex with user credential', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;

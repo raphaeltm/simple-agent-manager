@@ -826,6 +826,16 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			injectionMode: "",
 			authFilePath:  "",
 		}
+	case "amp":
+		return agentCommandInfo{
+			command:       "acp-amp",
+			args:          []string{"run"},
+			envVarName:    "AMP_API_KEY",
+			installCmd:    `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --python 3.12 --quiet`,
+			isNpmBased:    false,
+			injectionMode: "",
+			authFilePath:  "",
+		}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
 	}
