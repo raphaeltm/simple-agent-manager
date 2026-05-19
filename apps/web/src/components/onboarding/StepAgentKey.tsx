@@ -1,10 +1,16 @@
 import type { AgentType, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import { Alert, Input } from '@simple-agent-manager/ui';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
 import { saveAgentCredential, validateAgentCredential } from '../../lib/api';
-import { CompleteState, OptionCard, StepActions } from './StepShared';
+import {
+  CompleteState,
+  getValidateButtonLabel,
+  OptionCard,
+  StepActions,
+  useValidatedCredentialStep,
+} from './StepShared';
 
 interface StepAgentKeyProps {
   onComplete: () => void;
@@ -12,21 +18,38 @@ interface StepAgentKeyProps {
   isComplete: boolean;
 }
 
-function getValidateButtonLabel(validating: boolean, isValidated: boolean): string {
-  if (validating) return 'Testing...';
-  if (isValidated) return 'Tested';
-  return 'Test key';
-}
-
 export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyProps) {
   const [selectedAgent, setSelectedAgent] = useState<AgentType | null>(null);
   const [apiKey, setApiKey] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [validating, setValidating] = useState(false);
-  const [validatedKey, setValidatedKey] = useState<string | null>(null);
-  const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const latestCredentialKey = useRef<string | null>(null);
+  const credentialRequest: SaveAgentCredentialRequest | null =
+    selectedAgent && apiKey.trim()
+      ? {
+          agentType: selectedAgent,
+          credentialKind: 'api-key',
+          credential: apiKey.trim(),
+        }
+      : null;
+  const {
+    error,
+    handleSave,
+    handleValidate,
+    isValidated,
+    resetValidation,
+    saving,
+    setError,
+    validating,
+    validationMessage,
+  } = useValidatedCredentialStep({
+    missingRequestMessage: 'Select an agent and enter an API key',
+    onSaved: onComplete,
+    request: credentialRequest,
+    saveErrorMessage: 'Failed to save API key',
+    saveRequest: saveAgentCredential,
+    validateErrorMessage: 'API key validation failed',
+    validateRequest: validateAgentCredential,
+  });
+
+  const selectedDef = selectedAgent ? AGENT_CATALOG.find((a) => a.id === selectedAgent) : null;
 
   if (isComplete) {
     return (
@@ -37,64 +60,6 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
       />
     );
   }
-
-  const getCredentialRequest = (): SaveAgentCredentialRequest | null => {
-    if (!selectedAgent || !apiKey.trim()) return null;
-    return {
-      agentType: selectedAgent,
-      credentialKind: 'api-key',
-      credential: apiKey.trim(),
-    };
-  };
-
-  const credentialKey = JSON.stringify(getCredentialRequest());
-  latestCredentialKey.current = credentialKey;
-  const isValidated = validatedKey === credentialKey;
-
-  const handleValidate = async () => {
-    const data = getCredentialRequest();
-    if (!data) {
-      setError('Select an agent and enter an API key');
-      return;
-    }
-    setValidating(true);
-    setValidationMessage(null);
-    setError(null);
-    const requestKey = credentialKey;
-    try {
-      const result = await validateAgentCredential(data);
-      if (latestCredentialKey.current !== requestKey) return;
-      setValidatedKey(requestKey);
-      setValidationMessage(result.message);
-    } catch (err) {
-      if (latestCredentialKey.current !== requestKey) return;
-      setValidatedKey(null);
-      setError(err instanceof Error ? err.message : 'API key validation failed');
-    } finally {
-      setValidating(false);
-    }
-  };
-
-  const handleSave = async () => {
-    const data = getCredentialRequest();
-    if (!data) return;
-    if (!isValidated) {
-      await handleValidate();
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await saveAgentCredential(data);
-      onComplete();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save API key');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const selectedDef = selectedAgent ? AGENT_CATALOG.find((a) => a.id === selectedAgent) : null;
 
   return (
     <div>
@@ -122,8 +87,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
             onSelect={() => {
               setSelectedAgent(agent.id);
               setError(null);
-              setValidatedKey(null);
-              setValidationMessage(null);
+              resetValidation();
             }}
           />
         ))}
@@ -142,8 +106,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
             value={apiKey}
             onChange={(e) => {
               setApiKey(e.target.value);
-              setValidatedKey(null);
-              setValidationMessage(null);
+              resetValidation();
             }}
             placeholder={`Paste your ${selectedDef.provider} API key`}
           />
@@ -170,7 +133,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
         onSave={handleSave}
         testDisabled={!selectedAgent || !apiKey.trim() || validating || saving}
         connectDisabled={!selectedAgent || !apiKey.trim() || saving || validating || !isValidated}
-        testLabel={getValidateButtonLabel(validating, isValidated)}
+        testLabel={getValidateButtonLabel(validating, isValidated, 'Test key')}
         saveLabel={saving ? 'Saving...' : 'Connect'}
       />
     </div>

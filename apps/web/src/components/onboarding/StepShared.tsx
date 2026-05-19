@@ -1,4 +1,5 @@
 import { Button } from '@simple-agent-manager/ui';
+import { useRef, useState } from 'react';
 
 interface CompleteStateProps {
   description: string;
@@ -21,6 +22,108 @@ interface StepActionsProps {
   saveLabel: string;
   testDisabled: boolean;
   testLabel: string;
+}
+
+interface CredentialValidationResult {
+  message: string;
+}
+
+interface UseValidatedCredentialStepOptions<TRequest> {
+  missingRequestMessage: string;
+  onSaved: () => void;
+  request: TRequest | null;
+  saveErrorMessage: string;
+  saveRequest: (request: TRequest) => Promise<unknown>;
+  validateErrorMessage: string;
+  validateRequest: (request: TRequest) => Promise<CredentialValidationResult>;
+}
+
+export function getValidateButtonLabel(
+  validating: boolean,
+  isValidated: boolean,
+  idleLabel: string
+): string {
+  if (validating) return 'Testing...';
+  if (isValidated) return 'Tested';
+  return idleLabel;
+}
+
+export function useValidatedCredentialStep<TRequest>({
+  missingRequestMessage,
+  onSaved,
+  request,
+  saveErrorMessage,
+  saveRequest,
+  validateErrorMessage,
+  validateRequest,
+}: UseValidatedCredentialStepOptions<TRequest>) {
+  const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validatedKey, setValidatedKey] = useState<string | null>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const latestCredentialKey = useRef<string | null>(null);
+  const credentialKey = request ? JSON.stringify(request) : null;
+  latestCredentialKey.current = credentialKey;
+  const isValidated = validatedKey === credentialKey && credentialKey !== null;
+
+  const resetValidation = () => {
+    setValidatedKey(null);
+    setValidationMessage(null);
+  };
+
+  const handleValidate = async () => {
+    if (!request || !credentialKey) {
+      setError(missingRequestMessage);
+      return;
+    }
+    setValidating(true);
+    setValidationMessage(null);
+    setError(null);
+    const requestKey = credentialKey;
+    try {
+      const result = await validateRequest(request);
+      if (latestCredentialKey.current !== requestKey) return;
+      setValidatedKey(requestKey);
+      setValidationMessage(result.message);
+    } catch (err) {
+      if (latestCredentialKey.current !== requestKey) return;
+      setValidatedKey(null);
+      setError(err instanceof Error ? err.message : validateErrorMessage);
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!request) return;
+    if (!isValidated) {
+      await handleValidate();
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await saveRequest(request);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : saveErrorMessage);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return {
+    error,
+    handleSave,
+    handleValidate,
+    isValidated,
+    resetValidation,
+    saving,
+    setError,
+    validating,
+    validationMessage,
+  };
 }
 
 export function CompleteState({ description, onContinue, title }: Readonly<CompleteStateProps>) {

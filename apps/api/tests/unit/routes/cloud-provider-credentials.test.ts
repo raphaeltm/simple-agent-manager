@@ -17,7 +17,7 @@
  * - encrypt is mocked to avoid requiring a real WebCrypto environment
  */
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';

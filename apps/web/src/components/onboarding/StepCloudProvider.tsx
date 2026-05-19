@@ -1,10 +1,16 @@
 import type { CreateCredentialRequest } from '@simple-agent-manager/shared';
 import { PROVIDER_HELP, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Input } from '@simple-agent-manager/ui';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
 import { createCredential, validateCredential } from '../../lib/api';
-import { CompleteState, OptionCard, StepActions } from './StepShared';
+import {
+  CompleteState,
+  getValidateButtonLabel,
+  OptionCard,
+  StepActions,
+  useValidatedCredentialStep,
+} from './StepShared';
 
 type CloudProvider = 'hetzner' | 'scaleway';
 
@@ -30,12 +36,6 @@ interface StepCloudProviderProps {
   isComplete: boolean;
 }
 
-function getValidateButtonLabel(validating: boolean, isValidated: boolean): string {
-  if (validating) return 'Testing...';
-  if (isValidated) return 'Tested';
-  return 'Test connection';
-}
-
 function hasRequiredProviderFields(
   provider: CloudProvider | null,
   token: string,
@@ -50,12 +50,35 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
   const [selectedProvider, setSelectedProvider] = useState<CloudProvider | null>(null);
   const [token, setToken] = useState('');
   const [scalewayProjectId, setScalewayProjectId] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [validating, setValidating] = useState(false);
-  const [validatedKey, setValidatedKey] = useState<string | null>(null);
-  const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const latestCredentialKey = useRef<string | null>(null);
+  const selectedDef = selectedProvider ? PROVIDERS.find((p) => p.id === selectedProvider) : null;
+  const isValid = hasRequiredProviderFields(selectedProvider, token, scalewayProjectId);
+  const credentialRequest: CreateCredentialRequest | null = isValid
+    ? selectedProvider === 'hetzner'
+      ? { provider: 'hetzner', token: token.trim() }
+      : { provider: 'scaleway', secretKey: token.trim(), projectId: scalewayProjectId.trim() }
+    : null;
+  const {
+    error,
+    handleSave,
+    handleValidate,
+    isValidated,
+    resetValidation,
+    saving,
+    setError,
+    validating,
+    validationMessage,
+  } = useValidatedCredentialStep({
+    missingRequestMessage:
+      selectedProvider === 'scaleway'
+        ? 'Scaleway Project ID is required'
+        : 'Select a provider and enter a token',
+    onSaved: onComplete,
+    request: credentialRequest,
+    saveErrorMessage: 'Failed to save credential',
+    saveRequest: createCredential,
+    validateErrorMessage: 'Credential validation failed',
+    validateRequest: validateCredential,
+  });
 
   if (isComplete) {
     return (
@@ -66,67 +89,6 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
       />
     );
   }
-
-  const getCredentialRequest = (): CreateCredentialRequest | null => {
-    if (!selectedProvider || !token.trim()) return null;
-    if (selectedProvider === 'hetzner') return { provider: 'hetzner', token: token.trim() };
-    if (!scalewayProjectId.trim()) return null;
-    return { provider: 'scaleway', secretKey: token.trim(), projectId: scalewayProjectId.trim() };
-  };
-
-  const credentialKey = JSON.stringify(getCredentialRequest());
-  latestCredentialKey.current = credentialKey;
-  const isValidated = validatedKey === credentialKey;
-
-  const handleValidate = async () => {
-    const data = getCredentialRequest();
-    if (!data) {
-      setError(
-        selectedProvider === 'scaleway'
-          ? 'Scaleway Project ID is required'
-          : 'Select a provider and enter a token'
-      );
-      return;
-    }
-    setValidating(true);
-    setValidationMessage(null);
-    setError(null);
-    const requestKey = credentialKey;
-    try {
-      const result = await validateCredential(data);
-      if (latestCredentialKey.current !== requestKey) return;
-      setValidatedKey(requestKey);
-      setValidationMessage(result.message);
-    } catch (err) {
-      if (latestCredentialKey.current !== requestKey) return;
-      setValidatedKey(null);
-      setError(err instanceof Error ? err.message : 'Credential validation failed');
-    } finally {
-      setValidating(false);
-    }
-  };
-
-  const handleSave = async () => {
-    const data = getCredentialRequest();
-    if (!data) return;
-    if (!isValidated) {
-      await handleValidate();
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await createCredential(data);
-      onComplete();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save credential');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const selectedDef = selectedProvider ? PROVIDERS.find((p) => p.id === selectedProvider) : null;
-  const isValid = hasRequiredProviderFields(selectedProvider, token, scalewayProjectId);
 
   return (
     <div>
@@ -155,8 +117,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
             onSelect={() => {
               setSelectedProvider(provider.id);
               setError(null);
-              setValidatedKey(null);
-              setValidationMessage(null);
+              resetValidation();
             }}
           />
         ))}
@@ -178,8 +139,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
             value={token}
             onChange={(e) => {
               setToken(e.target.value);
-              setValidatedKey(null);
-              setValidationMessage(null);
+              resetValidation();
             }}
             placeholder={`Paste your ${selectedDef.name} API token`}
           />
@@ -198,8 +158,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
                 value={scalewayProjectId}
                 onChange={(e) => {
                   setScalewayProjectId(e.target.value);
-                  setValidatedKey(null);
-                  setValidationMessage(null);
+                  resetValidation();
                 }}
                 placeholder="Your Scaleway project ID"
               />
@@ -229,7 +188,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
         onSave={handleSave}
         testDisabled={!isValid || validating || saving}
         connectDisabled={!isValid || saving || validating || !isValidated}
-        testLabel={getValidateButtonLabel(validating, isValidated)}
+        testLabel={getValidateButtonLabel(validating, isValidated, 'Test connection')}
         saveLabel={saving ? 'Saving...' : 'Connect'}
       />
     </div>
