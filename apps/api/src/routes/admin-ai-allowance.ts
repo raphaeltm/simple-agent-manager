@@ -7,11 +7,7 @@
  * Mounts at /api/admin/ai-allowance (registered in index.ts).
  */
 import type { AdminAiAllowance, AdminAiAllowanceResponse, UpdateAdminAiAllowanceRequest } from '@simple-agent-manager/shared';
-import {
-  AI_ADMIN_ALLOWANCE_KV_PREFIX,
-  DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-  DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-} from '@simple-agent-manager/shared';
+import { AI_ADMIN_ALLOWANCE_KV_PREFIX } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -20,6 +16,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { getMaxDailyTokenLimit, getMaxMonthlyCostCapUsd } from '../services/ai-token-budget';
 
 const adminAiAllowanceRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,11 +37,9 @@ function resolveEffectiveCeiling(
   allowance: AdminAiAllowance | null,
   env: Env,
 ): AdminAiAllowanceResponse['effectiveCeiling'] {
-  const platformMaxInput = parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10)
-    || DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT;
+  const platformMaxInput = getMaxDailyTokenLimit(env);
   const platformMaxOutput = platformMaxInput; // same default for both
-  const platformMaxMonthlyCap = parseFloat(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD || '')
-    || DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD;
+  const platformMaxMonthlyCap = getMaxMonthlyCostCapUsd(env);
 
   return {
     maxDailyInputTokens: allowance?.maxDailyInputTokens ?? platformMaxInput,
@@ -88,25 +83,14 @@ function validateAllowanceBody(body: UpdateAdminAiAllowanceRequest): void {
   }
 }
 
-function pickNumberAllowance(
+function pickAllowanceValue<T extends keyof UpdateAdminAiAllowanceRequest>(
   body: UpdateAdminAiAllowanceRequest,
   existing: AdminAiAllowance | null,
-  field: 'maxDailyInputTokens' | 'maxDailyOutputTokens' | 'maxMonthlyCostCapUsd',
-): number | null {
-  const value = body[field];
-  return value !== undefined
-    ? value ?? null
-    : existing?.[field] ?? null;
-}
-
-function pickModelTiers(
-  body: UpdateAdminAiAllowanceRequest,
-  existing: AdminAiAllowance | null,
-): string[] | null {
-  const field = 'allowedModelTiers';
-  return body[field] !== undefined
+  field: T,
+): AdminAiAllowance[T] {
+  return (body[field] !== undefined
     ? body[field] ?? null
-    : existing?.[field] ?? null;
+    : existing?.[field] ?? null) as AdminAiAllowance[T];
 }
 
 function buildAllowance(
@@ -115,10 +99,10 @@ function buildAllowance(
   adminUserId: string,
 ): AdminAiAllowance {
   return {
-    maxDailyInputTokens: pickNumberAllowance(body, existing, 'maxDailyInputTokens'),
-    maxDailyOutputTokens: pickNumberAllowance(body, existing, 'maxDailyOutputTokens'),
-    maxMonthlyCostCapUsd: pickNumberAllowance(body, existing, 'maxMonthlyCostCapUsd'),
-    allowedModelTiers: pickModelTiers(body, existing),
+    maxDailyInputTokens: pickAllowanceValue(body, existing, 'maxDailyInputTokens'),
+    maxDailyOutputTokens: pickAllowanceValue(body, existing, 'maxDailyOutputTokens'),
+    maxMonthlyCostCapUsd: pickAllowanceValue(body, existing, 'maxMonthlyCostCapUsd'),
+    allowedModelTiers: pickAllowanceValue(body, existing, 'allowedModelTiers'),
     updatedAt: new Date().toISOString(),
     updatedBy: adminUserId,
   };

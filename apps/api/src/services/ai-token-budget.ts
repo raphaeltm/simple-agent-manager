@@ -56,6 +56,42 @@ function getBudgetCounter(env: Env | undefined, userId: string) {
   ) as AiTokenBudgetCounterStub;
 }
 
+function parseEnvNumber(value: string | undefined, fallback: number, parser: (raw: string) => number): number {
+  return parser(value || '') || fallback;
+}
+
+export function getMaxDailyTokenLimit(env: Env): number {
+  return parseEnvNumber(
+    env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
+    DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
+    (raw) => parseInt(raw, 10),
+  );
+}
+
+export function getMinDailyTokenLimit(env: Env): number {
+  return parseEnvNumber(
+    env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
+    DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
+    (raw) => parseInt(raw, 10),
+  );
+}
+
+export function getMaxMonthlyCostCapUsd(env: Env): number {
+  return parseEnvNumber(
+    env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
+    DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
+    parseFloat,
+  );
+}
+
+export function getMinMonthlyCostCapUsd(env: Env): number {
+  return parseEnvNumber(
+    env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
+    DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
+    parseFloat,
+  );
+}
+
 /**
  * Get the current daily token usage for a user.
  * Returns zero counts if no entry exists (new day or first request).
@@ -132,14 +168,10 @@ export function validateBudgetUpdate(
   adminAllowance?: AdminAiAllowance | null,
 ): UserAiBudgetSettings {
   const request = expectJsonRecord(body, 'usage.ai.budget');
-  const platformMaxDailyTokens = parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10)
-    || DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT;
-  const minDailyTokens = parseInt(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT || '', 10)
-    || DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT;
-  const platformMaxMonthlyCap = parseFloat(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD || '')
-    || DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD;
-  const minMonthlyCap = parseFloat(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD || '')
-    || DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD;
+  const platformMaxDailyTokens = getMaxDailyTokenLimit(env);
+  const minDailyTokens = getMinDailyTokenLimit(env);
+  const platformMaxMonthlyCap = getMaxMonthlyCostCapUsd(env);
+  const minMonthlyCap = getMinMonthlyCostCapUsd(env);
 
   // Admin ceilings take precedence over platform maximums when set
   const maxDailyInputTokens = adminAllowance?.maxDailyInputTokens ?? platformMaxDailyTokens;

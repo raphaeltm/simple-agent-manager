@@ -11,6 +11,7 @@ import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { getPlatformOpencodeAvailability, type PlatformOpencodeAvailability } from '../services/platform-trial';
 
 const agentsCatalogRoutes = new Hono<{ Bindings: Env }>();
+type AgentFallbackCredentialSource = 'scaleway-cloud' | 'platform-opencode' | 'platform-sam' | null;
 
 // All routes require authentication
 agentsCatalogRoutes.use('*', requireAuth(), requireApproved());
@@ -34,6 +35,17 @@ async function getCatalogPlatformOpencodeAvailability(
     log.warn('agents_catalog.platform_opencode_availability_failed', { error });
     return unavailablePlatformOpencode();
   }
+}
+
+function resolveFallbackCredentialSource(
+  usesScalewayFallback: boolean,
+  usesPlatformFallback: boolean,
+  usesSamProvider: boolean,
+): AgentFallbackCredentialSource {
+  if (usesScalewayFallback) return 'scaleway-cloud';
+  if (usesPlatformFallback) return 'platform-opencode';
+  if (usesSamProvider) return 'platform-sam';
+  return null;
 }
 
 /**
@@ -108,11 +120,11 @@ agentsCatalogRoutes.get('/', async (c) => {
       supportsAcp: agent.supportsAcp,
       configured: hasDedicatedKey || usesScalewayFallback || usesPlatformFallback || usesSamProvider,
       credentialHelpUrl: agent.credentialHelpUrl,
-      fallbackCredentialSource: usesScalewayFallback
-        ? 'scaleway-cloud' as const
-        : usesPlatformFallback ? 'platform-opencode' as const
-        : usesSamProvider ? 'platform-sam' as const
-        : null,
+      fallbackCredentialSource: resolveFallbackCredentialSource(
+        usesScalewayFallback,
+        usesPlatformFallback,
+        usesSamProvider,
+      ),
     };
   });
 
