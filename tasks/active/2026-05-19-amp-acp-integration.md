@@ -26,7 +26,7 @@ SAM should support Amp as a first-class agent. Amp does not currently expose an 
 - [x] Run focused shared, API, VM agent, and web tests.
 - [x] Run required quality gates.
 - [x] Complete specialist reviews for VM agent, API/Cloudflare, credentials/security/env, UI, tests, documentation sync, and task completion.
-- [ ] Deploy to staging and verify where possible. If valid Amp credentials are missing, follow the missing-credentials blocker policy and do not merge.
+- [x] Deploy to staging and verify where possible. Staging deploy and smoke verification passed in run `26093440857`; live Amp ACP execution remains blocked by missing valid staging Amp credentials/paid credits, so the PR must be labeled `needs-human-review` and not merged.
 
 ## Acceptance Criteria
 
