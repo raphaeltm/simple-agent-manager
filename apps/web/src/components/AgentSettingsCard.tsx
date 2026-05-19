@@ -281,7 +281,7 @@ export function AgentSettingsCard({
             <option value="">Not configured</option>
             <option value="sam">SAM Platform</option>
             <option value="user-api-key">Own API Key</option>
-            <option value="oauth">OAuth Token</option>
+            {agent.id === 'claude-code' && <option value="oauth">OAuth Token</option>}
           </select>
           {providerMode === 'sam' && (
             <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">

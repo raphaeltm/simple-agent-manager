@@ -79,10 +79,11 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   // AI proxy: when enabled and agent is eligible, return proxy config when the
   // credential can be forwarded to the upstream provider.
   // Two modes:
-  // - No user credential + providerMode='sam' → platform proxy (callback-token auth)
+  // - Claude/Codex with no user credential + providerMode='sam' → platform proxy (callback-token auth)
+  // - OpenCode with no user credential → existing platform proxy fallback
   // - User has upstream-compatible credential → passthrough proxy (user credential
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
-  // Note: Platform proxy fallback requires explicit providerMode='sam' selection.
+  // Note: Claude/Codex platform proxy fallback requires explicit providerMode='sam' selection.
   // Without it, users with no credential get a 404 (agent not configured).
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
   if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
@@ -169,29 +170,30 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       });
     }
 
-    // No user credential — platform proxy mode requires explicit providerMode='sam'.
-    // Look up the user's agent settings to check providerMode.
-    const settingsRows = await db
-      .select({ providerMode: schema.agentSettings.providerMode })
-      .from(schema.agentSettings)
-      .where(
-        and(
-          eq(schema.agentSettings.userId, workspace.userId),
-          eq(schema.agentSettings.agentType, body.agentType)
+    // Claude Code and Codex require an explicit SAM provider selection before
+    // using platform proxy. OpenCode keeps its existing platform fallback path.
+    if (isClaudeCode || isCodex) {
+      const settingsRows = await db
+        .select({ providerMode: schema.agentSettings.providerMode })
+        .from(schema.agentSettings)
+        .where(
+          and(
+            eq(schema.agentSettings.userId, workspace.userId),
+            eq(schema.agentSettings.agentType, body.agentType)
+          )
         )
-      )
-      .limit(1);
-    const providerMode = settingsRows[0]?.providerMode;
+        .limit(1);
+      const providerMode = settingsRows[0]?.providerMode;
 
-    if (providerMode !== 'sam') {
-      // User has not explicitly opted into SAM provider — do not silently fall back.
-      log.info('agent_key.no_credential_no_sam_provider', {
-        workspaceId, userId: workspace.userId, agentType: body.agentType, providerMode,
-      });
-      throw errors.notFound('Agent credential');
+      if (providerMode !== 'sam') {
+        log.info('agent_key.no_credential_no_sam_provider', {
+          workspaceId, userId: workspace.userId, agentType: body.agentType, providerMode,
+        });
+        throw errors.notFound('Agent credential');
+      }
     }
 
-    // providerMode='sam' — activate platform proxy.
+    // Activate platform proxy.
     // Auth via callback token in headers.
     let proxyBaseUrl: string;
     let proxyProvider: string;
