@@ -1107,8 +1107,8 @@ func TestGenerateCodexMcpConfigWithProxyProvider(t *testing.T) {
 	if !strings.Contains(config, `env_key = "OPENAI_API_KEY"`) {
 		t.Fatal("expected OpenAI env key")
 	}
-	if !strings.Contains(config, `wire_api = "chat"`) {
-		t.Fatal("expected chat completions wire API")
+	if !strings.Contains(config, `wire_api = "responses"`) {
+		t.Fatal("expected responses wire API")
 	}
 	if len(envVars) != 0 {
 		t.Fatalf("expected no env vars, got %v", envVars)

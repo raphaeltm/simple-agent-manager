@@ -988,7 +988,7 @@ func generateCodexProxyProviderConfig(config *codexProxyProviderConfig) string {
 	b.WriteString("name = \"SAM OpenAI Proxy\"\n")
 	b.WriteString(fmt.Sprintf("base_url = \"%s\"\n", tomlEscapeBasicString(config.baseURL)))
 	b.WriteString(fmt.Sprintf("env_key = \"%s\"\n", codexProxyProviderEnvKey))
-	b.WriteString("wire_api = \"chat\"\n\n")
+	b.WriteString("wire_api = \"responses\"\n\n")
 	return b.String()
 }
 
