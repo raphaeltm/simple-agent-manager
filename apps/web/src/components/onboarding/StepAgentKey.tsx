@@ -1,9 +1,16 @@
 import type { AgentType, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
-import { Alert,Button, Input } from '@simple-agent-manager/ui';
+import { Alert, Input } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
-import { saveAgentCredential } from '../../lib/api';
+import { saveAgentCredential, validateAgentCredential } from '../../lib/api';
+import {
+  CompleteState,
+  getValidateButtonLabel,
+  OptionCard,
+  StepActions,
+  useValidatedCredentialStep,
+} from './StepShared';
 
 interface StepAgentKeyProps {
   onComplete: () => void;
@@ -14,44 +21,45 @@ interface StepAgentKeyProps {
 export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyProps) {
   const [selectedAgent, setSelectedAgent] = useState<AgentType | null>(null);
   const [apiKey, setApiKey] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const credentialRequest: SaveAgentCredentialRequest | null =
+    selectedAgent && apiKey.trim()
+      ? {
+          agentType: selectedAgent,
+          credentialKind: 'api-key',
+          credential: apiKey.trim(),
+        }
+      : null;
+  const {
+    error,
+    handleSave,
+    handleValidate,
+    isValidated,
+    resetValidation,
+    saving,
+    setError,
+    validating,
+    validationMessage,
+  } = useValidatedCredentialStep({
+    missingRequestMessage: 'Select an agent and enter an API key',
+    onSaved: onComplete,
+    request: credentialRequest,
+    saveErrorMessage: 'Failed to save API key',
+    saveRequest: saveAgentCredential,
+    validateErrorMessage: 'API key validation failed',
+    validateRequest: validateAgentCredential,
+  });
+
+  const selectedDef = selectedAgent ? AGENT_CATALOG.find((a) => a.id === selectedAgent) : null;
 
   if (isComplete) {
     return (
-      <div className="text-center py-6">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-success/10 mb-3">
-          <span className="text-success text-xl">{'\u2713'}</span>
-        </div>
-        <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">AI agent connected</p>
-        <p className="sam-type-caption text-fg-muted m-0">You can manage your agent keys in Settings.</p>
-        <div className="mt-4">
-          <Button variant="primary" size="md" onClick={onComplete}>Continue</Button>
-        </div>
-      </div>
+      <CompleteState
+        title="AI agent connected"
+        description="You can manage your agent keys in Settings."
+        onContinue={onComplete}
+      />
     );
   }
-
-  const handleSave = async () => {
-    if (!selectedAgent || !apiKey.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const data: SaveAgentCredentialRequest = {
-        agentType: selectedAgent,
-        credentialKind: 'api-key',
-        credential: apiKey.trim(),
-      };
-      await saveAgentCredential(data);
-      onComplete();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save API key');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const selectedDef = selectedAgent ? AGENT_CATALOG.find((a) => a.id === selectedAgent) : null;
 
   return (
     <div>
@@ -62,40 +70,44 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
 
       {error && (
         <div className="mb-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          <Alert variant="error" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         </div>
       )}
 
       {/* Agent selection grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
         {AGENT_CATALOG.map((agent) => (
-          <button
+          <OptionCard
             key={agent.id}
-            type="button"
-            onClick={() => { setSelectedAgent(agent.id); setError(null); }}
-            className={`p-3 rounded-md border text-left transition-colors cursor-pointer bg-surface ${
-              selectedAgent === agent.id
-                ? 'border-accent ring-1 ring-accent'
-                : 'border-border-default hover:border-fg-muted'
-            }`}
-          >
-            <span className="block font-medium text-sm text-fg-primary">{agent.name}</span>
-            <span className="block text-xs text-fg-muted mt-0.5">{agent.description}</span>
-          </button>
+            name={agent.name}
+            description={agent.description}
+            isSelected={selectedAgent === agent.id}
+            onSelect={() => {
+              setSelectedAgent(agent.id);
+              setError(null);
+              resetValidation();
+            }}
+          />
         ))}
       </div>
 
       {/* API key input */}
       {selectedDef && (
         <div className="mb-4">
-          <label className="block text-sm font-medium text-fg-primary mb-1">
+          <label htmlFor="agent-api-key" className="block text-sm font-medium text-fg-primary mb-1">
             {selectedDef.name} API Key
           </label>
           <Input
+            id="agent-api-key"
             type="password"
             autoComplete="off"
             value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+            onChange={(e) => {
+              setApiKey(e.target.value);
+              resetValidation();
+            }}
             placeholder={`Paste your ${selectedDef.provider} API key`}
           />
           <a
@@ -109,24 +121,21 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onSkip}
-          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          Skip this step
-        </button>
-        <Button
-          variant="primary"
-          size="md"
-          onClick={handleSave}
-          disabled={!selectedAgent || !apiKey.trim() || saving}
-        >
-          {saving ? 'Saving...' : 'Connect'}
-        </Button>
-      </div>
+      {validationMessage && (
+        <div className="mb-3">
+          <Alert variant="success">{validationMessage}</Alert>
+        </div>
+      )}
+
+      <StepActions
+        onSkip={onSkip}
+        onValidate={handleValidate}
+        onSave={handleSave}
+        testDisabled={!selectedAgent || !apiKey.trim() || validating || saving}
+        connectDisabled={!selectedAgent || !apiKey.trim() || saving || validating || !isValidated}
+        testLabel={getValidateButtonLabel(validating, isValidated, 'Test key')}
+        saveLabel={saving ? 'Saving...' : 'Connect'}
+      />
     </div>
   );
 }

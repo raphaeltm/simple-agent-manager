@@ -207,6 +207,7 @@ export interface Env {
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
+  AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
   // Project data DO limits
   CACHED_COMMANDS_MAX_PER_AGENT?: string;

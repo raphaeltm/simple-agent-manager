@@ -6,8 +6,11 @@ const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
   listGitHubInstallations: vi.fn(),
   listAgentCredentials: vi.fn(),
+  getTrialStatus: vi.fn(),
   saveAgentCredential: vi.fn(),
+  validateAgentCredential: vi.fn(),
   createCredential: vi.fn(),
+  validateCredential: vi.fn(),
   getGitHubInstallUrl: vi.fn(),
 }));
 
@@ -16,8 +19,11 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   listCredentials: mocks.listCredentials,
   listGitHubInstallations: mocks.listGitHubInstallations,
   listAgentCredentials: mocks.listAgentCredentials,
+  getTrialStatus: mocks.getTrialStatus,
   saveAgentCredential: mocks.saveAgentCredential,
+  validateAgentCredential: mocks.validateAgentCredential,
   createCredential: mocks.createCredential,
+  validateCredential: mocks.validateCredential,
   getGitHubInstallUrl: mocks.getGitHubInstallUrl,
 }));
 
@@ -44,6 +50,7 @@ describe('OnboardingWizard', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listGitHubInstallations.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
   });
 
   it('shows wizard when setup is incomplete', async () => {
@@ -173,6 +180,8 @@ describe('StepAgentKey', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listGitHubInstallations.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.validateAgentCredential.mockResolvedValue({ valid: true, message: 'Claude Code credential validated.' });
   });
 
   it('allows selecting an agent and entering an API key', async () => {
@@ -216,7 +225,17 @@ describe('StepAgentKey', () => {
     const input = screen.getByPlaceholderText('Paste your anthropic API key');
     fireEvent.change(input, { target: { value: 'sk-ant-test-key' } });
 
-    // Click Connect
+    // Test key, then connect
+    fireEvent.click(screen.getByRole('button', { name: 'Test key' }));
+
+    await waitFor(() => {
+      expect(mocks.validateAgentCredential).toHaveBeenCalledWith({
+        agentType: 'claude-code',
+        credentialKind: 'api-key',
+        credential: 'sk-ant-test-key',
+      });
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
     await waitFor(() => {
@@ -250,6 +269,8 @@ describe('StepCloudProvider', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listGitHubInstallations.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.validateCredential.mockResolvedValue({ valid: true, message: 'hetzner credential validated.' });
   });
 
   it('saves Hetzner credential', async () => {
@@ -277,7 +298,16 @@ describe('StepCloudProvider', () => {
     const input = screen.getByPlaceholderText('Paste your Hetzner API token');
     fireEvent.change(input, { target: { value: 'hetzner-test-token' } });
 
-    // Click Connect
+    // Test connection, then connect
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+
+    await waitFor(() => {
+      expect(mocks.validateCredential).toHaveBeenCalledWith({
+        provider: 'hetzner',
+        token: 'hetzner-test-token',
+      });
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
     await waitFor(() => {
@@ -296,6 +326,7 @@ describe('StepGitHub', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listGitHubInstallations.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getGitHubInstallUrl.mockResolvedValue({ url: 'https://github.com/apps/sam/installations/new' });
   });
 
@@ -323,6 +354,7 @@ describe('StepHowItWorks', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listGitHubInstallations.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
   });
 
   it('shows workflow explanation and two modes', async () => {
@@ -356,15 +388,33 @@ describe('StepHowItWorks', () => {
     fireEvent.click(screen.getByText('How it works'));
 
     await waitFor(() => {
-      expect(screen.getByText("Got it, let's go!")).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("Got it, let's go!"));
+    fireEvent.click(screen.getByText('Done'));
 
     await waitFor(() => {
       expect(screen.queryByTestId('onboarding-wizard')).not.toBeInTheDocument();
     });
 
     expect(localStorage.getItem('sam-onboarding-wizard-dismissed-user_123')).toBe('true');
+  });
+
+  it('lets trial-covered users add their own credentials instead of showing completed trial steps', async () => {
+    mocks.getTrialStatus.mockResolvedValue({ available: true });
+    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+
+    renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Using trial compute right now')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add my own setup' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Connect your AI agent')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('AI agent connected')).not.toBeInTheDocument();
   });
 });

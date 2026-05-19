@@ -224,8 +224,11 @@ describe('ProjectMessageView — session isolation', () => {
       await vi.advanceTimersByTimeAsync(3100);
     });
 
-    // Verify the poll fired and we captured a signal
-    expect(pollSignal).toBeDefined();
+    // Verify the poll fired and we captured a signal. CI can schedule the
+    // polling callback a tick later than advanceTimersByTimeAsync resolves.
+    await waitFor(() => {
+      expect(pollSignal).toBeDefined();
+    });
     expect(pollSignal!.aborted).toBe(false);
 
     const sessionBResponse = makeSessionResponse('session-B', [

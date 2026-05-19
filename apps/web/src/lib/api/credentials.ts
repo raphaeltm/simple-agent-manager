@@ -1,4 +1,4 @@
-import type { CreateCredentialRequest, CredentialResponse } from '@simple-agent-manager/shared';
+import type { CreateCredentialRequest, CredentialResponse, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -8,6 +8,28 @@ export async function listCredentials(): Promise<CredentialResponse[]> {
 
 export async function createCredential(data: CreateCredentialRequest): Promise<CredentialResponse> {
   return request<CredentialResponse>('/api/credentials', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface CredentialValidationResponse {
+  valid: boolean;
+  provider?: string;
+  agentType?: string;
+  validationMode?: 'format' | 'provider';
+  message: string;
+}
+
+export async function validateCredential(data: CreateCredentialRequest): Promise<CredentialValidationResponse> {
+  return request<CredentialValidationResponse>('/api/credentials/validate', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function validateAgentCredential(data: SaveAgentCredentialRequest): Promise<CredentialValidationResponse> {
+  return request<CredentialValidationResponse>('/api/credentials/agent/validate', {
     method: 'POST',
     body: JSON.stringify(data),
   });

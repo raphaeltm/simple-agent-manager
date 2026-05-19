@@ -40,7 +40,7 @@ function FloatingHeader({
 }) {
   if (!lc.session) return null;
   return (
-    <div className="absolute top-0 left-0 right-0 z-10">
+    <div className="relative z-10 shrink-0">
       <SessionHeader
         projectId={projectId}
         session={lc.session}
@@ -275,53 +275,55 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="flex-1 min-h-0 relative">
+        <div className="flex-1 min-h-0 flex flex-col">
           <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
-          <div className="flex items-center justify-center h-full">
+          <div className="flex flex-1 items-center justify-center">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
             </span>
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
+        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
           <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
-          <Virtuoso
-            ref={virtuosoRef}
-            style={{ height: '100%' }}
-            data={conversationItems}
-            firstItemIndex={lc.firstItemIndex}
-            initialTopMostItemIndex={conversationItems.length - 1}
-            followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
-            alignToBottom
-            atBottomThreshold={50}
-            atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-            overscan={200}
-            itemContent={(index, item) => (
-              <div className="sam-message-entry px-4 pb-3">
-                <AcpConversationItemView
-                  item={item}
-                  onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
-                  onLoadToolContent={handleLoadToolContent}
-                  animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
-                  animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-                />
-              </div>
-            )}
-            components={{
-              Header: () => (
-                <div style={{ paddingTop: lc.session ? '48px' : undefined }}>
-                  {lc.hasMore && (
-                    <div className="text-center py-3">
-                      <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
-                        Load earlier messages
-                      </Button>
-                    </div>
-                  )}
+          <div className="flex-1 min-h-0">
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={conversationItems}
+              firstItemIndex={lc.firstItemIndex}
+              initialTopMostItemIndex={conversationItems.length - 1}
+              followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
+              alignToBottom
+              atBottomThreshold={50}
+              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+              overscan={200}
+              itemContent={(index, item) => (
+                <div className="sam-message-entry px-4 pb-3">
+                  <AcpConversationItemView
+                    item={item}
+                    onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
+                    onLoadToolContent={handleLoadToolContent}
+                    animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
+                    animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+                  />
                 </div>
-              ),
-            }}
-          />
+              )}
+              components={{
+                Header: () => (
+                  <>
+                    {lc.hasMore && (
+                      <div className="text-center py-3">
+                        <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
+                          Load earlier messages
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ),
+              }}
+            />
+          </div>
 
           {/* Scroll to bottom button */}
           {lc.showScrollButton && (

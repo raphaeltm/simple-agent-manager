@@ -25,10 +25,11 @@ function makeState(overrides: Partial<ProvisioningState> = {}): ProvisioningStat
 }
 
 describe('ProvisioningIndicator', () => {
-  it('shows the execution step label as status text', () => {
+  it('shows staged status text and preserves execution step detail', () => {
     const state = makeState({ executionStep: 'workspace_creation' });
-    render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-    expect(screen.getByText(EXECUTION_STEP_LABELS.workspace_creation)).toBeInTheDocument();
+    const { container } = render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
+    expect(screen.getByText('Cloning repository (2/4)')).toBeInTheDocument();
+    expect(container).toHaveTextContent(`Current detail: ${EXECUTION_STEP_LABELS.workspace_creation}`);
   });
 
   it('shows "Starting..." when no execution step is set', () => {

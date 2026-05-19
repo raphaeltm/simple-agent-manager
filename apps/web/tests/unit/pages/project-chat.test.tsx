@@ -86,6 +86,7 @@ vi.mock('../../../src/components/project-message-view', () => ({
 }));
 
 import { ProjectChat } from '../../../src/pages/project-chat';
+import { ProvisioningIndicator } from '../../../src/pages/project-chat/ProvisioningIndicator';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 
 const PROJECT_ID = 'proj-1';
@@ -200,6 +201,22 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     });
+  });
+
+  it('populates the composer from a first-chat starter prompt', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByText('Run the tests and summarize what fails.')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Run the tests and summarize what fails.'));
+
+    expect(screen.getByPlaceholderText('Describe what you want the agent to do...')).toHaveValue(
+      'Run the tests and summarize what fails.'
+    );
   });
 
   it('shows new chat input when sessions exist but no sessionId in URL', async () => {
@@ -459,6 +476,34 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     });
     expect(screen.queryByText('Forking from: Fix the login bug')).not.toBeInTheDocument();
+  });
+});
+
+describe('ProvisioningIndicator', () => {
+  it('shows staged provisioning progress and time estimate', () => {
+    render(
+      <ProvisioningIndicator
+        bootLogCount={2}
+        onViewLogs={vi.fn()}
+        state={{
+          taskId: 'task-1',
+          sessionId: 'session-1',
+          branchName: 'sam/test',
+          status: 'queued',
+          executionStep: 'workspace_ready',
+          errorMessage: null,
+          startedAt: Date.now(),
+          workspaceId: 'workspace-1',
+          workspaceUrl: null,
+        }}
+      />
+    );
+
+    expect(screen.getByText('Installing dependencies (3/4)')).toBeInTheDocument();
+    expect(screen.getByText(/Usually takes 2-4 minutes/)).toBeInTheDocument();
+    expect(screen.getByText('1. Provisioning VM')).toBeInTheDocument();
+    expect(screen.getByText('4. Starting agent')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View Logs' })).toBeInTheDocument();
   });
 });
 
