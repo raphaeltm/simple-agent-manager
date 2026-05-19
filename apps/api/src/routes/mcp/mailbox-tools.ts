@@ -16,6 +16,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { sendPromptToAgentOnNode } from '../../services/node-agent';
+import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
 import {
   ACTIVE_STATUSES,
@@ -338,6 +339,18 @@ async function attemptImmediateDelivery(
 ): Promise<boolean> {
   if (!target.agentSessionId) return false;
 
+  const persistedMessageId = await persistOrchestrationPrompt({
+    env,
+    projectId: target.projectId,
+    chatSessionId: target.chatSessionId,
+    content,
+    messageId,
+    source: 'agent_mailbox',
+    kind: 'mailbox_immediate_delivery',
+    mailboxMessageId: messageId,
+    senderId: userId,
+  });
+
   try {
     await sendPromptToAgentOnNode(
       target.nodeId,
@@ -346,6 +359,7 @@ async function attemptImmediateDelivery(
       content,
       env,
       userId,
+      persistedMessageId,
     );
 
     // Mark as delivered in the DO

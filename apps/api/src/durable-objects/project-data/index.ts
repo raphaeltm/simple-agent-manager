@@ -109,8 +109,8 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.failed', { sessionId }, sessionId);
   }
 
-  async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null): Promise<string> {
-    return messagePersistence.persistMessageWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, role, content, toolMetadata);
+  async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null, messageId?: string): Promise<string> {
+    return messagePersistence.persistMessageWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, role, content, toolMetadata, messageId);
   }
 
   async persistMessageBatch(

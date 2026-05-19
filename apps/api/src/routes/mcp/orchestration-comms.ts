@@ -13,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
 import {
   ACTIVE_STATUSES,
@@ -39,6 +40,7 @@ interface ResolvedChild {
     id: string;
     nodeId: string;
     nodeStatus: string | null;
+    chatSessionId: string | null;
   };
   agentSession: {
     id: string;
@@ -121,6 +123,7 @@ async function resolveChildAgent(
     .select({
       id: schema.workspaces.id,
       nodeId: schema.workspaces.nodeId,
+      chatSessionId: schema.workspaces.chatSessionId,
       nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
@@ -176,6 +179,7 @@ async function resolveChildAgent(
       id: workspace.id,
       nodeId: workspace.nodeId,
       nodeStatus: workspace.nodeStatus,
+      chatSessionId: workspace.chatSessionId,
     },
     agentSession: {
       id: agentSession.id,
@@ -220,6 +224,22 @@ export async function handleSendMessageToSubtask(
 
   const { workspace, agentSession } = resolution;
 
+  if (!workspace.chatSessionId) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Child workspace has no chat session');
+  }
+
+  const messageId = await persistOrchestrationPrompt({
+    env,
+    projectId: resolution.task.projectId,
+    chatSessionId: workspace.chatSessionId,
+    content: message,
+    source: 'parent_agent',
+    kind: 'orchestration_prompt',
+    parentTaskId: tokenData.taskId,
+    childTaskId: taskId,
+    senderId: tokenData.workspaceId,
+  });
+
   // Send the prompt to the child agent's running session
   try {
     await sendPromptToAgentOnNode(
@@ -229,6 +249,7 @@ export async function handleSendMessageToSubtask(
       message,
       env,
       tokenData.userId,
+      messageId,
     );
 
     log.info('mcp.send_message_to_subtask.delivered', {
@@ -237,6 +258,7 @@ export async function handleSendMessageToSubtask(
       workspaceId: workspace.id,
       agentSessionId: agentSession.id,
       messageLength: message.length,
+      messageId,
     });
 
     return jsonRpcSuccess(requestId, {

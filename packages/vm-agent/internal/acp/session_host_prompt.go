@@ -19,7 +19,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		return
 	}
 	h.persistLastPrompt(promptReq.firstTextContent)
-	h.injectUserMessageNotifications(promptReq.sessionID, promptReq.blocks)
+	h.injectUserMessageNotifications(promptReq.sessionID, promptReq.blocks, promptReq.messageID)
 	h.cancelAutoSuspendTimer()
 
 	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
@@ -61,6 +61,7 @@ type preparedPromptRequest struct {
 	sessionID        acpsdk.SessionId
 	blocks           []acpsdk.ContentBlock
 	firstTextContent string
+	messageID        string
 }
 
 type promptStartInfo struct {
@@ -78,7 +79,7 @@ func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID stri
 		return preparedPromptRequest{}, false
 	}
 
-	blocks, firstTextContent, err := parsePromptBlocks(params)
+	blocks, firstTextContent, messageID, err := parsePromptBlocks(params)
 	if err != nil {
 		slog.Error("Failed to parse prompt params", "error", err)
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Invalid prompt params")
@@ -88,7 +89,13 @@ func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID stri
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Empty prompt")
 		return preparedPromptRequest{}, false
 	}
-	return preparedPromptRequest{acpConn: acpConn, sessionID: sessionID, blocks: blocks, firstTextContent: firstTextContent}, true
+	return preparedPromptRequest{
+		acpConn:          acpConn,
+		sessionID:        sessionID,
+		blocks:           blocks,
+		firstTextContent: firstTextContent,
+		messageID:        messageID,
+	}, true
 }
 
 func (h *SessionHost) currentACPSession() (*acpsdk.ClientSideConnection, acpsdk.SessionId) {
@@ -97,15 +104,16 @@ func (h *SessionHost) currentACPSession() (*acpsdk.ClientSideConnection, acpsdk.
 	return h.acpConn, h.sessionID
 }
 
-func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, error) {
+func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, string, error) {
 	var promptParams struct {
-		Prompt []struct {
+		MessageID string `json:"messageId"`
+		Prompt    []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"prompt"`
 	}
 	if err := json.Unmarshal(params, &promptParams); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	var blocks []acpsdk.ContentBlock
@@ -119,10 +127,11 @@ func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, e
 			firstTextContent = p.Text
 		}
 	}
-	return blocks, firstTextContent, nil
+	return blocks, firstTextContent, promptParams.MessageID, nil
 }
 
-func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId, blocks []acpsdk.ContentBlock) {
+func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId, blocks []acpsdk.ContentBlock, messageID string) {
+	userMessageID := messageID
 	for _, block := range blocks {
 		notif := acpsdk.SessionNotification{
 			SessionId: sessionID,
@@ -142,6 +151,10 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 		// Enqueue to message reporter for Durable Object persistence.
 		if h.config.MessageReporter != nil {
 			for _, m := range ExtractMessages(notif) {
+				if userMessageID != "" && m.Role == "user" {
+					m.MessageID = userMessageID
+					userMessageID = ""
+				}
 				if err := h.config.MessageReporter.Enqueue(MessageReportEntry{
 					MessageID:    m.MessageID,
 					Role:         m.Role,

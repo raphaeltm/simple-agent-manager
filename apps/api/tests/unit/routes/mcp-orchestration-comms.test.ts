@@ -7,10 +7,20 @@ import type { Env } from '../../../src/env';
 // Mock node-agent service functions
 const mockSendPromptToAgentOnNode = vi.fn();
 const mockStopAgentSessionOnNode = vi.fn();
+const mockPersistOrchestrationPrompt = vi.fn();
+const mockEnqueueMailboxMessage = vi.fn();
 
 vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: (...args: unknown[]) => mockSendPromptToAgentOnNode(...args),
   stopAgentSessionOnNode: (...args: unknown[]) => mockStopAgentSessionOnNode(...args),
+}));
+
+vi.mock('../../../src/services/orchestration-prompts', () => ({
+  persistOrchestrationPrompt: (...args: unknown[]) => mockPersistOrchestrationPrompt(...args),
+}));
+
+vi.mock('../../../src/services/project-data', () => ({
+  enqueueMailboxMessage: (...args: unknown[]) => mockEnqueueMailboxMessage(...args),
 }));
 
 // Mock ulid for deterministic IDs
@@ -80,6 +90,8 @@ describe('MCP Orchestration Communication Tools', () => {
     mockEnv.DATABASE = mockD1 as unknown as D1Database;
     mockSendPromptToAgentOnNode.mockResolvedValue(undefined);
     mockStopAgentSessionOnNode.mockResolvedValue(undefined);
+    mockPersistOrchestrationPrompt.mockResolvedValue('persisted-msg-001');
+    mockEnqueueMailboxMessage.mockResolvedValue({ id: 'mailbox-msg-001' });
 
     const mod = await import('../../../src/routes/mcp/orchestration-comms');
     handleSendMessageToSubtask = mod.handleSendMessageToSubtask;
@@ -203,10 +215,14 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
           id: 'agent-session-001',
+        }],
+        [{
+          chat_session_id: 'chat-child-001',
         }],
       ]);
 
@@ -228,6 +244,21 @@ describe('MCP Orchestration Communication Tools', () => {
         'Please focus on the auth module',
         mockEnv,
         'user-001',
+        'persisted-msg-001',
+      );
+      expect(mockPersistOrchestrationPrompt).toHaveBeenCalledWith({
+        env: mockEnv,
+        projectId: 'proj-001',
+        chatSessionId: 'chat-child-001',
+        content: 'Please focus on the auth module',
+        source: 'parent_agent',
+        kind: 'orchestration_prompt',
+        parentTaskId: 'parent-task-001',
+        childTaskId: 'child-001',
+        senderId: 'ws-parent-001',
+      });
+      expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0],
       );
     });
 
@@ -243,10 +274,14 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
           id: 'agent-session-001',
+        }],
+        [{
+          chat_session_id: 'chat-child-001',
         }],
       ]);
 
@@ -264,7 +299,20 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error).toBeUndefined();
       const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
       expect(content.delivered).toBe(false);
+      expect(content.queued).toBe(true);
       expect(content.reason).toBe('agent_busy');
+      expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0],
+      );
+      expect(mockEnqueueMailboxMessage).toHaveBeenCalledWith(
+        mockEnv,
+        'proj-001',
+        expect.objectContaining({
+          targetSessionId: 'chat-child-001',
+          sourceTaskId: 'parent-task-001',
+          content: 'hello',
+        }),
+      );
     });
 
     it('should return internal error for non-409 delivery failures', async () => {
@@ -279,6 +327,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -312,6 +361,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [],
@@ -340,6 +390,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -405,6 +456,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -449,6 +501,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -497,6 +550,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -534,6 +588,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -589,6 +644,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'running',
         }],
         [{
@@ -619,6 +675,7 @@ describe('MCP Orchestration Communication Tools', () => {
         [{
           id: 'ws-child-001',
           node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
           status: 'destroying',
         }],
       ]);

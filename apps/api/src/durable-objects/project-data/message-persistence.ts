@@ -31,8 +31,11 @@ export async function persistMessageWithSideEffects(
   role: string,
   content: string,
   toolMetadata: string | null,
+  messageId?: string,
 ): Promise<string> {
-  const result = messages.persistMessage(sql, env, sessionId, role, content, toolMetadata);
+  const result = messages.persistMessage(sql, env, sessionId, role, content, toolMetadata, messageId);
+  if (!result.inserted) return result.id;
+
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
