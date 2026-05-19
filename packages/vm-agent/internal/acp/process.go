@@ -199,7 +199,7 @@ type ProcessConfig struct {
 	ContainerUser string
 	// AcpCommand is the binary name (e.g., "claude-agent-acp").
 	AcpCommand string
-	// AcpArgs are additional CLI arguments (e.g., ["--experimental-acp"]).
+	// AcpArgs are additional CLI arguments (e.g., ["--acp"]).
 	AcpArgs []string
 	// EnvVars are environment variables to set (e.g., "ANTHROPIC_API_KEY=sk-...").
 	EnvVars []string

@@ -216,6 +216,30 @@ describe('Credentials Routes - OAuth Support', () => {
       const body = await res.json();
       expect(body.message).toContain('not supported');
     });
+
+    it('should accept a Gemini API key credential', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+
+      const request: SaveAgentCredentialRequest = {
+        agentType: 'google-gemini',
+        credentialKind: 'api-key',
+        credential: 'gemini-api-key-1234567890',
+        autoActivate: true,
+      };
+
+      const res = await app.request('/api/credentials/agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }, makeTestEnv());
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.agentType).toBe('google-gemini');
+      expect(body.provider).toBe('google');
+      expect(body.credentialKind).toBe('api-key');
+      expect(body.isActive).toBe(true);
+    });
   });
 
   describe('GET /api/credentials/agent - Multiple credential types', () => {

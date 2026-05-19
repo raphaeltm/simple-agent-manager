@@ -94,7 +94,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     provider: 'google',
     envVarName: 'GEMINI_API_KEY',
     acpCommand: 'gemini',
-    acpArgs: ['--experimental-acp'],
+    acpArgs: ['--acp'],
     supportsAcp: true,
     credentialHelpUrl: 'https://aistudio.google.com/apikey',
     installCommand: 'npm install -g @google/gemini-cli',
