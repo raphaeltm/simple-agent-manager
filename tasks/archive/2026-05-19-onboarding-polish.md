@@ -37,7 +37,9 @@ Critical override for this `/do` run: do not merge under any circumstances. Comp
 - [x] Add focused API/unit tests for credential validation and frontend tests for onboarding/provisioning/chat prompt behavior.
 - [x] Run local Playwright visual audit for changed web surfaces on mobile and desktop.
 - [x] Run full quality suite before PR.
-- [ ] Complete specialist review, staging verification, PR creation/update, and CI monitoring.
+- [x] Complete specialist review.
+- [ ] Complete staging verification.
+- [ ] Create/update PR and monitor CI checks.
 - [ ] Stop before merge and report PR URL/status.
 
 ## Acceptance Criteria
