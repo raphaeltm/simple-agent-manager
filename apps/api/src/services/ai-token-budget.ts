@@ -348,7 +348,9 @@ export async function checkMonthlyCostCap(
 
   const costUsd = await getCachedMonthlyCost(kv, userId);
 
-  // No cache yet — fail-open (cron hasn't run yet for this user)
+  // No cache yet — fail-open until the hourly cron populates usage data.
+  // Window is at most 60 minutes after SAM mode activation or cap change.
+  // Acceptable risk: daily token budget (checked separately) still applies.
   if (costUsd === null) {
     return { allowed: true, costUsd: 0, capUsd };
   }

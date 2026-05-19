@@ -177,7 +177,13 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 
 ## Agent Authentication
 
-Claude Code supports dual authentication: **API keys** (pay-per-use from Anthropic Console) and **OAuth tokens** (from Claude Max/Pro subscriptions via `claude setup-token`). Users toggle between them in Settings. The system injects `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` based on active credential type.
+Agents support three **provider modes** (stored as `providerMode` in `agent_settings`):
+
+- **`user-api-key`** (default): User's own API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) injected at workspace boot. No platform proxy involved.
+- **`oauth`**: OAuth token from the provider's subscription plan (e.g., Claude Max/Pro via `claude setup-token`). Injected as `CLAUDE_CODE_OAUTH_TOKEN`.
+- **`sam`**: Platform-managed AI proxy. The workspace receives a `__platform_proxy__` sentinel as its API key and routes all LLM traffic through the SAM AI proxy (`/ai/v1/*`), which handles billing, usage tracking, rate limiting, and budget enforcement via Cloudflare AI Gateway.
+
+Users select their provider mode per-agent in Settings → Agent Settings. The `sam` mode requires explicit opt-in — it is never auto-selected.
 
 ## Testing
 
@@ -235,6 +241,7 @@ Domains chain together: competitive research feeds marketing and business strate
 
 > Full changelog with implementation details: `docs/recent-changes.md`. Use the `/changelog` skill for structured queries.
 
+- explicit-sam-provider-selection: Require explicit opt-in to SAM as AI provider via `providerMode: 'sam'`; three-mode agent auth (user-api-key, oauth, sam); AI proxy auth gate on all endpoints including /models
 - compact-mode-lazy-load-tool-content: Chat compact mode strips tool content from RPC payload (80-90% reduction); lazy-loads on expand
 - harness-track-d-integration-design: SAM-native harness architecture doc; Gemma 4 26B as default Workers AI model
 - ai-proxy-universal-tracking: URL-path-based passthrough proxy for usage tracking without consuming auth headers

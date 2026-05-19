@@ -771,11 +771,10 @@ aiProxyRoutes.post('/responses', async (c) => {
   }
 });
 
-/** OpenAI models endpoint — returns available models. */
+/** OpenAI models endpoint — returns available models. Requires callback token auth. */
 aiProxyRoutes.get('/models', async (c) => {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return c.json({ error: { message: 'AI proxy is disabled', type: 'service_unavailable' } }, 503);
-  }
+  const prepared = await prepareAIProxyRequest(c);
+  if (prepared instanceof Response) return prepared;
 
   const allowedModels = getAllowedModels(c.env);
   const providerOwnerMap: Record<string, string> = {
