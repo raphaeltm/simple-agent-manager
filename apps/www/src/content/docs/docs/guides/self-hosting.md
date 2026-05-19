@@ -9,9 +9,11 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 | Requirement              | Purpose                   | Tier          |
 | ------------------------ | ------------------------- | ------------- |
-| **Cloudflare account**   | API hosting, DNS, storage | Free tier     |
+| **Cloudflare account**   | API hosting, DNS, storage | Workers Paid ($5/mo) |
 | **GitHub account**       | Authentication, CI/CD     | Free tier     |
 | **Domain on Cloudflare** | Workspace URLs            | Any registrar |
+
+**Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
 You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/) or [Scaleway API key](https://console.scaleway.com/iam/api-keys) through the Settings UI.
 
@@ -32,12 +34,21 @@ In Cloudflare Dashboard → My Profile → API Tokens → Create Custom Token:
 | Account         | Workers Observability  | Read   |
 | Account         | Cloudflare Pages       | Edit   |
 | Account         | AI Gateway             | Edit   |
+| Account         | Containers             | Edit   |
 | Zone            | DNS                    | Edit   |
 | Zone            | Workers Routes         | Edit   |
 | Zone            | SSL and Certificates   | Edit   |
 | Zone            | Zone                   | Read   |
 
 Set **Zone Resources** to your specific domain and **Account Resources** to your account.
+
+:::caution[Use a top-level domain]
+Use a top-level domain as `BASE_DOMAIN` (e.g., `example.com`), not a subdomain (`sam.example.com`). Cloudflare's free Universal SSL covers `*.example.com` but not nested wildcards like `*.sam.example.com`. The root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created.
+:::
+
+:::tip[DNSSEC]
+If your registrar has DNSSEC enabled, disable it **before** changing nameservers to Cloudflare. DNSSEC with mismatched nameservers blocks DNS resolution.
+:::
 
 ## Step 3: Create GitHub App
 
@@ -62,6 +73,12 @@ Go to [GitHub App Settings](https://github.com/settings/apps) → New GitHub App
 - Secret: generate a random string and save the same value as the `GH_WEBHOOK_SECRET` GitHub Environment secret
 
 After creation, note the **App ID** and **Client ID**, generate a **Client Secret** and **Private Key**.
+
+Base64 encode the private key:
+```bash
+cat your-key.pem | base64 -w0    # Linux
+cat your-key.pem | base64        # macOS
+```
 
 :::caution
 "Request user authorization (OAuth) during installation" must be **unchecked**. When checked, it disables the Setup URL and breaks post-installation redirects.
@@ -160,7 +177,7 @@ To remove all resources: Actions → Teardown → Run workflow → type `DELETE`
 | Cloudflare R2      | 10GB storage     | $0.015/GB/month |
 | Cloudflare Pages   | Unlimited        | Free            |
 
-A typical SAM deployment stays within the free tier for small to medium usage.
+The Workers Paid plan ($5/month) is required for Durable Objects. Beyond the base plan, usage-based costs stay within free tier allowances for small to medium usage.
 
 ### User VM Costs
 
@@ -188,9 +205,33 @@ VMs are billed to each user's own cloud provider account. SAM supports Hetzner, 
 
 Your `PULUMI_CONFIG_PASSPHRASE` doesn't match the one used when state was created. Use the original passphrase or delete the stack in R2 and start fresh.
 
-### "OAuth callback failed"
+### "OAuth callback failed" / redirect URI mismatch
 
-Check that your GitHub App's Callback URL matches exactly: `https://api.yourdomain.com/api/auth/callback/github`
+Check that your GitHub App's Callback URL matches your `BASE_DOMAIN` exactly: `https://api.yourdomain.com/api/auth/callback/github`. If you changed `BASE_DOMAIN` after initial setup, update the URLs in both your GitHub OAuth App and GitHub App.
+
+### Origin CA Certificate Error (1016)
+
+Your API token is missing the **Zone → SSL and Certificates → Edit** permission. Edit the token in Cloudflare and add it.
+
+### Analytics Engine Not Enabled (10089)
+
+Go to **Workers & Pages** → **Analytics Engine** → **Enable**. This is free but must be explicitly activated.
+
+### Durable Objects Free Plan Error (10097)
+
+Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → upgrade plan.
+
+### Containers Forbidden
+
+Your API token is missing the **Account → Containers → Edit** permission. Edit the token and add it.
+
+### SSL Handshake Failure
+
+If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead.
+
+### DNS Record Already Exists
+
+If you changed `BASE_DOMAIN`, old DNS records from a previous deployment may conflict. Go to Cloudflare DNS and delete the stale `api`, `app`, and `*` records, then re-run the deploy.
 
 ### "D1_ERROR: no such table"
 

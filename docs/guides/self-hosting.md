@@ -230,9 +230,11 @@ Before starting, ensure you have the following ready.
 
 | Account              | Purpose                           | Tier Needed | Sign-up Link                                          |
 | -------------------- | --------------------------------- | ----------- | ----------------------------------------------------- |
-| **Cloudflare**       | API hosting, DNS, storage         | Free tier   | [cloudflare.com](https://dash.cloudflare.com/sign-up) |
+| **Cloudflare**       | API hosting, DNS, storage         | Workers Paid ($5/mo) | [cloudflare.com](https://dash.cloudflare.com/sign-up) |
 | **GitHub**           | Authentication, repository access | Free tier   | [github.com](https://github.com/signup)               |
 | **Domain Registrar** | Your workspace domain             | Any         | (you likely already have one)                         |
+
+**Why Workers Paid?** SAM uses Durable Objects for real-time chat, task execution, and node lifecycle management. Durable Objects require the Workers Paid plan ($5/month). Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free) — go to **Workers & Pages** → **Analytics Engine** → **Enable**.
 
 **Note on cloud providers**: SAM uses a Bring-Your-Own-Cloud (BYOC) model. Each user provides their own Hetzner (or other provider) API token through the Settings UI to create workspaces. You do **not** need a shared cloud provider account for the platform itself — Cloudflare is the only infrastructure the platform operator manages.
 
@@ -265,7 +267,8 @@ git --version
 
 - [ ] All required accounts created
 - [ ] All tools installed and verified
-- [ ] A domain you control (e.g., `example.com` or `workspaces.example.com`)
+- [ ] Workers Paid plan activated and Analytics Engine enabled
+- [ ] A domain you control (e.g., `example.com` — see note below about subdomains)
 - [ ] 30-60 minutes of uninterrupted time
 
 ---
@@ -311,6 +314,10 @@ You must point your domain to Cloudflare's nameservers. This varies by registrar
 
 **Important**: Nameserver changes can take up to 24 hours to propagate. Cloudflare will email you when the domain is active.
 
+> **DNSSEC**: If your registrar has DNSSEC enabled, disable it **before** changing nameservers. DNSSEC with mismatched nameservers will block DNS resolution.
+
+> **Use a top-level domain as `BASE_DOMAIN`**, not a subdomain (e.g., use `example.com`, not `sam.example.com`). Cloudflare's free Universal SSL certificate covers `example.com` and `*.example.com` but does **not** cover nested wildcards like `*.sam.example.com`. Using a subdomain as `BASE_DOMAIN` requires the Advanced Certificate Manager add-on ($10/month). The root domain itself is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created, so you can continue hosting other sites on the root.
+
 ### Step 3: Find Your Account ID and Zone ID
 
 You'll need these IDs for configuration:
@@ -345,6 +352,7 @@ SAM needs a Cloudflare API token with specific permissions:
 | Account | Developer Platform | Workers Observability | Read         |
 | Account | Developer Platform | Pages                 | Edit         |
 | Account | AI                 | AI Gateway            | Edit         |
+| Account | Developer Platform | Containers            | Edit         |
 | Zone    | Developer Platform | Workers Routes        | Edit         |
 | Zone    | SSL & Certificates | SSL and Certificates  | Edit         |
 | Zone    | DNS & Zone         | DNS                   | Edit         |
@@ -559,7 +567,8 @@ GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx
 GITHUB_CLIENT_SECRET=your-github-app-client-secret
 GITHUB_APP_ID=123456
 # For the private key, base64 encode the entire .pem file:
-# cat your-key.pem | base64 -w0
+# cat your-key.pem | base64 -w0    # Linux
+# cat your-key.pem | base64        # macOS
 GITHUB_APP_PRIVATE_KEY=LS0tLS1CRUdJTi4uLi4=
 
 # Security Keys (from generate-keys.ts script)
@@ -1249,7 +1258,7 @@ wrangler d1 migrations apply workspaces --remote
 **Fix**:
 
 1. Ensure the key is stored either as raw PEM or base64-encoded PEM (both work)
-2. For base64 encoding: `cat your-key.pem | base64 -w0`
+2. For base64 encoding: `cat your-key.pem | base64 -w0` (Linux) or `cat your-key.pem | base64` (macOS)
 3. For raw PEM via wrangler: `cat your-key.pem | wrangler secret put GITHUB_APP_PRIVATE_KEY`
 4. Make sure the key isn't truncated — PKCS#1 RSA 2048 keys are ~1700 characters
 
@@ -1274,6 +1283,42 @@ wrangler d1 migrations apply workspaces --remote
 3. Wait up to 24 hours for propagation
 4. Test with: `dig +short api.example.com`
 
+### Origin CA Certificate Error (1016)
+
+**Cause**: `POST "https://api.cloudflare.com/client/v4/certificates": 401 Unauthorized, code 1016`
+
+**Fix**: Your API token is missing the **Zone → SSL and Certificates → Edit** permission. Edit the token in Cloudflare and add it.
+
+### Analytics Engine Not Enabled (10089)
+
+**Cause**: `You need to enable Analytics Engine`
+
+**Fix**: Go to **Workers & Pages** → **Analytics Engine** → **Enable**. This is free but must be explicitly activated.
+
+### Durable Objects Free Plan Error (10097)
+
+**Cause**: `In order to use Durable Objects with a free plan, you must create a namespace using a new_sqlite_classes migration`
+
+**Fix**: Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → upgrade plan. Durable Objects require the paid plan.
+
+### Containers Forbidden
+
+**Cause**: `ApiError: Forbidden` on `/containers/me`
+
+**Fix**: Your API token is missing the **Account → Containers → Edit** permission. Edit the token and add it.
+
+### SSL Handshake Failure
+
+**Cause**: `sslv3 alert handshake failure` when accessing `api.YOUR_DOMAIN`
+
+**Fix**: If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead, or add the Advanced Certificate Manager add-on ($10/month).
+
+### DNS Record Already Exists
+
+**Cause**: `An A, AAAA, or CNAME record with that host already exists`
+
+**Fix**: If you changed `BASE_DOMAIN`, old DNS records from a previous deployment may conflict. Go to Cloudflare DNS and delete the stale `api`, `app`, and `*` records created by the previous deploy, then re-run.
+
 ---
 
 ## Cost Estimation
@@ -1290,7 +1335,7 @@ wrangler d1 migrations apply workspaces --remote
 | **Workers AI**         | 10K neurons/day free | Model-dependent   |
 | **Durable Objects**    | Included w/ Workers  | $0.15/million req |
 
-**Typical SAM deployment**: Stays within free tier for small to medium usage (1-5 users). Workers AI is used for task title generation and can be disabled by setting `TASK_TITLE_GENERATION_ENABLED=false` if you want to stay within the free tier.
+**Typical SAM deployment**: The Workers Paid plan ($5/month) is required for Durable Objects. Beyond the base plan, usage-based costs stay within free tier allowances for small to medium usage (1-5 users). Workers AI is used for task title generation and can be disabled by setting `TASK_TITLE_GENERATION_ENABLED=false` to minimize usage.
 
 ### User VM Costs (Paid by Users)
 

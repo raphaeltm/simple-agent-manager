@@ -44,7 +44,7 @@ To deploy your own SAM instance:
 ### Prerequisites
 
 - A domain with DNS managed by Cloudflare
-- A Cloudflare account (free tier works)
+- A Cloudflare account with **Workers Paid plan** ($5/month, required for Durable Objects)
 - A GitHub account
 
 ### Quick Deploy
