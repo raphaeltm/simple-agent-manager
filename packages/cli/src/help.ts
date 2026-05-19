@@ -3,6 +3,7 @@ export function helpText(): string {
 
 Usage:
   sam auth login --api-url <url> --session-cookie <cookie>
+  sam auth login --api-url <url> --session-cookie-stdin
   sam auth status
   sam task submit <projectId> <message> [--mode task|conversation]
   sam task status <projectId> <taskId>

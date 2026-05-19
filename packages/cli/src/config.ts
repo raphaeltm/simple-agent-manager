@@ -5,8 +5,6 @@ import path from 'node:path';
 import type { CliConfig, ConfigEnv, ConfigPaths } from './types.js';
 
 const CONFIG_FILE_NAME = 'config.json';
-const REDACTED_SUFFIX_LENGTH = 6;
-
 export function resolveConfigPaths(env: ConfigEnv): ConfigPaths {
   if (env.SAM_CONFIG_DIR) {
     return configPathFromDir(env.SAM_CONFIG_DIR);
@@ -44,8 +42,7 @@ export function normalizeApiUrl(apiUrl: string): string {
 export function redactSecret(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return '(not set)';
-  const suffix = trimmed.slice(-REDACTED_SUFFIX_LENGTH);
-  return `redacted:${suffix}`;
+  return '(redacted)';
 }
 
 export async function loadConfig(env: ConfigEnv): Promise<CliConfig | null> {
@@ -85,9 +82,9 @@ export async function saveConfig(env: ConfigEnv, config: CliConfig): Promise<Con
 }
 
 function configFromEnv(env: ConfigEnv): CliConfig | null {
-  if (!env.SAM_API_URL && !env.SAM_SESSION_COOKIE) return null;
-  if (!env.SAM_API_URL || !env.SAM_SESSION_COOKIE) {
-    throw new Error('SAM_API_URL and SAM_SESSION_COOKIE must be set together');
+  if (!env.SAM_SESSION_COOKIE) return null;
+  if (!env.SAM_API_URL) {
+    throw new Error('SAM_API_URL must be set when SAM_SESSION_COOKIE is set');
   }
   return {
     apiUrl: normalizeApiUrl(env.SAM_API_URL),

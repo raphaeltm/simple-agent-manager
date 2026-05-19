@@ -7,7 +7,7 @@ export interface ParsedCommand {
   positionals: string[];
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'help']);
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'session-cookie-stdin']);
 const FLAG_ALIASES: Record<string, string> = {
   h: 'help',
 };
@@ -61,6 +61,8 @@ export function parseLoginOptions(flags: Record<string, string | boolean>): Logi
   return {
     apiUrl: getStringFlag(flags, 'api-url'),
     sessionCookie: getStringFlag(flags, 'session-cookie'),
+    sessionCookieStdin:
+      flags['session-cookie-stdin'] === true || flags['session-cookie-stdin'] === 'true',
   };
 }
 

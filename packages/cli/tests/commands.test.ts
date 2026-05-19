@@ -14,8 +14,26 @@ describe('commands', () => {
     expect(runtime.output).toHaveLength(1);
     expect(runtime.output[0]).toContain('Authenticated');
     expect(runtime.output[0]).toContain('apiUrl: https://api.sammy.party');
-    expect(runtime.output[0]).toContain('sessionCookie: redacted:abcdef');
+    expect(runtime.output[0]).toContain('sessionCookie: (redacted)');
+    expect(runtime.output[0]).not.toContain('abcdef');
     expect(runtime.output[0]).toContain('configFile: ');
+  });
+
+  it('can read the auth login session cookie from stdin', async () => {
+    const runtime = runtimeWithFetch(async () => jsonResponse({}, 200), {
+      HOME: '/tmp/sam-cli-test-home',
+      SAM_CONFIG_DIR: '/tmp/sam-cli-test-config',
+    });
+    runtime.readStdin = async () => 'better-auth.session_token=secret\n';
+
+    const exitCode = await run(
+      ['auth', 'login', '--api-url', 'https://api.sammy.party', '--session-cookie-stdin'],
+      runtime
+    );
+
+    expect(exitCode).toBe(0);
+    expect(runtime.output[0]).toContain('Saved SAM CLI auth config');
+    expect(runtime.output[0]).not.toContain('secret');
   });
 
   it('routes sam chat without session to conversation-mode task submit', async () => {

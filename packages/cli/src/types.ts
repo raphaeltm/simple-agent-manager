@@ -29,6 +29,7 @@ export interface Runtime {
   env: ConfigEnv;
   fetch: typeof fetch;
   logger: Logger;
+  readStdin?: () => Promise<string>;
 }
 
 export interface GlobalOptions {
@@ -38,6 +39,7 @@ export interface GlobalOptions {
 export interface LoginOptions {
   apiUrl?: string;
   sessionCookie?: string;
+  sessionCookieStdin: boolean;
 }
 
 export interface TaskSubmitOptions {

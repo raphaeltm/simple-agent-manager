@@ -16,10 +16,13 @@ pnpm --filter @simple-agent-manager/cli exec sam --help
 Configure the API origin and session cookie:
 
 ```bash
-sam auth login \
+printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \
   --api-url https://api.sammy.party \
-  --session-cookie 'better-auth.session_token=...'
+  --session-cookie-stdin
 ```
+
+`--session-cookie-stdin` avoids putting the cookie in shell history. `--session-cookie`
+is also available for local throwaway sessions.
 
 The CLI writes `config.json` under `$SAM_CONFIG_DIR`, `$XDG_CONFIG_HOME/sam`, or `~/.config/sam` with file mode `0600` where the platform allows it. Normal status output redacts the cookie:
 
@@ -34,7 +37,8 @@ export SAM_API_URL=https://api.sammy.party
 export SAM_SESSION_COOKIE='better-auth.session_token=...'
 ```
 
-`SAM_API_URL` and `SAM_SESSION_COOKIE` must be set together.
+`SAM_SESSION_COOKIE` requires `SAM_API_URL`. `SAM_API_URL` by itself does not replace
+the stored config file.
 
 ## Submit A Task
 

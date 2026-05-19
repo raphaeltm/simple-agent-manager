@@ -43,13 +43,21 @@ async function authLogin(
   runtime: Runtime
 ): Promise<number> {
   const options = parseLoginOptions(flags);
-  if (!options.apiUrl || !options.sessionCookie) {
-    throw new Error('auth login requires --api-url and --session-cookie');
+  if (options.sessionCookie && options.sessionCookieStdin) {
+    throw new Error('Use either --session-cookie or --session-cookie-stdin, not both');
+  }
+
+  const sessionCookie = options.sessionCookieStdin
+    ? (await readSessionCookieFromStdin(runtime)).trim()
+    : options.sessionCookie;
+
+  if (!options.apiUrl || !sessionCookie) {
+    throw new Error('auth login requires --api-url and a session cookie');
   }
 
   const config: CliConfig = {
     apiUrl: normalizeApiUrl(options.apiUrl),
-    sessionCookie: options.sessionCookie,
+    sessionCookie,
   };
   const paths = await saveConfig(runtime.env, config);
   write(globals, runtime, {
@@ -176,6 +184,13 @@ async function client(runtime: Runtime): Promise<SamApiClient> {
     throw new Error('Not authenticated. Run `sam auth login` first.');
   }
   return new SamApiClient(config, runtime.fetch);
+}
+
+async function readSessionCookieFromStdin(runtime: Runtime): Promise<string> {
+  if (!runtime.readStdin) {
+    throw new Error('Reading the session cookie from stdin is not supported by this runtime');
+  }
+  return runtime.readStdin();
 }
 
 function write(

@@ -28,9 +28,10 @@ describe('config', () => {
     });
   });
 
-  it('uses environment config only when both values are present', async () => {
-    await expect(loadConfig({ SAM_API_URL: 'https://api.sammy.party' })).rejects.toThrow(
-      'SAM_API_URL and SAM_SESSION_COOKIE must be set together'
+  it('uses environment config only when a session cookie and API URL are present', async () => {
+    await expect(loadConfig({ SAM_API_URL: 'https://api.sammy.party' })).resolves.toBeNull();
+    await expect(loadConfig({ SAM_SESSION_COOKIE: 'cookie=value' })).rejects.toThrow(
+      'SAM_API_URL must be set when SAM_SESSION_COOKIE is set'
     );
 
     await expect(loadConfig({
@@ -49,8 +50,8 @@ describe('config', () => {
     });
   });
 
-  it('redacts all but the suffix of secrets', () => {
-    expect(redactSecret('better-auth.session_token=abcdef')).toBe('redacted:abcdef');
+  it('redacts secrets without exposing token fragments', () => {
+    expect(redactSecret('better-auth.session_token=abcdef')).toBe('(redacted)');
     expect(redactSecret('')).toBe('(not set)');
   });
 });

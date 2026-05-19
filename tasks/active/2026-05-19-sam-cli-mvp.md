@@ -22,13 +22,13 @@ This first slice should be conservative: a thin authenticated API client around 
 - [x] Add a new `@simple-agent-manager/cli` workspace package with a `sam` bin entrypoint.
 - [x] Implement config loading/saving with explicit file permissions and env overrides for API URL and auth cookie.
 - [x] Implement HTTP client helpers that send the stored cookie, parse JSON errors, and avoid logging secrets.
-- [x] Implement `sam auth login --api-url <url> --session-cookie <cookie>` and `sam auth status`.
+- [x] Implement `sam auth login --api-url <url> --session-cookie <cookie>`, safer `--session-cookie-stdin`, and `sam auth status`.
 - [x] Implement `sam task submit <projectId> <message>` with options for conversation/task mode and common task submit fields.
 - [x] Implement `sam task status <projectId> <taskId>`.
 - [x] Implement `sam chat <projectId> <message>` as a conversation-mode submit plus optional follow-up support via `--session <sessionId>`.
 - [x] Add focused unit tests for command parsing, config safety, request construction, and response formatting.
 - [x] Document the CLI MVP, auth limitations, and example commands.
-- [ ] Run package and repo quality checks.
+- [x] Run package and repo quality checks.
 - [ ] Run specialist reviews required by `/do`: task completion, security, docs sync, constitution, and test engineering.
 - [ ] Create/update PR, monitor CI/checks, and stop before merge.
 
