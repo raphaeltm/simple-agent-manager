@@ -150,6 +150,15 @@ function buildOpenAIUrl(env: Env): string {
   return 'https://api.openai.com/v1/chat/completions';
 }
 
+/** Build upstream URL for OpenAI Responses API via AI Gateway. */
+function buildOpenAIResponsesUrl(env: Env): string {
+  const gatewayId = env.AI_GATEWAY_ID;
+  if (gatewayId) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/responses`;
+  }
+  return 'https://api.openai.com/v1/responses';
+}
+
 
 // =============================================================================
 // Input Token Estimation
@@ -170,6 +179,22 @@ function estimateInputTokens(messages: Array<{ role: string; content: unknown }>
     return sum;
   }, 0);
   return Math.ceil(totalChars / 4);
+}
+
+function estimateResponsesInputTokens(body: Record<string, unknown>): number {
+  const chunks: string[] = [];
+  if (typeof body.instructions === 'string') chunks.push(body.instructions);
+
+  const input = body.input;
+  if (typeof input === 'string') {
+    chunks.push(input);
+  } else if (Array.isArray(input)) {
+    chunks.push(JSON.stringify(input));
+  } else if (input && typeof input === 'object') {
+    chunks.push(JSON.stringify(input));
+  }
+
+  return Math.ceil(chunks.join('\n').length / 4);
 }
 
 // =============================================================================
@@ -337,6 +362,60 @@ async function forwardToOpenAI(
   }
 
   // OpenAI returns OpenAI-compatible format — pass through transparently
+  const responseHeaders = new Headers();
+  const contentType = response.headers.get('content-type');
+  if (contentType) responseHeaders.set('Content-Type', contentType);
+  if (body.stream) {
+    responseHeaders.set('Cache-Control', 'no-cache');
+    responseHeaders.set('Connection', 'keep-alive');
+    responseHeaders.set('X-Accel-Buffering', 'no');
+  }
+
+  return new Response(response.body, { status: response.status, headers: responseHeaders });
+}
+
+/** Forward request to OpenAI Responses API via AI Gateway. */
+async function forwardToOpenAIResponses(
+  env: Env,
+  body: Record<string, unknown>,
+  modelId: string,
+  aigMetadata: string,
+  openaiApiKey: string,
+): Promise<Response> {
+  const gatewayUrl = buildOpenAIResponsesUrl(env);
+  const gatewayBody = { ...body, model: modelId };
+  const cfToken = resolveUnifiedBillingToken(env);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'cf-aig-metadata': aigMetadata,
+  };
+  if (cfToken) {
+    headers['cf-aig-authorization'] = `Bearer ${cfToken}`;
+  } else {
+    headers['Authorization'] = `Bearer ${openaiApiKey}`;
+  }
+
+  const response = await fetch(gatewayUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(gatewayBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    log.error('ai_proxy.openai_responses_error', {
+      status: response.status,
+      body: errorText.slice(0, 500),
+    });
+    return new Response(JSON.stringify({
+      error: {
+        message: `AI inference failed (${response.status}). Please try again.`,
+        type: 'server_error',
+      },
+    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
   const responseHeaders = new Headers();
   const contentType = response.headers.get('content-type');
   if (contentType) responseHeaders.set('Content-Type', contentType);
@@ -570,6 +649,196 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       workspaceId,
       modelId,
       provider,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return c.json({
+      error: { message: 'Failed to reach upstream. Please try again.', type: 'server_error' },
+    }, 502);
+  }
+});
+
+/**
+ * POST /responses — Proxy to OpenAI Responses API via AI Gateway.
+ *
+ * Current Codex ACP uses the Responses API for custom providers. SAM exposes
+ * this only for OpenAI-family models because Workers AI and Anthropic route
+ * through the chat/messages proxy paths above.
+ */
+aiProxyRoutes.post('/responses', async (c) => {
+  if (c.env.AI_PROXY_ENABLED === 'false') {
+    return c.json({ error: { message: 'AI proxy is disabled', type: 'service_unavailable' } }, 503);
+  }
+
+  const token = extractCallbackToken(c.req.header('Authorization'), undefined);
+  if (!token) {
+    return c.json({ error: { message: 'Missing or invalid Authorization header', type: 'invalid_request_error' } }, 401);
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  let auth;
+  try {
+    auth = await verifyAIProxyAuth(token, c.env, db);
+  } catch (err) {
+    if (err instanceof AIProxyAuthError) {
+      return c.json({ error: { message: err.message, type: 'invalid_request_error' } }, err.statusCode as 401 | 403 | 404);
+    }
+    return c.json({ error: { message: 'Invalid or expired token', type: 'invalid_request_error' } }, 401);
+  }
+
+  const { userId, workspaceId, projectId, trialId } = auth;
+  const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
+  const windowStart = getCurrentWindowStart(windowSeconds);
+  const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
+  const { allowed: rpmAllowed, remaining, resetAt } = await checkRateLimit(
+    c.env.KV,
+    rateLimitKey,
+    rpmLimit,
+    windowSeconds,
+  );
+
+  c.header('X-RateLimit-Limit', rpmLimit.toString());
+  c.header('X-RateLimit-Remaining', remaining.toString());
+  c.header('X-RateLimit-Reset', resetAt.toString());
+
+  if (!rpmAllowed) {
+    const retryAfter = resetAt - Math.floor(Date.now() / 1000);
+    c.header('Retry-After', Math.max(1, retryAfter).toString());
+    return c.json(
+      { error: { message: 'Rate limit exceeded. Please try again later.', type: 'rate_limit_error' } },
+      429,
+    );
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.responses');
+  } catch {
+    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+  }
+
+  if (!body.input && !body.instructions) {
+    return c.json({ error: { message: 'input or instructions is required', type: 'invalid_request_error' } }, 400);
+  }
+
+  const modelId = await resolveModelId(typeof body.model === 'string' ? body.model : undefined, c.env);
+  const allowedModels = getAllowedModels(c.env);
+  if (!allowedModels.has(modelId)) {
+    return c.json({
+      error: {
+        message: `Model '${modelId}' is not available. Allowed models: ${Array.from(allowedModels).join(', ')}`,
+        type: 'invalid_request_error',
+      },
+    }, 400);
+  }
+
+  if (getModelProvider(modelId) !== 'openai') {
+    return c.json({
+      error: {
+        message: 'Responses API is only available for OpenAI models.',
+        type: 'invalid_request_error',
+      },
+    }, 400);
+  }
+
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    if (usageGate.reason === 'daily-token-budget') {
+      const { budget } = usageGate;
+      return c.json({
+        error: {
+          message: 'Daily token budget exceeded. Resets at midnight UTC.',
+          type: 'rate_limit_error',
+          budget: {
+            inputTokens: { used: budget.usage.inputTokens, limit: budget.inputLimit },
+            outputTokens: { used: budget.usage.outputTokens, limit: budget.outputLimit },
+          },
+        },
+      }, 429);
+    }
+
+    return c.json({
+      error: {
+        message: 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
+        type: 'rate_limit_error',
+        monthlyCost: {
+          used: usageGate.monthlyCap.costUsd,
+          cap: usageGate.monthlyCap.capUsd,
+        },
+      },
+    }, 429);
+  }
+
+  const estimatedInputTokens = estimateResponsesInputTokens(body);
+  const maxInputPerRequest = parseInt(c.env.AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST || '', 10)
+    || DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST;
+  if (estimatedInputTokens > maxInputPerRequest) {
+    return c.json({
+      error: {
+        message: `Request too large: estimated ${estimatedInputTokens} input tokens exceeds limit of ${maxInputPerRequest}`,
+        type: 'invalid_request_error',
+      },
+    }, 400);
+  }
+
+  const aigMetadata = buildAIGatewayMetadata({
+    userId,
+    workspaceId,
+    projectId,
+    trialId,
+    modelId,
+    stream: !!body.stream,
+    hasTools: !!body.tools,
+  });
+
+  const cfToken = resolveUnifiedBillingToken(c.env);
+  let openaiApiKey: string | undefined;
+  if (!cfToken) {
+    const encryptionKey = getCredentialEncryptionKey(c.env);
+    const platformCred = await getPlatformAgentCredential(db, 'codex', encryptionKey);
+    openaiApiKey = platformCred?.credential;
+    if (!openaiApiKey) {
+      return c.json({
+        error: {
+          message: 'No OpenAI API key configured. An admin must add a Codex platform credential or configure Unified Billing.',
+          type: 'server_error',
+        },
+      }, 503);
+    }
+  }
+
+  log.info('ai_proxy.responses.forward', {
+    userId,
+    workspaceId,
+    modelId,
+    stream: !!body.stream,
+    estimatedInputTokens,
+  });
+
+  try {
+    const response = await forwardToOpenAIResponses(c.env, body, modelId, aigMetadata, openaiApiKey ?? '');
+
+    log.info('ai_proxy.responses.response', {
+      userId,
+      workspaceId,
+      modelId,
+      status: response.status,
+    });
+
+    let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
+    try { executionCtx = c.executionCtx; } catch { /* no exec ctx in tests */ }
+    return attachTokenUsageAccounting(response, {
+      env: c.env,
+      userId,
+      format: 'openai',
+      fallbackInputTokens: estimatedInputTokens,
+      executionCtx,
+    });
+  } catch (err) {
+    log.error('ai_proxy.responses.fetch_error', {
+      userId,
+      workspaceId,
+      modelId,
       error: err instanceof Error ? err.message : String(err),
     });
     return c.json({

@@ -8,6 +8,7 @@ const mockCheckMonthlyCostCap = vi.fn();
 const mockCheckAiUsageGate = vi.fn();
 const mockIncrementTokenUsage = vi.fn();
 const mockResolveUpstreamAuth = vi.fn();
+const mockGetPlatformAgentCredential = vi.fn();
 const mockFetch = vi.fn();
 
 vi.stubGlobal('fetch', mockFetch);
@@ -50,7 +51,7 @@ vi.mock('../../../src/services/ai-billing', () => ({
   resolveUpstreamAuth: (...args: unknown[]) => mockResolveUpstreamAuth(...args),
 }));
 vi.mock('../../../src/services/platform-credentials', () => ({
-  getPlatformAgentCredential: vi.fn(),
+  getPlatformAgentCredential: (...args: unknown[]) => mockGetPlatformAgentCredential(...args),
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -89,6 +90,14 @@ function postChat(body: Record<string, unknown>) {
     headers: { 'Authorization': 'Bearer ws-token', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }, makeEnv());
+}
+
+function postResponses(body: Record<string, unknown>) {
+  return app.request('/ai/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ws-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, { ...makeEnv(), AI_PROXY_ALLOWED_MODELS: 'gpt-4.1' });
 }
 
 function postAnthropic(path: string, body: Record<string, unknown>) {
@@ -139,6 +148,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockCheckAiUsageGate.mockResolvedValue({ allowed: true });
   mockCheckMonthlyCostCap.mockResolvedValue({ allowed: true, costUsd: 0, capUsd: null });
+  mockGetPlatformAgentCredential.mockResolvedValue({ credential: 'openai-key' });
 });
 
 describe('OpenAI-compatible AI proxy token accounting', () => {
@@ -214,6 +224,31 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(res.status).toBe(500);
     await res.text();
     expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
+  });
+
+  it('forwards OpenAI Responses API requests through AI Gateway', async () => {
+    allowProxyRequest();
+    mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 8, outputTokens: 3 });
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'resp_1',
+      object: 'response',
+      usage: { input_tokens: 8, output_tokens: 3 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const res = await postResponses({
+      model: 'gpt-4.1',
+      input: 'Say hi',
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.openai.com/v1/responses');
+    expect(init.body).toBe(JSON.stringify({ model: 'gpt-4.1', input: 'Say hi' }));
+    expectUsageIncrement(8, 3);
   });
 });
 
