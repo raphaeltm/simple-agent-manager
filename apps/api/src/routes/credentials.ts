@@ -15,8 +15,8 @@ import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import { CreateCredentialSchema, CredentialKindBodySchema,jsonValidator, SaveAgentCredentialSchema } from '../schemas';
+import { validateAgentApiKeyWithProvider } from '../services/agent-credential-validation';
 import { decrypt, encrypt } from '../services/encryption';
-import { getTimeoutMs } from '../services/fetch-timeout';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 import { buildProviderConfig, serializeCredentialToken } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
@@ -27,14 +27,6 @@ interface CloudCredentialFields {
   providerName: CredentialProvider;
   tokenToValidate: string;
 }
-
-interface AgentValidationResult {
-  valid: boolean;
-  message: string;
-  validationMode: 'format' | 'provider';
-}
-
-const DEFAULT_AGENT_VALIDATION_TIMEOUT_MS = 8000;
 
 function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentialFields {
   const providerName = body.provider;
@@ -98,64 +90,6 @@ async function validateCloudCredential(providerName: CredentialProvider, tokenTo
     log.error('credentials.validation_failed', { providerName, error: err instanceof Error ? err.message : String(err) });
     throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
   }
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function validateAgentApiKeyWithProvider(agentType: AgentType, credential: string, env: Env): Promise<AgentValidationResult> {
-  const agentDef = getAgentDefinition(agentType);
-  if (!agentDef) {
-    throw errors.badRequest('Unknown agent type');
-  }
-  const timeoutMs = getTimeoutMs(env.AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS, DEFAULT_AGENT_VALIDATION_TIMEOUT_MS);
-
-  let response: Response | null = null;
-  if (agentDef.provider === 'anthropic') {
-    response = await fetchWithTimeout('https://api.anthropic.com/v1/models', {
-      headers: {
-        'x-api-key': credential,
-        'anthropic-version': '2023-06-01',
-      },
-    }, timeoutMs);
-  } else if (agentDef.provider === 'openai') {
-    response = await fetchWithTimeout('https://api.openai.com/v1/models', {
-      headers: { Authorization: `Bearer ${credential}` },
-    }, timeoutMs);
-  } else if (agentDef.provider === 'google') {
-    response = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/models', {
-      headers: { 'x-goog-api-key': credential },
-    }, timeoutMs);
-  } else if (agentDef.provider === 'mistral') {
-    response = await fetchWithTimeout('https://api.mistral.ai/v1/models', {
-      headers: { Authorization: `Bearer ${credential}` },
-    }, timeoutMs);
-  }
-
-  if (!response) {
-    return {
-      valid: true,
-      message: 'Credential format looks valid. Provider reachability validation is not available for this agent.',
-      validationMode: 'format',
-    };
-  }
-
-  if (response.ok) {
-    return { valid: true, message: `${agentDef.name} credential validated.`, validationMode: 'provider' };
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    throw errors.badRequest(`Invalid or unauthorized ${agentDef.name} credential`);
-  }
-
-  throw errors.badRequest(`${agentDef.name} validation failed with HTTP ${response.status}`);
 }
 
 // Apply auth middleware to all routes
