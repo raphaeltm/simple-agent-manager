@@ -1,16 +1,15 @@
 ---
 title: "The Workspace Was the Wrong Shape"
-date: 2026-05-18
+date: 2026-05-19
 author: Raphaël Titsworth-Morin
 category: devlog
 tags: ["ai-agents", "architecture", "developer-experience", "open-source"]
-excerpt: "I started building a better GitHub Codespaces. Then I realized the whole IDE paradigm was wrong for how software is actually getting built."
-draft: true
+excerpt: "SAM started as a cloud workspace manager. Then agents started managing agents, and the workspace became invisible infrastructure."
 ---
 
 I started where everyone starts: the old thing, but better.
 
-SAM was going to be like GitHub Codespaces with first-class AI support. Cloud workspaces you could access from anywhere, including your phone, with AI agent tabs alongside your terminal tabs. A remote IDE, but friendlier.
+I was so influenced by cloud IDEs when I started building SAM. [GitHub Codespaces](https://github.com/features/codespaces), [Gitpod](https://www.gitpod.io/), the whole shape of it: cloud workspaces you could access from anywhere, including your phone, with AI agent tabs alongside your terminal tabs. I felt like that's what was necessary. A remote IDE, but friendlier, with first-class AI support.
 
 And it worked! I was building SAM using SAM. The AI tabs were basically my file editor. I'd describe what I wanted, the agent would write it. Terminal tabs were for running commands. It felt like a traditional IDE, except one of my tabs could think.
 
@@ -20,19 +19,19 @@ I'd have multiple AI conversations going, each doing different things, and when 
 
 At some point it hit me that it was a little bit stupid to move from an AI chat window to a terminal to run a command that I was using AI to come up with in the first place.
 
-The realization crept in: in an ideal world, I would never have to run a terminal command. The AI would do all of that. And once you accept that, the whole IDE paradigm stops making sense. The file tree, the terminal panes, the tab bar... that's an interface designed for humans who type commands. If you're talking to something that does the typing for you, you need a different shape entirely.
+The realization crept in over time: in an ideal world, I would never have to run a terminal command. The AI would do all of that. And once you accept that, the whole IDE paradigm stops making sense. The file tree, the terminal panes, the tab bar... that's an interface designed for humans who type commands. If you're talking to something that does the typing for you, the way you think about software development changes, and you need a different shape entirely.
 
 ## Chat eats the IDE
 
 So SAM became chat-forward. The project page went from seven tabs (overview, chat, kanban, tasks, sessions, activity, settings) to one. The conversation.
 
-File browsing, git diffs, attachments, agent output... all inside the chat. The workspace still exists underneath: every agent gets a full cloud VM running a [devcontainer](https://containers.dev/). But the workspace is infrastructure now, not interface. You tell the agent what you want, it does the work, you see the results in the conversation.
+File browsing, git diffs, attachments, agent output... all inside the chat. The workspace still exists underneath: every agent gets a full cloud VM on [Hetzner](https://www.hetzner.com/cloud/) running a [devcontainer](https://containers.dev/). But the workspace is infrastructure now, not interface. You tell the agent what you want, it does the work, you see the results in the conversation.
 
 Most users never visit the workspace directly. Which is kind of funny, because I put a lot of effort into the workspace view at the beginning.
 
-If the workspace is invisible, it needs to be fast. So we built devcontainer image caching via Cloudflare's container registry and warm node pooling so a new task can claim a VM that's already running from a previous task in the same project. Provisioning times vary wildly. A complex devcontainer can take twenty minutes to build; a simple one provisions in under a minute. The trend is toward making the wait disappear, but we're not there yet, and the numbers are still mostly vibes rather than accurate measurements. That's something I want to fix.
+If the workspace is invisible, it needs to be fast. So we built [devcontainer image caching](https://github.com/raphaeltm/simple-agent-manager/pull/940) and warm node pooling so a new task can claim a VM that's already running from a previous task in the same project. Provisioning times vary wildly. A complex devcontainer can take twenty minutes to build; a simple one provisions in under a minute. The trend is toward making the wait disappear, but we're not there yet, and the numbers are still mostly vibes rather than accurate measurements. That's something I want to fix.
 
-We also built a lightweight workspace profile. Still a devcontainer, but with a pre-specified base image that doesn't require a long build. I originally built this for brainstorming. I kept finding myself talking through architecture with an agent, exploring how other projects solved a problem, poking at parts of the codebase I hadn't looked at in a while. Those conversations were productive, but they didn't need a full devcontainer build. They needed fast access to the repo.
+We also built a lightweight workspace profile. Still a devcontainer, but with a pre-specified base image that doesn't require a long build. I originally built this for brainstorming. I kept finding myself [talking through architecture with an agent](/blog/from-brainstorm-to-branch/), exploring how other projects solved a problem, poking at parts of the codebase I hadn't looked at in a while. Those conversations were productive, but they didn't need a full devcontainer build. They needed fast access to the repo.
 
 Brainstorm first. Delegate the real work later.
 
@@ -44,7 +43,7 @@ Once you're talking to agents instead of typing commands, the next bottleneck is
 
 And you're slow.
 
-So I built the obvious thing: let an agent do that. A lightweight workspace spins up (fast, pre-specified image, access to the repo) and runs an orchestrator agent. It breaks the work into tasks, spins up full workspaces for each one, and coordinates. Real dev environments, each with their own agent working on a focused piece of the problem. Nobody stepping on anyone else's feet. Or ports.
+So I built the obvious thing: let an agent do that. A lightweight workspace spins up (fast, pre-specified image, access to the repo) and runs an orchestrator agent. It breaks the work into tasks, spins up full workspaces for each one, and coordinates. Real dev environments, each with their own agent working on a focused piece of the problem. Nobody stepping on anyone else's feet.
 
 The tools are pretty simple. `dispatch_task` creates a child workspace and starts an agent. `send_message_to_subtask` injects a message into a running child's session. `stop_subtask` shuts one down, with an optional warning first so it can commit its work. `retry_subtask` spins up a replacement with context about what went wrong. `get_pending_messages` lets an agent check for new directives. (I wrote about these in more detail in [Agents Managing Agents](/blog/agents-managing-agents/).)
 
@@ -62,7 +61,7 @@ The orchestrator needs to think and delegate. It doesn't need Docker, doesn't ne
 
 The code agent is the opposite. It needs a full dev environment, a powerful model, and you're OK waiting for it because the work it does justifies it.
 
-But there's a third kind of work emerging. Coordination, research, and planning don't need a VM at all. We've been experimenting with a native harness, a minimal Go agent we're prototyping locally, backed by models like Gemma 4 26B through Cloudflare Workers AI. It's not production-ready. It's an experiment aimed at building something very focused on lightweight orchestration. We're also exploring Cloudflare's container runtime for agents that need to clone a repo and run tools but don't need a full VM.
+But there's a third kind of work emerging. Coordination, research, and planning don't need a VM at all. We've been experimenting with a native harness: a minimal Go agent backed by models like [Gemma 4 26B](https://ai.google.dev/gemma) through [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/). It's early, but the goal is lightweight orchestration without a VM. We're also exploring [Cloudflare Containers](https://developers.cloudflare.com/containers/) for agents that need to clone a repo and run tools but don't need a full VM.
 
 The general principle is broader than SAM. If you're building a system where agents do different kinds of work, treating them all the same is a mistake. A coordinator that takes 90 seconds to boot because it's building a devcontainer it will never use is wasted time. An implementation agent running in a container without Docker can't run the tests.
 
@@ -72,11 +71,11 @@ SAM runs Claude Code and Codex in full workspaces today. Per-project credential 
 
 ## What's next
 
-Before you can make smart routing decisions, you need to see what's actually happening. Right now we have token usage tracking by model, cost monitoring, and daily budget controls. That's the starting layer.
+The thing about letting agents run in parallel is that you hit boundaries you wouldn't expect. Some of them are the same problems cloud development environments have always had: you define the machine size at the project level, and then discover that different tasks within that project need wildly different resources. But parallelism makes these problems worse. It's so easy to let five agents loose at once that you start discovering contention and resource pressure you'd never see with one developer on one machine.
 
-The next layer is compute. vCPU and RAM usage per task, disk pressure, whether co-locating multiple agents on one VM causes contention, which models in which configurations produce the best results for which kinds of work. Once you can see the relationship between task type, agent configuration, and resource consumption, you can start helping users build better agent profiles and routing tasks to the right infrastructure automatically.
+Other boundaries are entirely new. LLMs pull requirements out of the development process that didn't exist before: [guardrails](/blog/828-tests-passed-feature-didnt-work/) to keep agents from [drifting](/blog/sams-journal-every-task-needs-one-owner/), knowledge systems that surface context through tools and environment rather than just files, budget controls so a runaway agent doesn't burn through your API credits overnight. I keep building these things because I keep hitting these walls, sometimes in places I didn't expect.
 
-That's where SAM is heading. Not a workspace manager, not an IDE with AI bolted on, but a control plane for AI workloads. Different agents, different runtimes, different capabilities, managed through conversation.
+That's where SAM is heading. Not a workspace manager, not an IDE with AI bolted on, but a control plane for AI workloads. Different agents, different runtimes, different capabilities, managed through conversation. The shape keeps changing because the work keeps changing.
 
 That is the optimistic version, anyway.
 
