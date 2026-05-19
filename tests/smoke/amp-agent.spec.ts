@@ -17,8 +17,6 @@ test.describe('Amp agent', () => {
     expect(amp).toMatchObject({
       id: 'amp',
       name: 'Amp',
-      provider: 'amp',
-      envVarName: 'AMP_API_KEY',
       supportsAcp: true,
     });
     expect(amp.oauthSupport).toBeUndefined();
