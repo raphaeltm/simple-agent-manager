@@ -1,6 +1,6 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import { assertNoOverflow, getProjectSuffix, makeMockUser, screenshot } from './audit-helpers';
 
 type AuditMode = 'new' | 'active' | 'provisioning';
 
@@ -175,6 +175,12 @@ async function assertMobileTouchTargets(page: Page) {
   }
 }
 
+async function captureComposerAudit(page: Page, name: string) {
+  await assertMobileTouchTargets(page);
+  await screenshot(page, name);
+  await assertNoOverflow(page);
+}
+
 async function setupApiMocks(page: Page, mode: AuditMode) {
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -288,28 +294,24 @@ test.describe('Project chat composer audit', () => {
     await expect(
       page.locator('select[aria-label="Run mode"], select#task-mode-select')
     ).toBeVisible();
-    await assertMobileTouchTargets(page);
-    await screenshot(
+    await captureComposerAudit(
       page,
-      `project-chat-composer-new-long-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      `project-chat-composer-new-long-${getProjectSuffix(testInfo.project.name)}`
     );
-    await assertNoOverflow(page);
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();
-    await screenshot(
+    await captureComposerAudit(
       page,
-      `project-chat-composer-new-slash-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      `project-chat-composer-new-slash-${getProjectSuffix(testInfo.project.name)}`
     );
-    await assertNoOverflow(page);
 
     await textarea.fill('@Open');
     await expect(page.getByText('@Open Code')).toBeVisible();
-    await screenshot(
+    await captureComposerAudit(
       page,
-      `project-chat-composer-new-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      `project-chat-composer-new-mention-${getProjectSuffix(testInfo.project.name)}`
     );
-    await assertNoOverflow(page);
   });
 
   test('active follow-up composer has shared autocomplete without new-task controls', async ({
@@ -330,20 +332,17 @@ test.describe('Project chat composer audit', () => {
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();
-    await assertMobileTouchTargets(page);
-    await screenshot(
+    await captureComposerAudit(
       page,
-      `project-chat-composer-followup-slash-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      `project-chat-composer-followup-slash-${getProjectSuffix(testInfo.project.name)}`
     );
-    await assertNoOverflow(page);
 
     await textarea.fill('@Cod');
     await expect(page.getByText('@Codex')).toBeVisible();
-    await screenshot(
+    await captureComposerAudit(
       page,
-      `project-chat-composer-followup-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      `project-chat-composer-followup-mention-${getProjectSuffix(testInfo.project.name)}`
     );
-    await assertNoOverflow(page);
   });
 
   test('restored provisioning session shows staged progress without overflow', async ({
@@ -356,10 +355,9 @@ test.describe('Project chat composer audit', () => {
     await expect(page.getByText('Installing dependencies (3/4)')).toBeVisible();
     await expect(page.getByText(/Usually takes 2-4 minutes/)).toBeVisible();
     await expect(page.getByText('sam/provisioning-progress-with-long-branch-name')).toBeVisible();
-    await screenshot(
+    await captureComposerAudit(
       page,
-      `project-chat-provisioning-progress-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+      `project-chat-provisioning-progress-${getProjectSuffix(testInfo.project.name)}`
     );
-    await assertNoOverflow(page);
   });
 });

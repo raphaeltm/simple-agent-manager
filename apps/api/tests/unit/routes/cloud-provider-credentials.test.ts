@@ -21,7 +21,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { credentialsRoutes } from '../../../src/routes/credentials';
+import { createCredentialsTestApp, makeCredentialDbMock } from './credential-route-test-helpers';
 
 vi.mock('drizzle-orm/d1');
 
@@ -55,21 +55,6 @@ vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
 // Test Setup
 // ============================================================================
 
-function createTestApp() {
-  const app = new Hono<{ Bindings: Env }>();
-
-  app.onError((err, c) => {
-    const appError = err as { statusCode?: number; error?: string; message?: string };
-    if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-      return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-    }
-    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-  });
-
-  app.route('/api/credentials', credentialsRoutes);
-  return app;
-}
-
 const mockEnv = {
   DATABASE: {} as any,
   ENCRYPTION_KEY: 'test-encryption-key',
@@ -84,32 +69,26 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   let mockDB: any;
 
   beforeEach(() => {
-    app = createTestApp();
+    app = createCredentialsTestApp();
     vi.clearAllMocks();
 
-    mockDB = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([]), // No existing credential by default
-      insert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      set: vi.fn().mockReturnThis(),
-      values: vi.fn().mockResolvedValue(undefined),
-      delete: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([]),
-    };
+    mockDB = makeCredentialDbMock();
+    mockDB.limit.mockResolvedValue([]);
 
     (drizzle as any).mockReturnValue(mockDB);
     mockValidateToken.mockResolvedValue(true);
   });
 
   it('creates a hetzner credential and returns 201', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner', token: 'htz-api-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner', token: 'htz-api-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(201);
     const body = await res.json();
@@ -119,15 +98,19 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   });
 
   it('creates a scaleway credential and returns 201', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'scaleway',
-        secretKey: 'scw-secret-key',
-        projectId: 'proj-uuid-1234',
-      }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'scaleway',
+          secretKey: 'scw-secret-key',
+          projectId: 'proj-uuid-1234',
+        }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(201);
     const body = await res.json();
@@ -137,17 +120,23 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
 
   it('upserts when a credential for the same provider already exists, returning 200', async () => {
     // Simulate existing credential row
-    mockDB.limit.mockResolvedValueOnce([{
-      id: 'existing-cred-id',
-      provider: 'hetzner',
-      createdAt: '2024-01-01T00:00:00.000Z',
-    }]);
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'existing-cred-id',
+        provider: 'hetzner',
+        createdAt: '2024-01-01T00:00:00.000Z',
+      },
+    ]);
 
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner', token: 'new-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner', token: 'new-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -160,21 +149,29 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   });
 
   it('returns 400 when provider field is missing', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: 'htz-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'htz-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
   });
 
   it('returns 400 for an unsupported provider name', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'digitalocean', token: 'do-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean', token: 'do-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -183,11 +180,15 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   });
 
   it('returns 400 when hetzner token field is missing', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -196,11 +197,15 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   });
 
   it('returns 400 when scaleway secretKey is missing', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'scaleway', projectId: 'proj-uuid' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'scaleway', projectId: 'proj-uuid' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -208,11 +213,15 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   });
 
   it('returns 400 when scaleway projectId is missing', async () => {
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'scaleway', secretKey: 'scw-key' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'scaleway', secretKey: 'scw-key' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -224,11 +233,15 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     // The route must translate this into a user-facing 400, not an unhandled 500.
     mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized: invalid token'));
 
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -240,11 +253,15 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
 
     mockValidateToken.mockRejectedValueOnce(new Error('Invalid'));
 
-    await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
-    }, mockEnv);
+    await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
+      },
+      mockEnv
+    );
 
     // encrypt must not be called when validation fails — credentials should
     // never be stored if they are invalid.
@@ -255,15 +272,19 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   it('provider name appears in the 400 error message for scaleway validation failure', async () => {
     mockValidateToken.mockRejectedValueOnce(new Error('Forbidden'));
 
-    const res = await app.request('/api/credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'scaleway',
-        secretKey: 'bad-key',
-        projectId: 'proj-uuid',
-      }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'scaleway',
+          secretKey: 'bad-key',
+          projectId: 'proj-uuid',
+        }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -275,7 +296,7 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
   let app: Hono<{ Bindings: Env }>;
 
   beforeEach(() => {
-    app = createTestApp();
+    app = createCredentialsTestApp();
     vi.clearAllMocks();
     mockValidateToken.mockResolvedValue(true);
   });
@@ -283,11 +304,15 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
   it('validates a Hetzner token without encrypting or storing it', async () => {
     const { encrypt } = await import('../../../src/services/encryption');
 
-    const res = await app.request('/api/credentials/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner', token: 'htz-api-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner', token: 'htz-api-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -300,11 +325,15 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
   it('returns 400 when validation rejects the credential', async () => {
     mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized'));
 
-    const res = await app.request('/api/credentials/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -321,15 +350,10 @@ describe('GET /api/credentials', () => {
   let mockDB: any;
 
   beforeEach(() => {
-    app = createTestApp();
+    app = createCredentialsTestApp();
     vi.clearAllMocks();
 
-    mockDB = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-    };
+    mockDB = makeCredentialDbMock();
 
     (drizzle as any).mockReturnValue(mockDB);
   });
@@ -410,25 +434,23 @@ describe('DELETE /api/credentials/:provider', () => {
   let mockDB: any;
 
   beforeEach(() => {
-    app = createTestApp();
+    app = createCredentialsTestApp();
     vi.clearAllMocks();
 
-    mockDB = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([{ id: 'cred-1' }]), // credential found and deleted
-    };
+    mockDB = makeCredentialDbMock();
+    mockDB.returning.mockResolvedValue([{ id: 'cred-1' }]);
 
     (drizzle as any).mockReturnValue(mockDB);
   });
 
   it('returns 200 with success:true when credential is deleted', async () => {
-    const res = await app.request('/api/credentials/hetzner', {
-      method: 'DELETE',
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials/hetzner',
+      {
+        method: 'DELETE',
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -439,17 +461,25 @@ describe('DELETE /api/credentials/:provider', () => {
     // returning() resolves to empty array = row not found
     mockDB.returning.mockResolvedValueOnce([]);
 
-    const res = await app.request('/api/credentials/hetzner', {
-      method: 'DELETE',
-    }, mockEnv);
+    const res = await app.request(
+      '/api/credentials/hetzner',
+      {
+        method: 'DELETE',
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(404);
   });
 
   it('scopes the delete to the authenticated user (does not delete other users credentials)', async () => {
-    await app.request('/api/credentials/hetzner', {
-      method: 'DELETE',
-    }, mockEnv);
+    await app.request(
+      '/api/credentials/hetzner',
+      {
+        method: 'DELETE',
+      },
+      mockEnv
+    );
 
     // The where() call must have been invoked, meaning a user-scoped filter was applied.
     // We cannot inspect the Drizzle filter directly (it is constructed internally),
