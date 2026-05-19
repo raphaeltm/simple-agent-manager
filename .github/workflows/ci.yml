@@ -630,12 +630,14 @@ jobs:
               fi
             done
 
-            # Codex MCP servers
+            # Codex Cloudflare Observability MCP is intentionally opt-in after
+            # OAuth login. post-create.sh prints the setup commands instead of
+            # configuring it automatically, so absence here must not fail the
+            # devcontainer validation.
             if codex mcp get cloudflare-observability >/dev/null 2>&1; then
               echo "OK: Codex MCP server 'cloudflare-observability' configured"
             else
-              echo "FAIL: Codex MCP server 'cloudflare-observability' not found"
-              FAIL=$((FAIL + 1))
+              echo "WARNING: Codex MCP server 'cloudflare-observability' not configured; opt in with codex mcp add/login after OAuth"
             fi
 
             exit $FAIL
