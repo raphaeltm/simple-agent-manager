@@ -11,6 +11,7 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { sendPromptToAgentOnNode } from '../../../services/node-agent';
+import { persistOrchestrationPrompt } from '../../../services/orchestration-prompts';
 import * as projectDataService from '../../../services/project-data';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -92,6 +93,7 @@ export async function sendMessageToSubtask(
     .select({
       id: schema.workspaces.id,
       nodeId: schema.workspaces.nodeId,
+      chatSessionId: schema.workspaces.chatSessionId,
       nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
@@ -105,6 +107,10 @@ export async function sendMessageToSubtask(
 
   if (workspace.nodeStatus !== 'running') {
     return { error: `Node is not running (status: ${workspace.nodeStatus ?? 'unknown'}).` };
+  }
+
+  if (!workspace.chatSessionId) {
+    return { error: 'Workspace has no chat session.' };
   }
 
   // Resolve running agent session
@@ -124,6 +130,17 @@ export async function sendMessageToSubtask(
     return { error: 'No running agent session found for this task.' };
   }
 
+  const messageId = await persistOrchestrationPrompt({
+    env,
+    projectId: task.projectId,
+    chatSessionId: workspace.chatSessionId,
+    content: message,
+    source: 'sam_session',
+    kind: 'orchestration_prompt',
+    childTaskId: taskId,
+    senderId: ctx.userId,
+  });
+
   // Send the message
   try {
     await sendPromptToAgentOnNode(
@@ -133,6 +150,7 @@ export async function sendMessageToSubtask(
       message,
       env,
       ctx.userId,
+      messageId,
     );
 
     log.info('sam.send_message_to_subtask.delivered', {
@@ -140,6 +158,7 @@ export async function sendMessageToSubtask(
       workspaceId: workspace.id,
       agentSessionId: agentSession.id,
       messageLength: message.length,
+      messageId,
     });
 
     return {

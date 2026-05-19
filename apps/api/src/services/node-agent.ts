@@ -363,8 +363,12 @@ export async function sendPromptToAgentOnNode(
   sessionId: string,
   prompt: string,
   env: Env,
-  userId: string
+  userId: string,
+  messageId?: string,
 ): Promise<unknown> {
+  const body: { prompt: string; messageId?: string } = { prompt };
+  if (messageId) body.messageId = messageId;
+
   return nodeAgentRequest(
     nodeId,
     env,
@@ -373,7 +377,7 @@ export async function sendPromptToAgentOnNode(
       method: 'POST',
       userId,
       workspaceId,
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(body),
     }
   );
 }

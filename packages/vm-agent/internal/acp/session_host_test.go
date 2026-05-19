@@ -1540,6 +1540,7 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 
 	// Build a prompt request payload
 	promptParams, _ := json.Marshal(map[string]interface{}{
+		"messageId": "pre-persisted-msg-001",
 		"prompt": []map[string]string{
 			{"type": "text", "text": "Hello, please fix the bug"},
 		},
@@ -1600,7 +1601,9 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	msgs := reporter.Messages()
 	foundReported := false
 	for _, m := range msgs {
-		if m.Role == "user" && m.Content == "Hello, please fix the bug" {
+		if m.MessageID == "pre-persisted-msg-001" &&
+			m.Role == "user" &&
+			m.Content == "Hello, please fix the bug" {
 			foundReported = true
 			break
 		}

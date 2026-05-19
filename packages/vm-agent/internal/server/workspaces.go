@@ -1053,7 +1053,8 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Prompt string `json:"prompt"`
+		Prompt    string `json:"prompt"`
+		MessageID string `json:"messageId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1094,6 +1095,7 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 
 	// Build JSON-RPC params matching what HandlePrompt expects.
 	promptParams, _ := json.Marshal(map[string]interface{}{
+		"messageId": strings.TrimSpace(body.MessageID),
 		"prompt": []map[string]string{
 			{"type": "text", "text": strings.TrimSpace(body.Prompt)},
 		},
@@ -1102,6 +1104,7 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.followup_prompt", "Sending follow-up prompt to agent", map[string]interface{}{
 		"sessionId": sessionID,
+		"messageId": strings.TrimSpace(body.MessageID),
 	})
 
 	// Dispatch asynchronously — HandlePrompt blocks until the agent completes.

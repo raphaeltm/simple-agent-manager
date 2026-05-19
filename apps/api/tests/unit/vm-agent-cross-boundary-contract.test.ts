@@ -509,6 +509,33 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(capture.headers!.get('X-SAM-Node-Id')).toBe('node-abc');
       expect(capture.headers!.get('X-SAM-Workspace-Id')).toBe('ws-test');
     });
+
+    it('sendPromptToAgentOnNode includes messageId when provided', async () => {
+      vi.resetModules();
+      const capture = setupNodeAgentMocks();
+      const { sendPromptToAgentOnNode } = await import('../../src/services/node-agent');
+
+      const env = {
+        BASE_DOMAIN: 'example.com',
+        NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
+      } as any;
+
+      await sendPromptToAgentOnNode(
+        'node-abc',
+        'ws-test',
+        'sess-xyz',
+        'Follow up',
+        env,
+        'user-123',
+        'msg-prepersisted-001',
+      );
+
+      const parsedBody = JSON.parse(capture.body!);
+      expect(parsedBody).toEqual({
+        prompt: 'Follow up',
+        messageId: 'msg-prepersisted-001',
+      });
+    });
   });
 
   describe('startAgentSessionOnNode payload structure', () => {

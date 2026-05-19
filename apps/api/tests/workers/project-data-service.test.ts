@@ -201,6 +201,40 @@ describe('project-data service: message persistence', () => {
     expect(messages[0]!.toolMetadata).toEqual(toolMeta);
   });
 
+  it('persistMessage can store a caller-provided message ID for reporter dedupe', async () => {
+    const pid = 'svc-persist-custom-id';
+    const sessionId = await svc.createSession(testEnv, pid, null, null);
+    const messageId = 'pre-persisted-message-001';
+
+    const storedId = await svc.persistMessage(
+      testEnv,
+      pid,
+      sessionId,
+      'user',
+      'Please continue',
+      { source: 'parent_agent', kind: 'orchestration_prompt' },
+      messageId,
+    );
+
+    expect(storedId).toBe(messageId);
+
+    const result = await svc.persistMessageBatch(testEnv, pid, sessionId, [
+      {
+        messageId,
+        role: 'user',
+        content: 'Please continue',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    expect(result).toEqual({ persisted: 0, duplicates: 1 });
+
+    const { messages } = await svc.getMessages(testEnv, pid, sessionId);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.id).toBe(messageId);
+  });
+
   it('persistMessageBatch handles deduplication', async () => {
     const pid = 'svc-batch-dedup';
     const sessionId = await svc.createSession(testEnv, pid, null, null);

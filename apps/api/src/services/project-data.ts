@@ -90,14 +90,16 @@ export async function persistMessage(
   sessionId: string,
   role: string,
   content: string,
-  toolMetadata: Record<string, unknown> | null
+  toolMetadata: Record<string, unknown> | null,
+  messageId?: string,
 ): Promise<string> {
   const stub = await getStub(env, projectId);
   return stub.persistMessage(
     sessionId,
     role,
     content,
-    toolMetadata ? JSON.stringify(toolMetadata) : null
+    toolMetadata ? JSON.stringify(toolMetadata) : null,
+    messageId,
   );
 }
 

@@ -35,8 +35,9 @@ export function persistMessage(
   sessionId: string,
   role: string,
   content: string,
-  toolMetadata: string | null
-): { id: string; now: number; sequence: number; workspaceId: string | null } {
+  toolMetadata: string | null,
+  messageId?: string,
+): { id: string; now: number; sequence: number; workspaceId: string | null; inserted: boolean } {
   const maxMessages = parseInt(env.MAX_MESSAGES_PER_SESSION || '10000', 10);
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
@@ -45,11 +46,22 @@ export function persistMessage(
   if (!countRow) {
     throw new Error(`Session ${sessionId} not found`);
   }
+  const id = messageId ?? generateId();
+  const existing = sql
+    .exec('SELECT id FROM chat_messages WHERE id = ? LIMIT 1', id)
+    .toArray()[0];
+  if (existing) {
+    const wsRow = sql
+      .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+    const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace') : null;
+    return { id, now: Date.now(), sequence: 0, workspaceId, inserted: false };
+  }
+
   if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
     throw new Error(`Maximum ${maxMessages} messages per session exceeded`);
   }
 
-  const id = generateId();
   const now = Date.now();
   const sequence = nextSequence(sql, sessionId);
 
@@ -93,7 +105,7 @@ export function persistMessage(
     .toArray()[0];
   const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_workspace') : null;
 
-  return { id, now, sequence, workspaceId };
+  return { id, now, sequence, workspaceId, inserted: true };
 }
 
 export function persistMessageBatch(
