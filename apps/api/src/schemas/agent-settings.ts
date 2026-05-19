@@ -34,9 +34,10 @@ const OpenCodeProviderSchema = v.picklist(
   Object.keys(OPENCODE_PROVIDERS) as [OpenCodeProvider, ...OpenCodeProvider[]]
 );
 
-const AgentProviderModeSchema = v.picklist(
-  VALID_AGENT_PROVIDER_MODES as unknown as [AgentProviderMode, ...AgentProviderMode[]]
-);
+const AgentProviderModeSchema = v.picklist([...VALID_AGENT_PROVIDER_MODES] as [
+  AgentProviderMode,
+  ...AgentProviderMode[],
+]);
 
 const BoundedStringSchema = (maxLength: number) => v.pipe(v.string(), v.maxLength(maxLength));
 

@@ -29,18 +29,17 @@ interface CatalogDbState {
 
 function makeCatalogDb(state: CatalogDbState) {
   let selectCount = 0;
+  const selectResults = [
+    state.agentCredentials ?? [],
+    state.scalewayCloudCredentials ?? [],
+    state.platformCloudCredentials ?? [],
+    state.agentProviderModes ?? [],
+  ];
 
   return {
     select: vi.fn(() => {
       selectCount += 1;
-      const result =
-        selectCount === 1
-          ? state.agentCredentials ?? []
-          : selectCount === 2
-            ? state.scalewayCloudCredentials ?? []
-            : selectCount === 3
-              ? state.platformCloudCredentials ?? []
-              : state.agentProviderModes ?? [];
+      const result = selectResults[selectCount - 1] ?? [];
       const builder = {
         from: vi.fn(() => builder),
         where: vi.fn(() => (

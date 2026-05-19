@@ -67,29 +67,16 @@ function parseEnvNumber(value: string | undefined, fallback: number, parser: (ra
   return parser(value || '') || fallback;
 }
 
+function parseEnvInteger(value: string | undefined, fallback: number): number {
+  return parseEnvNumber(value, fallback, (raw) => parseInt(raw, 10));
+}
+
 export function getAiBudgetLimits(env: Env): AiBudgetLimits {
-  const parseInteger = (raw: string) => parseInt(raw, 10);
   return {
-    maxDailyTokens: parseEnvNumber(
-      env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-      DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-      parseInteger,
-    ),
-    minDailyTokens: parseEnvNumber(
-      env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-      DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-      parseInteger,
-    ),
-    maxMonthlyCostCapUsd: parseEnvNumber(
-      env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-      DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-      parseFloat,
-    ),
-    minMonthlyCostCapUsd: parseEnvNumber(
-      env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
-      DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
-      parseFloat,
-    ),
+    maxDailyTokens: parseEnvInteger(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT, DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT),
+    minDailyTokens: parseEnvInteger(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT, DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT),
+    maxMonthlyCostCapUsd: parseEnvNumber(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD, DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD, parseFloat),
+    minMonthlyCostCapUsd: parseEnvNumber(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD, DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD, parseFloat),
   };
 }
 
