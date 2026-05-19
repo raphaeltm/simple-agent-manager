@@ -419,6 +419,9 @@ export const AI_BUDGET_SETTINGS_KV_PREFIX = 'ai-budget-settings';
 /** KV key prefix for cached monthly AI cost per user. Written by cron, read by proxy. */
 export const AI_MONTHLY_COST_CACHE_KV_PREFIX = 'ai-monthly-cost';
 
+/** KV key prefix for admin-managed per-user AI allowance ceilings. */
+export const AI_ADMIN_ALLOWANCE_KV_PREFIX = 'ai-admin-allowance';
+
 /** Default TTL for cached monthly cost entries — 2 hours (cron runs hourly). Override via AI_MONTHLY_COST_CACHE_TTL_SECONDS env var. */
 export const DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS = 7_200;
 

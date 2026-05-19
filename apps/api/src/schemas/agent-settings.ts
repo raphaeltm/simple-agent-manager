@@ -1,6 +1,7 @@
-import type { OpenCodeProvider } from '@simple-agent-manager/shared';
+import type { AgentProviderMode, OpenCodeProvider } from '@simple-agent-manager/shared';
 import {
   OPENCODE_PROVIDERS,
+  VALID_AGENT_PROVIDER_MODES,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -31,6 +32,10 @@ const AgentPermissionModeSchema = v.picklist(VALID_PERMISSION_MODES);
 
 const OpenCodeProviderSchema = v.picklist(
   Object.keys(OPENCODE_PROVIDERS) as [OpenCodeProvider, ...OpenCodeProvider[]]
+);
+
+const AgentProviderModeSchema = v.picklist(
+  VALID_AGENT_PROVIDER_MODES as unknown as [AgentProviderMode, ...AgentProviderMode[]]
 );
 
 const BoundedStringSchema = (maxLength: number) => v.pipe(v.string(), v.maxLength(maxLength));
@@ -69,6 +74,7 @@ export function createSaveAgentSettingsSchema(
       opencodeProvider: v.optional(v.nullable(OpenCodeProviderSchema)),
       opencodeBaseUrl: v.optional(v.nullable(BoundedStringSchema(limits.maxBaseUrlLength))),
       opencodeProviderName: v.optional(v.nullable(BoundedStringSchema(limits.maxProviderNameLength))),
+      providerMode: v.optional(v.nullable(AgentProviderModeSchema)),
     }),
     v.check(
       (input) => {
