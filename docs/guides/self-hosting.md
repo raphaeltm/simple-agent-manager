@@ -75,6 +75,31 @@ These are runtime Worker variables, not GitHub Environment variables in the curr
 | `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | Max runtime file path length (chars)   | `256`    |
 | `AGENT_SETTINGS_VALIDATION_LIMITS`         | JSON object overriding agent-settings validation bounds for model IDs, tool lists, additional env, provider names, and OpenCode base URLs. See `apps/api/.env.example` for supported keys and defaults. | unset |
 
+**Optional SAM-managed AI provider variables** (Worker `vars`):
+
+These settings control SAM-managed AI provider access for Claude Code, Codex, and OpenCode. Claude Code and Codex only use SAM-managed provider traffic after a user explicitly selects **SAM Platform** in agent settings. OpenCode keeps its platform fallback behavior when enabled.
+
+| Variable                                      | Description                                                                  | Default                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------- |
+| `AI_PROXY_ENABLED`                            | Enables SAM-managed AI proxy routes and explicit SAM provider sessions        | `true`                                      |
+| `AI_PROXY_DEFAULT_MODEL`                      | Default OpenCode proxy model                                                  | `@cf/meta/llama-4-scout-17b-16e-instruct`  |
+| `AI_PROXY_DEFAULT_ANTHROPIC_MODEL`            | Default Claude Code proxy model                                               | `claude-sonnet-4-6`                         |
+| `AI_PROXY_DEFAULT_OPENAI_MODEL`               | Default Codex proxy model                                                     | `gpt-4.1`                                   |
+| `AI_PROXY_DAILY_INPUT_TOKEN_LIMIT`            | Platform default daily input token cap per user                               | `500000`                                    |
+| `AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT`           | Platform default daily output token cap per user                              | `200000`                                    |
+| `AI_PROXY_RATE_LIMIT_RPM`                     | AI proxy requests per minute per user                                         | `30`                                        |
+| `AI_PROXY_RATE_LIMIT_WINDOW_SECONDS`          | AI proxy rate limit window in seconds                                         | `60`                                        |
+| `AI_USAGE_MAX_DAILY_TOKEN_LIMIT`              | Maximum daily token limit a user may set unless an admin ceiling is lower     | `10000000`                                  |
+| `AI_USAGE_MIN_DAILY_TOKEN_LIMIT`              | Minimum daily token limit a user may set                                      | `1000`                                      |
+| `AI_USAGE_MAX_MONTHLY_COST_CAP_USD`           | Maximum monthly cost cap a user may set unless an admin ceiling is lower      | `10000`                                     |
+| `AI_USAGE_MIN_MONTHLY_COST_CAP_USD`           | Minimum monthly cost cap a user may set                                       | `0.01`                                      |
+| `AI_USAGE_BUDGET_TTL_SECONDS`                 | KV TTL for daily token budget fallback entries                                | `90000`                                     |
+| `AI_MONTHLY_COST_CACHE_TTL_SECONDS`           | TTL for hourly monthly-cost cache entries used by cost-cap enforcement        | `7200`                                      |
+| `AI_MONTHLY_COST_AGGREGATION_MAX_PAGES`       | Max AI Gateway log pages read by the monthly-cost cron                        | `200`                                       |
+| `AI_GATEWAY_ID`                               | Cloudflare AI Gateway ID used for managed AI usage and attribution            | unset                                       |
+
+SAM-managed AI uses the existing `CF_API_TOKEN` secret for Cloudflare AI Gateway access when unified billing is available. Admins can raise or lower a user's allowed self-limit ceiling through `/api/admin/ai-allowance/:userId`; users can then set their own daily token and monthly cost caps within that ceiling.
+
 **Optional AI task title generation variables** (Worker `vars`):
 
 | Variable                             | Description                                                                | Default                     |

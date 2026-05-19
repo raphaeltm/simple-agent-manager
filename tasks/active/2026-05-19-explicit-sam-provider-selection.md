@@ -36,7 +36,7 @@ This work also needs the minimum quota-aware enforcement required for SAM-provid
 - [x] Add focused unit tests for provider-mode resolution, no-silent-fallback behavior, frontend availability, quota ceiling validation, and cost-cap enforcement.
 - [x] Add or run Playwright visual audit for the changed settings surface.
 - [x] Update docs/self-hosting and recent changes for new setup expectations.
-- [ ] Run specialist validation: env-validator, constitution-validator, security-auditor, doc-sync-validator, plus task-completion-validator and relevant UI/API reviewers.
+- [x] Run specialist validation: env-validator, constitution-validator, security-auditor, doc-sync-validator, plus task-completion-validator and relevant UI/API reviewers.
 
 ## Acceptance Criteria
 
