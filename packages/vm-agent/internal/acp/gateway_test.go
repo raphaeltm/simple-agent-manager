@@ -348,8 +348,8 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 	if info.installCmd != wantInstall {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
-	if info.isNpmBased {
-		t.Fatalf("isNpmBased=true, want false (amp uses uv, not npm)")
+	if !info.isNpmBased {
+		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @sourcegraph/amp)")
 	}
 	if len(info.args) != 1 || info.args[0] != "run" {
 		t.Fatalf("args=%v, want [run]", info.args)
@@ -374,18 +374,23 @@ func TestGetAgentCommandInfoAmpIgnoresOAuth(t *testing.T) {
 	}
 }
 
-func TestAgentInstallScriptAmpPassesThrough(t *testing.T) {
+func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 	t.Parallel()
 
 	info := getAgentCommandInfo("amp", "api-key")
 	script := agentInstallScript(info)
-	// For non-npm agents, agentInstallScript must return installCmd unchanged.
-	if script != info.installCmd {
-		t.Fatalf("agentInstallScript modified non-npm amp install command:\ngot:  %q\nwant: %q", script, info.installCmd)
+	// Amp is isNpmBased=true because it chains `npm install -g @sourcegraph/amp`.
+	// agentInstallScript must prepend the Node.js bootstrap preamble so npm is
+	// available in devcontainers that don't ship with Node.js.
+	if !strings.Contains(script, "apt-get install") {
+		t.Fatalf("agentInstallScript did not inject Node.js bootstrap for amp")
 	}
-	// Confirm the Node.js bootstrap preamble was NOT injected.
-	if strings.Contains(script, "apt-get install") {
-		t.Fatalf("agentInstallScript injected apt-get bootstrap into non-npm amp command")
+	// The original install command must still be present after the preamble.
+	if !strings.Contains(script, "uv tool install acp-amp") {
+		t.Fatalf("agentInstallScript lost the uv install portion")
+	}
+	if !strings.Contains(script, "npm install -g @sourcegraph/amp") {
+		t.Fatalf("agentInstallScript lost the npm install portion")
 	}
 }
 

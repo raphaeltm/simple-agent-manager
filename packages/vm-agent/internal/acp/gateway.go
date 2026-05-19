@@ -832,11 +832,10 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			args:          []string{"run"},
 			envVarName:    "AMP_API_KEY",
 			installCmd:    `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp`,
-			// isNpmBased: false — primary agent (acp-amp) is installed via uv.
-			// installCmd also installs @sourcegraph/amp via npm, but isNpmBased must
-			// remain false to avoid the Node.js bootstrap preamble that targets
-			// npm-first installs. Requires npm already in the container.
-			isNpmBased: false,
+			// isNpmBased must be true because installCmd chains `npm install -g @sourcegraph/amp`
+			// after the uv install. The Node.js bootstrap preamble ensures npm is available
+			// inside devcontainers that don't ship with Node.js pre-installed.
+			isNpmBased: true,
 			injectionMode: "",
 			authFilePath:  "",
 		}
