@@ -1,9 +1,9 @@
 ---
 title: AI Agents
-description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, and OpenCode.
+description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, OpenCode, and Amp.
 ---
 
-SAM supports five AI coding agents. Each runs inside a workspace container and communicates via the **Agent Communication Protocol (ACP)**.
+SAM supports six AI coding agents. Each runs inside a workspace container and communicates via the **Agent Communication Protocol (ACP)**.
 
 ## Supported Agents
 
@@ -54,6 +54,17 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 | **Get a Key** | [Scaleway Console](https://console.scaleway.com/iam/api-keys) |
 
 OpenCode uses Scaleway's Generative APIs for inference. If you already have a Scaleway cloud provider credential configured, OpenCode can use that — no separate API key required.
+
+### Amp
+
+| Property | Value |
+|----------|-------|
+| **Provider** | Sourcegraph |
+| **API Key** | `AMP_API_KEY` |
+| **OAuth Support** | No |
+| **Get a Key** | [Amp settings](https://ampcode.com/settings) |
+
+Amp uses the community `acp-amp` ACP bridge in SAM v1. It requires an Amp API key and may require paid Amp credits.
 
 ## Configuring Agent Credentials
 

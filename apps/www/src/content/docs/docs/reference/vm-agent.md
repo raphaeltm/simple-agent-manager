@@ -3,7 +3,7 @@ title: VM Agent Reference
 description: The Go agent running on each VM — managing terminals, containers, and AI coding agent sessions.
 ---
 
-The VM Agent is a Go binary (`packages/vm-agent/`) that runs on each provisioned node. It listens on port 8443 (HTTPS) and provides HTTP/WebSocket endpoints for terminal sessions, container management, and AI coding agent sessions (Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, and OpenCode).
+The VM Agent is a Go binary (`packages/vm-agent/`) that runs on each provisioned node. It listens on port 8443 (HTTPS) and provides HTTP/WebSocket endpoints for terminal sessions, container management, and AI coding agent sessions (Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp).
 
 ## HTTP Endpoints
 

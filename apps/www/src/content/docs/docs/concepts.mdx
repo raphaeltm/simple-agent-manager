@@ -163,7 +163,7 @@ See the [Idea Execution guide](/docs/guides/idea-execution/) for full details.
 
 An **agent session** is an AI coding agent conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the agent process.
 
-SAM supports five AI coding agents:
+SAM supports six AI coding agents:
 
 | Agent | Provider | API Key Variable |
 |-------|----------|-----------------|
@@ -172,6 +172,7 @@ SAM supports five AI coding agents:
 | **Google Gemini** | Google | `GEMINI_API_KEY` |
 | **Mistral Vibe** | Mistral | `MISTRAL_API_KEY` |
 | **OpenCode** | Scaleway | `SCW_SECRET_KEY` |
+| **Amp** | Sourcegraph | `AMP_API_KEY` |
 
 Sessions support:
 - Streaming responses (real-time output as the agent works)

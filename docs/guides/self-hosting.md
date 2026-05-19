@@ -902,6 +902,7 @@ SAM supports multiple AI coding agents. Users provide their own API keys for eac
 | **OpenAI Codex** | OpenAI OAuth token | Sign in with OpenAI via `codex setup-auth` locally, then paste the auth JSON |
 | **Gemini CLI** | Google API key | A Google AI Studio API key from [aistudio.google.com](https://aistudio.google.com) |
 | **OpenCode** | Provider API key | An API key for the configured LLM provider (Anthropic, OpenAI, etc.) |
+| **Amp** | Amp API key | An Amp API key from [ampcode.com/settings](https://ampcode.com/settings). Paid Amp credits may be required. |
 
 The default agent for autonomous task execution is controlled by `DEFAULT_TASK_AGENT_TYPE` (default: `opencode`). Users can also set per-project agent defaults.
 
