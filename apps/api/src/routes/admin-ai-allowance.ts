@@ -65,6 +65,77 @@ async function requireUserExists(db: ReturnType<typeof drizzle>, userId: string)
   }
 }
 
+function validateNullableNumber(
+  body: UpdateAdminAiAllowanceRequest,
+  field: 'maxDailyInputTokens' | 'maxDailyOutputTokens' | 'maxMonthlyCostCapUsd',
+): void {
+  const value = body[field];
+  if (value === undefined || value === null) return;
+  if (typeof value !== 'number' || value < 0) {
+    throw errors.badRequest(`${field} must be a non-negative number or null`);
+  }
+}
+
+function validateAllowanceBody(body: UpdateAdminAiAllowanceRequest): void {
+  validateNullableNumber(body, 'maxDailyInputTokens');
+  validateNullableNumber(body, 'maxDailyOutputTokens');
+  validateNullableNumber(body, 'maxMonthlyCostCapUsd');
+
+  const tiers = body.allowedModelTiers;
+  if (tiers === undefined || tiers === null) return;
+  if (!Array.isArray(tiers) || tiers.some((tier) => typeof tier !== 'string')) {
+    throw errors.badRequest('allowedModelTiers must be an array of strings or null');
+  }
+}
+
+function pickNumberAllowance(
+  body: UpdateAdminAiAllowanceRequest,
+  existing: AdminAiAllowance | null,
+  field: 'maxDailyInputTokens' | 'maxDailyOutputTokens' | 'maxMonthlyCostCapUsd',
+): number | null {
+  const value = body[field];
+  return value !== undefined
+    ? value ?? null
+    : existing?.[field] ?? null;
+}
+
+function pickModelTiers(
+  body: UpdateAdminAiAllowanceRequest,
+  existing: AdminAiAllowance | null,
+): string[] | null {
+  const field = 'allowedModelTiers';
+  return body[field] !== undefined
+    ? body[field] ?? null
+    : existing?.[field] ?? null;
+}
+
+function buildAllowance(
+  body: UpdateAdminAiAllowanceRequest,
+  existing: AdminAiAllowance | null,
+  adminUserId: string,
+): AdminAiAllowance {
+  return {
+    maxDailyInputTokens: pickNumberAllowance(body, existing, 'maxDailyInputTokens'),
+    maxDailyOutputTokens: pickNumberAllowance(body, existing, 'maxDailyOutputTokens'),
+    maxMonthlyCostCapUsd: pickNumberAllowance(body, existing, 'maxMonthlyCostCapUsd'),
+    allowedModelTiers: pickModelTiers(body, existing),
+    updatedAt: new Date().toISOString(),
+    updatedBy: adminUserId,
+  };
+}
+
+function toResponse(
+  userId: string,
+  allowance: AdminAiAllowance | null,
+  env: Env,
+): AdminAiAllowanceResponse {
+  return {
+    userId,
+    allowance,
+    effectiveCeiling: resolveEffectiveCeiling(allowance, env),
+  };
+}
+
 /**
  * GET /api/admin/ai-allowance/:userId
  * Get admin-managed AI allowance for a user.
@@ -75,13 +146,7 @@ adminAiAllowanceRoutes.get('/:userId', async (c) => {
   await requireUserExists(db, targetUserId);
 
   const allowance = await getAllowance(c.env.KV, targetUserId);
-  const effectiveCeiling = resolveEffectiveCeiling(allowance, c.env);
-
-  return c.json({
-    userId: targetUserId,
-    allowance,
-    effectiveCeiling,
-  } satisfies AdminAiAllowanceResponse);
+  return c.json(toResponse(targetUserId, allowance, c.env));
 });
 
 /**
@@ -95,57 +160,13 @@ adminAiAllowanceRoutes.put('/:userId', async (c) => {
   await requireUserExists(db, targetUserId);
 
   const body = await c.req.json<UpdateAdminAiAllowanceRequest>();
-
-  // Validate fields
-  if (body.maxDailyInputTokens !== undefined && body.maxDailyInputTokens !== null) {
-    if (typeof body.maxDailyInputTokens !== 'number' || body.maxDailyInputTokens < 0) {
-      throw errors.badRequest('maxDailyInputTokens must be a non-negative number or null');
-    }
-  }
-  if (body.maxDailyOutputTokens !== undefined && body.maxDailyOutputTokens !== null) {
-    if (typeof body.maxDailyOutputTokens !== 'number' || body.maxDailyOutputTokens < 0) {
-      throw errors.badRequest('maxDailyOutputTokens must be a non-negative number or null');
-    }
-  }
-  if (body.maxMonthlyCostCapUsd !== undefined && body.maxMonthlyCostCapUsd !== null) {
-    if (typeof body.maxMonthlyCostCapUsd !== 'number' || body.maxMonthlyCostCapUsd < 0) {
-      throw errors.badRequest('maxMonthlyCostCapUsd must be a non-negative number or null');
-    }
-  }
-  if (body.allowedModelTiers !== undefined && body.allowedModelTiers !== null) {
-    if (!Array.isArray(body.allowedModelTiers) || body.allowedModelTiers.some((t) => typeof t !== 'string')) {
-      throw errors.badRequest('allowedModelTiers must be an array of strings or null');
-    }
-  }
+  validateAllowanceBody(body);
 
   const existing = await getAllowance(c.env.KV, targetUserId);
-
-  const allowance: AdminAiAllowance = {
-    maxDailyInputTokens: body.maxDailyInputTokens !== undefined
-      ? body.maxDailyInputTokens ?? null
-      : existing?.maxDailyInputTokens ?? null,
-    maxDailyOutputTokens: body.maxDailyOutputTokens !== undefined
-      ? body.maxDailyOutputTokens ?? null
-      : existing?.maxDailyOutputTokens ?? null,
-    maxMonthlyCostCapUsd: body.maxMonthlyCostCapUsd !== undefined
-      ? body.maxMonthlyCostCapUsd ?? null
-      : existing?.maxMonthlyCostCapUsd ?? null,
-    allowedModelTiers: body.allowedModelTiers !== undefined
-      ? body.allowedModelTiers ?? null
-      : existing?.allowedModelTiers ?? null,
-    updatedAt: new Date().toISOString(),
-    updatedBy: adminUserId,
-  };
+  const allowance = buildAllowance(body, existing, adminUserId);
 
   await c.env.KV.put(buildAllowanceKey(targetUserId), JSON.stringify(allowance));
-
-  const effectiveCeiling = resolveEffectiveCeiling(allowance, c.env);
-
-  return c.json({
-    userId: targetUserId,
-    allowance,
-    effectiveCeiling,
-  } satisfies AdminAiAllowanceResponse);
+  return c.json(toResponse(targetUserId, allowance, c.env));
 });
 
 /**
