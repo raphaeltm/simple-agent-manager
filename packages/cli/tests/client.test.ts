@@ -8,7 +8,7 @@ describe('SamApiClient', () => {
       return jsonResponse({ taskId: 'task_1', sessionId: 'sess_1', branchName: 'sam/demo', status: 'queued' }, 202);
     });
     const client = new SamApiClient({
-      apiUrl: 'https://api.sammy.party',
+      apiUrl: 'https://api.example.com',
       sessionCookie: 'better-auth.session_token=secret',
     }, fetchMock);
 
@@ -19,7 +19,7 @@ describe('SamApiClient', () => {
 
     expect(response.taskId).toBe('task_1');
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.sammy.party/api/projects/project_1/tasks/submit',
+      'https://api.example.com/api/projects/project_1/tasks/submit',
       expect.objectContaining({ method: 'POST' })
     );
     expect(calls).toEqual([
@@ -43,7 +43,7 @@ describe('SamApiClient', () => {
       message: 'Your account is pending admin approval',
     }, 403));
     const client = new SamApiClient({
-      apiUrl: 'https://api.sammy.party',
+      apiUrl: 'https://api.example.com',
       sessionCookie: 'secret-cookie',
     }, fetchMock);
 
@@ -55,14 +55,14 @@ describe('SamApiClient', () => {
   it('sends chat follow-up prompts to the session prompt route', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ success: true }, 200));
     const client = new SamApiClient({
-      apiUrl: 'https://api.sammy.party',
+      apiUrl: 'https://api.example.com',
       sessionCookie: 'cookie=value',
     }, fetchMock);
 
     await client.sendPrompt('project_1', 'session_1', 'Follow up');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.sammy.party/api/projects/project_1/sessions/session_1/prompt',
+      'https://api.example.com/api/projects/project_1/sessions/session_1/prompt',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ content: 'Follow up' }),

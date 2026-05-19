@@ -17,7 +17,7 @@ Configure the API origin and session cookie:
 
 ```bash
 printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \
-  --api-url https://api.sammy.party \
+  --api-url https://api.example.com \
   --session-cookie-stdin
 ```
 
@@ -33,7 +33,7 @@ sam auth status
 For CI or short-lived shell use, avoid writing a config file and set both env vars:
 
 ```bash
-export SAM_API_URL=https://api.sammy.party
+export SAM_API_URL=https://api.example.com
 export SAM_SESSION_COOKIE='better-auth.session_token=...'
 ```
 

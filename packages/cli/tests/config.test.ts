@@ -10,7 +10,7 @@ describe('config', () => {
     const paths = await saveConfig(
       { SAM_CONFIG_DIR: configDir },
       {
-        apiUrl: 'https://api.sammy.party/',
+        apiUrl: 'https://api.example.com/',
         sessionCookie: 'better-auth.session_token=secret',
       }
     );
@@ -19,26 +19,26 @@ describe('config', () => {
     const fileStat = await stat(paths.configFile);
     const loaded = await loadConfig({ SAM_CONFIG_DIR: configDir });
 
-    expect(raw).toContain('https://api.sammy.party');
+    expect(raw).toContain('https://api.example.com');
     expect(raw).toContain('better-auth.session_token=secret');
     expect(fileStat.mode & 0o777).toBe(0o600);
     expect(loaded).toEqual({
-      apiUrl: 'https://api.sammy.party',
+      apiUrl: 'https://api.example.com',
       sessionCookie: 'better-auth.session_token=secret',
     });
   });
 
   it('uses environment config only when a session cookie and API URL are present', async () => {
-    await expect(loadConfig({ SAM_API_URL: 'https://api.sammy.party' })).resolves.toBeNull();
+    await expect(loadConfig({ SAM_API_URL: 'https://api.example.com' })).resolves.toBeNull();
     await expect(loadConfig({ SAM_SESSION_COOKIE: 'cookie=value' })).rejects.toThrow(
       'SAM_API_URL must be set when SAM_SESSION_COOKIE is set'
     );
 
     await expect(loadConfig({
-      SAM_API_URL: 'https://api.sammy.party',
+      SAM_API_URL: 'https://api.example.com',
       SAM_SESSION_COOKIE: 'cookie=value',
     })).resolves.toEqual({
-      apiUrl: 'https://api.sammy.party',
+      apiUrl: 'https://api.example.com',
       sessionCookie: 'cookie=value',
     });
   });

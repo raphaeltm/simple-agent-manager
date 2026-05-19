@@ -4,7 +4,7 @@ import type { ConfigEnv, Logger } from '../src/types.js';
 describe('commands', () => {
   it('prints auth status with a redacted cookie', async () => {
     const runtime = runtimeWithFetch(async () => jsonResponse({}, 200), {
-      SAM_API_URL: 'https://api.sammy.party',
+      SAM_API_URL: 'https://api.example.com',
       SAM_SESSION_COOKIE: 'better-auth.session_token=abcdef',
     });
 
@@ -13,7 +13,7 @@ describe('commands', () => {
     expect(exitCode).toBe(0);
     expect(runtime.output).toHaveLength(1);
     expect(runtime.output[0]).toContain('Authenticated');
-    expect(runtime.output[0]).toContain('apiUrl: https://api.sammy.party');
+    expect(runtime.output[0]).toContain('apiUrl: https://api.example.com');
     expect(runtime.output[0]).toContain('sessionCookie: (redacted)');
     expect(runtime.output[0]).not.toContain('abcdef');
     expect(runtime.output[0]).toContain('configFile: ');
@@ -27,7 +27,7 @@ describe('commands', () => {
     runtime.readStdin = async () => 'better-auth.session_token=secret\n';
 
     const exitCode = await run(
-      ['auth', 'login', '--api-url', 'https://api.sammy.party', '--session-cookie-stdin'],
+      ['auth', 'login', '--api-url', 'https://api.example.com', '--session-cookie-stdin'],
       runtime
     );
 
@@ -53,7 +53,7 @@ describe('commands', () => {
     expect(exitCode).toBe(0);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toEqual({
-      url: 'https://api.sammy.party/api/projects/project_1/tasks/submit',
+      url: 'https://api.example.com/api/projects/project_1/tasks/submit',
       init: expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
@@ -79,7 +79,7 @@ describe('commands', () => {
     expect(exitCode).toBe(0);
     expect(runtime.output).toEqual(['{\n  "success": true\n}']);
     expect(requests[0]?.url).toBe(
-      'https://api.sammy.party/api/projects/project_1/sessions/session_1/prompt'
+      'https://api.example.com/api/projects/project_1/sessions/session_1/prompt'
     );
   });
 
@@ -130,7 +130,7 @@ interface TestRuntime {
 function runtimeWithFetch(
   fetchFn: typeof fetch,
   env: ConfigEnv = {
-    SAM_API_URL: 'https://api.sammy.party',
+    SAM_API_URL: 'https://api.example.com',
     SAM_SESSION_COOKIE: 'cookie=value',
   }
 ): TestRuntime {

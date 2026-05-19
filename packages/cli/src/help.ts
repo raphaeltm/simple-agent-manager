@@ -15,7 +15,7 @@ Global options:
   -h, --help                Show help
 
 Environment overrides:
-  SAM_API_URL               API origin, for example https://api.sammy.party
+  SAM_API_URL               API origin, for example https://api.example.com
   SAM_SESSION_COOKIE        BetterAuth session cookie header value
   SAM_CONFIG_DIR            Directory for config.json
 
