@@ -52,6 +52,14 @@ function makeTestEnv(): Env {
   } as Env;
 }
 
+function putAgentCredential(app: Hono<{ Bindings: Env }>, request: unknown) {
+  return app.request('/api/credentials/agent', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  }, makeTestEnv());
+}
+
 describe('Credentials Routes - OAuth Support', () => {
   let app: Hono<{ Bindings: Env }>;
   let mockDB: any;
@@ -184,18 +192,12 @@ describe('Credentials Routes - OAuth Support', () => {
     it('should accept an Amp API key from the shared agent catalog', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
 
-      const request: SaveAgentCredentialRequest = {
+      const res = await putAgentCredential(app, {
         agentType: 'amp',
         credentialKind: 'api-key',
         credential: 'sgamp_test_access_token_1234567890',
         autoActivate: true,
-      };
-
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      } satisfies SaveAgentCredentialRequest);
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -242,17 +244,11 @@ describe('Credentials Routes - OAuth Support', () => {
     });
 
     it('should reject OAuth token for Amp', async () => {
-      const request: SaveAgentCredentialRequest = {
+      const res = await putAgentCredential(app, {
         agentType: 'amp',
         credentialKind: 'oauth-token',
         credential: 'oauth_token_that_is_long_enough_to_pass_validation_1234567890',
-      };
-
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      } satisfies SaveAgentCredentialRequest);
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -260,17 +256,11 @@ describe('Credentials Routes - OAuth Support', () => {
     });
 
     it('should reject unknown agents through schema validation', async () => {
-      const request = {
+      const res = await putAgentCredential(app, {
         agentType: 'unknown-agent',
         credentialKind: 'api-key',
         credential: 'opaque-key',
-      };
-
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      });
 
       expect(res.status).toBe(400);
     });

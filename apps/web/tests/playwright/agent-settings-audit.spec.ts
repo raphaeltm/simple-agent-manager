@@ -383,23 +383,6 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(tagName).toBe('input');
   });
 
-  test('Amp agent: API key card renders without OAuth copy', async ({ page }) => {
-    await setupApiMocks(page, {
-      agents: [MOCK_AGENT_AMP],
-      settingsMap: {},
-    });
-    await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-amp"]');
-    await takeScreenshot(page, 'agent-settings-mobile-amp-api-key');
-    await assertNoOverflow(page);
-
-    const card = page.getByTestId('agent-card-amp');
-    await expect(card.getByText('Amp', { exact: true })).toBeVisible();
-    await expect(card.getByText('Get your API key from Amp')).toBeVisible();
-    await expect(card.getByText('OAuth')).not.toBeVisible();
-    await expect(card.getByText('ChatGPT Subscription')).not.toBeVisible();
-  });
-
   test('multiple agents rendered: layout holds on mobile', async ({ page }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE, MOCK_AGENT_CLAUDE, MOCK_AGENT_CODEX, MOCK_AGENT_AMP],
@@ -410,8 +393,14 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await navigateToAgentConfig(page);
     await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+    await page.waitForSelector('[data-testid="agent-card-amp"]');
     await takeScreenshot(page, 'agent-settings-mobile-multiple-agents');
     await assertNoOverflow(page);
+
+    const ampCard = page.getByTestId('agent-card-amp');
+    await expect(ampCard.getByText('Get your API key from Amp')).toBeVisible();
+    await expect(ampCard.getByText('OAuth')).not.toBeVisible();
+    await expect(ampCard.getByText('ChatGPT Subscription')).not.toBeVisible();
   });
 
   test('custom provider: shows base URL and provider name fields', async ({ page }) => {
