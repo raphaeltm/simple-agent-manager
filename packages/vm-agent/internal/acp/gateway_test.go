@@ -986,7 +986,7 @@ func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
 func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 	t.Parallel()
 
-	config, envVars := generateCodexMcpConfig(nil)
+	config, envVars := generateCodexMcpConfig(nil, nil)
 	if config != "" {
 		t.Fatalf("expected empty config, got %q", config)
 	}
@@ -1000,7 +1000,7 @@ func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
-	})
+	}, nil)
 
 	if !strings.Contains(config, codexManagedMcpStartMarker) {
 		t.Fatal("expected managed start marker")
@@ -1028,7 +1028,7 @@ func TestGenerateCodexMcpConfigMultipleServers(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "token-1"},
 		{URL: "https://backup.example.com/mcp", Token: "token-2"},
-	})
+	}, nil)
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp-0]`) {
 		t.Fatal("expected first server entry")
@@ -1052,7 +1052,7 @@ func TestGenerateCodexMcpConfigServerWithoutToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp"},
-	})
+	}, nil)
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
 		t.Fatal("expected server entry")
@@ -1071,7 +1071,7 @@ func TestGenerateCodexMcpConfigServerWithControlCharsRejected(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://good.example.com/mcp", Token: "good-token"},
 		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
-	})
+	}, nil)
 
 	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
 		t.Fatal("expected good server to be present")
@@ -1081,6 +1081,59 @@ func TestGenerateCodexMcpConfigServerWithControlCharsRejected(t *testing.T) {
 	}
 	if len(envVars) != 1 || envVars[0] != "SAM_MCP_TOKEN=good-token" {
 		t.Fatalf("unexpected env vars: %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfigWithProxyProvider(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig(nil, &codexProxyProviderConfig{
+		baseURL: "https://api.example.com/ai/v1",
+		model:   "gpt-4.1",
+	})
+
+	if !strings.Contains(config, `model = "gpt-4.1"`) {
+		t.Fatal("expected model override")
+	}
+	if !strings.Contains(config, `model_provider = "sam-openai"`) {
+		t.Fatal("expected SAM model provider override")
+	}
+	if !strings.Contains(config, `[model_providers.sam-openai]`) {
+		t.Fatal("expected SAM model provider block")
+	}
+	if !strings.Contains(config, `base_url = "https://api.example.com/ai/v1"`) {
+		t.Fatal("expected SAM proxy base URL")
+	}
+	if !strings.Contains(config, `env_key = "OPENAI_API_KEY"`) {
+		t.Fatal("expected OpenAI env key")
+	}
+	if !strings.Contains(config, `wire_api = "chat"`) {
+		t.Fatal("expected chat completions wire API")
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no env vars, got %v", envVars)
+	}
+}
+
+func TestCodexProxyProviderConfigFromCredential(t *testing.T) {
+	t.Parallel()
+
+	config := codexProxyProviderConfigFromCredential(&agentCredential{
+		inferenceConfig: &inferenceConfig{
+			Provider: "openai-passthrough",
+			BaseURL:  "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+			Model:    "gpt-4.1",
+		},
+	}, "workspace-token")
+
+	if config == nil {
+		t.Fatal("expected proxy provider config")
+	}
+	if config.baseURL != "https://api.example.com/ai/proxy/workspace-token/openai/v1" {
+		t.Fatalf("baseURL = %q", config.baseURL)
+	}
+	if config.model != "gpt-4.1" {
+		t.Fatalf("model = %q", config.model)
 	}
 }
 

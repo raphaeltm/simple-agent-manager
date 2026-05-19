@@ -898,7 +898,14 @@ func tomlEscapeBasicString(s string) string {
 const (
 	codexManagedMcpStartMarker = "# BEGIN SAM MANAGED MCP"
 	codexManagedMcpEndMarker   = "# END SAM MANAGED MCP"
+	codexProxyProviderID       = "sam-openai"
+	codexProxyProviderEnvKey   = "OPENAI_API_KEY"
 )
+
+type codexProxyProviderConfig struct {
+	baseURL string
+	model   string
+}
 
 func codexMcpServerName(index, total int) string {
 	if total <= 1 {
@@ -948,12 +955,50 @@ func mergeManagedCodexMcpConfig(existing, managed string) string {
 	}
 }
 
+func codexProxyProviderConfigFromCredential(cred *agentCredential, callbackToken string) *codexProxyProviderConfig {
+	if cred == nil || cred.inferenceConfig == nil {
+		return nil
+	}
+	if cred.inferenceConfig.Provider != "openai-proxy" && cred.inferenceConfig.Provider != "openai-passthrough" {
+		return nil
+	}
+	baseURL := strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", callbackToken)
+	if baseURL == "" || strings.ContainsAny(baseURL, "\n\r") {
+		return nil
+	}
+	model := cred.inferenceConfig.Model
+	if strings.ContainsAny(model, "\n\r") {
+		model = ""
+	}
+	return &codexProxyProviderConfig{baseURL: baseURL, model: model}
+}
+
+func generateCodexProxyProviderConfig(config *codexProxyProviderConfig) string {
+	if config == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("# SAM-managed Codex provider for proxy-backed sessions.\n")
+	if config.model != "" {
+		b.WriteString(fmt.Sprintf("model = \"%s\"\n", tomlEscapeBasicString(config.model)))
+	}
+	b.WriteString(fmt.Sprintf("model_provider = \"%s\"\n\n", codexProxyProviderID))
+	b.WriteString(fmt.Sprintf("[model_providers.%s]\n", codexProxyProviderID))
+	b.WriteString("name = \"SAM OpenAI Proxy\"\n")
+	b.WriteString(fmt.Sprintf("base_url = \"%s\"\n", tomlEscapeBasicString(config.baseURL)))
+	b.WriteString(fmt.Sprintf("env_key = \"%s\"\n", codexProxyProviderEnvKey))
+	b.WriteString("wire_api = \"chat\"\n\n")
+	return b.String()
+}
+
 // generateCodexMcpConfig produces a managed TOML block for Codex MCP server
 // configuration plus the environment variables referenced by
 // bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
 // via ~/.codex/config.toml.
-func generateCodexMcpConfig(mcpServers []McpServerEntry) (string, []string) {
-	if len(mcpServers) == 0 {
+func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig) (string, []string) {
+	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
+	if len(mcpServers) == 0 && providerConfig == "" {
 		return "", nil
 	}
 
@@ -966,7 +1011,7 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry) (string, []string) {
 		}
 		validServers = append(validServers, server)
 	}
-	if len(validServers) == 0 {
+	if len(validServers) == 0 && providerConfig == "" {
 		return "", nil
 	}
 
@@ -975,6 +1020,7 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry) (string, []string) {
 
 	config.WriteString(codexManagedMcpStartMarker)
 	config.WriteString("\n# Added by SAM vm-agent for Codex ACP sessions.\n")
+	config.WriteString(providerConfig)
 
 	for i, server := range validServers {
 		name := codexMcpServerName(i, len(validServers))
@@ -1437,8 +1483,8 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 // writeCodexConfigToContainer updates ~/.codex/config.toml with a SAM-managed
 // MCP block. Existing non-SAM config is preserved, and prior SAM-managed blocks
 // are replaced so resumed or restarted sessions do not accumulate stale tokens.
-func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry) ([]string, error) {
-	managedConfig, envVars := generateCodexMcpConfig(mcpServers)
+func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig) ([]string, error) {
+	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider)
 	existingConfig, err := readOptionalFileFromContainer(ctx, containerID, user, ".codex/config.toml")
 	if err != nil {
 		return nil, err

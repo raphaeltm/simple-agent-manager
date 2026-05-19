@@ -90,6 +90,22 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     const baseDomain = c.env.BASE_DOMAIN;
     const isClaudeCode = body.agentType === 'claude-code';
     const isCodex = body.agentType === 'openai-codex';
+    let explicitProviderMode: string | null | undefined;
+    const getExplicitProviderMode = async (): Promise<string | null> => {
+      if (explicitProviderMode !== undefined) return explicitProviderMode;
+      const settingsRows = await db
+        .select({ providerMode: schema.agentSettings.providerMode })
+        .from(schema.agentSettings)
+        .where(
+          and(
+            eq(schema.agentSettings.userId, workspace.userId),
+            eq(schema.agentSettings.agentType, body.agentType)
+          )
+        )
+        .limit(1);
+      explicitProviderMode = settingsRows[0]?.providerMode ?? null;
+      return explicitProviderMode;
+    };
 
     // Resolve default model: KV (admin-set) > env var > shared constant
     let defaultModel: string;
@@ -106,6 +122,12 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           if (parsed.defaultModel) defaultModel = parsed.defaultModel;
         }
       } catch { /* KV unavailable or corrupt data — use env/default */ }
+    }
+
+    // Claude Code/Codex explicit SAM mode must route through the SAM proxy,
+    // not through legacy platform agent credentials as user-style passthrough.
+    if ((isClaudeCode || isCodex) && credentialData?.credentialSource === 'platform') {
+      credentialData = null;
     }
 
     if (credentialData && !(isClaudeCode && credentialData.credentialKind === 'oauth-token')) {
@@ -173,17 +195,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     // Claude Code and Codex require an explicit SAM provider selection before
     // using platform proxy. OpenCode keeps its existing platform fallback path.
     if (isClaudeCode || isCodex) {
-      const settingsRows = await db
-        .select({ providerMode: schema.agentSettings.providerMode })
-        .from(schema.agentSettings)
-        .where(
-          and(
-            eq(schema.agentSettings.userId, workspace.userId),
-            eq(schema.agentSettings.agentType, body.agentType)
-          )
-        )
-        .limit(1);
-      const providerMode = settingsRows[0]?.providerMode;
+      const providerMode = await getExplicitProviderMode();
 
       if (providerMode !== 'sam') {
         log.info('agent_key.no_credential_no_sam_provider', {
