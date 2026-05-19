@@ -396,6 +396,20 @@ func (h *SessionHost) CancelPrompt() {
 	h.cancelPrompt(true)
 }
 
+// CancelPromptFromControlPlane mirrors the viewer WebSocket session/cancel path
+// for HTTP control-plane cancellation requests.
+func (h *SessionHost) CancelPromptFromControlPlane() {
+	if h.AgentType() == "opencode" {
+		h.cancelPrompt(false)
+		h.StopProcessForPromptCancel()
+		return
+	}
+
+	h.CancelPrompt()
+	h.ForwardToAgent([]byte(`{"jsonrpc":"2.0","method":"session/cancel","params":{}}`))
+	h.StopProcessForPromptCancel()
+}
+
 func (h *SessionHost) cancelPrompt(startGraceTimer bool) {
 	h.promptCancelMu.Lock()
 	cancelFn := h.promptCancel

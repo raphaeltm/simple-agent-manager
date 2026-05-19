@@ -1144,7 +1144,7 @@ func (s *Server) handleCancelAgentSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	host.CancelPrompt()
+	host.CancelPromptFromControlPlane()
 
 	slog.Info("Agent session prompt cancelled via HTTP", "workspace", workspaceID, "session", sessionID)
 	s.appendNodeEvent(workspaceID, "info", "agent_session.prompt_cancelled", "Agent prompt cancelled via HTTP", map[string]interface{}{

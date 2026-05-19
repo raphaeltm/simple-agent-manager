@@ -90,15 +90,15 @@ func parseEnvExportLines(content string) []string {
 // secretEnvNames are well-known secret environment variable names that must
 // not appear in docker exec command-line arguments (visible in /proc/*/cmdline).
 var secretEnvNames = map[string]bool{
-	"ANTHROPIC_API_KEY":        true,
-	"ANTHROPIC_AUTH_TOKEN":     true,
-	"CLAUDE_CODE_OAUTH_TOKEN":  true,
-	"OPENAI_API_KEY":           true,
-	"GH_TOKEN":                 true,
-	"GEMINI_API_KEY":           true,
-	"MISTRAL_API_KEY":          true,
-	"SCW_SECRET_KEY":           true,
-	"OPENCODE_CONFIG_CONTENT":  true,
+	"ANTHROPIC_API_KEY":         true,
+	"ANTHROPIC_AUTH_TOKEN":      true,
+	"CLAUDE_CODE_OAUTH_TOKEN":   true,
+	"OPENAI_API_KEY":            true,
+	"GH_TOKEN":                  true,
+	"GEMINI_API_KEY":            true,
+	"MISTRAL_API_KEY":           true,
+	"SCW_SECRET_KEY":            true,
+	"OPENCODE_CONFIG_CONTENT":   true,
 	"OPENCODE_PLATFORM_API_KEY": true, // also matches _KEY substring, explicit for clarity
 }
 
@@ -165,17 +165,17 @@ func hasEnvVar(envVars []string, key string) bool {
 // can reliably kill the entire process tree (docker exec + child processes)
 // using a negative PGID signal.
 type AgentProcess struct {
-	agentType        string
-	cmd              *exec.Cmd
-	stdin            io.WriteCloser
-	stdout           io.ReadCloser
-	stderr           io.ReadCloser
-	containerID      string
-	startTime        time.Time
-	stopGracePeriod  time.Duration
-	stopTimeout      time.Duration
-	mu               sync.Mutex
-	stopped          bool
+	agentType       string
+	cmd             *exec.Cmd
+	stdin           io.WriteCloser
+	stdout          io.ReadCloser
+	stderr          io.ReadCloser
+	containerID     string
+	startTime       time.Time
+	stopGracePeriod time.Duration
+	stopTimeout     time.Duration
+	mu              sync.Mutex
+	stopped         bool
 
 	// envFilePath is the tmpfs-backed file containing secret env vars.
 	// Cleaned up after the process exits (in Wait) rather than immediately
@@ -363,15 +363,17 @@ func (p *AgentProcess) Stop() error {
 	p.stopped = true
 
 	pid := 0
-	if p.cmd.Process != nil {
+	if p.cmd != nil && p.cmd.Process != nil {
 		pid = p.cmd.Process.Pid
 	}
 	slog.Info("Stopping ACP agent process", "agentType", p.agentType, "pid", pid, "container", p.containerID)
 
 	// Close stdin first to signal the agent to exit gracefully.
-	p.stdin.Close()
+	if p.stdin != nil {
+		p.stdin.Close()
+	}
 
-	if p.cmd.Process == nil {
+	if p.cmd == nil || p.cmd.Process == nil {
 		// No host process, but container processes may still be running.
 		p.killContainerProcesses(syscall.SIGKILL)
 		return nil

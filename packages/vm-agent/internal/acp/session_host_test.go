@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,14 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 )
+
+type bufferWriteCloser struct {
+	bytes.Buffer
+}
+
+func (w *bufferWriteCloser) Close() error {
+	return nil
+}
 
 // testWSPair creates a connected client+server WebSocket pair using httptest.
 func testWSPair(t *testing.T) (serverConn *websocket.Conn, clientConn *websocket.Conn) {
@@ -811,6 +820,54 @@ func TestSessionHost_CancelPrompt_CancelsContext(t *testing.T) {
 		// good — context was cancelled
 	default:
 		t.Fatal("context should be cancelled after CancelPrompt")
+	}
+}
+
+func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer func() {
+		host.mu.Lock()
+		host.process = nil
+		host.mu.Unlock()
+		host.Stop()
+	}()
+
+	stdin := &bufferWriteCloser{}
+	host.mu.Lock()
+	host.agentType = "claude-code"
+	host.process = &AgentProcess{stdin: stdin}
+	host.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	host.promptCancelMu.Lock()
+	host.promptCancel = cancel
+	host.promptCancelMu.Unlock()
+
+	host.CancelPromptFromControlPlane()
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected prompt context to be cancelled")
+	}
+
+	got := strings.TrimSpace(stdin.String())
+	want := `{"jsonrpc":"2.0","method":"session/cancel","params":{}}`
+	if got != want {
+		t.Fatalf("forwarded cancel = %q, want %q", got, want)
+	}
+
+	host.mu.RLock()
+	process := host.process
+	intentionalStop := host.intentionalPromptCancelProcessStop
+	host.mu.RUnlock()
+	if process == nil || !process.stopped {
+		t.Fatal("expected control-plane cancel to stop the agent process")
+	}
+	if !intentionalStop {
+		t.Fatal("expected control-plane cancel to mark process stop as intentional")
 	}
 }
 

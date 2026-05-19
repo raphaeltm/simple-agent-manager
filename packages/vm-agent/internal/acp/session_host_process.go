@@ -26,6 +26,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	}
 	intentionalPromptCancel := h.intentionalPromptCancelProcessStop
 	h.intentionalPromptCancelProcessStop = false
+	previousAcpSessionID := string(h.sessionID)
 	h.mu.Unlock()
 
 	if isRapidExit && !intentionalPromptCancel {
@@ -78,7 +79,11 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		h.mu.Unlock()
 		return
 	}
-	if !h.restartAgentLocked(ctx, agentType, cred, settings) {
+	loadSessionID := ""
+	if intentionalPromptCancel {
+		loadSessionID = previousAcpSessionID
+	}
+	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID) {
 		return
 	}
 	h.mu.Unlock()
@@ -128,8 +133,8 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
 }
 
-func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) bool {
-	if err := h.startAgent(ctx, agentType, cred, settings, ""); err != nil {
+func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string) bool {
+	if err := h.startAgent(ctx, agentType, cred, settings, previousAcpSessionID); err != nil {
 		h.status = HostError
 		h.statusErr = err.Error()
 		h.mu.Unlock()
