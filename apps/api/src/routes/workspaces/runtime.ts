@@ -33,6 +33,35 @@ const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(['opencode', 'claude-
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
+async function getAgentInferenceProvider(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  agentType: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({
+      inferenceProvider: schema.agentSettings.inferenceProvider,
+      opencodeProvider: schema.agentSettings.opencodeProvider,
+    })
+    .from(schema.agentSettings)
+    .where(
+      and(
+        eq(schema.agentSettings.userId, userId),
+        eq(schema.agentSettings.agentType, agentType)
+      )
+    )
+    .limit(1);
+
+  const settings = rows[0];
+  if (!settings) {
+    return null;
+  }
+  if (agentType === 'opencode') {
+    return settings.opencodeProvider === 'platform' ? 'sam' : null;
+  }
+  return settings.inferenceProvider === 'sam' ? 'sam' : null;
+}
+
 runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
@@ -167,7 +196,16 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       });
     }
 
-    // No user credential — platform proxy mode (existing behavior).
+    const inferenceProvider = await getAgentInferenceProvider(
+      db,
+      workspace.userId,
+      body.agentType,
+    );
+    if (inferenceProvider !== 'sam') {
+      throw errors.notFound('Agent credential');
+    }
+
+    // No user credential and SAM was explicitly selected — platform proxy mode.
     // Auth via callback token in headers.
     let proxyBaseUrl: string;
     let proxyProvider: string;
@@ -429,6 +467,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     opencodeProvider: userRow?.opencodeProvider ?? null,
     opencodeBaseUrl: userRow?.opencodeBaseUrl ?? null,
     opencodeProviderName: userRow?.opencodeProviderName ?? null,
+    inferenceProvider: userRow?.inferenceProvider ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {

@@ -346,6 +346,43 @@ describe('Agent Settings Routes', () => {
       const body = await res.json();
       expect(body.message).toContain('Invalid agent type');
     });
+
+    it('should accept explicit SAM inference provider for Claude Code', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      mockDB.limit.mockResolvedValueOnce([{
+        id: 'test-ulid',
+        userId: 'test-user-id',
+        agentType: 'claude-code',
+        model: null,
+        permissionMode: 'default',
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider: null,
+        opencodeBaseUrl: null,
+        opencodeProviderName: null,
+        inferenceProvider: 'sam',
+        createdAt: new Date('2026-05-19T00:00:00Z'),
+        updatedAt: new Date('2026-05-19T00:00:00Z'),
+      }]);
+
+      const res = await putSettings('claude-code', {
+        permissionMode: 'default',
+        inferenceProvider: 'sam',
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.inferenceProvider).toBe('sam');
+    });
+
+    it('should reject invalid inference provider values', async () => {
+      const res = await putSettings('openai-codex', { inferenceProvider: 'auto' });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('Invalid type');
+    });
   });
 
   describe('PUT /api/agent-settings/opencode (provider validation)', () => {

@@ -1,8 +1,8 @@
 /**
  * Tests for Codex (openai-codex) agent key fallback to AI proxy.
  *
- * When agentType === 'openai-codex' and no dedicated agent credential exists,
- * the agent-key endpoint falls back to the platform AI proxy with
+ * When agentType === 'openai-codex', no dedicated agent credential exists,
+ * and SAM is explicitly selected, the agent-key endpoint uses the platform AI proxy with
  * inferenceConfig { provider: 'openai-proxy' }.
  */
 import { drizzle } from 'drizzle-orm/d1';
@@ -95,7 +95,7 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
     vi.mocked(drizzle).mockReturnValue(mockDB as ReturnType<typeof drizzle>);
   });
 
-  it('returns openai-proxy inferenceConfig when no openai-codex credential exists', async () => {
+  it('returns 404 when no openai-codex credential exists and SAM provider is not selected', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
@@ -103,7 +103,24 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
         // workspace lookup
         return [{ userId: 'user-1', projectId: null }];
       }
-      // All credential lookups return empty
+      return [];
+    });
+
+    const resp = await postAgentKey({ agentType: 'openai-codex' });
+    expect(resp.status).toBe(404);
+  });
+
+  it('returns openai-proxy inferenceConfig when no openai-codex credential exists and SAM provider is selected', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        // workspace lookup
+        return [{ userId: 'user-1', projectId: null }];
+      }
+      if (queryCount === 4) {
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
+      }
       return [];
     });
 
@@ -163,6 +180,9 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
       if (queryCount === 1) {
         return [{ userId: 'user-1', projectId: null }];
       }
+      if (queryCount === 4) {
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
+      }
       return [];
     });
 
@@ -177,6 +197,9 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
       queryCount++;
       if (queryCount === 1) {
         return [{ userId: 'user-1', projectId: null }];
+      }
+      if (queryCount === 4) {
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
       }
       return [];
     });
@@ -201,12 +224,12 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
         // workspace lookup
         return [{ userId: 'user-1', projectId: null }];
       }
-      if (queryCount <= 3) {
-        // Credential lookups (user-scoped + platform) → empty
-        return [];
+      if (queryCount === 4) {
+        // agent settings lookup
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
       }
       // Task lookup (inside AI proxy fallback block)
-      if (queryCount === 4) return [{ id: 'task-1' }];
+      if (queryCount === 5) return [{ id: 'task-1' }];
       return [];
     });
 
@@ -224,6 +247,9 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
       if (queryCount === 1) {
         return [{ userId: 'user-1', projectId: null }];
       }
+      if (queryCount === 5) {
+        return [{ inferenceProvider: null, opencodeProvider: 'platform' }];
+      }
       return [];
     });
 
@@ -235,7 +261,7 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
     expect(body.inferenceConfig.provider).toBe('openai-compatible');
   });
 
-  it('does NOT affect existing claude-code proxy fallback', async () => {
+  it('requires explicit SAM provider for claude-code too', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
@@ -246,10 +272,6 @@ describe('POST /workspaces/:id/agent-key — Codex AI proxy fallback', () => {
     });
 
     const resp = await postAgentKey({ agentType: 'claude-code' });
-    expect(resp.status).toBe(200);
-
-    const body = await resp.json();
-    // Claude Code should still get anthropic-proxy
-    expect(body.inferenceConfig.provider).toBe('anthropic-proxy');
+    expect(resp.status).toBe(404);
   });
 });

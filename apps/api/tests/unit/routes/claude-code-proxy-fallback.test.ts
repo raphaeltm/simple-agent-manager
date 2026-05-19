@@ -1,8 +1,9 @@
 /**
  * Tests for Claude Code agent key fallback to AI proxy.
  *
- * When agentType === 'claude-code' and no dedicated agent credential exists,
- * the agent-key endpoint falls back to the platform AI proxy with
+ * When agentType === 'claude-code', no dedicated agent credential exists,
+ * and the user explicitly selected SAM as the inference provider,
+ * the agent-key endpoint uses the platform AI proxy with
  * inferenceConfig { provider: 'anthropic-proxy' }.
  */
 import { drizzle } from 'drizzle-orm/d1';
@@ -95,7 +96,7 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
     vi.mocked(drizzle).mockReturnValue(mockDB as ReturnType<typeof drizzle>);
   });
 
-  it('returns anthropic-proxy inferenceConfig when no claude-code credential exists', async () => {
+  it('returns 404 when no claude-code credential exists and SAM provider is not selected', async () => {
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
@@ -103,7 +104,25 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
         // workspace lookup
         return [{ userId: 'user-1', projectId: null }];
       }
-      // All credential lookups return empty
+      return [];
+    });
+
+    const resp = await postAgentKey({ agentType: 'claude-code' });
+    expect(resp.status).toBe(404);
+  });
+
+  it('returns anthropic-proxy inferenceConfig when no claude-code credential exists and SAM provider is selected', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        // workspace lookup
+        return [{ userId: 'user-1', projectId: null }];
+      }
+      if (queryCount === 4) {
+        // agent settings lookup
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
+      }
       return [];
     });
 
@@ -194,6 +213,9 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
       if (queryCount === 1) {
         return [{ userId: 'user-1', projectId: null }];
       }
+      if (queryCount === 4) {
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
+      }
       return [];
     });
 
@@ -208,6 +230,9 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
       queryCount++;
       if (queryCount === 1) {
         return [{ userId: 'user-1', projectId: null }];
+      }
+      if (queryCount === 4) {
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
       }
       return [];
     });
@@ -232,12 +257,12 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
         // workspace lookup
         return [{ userId: 'user-1', projectId: null }];
       }
-      if (queryCount <= 3) {
-        // Credential lookups (user-scoped + platform) → empty
-        return [];
+      if (queryCount === 4) {
+        // agent settings lookup
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
       }
       // Task lookup (inside AI proxy fallback block)
-      if (queryCount === 4) return [{ id: 'task-1' }];
+      if (queryCount === 5) return [{ id: 'task-1' }];
       return [];
     });
     // After the proxy fallback response, the update call chain:
@@ -251,12 +276,15 @@ describe('POST /workspaces/:id/agent-key — Claude Code AI proxy fallback', () 
   });
 
   it('does NOT use Scaleway fallback for claude-code', async () => {
-    // Claude Code has no fallbackCloudProvider, so it should skip directly to AI proxy
+    // Claude Code has no fallbackCloudProvider, so it should only use SAM when explicitly selected.
     let queryCount = 0;
     mockDB.limit.mockImplementation(() => {
       queryCount++;
       if (queryCount === 1) {
         return [{ userId: 'user-1', projectId: null }];
+      }
+      if (queryCount === 4) {
+        return [{ inferenceProvider: 'sam', opencodeProvider: null }];
       }
       return [];
     });

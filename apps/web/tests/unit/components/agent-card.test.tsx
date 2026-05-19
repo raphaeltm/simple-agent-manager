@@ -137,6 +137,7 @@ describe('AgentCard', () => {
       expect(onSaveSettings).toHaveBeenCalledWith('claude-code', {
         model: null,
         permissionMode: 'acceptEdits',
+        inferenceProvider: null,
       });
     });
   });

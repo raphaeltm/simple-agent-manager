@@ -32,6 +32,7 @@ const AgentPermissionModeSchema = v.picklist(VALID_PERMISSION_MODES);
 const OpenCodeProviderSchema = v.picklist(
   Object.keys(OPENCODE_PROVIDERS) as [OpenCodeProvider, ...OpenCodeProvider[]]
 );
+const AgentInferenceProviderSchema = v.picklist(['sam']);
 
 const BoundedStringSchema = (maxLength: number) => v.pipe(v.string(), v.maxLength(maxLength));
 
@@ -69,6 +70,7 @@ export function createSaveAgentSettingsSchema(
       opencodeProvider: v.optional(v.nullable(OpenCodeProviderSchema)),
       opencodeBaseUrl: v.optional(v.nullable(BoundedStringSchema(limits.maxBaseUrlLength))),
       opencodeProviderName: v.optional(v.nullable(BoundedStringSchema(limits.maxProviderNameLength))),
+      inferenceProvider: v.optional(v.nullable(AgentInferenceProviderSchema)),
     }),
     v.check(
       (input) => {

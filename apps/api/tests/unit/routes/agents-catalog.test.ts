@@ -23,6 +23,7 @@ type QueryResult = Record<string, unknown>[];
 interface CatalogDbState {
   agentCredentials?: QueryResult;
   scalewayCloudCredentials?: QueryResult;
+  agentSettings?: QueryResult;
   platformCloudCredentials?: QueryResult;
 }
 
@@ -37,10 +38,12 @@ function makeCatalogDb(state: CatalogDbState) {
           ? state.agentCredentials ?? []
           : selectCount === 2
             ? state.scalewayCloudCredentials ?? []
-            : state.platformCloudCredentials ?? [];
+            : selectCount === 3
+              ? state.agentSettings ?? []
+              : state.platformCloudCredentials ?? [];
       const builder = {
         from: vi.fn(() => builder),
-        where: vi.fn(() => (selectCount === 1 ? Promise.resolve(result) : builder)),
+        where: vi.fn(() => (selectCount === 1 || selectCount === 3 ? Promise.resolve(result) : builder)),
         limit: vi.fn(() => Promise.resolve(result)),
       };
       return builder;
@@ -126,6 +129,25 @@ describe('GET /api/agents', () => {
     });
     expect(claude).toMatchObject({
       configured: true,
+      fallbackCredentialSource: null,
+    });
+  });
+
+  it('marks Claude Code configured by explicit SAM provider selection', async () => {
+    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
+      agentSettings: [{ agentType: 'claude-code', inferenceProvider: 'sam', opencodeProvider: null }],
+    }) as ReturnType<typeof drizzle>);
+
+    const { agents } = await listAgents();
+    const claude = agents.find((agent) => agent.id === 'claude-code');
+    const codex = agents.find((agent) => agent.id === 'openai-codex');
+
+    expect(claude).toMatchObject({
+      configured: true,
+      fallbackCredentialSource: 'platform-ai',
+    });
+    expect(codex).toMatchObject({
+      configured: false,
       fallbackCredentialSource: null,
     });
   });

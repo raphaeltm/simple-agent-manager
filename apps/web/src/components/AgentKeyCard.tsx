@@ -51,6 +51,9 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
     scope === 'user' &&
     agent.id === 'opencode' &&
     (opencodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
+  const isSamPlatform =
+    scope === 'user' &&
+    agent.fallbackCredentialSource === 'platform-ai';
   const usesScalewayFallback =
     scope === 'user' &&
     agent.fallbackCredentialSource === 'scaleway-cloud' &&
@@ -109,18 +112,18 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
 
   const body = (
     <>
-      {isOpenCodePlatform && !showForm && (
+      {(isOpenCodePlatform || isSamPlatform) && !showForm && (
         <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
           <div className="flex flex-col gap-1">
-            <span className="text-xs text-fg-muted">SAM Platform (Workers AI)</span>
+            <span className="text-xs text-fg-muted">SAM Platform</span>
             <span className="text-sm text-fg-primary">
-              Using SAM&apos;s platform AI — daily limit applies. No API key needed.
+              Using SAM&apos;s platform AI. Daily and monthly limits apply. No API key needed.
             </span>
           </div>
         </div>
       )}
 
-      {usesScalewayFallback && !hasAnyCredential && !showForm && !isOpenCodePlatform && (
+      {usesScalewayFallback && !hasAnyCredential && !showForm && !isOpenCodePlatform && !isSamPlatform && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
             <div className="flex flex-col gap-1">

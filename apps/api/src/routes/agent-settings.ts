@@ -1,4 +1,5 @@
 import type {
+  AgentInferenceProvider,
   AgentPermissionMode,
   AgentSettingsResponse,
   OpenCodeProvider,
@@ -73,6 +74,10 @@ function isAgentPermissionMode(raw: string | null): raw is AgentPermissionMode {
 
 function isOpenCodeProvider(raw: string | null): raw is OpenCodeProvider {
   return raw !== null && Object.prototype.hasOwnProperty.call(OPENCODE_PROVIDERS, raw);
+}
+
+function isAgentInferenceProvider(raw: string | null): raw is AgentInferenceProvider {
+  return raw === 'sam';
 }
 
 function permissionModeFromDb(raw: string | null): AgentPermissionMode | null {
@@ -164,6 +169,7 @@ function toResponse(row: schema.AgentSettingsRow): AgentSettingsResponse {
     opencodeProvider: opencodeProviderFromDb(row.opencodeProvider),
     opencodeBaseUrl: row.opencodeBaseUrl ?? null,
     opencodeProviderName: row.opencodeProviderName ?? null,
+    inferenceProvider: isAgentInferenceProvider(row.inferenceProvider) ? row.inferenceProvider : null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
   };
@@ -205,6 +211,7 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
       opencodeProvider: null,
       opencodeBaseUrl: null,
       opencodeProviderName: null,
+      inferenceProvider: null,
       createdAt: null,
       updatedAt: null,
     } as AgentSettingsResponse);
@@ -261,6 +268,7 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
       ? (body.opencodeBaseUrl ?? null)
       : null,
     opencodeProviderName: body.opencodeProviderName ?? null,
+    inferenceProvider: body.inferenceProvider ?? null,
     updatedAt: now,
   };
 

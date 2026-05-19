@@ -19,6 +19,9 @@ export type OpenCodeProvider =
   | 'anthropic'
   | 'custom';
 
+/** Generic inference provider for agents with SAM-managed proxy support. */
+export type AgentInferenceProvider = 'sam';
+
 /** Metadata for an OpenCode provider option */
 export interface OpenCodeProviderMeta {
   label: string;
@@ -122,6 +125,8 @@ export interface AgentSettingsResponse {
   opencodeBaseUrl: string | null;
   /** Display name for custom providers. */
   opencodeProviderName: string | null;
+  /** Generic inference provider. null = direct user/project credential; 'sam' = SAM platform AI. */
+  inferenceProvider: AgentInferenceProvider | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -139,6 +144,8 @@ export interface SaveAgentSettingsRequest {
   opencodeBaseUrl?: string | null;
   /** Display name for custom providers. */
   opencodeProviderName?: string | null;
+  /** Generic inference provider. null = direct user/project credential; 'sam' = SAM platform AI. */
+  inferenceProvider?: AgentInferenceProvider | null;
 }
 
 // =============================================================================

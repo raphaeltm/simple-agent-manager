@@ -766,6 +766,8 @@ export const agentSettings = sqliteTable(
     opencodeBaseUrl: text('opencode_base_url'),
     /** Display name for custom OpenCode providers. */
     opencodeProviderName: text('opencode_provider_name'),
+    /** Generic inference provider for non-OpenCode agents. null = direct credential; 'sam' = SAM platform AI. */
+    inferenceProvider: text('inference_provider'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(cast(unixepoch() * 1000 as integer))`),

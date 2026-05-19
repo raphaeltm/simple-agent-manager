@@ -4,6 +4,7 @@
  * "card" layout and an `embedded` mode used by the unified AgentCard.
  */
 import type {
+  AgentInferenceProvider,
   AgentInfo,
   AgentPermissionMode,
   AgentSettingsResponse,
@@ -58,6 +59,9 @@ export function AgentSettingsCard({
   const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider | ''>(
     settings?.opencodeProvider ?? ''
   );
+  const [inferenceProvider, setInferenceProvider] = useState<AgentInferenceProvider | ''>(
+    settings?.inferenceProvider ?? ''
+  );
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState(settings?.opencodeBaseUrl ?? '');
   const [opencodeProviderName, setOpencodeProviderName] = useState(settings?.opencodeProviderName ?? '');
   const [saving, setSaving] = useState(false);
@@ -66,6 +70,7 @@ export function AgentSettingsCard({
   const [success, setSuccess] = useState(false);
 
   const isOpenCode = agent.id === 'opencode';
+  const supportsSamProvider = agent.id === 'claude-code' || agent.id === 'openai-codex';
   const selectedProvider = opencodeProvider || null;
   const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
   const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
@@ -78,6 +83,7 @@ export function AgentSettingsCard({
     setModel(settings?.model ?? '');
     setPermissionMode(settings?.permissionMode ?? 'default');
     setOpencodeProvider(settings?.opencodeProvider ?? '');
+    setInferenceProvider(settings?.inferenceProvider ?? '');
     setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
     setOpencodeProviderName(settings?.opencodeProviderName ?? '');
   }, [settings]);
@@ -97,6 +103,9 @@ export function AgentSettingsCard({
         data.opencodeProvider = opencodeProvider || null;
         data.opencodeBaseUrl = opencodeBaseUrl.trim() || null;
         data.opencodeProviderName = opencodeProviderName.trim() || null;
+      }
+      if (supportsSamProvider) {
+        data.inferenceProvider = inferenceProvider || null;
       }
 
       await onSave(agent.id, data);
@@ -118,6 +127,7 @@ export function AgentSettingsCard({
       setModel('');
       setPermissionMode('default');
       setOpencodeProvider('');
+      setInferenceProvider('');
       setOpencodeBaseUrl('');
       setOpencodeProviderName('');
       setSuccess(true);
@@ -150,6 +160,9 @@ export function AgentSettingsCard({
   const hasChanges = (() => {
     if ((model.trim() || null) !== (settings?.model ?? null)) return true;
     if (permissionMode !== (settings?.permissionMode ?? 'default')) return true;
+    if (supportsSamProvider) {
+      if ((inferenceProvider || null) !== (settings?.inferenceProvider ?? null)) return true;
+    }
     if (isOpenCode) {
       if ((opencodeProvider || null) !== (settings?.opencodeProvider ?? null)) return true;
       if ((opencodeBaseUrl.trim() || null) !== (settings?.opencodeBaseUrl ?? null)) return true;
@@ -209,6 +222,30 @@ export function AgentSettingsCard({
           {providerMeta && !providerMeta.requiresApiKey && (
             <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
               {providerMeta.keyHelpText}
+            </div>
+          )}
+        </div>
+      )}
+
+      {supportsSamProvider && (
+        <div className="mb-4">
+          <label htmlFor={`inference-provider-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Inference Provider</label>
+          <div className="text-xs text-fg-muted mb-2">
+            Select SAM only when you want platform-managed AI usage. Your daily and monthly allowance applies.
+          </div>
+          <select
+            id={`inference-provider-${agent.id}`}
+            value={inferenceProvider}
+            onChange={(e) => setInferenceProvider(e.target.value as AgentInferenceProvider | '')}
+            className={formControlClass}
+            data-testid={`inference-provider-${agent.id}`}
+          >
+            <option value="">Direct credential or subscription</option>
+            <option value="sam">SAM Platform</option>
+          </select>
+          {inferenceProvider === 'sam' && (
+            <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
+              SAM uses the workspace callback token for proxy auth. Platform provider secrets are not placed in the workspace.
             </div>
           )}
         </div>

@@ -53,6 +53,7 @@ function makeSettings(overrides: {
   opencodeProvider?: string | null;
   opencodeBaseUrl?: string | null;
   opencodeProviderName?: string | null;
+  inferenceProvider?: string | null;
 } = {}) {
   return {
     agentType: overrides.agentType ?? 'opencode',
@@ -64,6 +65,7 @@ function makeSettings(overrides: {
     opencodeProvider: overrides.opencodeProvider ?? null,
     opencodeBaseUrl: overrides.opencodeBaseUrl ?? null,
     opencodeProviderName: overrides.opencodeProviderName ?? null,
+    inferenceProvider: overrides.inferenceProvider ?? null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
   };
@@ -128,6 +130,7 @@ async function setupApiMocks(
           opencodeProvider: body.opencodeProvider ?? null,
           opencodeBaseUrl: body.opencodeBaseUrl ?? null,
           opencodeProviderName: body.opencodeProviderName ?? null,
+          inferenceProvider: body.inferenceProvider ?? null,
           createdAt: '2026-01-01T00:00:00Z',
           updatedAt: new Date().toISOString(),
         });
@@ -357,20 +360,25 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await expect(modelAfter).toHaveValue('');
   });
 
-  test('non-OpenCode agent: shows text input only, no provider selector', async ({ page }) => {
+  test('Claude Code: SAM provider selection explains allowance', async ({ page }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_CLAUDE],
-      settingsMap: {},
+      settingsMap: {
+        'claude-code': makeSettings({
+          agentType: 'claude-code',
+          inferenceProvider: 'sam',
+        }),
+      },
     });
     await navigateToAgentConfig(page);
     await page.waitForSelector('[data-testid="agent-card-claude-code"]');
-    await takeScreenshot(page, 'agent-settings-mobile-claude-code');
+    await takeScreenshot(page, 'agent-settings-mobile-claude-code-sam-provider');
     await assertNoOverflow(page);
 
-    // No provider selector present
     await expect(page.getByTestId('opencode-provider-select')).not.toBeVisible();
+    await expect(page.getByTestId('inference-provider-claude-code')).toBeVisible();
+    await expect(page.getByText(/daily and monthly allowance applies/)).toBeVisible();
 
-    // Model is text input
     const modelInput = page.getByTestId('model-input-claude-code');
     await expect(modelInput).toBeVisible();
     const tagName = await modelInput.evaluate((el) => el.tagName.toLowerCase());
@@ -671,6 +679,26 @@ test.describe('Unified Agent Cards — Desktop', () => {
     await page.waitForSelector('[data-testid="agent-card-opencode"]');
     await takeScreenshot(page, 'agent-settings-desktop-multiple-agents');
     await assertNoOverflow(page);
+  });
+
+  test('Codex SAM provider renders without overflow on desktop', async ({ page }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CODEX],
+      settingsMap: {
+        'openai-codex': makeSettings({
+          agentType: 'openai-codex',
+          inferenceProvider: 'sam',
+          model: 'gpt-4.1',
+        }),
+      },
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-openai-codex"]');
+    await takeScreenshot(page, 'agent-settings-desktop-codex-sam-provider');
+    await assertNoOverflow(page);
+
+    await expect(page.getByTestId('inference-provider-openai-codex')).toHaveValue('sam');
+    await expect(page.getByText(/Platform provider secrets are not placed/)).toBeVisible();
   });
 
   test('provider select label association on desktop', async ({ page }) => {

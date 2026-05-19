@@ -246,6 +246,7 @@ export type {
 
 // Agent Settings & Profiles
 export type {
+  AgentInferenceProvider,
   AgentPermissionMode,
   AgentProfile,
   AgentSettings,

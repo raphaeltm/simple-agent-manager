@@ -905,7 +905,9 @@ SAM supports multiple AI coding agents. Users provide their own API keys for eac
 
 The default agent for autonomous task execution is controlled by `DEFAULT_TASK_AGENT_TYPE` (default: `opencode`). Users can also set per-project agent defaults.
 
-**No platform-level AI API keys are required** — each user brings their own. The only exception is the optional trial feature, which can use either free Workers AI models or an `ANTHROPIC_API_KEY_TRIAL` for higher-quality trial conversations.
+Self-hosted deployments can also enable SAM-managed AI through the AI inference proxy. Users must explicitly select **SAM Platform** as the inference provider for Claude Code or Codex before SAM returns a callback-token proxy credential to a workspace. If they leave the provider on direct credential mode, missing user/project credentials still block agent startup instead of silently falling back to platform usage.
+
+**No platform-level AI API keys are required** when each user brings their own. Optional SAM-managed AI features can use Workers AI, Cloudflare AI Gateway unified billing, or configured platform credentials, depending on the proxy configuration.
 
 ### Public Website Link
 
