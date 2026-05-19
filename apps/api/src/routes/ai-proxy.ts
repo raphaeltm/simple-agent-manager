@@ -46,7 +46,7 @@ import {
   isAnthropicModel,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
-import { checkTokenBudget } from '../services/ai-token-budget';
+import { checkAiUsageGate } from '../services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../services/ai-token-usage-accounting';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 
@@ -192,7 +192,6 @@ async function forwardToWorkersAI(
       'Authorization': `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
-      'cf-aig-collect-log': 'false',
     },
     body: JSON.stringify(gatewayBody),
   });
@@ -244,7 +243,6 @@ async function forwardToAnthropic(
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
-      'cf-aig-collect-log': 'false',
     },
     body: JSON.stringify(anthropicRequest),
   });
@@ -437,16 +435,29 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     }, 400);
   }
 
-  // --- Check daily token budget ---
-  const budgetCheck = await checkTokenBudget(c.env.KV, userId, c.env);
-  if (!budgetCheck.allowed) {
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    if (usageGate.reason === 'daily-token-budget') {
+      const { budget } = usageGate;
+      return c.json({
+        error: {
+          message: 'Daily token budget exceeded. Resets at midnight UTC.',
+          type: 'rate_limit_error',
+          budget: {
+            inputTokens: { used: budget.usage.inputTokens, limit: budget.inputLimit },
+            outputTokens: { used: budget.usage.outputTokens, limit: budget.outputLimit },
+          },
+        },
+      }, 429);
+    }
+
     return c.json({
       error: {
-        message: 'Daily token budget exceeded. Resets at midnight UTC.',
+        message: 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
         type: 'rate_limit_error',
-        budget: {
-          inputTokens: { used: budgetCheck.usage.inputTokens, limit: budgetCheck.inputLimit },
-          outputTokens: { used: budgetCheck.usage.outputTokens, limit: budgetCheck.outputLimit },
+        monthlyCost: {
+          used: usageGate.monthlyCap.costUsd,
+          cap: usageGate.monthlyCap.capUsd,
         },
       },
     }, 429);

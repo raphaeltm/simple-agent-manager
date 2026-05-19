@@ -348,7 +348,6 @@ async function callAnthropicLLM(
       'anthropic-version': SAM_ANTHROPIC_VERSION,
       'content-type': 'application/json',
       'cf-aig-metadata': aigMetadata,
-      'cf-aig-collect-log': 'false',
     },
     body: JSON.stringify({
       model,
@@ -386,7 +385,6 @@ async function callWorkersAILLM(
       'Authorization': `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
-      'cf-aig-collect-log': 'false',
     },
     body: JSON.stringify({
       model,

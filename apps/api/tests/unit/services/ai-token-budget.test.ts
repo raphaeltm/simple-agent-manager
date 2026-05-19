@@ -7,6 +7,9 @@ import type { Env } from '../../../src/env';
 import {
   buildBudgetKey,
   buildBudgetSettingsKey,
+  buildMonthlyCostCacheKey,
+  checkAiUsageGate,
+  checkMonthlyCostCap,
   checkTokenBudget,
   deleteUserBudgetSettings,
   getTokenUsage,
@@ -77,6 +80,40 @@ describe('buildBudgetKey', () => {
   it('uses current date when none provided', () => {
     const key = buildBudgetKey('user-456');
     expect(key).toMatch(/^ai-budget:user-456:\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('monthly cost cap', () => {
+  it('builds the current-month cache key', () => {
+    const key = buildMonthlyCostCacheKey('user-123');
+    expect(key).toMatch(/^ai-monthly-cost:user-123:\d{4}-\d{2}$/);
+  });
+
+  it('fails open when a cap is configured but no cached cost exists', async () => {
+    const kv = createMockKV();
+    kv._store.set(buildBudgetSettingsKey('user-cap'), JSON.stringify({
+      dailyInputTokenLimit: null,
+      dailyOutputTokenLimit: null,
+      monthlyCostCapUsd: 10,
+      alertThresholdPercent: 80,
+    }));
+
+    const result = await checkMonthlyCostCap(kv, 'user-cap');
+    expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: 10 });
+  });
+
+  it('blocks when cached monthly cost reaches the configured cap', async () => {
+    const kv = createMockKV();
+    kv._store.set(buildBudgetSettingsKey('user-over-cap'), JSON.stringify({
+      dailyInputTokenLimit: null,
+      dailyOutputTokenLimit: null,
+      monthlyCostCapUsd: 10,
+      alertThresholdPercent: 80,
+    }));
+    kv._store.set(buildMonthlyCostCacheKey('user-over-cap'), '10.000000');
+
+    const result = await checkMonthlyCostCap(kv, 'user-over-cap');
+    expect(result).toEqual({ allowed: false, costUsd: 10, capUsd: 10 });
   });
 });
 
@@ -255,6 +292,56 @@ describe('checkTokenBudget', () => {
     expect(result.allowed).toBe(true);
     expect(result.inputLimit).toBe(500_000);
     expect(result.outputLimit).toBe(200_000);
+  });
+});
+
+describe('checkAiUsageGate', () => {
+  const makeEnv = (overrides: Partial<Env> = {}) =>
+    ({
+      AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: undefined,
+      AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: undefined,
+      ...overrides,
+    }) as unknown as Env;
+
+  it('allows when daily budget and monthly cap both allow', async () => {
+    const kv = createMockKV();
+    const result = await checkAiUsageGate(kv, 'user-ok', makeEnv());
+    expect(result).toEqual({ allowed: true });
+  });
+
+  it('returns daily-token-budget before checking monthly cap', async () => {
+    const kv = createMockKV();
+    kv._store.set(buildBudgetSettingsKey('user-daily'), JSON.stringify({
+      dailyInputTokenLimit: 1_000,
+      dailyOutputTokenLimit: null,
+      monthlyCostCapUsd: 10,
+      alertThresholdPercent: 80,
+    }));
+    kv._store.set(buildBudgetKey('user-daily'), JSON.stringify({ inputTokens: 1_001, outputTokens: 0 }));
+    kv._store.set(buildMonthlyCostCacheKey('user-daily'), '11.000000');
+
+    const result = await checkAiUsageGate(kv, 'user-daily', makeEnv());
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) {
+      expect(result.reason).toBe('daily-token-budget');
+    }
+  });
+
+  it('returns monthly-cost-cap when cached monthly cost exceeds cap', async () => {
+    const kv = createMockKV();
+    kv._store.set(buildBudgetSettingsKey('user-monthly'), JSON.stringify({
+      dailyInputTokenLimit: null,
+      dailyOutputTokenLimit: null,
+      monthlyCostCapUsd: 10,
+      alertThresholdPercent: 80,
+    }));
+    kv._store.set(buildMonthlyCostCacheKey('user-monthly'), '10.010000');
+
+    const result = await checkAiUsageGate(kv, 'user-monthly', makeEnv());
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) {
+      expect(result.reason).toBe('monthly-cost-cap');
+    }
   });
 });
 

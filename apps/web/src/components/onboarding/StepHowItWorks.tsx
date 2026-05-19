@@ -2,9 +2,23 @@ import { Button } from '@simple-agent-manager/ui';
 
 interface StepHowItWorksProps {
   onComplete: () => void;
+  onCreateProject: () => void;
+  onOwnSetup: () => void;
+  trialAvailable: boolean;
 }
 
-export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
+interface FlowStepProps {
+  number: string;
+  title: string;
+  description: string;
+}
+
+export function StepHowItWorks({
+  onComplete,
+  onCreateProject,
+  onOwnSetup,
+  trialAvailable,
+}: Readonly<StepHowItWorksProps>) {
   return (
     <div>
       <h3 className="sam-type-section-heading text-fg-primary m-0 mb-1">How SAM works</h3>
@@ -20,7 +34,9 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           description="Describe what you want — a feature, bug fix, question, or brainstorm."
         />
         <div className="flex justify-center">
-          <span className="text-fg-muted text-lg" aria-hidden="true">{'\u2193'}</span>
+          <span className="text-fg-muted text-lg" aria-hidden="true">
+            {'\u2193'}
+          </span>
         </div>
         <FlowStep
           number="2"
@@ -28,7 +44,9 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           description="A cloud VM with your repo cloned, dependencies installed, and your AI agent ready."
         />
         <div className="flex justify-center">
-          <span className="text-fg-muted text-lg" aria-hidden="true">{'\u2193'}</span>
+          <span className="text-fg-muted text-lg" aria-hidden="true">
+            {'\u2193'}
+          </span>
         </div>
         <FlowStep
           number="3"
@@ -36,7 +54,9 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
           description="It works in a real environment — running tests, installing packages, using git."
         />
         <div className="flex justify-center">
-          <span className="text-fg-muted text-lg" aria-hidden="true">{'\u2193'}</span>
+          <span className="text-fg-muted text-lg" aria-hidden="true">
+            {'\u2193'}
+          </span>
         </div>
         <FlowStep
           number="4"
@@ -75,21 +95,40 @@ export function StepHowItWorks({ onComplete }: StepHowItWorksProps) {
       {/* Devcontainer note */}
       <div className="border border-border-default rounded-md p-3 mb-4 bg-inset">
         <p className="text-xs text-fg-muted m-0">
-          <strong className="text-fg-primary">Tip:</strong> If your repo has a <code className="text-xs">.devcontainer</code> config, SAM uses it automatically.
+          <strong className="text-fg-primary">Tip:</strong> If your repo has a{' '}
+          <code className="text-xs">.devcontainer</code> config, SAM uses it automatically.
           Otherwise, it uses a sensible default with common dev tools pre-installed.
         </p>
       </div>
 
-      <div className="flex justify-end">
-        <Button variant="primary" size="md" onClick={onComplete}>
-          Got it, let&apos;s go!
+      {trialAvailable && (
+        <div className="border border-accent/30 rounded-md p-3 mb-4 bg-accent/5">
+          <p className="text-sm font-medium text-fg-primary m-0 mb-1">
+            Using trial compute right now
+          </p>
+          <p className="text-xs text-fg-muted m-0 mb-3">
+            You can create a project with the trial setup, or add your own agent and cloud
+            credentials when you are ready.
+          </p>
+          <Button variant="secondary" size="sm" onClick={onOwnSetup}>
+            Add my own setup
+          </Button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="secondary" size="md" onClick={onComplete}>
+          Done
+        </Button>
+        <Button variant="primary" size="md" onClick={onCreateProject}>
+          Create your first project
         </Button>
       </div>
     </div>
   );
 }
 
-function FlowStep({ number, title, description }: { number: string; title: string; description: string }) {
+function FlowStep({ number, title, description }: Readonly<FlowStepProps>) {
   return (
     <div className="flex items-start gap-3 p-3 border border-border-default rounded-md bg-surface">
       <div className="shrink-0 w-6 h-6 rounded-full bg-accent text-fg-on-accent text-xs font-bold flex items-center justify-center">

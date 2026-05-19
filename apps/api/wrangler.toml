@@ -253,6 +253,7 @@ binding = "AI"
 # Cron triggers:
 # - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery,
 #   trial expiry sweep
+# - Hourly at :30: monthly AI cost aggregation per user (Gateway logs → KV cache)
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
 # - Daily at 04:00 UTC: trial waitlist purge (rows with notified_at older than
 #   TRIAL_WAITLIST_PURGE_DAYS). Configurable via TRIAL_CRON_WAITLIST_CLEANUP.
@@ -263,7 +264,7 @@ binding = "AI"
 # the different jobs. If you change them here, update the comparisons in the scheduled
 # handler (or the corresponding TRIAL_CRON_* env vars).
 [triggers]
-crons = ["*/5 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
+crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 
 # Secrets (set via wrangler secret put):
 # - GITHUB_CLIENT_ID

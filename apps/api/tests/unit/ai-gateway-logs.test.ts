@@ -143,6 +143,26 @@ describe('resolveGatewayPagination', () => {
     const { maxPages } = resolveGatewayPagination(env as never);
     expect(maxPages).toBe(20);
   });
+
+  it('supports a separate hard cap for scheduled aggregation', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '300' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(300);
+  });
+
+  it('caps scheduled aggregation pages at its configured hard cap', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '999' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(500);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 
 **Local-first, Cloudflare-integrated.** Prove as much of a feature as you can locally before touching staging. Local iteration takes seconds; staging iteration takes minutes and burns VM quota. Staging is for things that genuinely require real infrastructure (OAuth callbacks, DNS, VM provisioning, edge TLS) — not for discovering whether your code compiles.
 
-1. **Prototype and test locally first** — unit tests, Miniflare integration tests, local Vite dev server, Playwright visual audits. Hybrid loops (local UI against staging API, or local API against staging VM agent) are encouraged. See `.claude/rules/29-local-first-debugging.md`.
+1. **Prototype and test locally first** — unit tests, Miniflare integration tests, local Vite dev server, Playwright visual audits. Hybrid loops (local UI against staging API, or local API against staging VM agent) are encouraged. See `.claude/rules/29-local-first-debugging.md`. Prototype artifacts are not production deliverables by default; do not ship throwaway prototype pages, demo routes, fixture-backed UI, or scaffolded experiments unless the user explicitly asks to ship the prototype itself.
 2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally. Staging deploys take ~7 minutes via `gh workflow run deploy-staging.yml`.
 3. **Query staging directly via Cloudflare API** — use `$CF_TOKEN` to query D1 (SQL), read/write KV, check DNS records, and inspect Workers. This is the fastest way to verify deploys, debug issues, and understand staging state. **Always check infrastructure state via CF API before guessing at fixes.** See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
 4. **When something fails on staging, QUERY THEN READ LOGS before changing any code** — first query D1/KV/DNS via CF API to understand the data state, then use `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
@@ -157,6 +157,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 ## Git Workflow
 
 - **Always use worktrees and PRs** — never commit directly to main. Create a feature branch in a git worktree and open a PR.
+- **No late direct-to-main fixes** — review fixes, CI fixes, staging fixes, and post-merge deploy fixes still go through a branch and PR. The only `/do` direct-to-main exception is the initial task file.
 - **Push early and often** — environments are ephemeral. Unpushed work can be lost at any time.
 - **Pull and rebase frequently** — before starting work and before pushing, run `git fetch origin && git rebase origin/main` to stay current and avoid conflicts.
 - After pushing, check CI and fix any failures before moving on.
@@ -205,7 +206,7 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
 
-**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill. This ensures the receiving agent follows the full end-to-end workflow (research, implement, review, staging verify, PR). See `.claude/rules/09-task-tracking.md`.
+**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill, then verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
 
 ## Strategy Planning
 

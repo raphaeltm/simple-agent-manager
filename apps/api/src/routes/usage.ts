@@ -31,7 +31,8 @@ import {
   validateBudgetUpdate,
 } from '../services/ai-token-budget';
 import { checkQuotaForUser, userHasOwnCloudCredentials } from '../services/compute-quotas';
-import { getCurrentPeriodBounds, getUserUsageSummary } from '../services/compute-usage';
+import { getCurrentPeriodBounds } from '../services/compute-usage';
+import { getUserNodeUsageSummary } from '../services/node-usage';
 
 const usageRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,7 +41,7 @@ usageRoutes.get('/compute', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const { period, activeSessions } = await getUserUsageSummary(db, userId);
+  const { period, activeSessions } = await getUserNodeUsageSummary(db, userId);
 
   return c.json({
     currentPeriod: period,

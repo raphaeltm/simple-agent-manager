@@ -328,6 +328,20 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     unifiedApiModelId: 'openai/gpt-4.1',
   },
   {
+    id: 'gpt-5-mini',
+    label: 'GPT-5 Mini',
+    provider: 'openai',
+    tier: 'standard',
+    costPer1kInputTokens: 0.0008,
+    costPer1kOutputTokens: 0.003,
+    contextWindow: 1047576,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-standard',
+    allowedScopes: ['workspace', 'project'],
+    unifiedApiModelId: 'openai/gpt-5-mini',
+  },
+  {
     id: 'gpt-5.2',
     label: 'GPT-5.2',
     provider: 'openai',
@@ -401,6 +415,12 @@ export const DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT = 80;
 
 /** KV key prefix for user budget settings. */
 export const AI_BUDGET_SETTINGS_KV_PREFIX = 'ai-budget-settings';
+
+/** KV key prefix for cached monthly AI cost per user. Written by cron, read by proxy. */
+export const AI_MONTHLY_COST_CACHE_KV_PREFIX = 'ai-monthly-cost';
+
+/** Default TTL for cached monthly cost entries — 2 hours (cron runs hourly). Override via AI_MONTHLY_COST_CACHE_TTL_SECONDS env var. */
+export const DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS = 7_200;
 
 /** Maximum allowed daily token limit a user can set. Override via AI_USAGE_MAX_DAILY_TOKEN_LIMIT env var. */
 export const DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT = 10_000_000;

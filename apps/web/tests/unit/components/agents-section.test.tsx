@@ -56,6 +56,14 @@ const AGENT_LIST = {
       configured: false,
       credentialHelpUrl: 'https://ampcode.com/settings',
     },
+    {
+      id: 'google-gemini',
+      name: 'Gemini CLI',
+      description: 'Google coding agent',
+      supportsAcp: true,
+      configured: false,
+      credentialHelpUrl: 'https://aistudio.google.com/apikey',
+    },
   ],
 };
 
@@ -89,17 +97,54 @@ describe('AgentsSection', () => {
       expect(screen.getByTestId('agent-card-claude-code')).toBeInTheDocument();
       expect(screen.getByTestId('agent-card-openai-codex')).toBeInTheDocument();
       expect(screen.getByTestId('agent-card-amp')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-card-google-gemini')).toBeInTheDocument();
     });
     expect(screen.getByText('Claude Code')).toBeInTheDocument();
     expect(screen.getByText('OpenAI Codex')).toBeInTheDocument();
     expect(screen.getByText('Amp')).toBeInTheDocument();
+    expect(screen.getByText('Gemini CLI')).toBeInTheDocument();
   });
 
   it('shows Connection and Configuration section headers for each card', async () => {
     render(<AgentsSection />);
     await waitFor(() => {
-      expect(screen.getAllByText('Connection').length).toBe(3);
-      expect(screen.getAllByText('Configuration').length).toBe(3);
+      expect(screen.getAllByText('Connection').length).toBe(4);
+      expect(screen.getAllByText('Configuration').length).toBe(4);
+    });
+  });
+
+  it('saves Gemini CLI model settings from the agent card', async () => {
+    mocks.getAgentSettings.mockImplementation((agentType: string) =>
+      Promise.resolve(
+        makeSettings(agentType, {
+          permissionMode: agentType === 'google-gemini' ? 'default' : null,
+        }),
+      ),
+    );
+    mocks.saveAgentSettings.mockResolvedValue(
+      makeSettings('google-gemini', {
+        model: 'gemini-2.5-pro',
+        permissionMode: 'default',
+      }),
+    );
+
+    render(<AgentsSection />);
+    const modelInput = await screen.findByTestId('model-input-google-gemini');
+    fireEvent.change(modelInput, { target: { value: 'gemini-2.5-pro' } });
+
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId('save-settings-google-gemini') as HTMLButtonElement).disabled
+      ).toBe(false);
+    });
+
+    fireEvent.click(screen.getByTestId('save-settings-google-gemini'));
+
+    await waitFor(() => {
+      expect(mocks.saveAgentSettings).toHaveBeenCalledWith('google-gemini', {
+        model: 'gemini-2.5-pro',
+        permissionMode: 'default',
+      });
     });
   });
 

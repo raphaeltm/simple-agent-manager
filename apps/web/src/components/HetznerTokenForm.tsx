@@ -1,9 +1,9 @@
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert,Button, Input } from '@simple-agent-manager/ui';
-import { useState } from 'react';
+import { useRef,useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
-import { createCredential, deleteCredential } from '../lib/api';
+import { createCredential, deleteCredential, validateCredential } from '../lib/api';
 
 interface HetznerTokenFormProps {
   credential?: CredentialResponse | null;
@@ -17,8 +17,35 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
   const toast = useToast();
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validatedToken, setValidatedToken] = useState<string | null>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const trimmedToken = token.trim();
+  const latestToken = useRef(trimmedToken);
+  latestToken.current = trimmedToken;
+  const isValidated = validatedToken === trimmedToken;
+
+  const handleValidate = async () => {
+    if (!trimmedToken) return;
+    setValidating(true);
+    setValidationMessage(null);
+    setError(null);
+    const requestToken = trimmedToken;
+    try {
+      const result = await validateCredential({ provider: 'hetzner', token: requestToken });
+      if (latestToken.current !== requestToken) return;
+      setValidatedToken(requestToken);
+      setValidationMessage(result.message);
+    } catch (err) {
+      if (latestToken.current !== requestToken) return;
+      setValidatedToken(null);
+      setError(err instanceof Error ? err.message : 'Failed to validate token');
+    } finally {
+      setValidating(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,7 +129,11 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
           id="hetzner-token"
           type="password"
           value={token}
-          onChange={(e) => setToken(e.target.value)}
+          onChange={(e) => {
+            setToken(e.target.value);
+            setValidatedToken(null);
+            setValidationMessage(null);
+          }}
           placeholder="Enter your Hetzner Cloud API token"
           required
         />
@@ -120,10 +151,14 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
         </p>
       </div>
 
+      {validationMessage && <Alert variant="success">{validationMessage}</Alert>}
       {error && <Alert variant="error">{error}</Alert>}
 
-      <div className="flex gap-3">
-        <Button type="submit" disabled={loading || !token} loading={loading}>
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:gap-3">
+        <Button type="button" variant="secondary" disabled={validating || loading || !token.trim()} loading={validating} onClick={handleValidate}>
+          {isValidated ? 'Tested' : 'Test connection'}
+        </Button>
+        <Button type="submit" disabled={loading || validating || !token.trim() || !isValidated} loading={loading}>
           {credential ? 'Update Token' : 'Connect'}
         </Button>
         {showForm && (

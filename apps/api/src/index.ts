@@ -100,6 +100,7 @@ import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
+import { runMonthlyCostAggregation } from './services/ai-monthly-cost-cron';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -607,6 +608,7 @@ export default {
    * Scheduled (cron) handler for background tasks.
    * Cron schedules:
    * - Every 5 minutes: operational cleanup (provisioning, nodes, tasks, observability, trial expiry)
+   * - Hourly at :30: monthly AI cost aggregation per user (Gateway logs → KV cache)
    * - Daily at 03:00 UTC: analytics event forwarding to external platforms
    * - Daily at 04:00 UTC (configurable via TRIAL_CRON_WAITLIST_CLEANUP): trial waitlist purge
    * - Monthly at 03:00 UTC on the 1st (configurable via TRIAL_CRON_ROLLOVER_CRON): trial counter rollover audit
@@ -620,21 +622,40 @@ export default {
     const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
 
     const isDailyForward = controller.cron === '0 3 * * *';
+    const isMonthlyCostAggregation = controller.cron === '30 * * * *';
     const isTrialRollover = controller.cron === rolloverCron;
     const isTrialWaitlistCleanup = controller.cron === waitlistCleanupCron;
 
     const cronType = isDailyForward
       ? 'daily-forward'
-      : isTrialRollover
-        ? 'trial-rollover'
-        : isTrialWaitlistCleanup
-          ? 'trial-waitlist-cleanup'
-          : 'sweep';
+      : isMonthlyCostAggregation
+        ? 'monthly-cost-aggregation'
+        : isTrialRollover
+          ? 'trial-rollover'
+          : isTrialWaitlistCleanup
+            ? 'trial-waitlist-cleanup'
+            : 'sweep';
 
     log.info('cron.started', {
       cron: controller.cron,
       type: cronType,
     });
+
+    // Hourly: aggregate per-user monthly AI cost from Gateway logs → KV cache.
+    if (isMonthlyCostAggregation) {
+      ctx.waitUntil((async () => {
+        const result = await runMonthlyCostAggregation(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'monthly-cost-aggregation',
+          monthlyCostEnabled: result.enabled,
+          monthlyCostUsersUpdated: result.usersUpdated,
+          monthlyCostTotalEntries: result.totalEntries,
+          monthlyCostErrors: result.errors,
+        });
+      })());
+      return;
+    }
 
     // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
     // isolate alive for the full duration of multi-step external API calls.

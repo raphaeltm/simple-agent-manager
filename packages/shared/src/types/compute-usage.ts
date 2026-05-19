@@ -18,8 +18,13 @@ export interface ComputeUsageRecord {
   createdAt: string;
 }
 
-/** Active compute session shown in usage responses. */
+/** Active compute resource shown in usage responses. Node fields are primary; workspace fields are legacy aliases. */
 export interface ActiveComputeSession {
+  nodeId?: string;
+  name?: string;
+  vmSize?: string;
+  createdAt?: string;
+  status?: string;
   workspaceId: string;
   serverType: string;
   vcpuCount: number;
@@ -31,9 +36,14 @@ export interface ActiveComputeSession {
 export interface ComputeUsagePeriod {
   start: string;
   end: string;
+  totalNodeHours?: number;
   totalVcpuHours: number;
+  platformNodeHours?: number;
   platformVcpuHours: number;
+  userNodeHours?: number;
   userVcpuHours: number;
+  activeNodes?: number;
+  /** Legacy alias for active node count on node-based billing responses. */
   activeWorkspaces: number;
 }
 
@@ -49,9 +59,13 @@ export interface AdminUserUsageSummary {
   email: string | null;
   name: string | null;
   avatarUrl: string | null;
+  totalNodeHours?: number;
   totalVcpuHours: number;
+  platformNodeHours?: number;
   platformVcpuHours: number;
+  userNodeHours?: number;
   userVcpuHours: number;
+  activeNodes?: number;
   activeWorkspaces: number;
 }
 

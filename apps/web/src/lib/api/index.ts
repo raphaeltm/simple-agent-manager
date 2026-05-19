@@ -88,8 +88,8 @@ export {
 } from './agents';
 export { getCurrentUser } from './auth';
 export { API_URL, ApiClientError, request } from './client';
-export type { GcpProject, GcpSetupRequest, GcpSetupResponse } from './credentials';
-export { createCredential, deleteCredential, listCredentials } from './credentials';
+export type { CredentialValidationResponse, GcpProject, GcpSetupRequest, GcpSetupResponse } from './credentials';
+export { createCredential, deleteCredential, listCredentials, validateAgentCredential, validateCredential } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
 export type { ProjectDeploymentGcpResponse } from './deployment';
 export {

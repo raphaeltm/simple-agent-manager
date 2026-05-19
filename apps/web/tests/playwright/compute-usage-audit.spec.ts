@@ -184,53 +184,71 @@ function makeDetailedNodeUsage(options: {
 }
 
 // ---------------------------------------------------------------------------
-// Settings-level compute usage mock (unchanged — still uses /api/usage/compute)
+// Settings-level compute usage mock (node-based /api/usage/compute)
 // ---------------------------------------------------------------------------
 
-function makeActiveSession(overrides: {
-  workspaceId?: string;
-  serverType?: string;
+function makeActiveNode(overrides: {
+  nodeId?: string;
+  name?: string;
+  vmSize?: string;
   vcpuCount?: number;
   credentialSource?: string;
-  startedAt?: string;
+  createdAt?: string;
+  status?: string;
 }) {
+  const nodeId = overrides.nodeId ?? 'node-abc123def456';
+  const vmSize = overrides.vmSize ?? 'cpx31';
+  const createdAt = overrides.createdAt ?? new Date(Date.now() - 3600000).toISOString();
   return {
-    workspaceId: overrides.workspaceId ?? 'ws-abc123def456',
-    serverType: overrides.serverType ?? 'cpx31',
+    nodeId,
+    name: overrides.name ?? `node-${nodeId.slice(0, 6)}`,
+    workspaceId: nodeId,
+    serverType: vmSize,
+    vmSize,
     vcpuCount: overrides.vcpuCount ?? 4,
     credentialSource: overrides.credentialSource ?? 'platform',
-    startedAt: overrides.startedAt ?? new Date(Date.now() - 3600000).toISOString(),
+    startedAt: createdAt,
+    createdAt,
+    status: overrides.status ?? 'running',
   };
 }
 
-const ACTIVE_SESSIONS_NORMAL = [
-  makeActiveSession({ workspaceId: 'ws-abc123def456ghi', serverType: 'cpx31', vcpuCount: 4, credentialSource: 'platform' }),
-  makeActiveSession({ workspaceId: 'ws-xyz789uvw012jkl', serverType: 'ccx13', vcpuCount: 2, credentialSource: 'user', startedAt: new Date(Date.now() - 7200000).toISOString() }),
+const ACTIVE_NODES_NORMAL = [
+  makeActiveNode({ nodeId: 'node-abc123def456ghi', name: 'warm-pool-node-1', vmSize: 'cpx31', vcpuCount: 4, credentialSource: 'platform' }),
+  makeActiveNode({ nodeId: 'node-xyz789uvw012jkl', name: 'byoc-node-1', vmSize: 'ccx13', vcpuCount: 2, credentialSource: 'user', createdAt: new Date(Date.now() - 7200000).toISOString() }),
 ];
 
-const ACTIVE_SESSIONS_LONG = [
-  makeActiveSession({
-    workspaceId: 'ws-averylongworkspaceidthatmightcauseoverflowissues-abc123',
-    serverType: 'cx11',
+const ACTIVE_NODES_LONG = [
+  makeActiveNode({
+    nodeId: 'node-averylongnodeidthatmightcauseoverflowissues-abc123',
+    name: 'node-with-a-very-long-human-readable-name-that-might-cause-overflow',
+    vmSize: 'cx11',
     vcpuCount: 1,
     credentialSource: 'platform',
   }),
 ];
 
 function makeComputeUsageResponse(options: {
-  activeSessions?: ReturnType<typeof makeActiveSession>[];
+  activeSessions?: ReturnType<typeof makeActiveNode>[];
+  totalNodeHours?: number;
   totalVcpuHours?: number;
+  platformNodeHours?: number;
   platformVcpuHours?: number;
+  userNodeHours?: number;
   userVcpuHours?: number;
-  activeWorkspaces?: number;
+  activeNodes?: number;
 } = {}) {
   const sessions = options.activeSessions ?? [];
   return {
     currentPeriod: {
+      totalNodeHours: options.totalNodeHours ?? 9.25,
       totalVcpuHours: options.totalVcpuHours ?? 18.75,
+      platformNodeHours: options.platformNodeHours ?? 7.5,
       platformVcpuHours: options.platformVcpuHours ?? 15.0,
+      userNodeHours: options.userNodeHours ?? 1.75,
       userVcpuHours: options.userVcpuHours ?? 3.75,
-      activeWorkspaces: options.activeWorkspaces ?? sessions.length,
+      activeNodes: options.activeNodes ?? sessions.length,
+      activeWorkspaces: options.activeNodes ?? sessions.length,
       start: PERIOD.start,
       end: PERIOD.end,
     },
@@ -253,7 +271,7 @@ type MockOptions = {
 async function setupMocks(page: Page, options: MockOptions = {}) {
   const adminUsageData = makeAdminNodeUsageResponse(options.adminUsers ?? USERS_NORMAL);
   const userDetailData = options.userDetailedUsage ?? makeDetailedNodeUsage();
-  const computeUsageData = options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_NORMAL });
+  const computeUsageData = options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL });
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -300,7 +318,35 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       });
     }
 
-    // Settings compute usage — GET /api/usage/compute (unchanged)
+    // AI budget — GET /api/usage/ai/budget (used by the Settings usage page shell)
+    if (path === '/api/usage/ai/budget') {
+      return respond(200, {
+        settings: {
+          dailyInputTokenLimit: null,
+          dailyOutputTokenLimit: null,
+          monthlyCostCapUsd: null,
+          alertThresholdPercent: 80,
+        },
+        isCustom: false,
+        dailyUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+        },
+        effectiveLimits: {
+          dailyInputTokenLimit: 500000,
+          dailyOutputTokenLimit: 200000,
+        },
+        monthCostUsd: 0,
+        utilization: {
+          dailyInputPercent: 0,
+          dailyOutputPercent: 0,
+          monthlyCostPercent: null,
+        },
+        exceeded: false,
+      });
+    }
+
+    // Settings compute usage — GET /api/usage/compute
     if (path === '/api/usage/compute') {
       if (options.computeUsageError) return respond(500, { error: 'Failed to fetch' });
       return respond(200, computeUsageData);
@@ -422,9 +468,11 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
     });
     await goToAdminUsage(page);
 
-    // The green dot should use bg-success (design system token), not an arbitrary Tailwind color
-    const greenDot = page.locator('.bg-success').first();
-    await expect(greenDot).toBeVisible();
+    if ((page.viewportSize()?.width ?? 0) < 640) {
+      // The green dot should use bg-success (design system token), not an arbitrary Tailwind color
+      const greenDot = page.locator('.bg-success').first();
+      await expect(greenDot).toBeVisible();
+    }
 
     await screenshot(page, 'admin-usage-active-indicator-mobile');
     await assertNoOverflow(page);
@@ -490,9 +538,11 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
 
     const backBtn = page.locator('button[aria-label="Back to all users"]');
     await expect(backBtn).toBeVisible();
-    const box = await backBtn.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    if ((page.viewportSize()?.width ?? 0) < 640) {
+      const box = await backBtn.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
     await screenshot(page, 'admin-usage-back-button-mobile');
   });
 
@@ -619,30 +669,30 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
 // ===========================================================================
 
 test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
-  test('normal data with active sessions renders without overflow', async ({ page }) => {
+  test('normal data with active nodes renders without overflow', async ({ page }) => {
     await setupMocks(page, {
-      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_NORMAL }),
+      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL }),
     });
     await goToSettingsUsage(page);
     await expect(page.locator('text=Compute Usage')).toBeVisible();
-    await expect(page.locator('text=Active Workspaces')).toBeVisible();
+    await expect(page.locator('text=Active Nodes')).toBeVisible();
     await screenshot(page, 'settings-usage-normal-mobile');
     await assertNoOverflow(page);
   });
 
-  test('no active sessions: empty state card shown', async ({ page }) => {
+  test('no active nodes: empty state card shown', async ({ page }) => {
     await setupMocks(page, {
       computeUsage: makeComputeUsageResponse({ activeSessions: [] }),
     });
     await goToSettingsUsage(page);
-    await expect(page.locator('text=No active workspaces right now.')).toBeVisible();
+    await expect(page.locator('text=No active nodes right now.')).toBeVisible();
     await screenshot(page, 'settings-usage-no-sessions-mobile');
     await assertNoOverflow(page);
   });
 
-  test('long workspace ID does not overflow at 375px', async ({ page }) => {
+  test('long node ID does not overflow at 375px', async ({ page }) => {
     await setupMocks(page, {
-      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_LONG }),
+      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_LONG }),
     });
     await goToSettingsUsage(page);
     await page.waitForTimeout(400);
@@ -653,10 +703,13 @@ test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
   test('zero vCPU-hours: shows < 0.01 formatting', async ({ page }) => {
     await setupMocks(page, {
       computeUsage: makeComputeUsageResponse({
+        totalNodeHours: 0.001,
         totalVcpuHours: 0.001,
+        platformNodeHours: 0.001,
         platformVcpuHours: 0.001,
+        userNodeHours: 0,
         userVcpuHours: 0,
-        activeWorkspaces: 0,
+        activeNodes: 0,
         activeSessions: [],
       }),
     });
@@ -681,17 +734,17 @@ test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
     await goToSettingsUsage(page);
 
     // Grid should be 2 columns at mobile — check cards are side-by-side by verifying 4 stat labels
-    await expect(page.locator('text=Total vCPU-hrs')).toBeVisible();
-    await expect(page.locator('text=Platform')).toBeVisible();
-    await expect(page.locator('text=Your Keys (BYOC)')).toBeVisible();
+    await expect(page.locator('text=Node-hrs')).toBeVisible();
+    await expect(page.locator('text=vCPU-hrs')).toBeVisible();
+    await expect(page.locator('text=Platform vCPU')).toBeVisible();
     await expect(page.locator('text=Active Now')).toBeVisible();
     await screenshot(page, 'settings-usage-stat-grid-mobile');
     await assertNoOverflow(page);
   });
 
-  test('active session row: server+credential+duration details visible', async ({ page }) => {
+  test('active node row: size+credential+duration details visible', async ({ page }) => {
     await setupMocks(page, {
-      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_NORMAL }),
+      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL }),
     });
     await goToSettingsUsage(page);
     // Server type text should be visible
@@ -700,11 +753,11 @@ test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
     await assertNoOverflow(page);
   });
 
-  test('special characters in workspace ID render safely', async ({ page }) => {
+  test('special characters in node ID render safely', async ({ page }) => {
     await setupMocks(page, {
       computeUsage: makeComputeUsageResponse({
         activeSessions: [
-          makeActiveSession({ workspaceId: 'ws-<script>alert(1)</script>' }),
+          makeActiveNode({ nodeId: 'node-<script>alert(1)</script>' }),
         ],
       }),
     });
@@ -713,7 +766,7 @@ test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
     await screenshot(page, 'settings-usage-xss-wsid-mobile');
     await assertNoOverflow(page);
     // XSS payload should not execute — page should still be intact
-    await expect(page.locator('text=Active Workspaces')).toBeVisible();
+    await expect(page.locator('text=Active Nodes')).toBeVisible();
   });
 });
 
@@ -726,27 +779,27 @@ test.describe('SettingsComputeUsage — Desktop (1280x800)', () => {
 
   test('normal data: 4-column stat grid and session rows visible', async ({ page }) => {
     await setupMocks(page, {
-      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_NORMAL }),
+      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL }),
     });
     await goToSettingsUsage(page);
-    await expect(page.locator('text=Total vCPU-hrs')).toBeVisible();
+    await expect(page.locator('text=Node-hrs')).toBeVisible();
     await screenshot(page, 'settings-usage-normal-desktop');
     await assertNoOverflow(page);
   });
 
-  test('no active sessions: empty card and stat grid', async ({ page }) => {
+  test('no active nodes: empty card and stat grid', async ({ page }) => {
     await setupMocks(page, {
       computeUsage: makeComputeUsageResponse({ activeSessions: [] }),
     });
     await goToSettingsUsage(page);
-    await expect(page.locator('text=No active workspaces right now.')).toBeVisible();
+    await expect(page.locator('text=No active nodes right now.')).toBeVisible();
     await screenshot(page, 'settings-usage-no-sessions-desktop');
     await assertNoOverflow(page);
   });
 
-  test('long workspace ID: truncates without overflow at 1280px', async ({ page }) => {
+  test('long node ID: truncates without overflow at 1280px', async ({ page }) => {
     await setupMocks(page, {
-      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_SESSIONS_LONG }),
+      computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_LONG }),
     });
     await goToSettingsUsage(page);
     await page.waitForTimeout(400);

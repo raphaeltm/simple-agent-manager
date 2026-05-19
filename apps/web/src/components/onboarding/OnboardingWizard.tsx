@@ -1,7 +1,13 @@
 import { Card } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 
-import { getTrialStatus, listAgentCredentials,listCredentials, listGitHubInstallations } from '../../lib/api';
+import {
+  getTrialStatus,
+  listAgentCredentials,
+  listCredentials,
+  listGitHubInstallations,
+} from '../../lib/api';
 import { useAuth } from '../AuthProvider';
 import { StepAgentKey } from './StepAgentKey';
 import { StepCloudProvider } from './StepCloudProvider';
@@ -25,14 +31,53 @@ interface SetupStatus {
   hasAgent: boolean;
   hasCloud: boolean;
   hasGitHub: boolean;
+  trialAvailable: boolean;
+}
+
+function getOwnSetupStep(status: SetupStatus): WizardStep {
+  if (!status.hasAgent) return 'agent';
+  if (!status.hasCloud) return 'cloud';
+  if (!status.hasGitHub) return 'github';
+  return 'how-it-works';
+}
+
+function getNextRecommendedStep(status: SetupStatus, ownSetupMode: boolean): WizardStep {
+  if (ownSetupMode) return getOwnSetupStep(status);
+
+  const effectiveHasAgent = status.hasAgent || status.trialAvailable;
+  const effectiveHasCloud = status.hasCloud || status.trialAvailable;
+  if (effectiveHasAgent && effectiveHasCloud && status.hasGitHub) return 'how-it-works';
+  if (!effectiveHasAgent) return 'agent';
+  if (!effectiveHasCloud) return 'cloud';
+  if (!status.hasGitHub) return 'github';
+  return 'how-it-works';
+}
+
+function getStepClassName(isActive: boolean, isAvailable: boolean): string {
+  let stateClass = 'bg-inset text-fg-muted/50';
+  if (isAvailable) {
+    stateClass = 'bg-inset text-fg-muted';
+  }
+  if (isActive) {
+    stateClass = 'bg-surface text-accent border-b-2 border-b-accent';
+  }
+
+  return `flex-1 py-3 px-2 text-xs font-medium text-center border-none cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${stateClass}`;
 }
 
 export function OnboardingWizard() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState<boolean | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>('agent');
-  const [status, setStatus] = useState<SetupStatus>({ hasAgent: false, hasCloud: false, hasGitHub: false });
+  const [ownSetupMode, setOwnSetupMode] = useState(false);
+  const [status, setStatus] = useState<SetupStatus>({
+    hasAgent: false,
+    hasCloud: false,
+    hasGitHub: false,
+    trialAvailable: false,
+  });
 
   const userId = user?.id;
 
@@ -53,42 +98,34 @@ export function OnboardingWizard() {
         getTrialStatus().catch(() => null),
       ]);
 
-      const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+      const hasCloud = credentials.some(
+        (c) => c.provider === 'hetzner' || c.provider === 'scaleway'
+      );
       const hasGitHub = installations.length > 0;
       const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 
-      // If platform trial is available, treat agent + cloud as satisfied
-      const trialAvailable = trialStatus?.available ?? false;
-      const effectiveHasAgent = hasAgent || trialAvailable;
-      const effectiveHasCloud = hasCloud || trialAvailable;
+      const nextStatus = {
+        hasAgent,
+        hasCloud,
+        hasGitHub,
+        trialAvailable: trialStatus?.available ?? false,
+      };
+      setStatus(nextStatus);
 
-      setStatus({ hasAgent: effectiveHasAgent, hasCloud: effectiveHasCloud, hasGitHub });
-
-      // If all complete (or trial covers agent+cloud), auto-dismiss
-      if (effectiveHasAgent && effectiveHasCloud && hasGitHub) {
+      // If a user has completed their own setup, stay out of the way.
+      if (hasAgent && hasCloud && hasGitHub) {
         setDismissed(true);
         if (userId) localStorage.setItem(getStorageKey(userId), 'true');
         return;
       }
 
-      // Trial covers agent+cloud but not GitHub — skip to GitHub step
-      if (trialAvailable && !hasGitHub) {
-        setCurrentStep('github');
-      } else if (!effectiveHasAgent) {
-        setCurrentStep('agent');
-      } else if (!effectiveHasCloud) {
-        setCurrentStep('cloud');
-      } else if (!hasGitHub) {
-        setCurrentStep('github');
-      } else {
-        setCurrentStep('how-it-works');
-      }
+      setCurrentStep(getNextRecommendedStep(nextStatus, ownSetupMode));
     } catch {
       // Silently fail — onboarding is non-critical
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [ownSetupMode, userId]);
 
   useEffect(() => {
     checkStatus();
@@ -123,85 +160,102 @@ export function OnboardingWizard() {
     advanceStep(step);
   };
 
+  const finishAndNavigate = (path: string) => {
+    handleDismiss();
+    navigate(path);
+  };
+
   if (loading || dismissed === null || dismissed) return null;
 
   const currentIdx = STEPS.findIndex((s) => s.id === currentStep);
+  const effectiveHasAgent = status.hasAgent || (!ownSetupMode && status.trialAvailable);
+  const effectiveHasCloud = status.hasCloud || (!ownSetupMode && status.trialAvailable);
 
   return (
     <div data-testid="onboarding-wizard" aria-label="Account setup">
-    <Card className="p-0 mb-6 overflow-hidden">
-      {/* Step indicator */}
-      <div role="tablist" aria-label="Setup steps" className="flex border-b border-border-default">
-        {STEPS.map((step, idx) => {
-          const isActive = step.id === currentStep;
-          const isPast = idx < currentIdx;
-          const isStepComplete =
-            (step.id === 'agent' && status.hasAgent) ||
-            (step.id === 'cloud' && status.hasCloud) ||
-            (step.id === 'github' && status.hasGitHub);
-
-          return (
-            <button
-              key={step.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              aria-controls={`onboarding-step-${step.id}`}
-              onClick={() => setCurrentStep(step.id)}
-              className={`flex-1 py-3 px-2 text-xs font-medium text-center border-none cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
-                isActive
-                  ? 'bg-surface text-accent border-b-2 border-b-accent'
-                  : isPast || isStepComplete
-                    ? 'bg-inset text-fg-muted'
-                    : 'bg-inset text-fg-muted/50'
-              }`}
-            >
-              {isStepComplete && <span className="mr-1 text-success" aria-hidden="true">{'\u2713'}</span>}
-              {step.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Dismiss link */}
-      <div className="flex justify-end px-4 pt-2">
-        <button
-          type="button"
-          onClick={handleDismiss}
-          className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      <Card className="p-0 mb-6 overflow-hidden">
+        {/* Step indicator */}
+        <div
+          role="tablist"
+          aria-label="Setup steps"
+          className="flex border-b border-border-default"
         >
-          Don&apos;t show again
-        </button>
-      </div>
+          {STEPS.map((step, idx) => {
+            const isActive = step.id === currentStep;
+            const isPast = idx < currentIdx;
+            const isStepComplete =
+              (step.id === 'agent' && effectiveHasAgent) ||
+              (step.id === 'cloud' && effectiveHasCloud) ||
+              (step.id === 'github' && status.hasGitHub);
 
-      {/* Step content */}
-      <div className="p-4 pt-2" id={`onboarding-step-${currentStep}`} role="tabpanel">
-        {currentStep === 'agent' && (
-          <StepAgentKey
-            isComplete={status.hasAgent}
-            onComplete={() => handleStepComplete('agent')}
-            onSkip={() => handleStepSkip('agent')}
-          />
-        )}
-        {currentStep === 'cloud' && (
-          <StepCloudProvider
-            isComplete={status.hasCloud}
-            onComplete={() => handleStepComplete('cloud')}
-            onSkip={() => handleStepSkip('cloud')}
-          />
-        )}
-        {currentStep === 'github' && (
-          <StepGitHub
-            isComplete={status.hasGitHub}
-            onComplete={() => handleStepComplete('github')}
-            onSkip={() => handleStepSkip('github')}
-          />
-        )}
-        {currentStep === 'how-it-works' && (
-          <StepHowItWorks onComplete={() => handleStepComplete('how-it-works')} />
-        )}
-      </div>
-    </Card>
+            return (
+              <button
+                key={step.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`onboarding-step-${step.id}`}
+                onClick={() => setCurrentStep(step.id)}
+                className={getStepClassName(isActive, isPast || isStepComplete)}
+              >
+                {isStepComplete && (
+                  <span className="mr-1 text-success" aria-hidden="true">
+                    {'\u2713'}
+                  </span>
+                )}
+                {step.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dismiss link */}
+        <div className="flex justify-end px-4 pt-2">
+          <button
+            type="button"
+            onClick={handleDismiss}
+            className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Don&apos;t show again
+          </button>
+        </div>
+
+        {/* Step content */}
+        <div className="p-4 pt-2" id={`onboarding-step-${currentStep}`} role="tabpanel">
+          {currentStep === 'agent' && (
+            <StepAgentKey
+              isComplete={effectiveHasAgent}
+              onComplete={() => handleStepComplete('agent')}
+              onSkip={() => handleStepSkip('agent')}
+            />
+          )}
+          {currentStep === 'cloud' && (
+            <StepCloudProvider
+              isComplete={effectiveHasCloud}
+              onComplete={() => handleStepComplete('cloud')}
+              onSkip={() => handleStepSkip('cloud')}
+            />
+          )}
+          {currentStep === 'github' && (
+            <StepGitHub
+              isComplete={status.hasGitHub}
+              onComplete={() => handleStepComplete('github')}
+              onSkip={() => handleStepSkip('github')}
+            />
+          )}
+          {currentStep === 'how-it-works' && (
+            <StepHowItWorks
+              trialAvailable={status.trialAvailable}
+              onComplete={() => handleStepComplete('how-it-works')}
+              onCreateProject={() => finishAndNavigate('/projects/new')}
+              onOwnSetup={() => {
+                setOwnSetupMode(true);
+                setCurrentStep('agent');
+              }}
+            />
+          )}
+        </div>
+      </Card>
     </div>
   );
 }

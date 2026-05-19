@@ -34,6 +34,8 @@ Local tests run against Miniflare mocks. CI runs unit tests in isolation. Neithe
 
 All checks — including **SonarCloud Code Analysis** — MUST pass before merge. SonarCloud provides valuable feedback on code quality, duplication, and potential bugs. Treat its findings the same as any other CI failure: investigate, fix, and only merge when green.
 
+GitHub may label some checks as informational, advisory, or not strictly required by branch protection. If the check is red or reports failure, agents must still treat it as a real merge blocker. Failed Preflight Evidence, SonarCloud, lint-adjacent, quality, or evidence checks must be inspected and resolved before merge. Do not summarize them away as "non-blocking" unless the repository explicitly documents that exact check as non-blocking or a human explicitly approves the exception in the PR.
+
 ### 1. Staging Deployment Must Be Green
 
 Staging deployment is **manual** — it does NOT run automatically on PRs. You must trigger it yourself:

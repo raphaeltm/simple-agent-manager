@@ -35,6 +35,10 @@ jobs:
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+      SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
+      SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -56,14 +60,8 @@ jobs:
 
       - name: Run smoke tests
         if: ${{ env.SMOKE_TEST_TOKEN != '' }}
-        env:
-          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
-          SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
-          SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
         run: npx playwright test --config=tests/smoke/playwright.config.ts
 
       - name: Skip notice (no token configured)
         if: ${{ env.SMOKE_TEST_TOKEN == '' }}
-        env:
-          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
         run: echo "⚠ Smoke tests skipped — SMOKE_TEST_TOKEN not configured in staging environment secrets"

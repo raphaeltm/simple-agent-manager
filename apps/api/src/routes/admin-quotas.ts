@@ -21,7 +21,8 @@ import {
   setDefaultQuota,
   setUserQuotaOverride,
 } from '../services/compute-quotas';
-import { calculateVcpuHoursForPeriod, getCurrentPeriodBounds } from '../services/compute-usage';
+import { getCurrentPeriodBounds } from '../services/compute-usage';
+import { calculateNodeVcpuHoursForPeriod } from '../services/node-usage';
 
 const adminQuotaRoutes = new Hono<{ Bindings: Env }>();
 
@@ -85,7 +86,7 @@ adminQuotaRoutes.get('/users/:userId', async (c) => {
 
   const quota = await resolveUserQuota(db, targetUserId);
   const { start, end } = getCurrentPeriodBounds();
-  const currentUsage = await calculateVcpuHoursForPeriod(
+  const currentUsage = await calculateNodeVcpuHoursForPeriod(
     db,
     targetUserId,
     new Date(start),

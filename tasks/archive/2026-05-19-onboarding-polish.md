@@ -25,20 +25,22 @@ Critical override for this `/do` run: do not merge under any circumstances. Comp
 
 ## Implementation Checklist
 
-- [ ] Add or expose a credential validation API path for right-entry validation without duplicating persistence logic.
-- [ ] Update onboarding cloud credential step to validate before completing, with inline success and error states.
-- [ ] Update onboarding agent credential step to validate before completing where the existing backend can validate, with clear inline feedback.
-- [ ] Update Settings Hetzner credential form to make validation visible at the entry point.
-- [ ] Update the final onboarding step to offer "Create your first project" and navigate to `/projects/new`, while preserving dismissal.
-- [ ] Keep trial-aware wizard behavior scoped to existing trial availability, and add a CTA to continue setup with own credentials when trial coverage is active.
-- [ ] Replace opaque provisioning text with a four-stage progress presentation and "Usually takes 2-4 minutes" estimate while keeping boot-log access.
-- [ ] Restore provisioning progress correctly when navigating back to an active session.
-- [ ] Add 3-4 first-chat example prompts that populate the composer and respect project context where available.
-- [ ] Add focused API/unit tests for credential validation and frontend tests for onboarding/provisioning/chat prompt behavior.
-- [ ] Run local Playwright visual audit for changed web surfaces on mobile and desktop.
-- [ ] Run full quality suite before PR.
-- [ ] Complete specialist review, staging verification, PR creation/update, and CI monitoring.
-- [ ] Stop before merge and report PR URL/status.
+- [x] Add or expose a credential validation API path for right-entry validation without duplicating persistence logic.
+- [x] Update onboarding cloud credential step to validate before completing, with inline success and error states.
+- [x] Update onboarding agent credential step to validate before completing where the existing backend can validate, with clear inline feedback.
+- [x] Update Settings Hetzner credential form to make validation visible at the entry point.
+- [x] Update the final onboarding step to offer "Create your first project" and navigate to `/projects/new`, while preserving dismissal.
+- [x] Keep trial-aware wizard behavior scoped to existing trial availability, and add a CTA to continue setup with own credentials when trial coverage is active.
+- [x] Replace opaque provisioning text with a four-stage progress presentation and "Usually takes 2-4 minutes" estimate while keeping boot-log access.
+- [x] Restore provisioning progress correctly when navigating back to an active session.
+- [x] Add 3-4 first-chat example prompts that populate the composer and respect project context where available.
+- [x] Add focused API/unit tests for credential validation and frontend tests for onboarding/provisioning/chat prompt behavior.
+- [x] Run local Playwright visual audit for changed web surfaces on mobile and desktop.
+- [x] Run full quality suite before PR.
+- [x] Complete specialist review.
+- [x] Complete staging verification.
+- [x] Create/update PR and monitor CI checks.
+- [x] Stop before merge and report PR URL/status.
 
 ## Acceptance Criteria
 

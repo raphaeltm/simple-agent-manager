@@ -17,15 +17,15 @@ User-facing compute usage and quota enforcement currently use workspace-scoped `
 
 ## Implementation Checklist
 
-- [ ] Add node-based vCPU-hour helper(s) to `node-usage.ts`, including a platform-only filter for quota usage.
-- [ ] Switch `GET /api/usage/compute` to return node-based current period data and active nodes.
-- [ ] Switch `checkQuotaForUser()` and admin quota current usage to node-based platform vCPU-hours.
-- [ ] Consolidate legacy admin compute usage routes onto node-based service data.
-- [ ] Update shared compute usage types while keeping backwards-compatible aliases where practical.
-- [ ] Update `SettingsComputeUsage.tsx` to show node-hours, node-based vCPU-hours, active node count, and active node rows.
-- [ ] Update Playwright audit mock data for the new user compute response shape.
-- [ ] Add or update tests proving idle platform node time counts for quota and user compute usage.
-- [ ] Run lint, typecheck, tests, build, and mandatory Playwright visual audit for changed UI.
+- [x] Add node-based vCPU-hour helper(s) to `node-usage.ts`, including a platform-only filter for quota usage.
+- [x] Switch `GET /api/usage/compute` to return node-based current period data and active nodes.
+- [x] Switch `checkQuotaForUser()` and admin quota current usage to node-based platform vCPU-hours.
+- [x] Consolidate legacy admin compute usage routes onto node-based service data.
+- [x] Update shared compute usage types while keeping backwards-compatible aliases where practical.
+- [x] Update `SettingsComputeUsage.tsx` to show node-hours, node-based vCPU-hours, active node count, and active node rows.
+- [x] Update Playwright audit mock data for the new user compute response shape.
+- [x] Add or update tests proving idle platform node time counts for quota and user compute usage.
+- [x] Run lint, typecheck, tests, build, and mandatory Playwright visual audit for changed UI.
 
 ## Acceptance Criteria
 

@@ -72,6 +72,18 @@ When a feature is large, it is acceptable and encouraged to deploy **partial sli
 
 A partial staging deploy is NOT a merge-ready state. Rule 22 (infrastructure merge gate) and Rule 13 (staging verification) still apply before PR merge — you must verify the *complete* feature on staging before merging.
 
+### Prototype Artifacts Are Not Production Features
+
+Prototype, spike, and demo work may create temporary pages, routes, fixtures, or hardcoded flows to learn quickly. Those artifacts must not ship to production unless the user explicitly says the prototype itself is the deliverable.
+
+Before creating a production PR from prototype work:
+
+- Remove throwaway pages, demo navigation, fixture-backed UI, and scaffold-only routes
+- Replace hardcoded sample behavior with real product behavior, or keep the artifact outside the production app surface
+- Verify the final shipped surface as a normal user flow, not as a prototype walkthrough
+
+If the user asks to apply prototype learnings to the real UI, "done" means the intended product surface changed. The prototype route is evidence, not the deliverable, unless the user says otherwise.
+
 ## Part 2: Log-Driven Debugging (Absolute Requirement)
 
 When something fails on staging, production, or any real VM, you MUST retrieve the relevant logs before changing code. This is not optional. This is not negotiable. This is the single highest-leverage debugging habit.

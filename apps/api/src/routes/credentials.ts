@@ -1,5 +1,5 @@
 import { createProvider } from '@simple-agent-manager/providers';
-import type { AgentCredentialInfo, AgentType, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource } from '@simple-agent-manager/shared';
 import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -15,12 +15,82 @@ import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import { CreateCredentialSchema, CredentialKindBodySchema,jsonValidator, SaveAgentCredentialSchema } from '../schemas';
+import { validateAgentApiKeyWithProvider } from '../services/agent-credential-validation';
 import { decrypt, encrypt } from '../services/encryption';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 import { buildProviderConfig, serializeCredentialToken } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
+
+interface CloudCredentialFields {
+  providerName: CredentialProvider;
+  tokenToValidate: string;
+}
+
+function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentialFields {
+  const providerName = body.provider;
+
+  if (!providerName) {
+    throw errors.badRequest('Provider is required');
+  }
+
+  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
+    throw errors.badRequest(`Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+  }
+
+  if (providerName === 'hetzner') {
+    if (!body.token) {
+      throw errors.badRequest('Token is required for Hetzner');
+    }
+    return { providerName, tokenToValidate: serializeCredentialToken(providerName, { token: body.token }) };
+  }
+
+  if (providerName === 'scaleway') {
+    if (!body.secretKey || !body.projectId) {
+      throw errors.badRequest('secretKey and projectId are required for Scaleway');
+    }
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, {
+        secretKey: body.secretKey,
+        projectId: body.projectId,
+      }),
+    };
+  }
+
+  if (providerName === 'gcp') {
+    if (!body.gcpProjectId || !body.gcpProjectNumber || !body.serviceAccountEmail || !body.wifPoolId || !body.wifProviderId || !body.defaultZone) {
+      throw errors.badRequest('gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP');
+    }
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, {
+        gcpProjectId: body.gcpProjectId,
+        gcpProjectNumber: body.gcpProjectNumber,
+        serviceAccountEmail: body.serviceAccountEmail,
+        wifPoolId: body.wifPoolId,
+        wifProviderId: body.wifProviderId,
+        defaultZone: body.defaultZone,
+      }),
+    };
+  }
+
+  throw errors.badRequest(`Unsupported provider: ${providerName}`);
+}
+
+async function validateCloudCredential(providerName: CredentialProvider, tokenToValidate: string): Promise<void> {
+  if (providerName === 'gcp') return;
+
+  try {
+    const providerConfig = buildProviderConfig(providerName, tokenToValidate);
+    const provider = createProvider(providerConfig);
+    await provider.validateToken();
+  } catch (err) {
+    log.error('credentials.validation_failed', { providerName, error: err instanceof Error ? err.message : String(err) });
+    throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
+  }
+}
 
 // Apply auth middleware to all routes
 credentialsRoutes.use('*', requireAuth(), requireApproved());
@@ -57,73 +127,31 @@ credentialsRoutes.get('/', async (c) => {
 });
 
 /**
+ * POST /api/credentials/validate - Validate a cloud-provider credential without saving it
+ */
+credentialsRoutes.post('/validate', jsonValidator(CreateCredentialSchema), async (c) => {
+  const body = c.req.valid('json');
+  const { providerName, tokenToValidate } = getCloudCredentialFields(body);
+  await validateCloudCredential(providerName, tokenToValidate);
+
+  return c.json({
+    valid: true,
+    provider: providerName,
+    message: providerName === 'gcp'
+      ? 'GCP credential metadata accepted. Live validation runs during Google setup.'
+      : `${providerName} credential validated.`,
+  });
+});
+
+/**
  * POST /api/credentials - Create or update a credential
  */
 credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = c.req.valid('json');
-  const providerName = body.provider;
-
-  // Validate required fields per provider
-  if (!providerName) {
-    throw errors.badRequest('Provider is required');
-  }
-
-  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
-    throw errors.badRequest(`Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`);
-  }
-
-  // Extract and serialize the credential token based on provider type
-  let credentialFields: Record<string, string>;
-  if (providerName === 'hetzner') {
-    const hetznerBody = body as { provider: 'hetzner'; token: string };
-    if (!hetznerBody.token) {
-      throw errors.badRequest('Token is required for Hetzner');
-    }
-    credentialFields = { token: hetznerBody.token };
-  } else if (providerName === 'scaleway') {
-    const scalewayBody = body as { provider: 'scaleway'; secretKey: string; projectId: string };
-    if (!scalewayBody.secretKey || !scalewayBody.projectId) {
-      throw errors.badRequest('secretKey and projectId are required for Scaleway');
-    }
-    credentialFields = { secretKey: scalewayBody.secretKey, projectId: scalewayBody.projectId };
-  } else if (providerName === 'gcp') {
-    // GCP credentials are created via the /api/gcp/setup flow, not directly via POST /api/credentials.
-    // This branch handles programmatic credential creation (e.g., for testing or migration).
-    const gcpBody = body as { provider: 'gcp'; gcpProjectId: string; gcpProjectNumber: string; serviceAccountEmail: string; wifPoolId: string; wifProviderId: string; defaultZone: string };
-    if (!gcpBody.gcpProjectId || !gcpBody.gcpProjectNumber || !gcpBody.serviceAccountEmail || !gcpBody.wifPoolId || !gcpBody.wifProviderId || !gcpBody.defaultZone) {
-      throw errors.badRequest('gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP');
-    }
-    credentialFields = {
-      gcpProjectId: gcpBody.gcpProjectId,
-      gcpProjectNumber: gcpBody.gcpProjectNumber,
-      serviceAccountEmail: gcpBody.serviceAccountEmail,
-      wifPoolId: gcpBody.wifPoolId,
-      wifProviderId: gcpBody.wifProviderId,
-      defaultZone: gcpBody.defaultZone,
-    };
-  } else {
-    throw errors.badRequest(`Unsupported provider: ${providerName}`);
-  }
-
-  const tokenToEncrypt = serializeCredentialToken(providerName, credentialFields);
-
-  // Validate the credentials by building a ProviderConfig and calling validateToken().
-  // GCP credentials are metadata (not API tokens) — validation is done during /api/gcp/setup.
-  // Note: buildProviderConfig accepts the pre-encryption serialized token here — this is
-  // safe because serialize → build is a documented round-trip (see provider-credentials tests).
-  if (providerName !== 'gcp') {
-    try {
-      const providerConfig = buildProviderConfig(providerName, tokenToEncrypt);
-      const provider = createProvider(providerConfig);
-      await provider.validateToken();
-    } catch (err) {
-      log.error('credentials.validation_failed', { providerName, error: err instanceof Error ? err.message : String(err) });
-      throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
-    }
-  }
+  const { providerName, tokenToValidate: tokenToEncrypt } = getCloudCredentialFields(c.req.valid('json'));
+  await validateCloudCredential(providerName, tokenToEncrypt);
 
   // Encrypt the serialized credential token
   const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
@@ -216,6 +244,43 @@ credentialsRoutes.delete('/:provider', async (c) => {
 // =============================================================================
 // Agent API Key Endpoints
 // =============================================================================
+
+/**
+ * POST /api/credentials/agent/validate - Validate an agent credential without saving it
+ */
+credentialsRoutes.post('/agent/validate', jsonValidator(SaveAgentCredentialSchema), async (c) => {
+  const body = c.req.valid('json');
+  const credentialKind = body.credentialKind || 'api-key';
+
+  if (!isValidAgentType(body.agentType)) {
+    throw errors.badRequest('Invalid agent type');
+  }
+
+  const agentDef = getAgentDefinition(body.agentType);
+  if (!agentDef) {
+    throw errors.badRequest('Unknown agent type');
+  }
+
+  const validation = CredentialValidator.validateCredential(body.credential, credentialKind, body.agentType);
+  if (!validation.valid) {
+    throw errors.badRequest(validation.error || 'Invalid credential format');
+  }
+
+  if (credentialKind === 'oauth-token') {
+    if (!agentDef.oauthSupport) {
+      throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
+    }
+    return c.json({
+      valid: true,
+      agentType: body.agentType,
+      validationMode: 'format',
+      message: `${agentDef.name} OAuth credential format looks valid.`,
+    });
+  }
+
+  const result = await validateAgentApiKeyWithProvider(body.agentType, body.credential, c.env);
+  return c.json({ agentType: body.agentType, ...result });
+});
 
 /**
  * GET /api/credentials/agent - List agent API key and OAuth credentials (masked)

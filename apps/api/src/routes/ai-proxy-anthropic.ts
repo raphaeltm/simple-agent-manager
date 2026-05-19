@@ -36,7 +36,7 @@ import {
   isAnthropicModel,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
-import { checkTokenBudget } from '../services/ai-token-budget';
+import { checkAiUsageGate } from '../services/ai-token-budget';
 import {
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
@@ -59,6 +59,14 @@ function anthropicError(
     JSON.stringify({ type: 'error', error: { type, message } }),
     { status, headers: { 'Content-Type': 'application/json' } },
   );
+}
+
+function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
+  if (reason === 'daily-token-budget') {
+    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+  }
+
+  return anthropicError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
 }
 
 // =============================================================================
@@ -142,10 +150,9 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     );
   }
 
-  // --- Check daily token budget ---
-  const budgetCheck = await checkTokenBudget(c.env.KV, userId, c.env);
-  if (!budgetCheck.allowed) {
-    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    return anthropicUsageGateError(usageGate.reason);
   }
 
   // --- Resolve upstream auth (Unified Billing or platform key) ---
@@ -345,10 +352,9 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     );
   }
 
-  // --- Check daily token budget ---
-  const budgetCheck = await checkTokenBudget(c.env.KV, userId, c.env);
-  if (!budgetCheck.allowed) {
-    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    return anthropicUsageGateError(usageGate.reason);
   }
 
   // --- Resolve upstream auth (Unified Billing or platform key) ---

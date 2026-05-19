@@ -79,6 +79,15 @@ The receiving agent will then follow the full `/do` workflow: research, task fil
 
 After calling `dispatch_task`, wait a few seconds and then check the task status (via `get_task_details` or `list_tasks`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
 
+Verification must confirm all of:
+
+- The task/session actually started and is not failed, stuck queued, or missing
+- The created task title/summary matches the intended work, not a generic or hallucinated title
+- The receiving session is using the requested agent/profile/skill, especially `/do` for implementation work
+- The task description still contains the critical constraints you intended to pass along, such as "do not merge", "draft PR", required branch, or required profile
+
+If the session failed immediately, never started, launched under the wrong profile, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile or report the dispatch failure with exact status evidence.
+
 ### Why This Matters
 
 Without the `/do` instruction, a dispatched agent may skip critical phases like staging verification, specialist review, or proper PR creation. The `/do` workflow enforces all quality gates defined in this project's rules.

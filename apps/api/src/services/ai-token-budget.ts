@@ -10,6 +10,7 @@
 import type { UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
   AI_BUDGET_SETTINGS_KV_PREFIX,
+  AI_MONTHLY_COST_CACHE_KV_PREFIX,
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
   DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
   DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
@@ -262,4 +263,89 @@ export async function incrementTokenUsage(
   });
 
   return updated;
+}
+
+// =============================================================================
+// Monthly Cost Cap Enforcement (KV-cached, written by cron)
+// =============================================================================
+
+/** Build the KV key for a user's cached monthly AI cost. */
+export function buildMonthlyCostCacheKey(userId: string): string {
+  const now = new Date();
+  const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:${userId}:${monthKey}`;
+}
+
+/** Read a user's cached monthly AI cost from KV. Returns null if not cached yet. */
+export async function getCachedMonthlyCost(
+  kv: KVNamespace,
+  userId: string,
+): Promise<number | null> {
+  const key = buildMonthlyCostCacheKey(userId);
+  const raw = await kv.get(key);
+  if (raw === null) return null;
+  const parsed = parseFloat(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Check whether a user is within their monthly cost cap.
+ *
+ * Reads from KV cache (written by hourly cron). If no cache exists,
+ * the check passes (fail-open) — the cron will populate it next run.
+ *
+ * Returns { allowed, costUsd, capUsd } where capUsd is null if no cap is set.
+ */
+export async function checkMonthlyCostCap(
+  kv: KVNamespace,
+  userId: string,
+): Promise<{ allowed: boolean; costUsd: number; capUsd: number | null }> {
+  const userSettings = await getUserBudgetSettings(kv, userId);
+  const capUsd = userSettings?.monthlyCostCapUsd ?? null;
+
+  // No cap set — always allowed
+  if (capUsd === null || capUsd <= 0) {
+    return { allowed: true, costUsd: 0, capUsd };
+  }
+
+  const costUsd = await getCachedMonthlyCost(kv, userId);
+
+  // No cache yet — fail-open (cron hasn't run yet for this user)
+  if (costUsd === null) {
+    return { allowed: true, costUsd: 0, capUsd };
+  }
+
+  return { allowed: costUsd < capUsd, costUsd, capUsd };
+}
+
+export type AiUsageGateResult =
+  | { allowed: true }
+  | {
+    allowed: false;
+    reason: 'daily-token-budget';
+    budget: Awaited<ReturnType<typeof checkTokenBudget>>;
+  }
+  | {
+    allowed: false;
+    reason: 'monthly-cost-cap';
+    monthlyCap: Awaited<ReturnType<typeof checkMonthlyCostCap>>;
+  };
+
+/** Check all pre-request AI usage limits shared by proxy routes. */
+export async function checkAiUsageGate(
+  kv: KVNamespace,
+  userId: string,
+  env: Env,
+): Promise<AiUsageGateResult> {
+  const budget = await checkTokenBudget(kv, userId, env);
+  if (!budget.allowed) {
+    return { allowed: false, reason: 'daily-token-budget', budget };
+  }
+
+  const monthlyCap = await checkMonthlyCostCap(kv, userId);
+  if (!monthlyCap.allowed) {
+    return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };
+  }
+
+  return { allowed: true };
 }

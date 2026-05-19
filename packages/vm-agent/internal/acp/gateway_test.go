@@ -287,8 +287,8 @@ func TestGetAgentCommandInfoGoogleGemini(t *testing.T) {
 	if info.envVarName != "GEMINI_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "GEMINI_API_KEY")
 	}
-	if len(info.args) != 1 || info.args[0] != "--experimental-acp" {
-		t.Fatalf("args=%v, want [--experimental-acp]", info.args)
+	if len(info.args) != 1 || info.args[0] != "--acp" {
+		t.Fatalf("args=%v, want [--acp]", info.args)
 	}
 }
 

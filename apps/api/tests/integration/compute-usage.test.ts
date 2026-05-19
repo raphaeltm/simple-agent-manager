@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 describe('compute usage metering pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-usage.ts'), 'utf8');
+  const nodeUsageServiceFile = readFileSync(resolve(process.cwd(), 'src/services/node-usage.ts'), 'utf8');
   const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
   const lifecycleFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8');
   const stateMachineFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/state-machine.ts'), 'utf8');
@@ -200,12 +201,12 @@ describe('compute usage metering pipeline', () => {
       expect(adminUsageRoute).toContain('requireSuperadmin');
     });
 
-    it('admin usage route calls getAllUsersUsageSummary', () => {
-      expect(adminUsageRoute).toContain('getAllUsersUsageSummary');
+    it('admin usage route calls getAllUsersNodeUsageSummary', () => {
+      expect(adminUsageRoute).toContain('getAllUsersNodeUsageSummary');
     });
 
-    it('admin usage route calls getUserDetailedUsage for user detail', () => {
-      expect(adminUsageRoute).toContain('getUserDetailedUsage');
+    it('admin usage route calls getUserNodeDetailedUsage for user detail', () => {
+      expect(adminUsageRoute).toContain('getUserNodeDetailedUsage');
     });
 
     it('admin usage route passes configurable recent records limit', () => {
@@ -216,8 +217,15 @@ describe('compute usage metering pipeline', () => {
       expect(adminUsageRoute).toContain(':userId');
     });
 
-    it('user usage route calls getUserUsageSummary', () => {
-      expect(usageRoute).toContain('getUserUsageSummary');
+    it('user usage route calls getUserNodeUsageSummary', () => {
+      expect(usageRoute).toContain('getUserNodeUsageSummary');
+    });
+
+    it('node usage service calculates billing from node lifetime', () => {
+      expect(nodeUsageServiceFile).toContain('schema.nodes.createdAt');
+      expect(nodeUsageServiceFile).toContain('calculateNodeVcpuHoursForPeriod');
+      expect(nodeUsageServiceFile).toContain('schema.nodes.credentialSource');
+      expect(nodeUsageServiceFile).toContain('opts.credentialSource');
     });
 
     it('user usage route uses authenticated user ID', () => {

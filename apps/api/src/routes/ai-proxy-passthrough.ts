@@ -35,7 +35,7 @@ import {
   isAnthropicModel,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
-import { checkTokenBudget } from '../services/ai-token-budget';
+import { checkAiUsageGate } from '../services/ai-token-budget';
 import {
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
@@ -60,6 +60,22 @@ function openaiError(message: string, type: string, status: number): Response {
     JSON.stringify({ error: { message, type } }),
     { status, headers: { 'Content-Type': 'application/json' } },
   );
+}
+
+function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
+  if (reason === 'daily-token-budget') {
+    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+  }
+
+  return anthropicError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
+}
+
+function openaiUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
+  if (reason === 'daily-token-budget') {
+    return openaiError('Daily token budget exceeded.', 'rate_limit_error', 429);
+  }
+
+  return openaiError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
 }
 
 // =============================================================================
@@ -149,10 +165,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     );
   }
 
-  // --- Check daily token budget ---
-  const budgetCheck = await checkTokenBudget(c.env.KV, userId, c.env);
-  if (!budgetCheck.allowed) {
-    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    return anthropicUsageGateError(usageGate.reason);
   }
 
   // --- Extract user's credential from request headers (passthrough) ---
@@ -294,9 +309,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
     return anthropicError('model is required and must be an Anthropic model (claude-*)', 'invalid_request_error', 400);
   }
 
-  const budgetCheck = await checkTokenBudget(c.env.KV, userId, c.env);
-  if (!budgetCheck.allowed) {
-    return anthropicError('Daily token budget exceeded.', 'rate_limit_error', 429);
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    return anthropicUsageGateError(usageGate.reason);
   }
 
   const userApiKey = c.req.header('x-api-key');
@@ -400,9 +415,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     return openaiError('model is required', 'invalid_request_error', 400);
   }
 
-  const budgetCheck = await checkTokenBudget(c.env.KV, userId, c.env);
-  if (!budgetCheck.allowed) {
-    return openaiError('Daily token budget exceeded.', 'rate_limit_error', 429);
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
+  if (!usageGate.allowed) {
+    return openaiUsageGateError(usageGate.reason);
   }
 
   // Extract user's credential from Authorization header (passthrough)

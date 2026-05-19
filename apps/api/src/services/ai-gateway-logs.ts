@@ -83,9 +83,9 @@ export function getPeriodLabel(period: GatewayPeriod): string {
 
 /** Default number of AI Gateway log entries per page. CF max is 50. */
 const DEFAULT_PAGE_SIZE = 50;
-/** Default maximum pages to iterate when aggregating. */
+/** Default maximum pages to iterate for request-time dashboards. */
 const DEFAULT_MAX_PAGES = 20;
-/** Hard cap on max pages to prevent Workers CPU timeout. */
+/** Hard cap on request-time dashboard pages to prevent Workers CPU timeout. */
 const MAX_PAGES_HARD_CAP = 20;
 
 const gatewayLogEntrySchema = v.object({
@@ -115,12 +115,23 @@ const gatewayLogsResponseSchema = v.object({
   errors: v.array(v.unknown()),
 });
 
+export interface GatewayPaginationOptions {
+  defaultMaxPages?: number;
+  maxPagesHardCap?: number;
+  maxPagesEnvValue?: string;
+}
+
 /** Resolve pageSize/maxPages from env with defaults and hard cap. */
-export function resolveGatewayPagination(env: Env): { pageSize: number; maxPages: number } {
+export function resolveGatewayPagination(
+  env: Env,
+  options: GatewayPaginationOptions = {},
+): { pageSize: number; maxPages: number } {
   const pageSize = parseInt(env.AI_USAGE_PAGE_SIZE || '', 10) || DEFAULT_PAGE_SIZE;
+  const defaultMaxPages = options.defaultMaxPages ?? DEFAULT_MAX_PAGES;
+  const maxPagesHardCap = options.maxPagesHardCap ?? MAX_PAGES_HARD_CAP;
   const maxPages = Math.min(
-    parseInt(env.AI_USAGE_MAX_PAGES || '', 10) || DEFAULT_MAX_PAGES,
-    MAX_PAGES_HARD_CAP,
+    parseInt(options.maxPagesEnvValue ?? env.AI_USAGE_MAX_PAGES ?? '', 10) || defaultMaxPages,
+    maxPagesHardCap,
   );
   return { pageSize, maxPages };
 }
@@ -169,8 +180,9 @@ export async function iterateGatewayLogs(
   gatewayId: string,
   startDate: string,
   visitor: (entry: AIGatewayLogEntry) => void,
+  options: GatewayPaginationOptions = {},
 ): Promise<void> {
-  const { pageSize, maxPages } = resolveGatewayPagination(env);
+  const { pageSize, maxPages } = resolveGatewayPagination(env, options);
 
   for (let page = 1; page <= maxPages; page++) {
     const params = new URLSearchParams({

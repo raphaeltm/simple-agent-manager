@@ -84,6 +84,14 @@ For each subtask that has no unmet dependencies:
 
 3. **Verify dispatch succeeded** — call `get_task_details` on the returned task ID within 10 seconds to confirm it was picked up. If it wasn't, retry once, then report the failure.
 
+   Verify more than existence:
+   - The task/session is not immediately failed, stuck queued, or missing
+   - The title/summary matches the intended work, not a generic or hallucinated title
+   - The requested profile/agent/skill is reflected, especially `/do` for implementation subtasks
+   - Critical constraints such as branch, `draft PR`, `do not merge`, or required profile survived in the task description
+
+   If any of these checks fail, do not wait on the subtask. Re-dispatch with corrected instructions or report the failure with exact status evidence.
+
 4. **Call `update_task_status`** after each dispatch: "Dispatched subtask N: <description>"
 
 ---

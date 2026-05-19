@@ -813,7 +813,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", true, "", ""}
 	case "google-gemini":
-		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
+		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
 	case "mistral-vibe":
 		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`, false, "", ""}
 	case "opencode":

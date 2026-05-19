@@ -207,6 +207,7 @@ export interface Env {
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
+  AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
   // Project data DO limits
   CACHED_COMMANDS_MAX_PER_AGENT?: string;
@@ -541,9 +542,11 @@ export interface Env {
   AI_PROXY_STREAM_TIMEOUT_MS?: string;               // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string;       // Rate limit window in seconds (default: 60)
   AI_PROXY_BILLING_MODE?: string;                    // Billing mode: "unified" | "platform-key" | "auto" (default: auto)
+  AI_MONTHLY_COST_CACHE_TTL_SECONDS?: string;        // TTL for monthly cost KV cache entries in seconds (default: 7200)
+  AI_MONTHLY_COST_AGGREGATION_MAX_PAGES?: string;    // Max AI Gateway log pages for monthly cost cron (default: 200, hard cap: 500)
   AI_GATEWAY_ID?: string;                            // Cloudflare AI Gateway ID (default: sam)
   CF_AIG_TOKEN?: string;                             // Cloudflare AI Gateway Unified Billing token (optional — enables all providers without separate keys)
-  AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for admin usage aggregation (default: 100)
+  AI_USAGE_PAGE_SIZE?: string;                       // AI Gateway logs page size for usage aggregation (default: 50)
   AI_USAGE_MAX_PAGES?: string;                       // Max pages to iterate for AI usage aggregation (default: 20)
   AI_USAGE_MAX_DAILY_TOKEN_LIMIT?: string;           // Max daily token limit a user can set (default: 10000000)
   AI_USAGE_MIN_DAILY_TOKEN_LIMIT?: string;           // Min daily token limit a user can set (default: 1000)

@@ -43,6 +43,19 @@ describe('AGENT_CATALOG', () => {
     expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.3');
   });
 
+  it('includes Gemini CLI as a supported ACP agent', () => {
+    const gemini = AGENT_CATALOG.find((a) => a.id === 'google-gemini');
+    expect(gemini).toBeDefined();
+    expect(gemini!.name).toBe('Gemini CLI');
+    expect(gemini!.provider).toBe('google');
+    expect(gemini!.envVarName).toBe('GEMINI_API_KEY');
+    expect(gemini!.acpCommand).toBe('gemini');
+    expect(gemini!.acpArgs).toEqual(['--acp']);
+    expect(gemini!.supportsAcp).toBe(true);
+    expect(gemini!.installCommand).toBe('npm install -g @google/gemini-cli');
+    expect(gemini!.oauthSupport).toBeUndefined();
+  });
+
   it('opencode has no OAuth support', () => {
     const opencode = AGENT_CATALOG.find((a) => a.id === 'opencode');
     expect(opencode!.oauthSupport).toBeUndefined();

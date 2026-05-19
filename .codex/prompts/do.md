@@ -52,6 +52,11 @@ Statements like "it probably won't work" or "credentials seem unavailable" are n
    - What needs to change (feature, bug fix, refactor, etc.)
    - Which parts of the codebase are likely affected
    - Any constraints or preferences stated
+   - Whether the user explicitly requested `draft PR`, `do not merge`, `WIP`, `prototype`, `spike`, `demo`, `show me first`, or equivalent handling
+
+   If the request says `draft PR`, `do not merge`, `prepare but don't merge`, or equivalent, record that constraint in the task file and `.do-state.md`. `/do` must stop after creating or updating the draft PR and must not mark it ready or merge without a later explicit user instruction.
+
+   If the request is for prototype, spike, or demo work, treat prototype artifacts as non-production by default. Do not add production-routed prototype pages, demo-only navigation, fixture-backed UI, or scaffolded experimental routes unless the user explicitly asks to ship the prototype itself. If the user asks to apply prototype learnings to the real UI, the real product surface is the deliverable.
 
 2. **Research the codebase.** Before writing anything:
    - Search and read to find all relevant code paths
@@ -59,6 +64,8 @@ Statements like "it probably won't work" or "credentials seem unavailable" are n
    - **Review relevant post-mortems** in `docs/notes/*-postmortem.md`. Search for post-mortems that touch the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections. These contain hard-won lessons about what goes wrong in this codebase — ignoring them risks repeating the exact same mistakes. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is almost certainly a relevant post-mortem.
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
+
+   If the user explicitly asks for local subagents to critique proposed changes before implementation, do that after research and before file edits. Send the concrete proposal to bounded local reviewer agents, wait for their critique, reconcile disagreements, and record the consensus or remaining dissent in the task file or `.do-state.md` before implementing.
 
 3. **Create a task file** in `tasks/backlog/` using the format `YYYY-MM-DD-descriptive-name.md`:
    - Problem statement (what and why)
@@ -232,6 +239,8 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 > **Skip this phase** only for documentation-only, config-only, or task-file-only changes.
 
+Before staging or PR creation, remove or replace prototype-only artifacts unless the user explicitly requested shipping the prototype itself. A prototype page that exists only to demonstrate an idea is not a completed product feature.
+
 ### 6a. Standard Verification (All Code Changes)
 
 > **Use the Cloudflare API throughout this phase.** You have direct access to staging infrastructure via `$CF_TOKEN`. Query D1 to verify migrations and data, read KV to check feature flags, inspect DNS for workspace routing — all without navigating the admin UI. This is faster and more precise than Playwright-based observation. See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet and copy-paste commands.
@@ -314,20 +323,22 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
    gh pr checks <pr-number> --watch
    ```
 
-3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
+3. **If CI fails or any check reports failure:** inspect logs, fix issues, commit, push, repeat. Do not hand-wave failed Preflight Evidence, SonarCloud, advisory, or non-required checks as irrelevant. If a check is red, it blocks merge unless the repository explicitly documents that exact check as non-blocking or a human explicitly approves the exception in the PR.
 
-4. **Once CI is fully green**, merge the PR:
+4. **If the user requested draft PR / do-not-merge:** create or update the PR as draft, report status to the user, and STOP. Do not convert it to ready-for-review and do not merge.
+
+5. **Once CI is fully green**, merge the PR:
    ```
    gh pr merge <pr-number> --squash --delete-branch
    ```
 
-5. **Clean up the worktree:**
+6. **Clean up the worktree:**
    ```
    cd /workspaces/simple-agent-manager
    git worktree remove ../sam-<short-name>
    ```
 
-6. **Pull main** to stay current:
+7. **Pull main** to stay current:
    ```
    git pull origin main
    ```
@@ -355,7 +366,7 @@ After merging to main, you MUST monitor the production deployment to completion.
      - The fact that the production deploy failed
      - The specific failure reason (e.g., missing secret, build error, Pulumi failure)
      - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
-   - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
+   - If it's a code issue you introduced: create a hotfix branch and PR, run the required checks, merge through the PR path, and monitor the next deploy. Do NOT commit directly to main unless a human explicitly authorizes an emergency exception.
    - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
 
 5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:

@@ -20,6 +20,8 @@ PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and 
 
 5. **The PR description is the source of truth for review status.** Not `.do-state.md` (gitignored, lost with workspace), not your conversation context (compacted), not the todo list (session-scoped). The PR description is durable, visible to humans, and survives workspace teardown.
 
+6. **Late review fixes still go through PRs.** If review feedback arrives after merge, or if a production deploy failure reveals a missed review issue, do NOT commit directly to main. Open a follow-up or hotfix PR, run the required gates, and merge through the normal PR path unless a human explicitly authorizes an emergency exception.
+
 ### When to Add `needs-human-review`
 
 Add this label and stop (do NOT merge) when ANY of:

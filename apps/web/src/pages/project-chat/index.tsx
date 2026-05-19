@@ -20,6 +20,15 @@ export function ProjectChat() {
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
   const activeSessionId = state.sessionId ?? '';
+  const starterPrompts = useMemo(() => {
+    const repoLabel = state.project?.repository || state.project?.name || 'this repo';
+    return [
+      `What's in ${repoLabel}?`,
+      'Run the tests and summarize what fails.',
+      'Find one small improvement I can ship today.',
+      'Fix the most recent open issue.',
+    ];
+  }, [state.project?.name, state.project?.repository]);
 
   // Compute lineage text for the selected session (for header display)
   const selectedLineageText = useMemo(() => {
@@ -231,6 +240,18 @@ export function ProjectChat() {
                   <span className="sam-type-secondary text-fg-muted text-center max-w-[400px]">
                     Describe the task and an agent will start working on it automatically.
                   </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-[560px] mt-2">
+                    {starterPrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => state.setMessage(prompt)}
+                        className="min-h-[44px] rounded-md border border-border-default bg-surface px-3 py-2 text-left text-sm text-fg-primary hover:border-accent hover:bg-accent/5 transition-colors"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </>
               )}
             </div>

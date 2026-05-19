@@ -7,10 +7,6 @@ import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
-  getAllUsersUsageSummary,
-  getUserDetailedUsage,
-} from '../services/compute-usage';
-import {
   getAllUsersNodeUsageSummary,
   getUserNodeDetailedUsage,
 } from '../services/node-usage';
@@ -19,14 +15,14 @@ const adminUsageRoutes = new Hono<{ Bindings: Env }>();
 
 adminUsageRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-/** GET /api/admin/usage/compute — all users' usage summary for current period (legacy workspace-based). */
+/** GET /api/admin/usage/compute — all users' node-based usage summary for current period. */
 adminUsageRoutes.get('/compute', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
-  const result = await getAllUsersUsageSummary(db);
+  const result = await getAllUsersNodeUsageSummary(db);
   return c.json(result);
 });
 
-/** GET /api/admin/usage/compute/:userId — specific user's detailed usage (legacy workspace-based). */
+/** GET /api/admin/usage/compute/:userId — specific user's node-based detailed usage. */
 adminUsageRoutes.get('/compute/:userId', async (c) => {
   const userId = c.req.param('userId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -43,7 +39,7 @@ adminUsageRoutes.get('/compute/:userId', async (c) => {
   }
 
   const recentLimit = parseInt(c.env.COMPUTE_USAGE_RECENT_RECORDS_LIMIT ?? '50', 10);
-  const result = await getUserDetailedUsage(db, userId, recentLimit);
+  const result = await getUserNodeDetailedUsage(db, userId, recentLimit);
   return c.json(result);
 });
 

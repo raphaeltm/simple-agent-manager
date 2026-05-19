@@ -11,6 +11,8 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 const mockVerifyAIProxyAuth = vi.fn();
 const mockCheckRateLimit = vi.fn();
 const mockCheckTokenBudget = vi.fn();
+const mockCheckMonthlyCostCap = vi.fn();
+const mockCheckAiUsageGate = vi.fn();
 const mockIncrementTokenUsage = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -42,7 +44,9 @@ vi.mock('../../src/middleware/rate-limit', () => ({
 }));
 
 vi.mock('../../src/services/ai-token-budget', () => ({
+  checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
+  checkMonthlyCostCap: (...args: unknown[]) => mockCheckMonthlyCostCap(...args),
   incrementTokenUsage: (...args: unknown[]) => mockIncrementTokenUsage(...args),
 }));
 
@@ -93,6 +97,9 @@ function postJson(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: usage gates always allow (tests override when needed)
+  mockCheckAiUsageGate.mockResolvedValue({ allowed: true });
+  mockCheckMonthlyCostCap.mockResolvedValue({ allowed: true, costUsd: 0, capUsd: null });
 });
 
 describe('AI Proxy Passthrough Routes', () => {
@@ -204,7 +211,7 @@ describe('AI Proxy Passthrough Routes', () => {
 
       expect(res.status).toBe(200);
       await res.text();
-      expect(mockCheckTokenBudget).toHaveBeenCalledOnce();
+      expect(mockCheckAiUsageGate).toHaveBeenCalledOnce();
       expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
     });
 
@@ -227,7 +234,11 @@ describe('AI Proxy Passthrough Routes', () => {
         userId: 'user1', workspaceId: 'ws1', projectId: 'proj1',
       });
       mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
-      mockCheckTokenBudget.mockResolvedValueOnce({ allowed: false });
+      mockCheckAiUsageGate.mockResolvedValueOnce({
+        allowed: false,
+        reason: 'daily-token-budget',
+        budget: { allowed: false },
+      });
 
       const res = await postJson(
         '/ai/proxy/valid-token/anthropic/v1/messages',
@@ -297,8 +308,14 @@ describe('AI Proxy Passthrough Routes', () => {
         .mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 })
         .mockResolvedValueOnce({ allowed: true, remaining: 28, resetAt: 9999 });
       mockCheckTokenBudget
+        .mockResolvedValue({ allowed: true });
+      mockCheckAiUsageGate
         .mockResolvedValueOnce({ allowed: true })
-        .mockResolvedValueOnce({ allowed: false });
+        .mockResolvedValueOnce({
+          allowed: false,
+          reason: 'daily-token-budget',
+          budget: { allowed: false },
+        });
       mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 21, outputTokens: 6 });
       mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'chatcmpl-1',

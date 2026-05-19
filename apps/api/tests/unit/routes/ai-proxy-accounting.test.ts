@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockVerifyAIProxyAuth = vi.fn();
 const mockCheckRateLimit = vi.fn();
 const mockCheckTokenBudget = vi.fn();
+const mockCheckMonthlyCostCap = vi.fn();
+const mockCheckAiUsageGate = vi.fn();
 const mockIncrementTokenUsage = vi.fn();
 const mockResolveUpstreamAuth = vi.fn();
 const mockFetch = vi.fn();
@@ -38,7 +40,9 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
   getCurrentWindowStart: () => 1000,
 }));
 vi.mock('../../../src/services/ai-token-budget', () => ({
+  checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
+  checkMonthlyCostCap: (...args: unknown[]) => mockCheckMonthlyCostCap(...args),
   incrementTokenUsage: (...args: unknown[]) => mockIncrementTokenUsage(...args),
 }));
 vi.mock('../../../src/services/ai-billing', () => ({
@@ -133,6 +137,8 @@ function expectUsageIncrement(inputTokens: number, outputTokens: number) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockCheckAiUsageGate.mockResolvedValue({ allowed: true });
+  mockCheckMonthlyCostCap.mockResolvedValue({ allowed: true, costUsd: 0, capUsd: null });
 });
 
 describe('OpenAI-compatible AI proxy token accounting', () => {
@@ -155,6 +161,8 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
 
     expect(res.status).toBe(200);
     await res.text();
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).not.toMatchObject({ 'cf-aig-collect-log': 'false' });
     expectUsageIncrement(10, 4);
   });
 
@@ -252,7 +260,7 @@ describe('native Anthropic AI proxy token accounting', () => {
 
     expect(res.status).toBe(200);
     await res.text();
-    expect(mockCheckTokenBudget).toHaveBeenCalledOnce();
+  expect(mockCheckAiUsageGate).toHaveBeenCalledOnce();
     expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
   });
 });
