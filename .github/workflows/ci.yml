@@ -28,6 +28,7 @@ jobs:
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
       devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
+      cli: ${{ steps.filter.outputs.cli }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
@@ -54,6 +55,11 @@ jobs:
               - 'packages/ui/**'
               - 'packages/terminal/**'
               - 'packages/acp-client/**'
+              - '.github/workflows/ci.yml'
+            cli:
+              - 'packages/cli/**'
+              - 'sonar-project.properties'
+              - '.claude/rules/36-cli-quality.md'
               - '.github/workflows/ci.yml'
 
   preflight-evidence:
@@ -385,7 +391,18 @@ jobs:
 
       - name: Run CLI tests
         working-directory: packages/cli
-        run: go test ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Print CLI coverage summary
+        working-directory: packages/cli
+        run: go tool cover -func=coverage.out
+
+      - name: Upload CLI coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-go-coverage
+          path: packages/cli/coverage.out
+          retention-days: 7
 
   vm-agent-integration:
     name: VM Agent Integration

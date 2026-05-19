@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -40,6 +41,25 @@ func TestLoadConfigRequiresAPIURLWithCookieEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsIncompleteFileConfig(t *testing.T) {
+	env := tempConfigEnv(t)
+	paths, err := ResolveConfigPaths(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(paths.ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte(`{"apiUrl":"https://api.example.com"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadConfig(env)
+	if err == nil {
+		t.Fatal("expected incomplete config error")
+	}
+}
+
 func TestLoadConfigUsesCompleteEnvPair(t *testing.T) {
 	loaded, err := LoadConfig(fakeEnv{values: map[string]string{
 		"SAM_API_URL":        "https://api.example.com/",
@@ -50,6 +70,33 @@ func TestLoadConfigUsesCompleteEnvPair(t *testing.T) {
 	}
 	if loaded.APIURL != "https://api.example.com" || loaded.SessionCookie != "cookie=value" {
 		t.Fatalf("unexpected config: %#v", loaded)
+	}
+}
+
+func TestResolveConfigPathsHonorsConfigPrecedence(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "explicit")
+	xdgDir := filepath.Join(t.TempDir(), "xdg")
+
+	paths, err := ResolveConfigPaths(fakeEnv{values: map[string]string{
+		"SAM_CONFIG_DIR":  configDir,
+		"XDG_CONFIG_HOME": xdgDir,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.ConfigFile != filepath.Join(configDir, configFileName) {
+		t.Fatalf("config path = %s", paths.ConfigFile)
+	}
+
+	paths, err = ResolveConfigPaths(fakeEnv{
+		values: map[string]string{"XDG_CONFIG_HOME": xdgDir},
+		home:   filepath.Join(t.TempDir(), "home"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.ConfigFile != filepath.Join(xdgDir, "sam", configFileName) {
+		t.Fatalf("xdg config path = %s", paths.ConfigFile)
 	}
 }
 

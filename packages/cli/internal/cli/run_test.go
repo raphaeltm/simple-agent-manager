@@ -3,8 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -35,20 +33,44 @@ func TestAuthLoginReadsCookieFromStdin(t *testing.T) {
 	}
 }
 
+func TestAuthStatusReportsSavedConfigWithoutLeakingCookie(t *testing.T) {
+	env := tempConfigEnv(t)
+	if _, err := SaveConfig(env, CLIConfig{
+		APIURL:        "https://api.example.com/",
+		SessionCookie: "better-auth.session_token=secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, stdout, stderr := testRuntime(t, []string{"auth", "status", "--json"}, nil, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"authenticated": true`) || !strings.Contains(output, `"apiUrl": "https://api.example.com"`) {
+		t.Fatalf("unexpected auth status output: %s", output)
+	}
+	if strings.Contains(output, "secret") {
+		t.Fatalf("auth status leaked cookie: %s", output)
+	}
+}
+
+func TestAuthStatusReturnsOneWhenNoConfigExists(t *testing.T) {
+	env := tempConfigEnv(t)
+	runtime, stdout, stderr := testRuntime(t, []string{"auth", "status"}, nil, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 1 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Not authenticated") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
 func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
-	var payload map[string]any
-	var path string
-	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		path = req.URL.String()
-		content, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatal(err)
-		}
-		return jsonResponse(`{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted), nil
-	})
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
 		"--project=project_1",
 		"tasks",
@@ -63,29 +85,19 @@ func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if path != "https://api.example.com/api/projects/project_1/tasks/submit" {
-		t.Fatalf("path = %s", path)
+	if captured.URL != "https://api.example.com/api/projects/project_1/tasks/submit" {
+		t.Fatalf("path = %s", captured.URL)
 	}
-	if payload["message"] != "manage idea 123" || payload["agentType"] != "sam" {
-		t.Fatalf("unexpected payload: %#v", payload)
+	if captured.JSON["message"] != "manage idea 123" || captured.JSON["agentType"] != "sam" {
+		t.Fatalf("unexpected payload: %#v", captured.JSON)
 	}
-	if payload["taskMode"] != "task" || payload["workspaceProfile"] != "lightweight" {
-		t.Fatalf("unexpected task options: %#v", payload)
+	if captured.JSON["taskMode"] != "task" || captured.JSON["workspaceProfile"] != "lightweight" {
+		t.Fatalf("unexpected task options: %#v", captured.JSON)
 	}
 }
 
 func TestTaskSubmitUsesPromptFlag(t *testing.T) {
-	var payload map[string]any
-	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		content, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatal(err)
-		}
-		return jsonResponse(`{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted), nil
-	})
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
 		"--project=project_1",
 		"task",
@@ -97,8 +109,49 @@ func TestTaskSubmitUsesPromptFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if payload["message"] != "manage idea 123" {
-		t.Fatalf("unexpected payload: %#v", payload)
+	if captured.JSON["message"] != "manage idea 123" {
+		t.Fatalf("unexpected payload: %#v", captured.JSON)
+	}
+}
+
+func TestTaskStatusPrintsStructuredStatus(t *testing.T) {
+	outputBranch := "sam/feature"
+	outputPRURL := "https://github.com/org/repo/pull/1"
+	response := `{
+		"id":"task_1",
+		"title":"Ship CLI",
+		"status":"completed",
+		"executionStep":"done",
+		"taskMode":"task",
+		"outputBranch":"` + outputBranch + `",
+		"outputPrUrl":"` + outputPRURL + `",
+		"updatedAt":"2026-05-19T00:00:00Z"
+	}`
+	doer, captured := captureJSONRequest(t, response, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{
+		"--project=project_1",
+		"task",
+		"status",
+		"task_1",
+	}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if captured.Method != http.MethodGet || captured.URL != "https://api.example.com/api/projects/project_1/tasks/task_1" {
+		t.Fatalf("unexpected request: %s %s", captured.Method, captured.URL)
+	}
+	for _, expected := range []string{
+		"id: task_1",
+		"title: Ship CLI",
+		"status: completed",
+		"outputBranch: " + outputBranch,
+		"outputPrUrl: " + outputPRURL,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("status output missing %q:\n%s", expected, stdout.String())
+		}
 	}
 }
 
@@ -120,31 +173,44 @@ func TestModelFlagFailsUntilAPIContractExists(t *testing.T) {
 	}
 }
 
+func TestChatWithoutSessionSubmitsConversationTask(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
+	runtime, stdout, stderr := testRuntime(t, []string{
+		"--project=project_1",
+		"chat",
+		"Plan",
+		"the",
+		"release",
+	}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if captured.URL != "https://api.example.com/api/projects/project_1/tasks/submit" {
+		t.Fatalf("path = %s", captured.URL)
+	}
+	if captured.JSON["message"] != "Plan the release" || captured.JSON["taskMode"] != "conversation" {
+		t.Fatalf("payload = %#v", captured.JSON)
+	}
+	if !strings.Contains(stdout.String(), "Task submitted") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
 func TestChatWithSessionSendsPrompt(t *testing.T) {
-	var path string
-	var payload map[string]any
-	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		path = req.URL.String()
-		content, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatal(err)
-		}
-		return jsonResponse(`{"success":true}`, http.StatusOK), nil
-	})
+	doer, captured := captureJSONRequest(t, `{"success":true}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"--project", "project_1", "chat", "--session", "session_1", "Follow up", "--json"}, doer, nil)
 
 	code := Run(context.Background(), runtime)
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if path != "https://api.example.com/api/projects/project_1/sessions/session_1/prompt" {
-		t.Fatalf("path = %s", path)
+	if captured.URL != "https://api.example.com/api/projects/project_1/sessions/session_1/prompt" {
+		t.Fatalf("path = %s", captured.URL)
 	}
-	if payload["content"] != "Follow up" {
-		t.Fatalf("payload = %#v", payload)
+	if captured.JSON["content"] != "Follow up" {
+		t.Fatalf("payload = %#v", captured.JSON)
 	}
 	if !strings.Contains(stdout.String(), `"success": true`) {
 		t.Fatalf("json output = %s", stdout.String())
@@ -159,5 +225,20 @@ func TestPlannedCommandsFailClearly(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "planned but not implemented yet") {
 		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestRunnerDoctorCommandPrintsHostReadiness(t *testing.T) {
+	runtime, stdout, stderr := testRuntime(t, []string{"runner", "doctor"}, nil, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, expected := range []string{"SAM runner doctor", "Docker daemon: ok", "systemd: ok", "vm-agent: ok"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("runner doctor output missing %q:\n%s", expected, output)
+		}
 	}
 }

@@ -18,48 +18,74 @@ type globalOptions struct {
 }
 
 func parseArgs(args []string) (parsedArgs, error) {
-	result := parsedArgs{
-		Flags: make(map[string]string),
-		Bools: make(map[string]bool),
+	parser := argParser{
+		args: args,
+		result: parsedArgs{
+			Flags: make(map[string]string),
+			Bools: make(map[string]bool),
+		},
 	}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--json" {
-			result.Globals.JSON = true
-			continue
+	for parser.index < len(parser.args) {
+		if err := parser.parseNext(); err != nil {
+			return parser.result, err
 		}
-		if value, ok := strings.CutPrefix(arg, "--project="); ok {
-			result.Globals.Project = value
-			continue
-		}
-		if arg == "--project" {
-			i++
-			if i >= len(args) {
-				return result, fmt.Errorf("--project requires a value")
-			}
-			result.Globals.Project = args[i]
-			continue
-		}
-		if strings.HasPrefix(arg, "--") {
-			name, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
-			if name == "" {
-				return result, fmt.Errorf("invalid flag %q", arg)
-			}
-			if hasValue {
-				result.Flags[name] = value
-				continue
-			}
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-				i++
-				result.Flags[name] = args[i]
-				continue
-			}
-			result.Bools[name] = true
-			continue
-		}
-		result.Positionals = append(result.Positionals, arg)
 	}
-	return result, nil
+	return parser.result, nil
+}
+
+type argParser struct {
+	args   []string
+	index  int
+	result parsedArgs
+}
+
+func (p *argParser) parseNext() error {
+	arg := p.args[p.index]
+	p.index++
+
+	if arg == "--json" {
+		p.result.Globals.JSON = true
+		return nil
+	}
+	if value, ok := strings.CutPrefix(arg, "--project="); ok {
+		p.result.Globals.Project = value
+		return nil
+	}
+	if arg == "--project" {
+		return p.readProjectValue()
+	}
+	if strings.HasPrefix(arg, "--") {
+		return p.parseFlag(arg)
+	}
+	p.result.Positionals = append(p.result.Positionals, arg)
+	return nil
+}
+
+func (p *argParser) readProjectValue() error {
+	if p.index >= len(p.args) {
+		return fmt.Errorf("--project requires a value")
+	}
+	p.result.Globals.Project = p.args[p.index]
+	p.index++
+	return nil
+}
+
+func (p *argParser) parseFlag(arg string) error {
+	name, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+	if name == "" {
+		return fmt.Errorf("invalid flag %q", arg)
+	}
+	if hasValue {
+		p.result.Flags[name] = value
+		return nil
+	}
+	if p.index < len(p.args) && !strings.HasPrefix(p.args[p.index], "--") {
+		p.result.Flags[name] = p.args[p.index]
+		p.index++
+		return nil
+	}
+	p.result.Bools[name] = true
+	return nil
 }
 
 func projectFromArgs(globals globalOptions, args []string, usage string) (string, []string, error) {

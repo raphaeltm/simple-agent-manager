@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -31,6 +32,36 @@ type roundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type capturedRequest struct {
+	Method  string
+	URL     string
+	Headers http.Header
+	JSON    map[string]any
+}
+
+func captureJSONRequest(t *testing.T, responseBody string, status int) (HTTPDoer, *capturedRequest) {
+	t.Helper()
+	captured := &capturedRequest{}
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		captured.Method = req.Method
+		captured.URL = req.URL.String()
+		captured.Headers = req.Header.Clone()
+		if req.Body != nil {
+			content, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(content) > 0 {
+				if err := json.Unmarshal(content, &captured.JSON); err != nil {
+					t.Fatalf("request body is not valid JSON: %v\n%s", err, string(content))
+				}
+			}
+		}
+		return jsonResponse(responseBody, status), nil
+	})
+	return doer, captured
 }
 
 type fakeRunner struct {

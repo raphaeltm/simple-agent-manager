@@ -10,6 +10,8 @@ import (
 	"net/url"
 )
 
+const apiProjectsPath = "/api/projects/"
+
 type APIClient struct {
 	config CLIConfig
 	http   HTTPDoer
@@ -44,20 +46,28 @@ func (c APIClient) SubmitTask(ctx context.Context, projectID string, message str
 	addIfSet(body, "workspaceProfile", options.Workspace)
 
 	var response SubmitTaskResponse
-	err := c.request(ctx, http.MethodPost, "/api/projects/"+url.PathEscape(projectID)+"/tasks/submit", body, &response)
+	err := c.request(ctx, http.MethodPost, projectAPIPath(projectID, "tasks", "submit"), body, &response)
 	return response, err
 }
 
 func (c APIClient) GetTaskStatus(ctx context.Context, projectID string, taskID string) (TaskStatusResponse, error) {
 	var response TaskStatusResponse
-	err := c.request(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(projectID)+"/tasks/"+url.PathEscape(taskID), nil, &response)
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "tasks", taskID), nil, &response)
 	return response, err
 }
 
 func (c APIClient) SendPrompt(ctx context.Context, projectID string, sessionID string, content string) (map[string]any, error) {
 	var response map[string]any
-	err := c.request(ctx, http.MethodPost, "/api/projects/"+url.PathEscape(projectID)+"/sessions/"+url.PathEscape(sessionID)+"/prompt", map[string]any{"content": content}, &response)
+	err := c.request(ctx, http.MethodPost, projectAPIPath(projectID, "sessions", sessionID, "prompt"), map[string]any{"content": content}, &response)
 	return response, err
+}
+
+func projectAPIPath(projectID string, segments ...string) string {
+	path := apiProjectsPath + url.PathEscape(projectID)
+	for _, segment := range segments {
+		path += "/" + url.PathEscape(segment)
+	}
+	return path
 }
 
 func (c APIClient) request(ctx context.Context, method string, path string, body map[string]any, out any) error {

@@ -78,9 +78,13 @@ Per-project data (chat sessions, messages, activity events) is stored in a `Proj
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1
 - **ADR**: `docs/adr/004-hybrid-d1-do-storage.md`
 
+## CLI Package Quality
+
+`packages/cli` is a user-facing Go package. Codex and Claude Code agents must follow `.claude/rules/36-cli-quality.md` for every CLI change: keep command parsing simple, inject external boundaries, address SonarCloud findings, generate Go coverage, and write scenario-driven tests that verify command behavior, API payloads, runner checks, and secret redaction.
+
 ## Active Technologies
 
-- TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent)
+- TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent), Go 1.25+ (CLI)
 - Hono (API framework), Drizzle ORM (D1), React 19 + Vite (Web)
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2)
 - Tailwind CSS v4 (Web), Astro + Starlight (Marketing site)

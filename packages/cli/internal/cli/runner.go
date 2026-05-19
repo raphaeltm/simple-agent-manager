@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+const (
+	dockerBinary          = "docker"
+	dockerDaemonCheckName = "Docker daemon"
+	systemdCheckName      = "systemd"
+	vmAgentBinary         = "vm-agent"
+)
+
 type RunnerDoctorReport struct {
 	OS     string              `json:"os"`
 	Arch   string              `json:"arch"`
@@ -26,7 +33,7 @@ func RunRunnerDoctor(ctx context.Context, runner Runner) RunnerDoctorReport {
 		Arch:  runner.GOARCH(),
 		Ready: true,
 	}
-	report.add(checkLookPath(runner, "docker", "Docker CLI"))
+	report.add(checkLookPath(runner, dockerBinary, "Docker CLI"))
 	report.add(checkDockerDaemon(ctx, runner))
 	report.add(checkSystemd(ctx, runner))
 	report.add(checkVMDAgent(runner))
@@ -49,22 +56,22 @@ func checkLookPath(runner Runner, binary string, label string) RunnerDoctorCheck
 }
 
 func checkDockerDaemon(ctx context.Context, runner Runner) RunnerDoctorCheck {
-	if _, err := runner.LookPath("docker"); err != nil {
-		return RunnerDoctorCheck{Name: "Docker daemon", OK: false, Detail: "docker CLI is not installed"}
+	if _, err := runner.LookPath(dockerBinary); err != nil {
+		return RunnerDoctorCheck{Name: dockerDaemonCheckName, OK: false, Detail: "docker CLI is not installed"}
 	}
-	output, err := runner.Command(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+	output, err := runner.Command(ctx, dockerBinary, "version", "--format", "{{.Server.Version}}")
 	if err != nil {
-		return RunnerDoctorCheck{Name: "Docker daemon", OK: false, Detail: strings.TrimSpace(string(output))}
+		return RunnerDoctorCheck{Name: dockerDaemonCheckName, OK: false, Detail: strings.TrimSpace(string(output))}
 	}
-	return RunnerDoctorCheck{Name: "Docker daemon", OK: true, Detail: strings.TrimSpace(string(output))}
+	return RunnerDoctorCheck{Name: dockerDaemonCheckName, OK: true, Detail: strings.TrimSpace(string(output))}
 }
 
 func checkSystemd(ctx context.Context, runner Runner) RunnerDoctorCheck {
 	if runner.GOOS() != "linux" {
-		return RunnerDoctorCheck{Name: "systemd", OK: false, Warning: true, Detail: "systemd is only expected on Linux hosts"}
+		return RunnerDoctorCheck{Name: systemdCheckName, OK: false, Warning: true, Detail: "systemd is only expected on Linux hosts"}
 	}
 	if _, err := runner.LookPath("systemctl"); err != nil {
-		return RunnerDoctorCheck{Name: "systemd", OK: false, Detail: "systemctl not found"}
+		return RunnerDoctorCheck{Name: systemdCheckName, OK: false, Detail: "systemctl not found"}
 	}
 	output, err := runner.Command(ctx, "systemctl", "is-system-running")
 	detail := strings.TrimSpace(string(output))
@@ -72,20 +79,20 @@ func checkSystemd(ctx context.Context, runner Runner) RunnerDoctorCheck {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return RunnerDoctorCheck{Name: "systemd", OK: false, Detail: detail}
+		return RunnerDoctorCheck{Name: systemdCheckName, OK: false, Detail: detail}
 	}
 	if detail == "" {
 		detail = "available"
 	}
-	return RunnerDoctorCheck{Name: "systemd", OK: true, Detail: detail}
+	return RunnerDoctorCheck{Name: systemdCheckName, OK: true, Detail: detail}
 }
 
 func checkVMDAgent(runner Runner) RunnerDoctorCheck {
-	path, err := runner.LookPath("vm-agent")
+	path, err := runner.LookPath(vmAgentBinary)
 	if err != nil {
-		return RunnerDoctorCheck{Name: "vm-agent", OK: false, Warning: true, Detail: "vm-agent is not installed yet"}
+		return RunnerDoctorCheck{Name: vmAgentBinary, OK: false, Warning: true, Detail: "vm-agent is not installed yet"}
 	}
-	return RunnerDoctorCheck{Name: "vm-agent", OK: true, Detail: path}
+	return RunnerDoctorCheck{Name: vmAgentBinary, OK: true, Detail: path}
 }
 
 func FormatRunnerDoctor(report RunnerDoctorReport) string {

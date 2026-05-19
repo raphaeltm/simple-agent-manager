@@ -9,6 +9,7 @@ build/
 
 # Test coverage
 coverage/
+packages/cli/coverage.out
 
 # Environment files
 .env

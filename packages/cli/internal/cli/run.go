@@ -45,63 +45,82 @@ func runAuth(_ context.Context, runtime Runtime, parsed parsedArgs, args []strin
 	}
 	switch args[0] {
 	case "login":
-		apiURL := flagValue(parsed.Flags, "api-url")
-		cookie := flagValue(parsed.Flags, "session-cookie")
-		if parsed.Bools["session-cookie-stdin"] {
-			if cookie != "" {
-				return fail(runtime.Stderr, errors.New("use either --session-cookie or --session-cookie-stdin, not both"))
-			}
-			read, err := io.ReadAll(bufio.NewReader(runtime.Stdin))
-			if err != nil {
-				return fail(runtime.Stderr, err)
-			}
-			cookie = strings.TrimSpace(string(read))
-		}
-		if apiURL == "" || cookie == "" {
-			return fail(runtime.Stderr, errors.New("auth login requires --api-url and a session cookie"))
-		}
-		config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: cookie}
-		paths, err := SaveConfig(runtime.Env, config)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		text := fmt.Sprintf("Saved SAM CLI auth config to %s", paths.ConfigFile)
-		value := map[string]string{
-			"apiUrl":        config.APIURL,
-			"configFile":    paths.ConfigFile,
-			"sessionCookie": redactSecret(config.SessionCookie),
-		}
-		return writeOrFail(runtime, parsed.Globals.JSON, text, value)
+		return runAuthLogin(runtime, parsed)
 	case "status":
-		config, err := LoadConfig(runtime.Env)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		paths, err := ResolveConfigPaths(runtime.Env)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		if config == nil {
-			text := fmt.Sprintf("Not authenticated. Expected config at %s", paths.ConfigFile)
-			writeOutput(runtime.Stdout, parsed.Globals.JSON, text, map[string]any{"authenticated": false, "configFile": paths.ConfigFile})
-			return 1
-		}
-		text := strings.Join([]string{
-			"Authenticated",
-			"apiUrl: " + config.APIURL,
-			"sessionCookie: " + redactSecret(config.SessionCookie),
-			"configFile: " + paths.ConfigFile,
-		}, "\n")
-		value := map[string]any{
-			"authenticated": true,
-			"apiUrl":        config.APIURL,
-			"configFile":    paths.ConfigFile,
-			"sessionCookie": redactSecret(config.SessionCookie),
-		}
-		return writeOrFail(runtime, parsed.Globals.JSON, text, value)
+		return runAuthStatus(runtime, parsed)
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unknown auth action: %s", args[0]))
 	}
+}
+
+func runAuthLogin(runtime Runtime, parsed parsedArgs) int {
+	apiURL := flagValue(parsed.Flags, "api-url")
+	cookie, err := readSessionCookie(runtime, parsed)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	if apiURL == "" || cookie == "" {
+		return fail(runtime.Stderr, errors.New("auth login requires --api-url and a session cookie"))
+	}
+
+	config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: cookie}
+	paths, err := SaveConfig(runtime.Env, config)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	text := fmt.Sprintf("Saved SAM CLI auth config to %s", paths.ConfigFile)
+	value := map[string]string{
+		"apiUrl":        config.APIURL,
+		"configFile":    paths.ConfigFile,
+		"sessionCookie": redactSecret(config.SessionCookie),
+	}
+	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
+}
+
+func readSessionCookie(runtime Runtime, parsed parsedArgs) (string, error) {
+	cookie := flagValue(parsed.Flags, "session-cookie")
+	if !parsed.Bools["session-cookie-stdin"] {
+		return cookie, nil
+	}
+	if cookie != "" {
+		return "", errors.New("use either --session-cookie or --session-cookie-stdin, not both")
+	}
+	read, err := io.ReadAll(bufio.NewReader(runtime.Stdin))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(read)), nil
+}
+
+func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
+	config, err := LoadConfig(runtime.Env)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	paths, err := ResolveConfigPaths(runtime.Env)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	if config == nil {
+		text := fmt.Sprintf("Not authenticated. Expected config at %s", paths.ConfigFile)
+		if err := writeOutput(runtime.Stdout, parsed.Globals.JSON, text, map[string]any{"authenticated": false, "configFile": paths.ConfigFile}); err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		return 1
+	}
+	text := strings.Join([]string{
+		"Authenticated",
+		"apiUrl: " + config.APIURL,
+		"sessionCookie: " + redactSecret(config.SessionCookie),
+		"configFile: " + paths.ConfigFile,
+	}, "\n")
+	value := map[string]any{
+		"authenticated": true,
+		"apiUrl":        config.APIURL,
+		"configFile":    paths.ConfigFile,
+		"sessionCookie": redactSecret(config.SessionCookie),
+	}
+	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
 }
 
 func runTask(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
@@ -115,34 +134,39 @@ func runTask(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 	}
 	switch action {
 	case "submit":
-		message := flagValue(parsed.Flags, "prompt")
-		if message == "" && len(rest) > 0 {
-			message = strings.Join(rest, " ")
-		}
-		if strings.TrimSpace(message) == "" {
-			return fail(runtime.Stderr, errors.New("task submit requires <message> or --prompt"))
-		}
-		options, err := parseSubmitOptions(parsed)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		return submitTask(ctx, runtime, parsed, projectID, message, options)
+		return runTaskSubmit(ctx, runtime, parsed, projectID, rest)
 	case "status":
-		if len(rest) != 1 {
-			return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
-		}
-		client, err := authenticatedClient(runtime)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		response, err := client.GetTaskStatus(ctx, projectID, rest[0])
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		return writeOrFail(runtime, parsed.Globals.JSON, formatTaskStatus(response), response)
+		return runTaskStatus(ctx, runtime, parsed, projectID, rest)
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unknown task action: %s", action))
 	}
+}
+
+func runTaskSubmit(ctx context.Context, runtime Runtime, parsed parsedArgs, projectID string, args []string) int {
+	message := commandMessage(parsed, args)
+	if strings.TrimSpace(message) == "" {
+		return fail(runtime.Stderr, errors.New("task submit requires <message> or --prompt"))
+	}
+	options, err := parseSubmitOptions(parsed)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	return submitTask(ctx, runtime, parsed, projectID, message, options)
+}
+
+func runTaskStatus(ctx context.Context, runtime Runtime, parsed parsedArgs, projectID string, args []string) int {
+	if len(args) != 1 {
+		return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
+	}
+	client, err := authenticatedClient(runtime)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	response, err := client.GetTaskStatus(ctx, projectID, args[0])
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	return writeOrFail(runtime, parsed.Globals.JSON, formatTaskStatus(response), response)
 }
 
 func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
@@ -156,10 +180,7 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	message := flagValue(parsed.Flags, "prompt")
-	if message == "" && len(rest) > 0 {
-		message = strings.Join(rest, " ")
-	}
+	message := commandMessage(parsed, rest)
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, errors.New("tasks dispatch requires --prompt or <prompt>"))
 	}
@@ -175,10 +196,7 @@ func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	message := flagValue(parsed.Flags, "prompt")
-	if message == "" && len(rest) > 0 {
-		message = strings.Join(rest, " ")
-	}
+	message := commandMessage(parsed, rest)
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, errors.New("chat requires <message> or --prompt"))
 	}
@@ -199,6 +217,14 @@ func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 	}
 	options.Mode = "conversation"
 	return submitTask(ctx, runtime, parsed, projectID, message, options)
+}
+
+func commandMessage(parsed parsedArgs, args []string) string {
+	message := flagValue(parsed.Flags, "prompt")
+	if message != "" || len(args) == 0 {
+		return message
+	}
+	return strings.Join(args, " ")
 }
 
 func runRunner(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {

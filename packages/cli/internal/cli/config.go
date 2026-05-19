@@ -14,6 +14,8 @@ type ConfigPaths struct {
 	ConfigFile string
 }
 
+const configFileName = "config.json"
+
 func LoadConfig(env ConfigEnv) (*CLIConfig, error) {
 	apiURL := strings.TrimSpace(env.Getenv("SAM_API_URL"))
 	cookie := strings.TrimSpace(env.Getenv("SAM_SESSION_COOKIE"))
@@ -72,18 +74,18 @@ func SaveConfig(env ConfigEnv, cfg CLIConfig) (ConfigPaths, error) {
 
 func ResolveConfigPaths(env ConfigEnv) (ConfigPaths, error) {
 	if dir := strings.TrimSpace(env.Getenv("SAM_CONFIG_DIR")); dir != "" {
-		return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, "config.json")}, nil
+		return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, configFileName)}, nil
 	}
 	if xdg := strings.TrimSpace(env.Getenv("XDG_CONFIG_HOME")); xdg != "" {
 		dir := filepath.Join(xdg, "sam")
-		return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, "config.json")}, nil
+		return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, configFileName)}, nil
 	}
 	home, err := env.UserHomeDir()
 	if err != nil {
 		return ConfigPaths{}, err
 	}
 	dir := filepath.Join(home, ".config", "sam")
-	return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, "config.json")}, nil
+	return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, configFileName)}, nil
 }
 
 func normalizeAPIURL(value string) string {
