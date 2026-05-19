@@ -22,7 +22,7 @@ import {
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono, type Context } from 'hono';
+import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
