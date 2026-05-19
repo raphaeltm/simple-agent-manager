@@ -269,11 +269,11 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig).toBeUndefined();
   });
 
-  it('returns platform proxy config when user has no credential and proxy enabled', async () => {
+  it('returns platform proxy config when user has no credential, proxy enabled, and SAM provider selected', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;
       if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
-      if (queryCount === 2) return []; // tasks
+      if (queryCount === 2) return [{ providerMode: 'sam' }]; // agent settings
       return [];
     });
     mockGetDecryptedAgentKey.mockResolvedValueOnce(null);

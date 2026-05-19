@@ -34,7 +34,7 @@ This work also needs the minimum quota-aware enforcement required for SAM-provid
 - [x] Add monthly USD cost cap enforcement for SAM-provider AI proxy traffic while preserving daily token caps.
 - [x] Preserve AI Gateway attribution metadata for user/workspace/project traffic.
 - [x] Add focused unit tests for provider-mode resolution, no-silent-fallback behavior, frontend availability, quota ceiling validation, and cost-cap enforcement.
-- [ ] Add or run Playwright visual audit for the changed settings surface.
+- [x] Add or run Playwright visual audit for the changed settings surface.
 - [x] Update docs/self-hosting and recent changes for new setup expectations.
 - [ ] Run specialist validation: env-validator, constitution-validator, security-auditor, doc-sync-validator, plus task-completion-validator and relevant UI/API reviewers.
 

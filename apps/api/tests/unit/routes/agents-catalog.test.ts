@@ -24,6 +24,7 @@ interface CatalogDbState {
   agentCredentials?: QueryResult;
   scalewayCloudCredentials?: QueryResult;
   platformCloudCredentials?: QueryResult;
+  agentProviderModes?: QueryResult;
 }
 
 function makeCatalogDb(state: CatalogDbState) {
@@ -37,10 +38,14 @@ function makeCatalogDb(state: CatalogDbState) {
           ? state.agentCredentials ?? []
           : selectCount === 2
             ? state.scalewayCloudCredentials ?? []
-            : state.platformCloudCredentials ?? [];
+            : selectCount === 3
+              ? state.platformCloudCredentials ?? []
+              : state.agentProviderModes ?? [];
       const builder = {
         from: vi.fn(() => builder),
-        where: vi.fn(() => (selectCount === 1 ? Promise.resolve(result) : builder)),
+        where: vi.fn(() => (
+          selectCount === 1 || selectCount >= 4 ? Promise.resolve(result) : builder
+        )),
         limit: vi.fn(() => Promise.resolve(result)),
       };
       return builder;

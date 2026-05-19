@@ -75,6 +75,10 @@ function makeSettings(agentType: string, overrides: Record<string, unknown> = {}
     allowedTools: null,
     deniedTools: null,
     additionalEnv: null,
+    opencodeProvider: null,
+    opencodeBaseUrl: null,
+    opencodeProviderName: null,
+    providerMode: null,
     createdAt: null,
     updatedAt: null,
     ...overrides,
@@ -197,6 +201,7 @@ describe('AgentsSection', () => {
       expect(mocks.saveAgentSettings).toHaveBeenCalledWith('claude-code', {
         model: null,
         permissionMode: 'acceptEdits',
+        providerMode: null,
       });
     });
   });
