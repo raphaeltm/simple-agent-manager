@@ -38,9 +38,9 @@ Critical override for this `/do` run: do not merge under any circumstances. Comp
 - [x] Run local Playwright visual audit for changed web surfaces on mobile and desktop.
 - [x] Run full quality suite before PR.
 - [x] Complete specialist review.
-- [ ] Complete staging verification.
-- [ ] Create/update PR and monitor CI checks.
-- [ ] Stop before merge and report PR URL/status.
+- [x] Complete staging verification.
+- [x] Create/update PR and monitor CI checks.
+- [x] Stop before merge and report PR URL/status.
 
 ## Acceptance Criteria
 
