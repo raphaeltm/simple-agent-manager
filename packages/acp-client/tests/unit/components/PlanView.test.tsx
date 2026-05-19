@@ -35,34 +35,37 @@ describe('PlanView', () => {
     ]);
     render(<PlanView plan={plan} />);
     const el = screen.getByText('Done step');
-    expect(el.className).toContain('line-through');
+    expect(el.style.textDecoration).toBe('line-through');
   });
 
-  it('renders in-progress entries with pulsing dot', () => {
+  it('renders in-progress entries with glow dot', () => {
     const plan = makePlan([
       { content: 'Working', priority: 'high', status: 'in_progress' },
     ]);
-    const { container } = render(<PlanView plan={plan} />);
-    const pulseDot = container.querySelector('.animate-pulse');
-    expect(pulseDot).toBeTruthy();
+    render(<PlanView plan={plan} />);
+    const el = screen.getByText('Working');
+    const dot = el.previousElementSibling as HTMLElement;
+    expect(dot.style.boxShadow).toContain('rgba(34, 197, 94');
   });
 
-  it('renders pending entries without strikethrough or pulse', () => {
+  it('renders pending entries without strikethrough or glow', () => {
     const plan = makePlan([
       { content: 'Pending step', priority: 'high', status: 'pending' },
     ]);
-    const { container } = render(<PlanView plan={plan} />);
+    render(<PlanView plan={plan} />);
     const el = screen.getByText('Pending step');
-    expect(el.className).not.toContain('line-through');
-    expect(container.querySelector('.animate-pulse')).toBeFalsy();
+    expect(el.style.textDecoration).not.toBe('line-through');
+    const dot = el.previousElementSibling as HTMLElement;
+    expect(dot.style.boxShadow).toBe('none');
   });
 
   it('renders green dot for completed entries', () => {
     const plan = makePlan([
       { content: 'Done', priority: 'high', status: 'completed' },
     ]);
-    const { container } = render(<PlanView plan={plan} />);
-    const dot = container.querySelector('.bg-green-400');
-    expect(dot).toBeTruthy();
+    render(<PlanView plan={plan} />);
+    const el = screen.getByText('Done');
+    const dot = el.previousElementSibling as HTMLElement;
+    expect(dot.style.backgroundColor).toMatch(/#22c55e|rgb\(34,\s*197,\s*94\)/);
   });
 });

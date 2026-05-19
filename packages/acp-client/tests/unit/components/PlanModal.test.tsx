@@ -74,18 +74,18 @@ describe('PlanModal', () => {
     ]);
     render(<PlanModal plan={plan} isOpen={true} onClose={vi.fn()} />);
     const el = screen.getByText('Done step');
-    expect(el.className).toContain('line-through');
+    expect(el.style.textDecoration).toBe('line-through');
   });
 
-  it('renders in-progress entries with pulsing dot', () => {
+  it('renders in-progress entries with glow', () => {
     const plan = makePlan([
       { content: 'Working', priority: 'high', status: 'in_progress' },
     ]);
-    const { container } = render(
-      <PlanModal plan={plan} isOpen={true} onClose={vi.fn()} />
-    );
-    const pulseDot = container.querySelector('.animate-pulse');
-    expect(pulseDot).toBeTruthy();
+    render(<PlanModal plan={plan} isOpen={true} onClose={vi.fn()} />);
+    const el = screen.getByText('Working');
+    // The sibling dot has a glow box-shadow for in-progress items
+    const dot = el.previousElementSibling as HTMLElement;
+    expect(dot.style.boxShadow).toContain('rgba(34, 197, 94');
   });
 
   it('shows 0 of N complete for all pending', () => {

@@ -54,7 +54,7 @@ describe('StickyPlanButton', () => {
       { content: 'A', priority: 'high', status: 'in_progress' },
     ]);
     const { container } = render(<StickyPlanButton plan={plan} onClick={vi.fn()} />);
-    const pulseDot = container.querySelector('.animate-pulse');
+    const pulseDot = container.querySelector('.sam-status-pulse');
     expect(pulseDot).toBeTruthy();
   });
 
@@ -64,35 +64,26 @@ describe('StickyPlanButton', () => {
       { content: 'B', priority: 'high', status: 'completed' },
     ]);
     const { container } = render(<StickyPlanButton plan={plan} onClick={vi.fn()} />);
-    const pulseDot = container.querySelector('.animate-pulse');
+    const pulseDot = container.querySelector('.sam-status-pulse');
     expect(pulseDot).toBeNull();
   });
 
-  it('uses green styling when all complete', () => {
-    const plan = makePlan({}, [
-      { content: 'A', priority: 'high', status: 'completed' },
-    ]);
-    render(<StickyPlanButton plan={plan} onClick={vi.fn()} />);
-    const button = screen.getByRole('button');
-    expect(button.className).toContain('border-green-300');
-  });
-
-  it('uses blue styling when in progress', () => {
+  it('uses green glow when in progress', () => {
     const plan = makePlan({}, [
       { content: 'A', priority: 'high', status: 'in_progress' },
     ]);
     render(<StickyPlanButton plan={plan} onClick={vi.fn()} />);
     const button = screen.getByRole('button');
-    expect(button.className).toContain('border-blue-300');
+    expect(button.style.boxShadow).toContain('rgba(34, 197, 94');
   });
 
-  it('uses gray styling when all pending', () => {
+  it('uses green glow when all complete', () => {
     const plan = makePlan({}, [
-      { content: 'A', priority: 'high', status: 'pending' },
+      { content: 'A', priority: 'high', status: 'completed' },
     ]);
     render(<StickyPlanButton plan={plan} onClick={vi.fn()} />);
     const button = screen.getByRole('button');
-    expect(button.className).toContain('border-gray-300');
+    expect(button.style.boxShadow).toContain('rgba(34, 197, 94');
   });
 
   it('has accessible label with completion info', () => {

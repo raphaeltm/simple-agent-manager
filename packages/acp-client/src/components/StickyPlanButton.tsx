@@ -9,7 +9,7 @@ export interface StickyPlanButtonProps {
 
 /**
  * Floating button shown above the chat input when a plan exists.
- * Displays completion progress and pulses when work is in progress.
+ * Displays completion progress with a green glow and white text.
  */
 export const StickyPlanButton: React.FC<StickyPlanButtonProps> = ({ plan, onClick }) => {
   if (!plan) return null;
@@ -19,37 +19,69 @@ export const StickyPlanButton: React.FC<StickyPlanButtonProps> = ({ plan, onClic
   const allDone = completed === plan.entries.length;
   const total = plan.entries.length;
 
-  // Border/glow color based on aggregate status
-  const borderClass = allDone
-    ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
-    : inProgress
-      ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
-      : 'border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100';
-
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center space-x-2 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${borderClass}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 12px',
+        fontSize: '0.75rem',
+        fontWeight: 500,
+        borderRadius: 8,
+        border: '1px solid rgba(34, 197, 94, 0.25)',
+        backgroundColor: 'rgba(8, 15, 12, 0.55)',
+        backdropFilter: 'blur(16px) saturate(1.35)',
+        WebkitBackdropFilter: 'blur(16px) saturate(1.35)',
+        color: '#e6f2ee',
+        cursor: 'pointer',
+        transition: 'all 0.15s ease',
+        boxShadow: inProgress
+          ? '0 0 12px rgba(34, 197, 94, 0.3), 0 0 4px rgba(34, 197, 94, 0.15)'
+          : allDone
+            ? '0 0 12px rgba(34, 197, 94, 0.25)'
+            : '0 0 6px rgba(34, 197, 94, 0.1)',
+      }}
       title={`Plan: ${completed}/${total} complete`}
       aria-label={`View plan, ${completed} of ${total} steps complete`}
     >
       {/* Checklist icon */}
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(34, 197, 94, 0.8)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
         <path d="M9 11l3 3L22 4" />
         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
       </svg>
       <span>Plan</span>
       {/* Progress badge */}
-      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
-        allDone ? 'bg-green-200 text-green-800' :
-        inProgress ? 'bg-blue-200 text-blue-800' : 'bg-gray-200 text-gray-700'
-      }`}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '1px 6px',
+          borderRadius: 4,
+          fontSize: '0.75rem',
+          fontWeight: 500,
+          backgroundColor: allDone
+            ? 'rgba(34, 197, 94, 0.2)'
+            : 'rgba(34, 197, 94, 0.12)',
+          color: allDone ? '#4ade80' : '#e6f2ee',
+        }}
+      >
         {completed}/{total}
       </span>
       {/* Pulse dot when in progress */}
       {inProgress && (
-        <span className="inline-block h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+        <span
+          className="sam-status-pulse"
+          style={{
+            display: 'inline-block',
+            height: 8,
+            width: 8,
+            borderRadius: '50%',
+            backgroundColor: '#22c55e',
+          }}
+        />
       )}
     </button>
   );
