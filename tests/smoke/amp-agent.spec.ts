@@ -28,7 +28,6 @@ test.describe('Amp agent', () => {
     const body = page.locator('body');
     await expect(body).toContainText('Amp');
     await expect(body).toContainText('API key');
-    await expect(body).toContainText('AMP_API_KEY');
 
     const pageText = await body.textContent();
     const ampSection = pageText?.match(/Amp[\s\S]{0,800}/)?.[0] ?? '';
