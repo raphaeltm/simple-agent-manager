@@ -224,7 +224,8 @@ describe('compute usage metering pipeline', () => {
     it('node usage service calculates billing from node lifetime', () => {
       expect(nodeUsageServiceFile).toContain('schema.nodes.createdAt');
       expect(nodeUsageServiceFile).toContain('calculateNodeVcpuHoursForPeriod');
-      expect(nodeUsageServiceFile).toContain("eq(schema.nodes.credentialSource, credentialSource)");
+      expect(nodeUsageServiceFile).toContain('schema.nodes.credentialSource');
+      expect(nodeUsageServiceFile).toContain('opts.credentialSource');
     });
 
     it('user usage route uses authenticated user ID', () => {
