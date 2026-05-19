@@ -42,9 +42,13 @@ export function getAgentConnectionSummary(
     scope === 'user' &&
     agent.fallbackCredentialSource === 'scaleway-cloud' &&
     (!opencodeProvider || opencodeProvider === 'scaleway');
+  const usesSamProvider = agent.fallbackCredentialSource === 'platform-sam';
 
   if (isOpenCodePlatform) {
     return { status: 'connected', label: 'Platform AI' };
+  }
+  if (usesSamProvider) {
+    return { status: 'connected', label: 'SAM' };
   }
   if (hasAnyCredential && activeCredential) {
     const fallback =

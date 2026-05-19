@@ -24,6 +24,7 @@ import {
 } from '../services/ai-gateway-logs';
 import {
   deleteUserBudgetSettings,
+  getAdminAiAllowance,
   getTokenUsage,
   getUserBudgetSettings,
   resolveEffectiveLimits,
@@ -260,9 +261,12 @@ usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     return c.json({ error: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
   }
 
+  // Fetch admin allowance to enforce ceilings on user-set limits
+  const adminAllowance = await getAdminAiAllowance(c.env.KV, userId);
+
   let settings;
   try {
-    settings = validateBudgetUpdate(body, c.env);
+    settings = validateBudgetUpdate(body, c.env, adminAllowance);
   } catch (err) {
     return c.json({ error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) }, 400);
   }

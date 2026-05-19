@@ -2,6 +2,18 @@
 // Agent Settings (per-user, per-agent configuration)
 // =============================================================================
 
+/**
+ * Provider mode for Claude Code / Codex agent sessions.
+ * - 'sam': Platform-managed AI proxy, paid/metered by SAM (explicit opt-in).
+ * - 'user-api-key': User-owned API key, routed through passthrough proxy.
+ * - 'oauth': Direct injection (Claude Code OAuth token, not proxied).
+ * - null: No provider selected (agent not configured via this path).
+ */
+export type AgentProviderMode = 'sam' | 'user-api-key' | 'oauth';
+
+/** Valid provider modes — single source of truth for validation. */
+export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = ['sam', 'user-api-key', 'oauth'] as const;
+
 /** Valid permission modes for agent sessions */
 export type AgentPermissionMode =
   | 'default'
@@ -122,6 +134,8 @@ export interface AgentSettingsResponse {
   opencodeBaseUrl: string | null;
   /** Display name for custom providers. */
   opencodeProviderName: string | null;
+  /** Provider mode for Claude Code / Codex. null = not explicitly selected. */
+  providerMode: AgentProviderMode | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -139,6 +153,8 @@ export interface SaveAgentSettingsRequest {
   opencodeBaseUrl?: string | null;
   /** Display name for custom providers. */
   opencodeProviderName?: string | null;
+  /** Provider mode for Claude Code / Codex. null = clear selection. */
+  providerMode?: AgentProviderMode | null;
 }
 
 // =============================================================================

@@ -1,11 +1,13 @@
 import type {
   AgentPermissionMode,
+  AgentProviderMode,
   AgentSettingsResponse,
   OpenCodeProvider,
 } from '@simple-agent-manager/shared';
 import {
   isValidAgentType,
   OPENCODE_PROVIDERS,
+  VALID_AGENT_PROVIDER_MODES,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -81,6 +83,14 @@ function permissionModeFromDb(raw: string | null): AgentPermissionMode | null {
 
 function opencodeProviderFromDb(raw: string | null): OpenCodeProvider | null {
   return isOpenCodeProvider(raw) ? raw : null;
+}
+
+function isAgentProviderMode(raw: string | null): raw is AgentProviderMode {
+  return raw !== null && (VALID_AGENT_PROVIDER_MODES as readonly string[]).includes(raw);
+}
+
+function providerModeFromDb(raw: string | null): AgentProviderMode | null {
+  return isAgentProviderMode(raw) ? raw : null;
 }
 
 function getAgentSettingsValidationLimits(env: Env): AgentSettingsValidationLimits {
@@ -164,6 +174,7 @@ function toResponse(row: schema.AgentSettingsRow): AgentSettingsResponse {
     opencodeProvider: opencodeProviderFromDb(row.opencodeProvider),
     opencodeBaseUrl: row.opencodeBaseUrl ?? null,
     opencodeProviderName: row.opencodeProviderName ?? null,
+    providerMode: providerModeFromDb(row.providerMode),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
   };
@@ -205,6 +216,7 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
       opencodeProvider: null,
       opencodeBaseUrl: null,
       opencodeProviderName: null,
+      providerMode: null,
       createdAt: null,
       updatedAt: null,
     } as AgentSettingsResponse);
@@ -261,6 +273,7 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
       ? (body.opencodeBaseUrl ?? null)
       : null,
     opencodeProviderName: body.opencodeProviderName ?? null,
+    providerMode: body.providerMode ?? null,
     updatedAt: now,
   };
 

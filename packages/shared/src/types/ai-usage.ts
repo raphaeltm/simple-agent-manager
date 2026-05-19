@@ -82,3 +82,42 @@ export interface UpdateAiBudgetRequest {
   monthlyCostCapUsd?: number | null;
   alertThresholdPercent?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Admin AI Allowance Ceilings (per-user, managed by admins)
+// ---------------------------------------------------------------------------
+
+/** Admin-managed AI allowance ceiling for a user (stored in KV). */
+export interface AdminAiAllowance {
+  /** Max daily input tokens the user can set. null = use platform default ceiling. */
+  maxDailyInputTokens: number | null;
+  /** Max daily output tokens the user can set. null = use platform default ceiling. */
+  maxDailyOutputTokens: number | null;
+  /** Max monthly spend USD the user can set. null = use platform default ceiling. */
+  maxMonthlyCostCapUsd: number | null;
+  /** Allowed model tiers. null = all tiers allowed. */
+  allowedModelTiers: string[] | null;
+  /** When the allowance was last updated (ISO string). */
+  updatedAt: string;
+  /** Admin user ID who set the allowance. */
+  updatedBy: string;
+}
+
+/** API response for GET /api/admin/users/:userId/ai-allowance. */
+export interface AdminAiAllowanceResponse {
+  userId: string;
+  allowance: AdminAiAllowance | null;
+  effectiveCeiling: {
+    maxDailyInputTokens: number;
+    maxDailyOutputTokens: number;
+    maxMonthlyCostCapUsd: number;
+  };
+}
+
+/** Request body for PUT /api/admin/users/:userId/ai-allowance. */
+export interface UpdateAdminAiAllowanceRequest {
+  maxDailyInputTokens?: number | null;
+  maxDailyOutputTokens?: number | null;
+  maxMonthlyCostCapUsd?: number | null;
+  allowedModelTiers?: string[] | null;
+}

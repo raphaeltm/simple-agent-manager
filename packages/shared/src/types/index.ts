@@ -248,6 +248,7 @@ export type {
 export type {
   AgentPermissionMode,
   AgentProfile,
+  AgentProviderMode,
   AgentSettings,
   AgentSettingsResponse,
   CreateAgentProfileRequest,
@@ -260,6 +261,7 @@ export type {
 export {
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
+  VALID_AGENT_PROVIDER_MODES,
 } from './agent-settings';
 
 // Orchestration (agent-to-agent communication)
@@ -457,6 +459,9 @@ export {
 
 // User AI Usage
 export type {
+  AdminAiAllowance,
+  AdminAiAllowanceResponse,
+  UpdateAdminAiAllowanceRequest,
   UpdateAiBudgetRequest,
   UserAiBudgetResponse,
   UserAiBudgetSettings,
