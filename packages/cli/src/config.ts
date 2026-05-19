@@ -33,10 +33,18 @@ export function normalizeApiUrl(apiUrl: string): string {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new Error('API URL must use http or https');
   }
-  parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+  parsed.pathname = stripTrailingSlashes(parsed.pathname);
   parsed.search = '';
   parsed.hash = '';
-  return parsed.toString().replace(/\/$/, '');
+  return stripTrailingSlashes(parsed.toString());
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return value.slice(0, end);
 }
 
 export function redactSecret(value: string): string {
