@@ -60,6 +60,29 @@ const mockEnv = {
   ENCRYPTION_KEY: 'test-encryption-key',
 } as Env;
 
+async function expectCredentialValidationFailure(
+  app: Hono<{ Bindings: Env }>,
+  path: string,
+  body: unknown,
+  expectedProvider: string
+) {
+  mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized'));
+
+  const res = await app.request(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    mockEnv
+  );
+
+  expect(res.status).toBe(400);
+  const responseBody = await res.json();
+  expect(responseBody.message).toContain(`Invalid or unauthorized ${expectedProvider} credentials`);
+}
+
 // ============================================================================
 // POST /api/credentials — cloud-provider credential creation
 // ============================================================================
@@ -231,21 +254,12 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   it('returns 400 (not 500) when validateToken throws (invalid credentials)', async () => {
     // validateToken() throws when credentials are rejected by the provider API.
     // The route must translate this into a user-facing 400, not an unhandled 500.
-    mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized: invalid token'));
-
-    const res = await app.request(
+    await expectCredentialValidationFailure(
+      app,
       '/api/credentials',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
-      },
-      mockEnv
+      { provider: 'hetzner', token: 'bad-token' },
+      'hetzner'
     );
-
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.message).toContain('Invalid or unauthorized hetzner credentials');
   });
 
   it('calls validateToken before encrypting or storing the credential', async () => {
@@ -323,21 +337,12 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
   });
 
   it('returns 400 when validation rejects the credential', async () => {
-    mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized'));
-
-    const res = await app.request(
+    await expectCredentialValidationFailure(
+      app,
       '/api/credentials/validate',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'hetzner', token: 'bad-token' }),
-      },
-      mockEnv
+      { provider: 'hetzner', token: 'bad-token' },
+      'hetzner'
     );
-
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.message).toContain('Invalid or unauthorized hetzner credentials');
   });
 });
 
