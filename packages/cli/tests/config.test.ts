@@ -43,10 +43,12 @@ describe('config', () => {
     });
   });
 
-  it('resolves config paths from XDG config home', () => {
-    expect(resolveConfigPaths({ XDG_CONFIG_HOME: '/tmp/config' })).toEqual({
-      configDir: '/tmp/config/sam',
-      configFile: '/tmp/config/sam/config.json',
+  it('resolves config paths from XDG config home', async () => {
+    const configHome = await mkdtemp(path.join(tmpdir(), 'sam-cli-xdg-'));
+
+    expect(resolveConfigPaths({ XDG_CONFIG_HOME: configHome })).toEqual({
+      configDir: path.join(configHome, 'sam'),
+      configFile: path.join(configHome, 'sam', 'config.json'),
     });
   });
 

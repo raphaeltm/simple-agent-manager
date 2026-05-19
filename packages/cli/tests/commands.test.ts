@@ -1,3 +1,7 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { run } from '../src/commands.js';
 import type { ConfigEnv, Logger } from '../src/types.js';
 
@@ -39,9 +43,9 @@ describe('commands', () => {
   });
 
   it('can read the auth login session cookie from stdin', async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), 'sam-cli-login-'));
     const runtime = runtimeWithFetch(async () => jsonResponse({}, 200), {
-      HOME: '/tmp/sam-cli-test-home',
-      SAM_CONFIG_DIR: '/tmp/sam-cli-test-config',
+      SAM_CONFIG_DIR: configDir,
     });
     runtime.readStdin = async () => 'better-auth.session_token=secret\n';
 
@@ -58,7 +62,7 @@ describe('commands', () => {
   it('routes sam chat without session to conversation-mode task submit', async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const runtime = runtimeWithFetch(async (url, init) => {
-      requests.push({ url: String(url), init: init ?? {} });
+      requests.push({ url: requestUrl(url), init: init ?? {} });
       return jsonResponse({
         taskId: 'task_1',
         sessionId: 'session_1',
@@ -86,7 +90,7 @@ describe('commands', () => {
   it('routes sam chat with session to prompt endpoint', async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const runtime = runtimeWithFetch(async (url, init) => {
-      requests.push({ url: String(url), init: init ?? {} });
+      requests.push({ url: requestUrl(url), init: init ?? {} });
       return jsonResponse({ success: true }, 200);
     });
 
@@ -148,10 +152,7 @@ interface TestRuntime {
 
 function runtimeWithFetch(
   fetchFn: typeof fetch,
-  env: ConfigEnv = {
-    SAM_API_URL: 'https://api.example.com',
-    SAM_SESSION_COOKIE: 'cookie=value',
-  }
+  env: ConfigEnv = defaultEnv()
 ): TestRuntime {
   const output: string[] = [];
   const errors: string[] = [];
@@ -165,6 +166,19 @@ function runtimeWithFetch(
     },
     output,
   };
+}
+
+function defaultEnv(): ConfigEnv {
+  return {
+    SAM_API_URL: 'https://api.example.com',
+    SAM_SESSION_COOKIE: 'cookie=value',
+  };
+}
+
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
 }
 
 function jsonResponse(body: unknown, status: number): Response {
