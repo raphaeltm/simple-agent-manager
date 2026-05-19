@@ -8,14 +8,32 @@ Deploy your own Simple Agent Manager instance using GitHub Actions. **Deployment
 
 ## Prerequisites
 
-**Cloudflare Account** (free tier works):
+**Cloudflare Account**:
 - Account at [cloudflare.com](https://cloudflare.com)
-- Domain added to Cloudflare with nameservers configured
+- **Workers Paid plan** ($5/month) — required for Durable Objects. Go to **Workers & Pages** → upgrade to the Paid plan.
+- Domain added to Cloudflare with nameservers configured (see [Domain Setup](#domain-setup) below)
+- **Analytics Engine** enabled — Go to **Workers & Pages** → **Analytics Engine** → **Enable**
 - API token with required permissions
 
 **GitHub Repository**:
 - Fork of the Simple Agent Manager repository
 - Access to repository Environments configuration
+
+### Domain Setup
+
+SAM uses subdomains (`api.`, `app.`, `*.`) under your `BASE_DOMAIN`. Your domain must be added to Cloudflare with nameservers pointed to Cloudflare.
+
+1. Go to **Cloudflare Dashboard** → **Add a site** → enter your domain
+2. Cloudflare will show you two nameservers (e.g., `anna.ns.cloudflare.com`, `bob.ns.cloudflare.com`)
+3. Go to your domain registrar and replace the existing nameservers with the Cloudflare ones
+4. Wait for propagation (typically 1-2 hours, up to 24 hours)
+5. Cloudflare will show status as **Active** once propagation completes
+
+> **Important: Use a top-level domain as `BASE_DOMAIN`**, not a subdomain (e.g., use `example.com`, not `sam.example.com`). Cloudflare's free Universal SSL certificate covers `example.com` and `*.example.com` but does **not** cover nested wildcards like `*.sam.example.com`. Using a subdomain requires the Advanced Certificate Manager add-on ($10/month).
+>
+> If you want to keep your domain for other uses, the root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created. You can continue hosting other sites on the root domain.
+
+> **DNSSEC**: If your registrar has DNSSEC enabled, disable it **before** changing nameservers. DNSSEC with mismatched nameservers will block DNS resolution.
 
 ## One-Time Setup (Manual Steps)
 
@@ -49,7 +67,9 @@ Create a token with permissions for all Cloudflare resources.
 | Account - Workers R2 Storage | Edit |
 | Account - Workers Scripts | Edit |
 | Account - Cloudflare Pages | Edit |
+| Account - Containers | Edit |
 | Zone - DNS | Edit |
+| Zone - SSL and Certificates | Edit |
 | Zone - Workers Routes | Edit |
 | Zone - Zone | Read |
 
@@ -102,6 +122,7 @@ Add these **Environment secrets**:
 | `GH_APP_ID` | GitHub App ID |
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
+| `GH_WEBHOOK_SECRET` | GitHub webhook secret (see Step 7) |
 
 > **Naming Convention**: GitHub secrets use `GH_*` prefix because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
 
@@ -189,14 +210,16 @@ To remove all deployed resources:
 
 SAM requires a GitHub OAuth App (for login) and a GitHub App (for repository access).
 
+> **Important**: All URLs below use your `BASE_DOMAIN`. If your `BASE_DOMAIN` is `example.com`, the URLs will be `https://app.example.com` and `https://api.example.com`. Make sure these match exactly — a mismatch (e.g., using a subdomain you later changed) will cause OAuth redirect errors.
+
 ### Create GitHub OAuth App
 
 1. Go to **GitHub Settings** → **Developer settings** → **OAuth Apps**
 2. Click **"New OAuth App"**
 3. Configure:
    - **Application name**: `Simple Agent Manager`
-   - **Homepage URL**: `https://app.YOUR_DOMAIN.com`
-   - **Authorization callback URL**: `https://api.YOUR_DOMAIN.com/api/auth/callback/github`
+   - **Homepage URL**: `https://app.YOUR_DOMAIN`
+   - **Authorization callback URL**: `https://api.YOUR_DOMAIN/api/auth/callback/github`
 4. Click **Register application**
 5. Note the **Client ID**
 6. Click **Generate a new client secret** and save it
@@ -206,19 +229,30 @@ SAM requires a GitHub OAuth App (for login) and a GitHub App (for repository acc
 1. Go to **GitHub Settings** → **Developer settings** → **GitHub Apps**
 2. Click **"New GitHub App"**
 3. Configure:
-   - **Name**: `Simple Agent Manager - YourOrg`
-   - **Homepage URL**: `https://app.YOUR_DOMAIN.com`
-   - **Callback URL**: `https://api.YOUR_DOMAIN.com/api/github/callback`
-   - **Webhook URL**: `https://api.YOUR_DOMAIN.com/api/github/webhook`
+   - **Name**: `Simple Agent Manager - YourName` (must be globally unique on GitHub)
+   - **Homepage URL**: `https://app.YOUR_DOMAIN`
+   - **Callback URL**: `https://api.YOUR_DOMAIN/api/github/callback`
+   - **Webhook URL**: `https://api.YOUR_DOMAIN/api/github/webhook`
    - **Repository permissions**: Contents (Read-only), Metadata (Read-only)
 4. Create the app and note:
    - **App ID** (number at top of page)
-   - **App slug** (the URL-friendly name, e.g., `simple-agent-manager-yourorg`)
+   - **App slug** (visible in the URL: `https://github.com/settings/apps/<slug>`)
 5. Generate a **Private Key** (downloads .pem file)
 6. Base64 encode the private key:
    ```bash
-   cat your-key.pem | base64 -w0
+   cat your-key.pem | base64 -w0    # Linux
+   cat your-key.pem | base64        # macOS
    ```
+
+### Generate Webhook Secret
+
+Generate a secret for verifying GitHub webhook signatures:
+
+```bash
+openssl rand -hex 20
+```
+
+Add this value as `GH_WEBHOOK_SECRET` in your GitHub Environment secrets **and** paste the same value in your GitHub App's **Webhook secret** field (GitHub App settings page → Webhook → Secret).
 
 Add all these values to your GitHub Environment secrets (see Step 6 above).
 
@@ -252,11 +286,53 @@ dig api.example.com
 dig app.example.com
 ```
 
+### Origin CA Certificate Error (1016)
+
+**Error**: `POST "https://api.cloudflare.com/client/v4/certificates": 401 Unauthorized, code 1016`
+
+**Solution**: Your API token is missing the **Zone - SSL and Certificates - Edit** permission. Edit the token in Cloudflare and add it.
+
+### Analytics Engine Not Enabled (10089)
+
+**Error**: `You need to enable Analytics Engine`
+
+**Solution**: Go to **Workers & Pages** → **Analytics Engine** → **Enable**. This is free.
+
+### Durable Objects Free Plan Error (10097)
+
+**Error**: `In order to use Durable Objects with a free plan, you must create a namespace using a new_sqlite_classes migration`
+
+**Solution**: Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → upgrade plan.
+
+### Containers Forbidden
+
+**Error**: `ApiError: Forbidden` on `/containers/me`
+
+**Solution**: Your API token is missing the **Account - Containers - Edit** permission. Edit the token and add it.
+
 ### Permission Denied
 
 **Error**: `error: Cloudflare API error`
 
-**Solution**: Verify your CF_API_TOKEN has all required permissions listed in Step 3.
+**Solution**: Verify your CF_API_TOKEN has all required permissions listed in Step 2.
+
+### SSL Handshake Failure
+
+**Error**: `sslv3 alert handshake failure` when accessing `api.YOUR_DOMAIN`
+
+**Solution**: If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead.
+
+### OAuth Redirect URI Mismatch
+
+**Error**: `The redirect_uri is not associated with this application` on GitHub login
+
+**Solution**: The callback URLs in your GitHub OAuth App and GitHub App must match your `BASE_DOMAIN` exactly. If you changed `BASE_DOMAIN`, update the URLs in both GitHub apps.
+
+### DNS Record Already Exists
+
+**Error**: `An A, AAAA, or CNAME record with that host already exists`
+
+**Solution**: If you changed `BASE_DOMAIN`, old DNS records from the previous deployment may conflict. Go to Cloudflare DNS and delete the stale `api`, `app`, and `*` records created by the previous deploy, then re-run.
 
 ### Resource Already Exists
 
@@ -292,6 +368,7 @@ Pulumi tracks state and handles existing resources. If you see conflicts:
 | `GH_APP_ID` | GitHub App ID |
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
+| `GH_WEBHOOK_SECRET` | Webhook signature verification secret |
 
 ### Auto-Generated Secrets
 
