@@ -25,7 +25,7 @@ SAM should support Amp as a first-class agent. Amp does not currently expose an 
 - [x] Update web UI tests so Amp renders from the catalog as an API-key agent with no OAuth copy.
 - [x] Run focused shared, API, VM agent, and web tests.
 - [x] Run required quality gates.
-- [ ] Complete specialist reviews for VM agent, API/Cloudflare, credentials/security/env, UI, tests, and task completion.
+- [x] Complete specialist reviews for VM agent, API/Cloudflare, credentials/security/env, UI, tests, documentation sync, and task completion.
 - [ ] Deploy to staging and verify where possible. If valid Amp credentials are missing, follow the missing-credentials blocker policy and do not merge.
 
 ## Acceptance Criteria
