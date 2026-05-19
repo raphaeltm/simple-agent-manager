@@ -4,11 +4,10 @@
  * - AgentProviderMode validation in agent settings schema
  * - Agent catalog configured status with providerMode
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   VALID_AGENT_PROVIDER_MODES,
 } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { validateBudgetUpdate } from '../../src/services/ai-token-budget';
