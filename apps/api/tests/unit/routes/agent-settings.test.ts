@@ -309,6 +309,36 @@ describe('Agent Settings Routes', () => {
       expect(body.permissionMode).toBeNull();
     });
 
+    it('should accept Gemini CLI model and permission settings', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      mockDB.limit.mockResolvedValueOnce([{
+        id: 'test-ulid',
+        userId: 'test-user-id',
+        agentType: 'google-gemini',
+        model: 'gemini-2.5-pro',
+        permissionMode: 'acceptEdits',
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider: null,
+        opencodeBaseUrl: null,
+        opencodeProviderName: null,
+        createdAt: new Date('2026-05-19T00:00:00Z'),
+        updatedAt: new Date('2026-05-19T00:00:00Z'),
+      }]);
+
+      const res = await putSettings('google-gemini', {
+        model: 'gemini-2.5-pro',
+        permissionMode: 'acceptEdits',
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.agentType).toBe('google-gemini');
+      expect(body.model).toBe('gemini-2.5-pro');
+      expect(body.permissionMode).toBe('acceptEdits');
+    });
+
     it('should reject invalid agent type', async () => {
       const res = await putSettings('not-real', { model: 'test' });
 
