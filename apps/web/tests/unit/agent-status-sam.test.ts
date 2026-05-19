@@ -1,9 +1,8 @@
 /**
  * Tests for getAgentConnectionSummary with platform-sam fallback.
  */
-import { describe, expect, it } from 'vitest';
-
 import type { AgentInfo } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 import { getAgentConnectionSummary } from '../../src/lib/agent-status';
 
