@@ -7,7 +7,7 @@ export interface CardProps extends ComponentPropsWithoutRef<'div'> {
 
 const variantClasses: Record<NonNullable<CardProps['variant']>, string> = {
   default: 'bg-surface border border-border-default',
-  glass: 'glass-surface glass-card-glow sam-glass-card-motion',
+  glass: 'glass-surface',
 };
 
 export function Card({ children, className = '', variant = 'default', ...props }: CardProps) {
