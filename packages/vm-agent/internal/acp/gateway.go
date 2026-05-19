@@ -1017,9 +1017,21 @@ func sanitizeVibeModelAlias(alias string) string {
 	return alias
 }
 
+// vibeBuiltinAliases lists the aliases that are always defined in the
+// generated config. If the user selects one of these, no extra entry is needed.
+var vibeBuiltinAliases = map[string]bool{
+	"mistral-large": true,
+	"devstral-2":    true,
+	"codestral":     true,
+}
+
 // generateVibeConfig produces a TOML config for ~/.vibe/config.toml that
 // defines model aliases so users can select models beyond the built-in
-// devstral-2 default. The activeModel parameter sets which alias is active.
+// defaults. The activeModel parameter sets which alias is active.
+// If activeModel doesn't match a built-in alias, a dynamic [[models]] entry
+// is generated using the value as both the alias and the Mistral API model name.
+// This allows the UI model catalog to use raw Mistral API IDs without needing
+// vm-agent changes when new models are released.
 // If mcpServers is provided, it includes MCP server configurations for tool discovery.
 func generateVibeConfig(activeModel string, mcpServers []McpServerEntry) string {
 	activeModel = sanitizeVibeModelAlias(activeModel)
@@ -1050,6 +1062,21 @@ provider = "mistral"
 alias = "codestral"
 temperature = 0.2
 `, activeModel)
+
+	// If the active model isn't a built-in alias, generate a dynamic entry
+	// using the model ID as both alias and API name. This lets the UI catalog
+	// list raw Mistral API model IDs (e.g. "mistral-medium-3-5-2604") without
+	// requiring vm-agent updates for each new model.
+	if activeModel != vibeDefaultActiveModel && !vibeBuiltinAliases[activeModel] {
+		config += fmt.Sprintf(`
+# Dynamic model entry (from SAM user settings)
+[[models]]
+name = "%s"
+provider = "mistral"
+alias = "%s"
+temperature = 0.2
+`, activeModel, activeModel)
+	}
 
 	// Append MCP server configurations if provided
 	for i, server := range mcpServers {

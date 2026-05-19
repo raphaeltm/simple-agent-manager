@@ -453,7 +453,7 @@ func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
 	}
 }
 
-func TestGenerateVibeConfig_CustomModel(t *testing.T) {
+func TestGenerateVibeConfig_BuiltinAlias(t *testing.T) {
 	t.Parallel()
 
 	config := generateVibeConfig("devstral-2", nil)
@@ -465,6 +465,31 @@ func TestGenerateVibeConfig_CustomModel(t *testing.T) {
 		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
 			t.Errorf("missing model alias %q when active model is devstral-2", alias)
 		}
+	}
+	// Builtin alias should NOT generate an extra [[models]] entry
+	if count := strings.Count(config, "[[models]]"); count != 3 {
+		t.Errorf("expected 3 [[models]] entries for builtin alias, got %d", count)
+	}
+}
+
+func TestGenerateVibeConfig_DynamicModel(t *testing.T) {
+	t.Parallel()
+
+	// A raw Mistral API model ID should generate a dynamic [[models]] entry
+	config := generateVibeConfig("mistral-medium-3-5-2604", nil)
+	if !strings.Contains(config, `active_model = "mistral-medium-3-5-2604"`) {
+		t.Errorf("expected active_model to be mistral-medium-3-5-2604, got:\n%s", config)
+	}
+	// Should have 4 entries: 3 builtins + 1 dynamic
+	if count := strings.Count(config, "[[models]]"); count != 4 {
+		t.Errorf("expected 4 [[models]] entries for dynamic model, got %d", count)
+	}
+	// Dynamic entry should use the model ID as both name and alias
+	if !strings.Contains(config, `name = "mistral-medium-3-5-2604"`) {
+		t.Errorf("dynamic entry missing name field")
+	}
+	if !strings.Contains(config, `alias = "mistral-medium-3-5-2604"`) {
+		t.Errorf("dynamic entry missing alias field")
 	}
 }
 

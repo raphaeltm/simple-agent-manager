@@ -89,31 +89,31 @@ const MISTRAL_MODELS: ModelGroup[] = [
   {
     label: 'Frontier (Latest)',
     models: [
-      { id: 'mistral-medium-3-5-26-04', name: 'Mistral Medium 3.5', group: 'Frontier (Latest)' },
-      { id: 'mistral-small-4-0-26-03', name: 'Mistral Small 4', group: 'Frontier (Latest)' },
-      { id: 'mistral-large-3-25-12', name: 'Mistral Large 3', group: 'Frontier (Latest)' },
-      { id: 'mistral-medium-3-1-25-08', name: 'Mistral Medium 3.1', group: 'Frontier (Latest)' },
+      { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5', group: 'Frontier (Latest)' },
+      { id: 'mistral-small-2603', name: 'Mistral Small 4', group: 'Frontier (Latest)' },
+      { id: 'mistral-large-2512', name: 'Mistral Large 3', group: 'Frontier (Latest)' },
+      { id: 'mistral-medium-2508', name: 'Mistral Medium 3.1', group: 'Frontier (Latest)' },
     ],
   },
   {
     label: 'Coding (Recommended)',
     models: [
-      { id: 'devstral-2-25-12', name: 'Devstral 2', group: 'Coding (Recommended)' },
-      { id: 'codestral-25-08', name: 'Codestral', group: 'Coding (Recommended)' },
+      { id: 'devstral-2-2512', name: 'Devstral 2', group: 'Coding (Recommended)' },
+      { id: 'codestral-2508', name: 'Codestral', group: 'Coding (Recommended)' },
     ],
   },
   {
     label: 'Reasoning',
     models: [
-      { id: 'magistral-medium-1-2-25-09', name: 'Magistral Medium 1.2', group: 'Reasoning' },
+      { id: 'magistral-medium-1-2-2509', name: 'Magistral Medium 1.2', group: 'Reasoning' },
     ],
   },
   {
     label: 'Edge / Efficient',
     models: [
-      { id: 'ministral-3-14b-25-12', name: 'Ministral 3 14B', group: 'Edge / Efficient' },
-      { id: 'ministral-3-8b-25-12', name: 'Ministral 3 8B', group: 'Edge / Efficient' },
-      { id: 'ministral-3-3b-25-12', name: 'Ministral 3 3B', group: 'Edge / Efficient' },
+      { id: 'ministral-3-14b-2512', name: 'Ministral 3 14B', group: 'Edge / Efficient' },
+      { id: 'ministral-3-8b-2512', name: 'Ministral 3 8B', group: 'Edge / Efficient' },
+      { id: 'ministral-3-3b-2512', name: 'Ministral 3 3B', group: 'Edge / Efficient' },
     ],
   },
 ];
