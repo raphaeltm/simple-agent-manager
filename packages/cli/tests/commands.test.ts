@@ -2,6 +2,25 @@ import { run } from '../src/commands.js';
 import type { ConfigEnv, Logger } from '../src/types.js';
 
 describe('commands', () => {
+  it('prints help when no command is provided', async () => {
+    const runtime = runtimeWithFetch(async () => jsonResponse({}, 200));
+
+    const exitCode = await run([], runtime);
+
+    expect(exitCode).toBe(0);
+    expect(runtime.output[0]).toContain('SAM CLI');
+    expect(runtime.output[0]).toContain('sam task submit');
+  });
+
+  it('returns a failure exit code for unknown commands', async () => {
+    const runtime = runtimeWithFetch(async () => jsonResponse({}, 200));
+
+    const exitCode = await run(['nope'], runtime);
+
+    expect(exitCode).toBe(1);
+    expect(runtime.errors).toEqual(['Unknown command: nope']);
+  });
+
   it('prints auth status with a redacted cookie', async () => {
     const runtime = runtimeWithFetch(async () => jsonResponse({}, 200), {
       SAM_API_URL: 'https://api.example.com',
