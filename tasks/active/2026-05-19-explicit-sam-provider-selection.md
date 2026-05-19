@@ -26,29 +26,29 @@ This work also needs the minimum quota-aware enforcement required for SAM-provid
 
 ## Implementation Checklist
 
-- [ ] Add explicit provider mode to agent settings for Claude Code and Codex, with validation and migration.
-- [ ] Add provider-mode resolution helpers that preserve project/user credentials, passthrough proxy for user API keys, direct Claude Code OAuth injection, and SAM-only platform fallback.
-- [ ] Update `/api/agents` and frontend status helpers so Claude Code/Codex are configured only by credentials/OAuth or explicit `SAM` provider mode.
-- [ ] Update agent settings UI to select `SAM` for Claude Code and Codex and show quota/billing/free-tier allowance context.
-- [ ] Add admin AI allowance ceilings per user and enforce user self-limit updates against effective admin ceilings.
-- [ ] Add monthly USD cost cap enforcement for SAM-provider AI proxy traffic while preserving daily token caps.
-- [ ] Preserve AI Gateway attribution metadata for user/workspace/project traffic.
-- [ ] Add focused unit tests for provider-mode resolution, no-silent-fallback behavior, frontend availability, quota ceiling validation, and cost-cap enforcement.
+- [x] Add explicit provider mode to agent settings for Claude Code and Codex, with validation and migration.
+- [x] Add provider-mode resolution helpers that preserve project/user credentials, passthrough proxy for user API keys, direct Claude Code OAuth injection, and SAM-only platform fallback.
+- [x] Update `/api/agents` and frontend status helpers so Claude Code/Codex are configured only by credentials/OAuth or explicit `SAM` provider mode.
+- [x] Update agent settings UI to select `SAM` for Claude Code and Codex and show quota/billing/free-tier allowance context.
+- [x] Add admin AI allowance ceilings per user and enforce user self-limit updates against effective admin ceilings.
+- [x] Add monthly USD cost cap enforcement for SAM-provider AI proxy traffic while preserving daily token caps.
+- [x] Preserve AI Gateway attribution metadata for user/workspace/project traffic.
+- [x] Add focused unit tests for provider-mode resolution, no-silent-fallback behavior, frontend availability, quota ceiling validation, and cost-cap enforcement.
 - [ ] Add or run Playwright visual audit for the changed settings surface.
-- [ ] Update docs/self-hosting and recent changes for new setup expectations.
+- [x] Update docs/self-hosting and recent changes for new setup expectations.
 - [ ] Run specialist validation: env-validator, constitution-validator, security-auditor, doc-sync-validator, plus task-completion-validator and relevant UI/API reviewers.
 
 ## Acceptance Criteria
 
-- [ ] A brand-new user with no AI credentials does not see Claude Code/Codex as configured until they select SAM as provider.
-- [ ] After selecting SAM as provider, the user can start Claude Code and Codex sessions without provider credentials.
-- [ ] The session routes through SAM proxy using workspace callback token, not raw platform provider secrets in the workspace.
-- [ ] Claude Code OAuth credentials still bypass proxy and continue working.
-- [ ] User sees free-tier AI allowance and current usage before/after enabling SAM provider.
-- [ ] Admin can grant a higher AI allowance ceiling to a user.
-- [ ] User can set lower self-limits but cannot exceed the admin ceiling.
-- [ ] Monthly cost cap and daily token caps are enforced for SAM-provider AI proxy traffic.
-- [ ] Gateway usage remains attributable by user/workspace/project metadata.
+- [x] A brand-new user with no AI credentials does not see Claude Code/Codex as configured until they select SAM as provider.
+- [x] After selecting SAM as provider, the user can start Claude Code and Codex sessions without provider credentials.
+- [x] The session routes through SAM proxy using workspace callback token, not raw platform provider secrets in the workspace.
+- [x] Claude Code OAuth credentials still bypass proxy and continue working.
+- [x] User sees free-tier AI allowance and current usage before/after enabling SAM provider.
+- [x] Admin can grant a higher AI allowance ceiling to a user.
+- [x] User can set lower self-limits but cannot exceed the admin ceiling.
+- [x] Monthly cost cap and daily token caps are enforced for SAM-provider AI proxy traffic.
+- [x] Gateway usage remains attributable by user/workspace/project metadata.
 
 ## References
 
