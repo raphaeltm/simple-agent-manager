@@ -27,9 +27,9 @@ So SAM became chat-forward. The project page went from a bunch of tabs focused o
 
 File browsing, git diffs, attachments, agent output... all inside the chat. The workspace still exists underneath: every agent gets a full cloud VM on [Hetzner](https://www.hetzner.com/cloud/) running a [devcontainer](https://containers.dev/). But the workspace is infrastructure now, not interface. You tell the agent what you want, it does the work, you see the results in the conversation.
 
-Most users never visit the workspace directly. Which is kind of funny, because I put a lot of effort into the workspace view at the beginning.
+Most users will never visit the workspace directly. They'll never even realize it exists, because we deprioritized it. Which is kind of funny, because I put a lot of effort into the workspace view at the beginning.
 
-If the workspace is invisible, it needs to be fast. So we built [devcontainer image caching](https://github.com/raphaeltm/simple-agent-manager/pull/940) and warm node pooling so a new task can claim a VM that's already running from a previous task in the same project. Provisioning times vary wildly. A complex devcontainer can take twenty minutes to build; a simple one provisions in under a minute. The trend is toward making the wait disappear, but we're not there yet, and the numbers are still mostly vibes rather than accurate measurements. That's something I want to fix.
+If the workspace is invisible, it needs to be fast. So we built [devcontainer image caching](https://github.com/raphaeltm/simple-agent-manager/pull/940) and warm node pooling so a new task can claim a VM that's already running from a previous task in the same project. Provisioning times vary wildly. A complex devcontainer can take twenty minutes to build; a simple one provisions in under a minute. The workspaces still don't launch as fast as we need them to. Right now, machines get warmed up when a user starts working. With scale, we'll be able to keep machines ready before a user even claims them, and there are a bunch of other optimizations we can make. The trend is toward making the wait disappear, but we're not there yet.
 
 We also built a lightweight workspace profile. Still a devcontainer, but with a pre-specified base image that doesn't require a long build. I originally built this for brainstorming. I kept finding myself [talking through architecture with an agent](/blog/from-brainstorm-to-branch/), exploring how other projects solved a problem, poking at parts of the codebase I hadn't looked at in a while. Those conversations were productive, but they didn't need a full devcontainer build. They needed fast access to the repo.
 
@@ -59,7 +59,7 @@ Here's the thing you discover once agents are managing agents: the orchestrator 
 
 The orchestrator needs to think and delegate. It doesn't need Docker, doesn't need to build anything, doesn't need a test suite. It needs to start fast, read the codebase, reason about what to do, and dispatch. That's why the lightweight workspace ended up being perfect for orchestration. I built it for brainstorming, but the same properties (fast startup, repo access, no heavy build) are exactly what a coordinator needs.
 
-The code agent is the opposite. It needs a full dev environment, a powerful model, and you're OK waiting for it because the work it does justifies it.
+A coding agent that needs to run the full application, execute a test suite, or build a container is the opposite. It needs a full dev environment, a powerful model, and you're OK waiting for it because the work it does justifies it.
 
 But there's a third kind of work emerging. Coordination, research, and planning don't need a VM at all. We've been experimenting with a native harness: a minimal Go agent backed by models like [Gemma 4 26B](https://ai.google.dev/gemma) through [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/). It's early, but the goal is lightweight orchestration without a VM. We're also exploring [Cloudflare Containers](https://developers.cloudflare.com/containers/) for agents that need to clone a repo and run tools but don't need a full VM.
 
@@ -67,7 +67,7 @@ The general principle is broader than SAM. If you're building a system where age
 
 Match the runtime to the work.
 
-SAM runs Claude Code and Codex in full workspaces today. Per-project credential overrides let you use different API keys per project. Agent profiles define the model, permission mode, and workspace type. But the real goal, automatically matching compute resources to workload type, giving the orchestrator a container and the code agent a beefy VM... that's what we're building toward. We're not there yet.
+SAM supports Claude Code, Codex, OpenCode, Gemini CLI, and others in full workspaces today, with more agents in the works. Per-project credential overrides let you use different API keys per project. Agent profiles define the model, permission mode, and workspace type. But the real goal, automatically matching compute resources to workload type, giving the orchestrator a container and the coding agent a beefy VM... that's what we're building toward. We're not there yet.
 
 ## What's next
 
