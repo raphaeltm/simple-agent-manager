@@ -64,16 +64,15 @@ function getBudgetCounter(env: Env | undefined, userId: string) {
 }
 
 export function getAiBudgetLimits(env: Env): AiBudgetLimits {
-  const parse = (value: string | undefined, fallback: number, integer = false) => {
-    const parsed = integer ? parseInt(value || '', 10) : parseFloat(value || '');
-    return parsed || fallback;
-  };
-
   return {
-    maxDailyTokens: parse(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT, DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT, true),
-    minDailyTokens: parse(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT, DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT, true),
-    maxMonthlyCostCapUsd: parse(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD, DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD),
-    minMonthlyCostCapUsd: parse(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD, DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD),
+    maxDailyTokens: Number.parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10)
+      || DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
+    minDailyTokens: Number.parseInt(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT || '', 10)
+      || DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
+    maxMonthlyCostCapUsd: Number(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD)
+      || DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
+    minMonthlyCostCapUsd: Number(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD)
+      || DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
   };
 }
 
