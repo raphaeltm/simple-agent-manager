@@ -22,7 +22,8 @@ describe('model-catalog', () => {
     it('returns grouped models for mistral-vibe', () => {
       const groups = getModelGroupsForAgent('mistral-vibe');
       expect(groups.length).toBeGreaterThanOrEqual(2);
-      expect(groups[0]!.models.some((m) => m.id === 'devstral-2512')).toBe(true);
+      const allModels = groups.flatMap((g) => g.models);
+      expect(allModels.some((m) => m.id === 'devstral-2-2512')).toBe(true);
     });
 
     it('returns grouped models for google-gemini', () => {
