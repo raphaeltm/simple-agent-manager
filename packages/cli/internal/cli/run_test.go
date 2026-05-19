@@ -54,7 +54,6 @@ func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 		"tasks",
 		"dispatch",
 		"--agent=sam",
-		"--model=gemma-4",
 		"--mode=task",
 		"--workspace=lightweight",
 		"--prompt=manage idea 123",
@@ -67,11 +66,57 @@ func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 	if path != "https://api.example.com/api/projects/project_1/tasks/submit" {
 		t.Fatalf("path = %s", path)
 	}
-	if payload["message"] != "manage idea 123" || payload["agentType"] != "sam" || payload["model"] != "gemma-4" {
+	if payload["message"] != "manage idea 123" || payload["agentType"] != "sam" {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
 	if payload["taskMode"] != "task" || payload["workspaceProfile"] != "lightweight" {
 		t.Fatalf("unexpected task options: %#v", payload)
+	}
+}
+
+func TestTaskSubmitUsesPromptFlag(t *testing.T) {
+	var payload map[string]any
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		content, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(`{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted), nil
+	})
+	runtime, _, stderr := testRuntime(t, []string{
+		"--project=project_1",
+		"task",
+		"submit",
+		"--prompt=manage idea 123",
+	}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if payload["message"] != "manage idea 123" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestModelFlagFailsUntilAPIContractExists(t *testing.T) {
+	runtime, _, stderr := testRuntime(t, []string{
+		"--project=project_1",
+		"tasks",
+		"dispatch",
+		"--model=gemma-4",
+		"--prompt=manage idea 123",
+	}, nil, nil)
+
+	code := Run(context.Background(), runtime)
+	if code == 0 {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(stderr.String(), "current task submit API does not accept") {
+		t.Fatalf("stderr = %s", stderr.String())
 	}
 }
 

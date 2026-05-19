@@ -46,13 +46,14 @@ The forward-looking command vocabulary is `tasks dispatch`, scoped with `--proje
 ```bash
 sam --project 01PROJECTID tasks dispatch \
   --agent sam \
-  --model gemma-4 \
   --mode task \
   --workspace lightweight \
   --prompt "manage the development of idea 123DSFD8902"
 ```
 
 This calls `POST /api/projects/:projectId/tasks/submit`. Options map to fields that the current submit API already accepts. The CLI does not invent runner or harness behavior behind this command.
+
+`--model` is reserved for the command shape Raphaël described, but the current submit API does not accept a per-dispatch model field. For this slice, model selection should flow through `--agent-profile` until the server API supports an explicit model override.
 
 Compatibility command:
 

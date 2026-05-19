@@ -35,7 +35,6 @@ func (c APIClient) SubmitTask(ctx context.Context, projectID string, message str
 	addIfSet(body, "agentProfileId", options.AgentProfile)
 	addIfSet(body, "contextSummary", options.ContextSummary)
 	addIfSet(body, "devcontainerConfigName", options.Devcontainer)
-	addIfSet(body, "model", options.Model)
 	addIfSet(body, "nodeId", options.Node)
 	addIfSet(body, "parentTaskId", options.ParentTask)
 	addIfSet(body, "provider", options.Provider)

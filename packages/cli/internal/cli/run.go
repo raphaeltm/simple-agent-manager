@@ -115,10 +115,18 @@ func runTask(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 	}
 	switch action {
 	case "submit":
-		if len(rest) == 0 {
+		message := flagValue(parsed.Flags, "prompt")
+		if message == "" && len(rest) > 0 {
+			message = strings.Join(rest, " ")
+		}
+		if strings.TrimSpace(message) == "" {
 			return fail(runtime.Stderr, errors.New("task submit requires <message> or --prompt"))
 		}
-		return submitTask(ctx, runtime, parsed, projectID, strings.Join(rest, " "), parseSubmitOptions(parsed))
+		options, err := parseSubmitOptions(parsed)
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		return submitTask(ctx, runtime, parsed, projectID, message, options)
 	case "status":
 		if len(rest) != 1 {
 			return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
@@ -155,7 +163,11 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, errors.New("tasks dispatch requires --prompt or <prompt>"))
 	}
-	return submitTask(ctx, runtime, parsed, projectID, message, parseSubmitOptions(parsed))
+	options, err := parseSubmitOptions(parsed)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	return submitTask(ctx, runtime, parsed, projectID, message, options)
 }
 
 func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
@@ -181,7 +193,10 @@ func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 		}
 		return writeOrFail(runtime, parsed.Globals.JSON, "Prompt sent to session "+sessionID, response)
 	}
-	options := parseSubmitOptions(parsed)
+	options, err := parseSubmitOptions(parsed)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
 	options.Mode = "conversation"
 	return submitTask(ctx, runtime, parsed, projectID, message, options)
 }
@@ -215,21 +230,23 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 	return writeOrFail(runtime, parsed.Globals.JSON, formatSubmitResponse(response), response)
 }
 
-func parseSubmitOptions(parsed parsedArgs) TaskSubmitOptions {
+func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
+	if flagValue(parsed.Flags, "model") != "" {
+		return TaskSubmitOptions{}, errors.New("--model is reserved, but the current task submit API does not accept a per-dispatch model yet; use --agent-profile for configured model selection")
+	}
 	return TaskSubmitOptions{
 		Agent:          flagValue(parsed.Flags, "agent"),
 		AgentProfile:   flagValue(parsed.Flags, "agent-profile", "agent-profile-id"),
 		ContextSummary: flagValue(parsed.Flags, "context-summary"),
 		Devcontainer:   flagValue(parsed.Flags, "devcontainer-config", "devcontainer-config-name"),
 		Mode:           flagValue(parsed.Flags, "mode"),
-		Model:          flagValue(parsed.Flags, "model"),
 		Node:           flagValue(parsed.Flags, "node", "node-id"),
 		ParentTask:     flagValue(parsed.Flags, "parent-task", "parent-task-id"),
 		Provider:       flagValue(parsed.Flags, "provider"),
 		VMLocation:     flagValue(parsed.Flags, "vm-location"),
 		VMSize:         flagValue(parsed.Flags, "vm-size"),
 		Workspace:      flagValue(parsed.Flags, "workspace", "workspace-profile"),
-	}
+	}, nil
 }
 
 func authenticatedClient(runtime Runtime) (APIClient, error) {

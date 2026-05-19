@@ -64,7 +64,6 @@ type TaskSubmitOptions struct {
 	ContextSummary string
 	Devcontainer   string
 	Mode           string
-	Model          string
 	Node           string
 	ParentTask     string
 	Provider       string
