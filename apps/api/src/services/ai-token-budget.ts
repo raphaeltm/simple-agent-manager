@@ -36,6 +36,13 @@ interface AiTokenBudgetCounterStub extends DurableObjectStub {
   increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
 }
 
+export interface AiBudgetLimits {
+  maxDailyTokens: number;
+  minDailyTokens: number;
+  maxMonthlyCostCapUsd: number;
+  minMonthlyCostCapUsd: number;
+}
+
 function buildBudgetDateKey(date?: Date): string {
   const d = date ?? new Date();
   return d.toISOString().slice(0, 10);
@@ -60,36 +67,30 @@ function parseEnvNumber(value: string | undefined, fallback: number, parser: (ra
   return parser(value || '') || fallback;
 }
 
-export function getMaxDailyTokenLimit(env: Env): number {
-  return parseEnvNumber(
-    env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-    DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-    (raw) => parseInt(raw, 10),
-  );
-}
-
-export function getMinDailyTokenLimit(env: Env): number {
-  return parseEnvNumber(
-    env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-    DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-    (raw) => parseInt(raw, 10),
-  );
-}
-
-export function getMaxMonthlyCostCapUsd(env: Env): number {
-  return parseEnvNumber(
-    env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-    DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-    parseFloat,
-  );
-}
-
-export function getMinMonthlyCostCapUsd(env: Env): number {
-  return parseEnvNumber(
-    env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
-    DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
-    parseFloat,
-  );
+export function getAiBudgetLimits(env: Env): AiBudgetLimits {
+  const parseInteger = (raw: string) => parseInt(raw, 10);
+  return {
+    maxDailyTokens: parseEnvNumber(
+      env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
+      DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
+      parseInteger,
+    ),
+    minDailyTokens: parseEnvNumber(
+      env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
+      DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
+      parseInteger,
+    ),
+    maxMonthlyCostCapUsd: parseEnvNumber(
+      env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
+      DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
+      parseFloat,
+    ),
+    minMonthlyCostCapUsd: parseEnvNumber(
+      env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
+      DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
+      parseFloat,
+    ),
+  };
 }
 
 /**
@@ -168,10 +169,12 @@ export function validateBudgetUpdate(
   adminAllowance?: AdminAiAllowance | null,
 ): UserAiBudgetSettings {
   const request = expectJsonRecord(body, 'usage.ai.budget');
-  const platformMaxDailyTokens = getMaxDailyTokenLimit(env);
-  const minDailyTokens = getMinDailyTokenLimit(env);
-  const platformMaxMonthlyCap = getMaxMonthlyCostCapUsd(env);
-  const minMonthlyCap = getMinMonthlyCostCapUsd(env);
+  const {
+    maxDailyTokens: platformMaxDailyTokens,
+    minDailyTokens,
+    maxMonthlyCostCapUsd: platformMaxMonthlyCap,
+    minMonthlyCostCapUsd: minMonthlyCap,
+  } = getAiBudgetLimits(env);
 
   // Admin ceilings take precedence over platform maximums when set
   const maxDailyInputTokens = adminAllowance?.maxDailyInputTokens ?? platformMaxDailyTokens;

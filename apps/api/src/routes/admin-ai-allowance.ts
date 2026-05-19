@@ -16,7 +16,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { getMaxDailyTokenLimit, getMaxMonthlyCostCapUsd } from '../services/ai-token-budget';
+import { getAiBudgetLimits } from '../services/ai-token-budget';
 
 const adminAiAllowanceRoutes = new Hono<{ Bindings: Env }>();
 
@@ -37,14 +37,12 @@ function resolveEffectiveCeiling(
   allowance: AdminAiAllowance | null,
   env: Env,
 ): AdminAiAllowanceResponse['effectiveCeiling'] {
-  const platformMaxInput = getMaxDailyTokenLimit(env);
-  const platformMaxOutput = platformMaxInput; // same default for both
-  const platformMaxMonthlyCap = getMaxMonthlyCostCapUsd(env);
+  const { maxDailyTokens, maxMonthlyCostCapUsd } = getAiBudgetLimits(env);
 
   return {
-    maxDailyInputTokens: allowance?.maxDailyInputTokens ?? platformMaxInput,
-    maxDailyOutputTokens: allowance?.maxDailyOutputTokens ?? platformMaxOutput,
-    maxMonthlyCostCapUsd: allowance?.maxMonthlyCostCapUsd ?? platformMaxMonthlyCap,
+    maxDailyInputTokens: allowance?.maxDailyInputTokens ?? maxDailyTokens,
+    maxDailyOutputTokens: allowance?.maxDailyOutputTokens ?? maxDailyTokens,
+    maxMonthlyCostCapUsd: allowance?.maxMonthlyCostCapUsd ?? maxMonthlyCostCapUsd,
   };
 }
 
@@ -88,9 +86,9 @@ function pickAllowanceValue<T extends keyof UpdateAdminAiAllowanceRequest>(
   existing: AdminAiAllowance | null,
   field: T,
 ): AdminAiAllowance[T] {
-  return (body[field] !== undefined
-    ? body[field] ?? null
-    : existing?.[field] ?? null) as AdminAiAllowance[T];
+  const incoming = body[field];
+  if (incoming !== undefined) return (incoming ?? null) as AdminAiAllowance[T];
+  return (existing?.[field] ?? null) as AdminAiAllowance[T];
 }
 
 function buildAllowance(
