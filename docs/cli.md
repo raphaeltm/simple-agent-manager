@@ -1,14 +1,15 @@
 # SAM CLI
 
-The SAM CLI is an MVP terminal client for existing SAM APIs. It is intentionally thin: commands authenticate with the same BetterAuth session cookie used by the web app and call the existing project task and chat routes.
+The SAM CLI is a Go command-line client for SAM's existing control-plane APIs. It is designed as the foundation for a broader terminal surface that can eventually cover most app navigation actions while keeping remote SAM execution, local runner setup, and local harness execution distinct.
 
-This first slice does not add personal access tokens, OAuth device flow, local harness execution, or MCP client behavior. Those are intended follow-ups once the terminal workflows are proven.
+The implemented commands authenticate with the same BetterAuth session cookie used by the web app and call existing project task and chat routes. Personal access tokens, OAuth device flow, local harness execution, runner installation, and runner registration are not implemented in this slice.
 
-## Install From The Workspace
+## Build From The Workspace
 
 ```bash
-pnpm --filter @simple-agent-manager/cli build
-pnpm --filter @simple-agent-manager/cli exec sam --help
+cd packages/cli
+go test ./...
+go build -o bin/sam ./cmd/sam
 ```
 
 ## Auth
@@ -21,8 +22,7 @@ printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \
   --session-cookie-stdin
 ```
 
-`--session-cookie-stdin` avoids putting the cookie in shell history. `--session-cookie`
-is also available for local throwaway sessions.
+`--session-cookie-stdin` avoids putting the cookie in shell history. `--session-cookie` is also available for local throwaway sessions.
 
 The CLI writes `config.json` under `$SAM_CONFIG_DIR`, `$XDG_CONFIG_HOME/sam`, or `~/.config/sam` with file mode `0600` where the platform allows it. Normal status output redacts the cookie:
 
@@ -37,29 +37,35 @@ export SAM_API_URL=https://api.example.com
 export SAM_SESSION_COOKIE='better-auth.session_token=...'
 ```
 
-`SAM_SESSION_COOKIE` requires `SAM_API_URL`. `SAM_API_URL` by itself does not replace
-the stored config file.
+`SAM_SESSION_COOKIE` requires `SAM_API_URL`. `SAM_API_URL` by itself does not replace the stored config file.
 
-## Submit A Task
+## Dispatch A Task
+
+The forward-looking command vocabulary is `tasks dispatch`, scoped with `--project`:
+
+```bash
+sam --project 01PROJECTID tasks dispatch \
+  --agent sam \
+  --model gemma-4 \
+  --mode task \
+  --workspace lightweight \
+  --prompt "manage the development of idea 123DSFD8902"
+```
+
+This calls `POST /api/projects/:projectId/tasks/submit`. Options map to fields that the current submit API already accepts. The CLI does not invent runner or harness behavior behind this command.
+
+Compatibility command:
 
 ```bash
 sam task submit 01PROJECTID "Add a README section for the CLI"
-```
-
-Useful options map to the existing task submit request in `apps/api/src/routes/tasks/submit.ts`:
-
-```bash
-sam task submit 01PROJECTID "Run the migration safety audit" \
-  --mode task \
-  --workspace-profile full \
-  --vm-size medium \
-  --provider hetzner
+sam --project 01PROJECTID task submit "Add a README section for the CLI"
 ```
 
 ## Check Task Status
 
 ```bash
 sam task status 01PROJECTID 01TASKID
+sam --project 01PROJECTID task status 01TASKID
 ```
 
 The command reads `GET /api/projects/:projectId/tasks/:taskId` and prints status, execution step, output branch, PR URL, finalization time, and any error message.
@@ -69,23 +75,47 @@ The command reads `GET /api/projects/:projectId/tasks/:taskId` and prints status
 Start a conversation-mode run:
 
 ```bash
-sam chat 01PROJECTID "Can you inspect the failing tests?"
+sam --project 01PROJECTID chat "Can you inspect the failing tests?"
 ```
 
 Send a follow-up prompt to an existing session:
 
 ```bash
-sam chat 01PROJECTID "Try the smaller repro first" --session 01SESSIONID
+sam --project 01PROJECTID chat --session 01SESSIONID "Try the smaller repro first"
 ```
 
 `sam chat` without `--session` submits through `POST /api/projects/:projectId/tasks/submit` with `taskMode: "conversation"`. `sam chat --session` calls `POST /api/projects/:projectId/sessions/:sessionId/prompt`.
+
+## Runner Preflight
+
+`runner doctor` is a read-only host preflight for future user-registered SAM runners:
+
+```bash
+sam runner doctor
+```
+
+It checks the OS, architecture, Docker CLI, Docker daemon, systemd availability, and whether `vm-agent` is already on `PATH`. It does not install packages, register the machine, create a node, or write service files.
+
+The following commands are reserved but intentionally fail until their API and credential lifecycle contracts exist:
+
+```bash
+sam runner install
+sam runner register
+```
+
+## Harness Roadmap
+
+The Go CLI is intentionally compatible with future native harness integration, but local harness execution is not implemented yet. The `sam harness` namespace is reserved and currently reports planned-command messaging instead of pretending the feature works.
+
+Remote task dispatch and local harness execution should remain explicit command paths.
 
 ## Machine-Readable Output
 
 Add `--json` to commands that return structured data:
 
 ```bash
-sam task status 01PROJECTID 01TASKID --json
+sam --project 01PROJECTID task status 01TASKID --json
+sam runner doctor --json
 ```
 
 ## Security Notes
@@ -93,4 +123,5 @@ sam task status 01PROJECTID 01TASKID --json
 - Treat the session cookie as a bearer secret.
 - Prefer environment variables for ephemeral automation.
 - Do not commit CLI config files.
-- This MVP reuses web session auth. A future PAT or device-flow implementation should have a lifecycle designed for long-lived CLI use.
+- This CLI reuses web session auth. A future PAT or device-flow implementation should have a lifecycle designed for long-lived CLI use.
+- Runner registration will need a real node credential and callback-token renewal design before it is safe to ship.

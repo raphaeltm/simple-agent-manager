@@ -61,19 +61,19 @@ Harness support should be reserved under `sam harness`, but deferred from this f
 
 ## Implementation Checklist
 
-- [ ] Replace the TypeScript CLI implementation in `packages/cli` with a Go module and `cmd/sam` entrypoint while keeping the package path stable.
-- [ ] Preserve existing auth config behavior: `SAM_API_URL`, `SAM_SESSION_COOKIE`, `SAM_CONFIG_DIR`, `XDG_CONFIG_HOME`, `~/.config/sam/config.json`, session cookie stdin, restrictive config file permissions, and redacted status output.
-- [ ] Preserve existing API client behavior for task submit/status, chat submit, and session prompt follow-up.
-- [ ] Add global `--project` support so project-scoped commands can accept the project once instead of repeating it positionally.
-- [ ] Add `tasks dispatch` as the forward-looking task submission command with flags for `--agent`, `--agent-profile`, `--model`, `--mode`, `--workspace`, `--vm-size`, `--vm-location`, `--provider`, `--node`, `--parent-task`, `--context-summary`, `--devcontainer-config`, and `--prompt`.
-- [ ] Keep `task submit`, `task status`, and `chat` compatibility commands so existing users do not lose the MVP workflow.
-- [ ] Add `runner doctor` as a non-mutating host preflight command that reports OS, architecture, Docker CLI availability, Docker daemon availability, systemd availability, and installed `vm-agent` presence.
-- [ ] Make `runner install`, `runner register`, and `harness` commands fail clearly with planned-command messaging instead of silently succeeding.
-- [ ] Provide machine-readable `--json` output for commands that currently expose structured data and for `runner doctor`.
-- [ ] Port focused tests from the TypeScript CLI to Go tests, covering config, redaction, argument routing, request payload construction, error formatting, and runner doctor dependency injection.
-- [ ] Update `docs/cli.md` to describe the Go CLI, command model, compatibility aliases, runner roadmap, and harness roadmap without claiming unimplemented behavior.
-- [ ] Update CI/workflow configuration if needed so Go CLI tests run when `packages/cli/**` changes.
-- [ ] Remove TypeScript CLI build/test/lint artifacts that no longer apply and update lock/workspace metadata accordingly.
+- [x] Replace the TypeScript CLI implementation in `packages/cli` with a Go module and `cmd/sam` entrypoint while keeping the package path stable.
+- [x] Preserve existing auth config behavior: `SAM_API_URL`, `SAM_SESSION_COOKIE`, `SAM_CONFIG_DIR`, `XDG_CONFIG_HOME`, `~/.config/sam/config.json`, session cookie stdin, restrictive config file permissions, and redacted status output.
+- [x] Preserve existing API client behavior for task submit/status, chat submit, and session prompt follow-up.
+- [x] Add global `--project` support so project-scoped commands can accept the project once instead of repeating it positionally.
+- [x] Add `tasks dispatch` as the forward-looking task submission command with flags for `--agent`, `--agent-profile`, `--model`, `--mode`, `--workspace`, `--vm-size`, `--vm-location`, `--provider`, `--node`, `--parent-task`, `--context-summary`, `--devcontainer-config`, and `--prompt`.
+- [x] Keep `task submit`, `task status`, and `chat` compatibility commands so existing users do not lose the MVP workflow.
+- [x] Add `runner doctor` as a non-mutating host preflight command that reports OS, architecture, Docker CLI availability, Docker daemon availability, systemd availability, and installed `vm-agent` presence.
+- [x] Make `runner install`, `runner register`, and `harness` commands fail clearly with planned-command messaging instead of silently succeeding.
+- [x] Provide machine-readable `--json` output for commands that currently expose structured data and for `runner doctor`.
+- [x] Port focused tests from the TypeScript CLI to Go tests, covering config, redaction, argument routing, request payload construction, error formatting, and runner doctor dependency injection.
+- [x] Update `docs/cli.md` to describe the Go CLI, command model, compatibility aliases, runner roadmap, and harness roadmap without claiming unimplemented behavior.
+- [x] Update CI/workflow configuration if needed so Go CLI tests run when `packages/cli/**` changes.
+- [x] Remove TypeScript CLI build/test/lint artifacts that no longer apply and update lock/workspace metadata accordingly.
 - [ ] Run relevant validation: Go tests for CLI, repo lint/typecheck/test/build where applicable, and targeted documentation checks.
 - [ ] Run required specialist reviews before PR: task-completion-validator, go-specialist, security-auditor, doc-sync-validator, constitution-validator, and test-engineer.
 
