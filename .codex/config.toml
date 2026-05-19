@@ -3,9 +3,6 @@
 # Also load CLAUDE.md as a project doc (in addition to AGENTS.md)
 project_doc_fallback_filenames = ["CLAUDE.md"]
 
-[mcp_servers.cloudflare-observability]
-url = "https://observability.mcp.cloudflare.com/mcp"
-
 # ==============================================================================
 # Hooks — Test Quality Enforcement
 # ==============================================================================

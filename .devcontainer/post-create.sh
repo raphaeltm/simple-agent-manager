@@ -56,13 +56,9 @@ if ! claude mcp get cloudflare-observability >/dev/null 2>&1; then
 	try_run "Add CF Observability MCP (Claude)" claude mcp add --transport http cloudflare-observability "$CLOUDFLARE_OBSERVABILITY_MCP_URL"
 fi
 
-# Codex
-if ! codex mcp get cloudflare-observability >/dev/null 2>&1; then
-	try_run "Add CF Observability MCP (Codex)" codex mcp add cloudflare-observability --url "$CLOUDFLARE_OBSERVABILITY_MCP_URL"
-fi
-
-echo "Cloudflare Observability MCP configured (OAuth required per-user)."
-echo "If Codex isn't authenticated yet, run:"
+echo "Cloudflare Observability MCP configured for Claude Code (OAuth required per-user)."
+echo "Codex Observability MCP is opt-in after OAuth login. To enable it locally, run:"
+echo "  codex mcp add cloudflare-observability --url \"$CLOUDFLARE_OBSERVABILITY_MCP_URL\""
 echo "  codex mcp login cloudflare-observability"
 
 echo "=== Setting up Simple Agent Manager development environment ==="
