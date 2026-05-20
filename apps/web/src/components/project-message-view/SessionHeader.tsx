@@ -112,16 +112,19 @@ function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
   return workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full';
 }
 
-function WorkspaceProfileBadge({ workspace }: { workspace: WorkspaceResponse }) {
+const RECOVERY_CONTAINER_HELP = 'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
+
+function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceResponse }>) {
   const [open, setOpen] = useState(false);
   const tooltipId = useId();
   const isRecovery = workspace.status === 'recovery';
   const label = getWorkspaceProfileLabel(workspace);
+  const badgeClassName = 'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0';
 
   if (!isRecovery) {
     return (
       <span
-        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
+        className={badgeClassName}
         aria-label={`Workspace profile: ${label}`}
         style={{
           backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
@@ -133,14 +136,8 @@ function WorkspaceProfileBadge({ workspace }: { workspace: WorkspaceResponse }) 
     );
   }
 
-  const helpText = 'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
-
   return (
-    <span
-      className="relative inline-flex shrink-0"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <span className="relative inline-flex shrink-0">
       <button
         type="button"
         aria-label="Recovery container: devcontainer build failed"
@@ -148,7 +145,9 @@ function WorkspaceProfileBadge({ workspace }: { workspace: WorkspaceResponse }) 
         onClick={() => setOpen(true)}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border border-transparent shrink-0 cursor-help focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className={`${badgeClassName} border border-transparent cursor-help focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary`}
         style={{
           backgroundColor: 'var(--sam-color-warning-tint, rgba(245, 158, 11, 0.12))',
           color: 'var(--sam-color-warning, #f59e0b)',
@@ -168,7 +167,7 @@ function WorkspaceProfileBadge({ workspace }: { workspace: WorkspaceResponse }) 
             lineHeight: 'var(--sam-type-caption-line-height)',
           }}
         >
-          {helpText}
+          {RECOVERY_CONTAINER_HELP}
         </span>
       )}
     </span>
