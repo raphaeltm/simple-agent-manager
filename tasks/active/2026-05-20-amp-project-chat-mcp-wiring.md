@@ -34,9 +34,9 @@ This task is being handled through the `/do` workflow.
 - [x] Run required quality gates before PR.
 - [x] Complete required specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and go-specialist if VM Go changes are made.
 - [x] Deploy the PR branch to staging via `gh workflow run deploy-staging.yml --ref sam/use-command-workflow-handle-01ks2x`.
-- [ ] Verify staging on a fresh workspace/node with the primary staging smoke-test user and valid Amp credential.
+- [x] Verify staging on a fresh workspace/node with the primary staging smoke-test user and valid Amp credential.
 - [x] Add opt-in staging smoke verification for the live Amp project-chat SAM MCP run.
-- [ ] Collect PR evidence: staging deploy URL, timestamp, user/project/workspace/node/agent-session/chat-session IDs, summarized D1 state, debug-package log excerpts, and explicit SAM MCP tool-call evidence with no secret values.
+- [x] Collect PR evidence: staging deploy URL, timestamp, user/project/workspace/node/agent-session/chat-session IDs, summarized D1 state, debug-package log excerpts, and explicit SAM MCP tool-call evidence with no secret values.
 - [ ] Merge only if `/do`, CI, staging, credential, and project policies all allow it.
 
 ## Acceptance Criteria
@@ -78,6 +78,12 @@ This task is being handled through the `/do` workflow.
 - Live smoke rerun `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26175270000` deployed staging successfully but failed before Amp startup because fresh node provisioning hit `[hetzner] hetzner API error (403): server limit reached`. Staging D1 showed failed node `01KS33B83R2E0B3KXV4BQVC3PV` with no workspace row, plus three prior `Amp MCP` smoke nodes still `running` (`01KS3228074WXMY70CRJBZT008`, `01KS316NBNF2TEB54AJSBV90VN`, `01KS30Y2H7KRBYN9KZ9EGD8MFQ`). Classification: infrastructure capacity/cleanup failure, not an Amp MCP result.
 - Updated the live smoke verifier to delete stale `Amp MCP` smoke nodes before provisioning and to delete the created node in `finally`, so failed live runs do not consume staging provider capacity.
 - Post-cleanup validation passed: `pnpm typecheck`; local Playwright skipped-mode check (`1 skipped`).
+- Live smoke rerun `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26176083492` deployed the PR branch successfully at head SHA `7ebe7ff66301a622e9821e0b6cf86b1fe9b1a8dc`, then ran the opt-in Amp project-chat MCP smoke at `2026-05-20T16:41:27.825Z`.
+- Latest staging IDs: smoke user `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y`; project `01KK1D324YTB3TF5FCWAPDE3T0` (`CrewAI Org`, repo `tmp-srv-prs-org/crewai`); node `01KS346WTBRW38CXN03Q76RDFQ`; workspace `01KS346WZ38WERSA89EM1D8E1K`; chat session `64f5492b-e7b9-4472-bea3-f8b8059ac487`; agent session `01KS34HK46D7HBWKGZFNVTSEN7`.
+- Debug-package excerpts from the smoke evidence showed `MCP servers registered for agent session` with `count=1`, `SessionHost created` with `mcpServers=1`, `Agent binary not found in container, installing` for `acp-amp`, `Agent binary installed successfully`, `ACP agent process started`, `ACP: sending NewSession request`, and `ACP: NewSession succeeded` with `sessionID=amp-0`.
+- The same smoke evidence showed `ampToolNames=""`, `samMcpIndicators=""`, and persisted chat content `Error: Process exited with code 1`; it did not show an Amp API 401/403, missing credits, missing key, missing npm, or missing CLI error.
+- Classification: platform bug. SAM now supplies MCP config before ACP startup, but direct project-chat Amp did not call any SAM MCP tool and exited with code 1 after ACP `NewSession`; therefore the full Amp integration acceptance criteria are not met and the PR must not be merged.
+- Post-run D1 summary: querying the fresh node/workspace/agent-session IDs returned no rows after cleanup, and querying `Amp MCP %` nodes for the smoke user returned no rows, confirming the live smoke cleanup path removed the test resources.
 
 ## Specialist Review Notes
 
