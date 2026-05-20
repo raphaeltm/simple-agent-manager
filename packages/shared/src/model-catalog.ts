@@ -31,22 +31,16 @@ const CLAUDE_MODELS: ModelGroup[] = [
       { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', group: 'Claude 4 (Latest)' },
       { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', group: 'Claude 4 (Latest)' },
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', group: 'Claude 4 (Latest)' },
-      { id: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5', group: 'Claude 4 (Latest)' },
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', group: 'Claude 4 (Latest)' },
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', group: 'Claude 4 (Latest)' },
     ],
   },
   {
-    label: 'Claude 3.5 (Legacy)',
+    label: 'Claude 4 (Legacy)',
     models: [
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', group: 'Claude 3.5 (Legacy)' },
-      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', group: 'Claude 3.5 (Legacy)' },
-    ],
-  },
-  {
-    label: 'Claude 3 (Legacy)',
-    models: [
-      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', group: 'Claude 3 (Legacy)' },
+      { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', group: 'Claude 4 (Legacy)' },
+      { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1', group: 'Claude 4 (Legacy)' },
+      { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', group: 'Claude 4 (Legacy)' },
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4 (retiring Jun 15)', group: 'Claude 4 (Legacy)' },
     ],
   },
 ];
@@ -61,22 +55,34 @@ const CODEX_MODELS: ModelGroup[] = [
     models: [
       { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.5', name: 'GPT-5.5', group: 'GPT-5 (Latest)' },
+      { id: 'gpt-5.4-pro', name: 'GPT-5.4 Pro', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.4', name: 'GPT-5.4', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', group: 'GPT-5 (Latest)' },
+      { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.2', name: 'GPT-5.2', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', group: 'GPT-5 (Latest)' },
     ],
   },
   {
-    label: 'Legacy',
+    label: 'GPT-5 (Older)',
     models: [
-      { id: 'o4-mini', name: 'O4 Mini', group: 'Legacy' },
-      { id: 'o3', name: 'O3', group: 'Legacy' },
-      { id: 'gpt-4.1', name: 'GPT-4.1', group: 'Legacy' },
-      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', group: 'Legacy' },
+      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', group: 'GPT-5 (Older)' },
+      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', group: 'GPT-5 (Older)' },
+      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', group: 'GPT-5 (Older)' },
+      { id: 'gpt-5-mini', name: 'GPT-5 Mini', group: 'GPT-5 (Older)' },
+    ],
+  },
+  {
+    label: 'Reasoning',
+    models: [
+      { id: 'o4-mini', name: 'O4 Mini', group: 'Reasoning' },
+      { id: 'o3', name: 'O3', group: 'Reasoning' },
+    ],
+  },
+  {
+    label: 'GPT-4.1 (Legacy)',
+    models: [
+      { id: 'gpt-4.1', name: 'GPT-4.1', group: 'GPT-4.1 (Legacy)' },
+      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', group: 'GPT-4.1 (Legacy)' },
     ],
   },
 ];
