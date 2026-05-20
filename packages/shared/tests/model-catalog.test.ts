@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { PLATFORM_AI_MODELS } from '../src/constants/ai-services';
 import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../src/model-catalog';
 
 describe('model-catalog', () => {
@@ -51,6 +52,18 @@ describe('model-catalog', () => {
 
     it('returns empty array for unknown agent', () => {
       expect(getModelsForAgent('foo')).toEqual([]);
+    });
+  });
+
+  describe('cross-catalog invariant', () => {
+    it('every claude-code and openai-codex dropdown model has a PLATFORM_AI_MODELS entry', () => {
+      const platformIds = new Set(PLATFORM_AI_MODELS.map((m) => m.id));
+      for (const agentType of ['claude-code', 'openai-codex'] as const) {
+        const dropdown = getModelsForAgent(agentType);
+        for (const model of dropdown) {
+          expect(platformIds.has(model.id), `${agentType} dropdown model ${model.id} missing from PLATFORM_AI_MODELS`).toBe(true);
+        }
+      }
     });
   });
 
