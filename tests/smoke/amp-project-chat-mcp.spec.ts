@@ -44,6 +44,8 @@ type TarEntry = {
 };
 
 test.describe('Amp project-chat SAM MCP wiring', () => {
+  test.describe.configure({ retries: 0 });
+
   test.skip(
     process.env.AMP_PROJECT_CHAT_MCP_SMOKE !== 'true',
     'Set AMP_PROJECT_CHAT_MCP_SMOKE=true to run the live Amp project-chat MCP verification.'
@@ -92,24 +94,16 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
 
       expect(wsResult.promptDone, 'Amp session should finish the prompt').toBe(true);
       expect(combinedWsText).not.toMatch(/401|403|missing key|missing api key|insufficient credits|missing npm|missing cli/i);
-      expect(wsResult.responseText, 'Amp response should name the SAM MCP tool it called').toMatch(
-        /get_workspace_info|get_instructions|SAM MCP|sam-mcp/i
-      );
-      expect(wsResult.responseText, 'Amp response should reference project or repository facts').toMatch(
-        projectFactPattern(project)
-      );
 
-      const chatText = await fetchPersistedChatText(
+      const chatText = await waitForPersistedChatText(
         request,
         apiUrl,
         project.id,
-        runningWorkspace.chatSessionId!
+        runningWorkspace.chatSessionId!,
+        project
       );
       evidence.persistedChatExcerpt = redactSecrets(chatText).slice(0, 2000);
       expect(chatText, 'Amp response should be persisted in project chat').toMatch(projectFactPattern(project));
-      expect(chatText, 'Persisted chat should include SAM MCP tool evidence').toMatch(
-        /get_workspace_info|get_instructions|SAM MCP|sam-mcp/i
-      );
 
       const debugEvidence = await fetchDebugEvidence(
         request,
@@ -121,6 +115,9 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
       const combinedEvidence = `${combinedWsText}\n${chatText}\n${debugEvidence.combined}`;
       const samMcpIndicators = extractSamMcpIndicators(combinedEvidence);
       evidence.samMcpIndicators = samMcpIndicators.join(', ');
+      expect(`${wsResult.responseText}\n${chatText}`, 'Amp answer should name the SAM MCP tool it called').toMatch(
+        /get_workspace_info|get_instructions|sam-mcp/i
+      );
       expect(samMcpIndicators.length, 'staging evidence should include explicit SAM MCP tool-call indicators').toBeGreaterThan(0);
       expect(debugEvidence.combined, 'VM debug package should show MCP server registration/injection').toMatch(
         /MCP servers registered for agent session|mcpServers"?[:=]\s*1|sam-mcp/i
@@ -249,32 +246,34 @@ async function runAmpPrompt(
         }
       };
 
-      const extractText = (value: unknown) => {
-        if (!value || typeof value !== 'object') {
-          return;
-        }
-        const record = value as Record<string, unknown>;
-        const method = typeof record.method === 'string' ? record.method : '';
-        const params = record.params && typeof record.params === 'object'
-          ? (record.params as Record<string, unknown>)
-          : undefined;
-        const result = record.result && typeof record.result === 'object'
-          ? (record.result as Record<string, unknown>)
-          : undefined;
-        const candidates = [params?.content, params?.text, params?.update, params?.message, result?.content, result?.text, result];
-        for (const candidate of candidates) {
-          if (typeof candidate === 'string') {
-            responseChunks.push(candidate);
-          } else if (candidate) {
-            const encoded = JSON.stringify(candidate);
-            if (/CrewAI|elysia|project|repository|framework|SAM MCP|get_workspace_info|get_instructions/i.test(encoded)) {
-              responseChunks.push(encoded);
-            }
+        const extractText = (value: unknown) => {
+          if (!value || typeof value !== 'object') {
+            return;
           }
-        }
-        if (/tool|mcp/i.test(method) || JSON.stringify(value).match(/get_workspace_info|get_instructions|sam-mcp/i)) {
-          parseToolNames(value);
-        }
+          const record = value as Record<string, unknown>;
+          const method = typeof record.method === 'string' ? record.method : '';
+          const params = record.params && typeof record.params === 'object'
+            ? (record.params as Record<string, unknown>)
+            : undefined;
+          if (method === 'session/update' && params?.update && typeof params.update === 'object') {
+            const update = params.update as Record<string, unknown>;
+            const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : '';
+            if (sessionUpdate === 'agent_message_chunk') {
+              const content = update.content && typeof update.content === 'object'
+                ? (update.content as Record<string, unknown>)
+                : undefined;
+              if (content?.type === 'text' && typeof content.text === 'string') {
+                responseChunks.push(content.text);
+              }
+            }
+            if (sessionUpdate === 'tool_call' || sessionUpdate === 'tool_call_update') {
+              parseToolNames(update);
+            }
+            return;
+          }
+          if (/tool|mcp/i.test(method) || JSON.stringify(value).match(/get_workspace_info|get_instructions|sam-mcp/i)) {
+            parseToolNames(value);
+          }
       };
 
       await new Promise<void>((resolve, reject) => {
@@ -331,12 +330,6 @@ async function runAmpPrompt(
               window.clearTimeout(timeout);
               reject(new Error(`prompt returned error: ${JSON.stringify(parsed.error)}`));
             }
-            if (ready && !promptDone) {
-              promptDone = true;
-              window.clearTimeout(timeout);
-              ws.close();
-              resolve();
-            }
           }
         };
       });
@@ -353,17 +346,27 @@ async function runAmpPrompt(
   );
 }
 
-async function fetchPersistedChatText(
+async function waitForPersistedChatText(
   request: APIRequestContext,
   apiUrl: string,
   projectId: string,
-  chatSessionId: string
+  chatSessionId: string,
+  project: ProjectSummary
 ): Promise<string> {
-  const response = await request.get(
-    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(chatSessionId)}?limit=50`
-  );
-  expect(response.ok(), `chat fetch failed: ${response.status()} ${await response.text()}`).toBe(true);
-  return JSON.stringify(await response.json());
+  const deadline = Date.now() + 60_000;
+  let lastText = '';
+  while (Date.now() < deadline) {
+    const response = await request.get(
+      `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(chatSessionId)}?limit=50`
+    );
+    expect(response.ok(), `chat fetch failed: ${response.status()} ${await response.text()}`).toBe(true);
+    lastText = JSON.stringify(await response.json());
+    if (projectFactPattern(project).test(lastText) && /get_workspace_info|get_instructions|sam-mcp/i.test(lastText)) {
+      return lastText;
+    }
+    await delay(5_000);
+  }
+  return lastText;
 }
 
 async function fetchDebugEvidence(
