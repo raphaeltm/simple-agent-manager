@@ -1606,7 +1606,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     const errorBanner = screen.getByText('Node provisioning failed').closest('div');
     expect(errorBanner).toBeTruthy();
     expect(errorBanner!.className).toContain('glass-chrome');
-    expect(errorBanner!.className).toContain('glass-composited');
+    // glass-composited removed — its transform: translateZ(0) broke backdrop-filter blur
 
     // SessionHeader should have hasContentBelow (no rounded-b-2xl)
     const headerEl = container.querySelector('.glass-chrome.border-t-0');
