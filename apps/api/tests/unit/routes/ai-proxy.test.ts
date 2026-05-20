@@ -309,9 +309,9 @@ describe('PLATFORM_AI_MODELS catalog', () => {
     // Standard tier has at least Haiku and GPT-4.1
     expect(standardModels.length).toBeGreaterThanOrEqual(2);
 
-    // Premium tier has Opus and GPT-5.2
+    // Premium tier has Opus and GPT-5.5
     expect(premiumModels.some((m) => m.id === 'claude-opus-4-6')).toBe(true);
-    expect(premiumModels.some((m) => m.id === 'gpt-5.2')).toBe(true);
+    expect(premiumModels.some((m) => m.id === 'gpt-5.5')).toBe(true);
   });
 
   it('has exactly one default model', async () => {
