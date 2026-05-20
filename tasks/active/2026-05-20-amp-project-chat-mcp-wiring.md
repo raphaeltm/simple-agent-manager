@@ -22,16 +22,16 @@ This task is being handled through the `/do` workflow.
 
 ## Implementation Checklist
 
-- [ ] Re-read `.do-state.md` before each phase transition and keep it current.
-- [ ] Create a dedicated worktree for `sam/use-command-workflow-handle-01ks2x`.
-- [ ] Move this task file from `tasks/backlog/` to `tasks/active/` in the worktree.
+- [x] Re-read `.do-state.md` before each phase transition and keep it current.
+- [x] Create a dedicated worktree for `sam/use-command-workflow-handle-01ks2x`.
+- [x] Move this task file from `tasks/backlog/` to `tasks/active/` in the worktree.
 - [x] Add API/control-plane wiring so direct project-chat session creation mints a SAM MCP token and sends `https://api.<BASE_DOMAIN>/mcp` plus the token to the VM before ACP startup.
 - [x] Ensure the direct project-chat MCP token is scoped to the correct user, project, workspace, chat session, and agent session, and does not leak in logs.
 - [x] Extend VM agent create-session handling, if needed, so MCP config sent during session creation is validated, persisted, and available before WebSocket `select_agent` triggers ACP `NewSession`.
 - [x] Add focused API/control-plane coverage proving direct project-chat session creation supplies SAM MCP config.
 - [x] Add VM agent coverage proving create-session MCP config is persisted and later injected into the ACP host before `NewSession`, if the VM create endpoint changes.
 - [x] Run focused tests for the modified API and VM paths.
-- [ ] Run required quality gates before PR.
+- [x] Run required quality gates before PR.
 - [ ] Complete required specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and go-specialist if VM Go changes are made.
 - [ ] Deploy the PR branch to staging via `gh workflow run deploy-staging.yml --ref sam/use-command-workflow-handle-01ks2x`.
 - [ ] Verify staging on a fresh workspace/node with the primary staging smoke-test user and valid Amp credential.
@@ -55,6 +55,23 @@ This task is being handled through the `/do` workflow.
 - The session reaches a sane terminal state and is not left stuck `running`.
 - No Amp API 401/403, missing credits, missing CLI, missing npm, or missing key errors occur.
 - If staging fails, the PR classifies the failure as platform bug, external credential/credits issue, or infrastructure bug and does not merge unless policy permits.
+
+## Validation Notes
+
+- Focused API coverage passed after adding route-level wiring coverage: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/agent-sessions-mcp.test.ts tests/unit/node-agent-contract.test.ts tests/unit/routes/mcp.test.ts` (`266/266` passed).
+- API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
+- API lint passed with existing warnings only: `pnpm --filter @simple-agent-manager/api lint`.
+- Broader pre-review validation already completed: `pnpm lint`, `pnpm typecheck`, `pnpm build`, `go test ./...` in `packages/vm-agent`, and focused VM tests.
+- Full `pnpm test` completed but hit unrelated API timeout failures; the six failing files passed when rerun directly (`39/39` passed).
+
+## Specialist Review Notes
+
+- `$task-completion-validator`: PASS for implemented pre-staging scope. Research findings map to checklist items and diff coverage. Remaining staging acceptance criteria intentionally remain open until PR-branch staging verification.
+- `$security-auditor`: PASS. MCP token is opaque, scoped with user/project/workspace/chat/agent IDs, stored in KV with existing configurable TTL, and not logged. VM logs only workspace/session/count for MCP registration.
+- `$cloudflare-specialist`: PASS. Uses existing KV token lifecycle and D1 control-plane access patterns; no wrangler/manual deploy path introduced.
+- `$constitution-validator`: PASS. Internal MCP URL derives from `BASE_DOMAIN`; token TTL remains environment-configurable; no new hardcoded internal deployment URL or timeout/limit.
+- `$test-engineer`: PASS after adding route-level control-plane coverage. Tests now cover helper token metadata, route-to-node payload propagation, shared contract schema, MCP `get_instructions`, and VM MCP persistence.
+- `$go-specialist`: PASS. VM change is scoped to request decoding/validation/persistence, preserves auth gate, avoids token logging, and is covered by Go tests.
 
 ## References
 
