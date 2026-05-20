@@ -1,8 +1,8 @@
 import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -105,6 +105,74 @@ function formatAgentType(agentType: string): string {
 /** Human-readable task mode label. */
 function formatTaskMode(mode: string): string {
   return mode === 'conversation' ? 'Conversation' : 'Task';
+}
+
+function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
+  if (workspace.status === 'recovery') return 'Recovery container';
+  return workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full';
+}
+
+function WorkspaceProfileBadge({ workspace }: { workspace: WorkspaceResponse }) {
+  const [open, setOpen] = useState(false);
+  const tooltipId = useId();
+  const isRecovery = workspace.status === 'recovery';
+  const label = getWorkspaceProfileLabel(workspace);
+
+  if (!isRecovery) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
+        aria-label={`Workspace profile: ${label}`}
+        style={{
+          backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
+          color: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
+        }}
+      >
+        {label}
+      </span>
+    );
+  }
+
+  const helpText = 'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
+
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-label="Recovery container: devcontainer build failed"
+        aria-describedby={open ? tooltipId : undefined}
+        onClick={() => setOpen(true)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border border-transparent shrink-0 cursor-help focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
+        style={{
+          backgroundColor: 'var(--sam-color-warning-tint, rgba(245, 158, 11, 0.12))',
+          color: 'var(--sam-color-warning, #f59e0b)',
+          borderColor: 'color-mix(in srgb, var(--sam-color-warning, #f59e0b) 24%, transparent)',
+        }}
+      >
+        <AlertTriangle size={10} aria-hidden="true" />
+        {label}
+      </button>
+      {open && (
+        <span
+          id={tooltipId}
+          role="tooltip"
+          className="absolute right-0 top-full mt-1 w-[min(280px,calc(100vw-2rem))] rounded-sm glass-surface bg-[rgba(8,15,12,0.94)] px-3 py-2 text-left text-fg-primary shadow-tooltip z-dropdown whitespace-normal pointer-events-none"
+          style={{
+            fontSize: 'var(--sam-type-caption-size)',
+            lineHeight: 'var(--sam-type-caption-line-height)',
+          }}
+        >
+          {helpText}
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** Collapsible session header — shows title + state dot, with expandable details. */
@@ -220,19 +288,7 @@ export function SessionHeader({
           </span>
         )}
 
-        {/* Workspace profile badge — null/undefined defaults to 'Full' (matches DEFAULT_WORKSPACE_PROFILE) */}
-        {workspace && (
-          <span
-            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
-            aria-label={`Workspace profile: ${workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full'}`}
-            style={{
-              backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
-              color: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
-            }}
-          >
-            {workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full'}
-          </span>
-        )}
+        {workspace && <WorkspaceProfileBadge workspace={workspace} />}
 
         {/* Active port badges — shown inline in compact row */}
         {detectedPorts.length > 0 && (

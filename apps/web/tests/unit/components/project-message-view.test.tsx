@@ -999,6 +999,51 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
   });
 
+  it('shows a recovery container badge with explanatory hover and tap text', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-recovery',
+      name: 'recovery-ws',
+      status: 'recovery',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      workspaceProfile: 'full',
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-recovery', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-recovery', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-recovery" />);
+
+    const badge = await screen.findByRole('button', {
+      name: /recovery container: devcontainer build failed/i,
+    });
+    expect(screen.getByText('Recovery container')).toBeTruthy();
+    expect(screen.queryByText('Full')).toBeNull();
+
+    fireEvent.mouseEnter(badge);
+    expect(screen.getByRole('tooltip').textContent).toContain('Boot Logs');
+    expect(screen.getByRole('tooltip').textContent).toContain('fallback recovery container');
+
+    fireEvent.mouseLeave(badge);
+    await waitFor(() => {
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    });
+
+    fireEvent.click(badge);
+    expect(screen.getByRole('tooltip').textContent).toContain('devcontainer error output');
+  });
+
   it('does not show context section when workspace fetch fails', async () => {
     mocks.getWorkspace.mockRejectedValue(new Error('Not found'));
 
