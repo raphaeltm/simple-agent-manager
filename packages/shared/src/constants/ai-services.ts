@@ -445,7 +445,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     id: 'gpt-5.4-nano',
     label: 'GPT-5.4 Nano',
     provider: 'openai',
-    tier: 'low-cost',
+    tier: 'standard',
     costPer1kInputTokens: 0.0002,
     costPer1kOutputTokens: 0.00125,
     contextWindow: 400000,
