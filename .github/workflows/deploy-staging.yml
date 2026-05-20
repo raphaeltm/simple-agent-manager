@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      amp_project_chat_mcp_smoke:
+        description: 'Run the live Amp project-chat SAM MCP smoke test'
+        required: false
+        type: boolean
+        default: false
 
 # Only one staging deployment at a time; queue (don't cancel) concurrent requests
 concurrency:
@@ -39,6 +44,7 @@ jobs:
       SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
       SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
       SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+      AMP_PROJECT_CHAT_MCP_SMOKE: ${{ inputs.amp_project_chat_mcp_smoke && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 

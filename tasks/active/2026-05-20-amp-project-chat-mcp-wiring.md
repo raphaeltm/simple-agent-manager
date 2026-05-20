@@ -32,9 +32,10 @@ This task is being handled through the `/do` workflow.
 - [x] Add VM agent coverage proving create-session MCP config is persisted and later injected into the ACP host before `NewSession`, if the VM create endpoint changes.
 - [x] Run focused tests for the modified API and VM paths.
 - [x] Run required quality gates before PR.
-- [ ] Complete required specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and go-specialist if VM Go changes are made.
-- [ ] Deploy the PR branch to staging via `gh workflow run deploy-staging.yml --ref sam/use-command-workflow-handle-01ks2x`.
+- [x] Complete required specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and go-specialist if VM Go changes are made.
+- [x] Deploy the PR branch to staging via `gh workflow run deploy-staging.yml --ref sam/use-command-workflow-handle-01ks2x`.
 - [ ] Verify staging on a fresh workspace/node with the primary staging smoke-test user and valid Amp credential.
+- [x] Add opt-in staging smoke verification for the live Amp project-chat SAM MCP run.
 - [ ] Collect PR evidence: staging deploy URL, timestamp, user/project/workspace/node/agent-session/chat-session IDs, summarized D1 state, debug-package log excerpts, and explicit SAM MCP tool-call evidence with no secret values.
 - [ ] Merge only if `/do`, CI, staging, credential, and project policies all allow it.
 
@@ -63,6 +64,11 @@ This task is being handled through the `/do` workflow.
 - API lint passed with existing warnings only: `pnpm --filter @simple-agent-manager/api lint`.
 - Broader pre-review validation already completed: `pnpm lint`, `pnpm typecheck`, `pnpm build`, `go test ./...` in `packages/vm-agent`, and focused VM tests.
 - Full `pnpm test` completed but hit unrelated API timeout failures; the six failing files passed when rerun directly (`39/39` passed).
+- First PR-branch staging deploy passed through the normal pipeline: `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26171873932`, head SHA `4fb740477b4024f76d4183b2c2b0ce321df55387`.
+- Added opt-in live smoke test `tests/smoke/amp-project-chat-mcp.spec.ts`, enabled only with `AMP_PROJECT_CHAT_MCP_SMOKE=true`, plus `deploy-staging.yml` manual-dispatch input `amp_project_chat_mcp_smoke`.
+- Repo typecheck passed after adding the smoke verifier: `pnpm typecheck`.
+- Repo lint passed after adding the smoke verifier with existing warnings only: `pnpm lint`.
+- Local Playwright skipped-mode check passed via CLI script after mirroring the workflow's root Playwright symlink setup: `node node_modules/.pnpm/playwright@1.59.1/node_modules/playwright/cli.js test --config=tests/smoke/playwright.config.ts tests/smoke/amp-project-chat-mcp.spec.ts` (`1 skipped`).
 
 ## Specialist Review Notes
 
