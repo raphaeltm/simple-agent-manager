@@ -80,12 +80,7 @@ const anthropicResponseSchema = v.object({
 
 /** Check if a model ID is an OpenAI model (routed through AI Gateway /openai path). */
 function isOpenAIModel(modelId: string): boolean {
-  return (
-    modelId.startsWith('gpt-') ||
-    modelId.startsWith('o1-') ||
-    modelId.startsWith('o3') ||
-    modelId.startsWith('o4-')
-  );
+  return modelId.startsWith('gpt-') || modelId.startsWith('o1-') || modelId.startsWith('o3') || modelId.startsWith('o4-');
 }
 
 /** Determine the provider for a model ID. */
