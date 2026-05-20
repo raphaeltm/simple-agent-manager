@@ -297,7 +297,13 @@ func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType str
 }
 
 func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {
-	proxyConfig := codexProxyProviderConfigFromCredential(cred, h.config.CallbackToken)
+	// Skip proxy provider config when using auth-file injection (OAuth tokens).
+	// The auth-file path does not set OPENAI_API_KEY as an env var, so a proxy
+	// provider referencing env_key = "OPENAI_API_KEY" in config.toml would crash Codex.
+	var proxyConfig *codexProxyProviderConfig
+	if h.credInjectionMode != "auth-file" {
+		proxyConfig = codexProxyProviderConfigFromCredential(cred, h.config.CallbackToken)
+	}
 	codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig)
 	if err != nil {
 		slog.Warn("Failed to write Codex config.toml", "error", err, "workspaceId", h.config.WorkspaceID)
