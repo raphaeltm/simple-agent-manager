@@ -959,6 +959,13 @@ func codexProxyProviderConfigFromCredential(cred *agentCredential, callbackToken
 	if cred == nil || cred.inferenceConfig == nil {
 		return nil
 	}
+	// Auth-file credentials (OAuth tokens) use auth.json injection, not env-var-based
+	// proxy providers. Generating a proxy provider config here would produce a
+	// config.toml entry with env_key = "OPENAI_API_KEY" that is never set,
+	// causing Codex to crash immediately.
+	if cred.credentialKind == "oauth-token" {
+		return nil
+	}
 	if cred.inferenceConfig.Provider != "openai-proxy" && cred.inferenceConfig.Provider != "openai-passthrough" {
 		return nil
 	}
