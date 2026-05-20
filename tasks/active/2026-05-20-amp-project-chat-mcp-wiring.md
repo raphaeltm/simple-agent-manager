@@ -84,6 +84,11 @@ This task is being handled through the `/do` workflow.
 - The same smoke evidence showed `ampToolNames=""`, `samMcpIndicators=""`, and persisted chat content `Error: Process exited with code 1`; it did not show an Amp API 401/403, missing credits, missing key, missing npm, or missing CLI error.
 - Classification: platform bug. SAM now supplies MCP config before ACP startup, but direct project-chat Amp did not call any SAM MCP tool and exited with code 1 after ACP `NewSession`; therefore the full Amp integration acceptance criteria are not met and the PR must not be merged.
 - Post-run D1 summary: querying the fresh node/workspace/agent-session IDs returned no rows after cleanup, and querying `Amp MCP %` nodes for the smoke user returned no rows, confirming the live smoke cleanup path removed the test resources.
+- Current-head live smoke rerun `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26177181050` deployed staging successfully at head SHA `c10aebb7e57f3da67ce18979d98eb40ac499e69b`, then failed the opt-in Amp project-chat MCP smoke at `2026-05-20T17:02:17.230Z`.
+- Current-head staging IDs: smoke user `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y`; project `01KK1D324YTB3TF5FCWAPDE3T0` (`CrewAI Org`, repo `tmp-srv-prs-org/crewai`); node `01KS35D1AH5XK5XA15V3BY1W2K`; workspace `01KS35D1F913BNT134KRR04CYV`; chat session `be8e8cb3-b865-42b8-9a18-1b122cf013cc`; agent session `01KS35RM5JQ0G8YZHSKE0N28VH`.
+- Current-head debug-package excerpts again showed `MCP servers registered for agent session` with `count=1`, `SessionHost created` with `mcpServers=1`, `acp-amp` installed successfully, `ACP agent process started`, and `ACP: NewSession succeeded` with `sessionID=amp-0`.
+- Current-head failure evidence again showed `ampToolNames=""`, `samMcpIndicators=""`, and persisted chat content `Error: Process exited with code 1`. No Amp API 401/403, missing credits, missing key, missing npm, or missing CLI error was shown. The classification remains platform bug and the PR remains not mergeable.
+- Current-head post-run D1 summary: querying node `01KS35D1AH5XK5XA15V3BY1W2K`, workspace `01KS35D1F913BNT134KRR04CYV`, and agent session `01KS35RM5JQ0G8YZHSKE0N28VH` returned no rows after cleanup; querying `Amp MCP %` nodes for the smoke user also returned no rows.
 
 ## Specialist Review Notes
 
