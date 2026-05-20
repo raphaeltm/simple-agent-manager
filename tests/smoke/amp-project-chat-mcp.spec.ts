@@ -103,7 +103,6 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
         project
       );
       evidence.persistedChatExcerpt = redactSecrets(chatText).slice(0, 2000);
-      expect(chatText, 'Amp response should be persisted in project chat').toMatch(projectFactPattern(project));
 
       const debugEvidence = await fetchDebugEvidence(
         request,
@@ -115,6 +114,9 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
       const combinedEvidence = `${combinedWsText}\n${chatText}\n${debugEvidence.combined}`;
       const samMcpIndicators = extractSamMcpIndicators(combinedEvidence);
       evidence.samMcpIndicators = samMcpIndicators.join(', ');
+      console.log(`AMP_PROJECT_CHAT_MCP_EVIDENCE ${JSON.stringify(redactEvidence(evidence), null, 2)}`);
+
+      expect(chatText, 'Amp response should be persisted in project chat').toMatch(projectFactPattern(project));
       expect(`${wsResult.responseText}\n${chatText}`, 'Amp answer should name the SAM MCP tool it called').toMatch(
         /get_workspace_info|get_instructions|sam-mcp/i
       );
@@ -125,8 +127,6 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
       expect(debugEvidence.combined, 'VM debug package should show Amp bootstrap/runtime evidence').toMatch(
         /acp-amp|@sourcegraph\/amp|AMP_API_KEY/i
       );
-
-      console.log(`AMP_PROJECT_CHAT_MCP_EVIDENCE ${JSON.stringify(redactEvidence(evidence), null, 2)}`);
     } finally {
       if (agentSessionId) {
         await request
@@ -362,6 +362,9 @@ async function waitForPersistedChatText(
     expect(response.ok(), `chat fetch failed: ${response.status()} ${await response.text()}`).toBe(true);
     lastText = JSON.stringify(await response.json());
     if (projectFactPattern(project).test(lastText) && /get_workspace_info|get_instructions|sam-mcp/i.test(lastText)) {
+      return lastText;
+    }
+    if (/Process exited with code|401|403|missing key|missing api key|insufficient credits|missing npm|missing cli/i.test(lastText)) {
       return lastText;
     }
     await delay(5_000);

@@ -72,6 +72,9 @@ This task is being handled through the `/do` workflow.
 - Live smoke run `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26173064893` deployed staging successfully but failed in the verifier, before collecting debug evidence. The failure was a smoke-test instrumentation bug: the verifier asserted on WebSocket text that only contained `available_commands_update` plus the echoed `user_message_chunk`, not assistant/tool output.
 - Updated the live smoke verifier to parse ACP updates like the UI (`agent_message_chunk`, `tool_call`, `tool_call_update`), wait for `session_prompt_done`, poll persisted project chat for project facts plus exact SAM MCP tool indicators, disable retries for this expensive live test, and then check debug-package evidence.
 - Post-fix validation passed: `pnpm typecheck`; local Playwright skipped-mode check (`1 skipped`).
+- Live smoke rerun `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26174155779` deployed staging successfully but failed with persisted project-chat text `Error: Process exited with code 1` for fresh workspace `01KS322854PZR52GD2DHB82JED` and chat session `0dd6a1d3-d79c-4940-8427-6f5665126951`. The verifier still asserted before emitting debug-package evidence, so this failure is not yet classified as platform, external credential/credits, or infrastructure.
+- Updated the live smoke verifier again so it logs sanitized `AMP_PROJECT_CHAT_MCP_EVIDENCE` before assertions and returns early when persisted chat shows terminal Amp/bootstrap errors. The next PR-branch staging run should provide debug-package evidence needed to classify the Amp exit.
+- Post-update validation passed: `pnpm typecheck`; local Playwright skipped-mode check (`1 skipped`).
 
 ## Specialist Review Notes
 
