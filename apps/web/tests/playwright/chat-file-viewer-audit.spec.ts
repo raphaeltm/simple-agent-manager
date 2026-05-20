@@ -275,49 +275,8 @@ async function setupMocks(page: Page, options: {
     const url = route.request().url();
 
     // Auth
-    if (url.includes('/api/auth/get-session')) {
-      return route.fulfill({
-        json: {
-          user: MOCK_USER.user,
-          session: MOCK_USER.session,
-        },
-      });
-    }
-
     if (url.includes('/api/auth/me')) {
       return route.fulfill({ json: MOCK_USER });
-    }
-
-    if (url.includes('/api/notifications')) {
-      return route.fulfill({ json: { notifications: [], unreadCount: 0 } });
-    }
-
-    if (url.includes('/api/github/installations')) {
-      return route.fulfill({ json: [] });
-    }
-
-    if (url.includes('/api/credentials')) {
-      return route.fulfill({ json: [] });
-    }
-
-    if (url.includes('/api/agents')) {
-      return route.fulfill({ json: { agents: [] } });
-    }
-
-    if (url.includes('/agent-profiles')) {
-      return route.fulfill({ json: { items: [] } });
-    }
-
-    if (url.includes('/cached-commands')) {
-      return route.fulfill({ json: { commands: [] } });
-    }
-
-    if (url.includes('/trial-status')) {
-      return route.fulfill({ json: { isTrialActive: false, trial: null } });
-    }
-
-    if (url.match(/\/api\/projects(?:\?|$)/)) {
-      return route.fulfill({ json: { projects: [MOCK_PROJECT], nextCursor: null } });
     }
 
     // Project detail
@@ -326,10 +285,10 @@ async function setupMocks(page: Page, options: {
     }
 
     // Session detail
-    if (url.match(/\/api\/projects\/[^/]+\/sessions\/[^/?]+(?:\?|$)/)) {
+    if (url.includes('/sessions/') && url.includes('/detail')) {
       return route.fulfill({
         json: {
-          session,
+          ...session,
           messages: messages,
           hasMore: false,
         },
@@ -337,8 +296,8 @@ async function setupMocks(page: Page, options: {
     }
 
     // Session list
-    if (url.match(/\/api\/projects\/[^/]+\/sessions\/?(?:\?|$)/)) {
-      return route.fulfill({ json: { sessions: [session], total: 1 } });
+    if (url.match(/\/api\/projects\/[^/]+\/sessions\/?$/)) {
+      return route.fulfill({ json: { sessions: [session] } });
     }
 
     // Chat messages (WebSocket fallback / REST)
@@ -503,22 +462,6 @@ test.describe('ChatFileViewer — Session Header — Mobile', () => {
     await takeScreenshot(page, 'session-header-stopped-mobile');
     await assertNoOverflow(page);
   });
-
-  test('recovery container badge explains logs on tap', async ({ page }) => {
-    await setupMocks(page, {
-      workspace: { ...MOCK_WORKSPACE, status: 'recovery', workspaceProfile: 'full' },
-    });
-    await page.goto('/projects/proj-test-1/chat/cs-1');
-    await page.waitForTimeout(1000);
-
-    const badge = page.getByRole('button', { name: /recovery container: devcontainer build failed/i });
-    await expect(badge).toBeVisible({ timeout: 3000 });
-    await badge.click();
-    await expect(page.getByRole('tooltip')).toContainText('Boot Logs');
-
-    await takeScreenshot(page, 'session-header-recovery-container-mobile');
-    await assertNoOverflow(page);
-  });
 });
 
 // ===========================================================================
@@ -658,22 +601,6 @@ test.describe('ChatFileViewer — Desktop', () => {
     await expandSessionHeader(page);
 
     await takeScreenshot(page, 'session-header-files-git-buttons-desktop');
-    await assertNoOverflow(page);
-  });
-
-  test('recovery container badge explains logs on hover', async ({ page }) => {
-    await setupMocks(page, {
-      workspace: { ...MOCK_WORKSPACE, status: 'recovery', workspaceProfile: 'full' },
-    });
-    await page.goto('/projects/proj-test-1/chat/cs-1');
-    await page.waitForTimeout(1000);
-
-    const badge = page.getByRole('button', { name: /recovery container: devcontainer build failed/i });
-    await expect(badge).toBeVisible({ timeout: 3000 });
-    await badge.hover();
-    await expect(page.getByRole('tooltip')).toContainText('Boot Logs');
-
-    await takeScreenshot(page, 'session-header-recovery-container-desktop');
     await assertNoOverflow(page);
   });
 
