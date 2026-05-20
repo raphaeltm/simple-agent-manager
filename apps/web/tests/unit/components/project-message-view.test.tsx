@@ -143,6 +143,35 @@ function makeSessionResponse(sessionId: string, messages: ReturnType<typeof make
   };
 }
 
+type WorkspaceBadgeFixture = {
+  id: string;
+  name: string;
+  status: string;
+  vmSize: string;
+  workspaceProfile: 'lightweight' | 'full' | null;
+};
+
+function renderWorkspaceBadgeFixture(sessionId: string, workspace: WorkspaceBadgeFixture) {
+  mocks.getWorkspace.mockResolvedValue({
+    ...workspace,
+    vmLocation: 'fsn1',
+    nodeId: 'node-1',
+  });
+  mocks.getNode.mockResolvedValue({
+    id: 'node-1',
+    name: 'node-1',
+    status: 'active',
+    healthStatus: 'healthy',
+  });
+  mocks.getChatSession.mockResolvedValue({
+    session: makeSession(sessionId, 'active'),
+    messages: [makeMessage('m1', sessionId, 'Hello')],
+    hasMore: false,
+  });
+
+  render(<ProjectMessageView projectId="proj-1" sessionId={sessionId} />);
+}
+
 describe('ProjectMessageView — session isolation', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -906,30 +935,13 @@ describe('ProjectMessageView — session context dropdown', () => {
   });
 
   it('shows lightweight badge for lightweight workspace profile', async () => {
-    mocks.getWorkspace.mockResolvedValue({
+    renderWorkspaceBadgeFixture('sess-light', {
       id: 'ws-light',
       name: 'light-ws',
       status: 'running',
       vmSize: 'small',
-      vmLocation: 'fsn1',
       workspaceProfile: 'lightweight',
-      nodeId: 'node-1',
     });
-    mocks.getNode.mockResolvedValue({
-      id: 'node-1',
-      name: 'node-1',
-      status: 'active',
-      healthStatus: 'healthy',
-    });
-
-    const session = makeSession('sess-light', 'active');
-    mocks.getChatSession.mockResolvedValue({
-      session,
-      messages: [makeMessage('m1', 'sess-light', 'Hello')],
-      hasMore: false,
-    });
-
-    render(<ProjectMessageView projectId="proj-1" sessionId="sess-light" />);
 
     // Wait for workspace data to load — the badge appears in the compact row
     await waitFor(() => {
@@ -938,30 +950,13 @@ describe('ProjectMessageView — session context dropdown', () => {
   });
 
   it('shows full badge for full workspace profile', async () => {
-    mocks.getWorkspace.mockResolvedValue({
+    renderWorkspaceBadgeFixture('sess-full', {
       id: 'ws-full',
       name: 'full-ws',
       status: 'running',
       vmSize: 'large',
-      vmLocation: 'fsn1',
       workspaceProfile: 'full',
-      nodeId: 'node-1',
     });
-    mocks.getNode.mockResolvedValue({
-      id: 'node-1',
-      name: 'node-1',
-      status: 'active',
-      healthStatus: 'healthy',
-    });
-
-    const session = makeSession('sess-full', 'active');
-    mocks.getChatSession.mockResolvedValue({
-      session,
-      messages: [makeMessage('m1', 'sess-full', 'Hello')],
-      hasMore: false,
-    });
-
-    render(<ProjectMessageView projectId="proj-1" sessionId="sess-full" />);
 
     await waitFor(() => {
       expect(screen.getByText('Full')).toBeTruthy();
@@ -969,30 +964,13 @@ describe('ProjectMessageView — session context dropdown', () => {
   });
 
   it('shows full badge when workspaceProfile is null (default)', async () => {
-    mocks.getWorkspace.mockResolvedValue({
+    renderWorkspaceBadgeFixture('sess-null', {
       id: 'ws-null',
       name: 'null-ws',
       status: 'running',
       vmSize: 'medium',
-      vmLocation: 'fsn1',
       workspaceProfile: null,
-      nodeId: 'node-1',
     });
-    mocks.getNode.mockResolvedValue({
-      id: 'node-1',
-      name: 'node-1',
-      status: 'active',
-      healthStatus: 'healthy',
-    });
-
-    const session = makeSession('sess-null', 'active');
-    mocks.getChatSession.mockResolvedValue({
-      session,
-      messages: [makeMessage('m1', 'sess-null', 'Hello')],
-      hasMore: false,
-    });
-
-    render(<ProjectMessageView projectId="proj-1" sessionId="sess-null" />);
 
     await waitFor(() => {
       expect(screen.getByText('Full')).toBeTruthy();
@@ -1000,30 +978,13 @@ describe('ProjectMessageView — session context dropdown', () => {
   });
 
   it('shows a recovery container badge with explanatory hover and tap text', async () => {
-    mocks.getWorkspace.mockResolvedValue({
+    renderWorkspaceBadgeFixture('sess-recovery', {
       id: 'ws-recovery',
       name: 'recovery-ws',
       status: 'recovery',
       vmSize: 'medium',
-      vmLocation: 'fsn1',
       workspaceProfile: 'full',
-      nodeId: 'node-1',
     });
-    mocks.getNode.mockResolvedValue({
-      id: 'node-1',
-      name: 'node-1',
-      status: 'active',
-      healthStatus: 'healthy',
-    });
-
-    const session = makeSession('sess-recovery', 'active');
-    mocks.getChatSession.mockResolvedValue({
-      session,
-      messages: [makeMessage('m1', 'sess-recovery', 'Hello')],
-      hasMore: false,
-    });
-
-    render(<ProjectMessageView projectId="proj-1" sessionId="sess-recovery" />);
 
     const badge = await screen.findByRole('button', {
       name: /recovery container: devcontainer build failed/i,
