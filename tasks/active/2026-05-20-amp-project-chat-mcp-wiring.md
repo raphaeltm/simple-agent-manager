@@ -75,6 +75,9 @@ This task is being handled through the `/do` workflow.
 - Live smoke rerun `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26174155779` deployed staging successfully but failed with persisted project-chat text `Error: Process exited with code 1` for fresh workspace `01KS322854PZR52GD2DHB82JED` and chat session `0dd6a1d3-d79c-4940-8427-6f5665126951`. The verifier still asserted before emitting debug-package evidence, so this failure is not yet classified as platform, external credential/credits, or infrastructure.
 - Updated the live smoke verifier again so it logs sanitized `AMP_PROJECT_CHAT_MCP_EVIDENCE` before assertions and returns early when persisted chat shows terminal Amp/bootstrap errors. The next PR-branch staging run should provide debug-package evidence needed to classify the Amp exit.
 - Post-update validation passed: `pnpm typecheck`; local Playwright skipped-mode check (`1 skipped`).
+- Live smoke rerun `https://github.com/raphaeltm/simple-agent-manager/actions/runs/26175270000` deployed staging successfully but failed before Amp startup because fresh node provisioning hit `[hetzner] hetzner API error (403): server limit reached`. Staging D1 showed failed node `01KS33B83R2E0B3KXV4BQVC3PV` with no workspace row, plus three prior `Amp MCP` smoke nodes still `running` (`01KS3228074WXMY70CRJBZT008`, `01KS316NBNF2TEB54AJSBV90VN`, `01KS30Y2H7KRBYN9KZ9EGD8MFQ`). Classification: infrastructure capacity/cleanup failure, not an Amp MCP result.
+- Updated the live smoke verifier to delete stale `Amp MCP` smoke nodes before provisioning and to delete the created node in `finally`, so failed live runs do not consume staging provider capacity.
+- Post-cleanup validation passed: `pnpm typecheck`; local Playwright skipped-mode check (`1 skipped`).
 
 ## Specialist Review Notes
 

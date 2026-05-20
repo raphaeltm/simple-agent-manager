@@ -24,6 +24,13 @@ type WorkspaceResponse = {
   errorMessage?: string | null;
 };
 
+type NodeSummary = {
+  id: string;
+  name?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+};
+
 type AgentSessionResponse = {
   id: string;
   status: string;
@@ -58,6 +65,8 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
     const appUrl = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';
     const page = await loginWithToken(context, { apiUrl, appUrl });
     const request = page.request;
+
+    await cleanupStaleAmpSmokeNodes(request, apiUrl);
 
     const project = await chooseProject(request, apiUrl);
     const workspace = await createWorkspace(request, apiUrl, project);
@@ -134,9 +143,34 @@ test.describe('Amp project-chat SAM MCP wiring', () => {
           .catch(() => undefined);
       }
       await request.delete(`${apiUrl}/api/workspaces/${encodeURIComponent(workspace.id)}`).catch(() => undefined);
+      const nodeId = evidence.nodeId ?? workspace.nodeId ?? undefined;
+      if (nodeId) {
+        await request.delete(`${apiUrl}/api/nodes/${encodeURIComponent(nodeId)}`).catch(() => undefined);
+      }
     }
   });
 });
+
+async function cleanupStaleAmpSmokeNodes(request: APIRequestContext, apiUrl: string): Promise<void> {
+  const response = await request.get(`${apiUrl}/api/nodes`);
+  expect(response.ok(), `node list failed: ${response.status()} ${await response.text()}`).toBe(true);
+  const nodes = (await response.json()) as NodeSummary[];
+  const staleCutoffMs = Date.now() - 5 * 60 * 1000;
+  const staleSmokeNodes = nodes.filter((node) => {
+    if (!node.name?.startsWith('Amp MCP ')) {
+      return false;
+    }
+    if (node.status !== 'running' && node.status !== 'error' && node.status !== 'stopped') {
+      return false;
+    }
+    const createdAt = node.createdAt ? Date.parse(node.createdAt) : 0;
+    return Number.isNaN(createdAt) || createdAt < staleCutoffMs;
+  });
+
+  for (const node of staleSmokeNodes) {
+    await request.delete(`${apiUrl}/api/nodes/${encodeURIComponent(node.id)}`).catch(() => undefined);
+  }
+}
 
 async function chooseProject(request: APIRequestContext, apiUrl: string): Promise<ProjectSummary> {
   const response = await request.get(`${apiUrl}/api/projects?limit=50`);
