@@ -15,8 +15,10 @@ import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateAgentSessionSchema, jsonValidator, UpdateAgentSessionSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
+import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import {
   createAgentSessionOnNode,
+  type McpServerConfig,
   resumeAgentSessionOnNode,
   stopAgentSessionOnNode,
   suspendAgentSessionOnNode,
@@ -24,6 +26,39 @@ import {
 import { assertNodeOperational,getOwnedNode, getOwnedWorkspace } from './_helpers';
 
 const agentSessionRoutes = new Hono<{ Bindings: Env }>();
+
+export async function createProjectChatMcpServer(
+  env: Env,
+  userId: string,
+  workspace: { id: string; projectId: string | null; chatSessionId: string | null },
+  sessionId: string,
+): Promise<McpServerConfig | undefined> {
+  if (!workspace.projectId || !workspace.chatSessionId) {
+    return undefined;
+  }
+
+  const token = generateMcpToken();
+  await storeMcpToken(
+    env.KV,
+    token,
+    {
+      kind: 'project-chat',
+      taskId: sessionId,
+      projectId: workspace.projectId,
+      userId,
+      workspaceId: workspace.id,
+      chatSessionId: workspace.chatSessionId,
+      agentSessionId: sessionId,
+      createdAt: new Date().toISOString(),
+    },
+    env,
+  );
+
+  return {
+    url: `https://api.${env.BASE_DOMAIN}/mcp`,
+    token,
+  };
+}
 
 // Auth applied per-route (NOT via use('/*', ...)) to prevent middleware leakage
 // to other subrouters (lifecycle, runtime) mounted at the same base path.
@@ -100,7 +135,9 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
     updatedAt: now,
   });
 
+  let mcpServer: McpServerConfig | undefined;
   try {
+    mcpServer = await createProjectChatMcpServer(c.env, userId, workspace, sessionId);
     await createAgentSessionOnNode(
       workspace.nodeId,
       workspace.id,
@@ -110,6 +147,7 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
       userId,
       workspace.chatSessionId,
       workspace.projectId,
+      mcpServer,
     );
   } catch (err) {
     await db
@@ -120,6 +158,10 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.agentSessions.id, sessionId));
+
+    if (mcpServer) {
+      await revokeMcpToken(c.env.KV, mcpServer.token).catch(() => {});
+    }
 
     throw errors.internal('Failed to create agent session on node');
   }

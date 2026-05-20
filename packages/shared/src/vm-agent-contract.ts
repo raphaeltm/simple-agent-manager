@@ -92,6 +92,12 @@ export type DeleteWorkspaceAgentResponse = z.infer<typeof DeleteWorkspaceAgentRe
 export const CreateAgentSessionAgentRequestSchema = z.object({
   sessionId: z.string().min(1),
   label: z.string().nullable(),
+  chatSessionId: z.string().optional(),
+  projectId: z.string().optional(),
+  mcpServers: z.array(z.object({
+    url: z.string().url(),
+    token: z.string().min(1),
+  })).optional(),
 });
 
 export type CreateAgentSessionAgentRequest = z.infer<typeof CreateAgentSessionAgentRequestSchema>;

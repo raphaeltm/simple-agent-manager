@@ -26,10 +26,13 @@ export interface McpTokenEnv {
 
 /** Data stored alongside each MCP token in KV */
 export interface McpTokenData {
+  kind?: 'task' | 'project-chat';
   taskId: string;
   projectId: string;
   userId: string;
   workspaceId: string;
+  chatSessionId?: string;
+  agentSessionId?: string;
   createdAt: string;
   /** ISO timestamp of last sliding window refresh (set on first refresh) */
   lastRefreshedAt?: string;

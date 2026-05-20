@@ -25,12 +25,12 @@ This task is being handled through the `/do` workflow.
 - [ ] Re-read `.do-state.md` before each phase transition and keep it current.
 - [ ] Create a dedicated worktree for `sam/use-command-workflow-handle-01ks2x`.
 - [ ] Move this task file from `tasks/backlog/` to `tasks/active/` in the worktree.
-- [ ] Add API/control-plane wiring so direct project-chat session creation mints a SAM MCP token and sends `https://api.<BASE_DOMAIN>/mcp` plus the token to the VM before ACP startup.
-- [ ] Ensure the direct project-chat MCP token is scoped to the correct user, project, workspace, chat session, and agent session, and does not leak in logs.
-- [ ] Extend VM agent create-session handling, if needed, so MCP config sent during session creation is validated, persisted, and available before WebSocket `select_agent` triggers ACP `NewSession`.
-- [ ] Add focused API/control-plane coverage proving direct project-chat session creation supplies SAM MCP config.
-- [ ] Add VM agent coverage proving create-session MCP config is persisted and later injected into the ACP host before `NewSession`, if the VM create endpoint changes.
-- [ ] Run focused tests for the modified API and VM paths.
+- [x] Add API/control-plane wiring so direct project-chat session creation mints a SAM MCP token and sends `https://api.<BASE_DOMAIN>/mcp` plus the token to the VM before ACP startup.
+- [x] Ensure the direct project-chat MCP token is scoped to the correct user, project, workspace, chat session, and agent session, and does not leak in logs.
+- [x] Extend VM agent create-session handling, if needed, so MCP config sent during session creation is validated, persisted, and available before WebSocket `select_agent` triggers ACP `NewSession`.
+- [x] Add focused API/control-plane coverage proving direct project-chat session creation supplies SAM MCP config.
+- [x] Add VM agent coverage proving create-session MCP config is persisted and later injected into the ACP host before `NewSession`, if the VM create endpoint changes.
+- [x] Run focused tests for the modified API and VM paths.
 - [ ] Run required quality gates before PR.
 - [ ] Complete required specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and go-specialist if VM Go changes are made.
 - [ ] Deploy the PR branch to staging via `gh workflow run deploy-staging.yml --ref sam/use-command-workflow-handle-01ks2x`.

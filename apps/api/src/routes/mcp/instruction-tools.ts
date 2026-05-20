@@ -43,6 +43,9 @@ export async function handleGetInstructions(
 
   const task = taskRows[0];
   if (!task) {
+    if (tokenData.kind === 'project-chat') {
+      return handleProjectChatInstructions(requestId, tokenData, env);
+    }
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
   }
 
@@ -163,6 +166,57 @@ export async function handleGetInstructions(
     // Include policy directives and structured data
     ...(policyDirectives ? { policyDirectives } : {}),
     ...(policyContext.length > 0 ? { policyContext } : {}),
+  };
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+  });
+}
+
+async function handleProjectChatInstructions(
+  requestId: string | number | null,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const db = drizzle(env.DATABASE, { schema });
+  const projectRows = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, tokenData.projectId))
+    .limit(1);
+
+  const project = projectRows[0];
+  if (!project) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
+  }
+
+  const result = {
+    task: {
+      id: tokenData.agentSessionId ?? tokenData.taskId,
+      title: 'Project chat',
+      description: 'Direct project-chat conversation.',
+      status: 'in_progress',
+      priority: 0,
+      outputBranch: null,
+    },
+    project: {
+      id: project.id,
+      name: project.name,
+      repository: project.repository,
+      defaultBranch: project.defaultBranch,
+      repoProvider: project.repoProvider || 'github',
+    },
+    session: {
+      chatSessionId: tokenData.chatSessionId ?? null,
+      agentSessionId: tokenData.agentSessionId ?? null,
+      workspaceId: tokenData.workspaceId,
+    },
+    instructions: [
+      'You are in a direct project-chat conversation with a human. Respond to their messages directly.',
+      'Use `get_workspace_info` for workspace and project orientation when needed.',
+      'Use project-awareness and workspace tools when they help answer the user.',
+      'Do NOT call `complete_task` — the human controls the conversation lifecycle.',
+    ],
   };
 
   return jsonRpcSuccess(requestId, {
