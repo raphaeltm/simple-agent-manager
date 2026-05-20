@@ -130,7 +130,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialData = null;
     }
 
-    if (credentialData && !(isClaudeCode && credentialData.credentialKind === 'oauth-token')) {
+    if (credentialData && !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')) {
       // User has their own credential — use passthrough proxy routes.
       // URL-path auth: wstoken embedded in URL, user credential in auth headers.
       let proxyBaseUrl: string;
