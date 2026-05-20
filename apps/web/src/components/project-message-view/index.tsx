@@ -40,7 +40,7 @@ function FloatingHeader({
 }) {
   if (!lc.session) return null;
   return (
-    <div className="relative z-10 shrink-0">
+    <div className="absolute top-0 left-0 right-0 z-10">
       <SessionHeader
         projectId={projectId}
         session={lc.session}
@@ -73,7 +73,7 @@ function FloatingHeader({
 function ErrorBanner({ message }: { message: string }) {
   return (
     <div
-      className="glass-chrome glass-composited px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
+      className="glass-chrome px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
       style={{
         backgroundColor: 'rgba(15, 8, 8, 0.68)',
         boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
@@ -275,9 +275,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col relative">
           <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
-          <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-1 items-center justify-center pt-14">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
             </span>
@@ -312,6 +312,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               components={{
                 Header: () => (
                   <>
+                    {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden behind it */}
+                    <div className="h-14" />
                     {lc.hasMore && (
                       <div className="text-center py-3">
                         <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
