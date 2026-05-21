@@ -2,8 +2,10 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // SelectAgent handles agent selection requests from a browser.
@@ -23,7 +25,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		"sessionId":            h.config.SessionID,
 	})
 
-	cred, err := h.fetchAgentKey(ctx, agentType)
+	cred, err := h.resolveAgentCredential(ctx, agentType)
 	if err != nil {
 		h.failAgentSelection(agentType, "agent_key_fetch", fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType), err)
 		return
@@ -54,6 +56,48 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		"agentType": agentType,
 	})
 	h.broadcastAgentStatus(StatusReady, agentType, "")
+}
+
+func (h *SessionHost) resolveAgentCredential(ctx context.Context, agentType string) (*agentCredential, error) {
+	cred, err := h.fetchAgentKey(ctx, agentType)
+	if err == nil {
+		return cred, nil
+	}
+	if !errors.Is(err, errNoAgentCredential) {
+		return nil, err
+	}
+
+	envCred, envErr := h.fetchAgentCredentialFromRuntimeEnv(ctx, agentType)
+	if envErr != nil {
+		return nil, err
+	}
+	slog.Info("Using runtime environment credential for agent",
+		"agentType", agentType, "workspaceId", h.config.WorkspaceID)
+	return envCred, nil
+}
+
+func (h *SessionHost) fetchAgentCredentialFromRuntimeEnv(ctx context.Context, agentType string) (*agentCredential, error) {
+	containerID, err := h.config.ContainerResolver()
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover devcontainer for runtime credential fallback: %w", err)
+	}
+	return agentCredentialFromEnvEntries(agentType, ReadContainerEnvFiles(ctx, containerID))
+}
+
+func agentCredentialFromEnvEntries(agentType string, envVars []string) (*agentCredential, error) {
+	info := getAgentCommandInfo(agentType, "api-key")
+	if strings.TrimSpace(info.envVarName) == "" {
+		return nil, fmt.Errorf("agent %s has no API-key environment variable", agentType)
+	}
+
+	prefix := info.envVarName + "="
+	for _, entry := range envVars {
+		value, ok := strings.CutPrefix(entry, prefix)
+		if ok && strings.TrimSpace(value) != "" {
+			return &agentCredential{credential: value, credentialKind: "api-key"}, nil
+		}
+	}
+	return nil, fmt.Errorf("runtime environment variable %s is not set", info.envVarName)
 }
 
 type previousAgentSelection struct {

@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var errNoAgentCredential = errors.New("no agent credential configured")
+
 // reportAgentError sends an agent error to boot-log and error reporter.
 func (h *SessionHost) reportAgentError(agentType, step, message, detail string) {
 	if h.config.BootLog != nil {
@@ -77,7 +79,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("no credential configured for %s", agentType)
+		return nil, fmt.Errorf("%w for %s", errNoAgentCredential, agentType)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)

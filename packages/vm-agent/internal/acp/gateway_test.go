@@ -710,6 +710,64 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 	}
 }
 
+func TestAgentCredentialFromEnvEntries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		agentType string
+		envVars   []string
+		want      string
+		wantErr   bool
+	}{
+		{
+			name:      "Amp uses profile runtime AMP_API_KEY",
+			agentType: "amp",
+			envVars:   []string{"SAM_WORKSPACE_ID=ws-123", "AMP_API_KEY=sgamp-runtime-token"},
+			want:      "sgamp-runtime-token",
+		},
+		{
+			name:      "empty runtime key is ignored",
+			agentType: "amp",
+			envVars:   []string{"AMP_API_KEY=   "},
+			wantErr:   true,
+		},
+		{
+			name:      "Codex API key can come from runtime env",
+			agentType: "openai-codex",
+			envVars:   []string{"OPENAI_API_KEY=sk-runtime"},
+			want:      "sk-runtime",
+		},
+		{
+			name:      "OAuth-only env name is not inferred",
+			agentType: "openai-codex",
+			envVars:   []string{`CODEX_AUTH_JSON={"tokens":{}}`},
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := agentCredentialFromEnvEntries(tt.agentType, tt.envVars)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("agentCredentialFromEnvEntries returned error: %v", err)
+			}
+			if got.credential != tt.want {
+				t.Fatalf("credential = %q, want %q", got.credential, tt.want)
+			}
+			if got.credentialKind != "api-key" {
+				t.Fatalf("credentialKind = %q, want api-key", got.credentialKind)
+			}
+		})
+	}
+}
+
 func TestParseEnvExportLines(t *testing.T) {
 	t.Parallel()
 
