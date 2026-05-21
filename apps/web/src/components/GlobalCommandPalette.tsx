@@ -1,15 +1,30 @@
 import {
+  Activity,
   ArrowRight,
+  BarChart3,
+  Bell,
+  Bot,
+  Cloud,
+  CreditCard,
+  DollarSign,
+  Eye,
+  FileText,
   FolderKanban,
+  Gauge,
   Home,
+  Key,
+  Map,
   MessageSquare,
   MessageSquarePlus,
   Monitor,
   Plus,
+  Radio,
   Search,
   Server,
   Settings,
   Shield,
+  Users,
+  Zap,
 } from 'lucide-react';
 import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation,useNavigate } from 'react-router';
@@ -208,14 +223,35 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const navigationItems = useMemo(() => {
     const items: Array<{ id: string; label: string; path: string; icon: React.ReactNode }> = [
       { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
+      { id: 'nav-sam', label: 'SAM', path: '/sam', icon: <Bot size={14} /> },
       { id: 'nav-chats', label: 'Chats', path: '/chats', icon: <MessageSquare size={14} /> },
       { id: 'nav-projects', label: 'Projects', path: '/projects', icon: <FolderKanban size={14} /> },
+      { id: 'nav-map', label: 'Account Map', path: '/account-map', icon: <Map size={14} /> },
       { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
       { id: 'nav-workspaces', label: 'Workspaces', path: '/workspaces', icon: <Monitor size={14} /> },
+      // Settings sub-pages
       { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
+      { id: 'nav-settings-cloud', label: 'Settings: Cloud Provider', path: '/settings/cloud-provider', icon: <Cloud size={14} /> },
+      { id: 'nav-settings-github', label: 'Settings: GitHub', path: '/settings/github', icon: <Key size={14} /> },
+      { id: 'nav-settings-agents', label: 'Settings: Agents', path: '/settings/agents', icon: <Bot size={14} /> },
+      { id: 'nav-settings-notifications', label: 'Settings: Notifications', path: '/settings/notifications', icon: <Bell size={14} /> },
+      { id: 'nav-settings-usage', label: 'Settings: Usage', path: '/settings/usage', icon: <BarChart3 size={14} /> },
     ];
     if (isSuperadmin) {
-      items.push({ id: 'nav-admin', label: 'Admin', path: '/admin', icon: <Shield size={14} /> });
+      items.push(
+        { id: 'nav-admin', label: 'Admin', path: '/admin', icon: <Shield size={14} /> },
+        { id: 'nav-admin-users', label: 'Admin: Users', path: '/admin/users', icon: <Users size={14} /> },
+        { id: 'nav-admin-credentials', label: 'Admin: Credentials', path: '/admin/credentials', icon: <CreditCard size={14} /> },
+        { id: 'nav-admin-ai-proxy', label: 'Admin: AI Proxy', path: '/admin/ai-proxy', icon: <Zap size={14} /> },
+        { id: 'nav-admin-costs', label: 'Admin: Costs', path: '/admin/costs', icon: <DollarSign size={14} /> },
+        { id: 'nav-admin-usage', label: 'Admin: Usage', path: '/admin/usage', icon: <BarChart3 size={14} /> },
+        { id: 'nav-admin-quotas', label: 'Admin: Quotas', path: '/admin/quotas', icon: <Gauge size={14} /> },
+        { id: 'nav-admin-errors', label: 'Admin: Errors', path: '/admin/errors', icon: <FileText size={14} /> },
+        { id: 'nav-admin-overview', label: 'Admin: Overview', path: '/admin/overview', icon: <Eye size={14} /> },
+        { id: 'nav-admin-logs', label: 'Admin: Logs', path: '/admin/logs', icon: <FileText size={14} /> },
+        { id: 'nav-admin-stream', label: 'Admin: Stream', path: '/admin/stream', icon: <Radio size={14} /> },
+        { id: 'nav-admin-analytics', label: 'Admin: Analytics', path: '/admin/analytics', icon: <Activity size={14} /> },
+      );
     }
     return items;
   }, [isSuperadmin]);
@@ -227,6 +263,18 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         id: 'action-new-project',
         label: 'New Project',
         action: () => navigate('/projects/new'),
+        icon: <Plus size={14} />,
+      },
+      {
+        id: 'action-new-node',
+        label: 'New Node',
+        action: () => navigate('/nodes', { state: { openCreate: true } }),
+        icon: <Plus size={14} />,
+      },
+      {
+        id: 'action-new-workspace',
+        label: 'New Workspace',
+        action: () => navigate('/workspaces/new'),
         icon: <Plus size={14} />,
       },
     ];

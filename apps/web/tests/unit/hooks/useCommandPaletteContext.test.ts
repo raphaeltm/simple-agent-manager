@@ -273,10 +273,9 @@ describe('useCommandPaletteContext', () => {
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });
-    // Default cap is 10, and we have 4 project + 2 session = 6 actions (all fit)
-    // (outputPrUrl is only on detail endpoint, not list; "Open PR" action removed)
-    expect(result.current.contextActions.length).toBeLessThanOrEqual(10);
-    expect(result.current.contextActions.length).toBe(6);
+    // Default cap is 20, and we have 11 project + 2 session = 13 actions (all fit)
+    expect(result.current.contextActions.length).toBeLessThanOrEqual(20);
+    expect(result.current.contextActions.length).toBe(13);
   });
 
   // ── window.open assertions ──

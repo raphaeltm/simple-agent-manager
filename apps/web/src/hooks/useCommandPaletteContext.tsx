@@ -1,10 +1,17 @@
 import {
   Activity,
+  Bell,
+  Bot,
+  Brain,
+  Clock,
   Eye,
+  FolderOpen,
   Lightbulb,
   MessageSquare,
+  MessageSquarePlus,
   Monitor,
   Settings,
+  UserCog,
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -14,7 +21,7 @@ import type { SessionSummaryItem } from '../lib/api';
 
 // ── Configurable limits ──
 
-const DEFAULT_MAX_CONTEXT_RESULTS = 10;
+const DEFAULT_MAX_CONTEXT_RESULTS = 20;
 
 const MAX_CONTEXT_RESULTS = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_CONTEXT_RESULTS ||
@@ -90,16 +97,58 @@ export function useCommandPaletteContext({
     // ── Project-scoped navigation ──
     actions.push(
       {
+        id: 'ctx-new-chat',
+        label: `${prefix}New Chat`,
+        icon: <MessageSquarePlus size={14} />,
+        action: () => navigate(`/projects/${projectId}/chat`),
+      },
+      {
         id: 'ctx-project-chat',
         label: `${prefix}Go to Chat`,
         icon: <MessageSquare size={14} />,
         action: () => navigate(`/projects/${projectId}/chat`),
       },
       {
+        id: 'ctx-project-agent',
+        label: `${prefix}Go to Agent`,
+        icon: <Bot size={14} />,
+        action: () => navigate(`/projects/${projectId}/agent`),
+      },
+      {
+        id: 'ctx-project-library',
+        label: `${prefix}Go to Library`,
+        icon: <FolderOpen size={14} />,
+        action: () => navigate(`/projects/${projectId}/library`),
+      },
+      {
         id: 'ctx-project-ideas',
         label: `${prefix}Go to Ideas`,
         icon: <Lightbulb size={14} />,
         action: () => navigate(`/projects/${projectId}/ideas`),
+      },
+      {
+        id: 'ctx-project-knowledge',
+        label: `${prefix}Go to Knowledge`,
+        icon: <Brain size={14} />,
+        action: () => navigate(`/projects/${projectId}/knowledge`),
+      },
+      {
+        id: 'ctx-project-notifications',
+        label: `${prefix}Go to Notifications`,
+        icon: <Bell size={14} />,
+        action: () => navigate(`/projects/${projectId}/notifications`),
+      },
+      {
+        id: 'ctx-project-triggers',
+        label: `${prefix}Go to Triggers`,
+        icon: <Clock size={14} />,
+        action: () => navigate(`/projects/${projectId}/triggers`),
+      },
+      {
+        id: 'ctx-project-profiles',
+        label: `${prefix}Go to Profiles`,
+        icon: <UserCog size={14} />,
+        action: () => navigate(`/projects/${projectId}/profiles`),
       },
       {
         id: 'ctx-project-activity',
