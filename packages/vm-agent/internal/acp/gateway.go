@@ -832,17 +832,44 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			args:          []string{"run"},
 			envVarName:    "AMP_API_KEY",
 			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
-import pathlib, re
-p = pathlib.Path('/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py')
+import pathlib
+base = '/opt/uv-tools/acp-amp/lib/python3.12/site-packages'
+
+# Patch 1: acp-amp error handling — include ProcessError.stderr in error messages
+p = pathlib.Path(base + '/acp_amp/driver/python_sdk.py')
 t = p.read_text()
 t = t.replace('\"message\": str(exc)', '\"message\": str(exc) + (\" stderr: \" + exc.stderr if hasattr(exc, \"stderr\") and exc.stderr else \"\")')
+
+# Patch 2: acp-amp MCP config — wrap raw dict in MCPConfig to fix pydantic Union
+# validation silently producing empty servers when dict keys are server names.
+# Also handle env:None which causes MCPServer validation to reject the entry.
+old_mcp = '''        if mcp_config:
+            base[\"mcp_config\"] = mcp_config
+            base[\"mcpConfig\"] = mcp_config'''
+new_mcp = '''        if mcp_config:
+            from amp_sdk.types import MCPConfig
+            cleaned = {}
+            for _n, _c in mcp_config.items():
+                if isinstance(_c, dict):
+                    _cc = dict(_c)
+                    if _cc.get(\"env\") is None:
+                        _cc[\"env\"] = {}
+                    cleaned[_n] = _cc
+                else:
+                    cleaned[_n] = _c
+            _wrapped = MCPConfig(servers=cleaned)
+            base[\"mcp_config\"] = _wrapped
+            base[\"mcpConfig\"] = _wrapped'''
+t = t.replace(old_mcp, new_mcp)
 p.write_text(t)
-print('Patched acp-amp error handling to include ProcessError.stderr')
-v = pathlib.Path('/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py')
+print('Patched acp-amp: error handling + MCP config wrapping')
+
+# Patch 3: amp_sdk visibility default — change from workspace to private
+v = pathlib.Path(base + '/amp_sdk/types.py')
 vt = v.read_text()
 vt = vt.replace('visibility: Optional[Literal[\"private\", \"public\", \"workspace\", \"group\"]] = \"workspace\"', 'visibility: Optional[Literal[\"private\", \"public\", \"workspace\", \"group\"]] = \"private\"')
 v.write_text(vt)
-print('Patched amp_sdk AmpOptions visibility default from workspace to private')
+print('Patched amp_sdk: visibility default to private')
 "`,
 			// isNpmBased must be true because installCmd chains `npm install -g @sourcegraph/amp`
 			// after the uv install. The Node.js bootstrap preamble ensures npm is available
