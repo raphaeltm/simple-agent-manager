@@ -1,0 +1,217 @@
+- main "elysia — Project" [ref=e5]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - heading "Project Name" [level=2] [ref=e10]
+        - paragraph [ref=e11]: The display name for this project.
+      - generic [ref=e12]:
+        - textbox "Project name" [ref=e13]: elysia
+        - button "Rename" [disabled] [ref=e14]
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - heading "Default Node Size" [level=2] [ref=e17]
+        - paragraph [ref=e18]: Used when launching new workspaces from this project. Click again to clear.
+      - generic [ref=e19]:
+        - button "Small 2-3 vCPUs, 4 GB RAM" [ref=e20] [cursor=pointer]:
+          - generic [ref=e21]: Small
+          - generic [ref=e22]: 2-3 vCPUs, 4 GB RAM
+        - button "Medium 4 vCPUs, 8-12 GB RAM" [pressed] [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]: Medium
+          - generic [ref=e25]: 4 vCPUs, 8-12 GB RAM
+        - button "Large 8 vCPUs, 16-32 GB RAM" [ref=e26] [cursor=pointer]:
+          - generic [ref=e27]: Large
+          - generic [ref=e28]: 8 vCPUs, 16-32 GB RAM
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - heading "Default Agent Type" [level=2] [ref=e31]
+        - paragraph [ref=e32]: Which AI coding agent to use for tasks in this project. Click again to clear.
+      - generic [ref=e33]:
+        - button "Claude Code Anthropic's AI coding agent" [ref=e34] [cursor=pointer]:
+          - generic [ref=e35]: Claude Code
+          - generic [ref=e36]: Anthropic's AI coding agent
+        - button "OpenAI Codex OpenAI's AI coding agent" [ref=e37] [cursor=pointer]:
+          - generic [ref=e38]: OpenAI Codex
+          - generic [ref=e39]: OpenAI's AI coding agent
+        - button "Gemini CLI Google's AI coding agent" [ref=e40] [cursor=pointer]:
+          - generic [ref=e41]: Gemini CLI
+          - generic [ref=e42]: Google's AI coding agent
+        - button "Mistral Vibe Mistral AI's coding agent" [ref=e43] [cursor=pointer]:
+          - generic [ref=e44]: Mistral Vibe
+          - generic [ref=e45]: Mistral AI's coding agent
+        - button "OpenCode Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference." [ref=e46] [cursor=pointer]:
+          - generic [ref=e47]: OpenCode
+          - generic [ref=e48]: Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.
+        - button "Amp Sourcegraph's managed AI coding agent" [pressed] [ref=e49] [cursor=pointer]:
+          - generic [ref=e50]: Amp
+          - generic [ref=e51]: Sourcegraph's managed AI coding agent
+    - generic [ref=e52]:
+      - generic [ref=e53]:
+        - heading "Agents" [level=2] [ref=e54]
+        - paragraph [ref=e55]: Per-agent credential and configuration overrides for this project. Empty fields fall through to your user-level settings.
+      - generic [ref=e56]:
+        - alert [ref=e57]:
+          - generic [ref=e58]: Project overrides apply only to this project. Clear an override to fall back to your user-level setting. Credentials and configuration fall through independently.
+        - generic [ref=e59]:
+          - generic [ref=e60]:
+            - generic [ref=e61]
+            - generic [ref=e64]: Inheriting user credential
+          - region "Credential (project override)" [ref=e65]:
+            - heading "Credential (project override)" [level=4] [ref=e66]
+            - generic [ref=e67]
+            - paragraph [ref=e77]: Inheriting user credential (...GQAA) — add an override above to use a different key for this project only.
+          - region "Configuration (project override)" [ref=e78]:
+            - generic [ref=e79]
+            - generic [ref=e82]
+            - generic [ref=e88]
+            - generic [ref=e93]
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - generic [ref=e98]
+            - generic [ref=e101]: Inheriting user credential
+          - region "Credential (project override)" [ref=e102]:
+            - heading "Credential (project override)" [level=4] [ref=e103]
+            - generic [ref=e104]
+            - paragraph [ref=e114]: "Inheriting user credential (...Z\" }) — add an override above to use a different key for this project only."
+          - region "Configuration (project override)" [ref=e115]:
+            - generic [ref=e116]
+            - generic [ref=e119]
+            - generic [ref=e125]
+            - generic [ref=e129]
+        - generic [ref=e132]:
+          - generic [ref=e133]:
+            - generic [ref=e134]
+            - generic [ref=e137]: No credential
+          - region "Credential (project override)" [ref=e138]:
+            - heading "Credential (project override)" [level=4] [ref=e139]
+            - generic [ref=e140]
+            - paragraph [ref=e147]: No user-level credential set. Adding one here creates a project-scoped credential. To set a default across all your projects, use Settings → Agents.
+          - region "Configuration (project override)" [ref=e148]:
+            - generic [ref=e149]
+            - generic [ref=e152]
+            - generic [ref=e158]
+            - generic [ref=e162]
+        - generic [ref=e165]:
+          - generic [ref=e166]:
+            - generic [ref=e167]
+            - generic [ref=e170]: Inheriting user credential
+          - region "Credential (project override)" [ref=e171]:
+            - heading "Credential (project override)" [level=4] [ref=e172]
+            - generic [ref=e173]
+            - paragraph [ref=e180]: Inheriting user credential (...9PDg) — add an override above to use a different key for this project only.
+          - region "Configuration (project override)" [ref=e181]:
+            - heading "Configuration (project override)" [level=4] [ref=e183]
+            - generic [ref=e184]
+            - generic [ref=e190]
+            - generic [ref=e194]
+        - generic [ref=e197]:
+          - generic [ref=e198]:
+            - generic [ref=e199]
+            - generic [ref=e202]: No credential
+          - region "Credential (project override)" [ref=e203]:
+            - heading "Credential (project override)" [level=4] [ref=e204]
+            - generic [ref=e205]
+            - paragraph [ref=e213]: No user-level credential set. Adding one here creates a project-scoped credential. To set a default across all your projects, use Settings → Agents.
+          - region "Configuration (project override)" [ref=e214]:
+            - heading "Configuration (project override)" [level=4] [ref=e216]
+            - generic [ref=e217]
+            - generic [ref=e221]
+            - generic [ref=e225]
+        - generic [ref=e228]:
+          - generic [ref=e229]:
+            - generic [ref=e230]
+            - generic [ref=e233]: Inheriting user credential
+          - region "Credential (project override)" [ref=e234]:
+            - heading "Credential (project override)" [level=4] [ref=e235]
+            - generic [ref=e236]
+            - paragraph [ref=e243]: Inheriting user credential (...8cc7) — add an override above to use a different key for this project only.
+          - region "Configuration (project override)" [ref=e244]:
+            - heading "Configuration (project override)" [level=4] [ref=e246]
+            - generic [ref=e247]
+            - generic [ref=e251]
+            - generic [ref=e255]
+    - generic [ref=e258]:
+      - generic [ref=e259]:
+        - heading "Workspace Idle Timeout" [level=2] [ref=e260]
+        - paragraph [ref=e261]: How long workspaces stay active when idle. Workspaces with no messages or terminal activity beyond the timeout are automatically cleaned up.
+      - generic [ref=e262]:
+        - generic [ref=e263]: Workspace idle timeout
+        - generic [ref=e264]:
+          - slider "Workspace idle timeout" [ref=e265] [cursor=pointer]: "7200000"
+          - generic [ref=e266]: 2.0h
+        - paragraph [ref=e267]: "Default: 2h. Range: 30m \\u2013 24h."
+      - button "Save" [disabled] [ref=e269]
+    - generic [ref=e270]:
+      - generic [ref=e271]:
+        - heading "Scaling & Scheduling" [level=2] [ref=e272]
+        - paragraph [ref=e273]: Override platform defaults for this project. Empty fields use the platform default shown as placeholder.
+      - generic [ref=e274]:
+        - heading "Provider & Location" [level=3] [ref=e275]
+        - generic [ref=e276]:
+          - generic [ref=e277]:
+            - generic [ref=e278]: Default Provider
+            - combobox "Default Provider" [ref=e279]
+          - generic [ref=e280]:
+            - generic [ref=e281]: Default Location
+            - combobox "Default Location" [ref=e282]
+        - button "Save Provider & Location" [ref=e283] [cursor=pointer]
+      - generic [ref=e284]:
+        - heading "Task Limits" [level=3] [ref=e285]
+        - generic [ref=e286]:
+          - 'generic "Env: TASK_RUN_MAX_EXECUTION_MS" [ref=e287]': Task Execution Timeout
+          - spinbutton [ref=e288]
+        - generic [ref=e289]:
+          - 'generic "Env: MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT" [ref=e290]': Max Concurrent Tasks
+          - spinbutton [ref=e291]
+        - generic [ref=e292]:
+          - 'generic "Env: MCP_DISPATCH_MAX_DEPTH" [ref=e293]': Max Dispatch Depth
+          - spinbutton [ref=e294]
+        - generic [ref=e295]:
+          - 'generic "Env: MCP_DISPATCH_MAX_PER_TASK" [ref=e296]': Max Sub-Tasks Per Task
+          - spinbutton [ref=e297]
+      - generic [ref=e298]:
+        - heading "Node Scheduling" [level=3] [ref=e299]
+        - generic [ref=e300]:
+          - 'generic "Env: NODE_WARM_TIMEOUT_MS" [ref=e301]': Warm Node Timeout
+          - spinbutton [ref=e302]
+        - generic [ref=e303]:
+          - 'generic "Env: MAX_WORKSPACES_PER_NODE" [ref=e304]': Max Workspaces Per Node
+          - spinbutton [ref=e305]
+        - generic [ref=e306]:
+          - 'generic "Env: TASK_RUN_NODE_CPU_THRESHOLD_PERCENT" [ref=e307]': Node CPU Threshold
+          - spinbutton [ref=e308]
+          - generic [ref=e309]: "%"
+        - generic [ref=e310]:
+          - 'generic "Env: TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT" [ref=e311]': Node Memory Threshold
+          - spinbutton [ref=e312]
+          - generic [ref=e313]: "%"
+        - generic [ref=e314]:
+          - generic [ref=e315]: Node Idle Timeout
+          - spinbutton [ref=e316]
+      - button "Save Scaling Settings" [ref=e317] [cursor=pointer]
+    - generic [ref=e318]:
+      - heading "Runtime Config" [level=2] [ref=e319]
+      - generic [ref=e320]:
+        - generic [ref=e321]:
+          - heading "Environment Variables" [level=3] [ref=e322]
+          - generic [ref=e323]:
+            - generic [ref=e324]
+            - generic [ref=e327]
+            - generic [ref=e330]
+          - generic [ref=e334]: No environment variables configured.
+        - generic [ref=e335]:
+          - heading "Runtime Files" [level=3] [ref=e336]
+          - generic [ref=e337]:
+            - generic [ref=e338]
+            - generic [ref=e341]
+            - generic [ref=e344]
+          - generic [ref=e348]: No runtime files configured.
+    - generic [ref=e349]:
+      - generic [ref=e350]:
+        - heading "Deploy to Cloud" [level=2] [ref=e351]
+        - paragraph [ref=e352]: Connect a GCP project for deployments via Defang. Agents use OIDC for short-lived credentials — no secrets stored.
+      - button "Connect Google Cloud" [ref=e354] [cursor=pointer]
+    - generic [ref=e355]:
+      - generic [ref=e356]:
+        - heading "Danger Zone" [level=2] [ref=e357]
+        - paragraph [ref=e358]: Permanently delete this project and all associated data. This action cannot be undone.
+      - button "Delete Project" [ref=e360] [cursor=pointer]
