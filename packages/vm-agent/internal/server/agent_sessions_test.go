@@ -31,6 +31,9 @@ func TestAgentSessionsSourceContract(t *testing.T) {
 		// Per-workspace message reporter creation
 		"getOrCreateReporter",
 		`"projectId"`,
+		`"mcpServers,omitempty"`,
+		"normalizeMcpServers",
+		"registerSessionMcpServers",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)

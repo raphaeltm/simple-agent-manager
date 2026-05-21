@@ -6,12 +6,12 @@ import (
 )
 
 func TestBuildAcpMcpServers_Empty(t *testing.T) {
-	result := buildAcpMcpServers(nil)
+	result := buildAcpMcpServers(nil, "claude-code")
 	if len(result) != 0 {
 		t.Fatalf("expected empty slice, got %d entries", len(result))
 	}
 
-	result = buildAcpMcpServers([]McpServerEntry{})
+	result = buildAcpMcpServers([]McpServerEntry{}, "claude-code")
 	if len(result) != 0 {
 		t.Fatalf("expected empty slice, got %d entries", len(result))
 	}
@@ -22,7 +22,7 @@ func TestBuildAcpMcpServers_SingleServer(t *testing.T) {
 		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
 	}
 
-	result := buildAcpMcpServers(entries)
+	result := buildAcpMcpServers(entries, "claude-code")
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 server, got %d", len(result))
@@ -56,7 +56,7 @@ func TestBuildAcpMcpServers_NoToken(t *testing.T) {
 		{URL: "https://api.example.com/mcp", Token: ""},
 	}
 
-	result := buildAcpMcpServers(entries)
+	result := buildAcpMcpServers(entries, "claude-code")
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 server, got %d", len(result))
@@ -74,7 +74,7 @@ func TestBuildAcpMcpServers_MultipleServers(t *testing.T) {
 		{URL: "https://api2.example.com/mcp", Token: "token-2"},
 	}
 
-	result := buildAcpMcpServers(entries)
+	result := buildAcpMcpServers(entries, "claude-code")
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 servers, got %d", len(result))
@@ -96,7 +96,7 @@ func TestBuildAcpMcpServers_WireFormat(t *testing.T) {
 	entries := []McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "tok"},
 	}
-	result := buildAcpMcpServers(entries)
+	result := buildAcpMcpServers(entries, "claude-code")
 
 	b, err := json.Marshal(result[0])
 	if err != nil {
@@ -109,5 +109,85 @@ func TestBuildAcpMcpServers_WireFormat(t *testing.T) {
 	// The ACP SDK's MarshalJSON sets type to "http" regardless of the struct field
 	if m["type"] != "http" {
 		t.Errorf("wire type should be 'http', got %q", m["type"])
+	}
+}
+
+func TestBuildAcpMcpServers_AmpUsesMcpRemoteStdioBridge(t *testing.T) {
+	entries := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	}
+	result := buildAcpMcpServers(entries, "amp")
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(result))
+	}
+
+	server := result[0]
+	if server.Http != nil {
+		t.Fatal("expected Amp MCP server to avoid HTTP transport")
+	}
+	if server.Stdio == nil {
+		t.Fatal("expected Stdio transport, got nil")
+	}
+	if server.Stdio.Name != "sam-mcp" {
+		t.Errorf("expected name 'sam-mcp', got '%s'", server.Stdio.Name)
+	}
+	if server.Stdio.Command != "npx" {
+		t.Errorf("expected command 'npx', got '%s'", server.Stdio.Command)
+	}
+
+	wantArgs := []string{
+		"-y",
+		"mcp-remote@0.1.38",
+		"https://api.example.com/mcp",
+		"--header",
+		"Authorization:Bearer ${SAM_MCP_TOKEN}",
+		"--silent",
+	}
+	if len(server.Stdio.Args) != len(wantArgs) {
+		t.Fatalf("args length=%d, want %d: %#v", len(server.Stdio.Args), len(wantArgs), server.Stdio.Args)
+	}
+	for i := range wantArgs {
+		if server.Stdio.Args[i] != wantArgs[i] {
+			t.Fatalf("arg[%d]=%q, want %q", i, server.Stdio.Args[i], wantArgs[i])
+		}
+	}
+
+	if len(server.Stdio.Env) != 1 {
+		t.Fatalf("expected 1 env var, got %d", len(server.Stdio.Env))
+	}
+	if server.Stdio.Env[0].Name != "SAM_MCP_TOKEN" {
+		t.Errorf("env name=%q, want SAM_MCP_TOKEN", server.Stdio.Env[0].Name)
+	}
+	if server.Stdio.Env[0].Value != "tok" {
+		t.Errorf("env value=%q, want token", server.Stdio.Env[0].Value)
+	}
+}
+
+func TestBuildAcpMcpServers_AmpWireFormatDoesNotExposeTokenInArgs(t *testing.T) {
+	entries := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "secret-token"},
+	}
+	result := buildAcpMcpServers(entries, "amp")
+
+	b, err := json.Marshal(result[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if m["type"] != nil {
+		t.Errorf("stdio wire format should not include type, got %q", m["type"])
+	}
+	args, ok := m["args"].([]interface{})
+	if !ok {
+		t.Fatalf("expected args array, got %#v", m["args"])
+	}
+	for _, arg := range args {
+		if arg == "secret-token" || arg == "Authorization:Bearer secret-token" {
+			t.Fatalf("token leaked in stdio args: %#v", args)
+		}
 	}
 }

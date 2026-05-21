@@ -33,18 +33,18 @@ Direct project-chat Amp sessions also need SAM MCP configuration before ACP `New
 
 ## Implementation Checklist
 
-- [ ] Move this task file from `tasks/backlog/` to `tasks/active/` in the feature worktree.
-- [ ] Add an Amp-specific MCP conversion path that turns SAM's remote MCP entry into a stdio MCP entry using `npx -y mcp-remote@0.1.38`.
-- [ ] Ensure the SAM MCP token is passed to `mcp-remote` through an environment variable, not embedded directly in command-line arguments or logs.
-- [ ] Keep raw HTTP MCP entries for agents that support HTTP MCP directly.
-- [ ] Add VM agent tests proving Amp receives a stdio `sam-mcp` ACP entry while non-Amp agents continue receiving HTTP MCP entries.
-- [ ] Wire direct project-chat agent session creation so it mints a scoped SAM MCP token and sends MCP server config to the VM before ACP startup.
-- [ ] Ensure the direct project-chat MCP token is scoped to the correct user, project, workspace, chat session, and agent session.
-- [ ] Extend VM agent create-session handling, if needed, so MCP config sent during session creation is validated, persisted, and available before WebSocket `select_agent` triggers ACP `NewSession`.
-- [ ] Add API/control-plane vertical slice coverage proving direct project-chat creation sends MCP config to the VM with realistic user/project/workspace/session state.
-- [ ] Add or update VM agent coverage proving create-session MCP config persists and reaches ACP `NewSession`.
-- [ ] Update docs describing Amp MCP behavior and the `mcp-remote` bridge dependency.
-- [ ] Run focused API and VM tests for changed paths.
+- [x] Move this task file from `tasks/backlog/` to `tasks/active/` in the feature worktree.
+- [x] Add an Amp-specific MCP conversion path that turns SAM's remote MCP entry into a stdio MCP entry using `npx -y mcp-remote@0.1.38`.
+- [x] Ensure the SAM MCP token is passed to `mcp-remote` through an environment variable, not embedded directly in command-line arguments or logs.
+- [x] Keep raw HTTP MCP entries for agents that support HTTP MCP directly.
+- [x] Add VM agent tests proving Amp receives a stdio `sam-mcp` ACP entry while non-Amp agents continue receiving HTTP MCP entries.
+- [x] Wire direct project-chat agent session creation so it mints a scoped SAM MCP token and sends MCP server config to the VM before ACP startup.
+- [x] Ensure the direct project-chat MCP token is scoped to the correct user, project, workspace, chat session, and agent session.
+- [x] Extend VM agent create-session handling, if needed, so MCP config sent during session creation is validated, persisted, and available before WebSocket `select_agent` triggers ACP `NewSession`.
+- [x] Add API/control-plane vertical slice coverage proving direct project-chat creation sends MCP config to the VM with realistic user/project/workspace/session state.
+- [x] Add or update VM agent coverage proving create-session MCP config persists and reaches ACP `NewSession`.
+- [x] Update docs describing Amp MCP behavior and the `mcp-remote` bridge dependency.
+- [x] Run focused API and VM tests for changed paths.
 - [ ] Run full required quality gates before PR.
 - [ ] Complete required specialist reviews: task-completion-validator, go-specialist, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, doc-sync-validator, and env-validator if env handling changes.
 - [ ] Deploy the PR branch to staging through the normal `deploy-staging.yml` GitHub Actions workflow.

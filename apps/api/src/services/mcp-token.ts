@@ -30,6 +30,8 @@ export interface McpTokenData {
   projectId: string;
   userId: string;
   workspaceId: string;
+  chatSessionId?: string;
+  agentSessionId?: string;
   createdAt: string;
   /** ISO timestamp of last sliding window refresh (set on first refresh) */
   lastRefreshedAt?: string;

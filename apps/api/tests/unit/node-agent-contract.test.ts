@@ -180,6 +180,23 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       expect(result.success).toBe(true);
     });
 
+    it('validates create request with project chat MCP server config', () => {
+      const request = {
+        sessionId: 'sess-abc123',
+        label: 'My Session',
+        chatSessionId: 'chat-abc123',
+        projectId: 'proj-abc123',
+        mcpServers: [
+          {
+            url: 'https://api.example.com/mcp',
+            token: 'mcp-token',
+          },
+        ],
+      };
+      const result = CreateAgentSessionAgentRequestSchema.safeParse(request);
+      expect(result.success).toBe(true);
+    });
+
     it('validates request with null label', () => {
       const request = {
         sessionId: 'sess-abc123',
@@ -963,13 +980,28 @@ describe('Node Agent client functions send correct payloads', () => {
 
     const { createAgentSessionOnNode } = await import('../../src/services/node-agent');
 
-    await createAgentSessionOnNode('node-abc', 'ws-test', 'sess-new', 'Test Session', {} as any, 'user-123');
+    await createAgentSessionOnNode(
+      'node-abc',
+      'ws-test',
+      'sess-new',
+      'Test Session',
+      {} as any,
+      'user-123',
+      'chat-123',
+      'proj-123',
+      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+    );
 
     const parsedBody = JSON.parse(capturedBody!);
     const result = CreateAgentSessionAgentRequestSchema.safeParse(parsedBody);
     expect(result.success).toBe(true);
     expect(parsedBody.sessionId).toBe('sess-new');
     expect(parsedBody.label).toBe('Test Session');
+    expect(parsedBody.chatSessionId).toBe('chat-123');
+    expect(parsedBody.projectId).toBe('proj-123');
+    expect(parsedBody.mcpServers).toEqual([
+      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+    ]);
   });
 
   it('node agent request throws on non-ok response', async () => {

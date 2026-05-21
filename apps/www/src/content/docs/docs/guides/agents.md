@@ -64,7 +64,7 @@ OpenCode uses Scaleway's Generative APIs for inference. If you already have a Sc
 | **OAuth Support** | No |
 | **Get a Key** | [Amp settings](https://ampcode.com/settings) |
 
-Amp uses the community `acp-amp` ACP bridge in SAM v1. It requires an Amp API key and may require paid Amp credits.
+Amp uses the community `acp-amp` ACP bridge in SAM v1. It requires an Amp API key and may require paid Amp credits. Because the current `acp-amp` release only forwards stdio MCP servers to Amp, SAM bridges its remote MCP endpoint through a pinned `mcp-remote` stdio server when starting Amp sessions.
 
 ## Configuring Agent Credentials
 

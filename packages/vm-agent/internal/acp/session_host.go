@@ -44,24 +44,30 @@ const (
 	defaultControlPlaneHTTPTimeout = 30 * time.Second
 )
 
+const (
+	ampMcpRemotePackage = "mcp-remote@0.1.38"
+	ampMcpTokenEnvVar   = "SAM_MCP_TOKEN"
+)
+
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
 // entries for NewSession/LoadSession requests.
-func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
+func buildAcpMcpServers(entries []McpServerEntry, agentType string) []acpsdk.McpServer {
 	if len(entries) == 0 {
 		return []acpsdk.McpServer{}
 	}
 	servers := make([]acpsdk.McpServer, 0, len(entries))
 	for i, e := range entries {
+		name := mcpServerName(i, len(entries))
+		if agentType == "amp" {
+			servers = append(servers, buildAmpMcpServer(name, e))
+			continue
+		}
 		var headers []acpsdk.HttpHeader
 		if e.Token != "" {
 			headers = append(headers, acpsdk.HttpHeader{
 				Name:  "Authorization",
 				Value: "Bearer " + e.Token,
 			})
-		}
-		name := "sam-mcp"
-		if len(entries) > 1 {
-			name = fmt.Sprintf("sam-mcp-%d", i)
 		}
 		servers = append(servers, acpsdk.McpServer{
 			Http: &acpsdk.McpServerHttpInline{
@@ -73,6 +79,39 @@ func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
 		})
 	}
 	return servers
+}
+
+func mcpServerName(index, total int) string {
+	if total > 1 {
+		return fmt.Sprintf("sam-mcp-%d", index)
+	}
+	return "sam-mcp"
+}
+
+func buildAmpMcpServer(name string, entry McpServerEntry) acpsdk.McpServer {
+	env := []acpsdk.EnvVariable{}
+	if entry.Token != "" {
+		env = append(env, acpsdk.EnvVariable{
+			Name:  ampMcpTokenEnvVar,
+			Value: entry.Token,
+		})
+	}
+
+	return acpsdk.McpServer{
+		Stdio: &acpsdk.McpServerStdio{
+			Name:    name,
+			Command: "npx",
+			Args: []string{
+				"-y",
+				ampMcpRemotePackage,
+				entry.URL,
+				"--header",
+				"Authorization:Bearer ${" + ampMcpTokenEnvVar + "}",
+				"--silent",
+			},
+			Env: env,
+		},
+	}
 }
 
 // DefaultMessageBufferSize is the default maximum number of messages buffered

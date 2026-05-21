@@ -756,10 +756,11 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	var body struct {
-		SessionID     string `json:"sessionId"`
-		Label         string `json:"label"`
-		ChatSessionID string `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
-		ProjectID     string `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
+		SessionID     string               `json:"sessionId"`
+		Label         string               `json:"label"`
+		ChatSessionID string               `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
+		ProjectID     string               `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
+		McpServers    []acp.McpServerEntry `json:"mcpServers,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -772,6 +773,11 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 
 	chatSID := strings.TrimSpace(body.ChatSessionID)
 	projectID := strings.TrimSpace(body.ProjectID)
+	mcpServers, err := normalizeMcpServers(body.McpServers)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Store projectID on workspace runtime for ACP heartbeat goroutine.
 	if projectID != "" {
@@ -803,6 +809,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.registerSessionMcpServers(workspaceID, session.ID, mcpServers)
 
 	if !idempotentHit {
 		s.appendNodeEvent(workspaceID, "info", "agent_session.created", "Agent session created", map[string]interface{}{"sessionId": session.ID})
@@ -824,6 +831,51 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusCreated, session)
+}
+
+func normalizeMcpServers(entries []acp.McpServerEntry) ([]acp.McpServerEntry, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	normalized := make([]acp.McpServerEntry, len(entries))
+	for i, srv := range entries {
+		u := strings.TrimSpace(srv.URL)
+		if u == "" {
+			return nil, fmt.Errorf("mcpServers[%d].url is required", i)
+		}
+		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+			return nil, fmt.Errorf("mcpServers[%d].url must be an HTTP(S) URL", i)
+		}
+		normalized[i] = acp.McpServerEntry{URL: u, Token: srv.Token}
+	}
+	return normalized, nil
+}
+
+func (s *Server) registerSessionMcpServers(workspaceID, sessionID string, entries []acp.McpServerEntry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	s.sessionMcpServers[hostKey] = entries
+	s.sessionHostMu.Unlock()
+
+	// Persist to SQLite so MCP servers survive VM agent restarts and
+	// are available even if a WebSocket creates the SessionHost first.
+	if s.store != nil {
+		persistEntries := make([]persistence.McpServer, len(entries))
+		for i, srv := range entries {
+			persistEntries[i] = persistence.McpServer{URL: srv.URL, Token: srv.Token}
+		}
+		if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, persistEntries); err != nil {
+			slog.Warn("Failed to persist MCP servers to SQLite",
+				"workspace", workspaceID, "session", sessionID, "error", err)
+		}
+	}
+
+	slog.Info("MCP servers registered for agent session",
+		"workspace", workspaceID, "session", sessionID, "count", len(entries))
 }
 
 // handleStartAgentSession starts an agent process and sends an initial prompt
@@ -886,42 +938,13 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Validate and store MCP servers for this session before creating the SessionHost.
-	// getOrCreateSessionHost reads these and wires them into GatewayConfig.
 	hostKey := workspaceID + ":" + sessionID
-	for i, srv := range body.McpServers {
-		u := strings.TrimSpace(srv.URL)
-		if u == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("mcpServers[%d].url is required", i))
-			return
-		}
-		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("mcpServers[%d].url must be an HTTP(S) URL", i))
-			return
-		}
-		body.McpServers[i].URL = u
+	mcpServers, err := normalizeMcpServers(body.McpServers)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	if len(body.McpServers) > 0 {
-		s.sessionHostMu.Lock()
-		s.sessionMcpServers[hostKey] = body.McpServers
-		s.sessionHostMu.Unlock()
-
-		// Persist to SQLite so MCP servers survive VM agent restarts and
-		// are available even if a WebSocket creates the SessionHost first.
-		if s.store != nil {
-			persistEntries := make([]persistence.McpServer, len(body.McpServers))
-			for i, srv := range body.McpServers {
-				persistEntries[i] = persistence.McpServer{URL: srv.URL, Token: srv.Token}
-			}
-			if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, persistEntries); err != nil {
-				slog.Warn("Failed to persist MCP servers to SQLite",
-					"workspace", workspaceID, "session", sessionID, "error", err)
-			}
-		}
-
-		slog.Info("MCP servers registered for agent session",
-			"workspace", workspaceID, "session", sessionID, "count", len(body.McpServers))
-	}
+	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
 
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".

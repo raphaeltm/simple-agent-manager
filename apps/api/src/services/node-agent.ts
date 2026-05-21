@@ -268,17 +268,28 @@ export async function createAgentSessionOnNode(
   userId: string,
   chatSessionId?: string | null,
   projectId?: string | null,
+  mcpServer?: McpServerConfig,
 ): Promise<unknown> {
+  const body: Record<string, unknown> = {
+    sessionId,
+    label,
+    chatSessionId: chatSessionId ?? undefined,
+    projectId: projectId ?? undefined,
+  };
+  if (mcpServer) {
+    body.mcpServers = [
+      {
+        url: mcpServer.url,
+        token: mcpServer.token,
+      },
+    ];
+  }
+
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'POST',
     userId,
     workspaceId,
-    body: JSON.stringify({
-      sessionId,
-      label,
-      chatSessionId: chatSessionId ?? undefined,
-      projectId: projectId ?? undefined,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
