@@ -45,7 +45,7 @@ Direct project-chat Amp sessions also need SAM MCP configuration before ACP `New
 - [x] Add or update VM agent coverage proving create-session MCP config persists and reaches ACP `NewSession`.
 - [x] Update docs describing Amp MCP behavior and the `mcp-remote` bridge dependency.
 - [x] Run focused API and VM tests for changed paths.
-- [ ] Run full required quality gates before PR.
+- [x] Run full required quality gates before PR.
 - [ ] Complete required specialist reviews: task-completion-validator, go-specialist, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, doc-sync-validator, and env-validator if env handling changes.
 - [ ] Deploy the PR branch to staging through the normal `deploy-staging.yml` GitHub Actions workflow.
 - [ ] Verify staging with a fresh workspace/node and a valid Amp credential.
