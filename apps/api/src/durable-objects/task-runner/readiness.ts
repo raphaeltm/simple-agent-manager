@@ -24,5 +24,22 @@ export function isNodeAgentReadyForWorkspaceDispatch(
   }
 
   const freshnessFloor = waitStartedAtMs - freshnessSkewMs;
-  return heartbeatTime > freshnessFloor && readyTime > freshnessFloor;
+
+  // `/ready` is emitted once during VM agent startup, while heartbeats continue
+  // every few seconds after boot. In real provisioning flows, task-runner may
+  // enter `node_agent_ready` after `/ready` has already fired (for example, if
+  // post-provision bookkeeping or retries delay the poll loop). Gating strictly
+  // on a *fresh* `/ready` timestamp causes false negatives where the node is
+  // actually healthy and actively heartbeating.
+  //
+  // Readiness criteria:
+  // 1) heartbeat must be fresh relative to this task-runner wait window, and
+  // 2) `/ready` must exist and not be implausibly newer than heartbeat.
+  //
+  // Rule (2) preserves protection against mixed-cycle timestamps while allowing
+  // valid startup sequences where `/ready` is older than recent heartbeats.
+  const heartbeatIsFresh = heartbeatTime > freshnessFloor;
+  const readyNotAheadOfHeartbeat = readyTime <= heartbeatTime + freshnessSkewMs;
+
+  return heartbeatIsFresh && readyNotAheadOfHeartbeat;
 }
