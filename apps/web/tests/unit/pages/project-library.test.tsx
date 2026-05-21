@@ -87,9 +87,9 @@ function makeResponse(files: ReturnType<typeof makeFile>[]): ListFilesResponse {
   return { files, cursor: null, total: files.length };
 }
 
-function renderLibrary() {
+function renderLibrary(initialRoute = '/projects/proj-test/library') {
   return render(
-    <MemoryRouter initialEntries={['/projects/proj-test/library']}>
+    <MemoryRouter initialEntries={[initialRoute]}>
       <ProjectLibrary />
     </MemoryRouter>,
   );
@@ -647,5 +647,72 @@ describe('ProjectLibrary', () => {
     // Status bar should show both file and folder counts
     expect(screen.getByText(/2 files/)).toBeInTheDocument();
     expect(screen.getByText(/1 folder/)).toBeInTheDocument();
+  });
+
+  describe('URL-driven directory navigation', () => {
+    it('uses ?dir= search param to set initial directory', async () => {
+      const files = [makeFile({ id: 'f1', filename: 'nested.md', directory: '/docs' })];
+      mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse(files));
+      mocks.listLibraryDirectories.mockResolvedValueOnce({ directories: [] });
+
+      renderLibrary('/projects/proj-test/library?dir=/docs');
+
+      await waitFor(() => {
+        expect(mocks.listLibraryFiles).toHaveBeenCalledWith(
+          'proj-test',
+          expect.objectContaining({ directory: '/docs' }),
+        );
+      });
+    });
+
+    it('defaults to root when no ?dir= param is present', async () => {
+      mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse([]));
+
+      renderLibrary();
+
+      await waitFor(() => {
+        expect(mocks.listLibraryFiles).toHaveBeenCalledWith(
+          'proj-test',
+          expect.objectContaining({ directory: '/' }),
+        );
+      });
+    });
+
+    it('navigating into a folder updates the directory param', async () => {
+      const dirs = [{ name: 'docs', path: '/docs', fileCount: 3 }];
+      mocks.listLibraryFiles.mockResolvedValue(makeResponse([]));
+      mocks.listLibraryDirectories.mockResolvedValueOnce({ directories: dirs });
+
+      renderLibrary();
+
+      await waitFor(() => {
+        expect(screen.getByText('docs')).toBeInTheDocument();
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText('Folder: docs, 3 files'));
+
+      // After clicking folder, the loadFiles should be called with new directory
+      await waitFor(() => {
+        expect(mocks.listLibraryFiles).toHaveBeenCalledWith(
+          'proj-test',
+          expect.objectContaining({ directory: '/docs' }),
+        );
+      });
+    });
+  });
+
+  describe('URL-driven file preview', () => {
+    it('opens preview modal when ?preview= param matches a loaded file', async () => {
+      const files = [makeFile({ id: 'f1', filename: 'readme.md' })];
+      mocks.listLibraryFiles.mockResolvedValueOnce(makeResponse(files));
+
+      renderLibrary('/projects/proj-test/library?preview=f1');
+
+      // Wait for data to load, then check modal is open (file name appears in both list and modal)
+      await waitFor(() => {
+        expect(screen.getAllByText('readme.md').length).toBeGreaterThanOrEqual(2);
+      });
+    });
   });
 });
