@@ -164,6 +164,36 @@ func TestBuildAcpMcpServers_AmpUsesMcpRemoteStdioBridge(t *testing.T) {
 	}
 }
 
+func TestBuildAcpMcpServers_AmpNoTokenOmitsHeaderArg(t *testing.T) {
+	entries := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: ""},
+	}
+	result := buildAcpMcpServers(entries, "amp")
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(result))
+	}
+	server := result[0]
+	if server.Stdio == nil {
+		t.Fatal("expected Stdio transport")
+	}
+	// No env vars when token is empty
+	if len(server.Stdio.Env) != 0 {
+		t.Fatalf("expected 0 env vars when token is empty, got %d", len(server.Stdio.Env))
+	}
+	// --header arg should not be present
+	for _, arg := range server.Stdio.Args {
+		if arg == "--header" {
+			t.Fatal("--header should not be present when token is empty")
+		}
+	}
+	// Should still have: -y, mcp-remote@version, URL, --silent
+	wantArgs := []string{"-y", "mcp-remote@0.1.38", "https://api.example.com/mcp", "--silent"}
+	if len(server.Stdio.Args) != len(wantArgs) {
+		t.Fatalf("args=%v, want %v", server.Stdio.Args, wantArgs)
+	}
+}
+
 func TestBuildAcpMcpServers_AmpWireFormatDoesNotExposeTokenInArgs(t *testing.T) {
 	entries := []McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "secret-token"},

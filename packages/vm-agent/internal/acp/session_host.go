@@ -89,27 +89,25 @@ func mcpServerName(index, total int) string {
 }
 
 func buildAmpMcpServer(name string, entry McpServerEntry) acpsdk.McpServer {
-	env := []acpsdk.EnvVariable{}
+	var env []acpsdk.EnvVariable
+	args := []string{"-y", ampMcpRemotePackage, entry.URL}
 	if entry.Token != "" {
 		env = append(env, acpsdk.EnvVariable{
 			Name:  ampMcpTokenEnvVar,
 			Value: entry.Token,
 		})
+		// mcp-remote expands ${ENV_VAR} references in --header values internally.
+		// The token is passed via env var (not in CLI args) to avoid /proc visibility.
+		args = append(args, "--header", "Authorization:Bearer ${"+ampMcpTokenEnvVar+"}")
 	}
+	args = append(args, "--silent")
 
 	return acpsdk.McpServer{
 		Stdio: &acpsdk.McpServerStdio{
 			Name:    name,
 			Command: "npx",
-			Args: []string{
-				"-y",
-				ampMcpRemotePackage,
-				entry.URL,
-				"--header",
-				"Authorization:Bearer ${" + ampMcpTokenEnvVar + "}",
-				"--silent",
-			},
-			Env: env,
+			Args:    args,
+			Env:     env,
 		},
 	}
 }

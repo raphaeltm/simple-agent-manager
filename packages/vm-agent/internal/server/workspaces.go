@@ -88,6 +88,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 		delete(s.sessionHosts, key)
 		delete(s.sessionMcpServers, key)
 		delete(s.sessionProfileOvr, key)
+		delete(s.sessionTaskCtx, key)
 	}
 	s.sessionHostMu.Unlock()
 
@@ -843,8 +844,9 @@ func normalizeMcpServers(entries []acp.McpServerEntry) ([]acp.McpServerEntry, er
 		if u == "" {
 			return nil, fmt.Errorf("mcpServers[%d].url is required", i)
 		}
-		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
-			return nil, fmt.Errorf("mcpServers[%d].url must be an HTTP(S) URL", i)
+		isLocalhost := strings.HasPrefix(u, "http://localhost:") || strings.HasPrefix(u, "http://127.0.0.1:")
+		if !strings.HasPrefix(u, "https://") && !isLocalhost {
+			return nil, fmt.Errorf("mcpServers[%d].url must use HTTPS (got %q)", i, u)
 		}
 		normalized[i] = acp.McpServerEntry{URL: u, Token: srv.Token}
 	}
