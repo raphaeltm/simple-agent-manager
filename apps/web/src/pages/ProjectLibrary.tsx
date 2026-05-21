@@ -3,6 +3,7 @@ import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { Filter, Folder, FolderOpen, FolderPlus, Grid3X3, List, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 
 import { CreateDirectoryDialog } from '../components/library/CreateDirectoryDialog';
 import { DirectoryBreadcrumb } from '../components/library/DirectoryBreadcrumb';
@@ -51,6 +52,12 @@ function filterDirectoriesBySearch(dirs: DirectoryEntry[], search: string): Dire
 export function ProjectLibrary() {
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL-driven directory navigation — `?dir=/path`
+  const currentDirectory = searchParams.get('dir') || '/';
+  // URL-driven file preview — `?preview=fileId`
+  const previewFileId = searchParams.get('preview');
 
   // Initialize from cache for instant render (avoids loading spinner on revisit)
   const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt');
@@ -62,9 +69,6 @@ export function ProjectLibrary() {
   const [directories, setDirectories] = useState<DirectoryEntry[]>(hasCachedData ? initialCachedDirs : []);
   const [loading, setLoading] = useState(!hasCachedData);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Directory navigation
-  const [currentDirectory, setCurrentDirectory] = useState('/');
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -88,8 +92,11 @@ export function ProjectLibrary() {
   // Tag editor
   const [editingTagsFile, setEditingTagsFile] = useState<FileWithTags | null>(null);
 
-  // Preview
-  const [previewFile, setPreviewFile] = useState<FileWithTags | null>(null);
+  // Preview — derived from URL param + loaded files
+  const previewFile = useMemo(
+    () => (previewFileId ? files.find((f) => f.id === previewFileId) ?? null : null),
+    [previewFileId, files],
+  );
 
   // Active filter count for badge
   const activeFilterCount =
@@ -190,8 +197,16 @@ export function ProjectLibrary() {
   // ---------------------------------------------------------------------------
 
   const navigateToDirectory = useCallback((dir: string) => {
-    setCurrentDirectory(dir);
-  }, []);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (dir === '/') {
+        next.delete('dir');
+      } else {
+        next.set('dir', dir);
+      }
+      return next;
+    });
+  }, [setSearchParams]);
 
   const handleCreateDirectory = useCallback(
     (dirPath: string) => {
@@ -269,6 +284,22 @@ export function ProjectLibrary() {
   // ---------------------------------------------------------------------------
   // Tag filter toggle
   // ---------------------------------------------------------------------------
+
+  const openPreview = useCallback((file: FileWithTags) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('preview', file.id);
+      return next;
+    });
+  }, [setSearchParams]);
+
+  const closePreview = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('preview');
+      return next;
+    });
+  }, [setSearchParams]);
 
   const handleTagClick = useCallback((tag: string) => {
     setActiveTags((prev) =>
@@ -561,7 +592,7 @@ export function ProjectLibrary() {
               onDeleted={() => loadFiles({ background: true })}
               onEditTags={setEditingTagsFile}
               onTagClick={handleTagClick}
-              onPreview={setPreviewFile}
+              onPreview={openPreview}
             />
           ))}
         </div>
@@ -577,7 +608,7 @@ export function ProjectLibrary() {
               onDeleted={() => loadFiles({ background: true })}
               onEditTags={setEditingTagsFile}
               onTagClick={handleTagClick}
-              onPreview={setPreviewFile}
+              onPreview={openPreview}
             />
           ))}
         </div>
@@ -588,7 +619,7 @@ export function ProjectLibrary() {
         <FilePreviewModal
           file={previewFile}
           previewUrl={getLibraryFilePreviewUrl(projectId, previewFile.id)}
-          onClose={() => setPreviewFile(null)}
+          onClose={closePreview}
           onDownload={() => downloadLibraryFile(projectId, previewFile.id)}
         />
       )}

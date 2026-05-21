@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
@@ -63,13 +63,28 @@ const SOURCE_LABELS: Record<string, string> = {
 export function KnowledgePage() {
   const { id: projectId } = useParams<{ id: string }>();
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL-driven entity selection — `?entity=entityId`
+  const selectedEntityId = searchParams.get('entity');
+
+  const selectEntity = useCallback((entityId: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (entityId) {
+        next.set('entity', entityId);
+      } else {
+        next.delete('entity');
+      }
+      return next;
+    });
+  }, [setSearchParams]);
 
   const [entities, setEntities] = useState<KnowledgeEntity[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('');
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   // Detail panel state
@@ -161,7 +176,7 @@ export function KnowledgePage() {
     try {
       await deleteKnowledgeEntity(projectId, entityId);
       if (selectedEntityId === entityId) {
-        setSelectedEntityId(null);
+        selectEntity(null);
         setDetailEntity(null);
       }
       void loadEntities();
@@ -210,7 +225,7 @@ export function KnowledgePage() {
     return (
       <div className="flex flex-col gap-3 px-4 py-3 w-full max-w-full min-w-0 overflow-x-hidden">
         <button
-          onClick={() => { setSelectedEntityId(null); setDetailEntity(null); }}
+          onClick={() => { selectEntity(null); setDetailEntity(null); }}
           className="flex items-center gap-1 text-sm text-fg-muted hover:text-fg-primary"
         >
           <ChevronLeft size={16} /> Back to entities
@@ -352,7 +367,7 @@ export function KnowledgePage() {
                 entity={entity}
                 selected={selectedEntityId === entity.id}
                 isMobile={isMobile}
-                onClick={() => setSelectedEntityId(entity.id)}
+                onClick={() => selectEntity(entity.id)}
                 onDelete={() => void handleDelete(entity.id)}
               />
             ))
