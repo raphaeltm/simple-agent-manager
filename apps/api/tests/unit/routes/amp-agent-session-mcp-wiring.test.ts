@@ -139,7 +139,7 @@ describe('Amp project-chat MCP wiring', () => {
       {},
       'mcp-token-123',
       expect.objectContaining({
-        taskId: 'agent-session-123',
+        taskId: '',
         projectId: 'project-123',
         userId: 'user-123',
         workspaceId: 'workspace-123',

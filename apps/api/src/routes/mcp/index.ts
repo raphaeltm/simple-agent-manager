@@ -185,7 +185,9 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
   }
 
   // ── HTTP-level rate limiting (per task/agent) ───────────────────────────
-  const rlResult = await checkMcpRateLimit(c.env.KV, tokenData.taskId, c.env);
+  // Use taskId for task-runner sessions; fall back to agentSessionId for direct project-chat sessions
+  const rateLimitKey = tokenData.taskId || tokenData.agentSessionId || tokenData.workspaceId;
+  const rlResult = await checkMcpRateLimit(c.env.KV, rateLimitKey, c.env);
   c.header('X-RateLimit-Limit', getMcpRateLimit(c.env).toString());
   c.header('X-RateLimit-Remaining', rlResult.remaining.toString());
   c.header('X-RateLimit-Reset', rlResult.resetAt.toString());

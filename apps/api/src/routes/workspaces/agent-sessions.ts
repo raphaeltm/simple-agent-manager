@@ -109,7 +109,11 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
         c.env.KV,
         mcpToken,
         {
-          taskId: sessionId,
+          // Empty taskId for direct project-chat sessions — only task-runner dispatched
+          // sessions have a real task row. Setting sessionId as taskId was wrong because
+          // MCP tools query tasks by this ID and would get "Task not found". Empty string
+          // is falsy so tools guarding on !tokenData.taskId correctly reject early.
+          taskId: '',
           projectId: workspace.projectId,
           userId,
           workspaceId: workspace.id,
