@@ -1,0 +1,241 @@
+- generic [ref=e5]:
+  - complementary [ref=e6]:
+    - generic [ref=e7]:
+      - img "SAM" [ref=e8]
+      - generic [ref=e9]:
+        - button "Recent chats" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+        - button "Notifications (1 need attention), 6 total unread" [ref=e15] [cursor=pointer]:
+          - img [ref=e16]
+          - generic [ref=e19]: "1"
+    - button "Open command palette" [ref=e20] [cursor=pointer]:
+      - img [ref=e21]
+      - generic [ref=e24]: Search...
+      - generic [ref=e25]: Ctrl+K
+    - generic [ref=e27]:
+      - navigation "Project navigation" [ref=e28]:
+        - button "Show global navigation" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+          - generic [ref=e32]: Back to Projects
+        - generic "CrewAI" [ref=e33]
+        - link "Chat" [ref=e34] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/chat
+          - img [ref=e35]
+          - text: Chat
+        - link "Agent" [ref=e37] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/agent
+          - img [ref=e38]
+          - text: Agent
+        - link "Library" [ref=e41] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/library
+          - img [ref=e42]
+          - text: Library
+        - link "Ideas" [ref=e44] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/ideas
+          - img [ref=e45]
+          - text: Ideas
+        - link "Knowledge" [ref=e47] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/knowledge
+          - img [ref=e48]
+          - text: Knowledge
+        - link "Notifications" [ref=e58] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/notifications
+          - img [ref=e59]
+          - text: Notifications
+        - link "Triggers" [ref=e62] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/triggers
+          - img [ref=e63]
+          - text: Triggers
+        - link "Profiles" [ref=e66] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/profiles
+          - img [ref=e67]
+          - text: Profiles
+        - link "Activity" [ref=e79] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/activity
+          - img [ref=e80]
+          - text: Activity
+        - link "Settings" [ref=e82] [cursor=pointer]:
+          - /url: /projects/01KJNR9R3TEN3KX1ETE33852R8/settings
+          - img [ref=e83]
+          - text: Settings
+      - navigation [ref=e86]:
+        - button [ref=e87] [cursor=pointer]:
+          - img [ref=e88]
+          - generic [ref=e90]: Back to CrewAI
+        - link [ref=e91] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e92]
+          - text: Home
+        - link [ref=e95] [cursor=pointer]:
+          - /url: /sam
+          - img [ref=e96]
+          - text: SAM
+        - link [ref=e99] [cursor=pointer]:
+          - /url: /chats
+          - img [ref=e100]
+          - text: Chats
+        - link [ref=e102] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e103]
+          - text: Projects
+        - link [ref=e105] [cursor=pointer]:
+          - /url: /account-map
+          - img [ref=e106]
+          - text: Map
+        - link [ref=e108] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e109]
+          - text: Settings
+        - link [ref=e112] [cursor=pointer]:
+          - /url: /admin
+          - img [ref=e113]
+          - text: Admin
+        - button [ref=e116] [cursor=pointer]:
+          - img [ref=e117]
+          - text: Infrastructure
+        - generic [ref=e119]:
+          - button [expanded] [ref=e120] [cursor=pointer]:
+            - img [ref=e121]
+            - text: Recent Projects
+          - region [ref=e123]:
+            - generic [ref=e125]:
+              - img
+              - textbox [ref=e126]:
+                - /placeholder: Filter projects...
+            - generic [ref=e127]:
+              - button [ref=e128] [cursor=pointer]:
+                - generic [ref=e129]: C
+                - generic [ref=e130]: CrewAI Org
+                - generic [ref=e131]: 23h
+                - img [ref=e132]
+              - button [ref=e133] [cursor=pointer]:
+                - generic [ref=e134]: C
+                - generic [ref=e135]: CrewAI
+                - generic [ref=e136]: 1d
+                - img [ref=e137]
+              - button [ref=e138] [cursor=pointer]:
+                - generic [ref=e139]: E
+                - generic [ref=e140]: elysia
+                - generic [ref=e141]: 1w
+                - img [ref=e142]
+    - generic [ref=e143]:
+      - img "serverspresentation2025" [ref=e144]
+      - generic [ref=e146]: serverspresentation2025
+      - button "Sign out" [ref=e147] [cursor=pointer]:
+        - img [ref=e148]
+  - main [ref=e150]:
+    - main "CrewAI — Project" [ref=e152]:
+      - generic [ref=e154]:
+        - generic [ref=e155]:
+          - heading "Library" [level=1] [ref=e156]
+          - generic [ref=e157]:
+            - button "List view" [pressed] [ref=e158] [cursor=pointer]:
+              - img [ref=e159]
+            - button "Grid view" [ref=e160] [cursor=pointer]:
+              - img [ref=e161]
+          - combobox "Sort by" [ref=e163] [cursor=pointer]:
+            - option "Newest" [selected]
+            - option "Name"
+            - option "Size"
+          - button "Toggle filters" [ref=e164] [cursor=pointer]:
+            - img [ref=e165]
+          - button "New folder" [ref=e167] [cursor=pointer]:
+            - img [ref=e168]
+          - button "Upload files" [ref=e170] [cursor=pointer]:
+            - img [ref=e171]
+            - generic [ref=e174]: Upload
+        - paragraph [ref=e176]: 1 file
+        - generic [ref=e178]:
+          - img [ref=e180]
+          - generic [ref=e183]:
+            - button "test-markdown.md" [ref=e185] [cursor=pointer]
+            - generic [ref=e186]:
+              - generic [ref=e187]: 850 B
+              - generic [ref=e188]: ·
+              - generic [ref=e189]: 37d ago
+          - button "Actions for test-markdown.md" [ref=e191] [cursor=pointer]:
+            - img [ref=e192]
+        - dialog "test-markdown.md" [active] [ref=e199]:
+          - generic [ref=e200]:
+            - generic [ref=e201]:
+              - heading "test-markdown.md" [level=3] [ref=e202]
+              - text: 850 B
+            - generic [ref=e203]:
+              - button "Rendered view" [pressed] [ref=e204] [cursor=pointer]:
+                - img [ref=e205]
+                - text: Rendered
+              - button "Source view" [ref=e208] [cursor=pointer]:
+                - img [ref=e209]
+                - text: Source
+            - button "Download test-markdown.md" [ref=e212] [cursor=pointer]:
+              - img [ref=e213]
+              - text: Download
+            - button "Close preview" [ref=e216] [cursor=pointer]:
+              - img [ref=e217]
+          - generic [ref=e221]:
+            - heading "Test Markdown Preview" [level=1] [ref=e222]
+            - paragraph [ref=e223]:
+              - text: This is a
+              - strong [ref=e224]: bold
+              - text: test with
+              - emphasis [ref=e225]: italic
+              - text: text.
+            - heading "Table Example" [level=2] [ref=e226]
+            - table [ref=e228]:
+              - rowgroup [ref=e229]:
+                - row "Feature Status Notes" [ref=e230]:
+                  - columnheader "Feature" [ref=e231]
+                  - columnheader "Status" [ref=e232]
+                  - columnheader "Notes" [ref=e233]
+              - rowgroup [ref=e234]:
+                - row "GFM Tables Working Renders as HTML table" [ref=e235]:
+                  - cell "GFM Tables" [ref=e236]
+                  - cell "Working" [ref=e237]
+                  - cell "Renders as HTML table" [ref=e238]
+                - row "Mermaid Working SVG diagrams" [ref=e239]:
+                  - cell "Mermaid" [ref=e240]
+                  - cell "Working" [ref=e241]
+                  - cell "SVG diagrams" [ref=e242]
+                - row "Code Blocks Working Syntax highlighted" [ref=e243]:
+                  - cell "Code Blocks" [ref=e244]
+                  - cell "Working" [ref=e245]
+                  - cell "Syntax highlighted" [ref=e246]
+            - heading "Code Block" [level=2] [ref=e247]
+            - generic [ref=e250]:
+              - generic [ref=e251]:
+                - generic [ref=e252]: "1"
+                - generic [ref=e253]: "interface Config {"
+              - generic [ref=e254]:
+                - generic [ref=e255]: "2"
+                - generic [ref=e256]: "timeout: number;"
+              - generic [ref=e257]:
+                - generic [ref=e258]: "3"
+                - generic [ref=e259]: "retries: number;"
+              - generic [ref=e260]:
+                - generic [ref=e261]: "4"
+                - generic [ref=e262]: "}"
+              - generic [ref=e264]: "5"
+              - generic [ref=e266]:
+                - generic [ref=e267]: "6"
+                - generic [ref=e268]: "function loadConfig(): Config {"
+              - generic [ref=e269]:
+                - generic [ref=e270]: "7"
+                - generic [ref=e271]: "return { timeout: 30000, retries: 3 };"
+              - generic [ref=e272]:
+                - generic [ref=e273]: "8"
+                - generic [ref=e274]: "}"
+            - heading "Mermaid Diagram" [level=2] [ref=e275]
+            - img [ref=e277]
+            - heading "Links and Lists" [level=2] [ref=e296]
+            - list [ref=e297]:
+              - listitem [ref=e298]:
+                - text: Item one with
+                - link "a link" [ref=e299] [cursor=pointer]:
+                  - /url: https://example.com
+              - listitem [ref=e300]:
+                - text: Item two with
+                - code [ref=e301]: inline code
+              - listitem [ref=e302]: Item three
+            - blockquote [ref=e303]:
+              - paragraph [ref=e304]: This is a blockquote for testing purposes.
+            - paragraph [ref=e305]: That's all folks!

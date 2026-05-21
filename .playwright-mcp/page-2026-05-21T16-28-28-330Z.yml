@@ -1,0 +1,195 @@
+- generic [ref=e17]:
+  - complementary [ref=e18]:
+    - generic [ref=e19]:
+      - img "SAM" [ref=e20]
+      - generic [ref=e21]:
+        - button "Recent chats" [ref=e23] [cursor=pointer]:
+          - img [ref=e24]
+        - button "Notifications (1 need attention), 6 total unread" [ref=e27] [cursor=pointer]:
+          - img [ref=e28]
+          - generic [ref=e31]: "1"
+    - button "Open command palette" [ref=e32] [cursor=pointer]:
+      - img [ref=e33]
+      - generic [ref=e36]: Search...
+      - generic [ref=e37]: Ctrl+K
+    - generic [ref=e228]:
+      - navigation "Project navigation" [ref=e229]:
+        - button "Show global navigation" [ref=e230] [cursor=pointer]:
+          - img [ref=e231]
+          - generic [ref=e233]: Back to Projects
+        - generic "CrewAI Org" [ref=e234]
+        - link "Chat" [ref=e235] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/chat
+          - img [ref=e236]
+          - text: Chat
+        - link "Agent" [ref=e238] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/agent
+          - img [ref=e239]
+          - text: Agent
+        - link "Library" [ref=e242] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/library
+          - img [ref=e243]
+          - text: Library
+        - link "Ideas" [ref=e245] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/ideas
+          - img [ref=e246]
+          - text: Ideas
+        - link "Knowledge" [ref=e248] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/knowledge
+          - img [ref=e249]
+          - text: Knowledge
+        - link "Notifications" [ref=e259] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/notifications
+          - img [ref=e260]
+          - text: Notifications
+        - link "Triggers" [ref=e263] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/triggers
+          - img [ref=e264]
+          - text: Triggers
+        - link "Profiles" [ref=e267] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/profiles
+          - img [ref=e268]
+          - text: Profiles
+        - link "Activity" [ref=e280] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/activity
+          - img [ref=e281]
+          - text: Activity
+        - link "Settings" [ref=e283] [cursor=pointer]:
+          - /url: /projects/01KK1D324YTB3TF5FCWAPDE3T0/settings
+          - img [ref=e284]
+          - text: Settings
+      - navigation [ref=e287]:
+        - button [ref=e288] [cursor=pointer]:
+          - img [ref=e289]
+          - generic [ref=e291]: Back to CrewAI Org
+        - link [ref=e292] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e293]
+          - text: Home
+        - link [ref=e296] [cursor=pointer]:
+          - /url: /sam
+          - img [ref=e297]
+          - text: SAM
+        - link [ref=e300] [cursor=pointer]:
+          - /url: /chats
+          - img [ref=e301]
+          - text: Chats
+        - link [ref=e303] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e304]
+          - text: Projects
+        - link [ref=e306] [cursor=pointer]:
+          - /url: /account-map
+          - img [ref=e307]
+          - text: Map
+        - link [ref=e309] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e310]
+          - text: Settings
+        - link [ref=e313] [cursor=pointer]:
+          - /url: /admin
+          - img [ref=e314]
+          - text: Admin
+        - button [ref=e317] [cursor=pointer]:
+          - img [ref=e318]
+          - text: Infrastructure
+        - generic [ref=e320]:
+          - button [expanded] [ref=e321] [cursor=pointer]:
+            - img [ref=e322]
+            - text: Recent Projects
+          - region [ref=e324]:
+            - generic [ref=e326]:
+              - img
+              - textbox [ref=e327]:
+                - /placeholder: Filter projects...
+            - generic [ref=e328]:
+              - button [ref=e329] [cursor=pointer]:
+                - generic [ref=e330]: C
+                - generic [ref=e331]: CrewAI Org
+                - generic [ref=e332]: 23h
+                - img [ref=e333]
+              - button [ref=e334] [cursor=pointer]:
+                - generic [ref=e335]: C
+                - generic [ref=e336]: CrewAI
+                - generic [ref=e337]: 1d
+                - img [ref=e338]
+              - button [ref=e339] [cursor=pointer]:
+                - generic [ref=e340]: E
+                - generic [ref=e341]: elysia
+                - generic [ref=e342]: 1w
+                - img [ref=e343]
+    - generic [ref=e77]:
+      - img "serverspresentation2025" [ref=e78]
+      - generic [ref=e80]: serverspresentation2025
+      - button "Sign out" [ref=e81] [cursor=pointer]:
+        - img [ref=e82]
+  - main [ref=e84]:
+    - generic [ref=e345]:
+      - generic [ref=e346]:
+        - generic [ref=e347]:
+          - generic [ref=e348]: CrewAI Org
+          - button "Project status" [ref=e349] [cursor=pointer]:
+            - img [ref=e350]
+          - button "Automation triggers" [ref=e356] [cursor=pointer]:
+            - img [ref=e357]
+          - button "Project settings" [ref=e360] [cursor=pointer]:
+            - img [ref=e361]
+        - button "+ New Chat" [ref=e365] [cursor=pointer]
+        - generic [ref=e367]:
+          - img
+          - textbox "Search chats..." [ref=e368]
+        - navigation "Chat sessions" [ref=e369]:
+          - button "Older (28)" [ref=e370] [cursor=pointer]:
+            - img [ref=e371]
+            - generic [ref=e373]: Older (28)
+          - generic [ref=e375]: No recent chats
+      - generic [ref=e377]:
+        - generic [ref=e378]:
+          - generic [ref=e379]: What do you want to build?
+          - generic [ref=e380]: Describe the task and an agent will start working on it automatically.
+          - generic [ref=e381]:
+            - button "What's in tmp-srv-prs-org/crewai?" [ref=e382] [cursor=pointer]
+            - button "Run the tests and summarize what fails." [ref=e383] [cursor=pointer]
+            - button "Find one small improvement I can ship today." [ref=e384] [cursor=pointer]
+            - button "Fix the most recent open issue." [ref=e385] [cursor=pointer]
+        - generic [ref=e386]:
+          - generic [ref=e387]:
+            - generic [ref=e388]:
+              - generic [ref=e389]: "Profile:"
+              - combobox "Agent profile" [ref=e390] [cursor=pointer]:
+                - option "Default (no profile)" [selected]
+                - option "default · claude-sonnet-4-5-20250929 (built-in)"
+                - option "implementer · claude-sonnet-4-5-20250929 (built-in)"
+                - option "planner · claude-opus-4-6 (built-in)"
+                - option "reviewer · claude-opus-4-6 (built-in)"
+            - generic [ref=e391]:
+              - generic [ref=e392]: "Agent:"
+              - combobox "Agent:" [ref=e393] [cursor=pointer]:
+                - option "Claude Code" [selected]
+                - option "OpenAI Codex"
+                - option "Mistral Vibe"
+                - option "OpenCode"
+                - option "Amp"
+            - generic [ref=e394]:
+              - generic [ref=e395]: "Workspace:"
+              - combobox "Workspace:" [ref=e396] [cursor=pointer]:
+                - option "Full" [selected]
+                - option "Lightweight"
+            - generic [ref=e397]:
+              - generic [ref=e398]: "Config:"
+              - combobox "Devcontainer config" [ref=e400] [cursor=pointer]:
+                - option "Auto-detect" [selected]
+            - generic [ref=e401]:
+              - generic [ref=e402]: "Run mode:"
+              - combobox "Run mode:" [ref=e403] [cursor=pointer]:
+                - option "Task" [selected]
+                - option "Conversation"
+              - generic [ref=e404]: Agent will do the work, push changes, and create a PR
+          - generic [ref=e405]:
+            - button "Attach files to this task" [ref=e406] [cursor=pointer]:
+              - img [ref=e407]
+            - combobox "Describe what you want the agent to do..." [active] [ref=e409]
+            - button "Start voice input" [ref=e410] [cursor=pointer]:
+              - img [ref=e411]
+            - button "Send" [disabled] [ref=e414]
+          - generic [ref=e415]: Press Ctrl+Enter to send, Enter for new line
