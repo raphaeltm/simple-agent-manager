@@ -838,6 +838,11 @@ t = p.read_text()
 t = t.replace('\"message\": str(exc)', '\"message\": str(exc) + (\" stderr: \" + exc.stderr if hasattr(exc, \"stderr\") and exc.stderr else \"\")')
 p.write_text(t)
 print('Patched acp-amp error handling to include ProcessError.stderr')
+v = pathlib.Path('/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py')
+vt = v.read_text()
+vt = vt.replace('visibility: Optional[Literal[\"private\", \"public\", \"workspace\", \"group\"]] = \"workspace\"', 'visibility: Optional[Literal[\"private\", \"public\", \"workspace\", \"group\"]] = \"private\"')
+v.write_text(vt)
+print('Patched amp_sdk AmpOptions visibility default from workspace to private')
 "`,
 			// isNpmBased must be true because installCmd chains `npm install -g @sourcegraph/amp`
 			// after the uv install. The Node.js bootstrap preamble ensures npm is available
