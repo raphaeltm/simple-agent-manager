@@ -2,6 +2,7 @@ import type { AgentProfile } from '@simple-agent-manager/shared';
 import { render, screen, waitFor,within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { ProfileFormDialog } from '../../../src/components/agent-profiles/ProfileFormDialog';
@@ -18,8 +19,12 @@ vi.mock('../../../src/lib/api', () => ({
   deleteProfileRuntimeFile: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
 }));
 
-function Wrapper({ children }: { children: ReactNode }) {
-  return <ToastProvider>{children}</ToastProvider>;
+function Wrapper({ children, initialEntries = ['/'] }: { children: ReactNode; initialEntries?: string[] }) {
+  return (
+    <MemoryRouter initialEntries={initialEntries}>
+      <ToastProvider>{children}</ToastProvider>
+    </MemoryRouter>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +304,29 @@ describe('ProfileList', () => {
         'prof-1',
         expect.objectContaining({ name: 'Renamed' }),
       );
+    });
+  });
+
+  describe('URL-driven edit modal', () => {
+    it('opens edit dialog when ?edit=<profileId> is in the URL', () => {
+      render(<ProfileList {...defaultProps} />, {
+        wrapper: ({ children }) => <Wrapper initialEntries={['/profiles?edit=prof-1']}>{children}</Wrapper>,
+      });
+      expect(screen.getByText('Edit Profile')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Fast Implementer')).toBeInTheDocument();
+    });
+
+    it('opens create dialog when ?edit=new is in the URL', () => {
+      render(<ProfileList {...defaultProps} />, {
+        wrapper: ({ children }) => <Wrapper initialEntries={['/profiles?edit=new']}>{children}</Wrapper>,
+      });
+      expect(screen.getByText('Create Agent Profile')).toBeInTheDocument();
+    });
+
+    it('does not open dialog when no ?edit param is present', () => {
+      render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
+      expect(screen.queryByText('Edit Profile')).not.toBeInTheDocument();
+      expect(screen.queryByText('Create Agent Profile')).not.toBeInTheDocument();
     });
   });
 });
