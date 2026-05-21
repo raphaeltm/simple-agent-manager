@@ -134,7 +134,7 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
       userId,
       workspace.chatSessionId,
       workspace.projectId,
-      mcpToken && workspace.projectId
+      mcpToken
         ? {
             url: `https://api.${c.env.BASE_DOMAIN}/mcp`,
             token: mcpToken,
