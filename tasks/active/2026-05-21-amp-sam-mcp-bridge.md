@@ -47,7 +47,7 @@ Direct project-chat Amp sessions also need SAM MCP configuration before ACP `New
 - [x] Run focused API and VM tests for changed paths.
 - [x] Run full required quality gates before PR.
 - [x] Complete required specialist reviews: task-completion-validator, go-specialist, cloudflare-specialist, security-auditor, constitution-validator, test-engineer, doc-sync-validator, and env-validator if env handling changes.
-- [ ] Deploy the PR branch to staging through the normal `deploy-staging.yml` GitHub Actions workflow.
+- [x] Deploy the PR branch to staging through the normal `deploy-staging.yml` GitHub Actions workflow.
 - [ ] Verify staging with a fresh workspace/node and a valid Amp credential.
 - [ ] Collect evidence that Amp called at least one SAM MCP tool, ideally `get_instructions`, during a real project-chat session and used the result in its response.
 
