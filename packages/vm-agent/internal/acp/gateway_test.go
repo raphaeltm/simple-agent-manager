@@ -349,8 +349,8 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 		"uv tool install acp-amp==0.1.3",
 		"--with amp-sdk==0.1.2",
 		"npm install -g @sourcegraph/amp",
-		"Patched acp-amp error handling",
-		"visibility default from workspace to private",
+		"Patched acp-amp: error handling + MCP config wrapping",
+		"visibility default to private",
 	} {
 		if !strings.Contains(info.installCmd, want) {
 			t.Fatalf("installCmd missing %q, got %q", want, info.installCmd)
