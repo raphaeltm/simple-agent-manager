@@ -1,7 +1,8 @@
 import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { Bot, Pencil, Plus, Trash2 } from 'lucide-react';
-import { type FC, useState } from 'react';
+import { type FC, useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 
 import { ProfileFormDialog } from './ProfileFormDialog';
 
@@ -28,19 +29,40 @@ export const ProfileList: FC<ProfileListProps> = ({
   hideHeader,
   projectId,
 }) => {
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<AgentProfile | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // URL-driven edit modal — `?edit=profileId` or `?edit=new`
+  const editParam = searchParams.get('edit');
+  const formOpen = editParam !== null;
+  const editingProfile = useMemo(
+    () => (editParam && editParam !== 'new' ? profiles.find((p) => p.id === editParam) ?? null : null),
+    [editParam, profiles],
+  );
+
+  const openForm = useCallback((profileId?: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('edit', profileId ?? 'new');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const closeForm = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('edit');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const handleCreate = () => {
-    setEditingProfile(null);
-    setFormOpen(true);
+    openForm();
   };
 
   const handleEdit = (profile: AgentProfile) => {
-    setEditingProfile(profile);
-    setFormOpen(true);
+    openForm(profile.id);
   };
 
   const handleSave = async (data: CreateAgentProfileRequest | UpdateAgentProfileRequest) => {
@@ -189,8 +211,8 @@ export const ProfileList: FC<ProfileListProps> = ({
 
       <ProfileFormDialog
         isOpen={formOpen}
-        onClose={() => { setFormOpen(false); setEditingProfile(null); }}
-        profile={editingProfile}
+        onClose={closeForm}
+        profile={editingProfile ?? null}
         onSave={handleSave}
         projectId={projectId}
       />

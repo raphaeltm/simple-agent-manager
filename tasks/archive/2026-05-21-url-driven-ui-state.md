@@ -33,38 +33,38 @@ Use `useSearchParams` to sync key UI state to query parameters. This is minimall
 
 ## Implementation Checklist
 
-- [ ] **Library: URL-driven directory navigation**
+- [x] **Library: URL-driven directory navigation**
   - Replace `useState` for `currentDirectory` with `useSearchParams` `dir` param
   - Default to `/` when no param present
   - Update `navigateToDirectory` to use `setSearchParams`
   - Update `DirectoryBreadcrumb` clicks to update URL
   - Ensure back button works (browser history)
 
-- [ ] **Library: URL-driven file preview**
+- [x] **Library: URL-driven file preview**
   - Add `preview` search param that holds a file ID
   - When `preview` param is present, find the file and open `FilePreviewModal`
   - When modal closes, remove `preview` param
   - When clicking a file to preview, set `preview` param
 
-- [ ] **Knowledge: URL-driven entity selection**
+- [x] **Knowledge: URL-driven entity selection**
   - Replace `useState` for `selectedEntityId` with `useSearchParams` `entity` param
   - Both desktop detail panel and mobile full-screen view driven by the param
   - Back button on mobile removes the param (returns to list)
   - Clicking an entity sets the param
 
-- [ ] **Profiles: URL-driven edit modal**
+- [x] **Profiles: URL-driven edit modal**
   - Add `edit` search param: `edit=new` for create, `edit=<profileId>` for editing
   - `ProfileFormDialog` open state driven by presence of `edit` param
   - Closing the dialog removes `edit` param
   - Edit button on profile card sets `edit=<profileId>`
 
-- [ ] **Triggers: URL-driven edit modal**
+- [x] **Triggers: URL-driven edit modal**
   - Add `edit` search param: `edit=new` for create, `edit=<triggerId>` for editing
   - `TriggerForm` open state driven by presence of `edit` param
   - Closing the form removes `edit` param
   - Edit button sets `edit=<triggerId>`
 
-- [ ] **Tests for URL-driven state**
+- [x] **Tests for URL-driven state**
   - Add behavioral tests that verify URL params control modal/selection state
   - Verify setting params via URL opens the correct modal/view
   - Verify closing modal/deselecting removes the params

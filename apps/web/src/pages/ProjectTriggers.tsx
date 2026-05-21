@@ -1,8 +1,8 @@
 import type { TriggerResponse, UpdateTriggerRequest } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { Clock, Plus } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 
 import { TriggerCard } from '../components/triggers/TriggerCard';
 import { TriggerForm } from '../components/triggers/TriggerForm';
@@ -25,12 +25,35 @@ export function ProjectTriggers() {
   const { projectId } = useProjectContext();
   const navigate = useNavigate();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<TriggerResponse | null>(null);
+
+  // URL-driven edit modal — `?edit=triggerId` or `?edit=new`
+  const editParam = searchParams.get('edit');
+  const formOpen = editParam !== null;
+  const editTarget = useMemo(
+    () => (editParam && editParam !== 'new' ? triggers.find((t) => t.id === editParam) ?? null : null),
+    [editParam, triggers],
+  );
+
+  const openForm = useCallback((triggerId?: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('edit', triggerId ?? 'new');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const closeForm = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('edit');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const loadTriggers = useCallback(async () => {
     try {
@@ -71,18 +94,16 @@ export function ProjectTriggers() {
   }, [projectId, toast, loadTriggers]);
 
   const handleEdit = useCallback((trigger: TriggerResponse) => {
-    setEditTarget(trigger);
-    setFormOpen(true);
-  }, []);
+    openForm(trigger.id);
+  }, [openForm]);
 
   const handleViewHistory = useCallback((trigger: TriggerResponse) => {
     navigate(`/projects/${projectId}/triggers/${trigger.id}`);
   }, [navigate, projectId]);
 
   const handleNewTrigger = useCallback(() => {
-    setEditTarget(null);
-    setFormOpen(true);
-  }, []);
+    openForm();
+  }, [openForm]);
 
   // Loading
   if (loading) {
@@ -148,7 +169,7 @@ export function ProjectTriggers() {
       {/* Creation/edit form */}
       <TriggerForm
         open={formOpen}
-        onClose={() => { setFormOpen(false); setEditTarget(null); }}
+        onClose={closeForm}
         editTrigger={editTarget}
         onSaved={loadTriggers}
       />
