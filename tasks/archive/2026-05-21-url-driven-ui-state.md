@@ -64,7 +64,7 @@ Use `useSearchParams` to sync key UI state to query parameters. This is minimall
   - Closing the form removes `edit` param
   - Edit button sets `edit=<triggerId>`
 
-- [ ] **Tests for URL-driven state**
+- [x] **Tests for URL-driven state**
   - Add behavioral tests that verify URL params control modal/selection state
   - Verify setting params via URL opens the correct modal/view
   - Verify closing modal/deselecting removes the params
