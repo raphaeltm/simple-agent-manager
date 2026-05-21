@@ -831,7 +831,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "acp-amp",
 			args:          []string{"run"},
 			envVarName:    "AMP_API_KEY",
-			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp && python3.12 -c "
+			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
 import pathlib, re
 p = pathlib.Path('/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py')
 t = p.read_text()
