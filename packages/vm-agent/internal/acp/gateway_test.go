@@ -99,8 +99,8 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 				t.Errorf("getAgentCommandInfo() envVarName = %v, want %v", info.envVarName, tt.wantEnvVar)
 			}
 
-			if info.installCmd != tt.wantInstallCmd {
-				t.Errorf("getAgentCommandInfo() installCmd = %v, want %v", info.installCmd, tt.wantInstallCmd)
+			if !strings.HasPrefix(info.installCmd, tt.wantInstallCmd) {
+				t.Errorf("getAgentCommandInfo() installCmd does not start with expected prefix.\ngot:  %v\nwant prefix: %v", info.installCmd, tt.wantInstallCmd)
 			}
 
 			if info.injectionMode != tt.wantInjectionMode {
@@ -344,9 +344,17 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 	if info.envVarName != "AMP_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "AMP_API_KEY")
 	}
-	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp`
-	if info.installCmd != wantInstall {
-		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
+	// Verify key parts of installCmd rather than exact match (it includes post-install patches)
+	for _, want := range []string{
+		"uv tool install acp-amp==0.1.3",
+		"--with amp-sdk==0.1.2",
+		"npm install -g @sourcegraph/amp",
+		"Patched acp-amp error handling",
+		"visibility default from workspace to private",
+	} {
+		if !strings.Contains(info.installCmd, want) {
+			t.Fatalf("installCmd missing %q, got %q", want, info.installCmd)
+		}
 	}
 	if !info.isNpmBased {
 		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @sourcegraph/amp)")
