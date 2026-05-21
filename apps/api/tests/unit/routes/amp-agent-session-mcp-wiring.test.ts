@@ -43,7 +43,7 @@ vi.mock('../../../src/services/node-agent', () => ({
   suspendAgentSessionOnNode: vi.fn(),
 }));
 
-const workspaceRow = {
+let testWorkspaceRow: Record<string, unknown> = {
   id: 'workspace-123',
   userId: 'user-123',
   nodeId: 'node-123',
@@ -83,7 +83,7 @@ vi.mock('drizzle-orm/d1', () => ({
         return {
           from: () => ({
             where: () => {
-              if (selectCount === 1) return { limit: () => Promise.resolve([workspaceRow]) };
+              if (selectCount === 1) return { limit: () => Promise.resolve([testWorkspaceRow]) };
               if (selectCount === 2) return { limit: () => Promise.resolve([nodeRow]) };
               if (selectCount === 3) return Promise.resolve([]);
               return { limit: () => Promise.resolve([agentSessionRow]) };
@@ -119,6 +119,14 @@ async function createTestApp(): Promise<Hono> {
 describe('Amp project-chat MCP wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    testWorkspaceRow = {
+      id: 'workspace-123',
+      userId: 'user-123',
+      nodeId: 'node-123',
+      projectId: 'project-123',
+      chatSessionId: 'chat-123',
+      status: 'running',
+    };
   });
 
   it('mints a scoped MCP token and sends MCP config during direct agent-session creation', async () => {
@@ -163,5 +171,60 @@ describe('Amp project-chat MCP wiring', () => {
       },
     );
     expect(revokeMcpTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('revokes MCP token when createAgentSessionOnNode fails', async () => {
+    createAgentSessionOnNodeMock.mockRejectedValueOnce(new Error('VM agent unreachable'));
+
+    const app = await createTestApp();
+    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+    }, {
+      DATABASE: {},
+      KV: {},
+      BASE_DOMAIN: 'example.com',
+    });
+
+    expect(res.status).toBe(500);
+    expect(storeMcpTokenMock).toHaveBeenCalledTimes(1);
+    expect(revokeMcpTokenMock).toHaveBeenCalledWith({}, 'mcp-token-123');
+  });
+
+  it('skips MCP token minting when workspace has no projectId', async () => {
+    testWorkspaceRow = {
+      id: 'workspace-123',
+      userId: 'user-123',
+      nodeId: 'node-123',
+      projectId: null,
+      chatSessionId: null,
+      status: 'running',
+    };
+
+    const app = await createTestApp();
+    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+    }, {
+      DATABASE: {},
+      KV: {},
+      BASE_DOMAIN: 'example.com',
+    });
+
+    expect(res.status).toBe(201);
+    expect(storeMcpTokenMock).not.toHaveBeenCalled();
+    expect(createAgentSessionOnNodeMock).toHaveBeenCalledWith(
+      'node-123',
+      'workspace-123',
+      'agent-session-123',
+      'Amp',
+      expect.anything(),
+      'user-123',
+      null,
+      null,
+      undefined,
+    );
   });
 });
