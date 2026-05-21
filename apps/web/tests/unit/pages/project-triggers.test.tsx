@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ToastProvider } from '../../../src/hooks/useToast';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggers } from '../../../src/pages/ProjectTriggers';
-import { ToastProvider } from '../../../src/hooks/useToast';
 
 // ---------------------------------------------------------------------------
 // Mocks — inline data to avoid hoisting issues with vi.mock

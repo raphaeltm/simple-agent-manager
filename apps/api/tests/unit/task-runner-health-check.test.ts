@@ -139,12 +139,30 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
     expect(isNodeAgentReadyForWorkspaceDispatch(afterReady, waitStartedAt)).toBe(true);
   });
 
-  it('does not accept a stale /ready signal from an earlier provisioning cycle', () => {
-    const staleReady = readyRow({
+  it('accepts an older /ready signal when the node is still sending fresh heartbeats', () => {
+    const readyBeforePollingStarted = readyRow({
       agent_ready_at: isoAt(-120_000),
     });
 
-    expect(isNodeAgentReadyForWorkspaceDispatch(staleReady, waitStartedAt)).toBe(false);
+    expect(isNodeAgentReadyForWorkspaceDispatch(readyBeforePollingStarted, waitStartedAt)).toBe(true);
+  });
+
+  it('does not accept a stale heartbeat even when /ready was sent earlier', () => {
+    const staleHeartbeat = readyRow({
+      last_heartbeat_at: isoAt(-120_000),
+      agent_ready_at: isoAt(-125_000),
+    });
+
+    expect(isNodeAgentReadyForWorkspaceDispatch(staleHeartbeat, waitStartedAt)).toBe(false);
+  });
+
+  it('does not accept /ready when it is implausibly ahead of the latest heartbeat', () => {
+    const futureReady = readyRow({
+      last_heartbeat_at: isoAt(5_000),
+      agent_ready_at: isoAt(45_001),
+    });
+
+    expect(isNodeAgentReadyForWorkspaceDispatch(futureReady, waitStartedAt)).toBe(false);
   });
 
   it('rejects unhealthy, creating, and malformed node records', () => {
@@ -186,7 +204,7 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
         && row.last_heartbeat_at !== null
         && row.agent_ready_at !== null
         && heartbeatOffset > -30_000
-        && readyOffset > -30_000;
+        && readyOffset <= heartbeatOffset + 30_000;
 
       expect(isNodeAgentReadyForWorkspaceDispatch(row, waitStartedAt)).toBe(expected);
     }
