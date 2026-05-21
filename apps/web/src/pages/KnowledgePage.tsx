@@ -77,7 +77,7 @@ export function KnowledgePage() {
         next.delete('entity');
       }
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const [entities, setEntities] = useState<KnowledgeEntity[]>([]);

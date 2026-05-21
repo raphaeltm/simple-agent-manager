@@ -44,7 +44,7 @@ export function ProjectTriggers() {
       const next = new URLSearchParams(prev);
       next.set('edit', triggerId ?? 'new');
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const closeForm = useCallback(() => {
@@ -52,7 +52,7 @@ export function ProjectTriggers() {
       const next = new URLSearchParams(prev);
       next.delete('edit');
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const loadTriggers = useCallback(async () => {

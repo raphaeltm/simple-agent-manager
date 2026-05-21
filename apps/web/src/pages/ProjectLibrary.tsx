@@ -290,7 +290,7 @@ export function ProjectLibrary() {
       const next = new URLSearchParams(prev);
       next.set('preview', file.id);
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const closePreview = useCallback(() => {
@@ -298,7 +298,7 @@ export function ProjectLibrary() {
       const next = new URLSearchParams(prev);
       next.delete('preview');
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const handleTagClick = useCallback((tag: string) => {

@@ -46,7 +46,7 @@ export const ProfileList: FC<ProfileListProps> = ({
       const next = new URLSearchParams(prev);
       next.set('edit', profileId ?? 'new');
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const closeForm = useCallback(() => {
@@ -54,7 +54,7 @@ export const ProfileList: FC<ProfileListProps> = ({
       const next = new URLSearchParams(prev);
       next.delete('edit');
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const handleCreate = () => {
