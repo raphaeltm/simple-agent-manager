@@ -210,7 +210,7 @@ export async function dispatchTask(
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
 
-  // Task mode: explicit → profile → task.
+  // Task mode: explicit -> profile -> task.
   // MCP dispatch is agent-to-agent delegated work; workspace profile controls
   // provisioning shape, not whether the task reports completion.
   const resolvedTaskMode: TaskMode = (input.taskMode as TaskMode | undefined)
