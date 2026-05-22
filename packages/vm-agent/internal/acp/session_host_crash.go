@@ -101,7 +101,7 @@ func (h *SessionHost) crashReport(snapshot crashRecoverySnapshot, recovered bool
 		Attribution:      fmt.Sprintf("This is a bug in %s, not in SAM.", displayName),
 		Stderr:           snapshot.stderr,
 		StderrTruncated:  len(snapshot.stderr) >= h.config.StderrBufferBytes,
-		Suggestion:       fmt.Sprintf("Please report this to %s with the debugging information above.", agentVendorName(agentType)),
+		Suggestion:       fmt.Sprintf("Please report this to %s with the debugging information above. Review stderr for secrets before sharing it outside your team.", agentVendorName(agentType)),
 		Timestamp:        time.Now().UTC(),
 		RecoveryError:    recoveryErr,
 		OriginalPromptID: snapshot.promptReqID,
