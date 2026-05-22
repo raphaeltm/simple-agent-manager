@@ -3,6 +3,7 @@ import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import { RenderedMarkdown } from '../MarkdownRenderer';
 
 /** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
 let _cachedTtsApiUrl: string | undefined;
@@ -113,9 +114,7 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
             )}
           </div>
 
-          <p className="text-fg-primary whitespace-pre-wrap break-words">
-            {summary}
-          </p>
+          <RenderedMarkdown content={summary} inline />
           <div className="flex justify-end">
             <button
               type="button"
