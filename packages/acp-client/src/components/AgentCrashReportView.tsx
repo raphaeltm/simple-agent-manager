@@ -22,19 +22,31 @@ const crashReportTones = {
 } as const;
 
 export const AgentCrashReportView = React.memo(function AgentCrashReportView({ item }: AgentCrashReportViewProps) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const tone = item.recovered ? crashReportTones.recovered : crashReportTones.failed;
 
   const copyDebugInfo = async () => {
     const debugInfo = [
+      `Agent: ${item.agentType}`,
+      `Recovered: ${item.recovered ? 'yes' : 'no'}`,
+      `Timestamp: ${new Date(item.timestamp).toISOString()}`,
+      `stderr truncated: ${item.stderrTruncated ? 'yes' : 'no'}`,
       item.message,
       item.attribution,
+      item.suggestion,
       item.recoveryError ? `Recovery error: ${item.recoveryError}` : '',
       item.stderr ? `stderr:\n${item.stderr}` : '',
     ].filter(Boolean).join('\n\n');
-    await navigator.clipboard.writeText(debugInfo);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API is unavailable');
+      }
+      await navigator.clipboard.writeText(debugInfo);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+    window.setTimeout(() => setCopyState('idle'), 2000);
   };
 
   return (
@@ -68,10 +80,11 @@ export const AgentCrashReportView = React.memo(function AgentCrashReportView({ i
         <button
           type="button"
           onClick={() => void copyDebugInfo()}
+          aria-live="polite"
           className="min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:brightness-95"
           style={tone.buttonStyle}
         >
-          {copied ? 'Copied' : 'Copy report'}
+          {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy report'}
         </button>
       </div>
       {item.stderr && (

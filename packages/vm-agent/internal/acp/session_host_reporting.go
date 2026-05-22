@@ -15,6 +15,8 @@ import (
 
 // reportAgentError sends an agent error to boot-log and error reporter.
 func (h *SessionHost) reportAgentError(agentType, step, message, detail string) {
+	message = redactAgentDiagnosticText(message)
+	detail = redactAgentDiagnosticText(detail)
 	if h.config.BootLog != nil {
 		h.config.BootLog.Log(step, "failed", fmt.Sprintf("[%s] %s", agentType, message), detail)
 	}
@@ -162,12 +164,12 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 // activityPayload is the enhanced JSON body sent to the control plane.
 type activityPayload struct {
-	Activity       string  `json:"activity"`
-	NodeID         string  `json:"nodeId"`
-	PromptStartedAt *int64 `json:"promptStartedAt,omitempty"`
-	AgentType      string  `json:"agentType,omitempty"`
-	RestartCount   int     `json:"restartCount"`
-	StatusError    *string `json:"statusError,omitempty"`
+	Activity        string  `json:"activity"`
+	NodeID          string  `json:"nodeId"`
+	PromptStartedAt *int64  `json:"promptStartedAt,omitempty"`
+	AgentType       string  `json:"agentType,omitempty"`
+	RestartCount    int     `json:"restartCount"`
+	StatusError     *string `json:"statusError,omitempty"`
 }
 
 // reportActivity sends a durable activity signal to the control plane.

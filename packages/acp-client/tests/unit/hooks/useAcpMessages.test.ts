@@ -19,7 +19,7 @@ describe('useAcpMessages tool call parsing', () => {
       agentType: 'claude-code',
       recovered: true,
       message: 'Claude Code exited unexpectedly. SAM restored the saved ACP session.',
-      attribution: 'This is a bug in Claude Code, not in SAM.',
+      attribution: "The crash points to a bug in Claude Code's agent process, not SAM's workspace runner.",
       stderr: 'peer disconnected before response',
       stderrTruncated: false,
       suggestion: 'Review stderr before sharing it with Anthropic support.',
@@ -37,7 +37,7 @@ describe('useAcpMessages tool call parsing', () => {
       throw new Error('expected agent_crash_report item');
     }
     expect(item.recovered).toBe(true);
-    expect(item.attribution).toContain('not in SAM');
+    expect(item.attribution).toContain('not SAM');
     expect(item.stderr).toContain('peer disconnected');
   });
 

@@ -5,12 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 )
 
 const crashRecoveredStopReason = "recovered"
+
+var diagnosticRedactionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
+	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
+	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
+	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
+	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
+	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
+}
 
 func isCrashPromptError(err error) bool {
 	if err == nil {
@@ -36,8 +46,25 @@ func isCrashPromptError(err error) bool {
 	return false
 }
 
+func redactAgentDiagnosticText(text string) string {
+	redacted := text
+	for _, pattern := range diagnosticRedactionPatterns {
+		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
+			submatches := pattern.FindStringSubmatch(match)
+			if len(submatches) >= 3 {
+				return submatches[1] + "[REDACTED]"
+			}
+			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
+				return submatches[1] + "[REDACTED]"
+			}
+			return "[REDACTED]"
+		})
+	}
+	return redacted
+}
+
 func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, bool) {
-	stderr := h.peekStderr()
+	stderr := redactAgentDiagnosticText(h.peekStderr())
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -94,17 +121,16 @@ func (h *SessionHost) crashReport(snapshot crashRecoverySnapshot, recovered bool
 	}
 
 	return AgentCrashReportMessage{
-		Type:             MsgAgentCrashReport,
-		AgentType:        agentType,
-		Recovered:        recovered,
-		Message:          message,
-		Attribution:      fmt.Sprintf("This is a bug in %s, not in SAM.", displayName),
-		Stderr:           snapshot.stderr,
-		StderrTruncated:  len(snapshot.stderr) >= h.config.StderrBufferBytes,
-		Suggestion:       fmt.Sprintf("Please report this to %s with the debugging information above. Review stderr for secrets before sharing it outside your team.", agentVendorName(agentType)),
-		Timestamp:        time.Now().UTC(),
-		RecoveryError:    recoveryErr,
-		OriginalPromptID: snapshot.promptReqID,
+		Type:            MsgAgentCrashReport,
+		AgentType:       agentType,
+		Recovered:       recovered,
+		Message:         message,
+		Attribution:     fmt.Sprintf("The crash points to a bug in %s's agent process, not SAM's workspace runner.", displayName),
+		Stderr:          redactAgentDiagnosticText(snapshot.stderr),
+		StderrTruncated: len(snapshot.stderr) >= h.config.StderrBufferBytes,
+		Suggestion:      fmt.Sprintf("Please report this to %s with the redacted debugging information above. Review diagnostics before sharing them outside your team.", agentVendorName(agentType)),
+		Timestamp:       time.Now().UTC(),
+		RecoveryError:   recoveryErr,
 	}
 }
 

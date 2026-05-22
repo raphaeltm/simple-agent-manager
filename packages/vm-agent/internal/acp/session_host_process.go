@@ -12,7 +12,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	err := process.Wait()
 
 	time.Sleep(100 * time.Millisecond)
-	stderrOutput := h.getAndClearStderr()
+	stderrOutput := redactAgentDiagnosticText(h.getAndClearStderr())
 	uptime := time.Since(process.startTime)
 	exitInfo := agentExitInfo(err)
 	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))

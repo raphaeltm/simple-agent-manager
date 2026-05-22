@@ -11,10 +11,10 @@ function crashReport(overrides: Partial<AgentCrashReportItem> = {}): AgentCrashR
     agentType: 'claude-code',
     recovered: false,
     message: 'Claude Code exited while processing your prompt.',
-    attribution: 'This is a bug in Claude Code, not in SAM.',
-    stderr: 'fatal: peer disconnected before response',
+    attribution: "The crash points to a bug in Claude Code's agent process, not SAM's workspace runner.",
+    stderr: 'fatal: peer disconnected before response\nOPENAI_API_KEY=[REDACTED]',
     stderrTruncated: true,
-    suggestion: 'Review stderr for secrets before sharing it with Anthropic support.',
+    suggestion: 'Report this with redacted diagnostics after reviewing them.',
     recoveryError: 'LoadSession returned unavailable',
     timestamp: Date.UTC(2026, 4, 22),
     ...overrides,
@@ -28,10 +28,11 @@ describe('AgentCrashReportView', () => {
     expect(screen.getByRole('status', { name: 'claude-code crash report' })).not.toBeNull();
     expect(screen.getByText('Recovery failed')).not.toBeNull();
     expect(screen.getByText('Agent crash')).not.toBeNull();
-    expect(screen.getByText(/not in SAM/)).not.toBeNull();
+    expect(screen.getByText(/not SAM/)).not.toBeNull();
     expect(screen.getByText(/LoadSession returned unavailable/)).not.toBeNull();
     expect(screen.getByText(/stderr was truncated/)).not.toBeNull();
     expect(screen.getByText(/peer disconnected before response/)).not.toBeNull();
+    expect(screen.getByText(/OPENAI_API_KEY=\[REDACTED\]/)).not.toBeNull();
   });
 
   it('copies the report text for vendor debugging', async () => {
@@ -45,8 +46,25 @@ describe('AgentCrashReportView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy report' }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-    expect(writeText.mock.calls[0]?.[0]).toContain('Claude Code exited while processing your prompt.');
-    expect(writeText.mock.calls[0]?.[0]).toContain('fatal: peer disconnected before response');
+    const copiedReport = writeText.mock.calls[0]?.[0];
+    expect(copiedReport).toContain('Agent: claude-code');
+    expect(copiedReport).toContain('Recovered: yes');
+    expect(copiedReport).toContain('Timestamp: 2026-05-22T00:00:00.000Z');
+    expect(copiedReport).toContain('stderr truncated: yes');
+    expect(copiedReport).toContain('fatal: peer disconnected before response');
+    expect(copiedReport).not.toContain('sk-secret');
     expect(screen.getByRole('button', { name: 'Copied' })).not.toBeNull();
+  });
+
+  it('shows copy failure feedback when clipboard is unavailable', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+
+    render(<AgentCrashReportView item={crashReport()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy report' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Copy failed' })).not.toBeNull());
   });
 });

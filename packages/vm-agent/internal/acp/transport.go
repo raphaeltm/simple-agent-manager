@@ -65,17 +65,16 @@ type AgentStatusMessage struct {
 // AgentCrashReportMessage gives users enough context to continue safely and
 // report an agent-vendor crash with useful debugging evidence.
 type AgentCrashReportMessage struct {
-	Type             ControlMessageType `json:"type"`
-	AgentType        string             `json:"agentType"`
-	Recovered        bool               `json:"recovered"`
-	Message          string             `json:"message"`
-	Attribution      string             `json:"attribution"`
-	Stderr           string             `json:"stderr,omitempty"`
-	StderrTruncated  bool               `json:"stderrTruncated"`
-	Suggestion       string             `json:"suggestion"`
-	Timestamp        time.Time          `json:"timestamp"`
-	RecoveryError    string             `json:"recoveryError,omitempty"`
-	OriginalPromptID json.RawMessage    `json:"originalPromptId,omitempty"`
+	Type            ControlMessageType `json:"type"`
+	AgentType       string             `json:"agentType"`
+	Recovered       bool               `json:"recovered"`
+	Message         string             `json:"message"`
+	Attribution     string             `json:"attribution"`
+	Stderr          string             `json:"stderr,omitempty"`
+	StderrTruncated bool               `json:"stderrTruncated"`
+	Suggestion      string             `json:"suggestion"`
+	Timestamp       time.Time          `json:"timestamp"`
+	RecoveryError   string             `json:"recoveryError,omitempty"`
 }
 
 // SessionStateMessage is sent to newly attached viewers with the current

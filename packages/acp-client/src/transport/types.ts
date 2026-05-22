@@ -31,7 +31,6 @@ export interface AgentCrashReportMessage {
   suggestion: string;
   timestamp: string;
   recoveryError?: string;
-  originalPromptId?: unknown;
 }
 
 // --- Multi-viewer session control messages ---
