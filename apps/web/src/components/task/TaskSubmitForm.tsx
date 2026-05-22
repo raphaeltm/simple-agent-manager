@@ -3,6 +3,7 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef,useState } from 'react';
 
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import type { TaskAttachmentRef } from '../../lib/api';
 import {
   listAgentProfiles,
@@ -14,6 +15,7 @@ import { formatFileSize } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { SplitButton } from '../ui/SplitButton';
+import { formatVmSizeOption } from '../vm/format-vm-size';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -47,6 +49,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   onRunNow,
   onSaveToBacklog,
 }) => {
+  const { catalog } = useProviderCatalog();
   const [title, setTitle] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [description, setDescription] = useState('');
@@ -438,10 +441,12 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                     onChange={(e) => setVmSize(e.target.value as VMSize | '')}
                     className="py-1 px-2 rounded-sm text-fg-primary text-sm"
                   >
-                    <option value="">Default</option>
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large</option>
+                    <option value="">Project default</option>
+                    {(['small', 'medium', 'large'] as VMSize[]).map((s) => (
+                      <option key={s} value={s}>
+                        {formatVmSizeOption(s, catalog?.sizes[s] ?? null)}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

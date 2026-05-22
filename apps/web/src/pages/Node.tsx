@@ -11,6 +11,7 @@ import { NodeWorkspacesSection } from '../components/node/NodeWorkspacesSection'
 import { SoftwareSection } from '../components/node/SoftwareSection';
 import { SystemResourcesSection } from '../components/node/SystemResourcesSection';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
+import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
 import {
   deleteNode,
@@ -28,6 +29,7 @@ export function Node() {
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
 
+  const { catalogs } = useProviderCatalog();
   const [node, setNode] = useState<NodeResponse | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -264,7 +266,7 @@ export function Node() {
         <Alert variant="error">Node not found</Alert>
       ) : (
         <div className="flex flex-col gap-6">
-          <NodeOverviewSection node={node} systemInfo={systemInfo} />
+          <NodeOverviewSection node={node} systemInfo={systemInfo} catalogs={catalogs} />
 
           {node.status === 'running' && (
             <>

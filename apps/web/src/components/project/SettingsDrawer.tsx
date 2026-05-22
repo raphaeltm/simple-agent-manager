@@ -12,6 +12,7 @@ import { Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { useToast } from '../../hooks/useToast';
 import {
@@ -23,10 +24,10 @@ import {
   upsertProjectRuntimeFile,
 } from '../../lib/api';
 import { listTriggers } from '../../lib/api/triggers';
-import { FALLBACK_VM_SIZES } from '../../lib/constants';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeploymentSettings } from '../DeploymentSettings';
+import { VmSizeCard } from '../vm/VmSizeCard';
 
 const WORKSPACE_PROFILES: { value: WorkspaceProfile; label: string; description: string }[] = [
   { value: 'full', label: 'Full', description: 'Build project devcontainer' },
@@ -42,6 +43,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const toast = useToast();
   const navigate = useNavigate();
   const { projectId, project, reload } = useProjectContext();
+  const { catalog, loading: catalogLoading } = useProviderCatalog();
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Track dirty state for unsaved changes confirmation (T040)
@@ -353,28 +355,17 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {FALLBACK_VM_SIZES.map((size) => {
-                  const isSelected = defaultVmSize === size.value;
-                  return (
-                    <button
-                      key={size.value}
-                      type="button"
-                      aria-pressed={isSelected}
-                      disabled={savingVmSize}
-                      onClick={() => void handleSaveVmSize(size.value)}
-                      className={`p-2 rounded-md text-left text-fg-primary ${
-                        isSelected
-                          ? 'border-2 border-accent bg-accent-tint'
-                          : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
-                      } ${savingVmSize ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-                    >
-                      <div className="font-medium text-[0.8125rem]">{size.label}</div>
-                      <div className="text-xs text-fg-muted mt-0.5">
-                        {size.description}
-                      </div>
-                    </button>
-                  );
-                })}
+                {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
+                  <VmSizeCard
+                    key={size}
+                    size={size}
+                    sizeInfo={catalog?.sizes[size] ?? null}
+                    selected={defaultVmSize === size}
+                    disabled={savingVmSize || catalogLoading}
+                    onClick={() => void handleSaveVmSize(size)}
+                    compact
+                  />
+                ))}
               </div>
               {!defaultVmSize && (
                 <div className="text-xs text-fg-muted">

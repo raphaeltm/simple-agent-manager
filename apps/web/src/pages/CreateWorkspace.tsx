@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { BranchSelector } from '../components/BranchSelector';
 import { RepoSelector } from '../components/RepoSelector';
+import { VmSizeCard } from '../components/vm/VmSizeCard';
 import {
   createWorkspace,
   getProject,
@@ -17,7 +18,6 @@ import {
   listNodes,
   listProjects,
 } from '../lib/api';
-import { FALLBACK_VM_SIZES } from '../lib/constants';
 
 type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
 
@@ -344,20 +344,6 @@ export function CreateWorkspace() {
     marginBottom: '0.25rem',
   } as const;
 
-  // Build VM size options from catalog or use generic fallback
-  const vmSizeOptions = activeCatalog
-    ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
-        const sizeInfo = activeCatalog.sizes[size];
-        return {
-          value: size,
-          label: size.charAt(0).toUpperCase() + size.slice(1),
-          description: sizeInfo
-            ? `${sizeInfo.vcpu} vCPUs, ${sizeInfo.ramGb}GB RAM \u2014 ${sizeInfo.price}`
-            : size,
-        };
-      })
-    : FALLBACK_VM_SIZES;
-
   // Build location options from catalog
   const locationOptions = activeCatalog
     ? activeCatalog.locations.map((loc) => ({
@@ -609,23 +595,14 @@ export function CreateWorkspace() {
                 )}
               </label>
               <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3${catalogLoading ? ' opacity-60 pointer-events-none' : ''}`}>
-                {vmSizeOptions.map((size) => (
-                  <button
-                    key={size.value}
-                    type="button"
-                    aria-pressed={vmSize === size.value}
-                    onClick={() => setVmSize(size.value)}
-                    className={`p-3 rounded-md text-left cursor-pointer text-fg-primary transition-all duration-150 ${
-                      vmSize === size.value
-                        ? 'border-2 border-accent bg-accent-tint'
-                        : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
-                    }`}
-                  >
-                    <div className="font-medium">{size.label}</div>
-                    <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
-                      {size.description}
-                    </div>
-                  </button>
+                {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
+                  <VmSizeCard
+                    key={size}
+                    size={size}
+                    sizeInfo={activeCatalog?.sizes[size] ?? null}
+                    selected={vmSize === size}
+                    onClick={() => setVmSize(size)}
+                  />
                 ))}
               </div>
             </div>
