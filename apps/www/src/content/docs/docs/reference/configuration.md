@@ -109,6 +109,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | Variable                      | Default | Description                        |
 | ----------------------------- | ------- | ---------------------------------- |
 | `ACP_MESSAGE_BUFFER_SIZE`     | `5000`  | Buffer size for ACP messages       |
+| `ACP_STDERR_BUFFER_BYTES`     | `4096`  | Agent stderr bytes retained for crash reports |
 | `ACP_PING_INTERVAL`           | `30s`   | WebSocket keepalive ping interval  |
 | `ACP_PONG_TIMEOUT`            | `10s`   | Pong response timeout              |
 | `ACP_TASK_PROMPT_TIMEOUT`     | `6h`    | Task execution prompt timeout      |

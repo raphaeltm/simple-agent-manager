@@ -450,6 +450,9 @@ func TestACPPhaseTimeoutsDefault(t *testing.T) {
 	if cfg.ACPInitTimeoutMs != 30000 {
 		t.Fatalf("ACPInitTimeoutMs=%d, want 30000", cfg.ACPInitTimeoutMs)
 	}
+	if cfg.ACPStderrBufferBytes != 4096 {
+		t.Fatalf("ACPStderrBufferBytes=%d, want 4096", cfg.ACPStderrBufferBytes)
+	}
 }
 
 func TestACPPhaseTimeoutsOverride(t *testing.T) {
@@ -458,6 +461,7 @@ func TestACPPhaseTimeoutsOverride(t *testing.T) {
 	t.Setenv("ACP_INITIALIZE_TIMEOUT_MS", "45000")
 	t.Setenv("ACP_NEW_SESSION_TIMEOUT_MS", "60000")
 	t.Setenv("ACP_LOAD_SESSION_TIMEOUT_MS", "20000")
+	t.Setenv("ACP_STDERR_BUFFER_BYTES", "8192")
 
 	cfg, err := Load()
 	if err != nil {
@@ -471,6 +475,9 @@ func TestACPPhaseTimeoutsOverride(t *testing.T) {
 	}
 	if cfg.ACPLoadSessionTimeoutMs != 20000 {
 		t.Fatalf("ACPLoadSessionTimeoutMs=%d, want 20000", cfg.ACPLoadSessionTimeoutMs)
+	}
+	if cfg.ACPStderrBufferBytes != 8192 {
+		t.Fatalf("ACPStderrBufferBytes=%d, want 8192", cfg.ACPStderrBufferBytes)
 	}
 }
 

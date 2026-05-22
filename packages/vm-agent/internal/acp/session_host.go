@@ -46,10 +46,13 @@ const (
 )
 
 const (
-	ampMcpRemotePackage  = "mcp-remote@0.1.38"
-	ampMcpTokenEnvVar    = "SAM_MCP_TOKEN"
-	maxStderrBufferBytes = 4096
+	ampMcpRemotePackage = "mcp-remote@0.1.38"
+	ampMcpTokenEnvVar   = "SAM_MCP_TOKEN"
 )
+
+// DefaultStderrBufferBytes is the default maximum agent stderr captured for
+// crash reports. Override via ACP_STDERR_BUFFER_BYTES.
+const DefaultStderrBufferBytes = 4096
 
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
 // entries for NewSession/LoadSession requests.
@@ -134,6 +137,10 @@ type SessionHostConfig struct {
 	// ViewerSendBuffer is the channel buffer size per viewer. If a viewer's
 	// channel is full, messages are dropped for that viewer.
 	ViewerSendBuffer int
+
+	// StderrBufferBytes is the maximum agent stderr captured for crash reports.
+	// Override via ACP_STDERR_BUFFER_BYTES. Default: 4096 bytes.
+	StderrBufferBytes int
 
 	// NotifSerializeTimeout is the maximum time to wait for a previous
 	// notification handler to complete before delivering the next notification
@@ -255,6 +262,9 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 	}
 	if config.ViewerSendBuffer <= 0 {
 		config.ViewerSendBuffer = DefaultViewerSendBuffer
+	}
+	if config.StderrBufferBytes <= 0 {
+		config.StderrBufferBytes = DefaultStderrBufferBytes
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -699,7 +709,7 @@ func (h *SessionHost) monitorStderr(process *AgentProcess) {
 		line := scanner.Text()
 		slog.Warn("Agent stderr", "line", line)
 		h.stderrMu.Lock()
-		if h.stderrBuf.Len() < maxStderrBufferBytes {
+		if h.stderrBuf.Len() < h.config.StderrBufferBytes {
 			if h.stderrBuf.Len() > 0 {
 				h.stderrBuf.WriteByte('\n')
 			}

@@ -101,6 +101,7 @@ type Config struct {
 	ACPMaxRestartAttempts    int
 	ACPMessageBufferSize     int           // Max buffered messages per SessionHost for late-join replay
 	ACPViewerSendBuffer      int           // Per-viewer send channel buffer size
+	ACPStderrBufferBytes     int           // Max agent stderr bytes retained for crash reports
 	ACPPingInterval          time.Duration // WebSocket ping interval (default: 30s)
 	ACPPongTimeout           time.Duration // WebSocket pong deadline after ping (default: 10s)
 	ACPPromptTimeout         time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
@@ -307,6 +308,7 @@ func Load() (*Config, error) {
 		ACPMaxRestartAttempts:    getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
 		ACPMessageBufferSize:     getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
 		ACPViewerSendBuffer:      getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
+		ACPStderrBufferBytes:     getEnvInt("ACP_STDERR_BUFFER_BYTES", 4096),
 		ACPPingInterval:          getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
 		ACPPongTimeout:           getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 		ACPPromptTimeout:         getEnvDuration("ACP_PROMPT_TIMEOUT", 0),

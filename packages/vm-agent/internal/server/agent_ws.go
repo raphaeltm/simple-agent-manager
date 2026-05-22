@@ -357,6 +357,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		GatewayConfig:         cfg,
 		MessageBufferSize:     s.config.ACPMessageBufferSize,
 		ViewerSendBuffer:      s.config.ACPViewerSendBuffer,
+		StderrBufferBytes:     s.config.ACPStderrBufferBytes,
 		NotifSerializeTimeout: s.config.ACPNotifSerializeTimeout,
 	}
 	host := acp.NewSessionHost(hostCfg)
