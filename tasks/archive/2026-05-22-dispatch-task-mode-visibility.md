@@ -40,6 +40,11 @@ Agent-to-agent dispatch can silently resolve to `conversation` mode through prof
 - Tool descriptions steer subtask dispatch toward task mode and make conversation-mode lifecycle responsibilities explicit.
 - Unit tests cover the changed response/default behavior.
 
+## Completion Evidence
+
+- PR created: https://github.com/raphaeltm/simple-agent-manager/pull/1100
+- Staging deploy and smoke tests passed: https://github.com/raphaeltm/simple-agent-manager/actions/runs/26294108312
+
 ## References
 
 - `apps/api/src/routes/mcp/dispatch-tool.ts`
