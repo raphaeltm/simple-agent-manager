@@ -140,6 +140,23 @@ describe('TruncatedSummary', () => {
     expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
   });
 
+  it('renders markdown content in modal instead of plain text', async () => {
+    const user = userEvent.setup();
+    const markdownSummary = '## Heading\n\nSome **bold** text and `inline code`.';
+    renderWithTruncation(markdownSummary);
+
+    await user.click(screen.getByText('Read more'));
+
+    // Modal should render markdown — heading becomes an h2, bold renders, inline code renders
+    expect(screen.getByRole('heading', { name: 'Heading', level: 2 })).toBeInTheDocument();
+    expect(screen.getByText('bold')).toBeInTheDocument();
+    expect(screen.getByText('inline code')).toBeInTheDocument();
+
+    // The rendered-markdown test-id should be present (from RenderedMarkdown component)
+    const modal = screen.getByTestId('rendered-markdown');
+    expect(modal).toBeInTheDocument();
+  });
+
   describe('taskId prop — global audio integration', () => {
     it('does not show speaker button in modal when taskId is not provided', async () => {
       const user = userEvent.setup();
