@@ -41,6 +41,12 @@ const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 const DEFAULT_MAX_DESCRIPTION_LENGTH = 32_000;
 
+export function getConversationTaskModeWarning(): string {
+  return 'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
+    'Actively manage its lifecycle with send_message_to_subtask and get_session_messages, ' +
+    'or pass taskMode: "task" explicitly to use task completion semantics.';
+}
+
 export const dispatchTaskDef: AnthropicToolDef = {
   name: 'dispatch_task',
   description:
@@ -82,7 +88,7 @@ export const dispatchTaskDef: AnthropicToolDef = {
       taskMode: {
         type: 'string',
         enum: ['task', 'conversation'],
-        description: '"task" = agent pushes code + creates PR. "conversation" = interactive session.',
+        description: '"task" is recommended for subtasks: the agent reports completion. "conversation" requires active lifecycle management via send_message_to_subtask.',
       },
       agentProfileId: {
         type: 'string',
@@ -204,9 +210,12 @@ export async function dispatchTask(
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
 
+  // Task mode: explicit → profile → task.
+  // MCP dispatch is agent-to-agent delegated work; workspace profile controls
+  // provisioning shape, not whether the task reports completion.
   const resolvedTaskMode: TaskMode = (input.taskMode as TaskMode | undefined)
     ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+    ?? 'task';
 
   const resolvedAgentType: string | null = input.agentType
     ?? resolvedProfile?.agentType
@@ -399,6 +408,10 @@ export async function dispatchTask(
     branchName,
     title: taskTitle,
     status: 'queued',
+    taskMode: resolvedTaskMode,
+    ...(resolvedTaskMode === 'conversation'
+      ? { warning: getConversationTaskModeWarning() }
+      : {}),
     url: taskUrl,
     message: `Task dispatched successfully. Track progress at: ${taskUrl}`,
   };

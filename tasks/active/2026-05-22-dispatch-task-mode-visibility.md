@@ -15,19 +15,19 @@ Agent-to-agent dispatch can silently resolve to `conversation` mode through prof
 
 ## Implementation Checklist
 
-- [ ] Add `taskMode: resolvedTaskMode` to the MCP `dispatch_task` success response.
-- [ ] Add a conversation-mode warning to the MCP response that tells agents the child will not auto-complete, to use `send_message_to_subtask` / `get_session_messages`, and to pass `taskMode: "task"` to override.
-- [ ] Add `taskMode: resolvedTaskMode` to the SAM `dispatch_task` success response.
-- [ ] Add the same conversation-mode warning to the SAM response.
-- [ ] Change the SAM dispatch fallback from lightweight-to-conversation to unconditional `'task'`, with the requested comment explaining that workspace profile controls provisioning shape, not completion reporting.
-- [ ] Update MCP `dispatch_task` tool definition guidance to recommend `task` for subtasks and warn that `conversation` requires active lifecycle management via `send_message_to_subtask`.
-- [ ] Update SAM `dispatch_task` tool definition guidance with the same treatment.
-- [ ] Update profile tool `taskMode` description to say most profiles should use `task` or leave it unset.
-- [ ] Add unit coverage for MCP dispatch response `taskMode`.
-- [ ] Add unit coverage for MCP dispatch conversation warning when profile resolves to conversation mode.
-- [ ] Add unit coverage for SAM dispatch response `taskMode`.
-- [ ] Add a SAM dispatch regression test proving lightweight workspace profile defaults to `task`.
-- [ ] Run relevant unit tests plus lint/typecheck as required by the `/do` workflow.
+- [x] Add `taskMode: resolvedTaskMode` to the MCP `dispatch_task` success response.
+- [x] Add a conversation-mode warning to the MCP response that tells agents the child will not auto-complete, to use `send_message_to_subtask` / `get_session_messages`, and to pass `taskMode: "task"` to override.
+- [x] Add `taskMode: resolvedTaskMode` to the SAM `dispatch_task` success response.
+- [x] Add the same conversation-mode warning to the SAM response.
+- [x] Change the SAM dispatch fallback from lightweight-to-conversation to unconditional `'task'`, with the requested comment explaining that workspace profile controls provisioning shape, not completion reporting.
+- [x] Update MCP `dispatch_task` tool definition guidance to recommend `task` for subtasks and warn that `conversation` requires active lifecycle management via `send_message_to_subtask`.
+- [x] Update SAM `dispatch_task` tool definition guidance with the same treatment.
+- [x] Update profile tool `taskMode` description to say most profiles should use `task` or leave it unset.
+- [x] Add unit coverage for MCP dispatch response `taskMode`.
+- [x] Add unit coverage for MCP dispatch conversation warning when profile resolves to conversation mode.
+- [x] Add unit coverage for SAM dispatch response `taskMode`.
+- [x] Add a SAM dispatch regression test proving lightweight workspace profile defaults to `task`.
+- [x] Run relevant unit tests plus lint/typecheck as required by the `/do` workflow.
 
 ## Acceptance Criteria
 

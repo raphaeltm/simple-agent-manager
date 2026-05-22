@@ -2,6 +2,16 @@ import { Hono } from 'hono';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
+import * as agentProfileService from '../../../src/services/agent-profiles';
+
+vi.mock('../../../src/services/agent-profiles', () => ({
+  createProfile: vi.fn(),
+  deleteProfile: vi.fn(),
+  getProfile: vi.fn(),
+  listProfiles: vi.fn(),
+  resolveAgentProfile: vi.fn().mockResolvedValue(null),
+  updateProfile: vi.fn(),
+}));
 
 // Mock KV namespace
 const mockKV = {
@@ -1113,6 +1123,7 @@ describe('MCP Routes', () => {
       expect(data.sessionId).toBe('sess-new-1');
       expect(data.branchName).toBeDefined();
       expect(data.status).toBe('queued');
+      expect(data.taskMode).toBe('task');
       expect(data.dispatchDepth).toBe(1);
       expect(data.url).toContain('app.example.com');
       expect(data.url).toContain('proj-456');
@@ -1525,8 +1536,50 @@ describe('MCP Routes', () => {
       expect(body.result).toBeDefined();
 
       // Verify TaskRunner DO receives conversation mode
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.taskMode).toBe('conversation');
+      expect(data.warning).toContain('will not auto-complete');
+      expect(data.warning).toContain('send_message_to_subtask');
+      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('taskMode: "task"');
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
       expect(startInput.config.taskMode).toBe('conversation');
+    });
+
+    it('should warn when profile resolves taskMode=conversation', async () => {
+      setupHappyPathMocks();
+      vi.mocked(agentProfileService.resolveAgentProfile).mockResolvedValueOnce({
+        profileId: 'profile-conversation',
+        taskMode: 'conversation',
+        vmSizeOverride: null,
+        provider: null,
+        vmLocation: null,
+        workspaceProfile: null,
+        devcontainerConfigName: null,
+        agentType: null,
+        model: null,
+        permissionMode: null,
+        systemPromptAppend: null,
+      } as Awaited<ReturnType<typeof agentProfileService.resolveAgentProfile>>);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Continue the design discussion',
+          agentProfileId: 'conversation-profile',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.taskMode).toBe('conversation');
+      expect(data.warning).toContain('will not auto-complete');
+      expect(data.warning).toContain('send_message_to_subtask');
+      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('taskMode: "task"');
     });
 
     it('should pass explicit config fields to TaskRunner DO', async () => {
@@ -1574,6 +1627,7 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.taskId).toBeDefined();
       expect(data.status).toBe('queued');
+      expect(data.taskMode).toBe('task');
 
       // Verify defaults are used when no config specified
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];

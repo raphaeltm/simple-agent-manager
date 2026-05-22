@@ -80,7 +80,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         },
         taskMode: {
           type: 'string',
-          description: 'Task execution mode. "task" (default): agent pushes, creates PR, calls complete_task. "conversation": agent responds conversationally, human controls lifecycle.',
+          description: 'Task execution mode. "task" is recommended for subtasks and reports completion. "conversation" requires active lifecycle management via send_message_to_subtask.',
           enum: ['task', 'conversation'],
         },
         agentType: {

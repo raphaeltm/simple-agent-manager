@@ -56,7 +56,7 @@ const PROFILE_FIELD_PROPERTIES = {
   },
   taskMode: {
     type: 'string',
-    description: 'Task mode: task, conversation',
+    description: 'Default task mode for this profile. Most profiles should use "task" or leave this unset; "conversation" requires active lifecycle management.',
   },
 } as const;
 

@@ -38,6 +38,12 @@ const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 /** Valid workspace profiles for dispatch */
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 
+export function getConversationTaskModeWarning(): string {
+  return 'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
+    'Actively manage its lifecycle with send_message_to_subtask and get_session_messages, ' +
+    'or pass taskMode: "task" explicitly to use task completion semantics.';
+}
+
 export async function handleDispatchTask(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -678,6 +684,10 @@ export async function handleDispatchTask(
         branchName,
         title: taskTitle,
         status: 'queued',
+        taskMode: resolvedTaskMode,
+        ...(resolvedTaskMode === 'conversation'
+          ? { warning: getConversationTaskModeWarning() }
+          : {}),
         dispatchDepth: newDepth,
         url: taskUrl,
         message: `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
