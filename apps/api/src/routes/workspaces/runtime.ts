@@ -60,6 +60,14 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     workspace.projectId
   );
 
+  // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
+  // Platform credentials are control-plane secrets and must only be used via
+  // SAM-mediated proxy flows (callback-token auth), not injected into tenant
+  // containers as env vars or auth files.
+  if (credentialData?.credentialSource === 'platform') {
+    credentialData = null;
+  }
+
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
   // definition specifies a cloud provider whose credential can be used instead.
   // Currently applies to OpenCode, which shares SCW_SECRET_KEY with Scaleway cloud.
