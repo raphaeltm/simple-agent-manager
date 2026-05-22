@@ -12,12 +12,12 @@ export const AgentCrashReportView = React.memo(function AgentCrashReportView({ i
   const containerClass = tone === 'amber'
     ? 'border-amber-300 bg-amber-50 text-amber-950'
     : 'border-red-300 bg-red-50 text-red-950';
-  const labelClass = tone === 'amber'
-    ? 'bg-amber-100 text-amber-800 border-amber-200'
-    : 'bg-red-100 text-red-800 border-red-200';
-  const buttonClass = tone === 'amber'
-    ? 'border-amber-300 bg-white text-amber-900 hover:bg-amber-100'
-    : 'border-red-300 bg-white text-red-900 hover:bg-red-100';
+  const labelStyle = tone === 'amber'
+    ? { backgroundColor: '#fef3c7', borderColor: '#fbbf24', color: '#92400e' }
+    : { backgroundColor: '#fee2e2', borderColor: '#fca5a5', color: '#991b1b' };
+  const buttonStyle = tone === 'amber'
+    ? { backgroundColor: '#fffbeb', borderColor: '#f59e0b', color: '#78350f' }
+    : { backgroundColor: '#fef2f2', borderColor: '#ef4444', color: '#7f1d1d' };
 
   const copyDebugInfo = async () => {
     const debugInfo = [
@@ -40,7 +40,10 @@ export const AgentCrashReportView = React.memo(function AgentCrashReportView({ i
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${labelClass}`}>
+            <span
+              className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold"
+              style={labelStyle}
+            >
               {item.recovered ? 'Recovered' : 'Recovery failed'}
             </span>
             <span className="text-xs font-medium uppercase text-current opacity-70">
@@ -59,7 +62,8 @@ export const AgentCrashReportView = React.memo(function AgentCrashReportView({ i
         <button
           type="button"
           onClick={() => void copyDebugInfo()}
-          className={`min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${buttonClass}`}
+          className="min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:brightness-95"
+          style={buttonStyle}
         >
           {copied ? 'Copied' : 'Copy report'}
         </button>
