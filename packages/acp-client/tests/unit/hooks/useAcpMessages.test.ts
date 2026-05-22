@@ -12,6 +12,34 @@ function sessionUpdateMessage(update: Record<string, unknown>): AcpMessage {
 }
 
 describe('useAcpMessages tool call parsing', () => {
+  it('renders agent crash reports as conversation items', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage({
+        type: 'agent_crash_report',
+        agentType: 'openai-codex',
+        recovered: true,
+        message: 'The Codex agent crashed unexpectedly. SAM recovered your session automatically.',
+        attribution: 'This is a bug in Codex, not in SAM.',
+        stderr: 'write_stdin failed: stdin is closed',
+        stderrTruncated: false,
+        suggestion: 'Please report this to OpenAI.',
+        timestamp: '2026-05-22T00:00:00Z',
+      } as AcpMessage);
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0];
+    expect(item?.kind).toBe('agent_crash_report');
+    if (item?.kind !== 'agent_crash_report') {
+      throw new Error('expected agent_crash_report item');
+    }
+    expect(item.recovered).toBe(true);
+    expect(item.attribution).toContain('not in SAM');
+    expect(item.stderr).toContain('stdin is closed');
+  });
+
   it('extracts nested terminal text content from tool_call payloads', () => {
     const { result } = renderHook(() => useAcpMessages());
 

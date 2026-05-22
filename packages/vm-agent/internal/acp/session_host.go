@@ -3,6 +3,7 @@ package acp
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -45,8 +46,9 @@ const (
 )
 
 const (
-	ampMcpRemotePackage = "mcp-remote@0.1.38"
-	ampMcpTokenEnvVar   = "SAM_MCP_TOKEN"
+	ampMcpRemotePackage  = "mcp-remote@0.1.38"
+	ampMcpTokenEnvVar    = "SAM_MCP_TOKEN"
+	maxStderrBufferBytes = 4096
 )
 
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
@@ -180,8 +182,11 @@ type SessionHost struct {
 	sessionID      acpsdk.SessionId
 	restartCount   int
 	permissionMode string
-	status         SessionHostStatus
-	statusErr      string
+	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
+	// handling can decide whether a process crash is recoverable.
+	agentSupportsLoadSession bool
+	status                   SessionHostStatus
+	statusErr                string
 	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
 	// when a user cancel intentionally terminates an agent that lacks native
 	// session/cancel support.
@@ -220,6 +225,15 @@ type SessionHost struct {
 	// cancelled by a viewer or control-plane request.
 	// Protected by promptCancelMu.
 	promptCancelRequested bool
+
+	// Crash recovery state (guarded by mu). When a prompt fails because the
+	// agent process disconnected, finishPromptWithError records this context
+	// and lets monitorProcessExit attempt LoadSession recovery.
+	crashRecoveryInProgress bool
+	crashStderr             string
+	crashAgentType          string
+	crashPromptReqID        json.RawMessage
+	crashPromptViewerID     string
 
 	// Stderr collection
 	stderrMu  sync.Mutex
@@ -685,7 +699,7 @@ func (h *SessionHost) monitorStderr(process *AgentProcess) {
 		line := scanner.Text()
 		slog.Warn("Agent stderr", "line", line)
 		h.stderrMu.Lock()
-		if h.stderrBuf.Len() < 4096 {
+		if h.stderrBuf.Len() < maxStderrBufferBytes {
 			if h.stderrBuf.Len() > 0 {
 				h.stderrBuf.WriteByte('\n')
 			}
@@ -701,6 +715,12 @@ func (h *SessionHost) getAndClearStderr() string {
 	s := h.stderrBuf.String()
 	h.stderrBuf.Reset()
 	return s
+}
+
+func (h *SessionHost) peekStderr() string {
+	h.stderrMu.Lock()
+	defer h.stderrMu.Unlock()
+	return h.stderrBuf.String()
 }
 
 // silentErrorPatterns are stderr substrings that indicate an API-level error
@@ -763,6 +783,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	}
 	h.acpConn = nil
 	h.sessionID = ""
+	h.agentSupportsLoadSession = false
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""

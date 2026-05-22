@@ -1,5 +1,6 @@
 import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import {
+  AgentCrashReportView,
   MessageBubble as AcpMessageBubble,
   PlanView,
   RawFallbackView,
@@ -125,6 +126,8 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
       return <PlanView plan={item} />;
     case 'system_message':
       return <SystemMessageBubble text={item.text} />;
+    case 'agent_crash_report':
+      return <AgentCrashReportView item={item} />;
     case 'raw_fallback':
       return <RawFallbackView item={item} />;
     default:

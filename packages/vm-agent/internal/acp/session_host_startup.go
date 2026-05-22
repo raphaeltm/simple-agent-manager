@@ -16,6 +16,14 @@ import (
 // startAgent spawns the agent process and sets up the ACP connection.
 // Must hold h.mu when calling.
 func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string) error {
+	return h.startAgentWithSessionMode(ctx, agentType, cred, settings, previousAcpSessionID, false)
+}
+
+func (h *SessionHost) startAgentForCrashRecovery(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string) error {
+	return h.startAgentWithSessionMode(ctx, agentType, cred, settings, previousAcpSessionID, true)
+}
+
+func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string, requireLoadSession bool) error {
 	startup, err := h.prepareAgentStartup(ctx, agentType, cred, settings)
 	if err != nil {
 		return err
@@ -34,7 +42,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	go h.monitorStderr(process)
 	go h.monitorProcessExit(ctx, process, agentType, cred, startup.settings)
 
-	return h.establishACPSession(ctx, agentType, startup.settings, previousAcpSessionID)
+	return h.establishACPSession(ctx, agentType, startup.settings, previousAcpSessionID, requireLoadSession)
 }
 
 type agentStartup struct {

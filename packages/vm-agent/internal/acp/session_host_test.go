@@ -740,6 +740,112 @@ func TestSessionHost_BroadcastAgentStatus(t *testing.T) {
 	}
 }
 
+func TestIsCrashPromptError(t *testing.T) {
+	t.Parallel()
+
+	crashErrors := []error{
+		io.EOF,
+		fmt.Errorf("connection closed, peer disconnected"),
+		fmt.Errorf("write: broken pipe"),
+		fmt.Errorf("read tcp: connection reset by peer"),
+		fmt.Errorf("write_stdin failed: stdin is closed for this session"),
+	}
+	for _, err := range crashErrors {
+		if !isCrashPromptError(err) {
+			t.Fatalf("isCrashPromptError(%q) = false, want true", err.Error())
+		}
+	}
+
+	if isCrashPromptError(context.DeadlineExceeded) {
+		t.Fatal("deadline exceeded should not be treated as an agent crash")
+	}
+}
+
+func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-1"
+	host.agentSupportsLoadSession = false
+	host.mu.Unlock()
+
+	if _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
+		t.Fatal("beginCrashRecovery succeeded without LoadSession support")
+	}
+
+	host.mu.Lock()
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	agentType, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	if !ok {
+		t.Fatal("beginCrashRecovery failed with LoadSession support")
+	}
+	if agentType != "openai-codex" {
+		t.Fatalf("agentType = %q, want openai-codex", agentType)
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false, want true")
+	}
+	if string(host.crashPromptReqID) != `"req-1"` {
+		t.Fatalf("crashPromptReqID = %s, want \"req-1\"", string(host.crashPromptReqID))
+	}
+	if host.crashPromptViewerID != "viewer-1" {
+		t.Fatalf("crashPromptViewerID = %q, want viewer-1", host.crashPromptViewerID)
+	}
+}
+
+func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	report := host.crashReport(crashRecoverySnapshot{
+		stderr:      "write_stdin failed: stdin is closed",
+		agentType:   "openai-codex",
+		promptReqID: json.RawMessage(`"req-1"`),
+	}, true, "")
+	host.broadcastAgentCrashReport(report)
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+
+	if len(host.messageBuf) != 1 {
+		t.Fatalf("buffer length = %d, want 1", len(host.messageBuf))
+	}
+
+	var got AgentCrashReportMessage
+	if err := json.Unmarshal(host.messageBuf[0].Data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != MsgAgentCrashReport {
+		t.Fatalf("type = %s, want %s", got.Type, MsgAgentCrashReport)
+	}
+	if got.AgentType != "openai-codex" {
+		t.Fatalf("agentType = %q, want openai-codex", got.AgentType)
+	}
+	if !got.Recovered {
+		t.Fatal("recovered = false, want true")
+	}
+	if !strings.Contains(got.Attribution, "not in SAM") {
+		t.Fatalf("attribution = %q, want SAM fault attribution", got.Attribution)
+	}
+	if !strings.Contains(got.Stderr, "stdin is closed") {
+		t.Fatalf("stderr = %q, want captured stderr", got.Stderr)
+	}
+	if !strings.Contains(got.Suggestion, "OpenAI") {
+		t.Fatalf("suggestion = %q, want OpenAI vendor attribution", got.Suggestion)
+	}
+}
+
 func TestSessionHost_ViewerDisconnectDoesNotStopAgent(t *testing.T) {
 	t.Parallel()
 

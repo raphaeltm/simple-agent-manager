@@ -10,14 +10,21 @@ import (
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
-func (h *SessionHost) establishACPSession(ctx context.Context, agentType string, settings *agentSettingsPayload, previousAcpSessionID string) error {
+func (h *SessionHost) establishACPSession(ctx context.Context, agentType string, settings *agentSettingsPayload, previousAcpSessionID string, requireLoadSession bool) error {
 	timeouts := h.acpPhaseTimeouts()
 	initResp, err := h.initializeACP(ctx, agentType, timeouts.initialize)
 	if err != nil {
 		return err
 	}
-	if h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession) {
+	loaded, err := h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession, !requireLoadSession)
+	if loaded {
 		return nil
+	}
+	if requireLoadSession {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("ACP LoadSession required for crash recovery but no previous session is available")
 	}
 	return h.startNewACPSession(ctx, agentType, settings, timeouts.newSession)
 }
@@ -64,6 +71,7 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 		return acpsdk.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", err)
 	}
 	cancel()
+	h.agentSupportsLoadSession = resp.AgentCapabilities.LoadSession
 	slog.Info("ACP: Initialize succeeded", "loadSession", resp.AgentCapabilities.LoadSession)
 	h.reportLifecycle("info", "ACP Initialize succeeded", map[string]interface{}{
 		"agentType":           agentType,
@@ -79,14 +87,19 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	previousAcpSessionID string,
 	supportsLoadSession bool,
 	timeout time.Duration,
-) bool {
+	allowNewSessionFallback bool,
+) (bool, error) {
 	if previousAcpSessionID == "" {
-		return false
+		return false, nil
 	}
 	if !supportsLoadSession {
-		slog.Info("ACP: agent does not support LoadSession, using NewSession instead")
-		h.reportLifecycle("info", "Agent does not support LoadSession", map[string]interface{}{"agentType": agentType})
-		return false
+		message := "Agent does not support LoadSession"
+		if allowNewSessionFallback {
+			message = "Agent does not support LoadSession, using NewSession instead"
+		}
+		slog.Info("ACP: " + message)
+		h.reportLifecycle("info", message, map[string]interface{}{"agentType": agentType})
+		return false, fmt.Errorf("agent %s does not support LoadSession", agentType)
 	}
 
 	loadCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -105,13 +118,19 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	})
 	cancel()
 	if loadErr != nil {
-		slog.Warn("ACP: LoadSession failed, falling back to NewSession", "error", loadErr)
-		h.reportLifecycle("warn", "ACP LoadSession failed, falling back to NewSession", map[string]interface{}{
+		message := "ACP LoadSession failed"
+		eventMessage := "Could not restore conversation"
+		if allowNewSessionFallback {
+			message = "ACP LoadSession failed, falling back to NewSession"
+			eventMessage = "Could not restore conversation, starting fresh"
+		}
+		slog.Warn("ACP: "+message, "error", loadErr)
+		h.reportLifecycle("warn", message, map[string]interface{}{
 			"agentType": agentType,
 			"error":     loadErr.Error(),
 		})
-		h.reportEvent("warn", "agent.load_session_failed", "Could not restore conversation, starting fresh", map[string]interface{}{"error": loadErr.Error()})
-		return false
+		h.reportEvent("warn", "agent.load_session_failed", eventMessage, map[string]interface{}{"error": loadErr.Error()})
+		return false, fmt.Errorf("ACP LoadSession failed: %w", loadErr)
 	}
 
 	h.sessionID = acpsdk.SessionId(previousAcpSessionID)
@@ -123,7 +142,7 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	h.reportEvent("info", "agent.load_session_ok", "Previous conversation restored", map[string]interface{}{"acpSessionId": previousAcpSessionID})
 	h.persistAcpSessionID(agentType)
 	h.applySessionSettings(ctx, settings)
-	return true
+	return true, nil
 }
 
 func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, settings *agentSettingsPayload, timeout time.Duration) error {

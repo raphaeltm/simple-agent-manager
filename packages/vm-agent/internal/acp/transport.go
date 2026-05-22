@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"time"
 )
 
 // ControlMessageType identifies non-ACP control messages on the WebSocket.
@@ -23,6 +24,9 @@ const (
 	MsgSessionPrompting ControlMessageType = "session_prompting"
 	// MsgSessionPromptDone is broadcast to all viewers when a prompt completes.
 	MsgSessionPromptDone ControlMessageType = "session_prompt_done"
+	// MsgAgentCrashReport is broadcast when an agent crash is detected and
+	// SAM either recovered or failed to recover the ACP session.
+	MsgAgentCrashReport ControlMessageType = "agent_crash_report"
 	// MsgPing is an application-level keepalive sent by the browser.
 	// The server responds with MsgPong. This works through any proxy
 	// (Cloudflare, etc.) because it uses regular data frames.
@@ -40,6 +44,8 @@ const (
 	StatusReady      AgentStatus = "ready"
 	StatusError      AgentStatus = "error"
 	StatusRestarting AgentStatus = "restarting"
+	StatusRecovering AgentStatus = "recovering"
+	StatusRecovered  AgentStatus = "recovered"
 )
 
 // SelectAgentMessage is sent by the browser to request agent selection.
@@ -54,6 +60,22 @@ type AgentStatusMessage struct {
 	Status    AgentStatus        `json:"status"`
 	AgentType string             `json:"agentType"`
 	Error     string             `json:"error,omitempty"`
+}
+
+// AgentCrashReportMessage gives users enough context to continue safely and
+// report an agent-vendor crash with useful debugging evidence.
+type AgentCrashReportMessage struct {
+	Type             ControlMessageType `json:"type"`
+	AgentType        string             `json:"agentType"`
+	Recovered        bool               `json:"recovered"`
+	Message          string             `json:"message"`
+	Attribution      string             `json:"attribution"`
+	Stderr           string             `json:"stderr,omitempty"`
+	StderrTruncated  bool               `json:"stderrTruncated"`
+	Suggestion       string             `json:"suggestion"`
+	Timestamp        time.Time          `json:"timestamp"`
+	RecoveryError    string             `json:"recoveryError,omitempty"`
+	OriginalPromptID json.RawMessage    `json:"originalPromptId,omitempty"`
 }
 
 // SessionStateMessage is sent to newly attached viewers with the current
@@ -100,6 +122,8 @@ func ParseWebSocketMessage(data []byte) (isControl bool, controlType ControlMess
 		return true, MsgSessionPrompting
 	case MsgSessionPromptDone:
 		return true, MsgSessionPromptDone
+	case MsgAgentCrashReport:
+		return true, MsgAgentCrashReport
 	case MsgPing:
 		return true, MsgPing
 	case MsgPong:

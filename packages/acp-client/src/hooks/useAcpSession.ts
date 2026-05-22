@@ -273,6 +273,8 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       ready: 'ready',
       error: 'error',
       restarting: 'initializing',
+      recovering: 'initializing',
+      recovered: 'ready',
     };
 
     const newState = statusMap[msg.status] || 'error';
@@ -477,6 +479,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       ws,
       onAgentStatus: handleAgentStatus,
       onAcpMessage: handleAcpMessage,
+      onAgentCrashReport: handleAcpMessage,
       onSessionState: handleSessionState,
       onSessionReplayComplete: handleSessionReplayComplete,
       onSessionPrompting: handleSessionPrompting,

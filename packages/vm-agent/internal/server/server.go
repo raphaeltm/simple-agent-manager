@@ -1102,6 +1102,16 @@ func (s *Server) makeTaskCompletionCallback(
 			return
 		}
 
+		if stopReason == "recovered" {
+			s.postTaskCallback(
+				callbackURL,
+				taskID,
+				s.callbackTokenForWorkspace(workspaceID),
+				awaitingFollowupCallbackBody(gitPushResult{}),
+			)
+			return
+		}
+
 		// On error, send terminal failure immediately.
 		if promptErr != nil || stopReason == "error" {
 			reason := "Agent prompt failed"

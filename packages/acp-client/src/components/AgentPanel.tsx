@@ -5,6 +5,7 @@ import { getErrorMeta } from '../errors';
 import type { AcpMessagesHandle, ConversationItem, PlanItem } from '../hooks/useAcpMessages';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { SlashCommand } from '../types';
+import { AgentCrashReportView } from './AgentCrashReportView';
 import type { ChatSettingsData } from './ChatSettingsPanel';
 import { ChatSettingsPanel } from './ChatSettingsPanel';
 import { MessageBubble } from './MessageBubble';
@@ -483,6 +484,8 @@ const ConversationItemView = React.memo(function ConversationItemView({ item, tt
       return <ToolCallCard toolCall={item} />;
     case 'plan':
       return <PlanView plan={item} />;
+    case 'agent_crash_report':
+      return <AgentCrashReportView item={item} />;
     case 'raw_fallback':
       return <RawFallbackView item={item} />;
     default:

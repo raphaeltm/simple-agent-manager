@@ -107,6 +107,26 @@ describe('createAcpWebSocketTransport', () => {
     expect(onAgentStatus).not.toHaveBeenCalled();
   });
 
+  it('routes agent_crash_report messages to onAcpMessage by default', () => {
+    createAcpWebSocketTransport(ws, onAgentStatus, onAcpMessage, onClose, onError, onLifecycleEvent);
+
+    ws._simulateMessage(JSON.stringify({
+      type: 'agent_crash_report',
+      agentType: 'openai-codex',
+      recovered: true,
+      message: 'Codex crashed',
+      attribution: 'This is a bug in Codex, not in SAM.',
+      stderrTruncated: false,
+      suggestion: 'Please report this to OpenAI.',
+      timestamp: '2026-05-22T00:00:00Z',
+    }));
+
+    expect(onAcpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'agent_crash_report', recovered: true })
+    );
+    expect(onAgentStatus).not.toHaveBeenCalled();
+  });
+
   it('logs lifecycle event when JSON parse fails', () => {
     createAcpWebSocketTransport(ws, onAgentStatus, onAcpMessage, onClose, onError, onLifecycleEvent);
 

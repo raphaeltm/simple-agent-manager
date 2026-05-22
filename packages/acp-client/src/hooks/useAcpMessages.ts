@@ -1,6 +1,6 @@
 import { useCallback, useRef,useState } from 'react';
 
-import { expectJsonRecord } from '../runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../runtime-validation';
 import type { SlashCommand } from '../types';
 import type { AcpMessage } from './useAcpSession';
 
@@ -73,6 +73,20 @@ export interface SystemMessage {
   timestamp: number;
 }
 
+export interface AgentCrashReportItem {
+  kind: 'agent_crash_report';
+  id: string;
+  agentType: string;
+  recovered: boolean;
+  message: string;
+  attribution: string;
+  stderr?: string;
+  stderrTruncated: boolean;
+  suggestion: string;
+  recoveryError?: string;
+  timestamp: number;
+}
+
 export interface RawFallback {
   kind: 'raw_fallback';
   id: string;
@@ -84,6 +98,7 @@ export type ConversationItem =
   | UserMessage
   | AgentMessage
   | SystemMessage
+  | AgentCrashReportItem
   | ThinkingItem
   | ToolCallItem
   | PlanItem
@@ -218,6 +233,23 @@ export function useAcpMessages(): AcpMessagesHandle {
   const lastToolCallIndexRef = useRef(-1);
 
   const processMessage = useCallback((msg: AcpMessage) => {
+    if (isAgentCrashReport(msg)) {
+      setItems((prev) => enforceItemCap([...prev, {
+        kind: 'agent_crash_report',
+        id: nextId(),
+        agentType: msg.agentType,
+        recovered: msg.recovered,
+        message: msg.message,
+        attribution: msg.attribution,
+        stderr: msg.stderr,
+        stderrTruncated: msg.stderrTruncated,
+        suggestion: msg.suggestion,
+        recoveryError: msg.recoveryError,
+        timestamp: Date.parse(msg.timestamp) || Date.now(),
+      }]));
+      return;
+    }
+
     // Handle session notifications (method === 'session/update')
     if (msg.method === 'session/update' && msg.params) {
       const params = msg.params as { update?: { sessionUpdate?: string } & Record<string, unknown> };
@@ -493,6 +525,30 @@ export function mapToolCallContent(c: { type: string } & Record<string, unknown>
     default:
       return { type: 'content', text, data: c };
   }
+}
+
+function isAgentCrashReport(value: unknown): value is {
+  type: 'agent_crash_report';
+  agentType: string;
+  recovered: boolean;
+  message: string;
+  attribution: string;
+  stderr?: string;
+  stderrTruncated: boolean;
+  suggestion: string;
+  timestamp: string;
+  recoveryError?: string;
+} {
+  const record = maybeJsonRecord(value);
+  return record !== null &&
+    record.type === 'agent_crash_report' &&
+    typeof record.agentType === 'string' &&
+    typeof record.recovered === 'boolean' &&
+    typeof record.message === 'string' &&
+    typeof record.attribution === 'string' &&
+    typeof record.stderrTruncated === 'boolean' &&
+    typeof record.suggestion === 'string' &&
+    typeof record.timestamp === 'string';
 }
 
 function extractToolCallText(value: unknown, depth = 0): string {

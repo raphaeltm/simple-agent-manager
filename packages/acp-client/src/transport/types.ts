@@ -3,7 +3,7 @@
 // =============================================================================
 
 /** Status values for agent lifecycle updates */
-export type AgentSessionStatus = 'starting' | 'installing' | 'ready' | 'error' | 'restarting';
+export type AgentSessionStatus = 'starting' | 'installing' | 'ready' | 'error' | 'restarting' | 'recovering' | 'recovered';
 
 /** Sent by VM Agent to browser: agent lifecycle status update */
 export interface AgentStatusMessage {
@@ -17,6 +17,21 @@ export interface AgentStatusMessage {
 export interface SelectAgentMessage {
   type: 'select_agent';
   agentType: string;
+}
+
+/** Sent by VM Agent when an agent process crashes and recovery is attempted */
+export interface AgentCrashReportMessage {
+  type: 'agent_crash_report';
+  agentType: string;
+  recovered: boolean;
+  message: string;
+  attribution: string;
+  stderr?: string;
+  stderrTruncated: boolean;
+  suggestion: string;
+  timestamp: string;
+  recoveryError?: string;
+  originalPromptId?: unknown;
 }
 
 // --- Multi-viewer session control messages ---
@@ -58,6 +73,7 @@ export interface PongMessage {
 /** Union of all control messages (non-ACP) */
 export type ControlMessage =
   | AgentStatusMessage
+  | AgentCrashReportMessage
   | SelectAgentMessage
   | SessionStateMessage
   | SessionReplayCompleteMessage
@@ -69,6 +85,7 @@ export type ControlMessage =
 /** All known control message type strings */
 const CONTROL_MESSAGE_TYPES = new Set([
   'agent_status',
+  'agent_crash_report',
   'select_agent',
   'session_state',
   'session_replay_complete',

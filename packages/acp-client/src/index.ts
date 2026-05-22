@@ -19,6 +19,7 @@ export * from './hooks/useAutoScroll';
 export * from './hooks/useStreamingReveal';
 
 // Components
+export { AgentCrashReportView } from './components/AgentCrashReportView';
 export type { AgentPanelHandle } from './components/AgentPanel';
 export { AgentPanel, CLIENT_COMMANDS } from './components/AgentPanel';
 export type { AudioPlayerProps } from './components/AudioPlayer';
