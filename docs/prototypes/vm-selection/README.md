@@ -2,40 +2,42 @@
 
 Prototype route in development: `/__prototype/vm-selection`
 
-This explores a single reusable VM selection flow for project defaults, agent profile overrides, manual provisioning, and scheduler review. The central interaction is:
+## All Surfaces
 
-1. Choose provider.
-2. Choose region/datacenter for that provider.
-3. Choose size with exact server type, vCPU, RAM, disk, and price.
-4. Confirm that scheduling/provisioning must honor the selected region rather than silently falling back elsewhere.
+This prototype covers every location where VM/machine selection or display happens in the app. Each tab shows how standardized specs (server type, vCPU, RAM, disk, price) would look in that context.
 
-## Variants Considered
+| Surface | Tab | What it shows |
+| --- | --- | --- |
+| **Project Settings** | Project Settings | Default node size with provider, region, and size cards |
+| **Create Node** | Create Node | Node creation form on the Nodes page with confirmation summary |
+| **Create Workspace** | Create Workspace | Workspace creation form with VM picker inline |
+| **Task Submit** | Task Submit | Advanced options dropdown with specs in the option text |
+| **Node Card** | Node Card | Side-by-side: current vague display vs proposed exact display |
+| **Settings Drawer** | Settings Drawer | Quick settings panel with compact size cards |
 
-1. **Single unified picker with contextual preview**: one provider/region/size control shared across surfaces, with a preview panel changing by selected screen.
-2. **Separate production-like mock screens**: individual project settings, profile, node creation, and scheduler screens.
-3. **Dense comparison matrix**: provider rows and size columns optimized for comparing every option at once.
+## Design Principles
 
-Selected: **single unified picker with contextual preview**. It best demonstrates the reusable component we should eventually wire into each production surface while still showing how the selected data affects project defaults, profiles, provisioning, and scheduling.
+1. Every selection surface uses the same `SizeCard` component showing server type, vCPU, RAM, and price.
+2. Even compact contexts (task submit dropdown, settings drawer) include exact specs.
+3. Read-only displays (node card) show the exact server type instead of vague "Small / Medium / Large" labels.
+4. Provider and region selectors appear alongside size selection where appropriate.
 
 ## Screenshots
 
-![Desktop VM selection prototype](./screenshots/vm-selection-desktop.png)
+![Desktop VM selection prototype](./screenshots/vm-all-surfaces-desktop.png)
 
-![Mobile VM selection prototype](./screenshots/vm-selection-mobile.png)
+![Mobile VM selection prototype](./screenshots/vm-all-surfaces-mobile.png)
 
 ## Validation
 
 | Category | Score | Notes |
 | --- | ---: | --- |
-| Visual hierarchy and scanability | 4 | Primary selection, resolved specs, and contextual preview are distinct. |
-| Interaction clarity | 4 | Provider, region, and VM size choices are explicit; region fallback behavior is called out. |
-| Mobile usability | 4 | 375px viewport has no horizontal overflow and controls stack into a single column. |
-| Accessibility | 4 | Native selects and radio inputs are used; segmented screen switch uses button state. |
-| System consistency | 4 | Uses shared `Card`, `Select`, and `StatusBadge` components plus existing tokens. |
+| Coverage | 5 | All 6 surfaces where VM selection/display occurs |
+| Visual hierarchy | 4 | Consistent size cards with server type, specs, and price |
+| Mobile usability | 4 | 375px viewport, no horizontal overflow, controls stack |
+| System consistency | 4 | Uses shared Card, Select, StatusBadge, and design tokens |
 
 Checked:
 
 - `pnpm --filter @simple-agent-manager/web typecheck`
-- `pnpm --filter @simple-agent-manager/web exec eslint src/App.tsx src/pages/VmSelectionPrototype.tsx`
-- Playwright screenshots at 375x667 and 1280x800
-- Overflow check: `document.documentElement.scrollWidth <= window.innerWidth` for both viewports
+- Playwright screenshots at 375x667 and 1280x800 for all 6 surfaces (12 total)
