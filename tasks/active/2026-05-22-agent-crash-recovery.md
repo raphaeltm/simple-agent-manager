@@ -48,13 +48,13 @@ The desired behavior is to distinguish agent-process crashes from normal prompt 
 
 ## Acceptance Criteria
 
-- [ ] Agent crash mid-session triggers `LoadSession` recovery rather than immediate task failure.
-- [ ] Recovered sessions transition to `awaiting_followup` so the user can decide what to do next.
-- [ ] Crash report message is displayed to clients with agent name, fault attribution, stderr, and vendor-reporting suggestion.
-- [ ] Failed recovery still surfaces crash information before the task fails.
-- [ ] Existing cancel-restart behavior is not regressed.
-- [ ] Rapid exits under 5 seconds still follow the existing rapid-exit error path without recovery.
-- [ ] Recovery attempts still respect `maxRestartAttempts`.
+- [x] Agent crash mid-session triggers `LoadSession` recovery rather than immediate task failure.
+- [x] Recovered sessions transition to `awaiting_followup` so the user can decide what to do next.
+- [x] Crash report message is displayed to clients with agent name, fault attribution, stderr, and vendor-reporting suggestion.
+- [x] Failed recovery still surfaces crash information before the task fails.
+- [x] Existing cancel-restart behavior is not regressed.
+- [x] Rapid exits under 5 seconds still follow the existing rapid-exit error path without recovery.
+- [x] Recovery attempts still respect `maxRestartAttempts`.
 
 ## References
 
