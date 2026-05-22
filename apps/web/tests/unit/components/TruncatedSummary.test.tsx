@@ -142,19 +142,47 @@ describe('TruncatedSummary', () => {
 
   it('renders markdown content in modal instead of plain text', async () => {
     const user = userEvent.setup();
-    const markdownSummary = '## Heading\n\nSome **bold** text and `inline code`.';
+    const markdownSummary = [
+      '## Heading',
+      '',
+      'Some **bold** text and `inline code`.',
+      '',
+      '- List item one',
+      '- List item two',
+      '',
+      '| Col A | Col B |',
+      '|-------|-------|',
+      '| cell1 | cell2 |',
+      '',
+      '[a link](https://example.com)',
+    ].join('\n');
     renderWithTruncation(markdownSummary);
 
     await user.click(screen.getByText('Read more'));
 
-    // Modal should render markdown — heading becomes an h2, bold renders, inline code renders
-    expect(screen.getByRole('heading', { name: 'Heading', level: 2 })).toBeInTheDocument();
-    expect(screen.getByText('bold')).toBeInTheDocument();
-    expect(screen.getByText('inline code')).toBeInTheDocument();
-
     // The rendered-markdown test-id should be present (from RenderedMarkdown component)
     const modal = screen.getByTestId('rendered-markdown');
     expect(modal).toBeInTheDocument();
+
+    // Heading renders as h2
+    expect(screen.getByRole('heading', { name: 'Heading', level: 2 })).toBeInTheDocument();
+
+    // Bold and inline code
+    expect(screen.getByText('bold')).toBeInTheDocument();
+    expect(screen.getByText('inline code')).toBeInTheDocument();
+
+    // List items render as <li>
+    expect(modal.querySelector('li')).toBeInTheDocument();
+    expect(screen.getByText('List item one')).toBeInTheDocument();
+
+    // Table renders
+    expect(modal.querySelector('table')).toBeInTheDocument();
+    expect(screen.getByText('Col A')).toBeInTheDocument();
+    expect(screen.getByText('cell1')).toBeInTheDocument();
+
+    // Link renders as anchor
+    const link = screen.getByRole('link', { name: 'a link' });
+    expect(link).toHaveAttribute('href', 'https://example.com');
   });
 
   describe('taskId prop — global audio integration', () => {
