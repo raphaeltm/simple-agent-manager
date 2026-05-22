@@ -44,7 +44,7 @@ The desired behavior is to distinguish agent-process crashes from normal prompt 
 - [x] After failed crash recovery, fall back to terminal failure while still broadcasting the crash report with stderr.
 - [x] Update `makeTaskCompletionCallback()` to treat the recovery stop reason as `awaiting_followup`.
 - [x] Add focused Go tests for crash error classification, recovery callback behavior, crash report broadcast shape, and no-recovery cases.
-- [ ] Run VM agent Go tests and relevant repo validation.
+- [x] Run VM agent Go tests and relevant repo validation.
 
 ## Acceptance Criteria
 
