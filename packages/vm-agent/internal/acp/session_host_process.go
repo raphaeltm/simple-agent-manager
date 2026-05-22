@@ -58,10 +58,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		h.statusErr = errMsg
 		h.mu.Unlock()
-		if crashRecovery.inProgress {
-			h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, errMsg))
-			h.notifyPromptComplete("error", fmt.Errorf("%s", errMsg))
-		}
+		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg))
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
 		return
 	}
@@ -151,10 +148,7 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	}
 	h.statusErr = crashMsg
 	h.mu.Unlock()
-	if crashRecovery.inProgress {
-		h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, crashMsg))
-		h.notifyPromptComplete("error", fmt.Errorf("%s", crashMsg))
-	}
+	h.finishCrashRecoveryFailure(crashRecovery, crashMsg, fmt.Errorf("%s", crashMsg))
 	h.broadcastAgentStatus(StatusError, agentType, crashMsg)
 	h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
 }
@@ -174,10 +168,7 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		}
 		h.mu.Unlock()
 		slog.Error("Agent restart failed", "error", err)
-		if crashRecovery.inProgress {
-			h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, err.Error()))
-			h.notifyPromptComplete("error", err)
-		}
+		h.finishCrashRecoveryFailure(crashRecovery, err.Error(), err)
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return false
@@ -185,4 +176,12 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 	h.status = HostReady
 	h.statusErr = ""
 	return true
+}
+
+func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnapshot, message string, err error) {
+	if !crashRecovery.inProgress {
+		return
+	}
+	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, message))
+	h.notifyPromptComplete("error", err)
 }

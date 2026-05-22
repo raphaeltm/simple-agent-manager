@@ -6,18 +6,24 @@ interface AgentCrashReportViewProps {
   item: AgentCrashReportItem;
 }
 
+const crashReportTones = {
+  recovered: {
+    containerClass: 'border-amber-300 bg-amber-50 text-amber-950',
+    labelStyle: { backgroundColor: '#fef3c7', borderColor: '#fbbf24', color: '#92400e' },
+    buttonStyle: { backgroundColor: '#fffbeb', borderColor: '#f59e0b', color: '#78350f' },
+    label: 'Recovered',
+  },
+  failed: {
+    containerClass: 'border-red-300 bg-red-50 text-red-950',
+    labelStyle: { backgroundColor: '#fee2e2', borderColor: '#fca5a5', color: '#991b1b' },
+    buttonStyle: { backgroundColor: '#fef2f2', borderColor: '#ef4444', color: '#7f1d1d' },
+    label: 'Recovery failed',
+  },
+} as const;
+
 export const AgentCrashReportView = React.memo(function AgentCrashReportView({ item }: AgentCrashReportViewProps) {
   const [copied, setCopied] = useState(false);
-  const tone = item.recovered ? 'amber' : 'red';
-  const containerClass = tone === 'amber'
-    ? 'border-amber-300 bg-amber-50 text-amber-950'
-    : 'border-red-300 bg-red-50 text-red-950';
-  const labelStyle = tone === 'amber'
-    ? { backgroundColor: '#fef3c7', borderColor: '#fbbf24', color: '#92400e' }
-    : { backgroundColor: '#fee2e2', borderColor: '#fca5a5', color: '#991b1b' };
-  const buttonStyle = tone === 'amber'
-    ? { backgroundColor: '#fffbeb', borderColor: '#f59e0b', color: '#78350f' }
-    : { backgroundColor: '#fef2f2', borderColor: '#ef4444', color: '#7f1d1d' };
+  const tone = item.recovered ? crashReportTones.recovered : crashReportTones.failed;
 
   const copyDebugInfo = async () => {
     const debugInfo = [
@@ -35,16 +41,16 @@ export const AgentCrashReportView = React.memo(function AgentCrashReportView({ i
     <section
       role="status"
       aria-label={`${item.agentType} crash report`}
-      className={`my-3 rounded-lg border px-4 py-3 shadow-sm ${containerClass}`}
+      className={`my-3 rounded-lg border px-4 py-3 shadow-sm ${tone.containerClass}`}
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span
               className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold"
-              style={labelStyle}
+              style={tone.labelStyle}
             >
-              {item.recovered ? 'Recovered' : 'Recovery failed'}
+              {tone.label}
             </span>
             <span className="text-xs font-medium uppercase text-current opacity-70">
               Agent crash
@@ -63,7 +69,7 @@ export const AgentCrashReportView = React.memo(function AgentCrashReportView({ i
           type="button"
           onClick={() => void copyDebugInfo()}
           className="min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:brightness-95"
-          style={buttonStyle}
+          style={tone.buttonStyle}
         >
           {copied ? 'Copied' : 'Copy report'}
         </button>
