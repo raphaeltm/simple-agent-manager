@@ -93,9 +93,9 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
       <Dialog isOpen={isModalOpen} onClose={handleClose} maxWidth="lg">
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary">
+            <h3 id="dialog-title" className="text-lg font-semibold text-fg-primary">
               Task Summary
-            </h2>
+            </h3>
             {showSpeaker && (
               <button
                 type="button"

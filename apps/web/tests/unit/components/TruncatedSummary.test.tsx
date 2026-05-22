@@ -93,7 +93,7 @@ describe('TruncatedSummary', () => {
     await user.click(screen.getByText('Read more'));
 
     // Modal should show title and full text
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
     const summaryElements = screen.getAllByText('Full summary content here');
     expect(summaryElements.length).toBeGreaterThanOrEqual(2); // truncated + modal
 
@@ -106,10 +106,10 @@ describe('TruncatedSummary', () => {
     renderWithTruncation('Summary text for close test');
 
     await user.click(screen.getByText('Read more'));
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
 
     await user.click(screen.getByText('Close'));
-    expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Task Summary', level: 3 })).not.toBeInTheDocument();
   });
 
   it('keeps Close button accessible when modal has long content', async () => {
@@ -120,13 +120,13 @@ describe('TruncatedSummary', () => {
 
     // The modal should show the full content and the Close button should
     // remain interactive even when content is long (scroll fix ensures this)
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
     const closeButton = screen.getByText('Close');
     expect(closeButton).toBeInTheDocument();
 
     // Verify Close button still works (proves it's not hidden behind overflow)
     await user.click(closeButton);
-    expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Task Summary', level: 3 })).not.toBeInTheDocument();
   });
 
   it('closes modal on Escape key', async () => {
@@ -134,10 +134,10 @@ describe('TruncatedSummary', () => {
     renderWithTruncation('Summary text for escape test');
 
     await user.click(screen.getByText('Read more'));
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
-    expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Task Summary', level: 3 })).not.toBeInTheDocument();
   });
 
   it('renders markdown content in modal instead of plain text', async () => {
