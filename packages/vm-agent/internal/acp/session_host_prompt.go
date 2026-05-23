@@ -260,7 +260,8 @@ func (h *SessionHost) finishPromptCancelled(reqID json.RawMessage, info promptSt
 
 func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
-		if agentType, ok := h.beginCrashRecovery(reqID, info.viewerID); ok {
+		agentType, stderr, ok := h.beginCrashRecovery(reqID, info.viewerID)
+		if ok {
 			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)
 			h.reportLifecycle("warn", "ACP agent crashed during prompt; attempting LoadSession recovery", map[string]interface{}{
 				"agentType": agentType,
@@ -271,7 +272,7 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			h.reportActivity("recovering")
 			return
 		}
-		h.finishUnrecoverableCrashPrompt(reqID, info, err)
+		h.finishUnrecoverableCrashPrompt(reqID, info, agentType, stderr, err)
 		return
 	}
 
@@ -292,8 +293,7 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 	h.notifyPromptComplete("error", err)
 }
 
-func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info promptStartInfo, err error) {
-	agentType := h.AgentType()
+func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info promptStartInfo, agentType, stderr string, err error) {
 	if agentType == "" {
 		agentType = "unknown"
 	}
@@ -305,12 +305,16 @@ func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info
 		"duration":  time.Since(info.startedAt).String(),
 		"error":     err.Error(),
 	})
+	// promptReqID gets a defensive copy because crashRecoverySnapshot stores the slice;
+	// marshalJSONRPCError serialises reqID immediately so no copy needed.
 	h.broadcastAgentCrashReport(h.crashReport(crashRecoverySnapshot{
-		stderr:      redactAgentDiagnosticText(h.peekStderr()),
+		stderr:      stderr,
 		agentType:   agentType,
 		promptReqID: append(json.RawMessage(nil), reqID...),
 	}, false, "LoadSession recovery is unavailable for this agent session"))
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, message))
+	h.setStatus(HostError, message)
+	h.broadcastAgentStatus(StatusError, agentType, message)
 	h.notifyPromptComplete("error", fmt.Errorf("%s: %w", message, err))
 }
 

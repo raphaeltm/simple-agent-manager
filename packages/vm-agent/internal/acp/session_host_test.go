@@ -811,7 +811,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 
-	if _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
+	if _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
 		t.Fatal("beginCrashRecovery succeeded without LoadSession support")
 	}
 
@@ -819,7 +819,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
-	agentType, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	agentType, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
 	if !ok {
 		t.Fatal("beginCrashRecovery failed with LoadSession support")
 	}
@@ -950,6 +950,11 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 	}
 	if !foundRPCError {
 		t.Fatal("missing actionable JSON-RPC error")
+	}
+
+	// After an unrecoverable crash the host must be in HostError, not HostReady.
+	if status := host.Status(); status != HostError {
+		t.Fatalf("host.Status() = %s after unrecoverable crash, want %s", status, HostError)
 	}
 }
 

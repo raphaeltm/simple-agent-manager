@@ -63,23 +63,27 @@ func redactAgentDiagnosticText(text string) string {
 	return redacted
 }
 
-func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, bool) {
+// beginCrashRecovery attempts to start LoadSession-based recovery after an agent crash.
+// Returns (agentType, redactedStderr, recoveryStarted). agentType and stderr are returned
+// even when recovery is unavailable so the caller can use them without re-acquiring locks.
+func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, string, bool) {
 	stderr := redactAgentDiagnosticText(h.peekStderr())
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.sessionID == "" || !h.agentSupportsLoadSession || h.agentType == "" {
-		return "", false
+	agentType := h.agentType
+	if h.sessionID == "" || !h.agentSupportsLoadSession || agentType == "" {
+		return agentType, stderr, false
 	}
 
 	h.crashRecoveryInProgress = true
 	h.crashStderr = stderr
-	h.crashAgentType = h.agentType
+	h.crashAgentType = agentType
 	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
 	h.crashPromptViewerID = viewerID
 	h.status = HostStarting
 	h.statusErr = ""
-	return h.agentType, true
+	return agentType, stderr, true
 }
 
 type crashRecoverySnapshot struct {
