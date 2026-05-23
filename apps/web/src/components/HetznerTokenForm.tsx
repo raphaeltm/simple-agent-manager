@@ -26,6 +26,9 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
   const latestToken = useRef(trimmedToken);
   latestToken.current = trimmedToken;
   const isValidated = validatedToken === trimmedToken;
+  let submitLabel = 'Connect';
+  if (credential) submitLabel = 'Update Token';
+  if (loading) submitLabel = 'Testing...';
 
   const handleValidate = async () => {
     if (!trimmedToken) return;
@@ -168,7 +171,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
           {isValidated ? 'Tested' : 'Test connection'}
         </Button>
         <Button type="submit" disabled={loading || validating || !token.trim()} loading={loading}>
-          {loading ? 'Testing...' : credential ? 'Update Token' : 'Connect'}
+          {submitLabel}
         </Button>
         {showForm && (
           <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>

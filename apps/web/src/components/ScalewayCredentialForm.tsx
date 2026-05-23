@@ -21,6 +21,9 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  let submitLabel = 'Connect';
+  if (credential) submitLabel = 'Update Credentials';
+  if (loading) submitLabel = 'Testing...';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,7 +163,7 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
 
       <div className="flex gap-3">
         <Button type="submit" disabled={loading || !secretKey || !projectId} loading={loading}>
-          {loading ? 'Testing...' : credential ? 'Update Credentials' : 'Connect'}
+          {submitLabel}
         </Button>
         {showForm && (
           <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>

@@ -39,7 +39,7 @@ interface UseValidatedCredentialStepOptions<TRequest> {
   onSaved: () => void;
   request: TRequest | null;
   saveErrorMessage: string;
-  saveRequest: (request: TRequest) => Promise<CredentialSaveResult | unknown>;
+  saveRequest: (request: TRequest) => Promise<CredentialSaveResult | CredentialValidationResult>;
   validateErrorMessage: string;
   validateRequest: (request: TRequest) => Promise<CredentialValidationResult>;
 }

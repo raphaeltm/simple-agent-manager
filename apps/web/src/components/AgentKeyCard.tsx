@@ -44,6 +44,9 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   // Find active credential
   const activeCredential = credentials?.find(c => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
+  let saveCredentialLabel = 'Save Credential';
+  if (hasAnyCredential) saveCredentialLabel = 'Update Credential';
+  if (loading) saveCredentialLabel = 'Testing...';
 
   // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider).
   // Project scope does not display provider-derived fallbacks — provider selection is user-scoped,
@@ -272,7 +275,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
 
           <div className="flex gap-2">
             <Button type="submit" disabled={loading || !credential} loading={loading} size="sm">
-              {loading ? 'Testing...' : hasAnyCredential ? 'Update Credential' : 'Save Credential'}
+              {saveCredentialLabel}
             </Button>
             {showForm && (
               <Button type="button" variant="secondary" size="sm" onClick={() => { setShowForm(false); setError(null); setValidationMessage(null); setCredential(''); }}>
