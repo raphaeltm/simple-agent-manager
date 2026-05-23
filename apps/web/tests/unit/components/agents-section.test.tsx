@@ -92,7 +92,7 @@ describe('AgentsSection', () => {
     mocks.listAgents.mockResolvedValue(AGENT_LIST);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
     mocks.getAgentSettings.mockImplementation((agentType: string) =>
-      Promise.resolve(makeSettings(agentType)),
+      Promise.resolve(makeSettings(agentType))
     );
   });
 
@@ -124,14 +124,14 @@ describe('AgentsSection', () => {
       Promise.resolve(
         makeSettings(agentType, {
           permissionMode: agentType === 'google-gemini' ? 'default' : null,
-        }),
-      ),
+        })
+      )
     );
     mocks.saveAgentSettings.mockResolvedValue(
       makeSettings('google-gemini', {
         model: 'gemini-2.5-pro',
         permissionMode: 'default',
-      }),
+      })
     );
 
     render(<AgentsSection />);
@@ -172,18 +172,16 @@ describe('AgentsSection', () => {
       Promise.resolve(
         makeSettings(agentType, {
           permissionMode: agentType === 'claude-code' ? 'plan' : null,
-        }),
-      ),
+        })
+      )
     );
     mocks.saveAgentSettings.mockResolvedValue(
-      makeSettings('claude-code', { permissionMode: 'default' }),
+      makeSettings('claude-code', { permissionMode: 'default' })
     );
 
     render(<AgentsSection />);
     await waitFor(() => {
-      const planRadio = screen.getByTestId(
-        'permission-mode-claude-code-plan',
-      ) as HTMLInputElement;
+      const planRadio = screen.getByTestId('permission-mode-claude-code-plan') as HTMLInputElement;
       expect(planRadio.checked).toBe(true);
     });
 
@@ -192,9 +190,9 @@ describe('AgentsSection', () => {
     // Wait for the save button to become enabled (hasChanges = true) before clicking,
     // since async state updates from loadData() can race with the radio click
     await waitFor(() => {
-      expect(
-        (screen.getByTestId('save-settings-claude-code') as HTMLButtonElement).disabled
-      ).toBe(false);
+      expect((screen.getByTestId('save-settings-claude-code') as HTMLButtonElement).disabled).toBe(
+        false
+      );
     });
 
     fireEvent.click(screen.getByTestId('save-settings-claude-code'));
@@ -214,8 +212,8 @@ describe('AgentsSection', () => {
         makeSettings(agentType, {
           model: 'claude-opus-4-6',
           permissionMode: 'acceptEdits',
-        }),
-      ),
+        })
+      )
     );
     mocks.deleteAgentSettings.mockResolvedValue(undefined);
 
@@ -275,8 +273,10 @@ describe('AgentsSection', () => {
       const card = screen.getByTestId('agent-card-claude-code');
       const removeButton = await waitFor(() => {
         const btn = card.querySelector('button.text-danger') as HTMLButtonElement | null;
-        expect(btn).not.toBeNull();
-        return btn!;
+        if (!btn) {
+          throw new Error('Remove button not found');
+        }
+        return btn;
       });
 
       fireEvent.click(removeButton);
@@ -289,6 +289,68 @@ describe('AgentsSection', () => {
       await waitFor(() => {
         expect(screen.getByText('oauth-****wxyz')).toBeInTheDocument();
         expect(screen.getByText('Pro/Max Subscription')).toBeInTheDocument();
+      });
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  it('deletes only the active OAuth credential and keeps the API key configured', async () => {
+    mocks.listAgentCredentials.mockResolvedValue({
+      credentials: [
+        {
+          id: 'cred-claude',
+          agentType: 'claude-code',
+          credentialKind: 'api-key',
+          maskedKey: 'sk-****abcd',
+          isActive: false,
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
+        {
+          id: 'cred-claude-oauth',
+          agentType: 'claude-code',
+          credentialKind: 'oauth-token',
+          maskedKey: 'oauth-****wxyz',
+          isActive: true,
+          label: 'Pro/Max Subscription',
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
+      ],
+    });
+    mocks.deleteAgentCredentialByKind.mockResolvedValue(undefined);
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    try {
+      render(<AgentsSection />);
+      await waitFor(() => {
+        expect(screen.getByText('oauth-****wxyz')).toBeInTheDocument();
+      });
+
+      const card = screen.getByTestId('agent-card-claude-code');
+      const removeButton = await waitFor(() => {
+        const btn = card.querySelector('button.text-danger') as HTMLButtonElement | null;
+        if (!btn) {
+          throw new Error('Remove button not found');
+        }
+        return btn;
+      });
+
+      fireEvent.click(removeButton);
+
+      await waitFor(() => {
+        expect(mocks.deleteAgentCredentialByKind).toHaveBeenCalledWith(
+          'claude-code',
+          'oauth-token'
+        );
+        expect(mocks.deleteAgentCredential).not.toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('sk-****abcd')).toBeInTheDocument();
+        expect(screen.queryByText('oauth-****wxyz')).not.toBeInTheDocument();
       });
     } finally {
       confirmSpy.mockRestore();

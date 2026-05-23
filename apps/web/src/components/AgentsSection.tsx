@@ -11,6 +11,7 @@ import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
+import { hasAgentCredentials, removeAgentCredentialKind } from '../lib/agent-credentials';
 import {
   deleteAgentCredentialByKind,
   deleteAgentSettings,
@@ -38,10 +39,7 @@ export function AgentsSection() {
   const loadData = useCallback(async () => {
     try {
       setError(null);
-      const [agentResult, credResult] = await Promise.all([
-        listAgents(),
-        listAgentCredentials(),
-      ]);
+      const [agentResult, credResult] = await Promise.all([listAgents(), listAgentCredentials()]);
       setAgents(agentResult.agents);
       setCredentials(credResult.credentials);
 
@@ -77,50 +75,24 @@ export function AgentsSection() {
     const result = await saveAgentCredential(request);
     toast.success('Agent credential saved');
     setCredentials((prev) => {
-      const filtered = prev.filter((c) =>
-        !(c.agentType === request.agentType && c.credentialKind === request.credentialKind)
+      const filtered = prev.filter(
+        (c) => !(c.agentType === request.agentType && c.credentialKind === request.credentialKind)
       );
       return [...filtered, result];
     });
     setAgents((prev) =>
-      prev.map((a) => a.id === request.agentType ? { ...a, configured: true } : a)
+      prev.map((a) => (a.id === request.agentType ? { ...a, configured: true } : a))
     );
   };
 
   const handleDeleteCredential = async (agentType: AgentType, credentialKind: CredentialKind) => {
     await deleteAgentCredentialByKind(agentType, credentialKind);
     toast.success('Agent credential removed');
-    setCredentials((prev) => {
-      const deletedCredential = prev.find((c) =>
-        c.agentType === agentType && c.credentialKind === credentialKind
-      );
-      const next = prev.filter((c) =>
-        !(c.agentType === agentType && c.credentialKind === credentialKind)
-      );
+    const nextCredentials = removeAgentCredentialKind(credentials, agentType, credentialKind);
+    setCredentials(nextCredentials);
 
-      if (!deletedCredential?.isActive) {
-        return next;
-      }
-
-      const agentCredentials = next.filter((c) => c.agentType === agentType);
-      const hasActiveCredential = agentCredentials.some((c) => c.isActive);
-      const fallbackCredential = agentCredentials[0];
-      if (hasActiveCredential || !fallbackCredential) {
-        return next;
-      }
-
-      return next.map((c) =>
-        c === fallbackCredential ? { ...c, isActive: true } : c
-      );
-    });
-
-    const hasRemainingCreds = credentials.some(c =>
-      c.agentType === agentType && c.credentialKind !== credentialKind
-    );
-    if (!hasRemainingCreds) {
-      setAgents((prev) =>
-        prev.map((a) => a.id === agentType ? { ...a, configured: false } : a)
-      );
+    if (!hasAgentCredentials(nextCredentials, agentType)) {
+      setAgents((prev) => prev.map((a) => (a.id === agentType ? { ...a, configured: false } : a)));
     }
   };
 
