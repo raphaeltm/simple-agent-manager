@@ -50,7 +50,7 @@ export interface ProjectAgentCardProps {
   projectCredentials: AgentCredentialInfo[] | null;
   userCredentials: AgentCredentialInfo[];
   defaultValue: { model?: string | null; permissionMode?: AgentPermissionMode | null } | undefined;
-  onSaveCredential: (req: SaveAgentCredentialRequest) => Promise<void>;
+  onSaveCredential: (req: SaveAgentCredentialRequest) => Promise<AgentCredentialInfo>;
   onDeleteCredential: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   onSaveDefault: (
     agentType: AgentType,

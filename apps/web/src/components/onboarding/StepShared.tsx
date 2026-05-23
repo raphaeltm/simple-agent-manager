@@ -25,7 +25,13 @@ interface StepActionsProps {
 }
 
 interface CredentialValidationResult {
+  valid?: boolean;
   message: string;
+  error?: string;
+}
+
+interface CredentialSaveResult {
+  validation?: CredentialValidationResult;
 }
 
 interface UseValidatedCredentialStepOptions<TRequest> {
@@ -33,9 +39,23 @@ interface UseValidatedCredentialStepOptions<TRequest> {
   onSaved: () => void;
   request: TRequest | null;
   saveErrorMessage: string;
-  saveRequest: (request: TRequest) => Promise<unknown>;
+  saveRequest: (request: TRequest) => Promise<CredentialSaveResult | unknown>;
   validateErrorMessage: string;
   validateRequest: (request: TRequest) => Promise<CredentialValidationResult>;
+}
+
+
+function extractCredentialValidation(result: unknown): CredentialValidationResult | null {
+  if (!result || typeof result !== 'object') return null;
+  const maybeValidation = (result as CredentialSaveResult).validation;
+  if (maybeValidation && typeof maybeValidation.message === 'string') {
+    return maybeValidation;
+  }
+  const maybeResult = result as CredentialValidationResult;
+  if (typeof maybeResult.message === 'string') {
+    return maybeResult;
+  }
+  return null;
 }
 
 export function getValidateButtonLabel(
@@ -61,6 +81,7 @@ export function useValidatedCredentialStep<TRequest>({
   const [validating, setValidating] = useState(false);
   const [validatedKey, setValidatedKey] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  const [validationWarning, setValidationWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const latestCredentialKey = useRef<string | null>(null);
   const credentialKey = request ? JSON.stringify(request) : null;
@@ -70,6 +91,7 @@ export function useValidatedCredentialStep<TRequest>({
   const resetValidation = () => {
     setValidatedKey(null);
     setValidationMessage(null);
+    setValidationWarning(null);
   };
 
   const handleValidate = async () => {
@@ -79,6 +101,7 @@ export function useValidatedCredentialStep<TRequest>({
     }
     setValidating(true);
     setValidationMessage(null);
+    setValidationWarning(null);
     setError(null);
     const requestKey = credentialKey;
     try {
@@ -96,15 +119,27 @@ export function useValidatedCredentialStep<TRequest>({
   };
 
   const handleSave = async () => {
-    if (!request) return;
-    if (!isValidated) {
-      await handleValidate();
+    if (!request || !credentialKey) {
+      setError(missingRequestMessage);
       return;
     }
     setSaving(true);
+    setValidationMessage(null);
+    setValidationWarning(null);
     setError(null);
+    const requestKey = credentialKey;
     try {
-      await saveRequest(request);
+      const result = await saveRequest(request);
+      if (latestCredentialKey.current !== requestKey) return;
+      const validation = extractCredentialValidation(result);
+      setValidatedKey(requestKey);
+      if (validation?.valid === false) {
+        setValidationWarning(`Saved, but ${validation.error ?? validation.message}`);
+        return;
+      }
+      if (validation?.message) {
+        setValidationMessage(validation.message);
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : saveErrorMessage);
@@ -123,6 +158,7 @@ export function useValidatedCredentialStep<TRequest>({
     setError,
     validating,
     validationMessage,
+    validationWarning,
   };
 }
 

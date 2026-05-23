@@ -1,3 +1,5 @@
+import type { CredentialValidationStatus } from './types/user';
+
 // =============================================================================
 // Agent Types
 // =============================================================================
@@ -64,6 +66,7 @@ export interface AgentDefinition {
     subscriptionUrl: string;
   };
 }
+
 
 // =============================================================================
 // Agent Catalog
@@ -194,6 +197,7 @@ export interface AgentCredentialInfo {
   credentialKind: CredentialKind;
   isActive: boolean;
   maskedKey: string;
+  validation?: CredentialValidationStatus;
   label?: string; // e.g., "Pro/Max Subscription" for OAuth
   createdAt: string;
   updatedAt: string;

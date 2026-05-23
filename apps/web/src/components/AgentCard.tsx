@@ -18,7 +18,7 @@ export interface AgentCardProps {
   agent: AgentInfo;
   credentials: AgentCredentialInfo[] | null;
   settings: AgentSettingsResponse | null;
-  onSaveCredential: (request: SaveAgentCredentialRequest) => Promise<void>;
+  onSaveCredential: (request: SaveAgentCredentialRequest) => Promise<AgentCredentialInfo>;
   onDeleteCredential: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   onSaveSettings: (agentType: AgentType, data: SaveAgentSettingsRequest) => Promise<void>;
   onResetSettings: (agentType: AgentType) => Promise<void>;

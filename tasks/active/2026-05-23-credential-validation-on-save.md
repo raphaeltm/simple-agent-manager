@@ -17,16 +17,16 @@ Cloud provider credentials and agent API keys can be accepted without a user-vis
 
 ## Implementation Checklist
 
-- [ ] Add typed credential validation result helpers in `apps/api/src/services/validation.ts` for Hetzner, Scaleway, Anthropic, and OpenAI provider checks.
-- [ ] Preserve existing explicit validation endpoints with clear failure responses.
-- [ ] Update cloud-provider save to call live validation before encryption but continue saving with `validation.valid === false` warnings.
-- [ ] Update agent credential save to validate API keys live before encryption but continue saving with warnings; keep OAuth credentials format-only.
-- [ ] Return validation metadata from save responses without exposing credential material.
-- [ ] Update web API types and credential settings/onboarding UI to show saving/test progress, green success, and red warning/error messages.
-- [ ] Make onboarding Connect validate-on-save and not require a separate Test action before saving.
-- [ ] Add unit tests for provider validation helpers with mocked `fetch`.
-- [ ] Add route tests proving validation success and warning-mode failure save responses.
-- [ ] Add/adjust web unit or Playwright coverage for validation feedback surfaces.
+- [x] Add typed credential validation result helpers in `apps/api/src/services/validation.ts` for Hetzner, Scaleway, Anthropic, and OpenAI provider checks.
+- [x] Preserve existing explicit validation endpoints with clear failure responses.
+- [x] Update cloud-provider save to call live validation before encryption but continue saving with `validation.valid === false` warnings.
+- [x] Update agent credential save to validate API keys live before encryption but continue saving with warnings; keep OAuth credentials format-only.
+- [x] Return validation metadata from save responses without exposing credential material.
+- [x] Update web API types and credential settings/onboarding UI to show saving/test progress, green success, and red warning/error messages.
+- [x] Make onboarding Connect validate-on-save and not require a separate Test action before saving.
+- [x] Add unit tests for provider validation helpers with mocked `fetch`.
+- [x] Add route tests proving validation success and warning-mode failure save responses.
+- [x] Add/adjust web unit or Playwright coverage for validation feedback surfaces.
 - [ ] Run required quality gates, specialist review, staging verification, and create a do-not-merge PR.
 
 ## Acceptance Criteria

@@ -67,6 +67,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
     setError,
     validating,
     validationMessage,
+    validationWarning,
   } = useValidatedCredentialStep({
     missingRequestMessage:
       selectedProvider === 'scaleway'
@@ -182,14 +183,20 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
         </div>
       )}
 
+      {validationWarning && (
+        <div className="mb-3">
+          <Alert variant="error">{validationWarning}</Alert>
+        </div>
+      )}
+
       <StepActions
         onSkip={onSkip}
         onValidate={handleValidate}
         onSave={handleSave}
         testDisabled={!isValid || validating || saving}
-        connectDisabled={!isValid || saving || validating || !isValidated}
+        connectDisabled={!isValid || saving || validating}
         testLabel={getValidateButtonLabel(validating, isValidated, 'Test connection')}
-        saveLabel={saving ? 'Saving...' : 'Connect'}
+        saveLabel={saving ? 'Testing...' : 'Connect'}
       />
     </div>
   );

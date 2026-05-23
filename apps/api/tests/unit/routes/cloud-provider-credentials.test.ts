@@ -11,7 +11,7 @@
  *
  * Mocking strategy:
  * - drizzle-orm/d1 is mocked so DB calls are controlled per test
- * - @simple-agent-manager/providers is mocked so validateToken() is controlled
+ * - global fetch is mocked so upstream validation responses are controlled
  * - serializeCredentialToken/buildProviderConfig are exercised through the
  *   route handler (not mocked) so the full path is covered
  * - encrypt is mocked to avoid requiring a real WebCrypto environment
@@ -40,17 +40,6 @@ vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn().mockResolvedValue('decrypted-value'),
 }));
 
-// Mock the providers package so validateToken() is controlled per test
-const mockValidateToken = vi.fn();
-const mockProvider = { validateToken: mockValidateToken };
-vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@simple-agent-manager/providers')>();
-  return {
-    ...original,
-    createProvider: vi.fn(() => mockProvider),
-  };
-});
-
 // ============================================================================
 // Test Setup
 // ============================================================================
@@ -66,7 +55,9 @@ async function expectCredentialValidationFailure(
   body: unknown,
   expectedProvider: string
 ) {
-  mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized'));
+  vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+    new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+  );
 
   const res = await app.request(
     path,
@@ -80,7 +71,7 @@ async function expectCredentialValidationFailure(
 
   expect(res.status).toBe(400);
   const responseBody = await res.json();
-  expect(responseBody.message).toContain(`Invalid or unauthorized ${expectedProvider} credentials`);
+  expect(responseBody.message).toContain(`Token rejected by ${expectedProvider} API (401 Unauthorized)`);
 }
 
 // ============================================================================
@@ -99,7 +90,10 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     mockDB.limit.mockResolvedValue([]);
 
     (drizzle as any).mockReturnValue(mockDB);
-    mockValidateToken.mockResolvedValue(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ servers: [] }), { status: 200 }))
+    );
   });
 
   it('creates a hetzner credential and returns 201', async () => {
@@ -251,23 +245,13 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     expect(body.message).toContain('projectId');
   });
 
-  it('returns 400 (not 500) when validateToken throws (invalid credentials)', async () => {
-    // validateToken() throws when credentials are rejected by the provider API.
-    // The route must translate this into a user-facing 400, not an unhandled 500.
-    await expectCredentialValidationFailure(
-      app,
-      '/api/credentials',
-      { provider: 'hetzner', token: 'bad-token' },
-      'hetzner'
-    );
-  });
-
-  it('calls validateToken before encrypting or storing the credential', async () => {
+  it('saves and returns a validation warning when Hetzner rejects the token', async () => {
     const { encrypt } = await import('../../../src/services/encryption');
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+    );
 
-    mockValidateToken.mockRejectedValueOnce(new Error('Invalid'));
-
-    await app.request(
+    const res = await app.request(
       '/api/credentials',
       {
         method: 'POST',
@@ -277,14 +261,18 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
       mockEnv
     );
 
-    // encrypt must not be called when validation fails — credentials should
-    // never be stored if they are invalid.
-    expect(encrypt).not.toHaveBeenCalled();
-    expect(mockDB.insert).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.validation.valid).toBe(false);
+    expect(body.validation.error).toContain('Token rejected by Hetzner API (401 Unauthorized)');
+    expect(encrypt).toHaveBeenCalled();
+    expect(mockDB.insert).toHaveBeenCalled();
   });
 
-  it('provider name appears in the 400 error message for scaleway validation failure', async () => {
-    mockValidateToken.mockRejectedValueOnce(new Error('Forbidden'));
+  it('saves and returns provider-specific validation warning for Scaleway failure', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'forbidden' }), { status: 403, statusText: 'Forbidden' })
+    );
 
     const res = await app.request(
       '/api/credentials',
@@ -300,9 +288,10 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
       mockEnv
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.message).toContain('scaleway');
+    expect(body.validation.valid).toBe(false);
+    expect(body.validation.error).toContain('Token rejected by Scaleway API (403 Forbidden)');
   });
 });
 
@@ -312,7 +301,10 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
   beforeEach(() => {
     app = createCredentialsTestApp();
     vi.clearAllMocks();
-    mockValidateToken.mockResolvedValue(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ servers: [] }), { status: 200 }))
+    );
   });
 
   it('validates a Hetzner token without encrypting or storing it', async () => {
@@ -332,7 +324,10 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
     const body = await res.json();
     expect(body.valid).toBe(true);
     expect(body.provider).toBe('hetzner');
-    expect(mockValidateToken).toHaveBeenCalledOnce();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.hetzner.cloud/v1/servers',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer htz-api-token' }) })
+    );
     expect(encrypt).not.toHaveBeenCalled();
   });
 
@@ -341,7 +336,7 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
       app,
       '/api/credentials/validate',
       { provider: 'hetzner', token: 'bad-token' },
-      'hetzner'
+      'Hetzner'
     );
   });
 });

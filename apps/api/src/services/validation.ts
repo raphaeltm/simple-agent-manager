@@ -1,6 +1,8 @@
-import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
+import type { AgentType, CredentialKind, CredentialValidationStatus } from '@simple-agent-manager/shared';
+import { DEFAULT_SCALEWAY_ZONE, getAgentDefinition } from '@simple-agent-manager/shared';
 
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+import { fetchWithTimeout } from './fetch-timeout';
 
 const ANTHROPIC_API_KEY_PREFIX = 'sk-ant-api';
 const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
@@ -28,7 +30,8 @@ function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
     const parts = jwt.split('.');
     if (parts.length !== 3) return null;
     // Base64url → Base64 → decode
-    const payload = parts[1]!;
+    const payload = parts[1];
+    if (!payload) return null;
     const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
     const json = atob(base64);
     return JSON.parse(json);
@@ -114,6 +117,145 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
     warnings: warnings.length > 0 ? warnings : undefined,
     metadata: { planType, isExpired },
   };
+}
+
+
+const DEFAULT_CREDENTIAL_VALIDATION_TIMEOUT_MS = 8000;
+
+interface ProviderCheck {
+  displayName: string;
+  request: string | URL;
+  init: RequestInit;
+}
+
+export interface CredentialValidationOptions {
+  timeoutMs?: number;
+}
+
+function statusMessage(status: number, statusText: string): string {
+  return `${status} ${statusText || 'Provider Error'}`;
+}
+
+function providerRejected(displayName: string, response: Response): CredentialValidationStatus {
+  const message = `Token rejected by ${displayName} API (${statusMessage(response.status, response.statusText)})`;
+  return {
+    valid: false,
+    message,
+    error: message,
+    status: response.status,
+    validationMode: 'provider',
+  };
+}
+
+function providerUnavailable(displayName: string, err: unknown): CredentialValidationStatus {
+  const detail = err instanceof Error ? err.message : String(err);
+  const message = `Could not validate with ${displayName} API: ${detail}`;
+  return {
+    valid: false,
+    message,
+    error: message,
+    validationMode: 'provider',
+  };
+}
+
+async function runProviderCheck(
+  check: ProviderCheck,
+  successMessage: string,
+  options: CredentialValidationOptions = {},
+): Promise<CredentialValidationStatus> {
+  try {
+    const response = await fetchWithTimeout(
+      check.request,
+      check.init,
+      options.timeoutMs ?? DEFAULT_CREDENTIAL_VALIDATION_TIMEOUT_MS,
+    );
+
+    if (response.ok) {
+      return { valid: true, message: successMessage, validationMode: 'provider' };
+    }
+
+    return providerRejected(check.displayName, response);
+  } catch (err) {
+    return providerUnavailable(check.displayName, err);
+  }
+}
+
+export function formatOnlyValidation(message: string): CredentialValidationStatus {
+  return { valid: true, message, validationMode: 'format' };
+}
+
+export async function validateHetznerCredentialWithProvider(
+  token: string,
+  options?: CredentialValidationOptions,
+): Promise<CredentialValidationStatus> {
+  return runProviderCheck(
+    {
+      displayName: 'Hetzner',
+      request: 'https://api.hetzner.cloud/v1/servers',
+      init: { headers: { Authorization: `Bearer ${token}` } },
+    },
+    'Hetzner credential validated.',
+    options,
+  );
+}
+
+export async function validateScalewayCredentialWithProvider(
+  secretKey: string,
+  projectId: string,
+  options?: CredentialValidationOptions,
+): Promise<CredentialValidationStatus> {
+  const query = new URLSearchParams({ per_page: '1', project: projectId });
+  return runProviderCheck(
+    {
+      displayName: 'Scaleway',
+      request: `https://api.scaleway.com/instance/v1/zones/${DEFAULT_SCALEWAY_ZONE}/servers?${query.toString()}`,
+      init: { headers: { 'X-Auth-Token': secretKey } },
+    },
+    'Scaleway credential validated.',
+    options,
+  );
+}
+
+export async function validateAgentApiKeyCredentialWithProvider(
+  agentType: AgentType,
+  credential: string,
+  options?: CredentialValidationOptions,
+): Promise<CredentialValidationStatus> {
+  const agentDef = getAgentDefinition(agentType);
+  if (!agentDef) {
+    return { valid: false, message: 'Unknown agent type', error: 'Unknown agent type', validationMode: 'format' };
+  }
+
+  if (agentDef.provider === 'anthropic') {
+    return runProviderCheck(
+      {
+        displayName: 'Anthropic',
+        request: 'https://api.anthropic.com/v1/models',
+        init: {
+          headers: {
+            'x-api-key': credential,
+            'anthropic-version': '2023-06-01',
+          },
+        },
+      },
+      `${agentDef.name} credential validated.`,
+      options,
+    );
+  }
+
+  if (agentDef.provider === 'openai') {
+    return runProviderCheck(
+      {
+        displayName: 'OpenAI',
+        request: 'https://api.openai.com/v1/models',
+        init: { headers: { Authorization: `Bearer ${credential}` } },
+      },
+      `${agentDef.name} credential validated.`,
+      options,
+    );
+  }
+
+  return formatOnlyValidation('Credential format looks valid. Provider reachability validation is not available for this agent.');
 }
 
 /**

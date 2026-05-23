@@ -1,5 +1,4 @@
-import { createProvider } from '@simple-agent-manager/providers';
-import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource, CredentialValidationStatus } from '@simple-agent-manager/shared';
 import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -15,11 +14,11 @@ import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import { CreateCredentialSchema, CredentialKindBodySchema,jsonValidator, SaveAgentCredentialSchema } from '../schemas';
-import { validateAgentApiKeyWithProvider } from '../services/agent-credential-validation';
 import { decrypt, encrypt } from '../services/encryption';
+import { getTimeoutMs } from '../services/fetch-timeout';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
-import { buildProviderConfig, serializeCredentialToken } from '../services/provider-credentials';
-import { CredentialValidator } from '../services/validation';
+import { serializeCredentialToken } from '../services/provider-credentials';
+import { CredentialValidator, formatOnlyValidation, validateAgentApiKeyCredentialWithProvider, validateHetznerCredentialWithProvider, validateScalewayCredentialWithProvider } from '../services/validation';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -79,17 +78,43 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
   throw errors.badRequest(`Unsupported provider: ${providerName}`);
 }
 
-async function validateCloudCredential(providerName: CredentialProvider, tokenToValidate: string): Promise<void> {
-  if (providerName === 'gcp') return;
+const DEFAULT_SAVE_VALIDATION_TIMEOUT_MS = 8000;
 
-  try {
-    const providerConfig = buildProviderConfig(providerName, tokenToValidate);
-    const provider = createProvider(providerConfig);
-    await provider.validateToken();
-  } catch (err) {
-    log.error('credentials.validation_failed', { providerName, error: err instanceof Error ? err.message : String(err) });
-    throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
+function getSaveValidationTimeoutMs(env: Env): number {
+  return getTimeoutMs(env.AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS, DEFAULT_SAVE_VALIDATION_TIMEOUT_MS);
+}
+
+async function validateCloudCredentialRequest(
+  body: CreateCredentialRequest,
+  env: Env,
+): Promise<CredentialValidationStatus> {
+  if (body.provider === 'hetzner') {
+    return validateHetznerCredentialWithProvider(body.token, { timeoutMs: getSaveValidationTimeoutMs(env) });
   }
+
+  if (body.provider === 'scaleway') {
+    return validateScalewayCredentialWithProvider(body.secretKey, body.projectId, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+
+  return formatOnlyValidation('GCP credential metadata accepted. Live validation runs during Google setup.');
+}
+
+function rejectInvalidCredentialValidation(validation: CredentialValidationStatus): void {
+  if (!validation.valid) {
+    throw errors.badRequest(validation.error ?? validation.message);
+  }
+}
+
+function logCredentialValidationWarning(scope: 'cloud' | 'agent', providerName: string, validation: CredentialValidationStatus): void {
+  if (validation.valid) return;
+  log.warn('credentials.validation_warning', {
+    scope,
+    providerName,
+    status: validation.status,
+    error: validation.error ?? validation.message,
+  });
 }
 
 // Apply auth middleware to all routes
@@ -131,15 +156,13 @@ credentialsRoutes.get('/', async (c) => {
  */
 credentialsRoutes.post('/validate', jsonValidator(CreateCredentialSchema), async (c) => {
   const body = c.req.valid('json');
-  const { providerName, tokenToValidate } = getCloudCredentialFields(body);
-  await validateCloudCredential(providerName, tokenToValidate);
+  const { providerName } = getCloudCredentialFields(body);
+  const validation = await validateCloudCredentialRequest(body, c.env);
+  rejectInvalidCredentialValidation(validation);
 
   return c.json({
-    valid: true,
     provider: providerName,
-    message: providerName === 'gcp'
-      ? 'GCP credential metadata accepted. Live validation runs during Google setup.'
-      : `${providerName} credential validated.`,
+    ...validation,
   });
 });
 
@@ -150,8 +173,10 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const { providerName, tokenToValidate: tokenToEncrypt } = getCloudCredentialFields(c.req.valid('json'));
-  await validateCloudCredential(providerName, tokenToEncrypt);
+  const requestBody = c.req.valid('json');
+  const { providerName, tokenToValidate: tokenToEncrypt } = getCloudCredentialFields(requestBody);
+  const validation = await validateCloudCredentialRequest(requestBody, c.env);
+  logCredentialValidationWarning('cloud', providerName, validation);
 
   // Encrypt the serialized credential token
   const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
@@ -187,6 +212,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       provider: providerName,
       connected: true,
       createdAt: existingCred.createdAt,
+      validation,
     };
 
     return c.json(response);
@@ -210,6 +236,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
     provider: providerName,
     connected: true,
     createdAt: now,
+    validation,
   };
 
   return c.json(response, 201);
@@ -278,7 +305,10 @@ credentialsRoutes.post('/agent/validate', jsonValidator(SaveAgentCredentialSchem
     });
   }
 
-  const result = await validateAgentApiKeyWithProvider(body.agentType, body.credential, c.env);
+  const result = await validateAgentApiKeyCredentialWithProvider(body.agentType, body.credential, {
+    timeoutMs: getSaveValidationTimeoutMs(c.env),
+  });
+  rejectInvalidCredentialValidation(result);
   return c.json({ agentType: body.agentType, ...result });
 });
 
@@ -378,6 +408,13 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
     throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
   }
 
+  const providerValidation = credentialKind === 'api-key'
+    ? await validateAgentApiKeyCredentialWithProvider(body.agentType, credential, {
+        timeoutMs: getSaveValidationTimeoutMs(c.env),
+      })
+    : formatOnlyValidation(`${agentDef.name} OAuth credential format looks valid.`);
+  logCredentialValidationWarning('agent', agentDef.provider, providerValidation);
+
   // Encrypt the credential
   const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
 
@@ -450,6 +487,7 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
       credentialKind,
       isActive: autoActivate,
       maskedKey,
+      validation: providerValidation,
       label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
       createdAt: existingCred.createdAt,
       updatedAt: now,
@@ -465,6 +503,7 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
     credentialKind,
     isActive: autoActivate,
     maskedKey,
+    validation: providerValidation,
     label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
     createdAt: now,
     updatedAt: now,

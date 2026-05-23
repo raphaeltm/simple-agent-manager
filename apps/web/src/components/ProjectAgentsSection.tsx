@@ -74,13 +74,18 @@ export function ProjectAgentsSection({
 
   const handleSaveCredential = async (req: SaveAgentCredentialRequest) => {
     const result = await saveProjectAgentCredential(projectId, req);
-    toast.success('Project credential override saved');
+    if (result.validation?.valid === false) {
+      toast.warning('Project credential override saved with a validation warning');
+    } else {
+      toast.success('Project credential override saved');
+    }
     setProjectCreds((prev) => {
       const filtered = prev.filter(
         (c) => !(c.agentType === req.agentType && c.credentialKind === req.credentialKind),
       );
       return [...filtered, result];
     });
+    return result;
   };
 
   const handleDeleteCredential = async (agentType: AgentType, credentialKind: CredentialKind) => {

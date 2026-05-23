@@ -12,6 +12,7 @@ export type {
   CredentialProvider,
   CredentialResponse,
   CredentialSource,
+  CredentialValidationStatus,
   GcpOidcCredential,
   ListPlatformCredentialsResponse,
   PlatformCredential,

@@ -53,7 +53,15 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
     setError(null);
 
     try {
-      await createCredential({ provider: 'hetzner', token });
+      const result = await createCredential({ provider: 'hetzner', token });
+      if (result.validation?.valid === false) {
+        const message = `Saved, but ${result.validation.error ?? result.validation.message}`;
+        setError(message);
+        toast.warning('Hetzner token saved with a validation warning');
+        onUpdate();
+        return;
+      }
+      setValidationMessage(result.validation?.message ?? 'Hetzner credential validated.');
       toast.success('Hetzner token saved');
       setToken('');
       setShowForm(false);
@@ -133,6 +141,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
             setToken(e.target.value);
             setValidatedToken(null);
             setValidationMessage(null);
+            setError(null);
           }}
           placeholder="Enter your Hetzner Cloud API token"
           required
@@ -158,8 +167,8 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
         <Button type="button" variant="secondary" disabled={validating || loading || !token.trim()} loading={validating} onClick={handleValidate}>
           {isValidated ? 'Tested' : 'Test connection'}
         </Button>
-        <Button type="submit" disabled={loading || validating || !token.trim() || !isValidated} loading={loading}>
-          {credential ? 'Update Token' : 'Connect'}
+        <Button type="submit" disabled={loading || validating || !token.trim()} loading={loading}>
+          {loading ? 'Testing...' : credential ? 'Update Token' : 'Connect'}
         </Button>
         {showForm && (
           <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>

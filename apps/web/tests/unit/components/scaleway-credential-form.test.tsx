@@ -13,7 +13,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), addToast: vi.fn() }),
 }));
 
 import { ScalewayCredentialForm } from '../../../src/components/ScalewayCredentialForm';
@@ -72,6 +72,27 @@ describe('ScalewayCredentialForm', () => {
         secretKey: 'my-secret',
         projectId: 'proj-abc',
       });
+    });
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('shows a saved warning when save validation fails', async () => {
+    mocks.createCredential.mockResolvedValue({
+      validation: {
+        valid: false,
+        message: 'Token rejected by Scaleway API (401 Unauthorized)',
+        error: 'Token rejected by Scaleway API (401 Unauthorized)',
+        validationMode: 'provider',
+      },
+    });
+    render(<ScalewayCredentialForm onUpdate={onUpdate} />);
+
+    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'bad-key' } });
+    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj-abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Saved, but Token rejected by Scaleway API (401 Unauthorized)')).toBeInTheDocument();
     });
     expect(onUpdate).toHaveBeenCalled();
   });

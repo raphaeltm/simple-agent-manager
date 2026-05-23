@@ -63,6 +63,15 @@ export interface CredentialResponse {
   provider: CredentialProvider;
   connected: boolean;
   createdAt: string;
+  validation?: CredentialValidationStatus;
+}
+
+export interface CredentialValidationStatus {
+  valid: boolean;
+  message: string;
+  error?: string;
+  status?: number;
+  validationMode: 'format' | 'provider';
 }
 
 /**

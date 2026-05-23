@@ -18,6 +18,7 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
   const [secretKey, setSecretKey] = useState('');
   const [projectId, setProjectId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -25,9 +26,18 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setValidationMessage(null);
 
     try {
-      await createCredential({ provider: 'scaleway', secretKey, projectId });
+      const result = await createCredential({ provider: 'scaleway', secretKey, projectId });
+      if (result.validation?.valid === false) {
+        const message = `Saved, but ${result.validation.error ?? result.validation.message}`;
+        setError(message);
+        toast.warning('Scaleway credentials saved with a validation warning');
+        onUpdate();
+        return;
+      }
+      setValidationMessage(result.validation?.message ?? 'Scaleway credential validated.');
       toast.success('Scaleway credentials saved');
       setSecretKey('');
       setProjectId('');
@@ -105,7 +115,11 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
           id="scaleway-secret-key"
           type="password"
           value={secretKey}
-          onChange={(e) => setSecretKey(e.target.value)}
+          onChange={(e) => {
+            setSecretKey(e.target.value);
+            setValidationMessage(null);
+            setError(null);
+          }}
           placeholder="Enter your Scaleway API secret key"
           required
         />
@@ -119,7 +133,11 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
           id="scaleway-project-id"
           type="text"
           value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
+          onChange={(e) => {
+            setProjectId(e.target.value);
+            setValidationMessage(null);
+            setError(null);
+          }}
           placeholder="Enter your Scaleway project ID"
           required
         />
@@ -137,11 +155,12 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
         </p>
       </div>
 
+      {validationMessage && <Alert variant="success">{validationMessage}</Alert>}
       {error && <Alert variant="error">{error}</Alert>}
 
       <div className="flex gap-3">
         <Button type="submit" disabled={loading || !secretKey || !projectId} loading={loading}>
-          {credential ? 'Update Credentials' : 'Connect'}
+          {loading ? 'Testing...' : credential ? 'Update Credentials' : 'Connect'}
         </Button>
         {showForm && (
           <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>

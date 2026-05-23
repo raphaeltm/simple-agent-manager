@@ -112,7 +112,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
     it('returns 400 when provider validation rejects the API key', async () => {
       vi.mocked(globalThis.fetch).mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: 'bad key' }), { status: 401 })
+        new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
       );
       const claudeApiKey = makeFakeSecret('sk-ant-api03');
 
@@ -132,7 +132,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.message).toContain('Invalid or unauthorized Claude Code credential');
+      expect(body.message).toContain('Token rejected by Anthropic API (401 Unauthorized)');
     });
 
     it('validates OAuth credentials by format only', async () => {
@@ -157,16 +157,16 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    it('validates Google API keys without placing the credential in the URL', async () => {
+    it('validates OpenAI API keys with a Bearer token against the models endpoint', async () => {
       const res = await app.request(
         '/api/credentials/agent/validate',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            agentType: 'google-gemini',
+            agentType: 'openai-codex',
             credentialKind: 'api-key',
-            credential: 'google-api-key-1234567890',
+            credential: 'openai-api-key-1234567890',
           }),
         },
         makeTestEnv()
@@ -174,13 +174,10 @@ describe('Credentials Routes - OAuth Support', () => {
 
       expect(res.status).toBe(200);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://generativelanguage.googleapis.com/v1beta/models',
+        'https://api.openai.com/v1/models',
         expect.objectContaining({
-          headers: expect.objectContaining({ 'x-goog-api-key': 'google-api-key-1234567890' }),
+          headers: expect.objectContaining({ Authorization: 'Bearer openai-api-key-1234567890' }),
         })
-      );
-      expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).not.toContain(
-        'google-api-key-1234567890'
       );
     });
   });
@@ -298,6 +295,31 @@ describe('Credentials Routes - OAuth Support', () => {
       );
 
       expect(res.status).toBe(201);
+    });
+
+    it('saves an API key and returns a warning when provider validation rejects it', async () => {
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+      );
+
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentType: 'claude-code',
+            credentialKind: 'api-key',
+            credential: 'sk-ant-api03-1234567890abcdef',
+          }),
+        },
+        makeTestEnv()
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.validation.valid).toBe(false);
+      expect(body.validation.error).toContain('Token rejected by Anthropic API (401 Unauthorized)');
     });
 
     it('should accept an Amp API key from the shared agent catalog', async () => {

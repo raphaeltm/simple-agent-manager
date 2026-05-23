@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { CredentialValidator, validateOpenAICodexAuthJson } from '../../../src/services/validation';
+import { CredentialValidator, validateAgentApiKeyCredentialWithProvider, validateHetznerCredentialWithProvider, validateOpenAICodexAuthJson, validateScalewayCredentialWithProvider } from '../../../src/services/validation';
 
 describe('CredentialValidator', () => {
   describe('detectCredentialKind', () => {
@@ -274,5 +274,84 @@ describe('validateOpenAICodexAuthJson', () => {
     const result = validateOpenAICodexAuthJson(json);
     expect(result.valid).toBe(false);
     expect(result.error).toContain('access_token');
+  });
+});
+
+
+describe('provider credential validation helpers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('validates Hetzner credentials against the servers endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+
+    const result = await validateHetznerCredentialWithProvider('hetzner-token', { timeoutMs: 1000 });
+
+    expect(result.valid).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.hetzner.cloud/v1/servers',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer hetzner-token' }),
+      })
+    );
+  });
+
+  it('returns a clear Hetzner rejection for 401 responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('{}', { status: 401, statusText: 'Unauthorized' }))
+    );
+
+    const result = await validateHetznerCredentialWithProvider('bad-token', { timeoutMs: 1000 });
+
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('Token rejected by Hetzner API (401 Unauthorized)');
+    expect(result.status).toBe(401);
+  });
+
+  it('validates Scaleway credentials against a project-scoped servers endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+
+    const result = await validateScalewayCredentialWithProvider('scw-secret', 'project-id', { timeoutMs: 1000 });
+
+    expect(result.valid).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.scaleway.com/instance/v1/zones/fr-par-1/servers?per_page=1&project=project-id',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Auth-Token': 'scw-secret' }),
+      })
+    );
+  });
+
+  it('validates Anthropic agent API keys with x-api-key', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+
+    const result = await validateAgentApiKeyCredentialWithProvider('claude-code', 'sk-ant-api03-valid', { timeoutMs: 1000 });
+
+    expect(result.valid).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.anthropic.com/v1/models',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-api-key': 'sk-ant-api03-valid',
+          'anthropic-version': '2023-06-01',
+        }),
+      })
+    );
+  });
+
+  it('validates OpenAI agent API keys with bearer auth', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+
+    const result = await validateAgentApiKeyCredentialWithProvider('openai-codex', 'openai-key', { timeoutMs: 1000 });
+
+    expect(result.valid).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/models',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer openai-key' }),
+      })
+    );
   });
 });

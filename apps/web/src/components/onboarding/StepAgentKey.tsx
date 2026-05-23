@@ -39,6 +39,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
     setError,
     validating,
     validationMessage,
+    validationWarning,
   } = useValidatedCredentialStep({
     missingRequestMessage: 'Select an agent and enter an API key',
     onSaved: onComplete,
@@ -127,14 +128,20 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
         </div>
       )}
 
+      {validationWarning && (
+        <div className="mb-3">
+          <Alert variant="error">{validationWarning}</Alert>
+        </div>
+      )}
+
       <StepActions
         onSkip={onSkip}
         onValidate={handleValidate}
         onSave={handleSave}
         testDisabled={!selectedAgent || !apiKey.trim() || validating || saving}
-        connectDisabled={!selectedAgent || !apiKey.trim() || saving || validating || !isValidated}
+        connectDisabled={!selectedAgent || !apiKey.trim() || saving || validating}
         testLabel={getValidateButtonLabel(validating, isValidated, 'Test key')}
-        saveLabel={saving ? 'Saving...' : 'Connect'}
+        saveLabel={saving ? 'Testing...' : 'Connect'}
       />
     </div>
   );

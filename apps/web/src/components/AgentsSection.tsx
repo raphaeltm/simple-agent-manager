@@ -73,7 +73,11 @@ export function AgentsSection() {
 
   const handleSaveCredential = async (request: SaveAgentCredentialRequest) => {
     const result = await saveAgentCredential(request);
-    toast.success('Agent credential saved');
+    if (result.validation?.valid === false) {
+      toast.warning('Agent credential saved with a validation warning');
+    } else {
+      toast.success('Agent credential saved');
+    }
     setCredentials((prev) => {
       const filtered = prev.filter(
         (c) => !(c.agentType === request.agentType && c.credentialKind === request.credentialKind)
@@ -83,6 +87,7 @@ export function AgentsSection() {
     setAgents((prev) =>
       prev.map((a) => (a.id === request.agentType ? { ...a, configured: true } : a))
     );
+    return result;
   };
 
   const handleDeleteCredential = async (agentType: AgentType, credentialKind: CredentialKind) => {
