@@ -27,7 +27,7 @@ Cloud provider credentials and agent API keys can be accepted without a user-vis
 - [x] Add unit tests for provider validation helpers with mocked `fetch`.
 - [x] Add route tests proving validation success and warning-mode failure save responses.
 - [x] Add/adjust web unit or Playwright coverage for validation feedback surfaces.
-- [ ] Run required quality gates, specialist review, staging verification, and create a do-not-merge PR.
+- [x] Run required quality gates, specialist review, staging verification, and create a do-not-merge PR.
 
 ## Acceptance Criteria
 
@@ -44,3 +44,10 @@ Cloud provider credentials and agent API keys can be accepted without a user-vis
 - Do not merge. Leave a PR ready for human review.
 - Coordinate before staging deploy and do not deploy concurrently with another active staging run.
 - Do not touch unrelated dirty `.codex/` workspace files.
+
+## Verification Evidence
+
+- Full quality suite passed: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- Playwright visual audit passed on mobile 375x667 and desktop 1280x800.
+- Deploy Staging workflow passed for branch `sam/add-credential-validation-entry-01ksa6`: https://github.com/raphaeltm/simple-agent-manager/actions/runs/26331230963
+- Live staging Playwright/API verification passed: dashboard, projects, cloud provider settings, and agent key settings loaded with zero console errors; saving a temporary invalid OpenAI Codex API key returned `201` with `validation.valid=false`, provider status `401`, and warning-mode persistence; the temporary credential was deleted; explicit validation returned `400`.
