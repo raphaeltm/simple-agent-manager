@@ -24,7 +24,7 @@ The current branch already contains the prior by-kind call from an archived task
 - [x] Add focused unit coverage for an agent with both `api-key` and `oauth-token`, deleting one kind and verifying the other remains.
 - [x] Add behavioral component coverage for the rendered delete interaction and assert only the targeted credential is removed.
 - [x] Run focused tests for `AgentsSection` and the new state helper.
-- [ ] Run the required validation suite for affected web changes.
+- [x] Run the required validation suite for affected web changes.
 
 ## Acceptance Criteria
 
