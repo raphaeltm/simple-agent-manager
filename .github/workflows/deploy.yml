@@ -26,6 +26,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate only on the GitHub Actions CI workflow result. SonarCloud is a
+  # separate GitHub App check and must not suppress production deploys.
   deploy:
     if: >-
       github.event_name == 'workflow_dispatch' ||

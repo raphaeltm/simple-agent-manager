@@ -15,7 +15,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep main CI runs alive so every successful main merge can trigger production deploy.
+  # Pull request runs still cancel superseded commits for faster feedback.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:

@@ -24,11 +24,11 @@ The PR must not be merged automatically. It should be left ready for human revie
 
 ## Implementation Checklist
 
-- [ ] Preserve the do-not-merge constraint in state, task tracking, and PR wording.
-- [ ] Update deploy workflow behavior or documentation so production deploy coupling is explicitly to GitHub Actions CI only, not the separate SonarCloud GitHub App check.
-- [ ] Refactor `packages/shared/src/constants/ai-services.ts` to remove repeated model metadata blocks without changing exported model values.
-- [ ] Re-query or locally inspect Sonar duplication after the refactor; address the next offender if the margin is still too narrow.
-- [ ] Inspect Sonar reliability/security-rating issue evidence and fix any small, clear correctness issue found.
+- [x] Preserve the do-not-merge constraint in state, task tracking, and PR wording.
+- [x] Update deploy workflow behavior or documentation so production deploy coupling is explicitly to GitHub Actions CI only, not the separate SonarCloud GitHub App check.
+- [x] Refactor `packages/shared/src/constants/ai-services.ts` to remove repeated model metadata blocks without changing exported model values.
+- [x] Re-query or locally inspect Sonar duplication after the refactor; address the next offender if the margin is still too narrow.
+- [x] Inspect Sonar reliability/security-rating issue evidence and fix any small, clear correctness issue found.
 - [ ] Run relevant unit/type/lint/build validation.
 - [ ] Run required specialist review skills for config/business-logic/test changes.
 - [ ] Check active staging deploy runs, deploy the branch to staging, and verify the workflow/config change.

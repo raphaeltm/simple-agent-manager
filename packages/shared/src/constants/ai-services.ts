@@ -177,6 +177,41 @@ export interface PlatformAIModel {
   unifiedApiModelId: string | null;
 }
 
+const ALL_AGENT_SCOPES: ModelAllowedScope[] = ['workspace', 'project', 'top-level'];
+const WORKSPACE_PROJECT_SCOPES: ModelAllowedScope[] = ['workspace', 'project'];
+const WORKSPACE_ONLY_SCOPES: ModelAllowedScope[] = ['workspace'];
+
+type ModelDefinition = Omit<PlatformAIModel, 'provider' | 'allowedScopes' | 'unifiedApiModelId'> & {
+  allowedScopes?: ModelAllowedScope[];
+};
+
+function workersAIModel(input: ModelDefinition): PlatformAIModel {
+  return {
+    ...input,
+    provider: 'workers-ai',
+    allowedScopes: input.allowedScopes ?? WORKSPACE_ONLY_SCOPES,
+    unifiedApiModelId: null,
+  };
+}
+
+function anthropicModel(input: ModelDefinition): PlatformAIModel {
+  return {
+    ...input,
+    provider: 'anthropic',
+    allowedScopes: input.allowedScopes ?? ALL_AGENT_SCOPES,
+    unifiedApiModelId: 'anthropic/' + input.id,
+  };
+}
+
+function openAIModel(input: ModelDefinition): PlatformAIModel {
+  return {
+    ...input,
+    provider: 'openai',
+    allowedScopes: input.allowedScopes ?? WORKSPACE_PROJECT_SCOPES,
+    unifiedApiModelId: 'openai/' + input.id,
+  };
+}
+
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
@@ -184,11 +219,10 @@ export interface PlatformAIModel {
  * models routed through Cloudflare AI Gateway with Unified Billing. */
 export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   // --- Workers AI (Cloudflare-billed low-cost tier) ---
-  {
+  workersAIModel({
     id: '@cf/meta/llama-4-scout-17b-16e-instruct',
     label: 'Llama 4 Scout 17B',
     isDefault: true,
-    provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.00027,
     costPer1kOutputTokens: 0.00085,
@@ -196,13 +230,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'limited',
     intendedRole: 'utility',
     fallbackGroup: 'workers-general',
-    allowedScopes: ['workspace'],
-    unifiedApiModelId: null,
-  },
-  {
+  }),
+  workersAIModel({
     id: '@cf/qwen/qwen3-30b-a3b-fp8',
     label: 'Qwen 3 30B',
-    provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.000051,
     costPer1kOutputTokens: 0.000335,
@@ -210,13 +241,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
-    allowedScopes: ['workspace'],
-    unifiedApiModelId: null,
-  },
-  {
+  }),
+  workersAIModel({
     id: '@cf/qwen/qwen2.5-coder-32b-instruct',
     label: 'Qwen 2.5 Coder 32B',
-    provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.00066,
     costPer1kOutputTokens: 0.001,
@@ -224,13 +252,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
-    allowedScopes: ['workspace'],
-    unifiedApiModelId: null,
-  },
-  {
+  }),
+  workersAIModel({
     id: '@cf/google/gemma-4-26b-a4b-it',
     label: 'Gemma 4 26B',
-    provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.0001,
     costPer1kOutputTokens: 0.0003,
@@ -238,13 +263,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
-    allowedScopes: ['workspace'],
-    unifiedApiModelId: null,
-  },
-  {
+  }),
+  workersAIModel({
     id: '@cf/google/gemma-3-12b-it',
     label: 'Gemma 3 12B',
-    provider: 'workers-ai',
     tier: 'low-cost',
     costPer1kInputTokens: 0.00035,
     costPer1kOutputTokens: 0.00056,
@@ -252,14 +274,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'none',
     intendedRole: 'utility',
     fallbackGroup: 'workers-utility',
-    allowedScopes: ['workspace'],
-    unifiedApiModelId: null,
-  },
+  }),
   // --- Anthropic (via AI Gateway) ---
-  {
+  anthropicModel({
     id: 'claude-haiku-4-5-20251001',
     label: 'Claude Haiku 4.5',
-    provider: 'anthropic',
     tier: 'standard',
     costPer1kInputTokens: 0.001,
     costPer1kOutputTokens: 0.005,
@@ -267,13 +286,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'utility',
     fallbackGroup: 'anthropic-fast',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-haiku-4-5-20251001',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-sonnet-4-20250514',
     label: 'Claude Sonnet 4',
-    provider: 'anthropic',
     tier: 'standard',
     costPer1kInputTokens: 0.003,
     costPer1kOutputTokens: 0.015,
@@ -281,13 +297,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'anthropic-standard',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-sonnet-4-20250514',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-sonnet-4-5-20250929',
     label: 'Claude Sonnet 4.5',
-    provider: 'anthropic',
     tier: 'standard',
     costPer1kInputTokens: 0.003,
     costPer1kOutputTokens: 0.015,
@@ -295,13 +308,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'anthropic-standard',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-sonnet-4-5-20250929',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-sonnet-4-6',
     label: 'Claude Sonnet 4.6',
-    provider: 'anthropic',
     tier: 'standard',
     costPer1kInputTokens: 0.003,
     costPer1kOutputTokens: 0.015,
@@ -309,13 +319,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'any',
     fallbackGroup: 'anthropic-standard',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-sonnet-4-6',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-opus-4-6',
     label: 'Claude Opus 4.6',
-    provider: 'anthropic',
     tier: 'premium',
     costPer1kInputTokens: 0.005,
     costPer1kOutputTokens: 0.025,
@@ -323,13 +330,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'sam-agent',
     fallbackGroup: 'anthropic-premium',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-opus-4-6',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-opus-4-7',
     label: 'Claude Opus 4.7',
-    provider: 'anthropic',
     tier: 'premium',
     costPer1kInputTokens: 0.005,
     costPer1kOutputTokens: 0.025,
@@ -337,13 +341,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'sam-agent',
     fallbackGroup: 'anthropic-premium',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-opus-4-7',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-opus-4-5-20251101',
     label: 'Claude Opus 4.5',
-    provider: 'anthropic',
     tier: 'premium',
     costPer1kInputTokens: 0.005,
     costPer1kOutputTokens: 0.025,
@@ -351,13 +352,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'anthropic-premium',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-opus-4-5-20251101',
-  },
-  {
+  }),
+  anthropicModel({
     id: 'claude-opus-4-1-20250805',
     label: 'Claude Opus 4.1',
-    provider: 'anthropic',
     tier: 'premium',
     costPer1kInputTokens: 0.015,
     costPer1kOutputTokens: 0.075,
@@ -365,15 +363,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'anthropic-premium',
-    allowedScopes: ['workspace', 'project', 'top-level'],
-    unifiedApiModelId: 'anthropic/claude-opus-4-1-20250805',
-  },
+  }),
   // --- OpenAI (via AI Gateway) ---
   // GPT-5.5 series (current flagship)
-  {
+  openAIModel({
     id: 'gpt-5.5-pro',
     label: 'GPT-5.5 Pro',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.03,
     costPer1kOutputTokens: 0.18,
@@ -381,13 +376,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.5-pro',
-  },
-  {
+  }),
+  openAIModel({
     id: 'gpt-5.5',
     label: 'GPT-5.5',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.005,
     costPer1kOutputTokens: 0.03,
@@ -395,14 +387,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.5',
-  },
+  }),
   // GPT-5.4 series (current)
-  {
+  openAIModel({
     id: 'gpt-5.4-pro',
     label: 'GPT-5.4 Pro',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.03,
     costPer1kOutputTokens: 0.18,
@@ -410,13 +399,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.4-pro',
-  },
-  {
+  }),
+  openAIModel({
     id: 'gpt-5.4',
     label: 'GPT-5.4',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.0025,
     costPer1kOutputTokens: 0.015,
@@ -424,13 +410,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.4',
-  },
-  {
+  }),
+  openAIModel({
     id: 'gpt-5.4-mini',
     label: 'GPT-5.4 Mini',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.00075,
     costPer1kOutputTokens: 0.0045,
@@ -438,13 +421,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-standard',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.4-mini',
-  },
-  {
+  }),
+  openAIModel({
     id: 'gpt-5.4-nano',
     label: 'GPT-5.4 Nano',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.0002,
     costPer1kOutputTokens: 0.00125,
@@ -452,14 +432,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'utility',
     fallbackGroup: 'openai-fast',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.4-nano',
-  },
+  }),
   // GPT-5.3 Codex (current coding model)
-  {
+  openAIModel({
     id: 'gpt-5.3-codex',
     label: 'GPT-5.3 Codex',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.00175,
     costPer1kOutputTokens: 0.014,
@@ -467,14 +444,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.3-codex',
-  },
+  }),
   // GPT-5.2 Codex (deprecating Aug 10, 2026)
-  {
+  openAIModel({
     id: 'gpt-5.2-codex',
     label: 'GPT-5.2 Codex',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.00175,
     costPer1kOutputTokens: 0.014,
@@ -482,14 +456,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.2-codex',
-  },
+  }),
   // GPT-5.1 Codex series (deprecating Jul 23, 2026)
-  {
+  openAIModel({
     id: 'gpt-5.1-codex-max',
     label: 'GPT-5.1 Codex Max',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.00175,
     costPer1kOutputTokens: 0.014,
@@ -497,13 +468,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.1-codex-max',
-  },
-  {
+  }),
+  openAIModel({
     id: 'gpt-5.1-codex-mini',
     label: 'GPT-5.1 Codex Mini',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.00075,
     costPer1kOutputTokens: 0.0045,
@@ -511,14 +479,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-standard',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5.1-codex-mini',
-  },
+  }),
   // GPT-5 Mini (deprecating Aug 10, 2026)
-  {
+  openAIModel({
     id: 'gpt-5-mini',
     label: 'GPT-5 Mini',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.00025,
     costPer1kOutputTokens: 0.002,
@@ -526,14 +491,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-standard',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-5-mini',
-  },
+  }),
   // Reasoning models (deprecating Oct 23, 2026)
-  {
+  openAIModel({
     id: 'o4-mini',
     label: 'O4 Mini',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.00055,
     costPer1kOutputTokens: 0.0022,
@@ -541,13 +503,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-standard',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/o4-mini',
-  },
-  {
+  }),
+  openAIModel({
     id: 'o3',
     label: 'O3',
-    provider: 'openai',
     tier: 'premium',
     costPer1kInputTokens: 0.002,
     costPer1kOutputTokens: 0.008,
@@ -555,14 +514,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/o3',
-  },
+  }),
   // GPT-4.1 (legacy, still available)
-  {
+  openAIModel({
     id: 'gpt-4.1',
     label: 'GPT-4.1',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.002,
     costPer1kOutputTokens: 0.008,
@@ -570,13 +526,10 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-standard',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-4.1',
-  },
-  {
+  }),
+  openAIModel({
     id: 'gpt-4.1-mini',
     label: 'GPT-4.1 Mini',
-    provider: 'openai',
     tier: 'standard',
     costPer1kInputTokens: 0.0004,
     costPer1kOutputTokens: 0.0016,
@@ -584,9 +537,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'excellent',
     intendedRole: 'utility',
     fallbackGroup: 'openai-fast',
-    allowedScopes: ['workspace', 'project'],
-    unifiedApiModelId: 'openai/gpt-4.1-mini',
-  },
+  }),
 ];
 
 /** KV key for the admin-configured default model. Stored by the admin AI proxy config endpoint. */
