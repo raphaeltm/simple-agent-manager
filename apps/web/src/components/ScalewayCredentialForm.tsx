@@ -1,5 +1,5 @@
 import type { CredentialResponse } from '@simple-agent-manager/shared';
-import { Alert,Button, Input } from '@simple-agent-manager/ui';
+import { Alert, Button, Input } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
 import { useToast } from '../hooks/useToast';

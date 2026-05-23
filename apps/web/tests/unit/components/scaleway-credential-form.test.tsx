@@ -76,6 +76,26 @@ describe('ScalewayCredentialForm', () => {
     expect(onUpdate).toHaveBeenCalled();
   });
 
+  it('shows validation success when save validation passes', async () => {
+    mocks.createCredential.mockResolvedValue({
+      validation: {
+        valid: true,
+        message: 'Scaleway credential validated.',
+        validationMode: 'provider',
+      },
+    });
+    render(<ScalewayCredentialForm onUpdate={onUpdate} />);
+
+    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'good-key' } });
+    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj-abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Scaleway credential validated.')).toBeInTheDocument();
+    });
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
   it('shows a saved warning when save validation fails', async () => {
     mocks.createCredential.mockResolvedValue({
       validation: {
