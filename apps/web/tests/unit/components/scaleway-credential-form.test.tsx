@@ -25,6 +25,18 @@ const credential = {
   createdAt: '2026-03-13T00:00:00.000Z',
 };
 
+function submitScalewayForm(secretKey = 'my-secret', projectId = 'proj-abc') {
+  fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: secretKey } });
+  fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: projectId } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+}
+
+async function expectAlertText(text: string) {
+  await waitFor(() => {
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
+}
+
 describe('ScalewayCredentialForm', () => {
   const onUpdate = vi.fn();
 
@@ -62,9 +74,7 @@ describe('ScalewayCredentialForm', () => {
   it('calls createCredential with correct payload on submit', async () => {
     render(<ScalewayCredentialForm onUpdate={onUpdate} />);
 
-    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'my-secret' } });
-    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj-abc' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    submitScalewayForm();
 
     await waitFor(() => {
       expect(mocks.createCredential).toHaveBeenCalledWith({
@@ -86,13 +96,9 @@ describe('ScalewayCredentialForm', () => {
     });
     render(<ScalewayCredentialForm onUpdate={onUpdate} />);
 
-    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'good-key' } });
-    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj-abc' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    submitScalewayForm('good-key');
 
-    await waitFor(() => {
-      expect(screen.getByText('Scaleway credential validated.')).toBeInTheDocument();
-    });
+    await expectAlertText('Scaleway credential validated.');
     expect(onUpdate).toHaveBeenCalled();
   });
 
@@ -107,13 +113,9 @@ describe('ScalewayCredentialForm', () => {
     });
     render(<ScalewayCredentialForm onUpdate={onUpdate} />);
 
-    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'bad-key' } });
-    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj-abc' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    submitScalewayForm('bad-key');
 
-    await waitFor(() => {
-      expect(screen.getByText('Saved, but Token rejected by Scaleway API (401 Unauthorized)')).toBeInTheDocument();
-    });
+    await expectAlertText('Saved, but Token rejected by Scaleway API (401 Unauthorized)');
     expect(onUpdate).toHaveBeenCalled();
   });
 
@@ -121,13 +123,9 @@ describe('ScalewayCredentialForm', () => {
     mocks.createCredential.mockRejectedValue(new Error('Invalid key'));
     render(<ScalewayCredentialForm onUpdate={onUpdate} />);
 
-    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'bad' } });
-    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    submitScalewayForm('bad', 'proj');
 
-    await waitFor(() => {
-      expect(screen.getByText('Invalid key')).toBeInTheDocument();
-    });
+    await expectAlertText('Invalid key');
     expect(onUpdate).not.toHaveBeenCalled();
   });
 
