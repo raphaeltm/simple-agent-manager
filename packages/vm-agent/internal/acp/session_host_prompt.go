@@ -271,6 +271,8 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			h.reportActivity("recovering")
 			return
 		}
+		h.finishUnrecoverableCrashPrompt(reqID, info, err)
+		return
 	}
 
 	errMsg := fmt.Sprintf("Prompt failed: %v", err)
@@ -288,6 +290,28 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 	})
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
 	h.notifyPromptComplete("error", err)
+}
+
+func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info promptStartInfo, err error) {
+	agentType := h.AgentType()
+	if agentType == "" {
+		agentType = "unknown"
+	}
+	message := "Agent process disconnected during prompt and cannot be recovered automatically"
+	slog.Warn("ACP Prompt failed because agent disconnected and recovery is unavailable",
+		"error", err, "agentType", agentType)
+	h.reportLifecycle("warn", "ACP agent disconnected during prompt without LoadSession recovery", map[string]interface{}{
+		"agentType": agentType,
+		"duration":  time.Since(info.startedAt).String(),
+		"error":     err.Error(),
+	})
+	h.broadcastAgentCrashReport(h.crashReport(crashRecoverySnapshot{
+		stderr:      redactAgentDiagnosticText(h.peekStderr()),
+		agentType:   agentType,
+		promptReqID: append(json.RawMessage(nil), reqID...),
+	}, false, "LoadSession recovery is unavailable for this agent session"))
+	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, message))
+	h.notifyPromptComplete("error", fmt.Errorf("%s: %w", message, err))
 }
 
 func (h *SessionHost) broadcastPromptResponse(reqID json.RawMessage, resp acpsdk.PromptResponse) {

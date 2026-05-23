@@ -27,15 +27,25 @@ The failure originates in the ACP layer when the agent process disconnects befor
 - Compare observed failure mode against the recently merged crash recovery path via `LoadSession`.
 - Check for stale workspace or container state that may still run pre-crash-recovery behavior.
 
+## Research Findings
+
+- Production D1 (`sam-prod`) contains 24 tasks with the exact `peer disconnected before response` error between 2026-05-15 and 2026-05-22. The latest observed failure updated at 2026-05-22T07:09:41.503Z.
+- The LoadSession crash-recovery feature merged in commit `34fe25e4` at 2026-05-22T12:12:36Z, about five hours after the latest observed production failure. Current main therefore has a recovery path the observed failures did not have.
+- Pattern by task mode: 18 task-mode failures with no profile hint, 5 conversation-mode failures with no profile hint, and 1 conversation-mode failure using profile `01KS4XBW9QPMMBXP8EWH8EHBY2` (`AMP Tester`, `openai-codex`).
+- Pattern by node: failures cluster on deleted nodes, especially `01KS4SVNP7EDWB3842HQRQKEB8` (4) and `01KRRZP2JBQAPJ2G6SWCT52Y3V` (3). All recent affected nodes queried are now `deleted`, so normal debug-package download is no longer available. A current-node debug package attempt through the API using the available MCP token returned 401; localhost VM-agent debug endpoint was not reachable from the workspace.
+- The current workspace is not stale: production D1 shows workspace `01KSA6ZMP1ECGPJ7R4JE4HA63D` running on healthy node `01KSA6W131DKG0X0FS7TE0423B`, linked to this task `01KSA6VYJJDGECCCX8H6NPGGG5`, with no task error.
+- Code path: `SessionHost.finishPromptWithError` classifies `peer disconnected` as a crash prompt error via `isCrashPromptError`. If `agentSupportsLoadSession` is true and an ACP session ID is available, it calls `beginCrashRecovery`, waits for `monitorProcessExit`, restarts the agent, calls ACP `LoadSession`, then notifies prompt completion with stop reason `recovered`. The VM-agent task callback maps `recovered` to `executionStep=awaiting_followup` instead of `toStatus=failed`.
+- Gap found: if the crash is not recoverable because LoadSession is unavailable, the existing code fell through to generic prompt failure and surfaced the raw JSON-RPC error blob. That is still a terminal failure, but it is not actionable and gives no crash report context.
+
 ## Implementation Checklist
 
-- [ ] Gather production evidence for recent `peer disconnected before response` failures.
-- [ ] Download and inspect at least one relevant debug package when accessible.
-- [ ] Identify exact ACP code path that creates or propagates the error.
-- [ ] Determine whether the process exit/disconnect path triggers crash recovery or direct failure.
-- [ ] Implement targeted hardening for uncovered peer disconnect cases.
-- [ ] Add focused Go tests covering the failure and recovery behavior.
-- [ ] Run VM agent tests and broader project checks appropriate to touched files.
+- [x] Gather production evidence for recent `peer disconnected before response` failures.
+- [x] Download and inspect at least one relevant debug package when accessible.
+- [x] Identify exact ACP code path that creates or propagates the error.
+- [x] Determine whether the process exit/disconnect path triggers crash recovery or direct failure.
+- [x] Implement targeted hardening for uncovered peer disconnect cases.
+- [x] Add focused Go tests covering the failure and recovery behavior.
+- [x] Run VM agent tests and broader project checks appropriate to touched files.
 - [ ] Run required specialist review for Go/VM agent changes.
 - [ ] Deploy to staging only after checking active staging deployments.
 - [ ] Create PR on `sam/investigate-resolve-recurring-peer-01ksa6` and do not merge.

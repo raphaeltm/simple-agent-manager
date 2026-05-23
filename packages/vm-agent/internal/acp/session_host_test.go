@@ -840,6 +840,119 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	}
 }
 
+func TestSessionHost_FinishPromptWithPeerDisconnectBeginsCrashRecovery(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	completed := make(chan string, 1)
+	host.config.OnPromptComplete = func(stopReason string, _ error) {
+		completed <- stopReason
+	}
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-1"
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	select {
+	case stopReason := <-completed:
+		t.Fatalf("prompt completed before crash recovery: %q", stopReason)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false, want true")
+	}
+	if host.status != HostStarting {
+		t.Fatalf("status = %s, want %s", host.status, HostStarting)
+	}
+}
+
+func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionableFailure(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	completed := make(chan error, 1)
+	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
+		if stopReason != "error" {
+			t.Errorf("stopReason = %q, want error", stopReason)
+		}
+		completed <- promptErr
+	}
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-1"
+	host.agentSupportsLoadSession = false
+	host.mu.Unlock()
+	host.stderrMu.Lock()
+	host.stderrBuf.WriteString("fatal: peer disconnected before response\nOPENAI_API_KEY=sk-secret1234567890")
+	host.stderrMu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	select {
+	case err := <-completed:
+		if err == nil {
+			t.Fatal("promptErr = nil, want actionable failure")
+		}
+		if !strings.Contains(err.Error(), "cannot be recovered automatically") {
+			t.Fatalf("promptErr = %q, want actionable recovery message", err.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt completion callback")
+	}
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+	foundReport := false
+	foundRPCError := false
+	for _, msg := range host.messageBuf {
+		var report AgentCrashReportMessage
+		if err := json.Unmarshal(msg.Data, &report); err == nil && report.Type == MsgAgentCrashReport {
+			foundReport = true
+			if report.Recovered {
+				t.Fatal("crash report recovered = true, want false")
+			}
+			if strings.Contains(report.Stderr, "sk-secret1234567890") {
+				t.Fatalf("crash report leaked secret: %q", report.Stderr)
+			}
+		}
+
+		var rpc struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(msg.Data, &rpc); err == nil && strings.Contains(rpc.Error.Message, "cannot be recovered automatically") {
+			foundRPCError = true
+		}
+	}
+	if !foundReport {
+		t.Fatal("missing unrecovered crash report")
+	}
+	if !foundRPCError {
+		t.Fatal("missing actionable JSON-RPC error")
+	}
+}
+
 func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
 	t.Parallel()
 
