@@ -212,6 +212,25 @@ function openAIModel(input: ModelDefinition): PlatformAIModel {
   };
 }
 
+const OPENAI_CODEX_PREMIUM_PROFILE = {
+  tier: 'premium',
+  costPer1kInputTokens: 0.00175,
+  costPer1kOutputTokens: 0.014,
+  contextWindow: 400000,
+  toolCallSupport: 'excellent',
+  intendedRole: 'workspace-agent',
+  fallbackGroup: 'openai-premium',
+} satisfies Pick<
+  ModelDefinition,
+  | 'tier'
+  | 'costPer1kInputTokens'
+  | 'costPer1kOutputTokens'
+  | 'contextWindow'
+  | 'toolCallSupport'
+  | 'intendedRole'
+  | 'fallbackGroup'
+>;
+
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
@@ -437,37 +456,19 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   openAIModel({
     id: 'gpt-5.3-codex',
     label: 'GPT-5.3 Codex',
-    tier: 'premium',
-    costPer1kInputTokens: 0.00175,
-    costPer1kOutputTokens: 0.014,
-    contextWindow: 400000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
-    fallbackGroup: 'openai-premium',
+    ...OPENAI_CODEX_PREMIUM_PROFILE,
   }),
   // GPT-5.2 Codex (deprecating Aug 10, 2026)
   openAIModel({
     id: 'gpt-5.2-codex',
     label: 'GPT-5.2 Codex',
-    tier: 'premium',
-    costPer1kInputTokens: 0.00175,
-    costPer1kOutputTokens: 0.014,
-    contextWindow: 400000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
-    fallbackGroup: 'openai-premium',
+    ...OPENAI_CODEX_PREMIUM_PROFILE,
   }),
   // GPT-5.1 Codex series (deprecating Jul 23, 2026)
   openAIModel({
     id: 'gpt-5.1-codex-max',
     label: 'GPT-5.1 Codex Max',
-    tier: 'premium',
-    costPer1kInputTokens: 0.00175,
-    costPer1kOutputTokens: 0.014,
-    contextWindow: 400000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
-    fallbackGroup: 'openai-premium',
+    ...OPENAI_CODEX_PREMIUM_PROFILE,
   }),
   openAIModel({
     id: 'gpt-5.1-codex-mini',
