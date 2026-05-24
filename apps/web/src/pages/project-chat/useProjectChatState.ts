@@ -1,5 +1,5 @@
-import type { AgentInfo, AgentProfile, Task, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -10,6 +10,7 @@ import type { ChatSessionListItem, ChatSessionResponse, TaskAttachmentRef } from
 import {
   closeConversationTask,
   getProjectTask,
+  getProviderCatalog,
   getTranscribeApiUrl,
   getTrialStatus,
   getWorkspace,
@@ -57,6 +58,10 @@ const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, sear
 
 `;
 
+function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
+  return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
+}
+
 export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -93,6 +98,7 @@ export function useProjectChatState() {
   // Agent profile selection
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [providerCatalogs, setProviderCatalogs] = useState<ProviderCatalog[]>([]);
 
   // Slash command cache for pre-session autocomplete
   // Pass sessionId as refreshKey so cached commands are re-fetched when switching sessions
@@ -106,6 +112,8 @@ export function useProjectChatState() {
   const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
     (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE,
   );
+  const [selectedVmSizeOverride, setSelectedVmSizeOverride] = useState<VMSize | null>(null);
+  const selectedVmSize = selectedVmSizeOverride ?? resolveInitialVmSize(project?.defaultVmSize);
 
   // Devcontainer config name — empty string means auto-detect
   const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
@@ -202,6 +210,7 @@ export function useProjectChatState() {
     }
   }, [selectedWorkspaceProfile]);
 
+
   useEffect(() => {
     void Promise.all([
       listCredentials().catch(() => []),
@@ -209,7 +218,15 @@ export function useProjectChatState() {
     ]).then(([creds, trial]) => {
       const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
       const trialAvailable = trial?.available ?? false;
-      setHasCloudCredentials(hasUserCreds || trialAvailable);
+      const hasCloud = hasUserCreds || trialAvailable;
+      setHasCloudCredentials(hasCloud);
+      if (hasCloud) {
+        void getProviderCatalog()
+          .then((response) => setProviderCatalogs(response.catalogs))
+          .catch(() => setProviderCatalogs([]));
+      } else {
+        setProviderCatalogs([]);
+      }
     });
   }, []);
 
@@ -381,6 +398,7 @@ export function useProjectChatState() {
         : {
             message: trimmed,
             ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+            vmSize: selectedVmSize,
             workspaceProfile: selectedWorkspaceProfile,
             ...(selectedWorkspaceProfile !== 'lightweight' && selectedDevcontainerConfigName.trim()
               ? { devcontainerConfigName: selectedDevcontainerConfigName.trim() }
@@ -537,6 +555,10 @@ export function useProjectChatState() {
     setSelectedTaskMode(mode);
   }, []);
 
+  const handleVmSizeChange = useCallback((size: VMSize) => {
+    setSelectedVmSizeOverride(size);
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
@@ -556,7 +578,9 @@ export function useProjectChatState() {
     handleSubmit, handleNewChat, handleSelect,
     configuredAgents, selectedAgentType, setSelectedAgentType,
     agentProfiles, selectedProfileId, setSelectedProfileId,
+    providerCatalogs,
     handleUpdateProfile, slashCommands,
+    selectedVmSize, handleVmSizeChange,
     selectedWorkspaceProfile, setSelectedWorkspaceProfile,
     selectedDevcontainerConfigName, setSelectedDevcontainerConfigName,
     selectedTaskMode, handleTaskModeChange,

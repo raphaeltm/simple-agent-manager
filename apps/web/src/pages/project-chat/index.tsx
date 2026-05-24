@@ -277,12 +277,17 @@ export function ProjectChat() {
               selectedProfileId={state.selectedProfileId}
               onProfileChange={state.setSelectedProfileId}
               onUpdateProfile={state.handleUpdateProfile}
+              selectedVmSize={state.selectedVmSize}
+              onVmSizeChange={state.handleVmSizeChange}
               selectedWorkspaceProfile={state.selectedWorkspaceProfile}
               onWorkspaceProfileChange={state.setSelectedWorkspaceProfile}
               selectedDevcontainerConfigName={state.selectedDevcontainerConfigName}
               onDevcontainerConfigNameChange={state.setSelectedDevcontainerConfigName}
               selectedTaskMode={state.selectedTaskMode}
               onTaskModeChange={state.handleTaskModeChange}
+              providerCatalogs={state.providerCatalogs}
+              projectDefaultProvider={state.project?.defaultProvider}
+              projectDefaultLocation={state.project?.defaultLocation}
               slashCommands={state.slashCommands}
               attachments={state.chatAttachments}
               onFilesSelected={state.handleChatFilesSelected}

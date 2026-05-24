@@ -1,5 +1,5 @@
 import type { AgentProfile, CredentialProvider, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, PROVIDER_LABELS, SAFE_FILENAME_REGEX, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef,useState } from 'react';
 
@@ -16,7 +16,7 @@ import { formatFileSize } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { SplitButton } from '../ui/SplitButton';
-import { formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
+import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -75,16 +75,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const displayProvider = selectedProfile?.provider ?? projectProvider;
   const displayLocation = selectedProfile?.vmLocation ?? projectLocation;
   const activeCatalog = selectProviderCatalog(catalogs, displayProvider);
-  const providerContext = activeCatalog
-    ? [
-        PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider,
-        displayLocation
-          ? (VM_LOCATIONS[displayLocation]?.name
-            ? `${VM_LOCATIONS[displayLocation].name}, ${VM_LOCATIONS[displayLocation].country}`
-            : displayLocation)
-          : null,
-      ].filter(Boolean).join(' / ')
-    : null;
+  const providerContext = formatProviderCatalogContext(activeCatalog, displayLocation);
 
   const uploading = attachments.some((a) => a.status === 'uploading' || a.status === 'pending');
   const allUploadsComplete = attachments.length === 0 || attachments.every((a) => a.status === 'complete');

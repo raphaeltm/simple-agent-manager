@@ -1,5 +1,5 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, TaskMode, UpdateAgentProfileRequest, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Settings } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useState } from 'react';
@@ -8,6 +8,7 @@ import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDi
 import { ProfileSelector } from '../../components/agent-profiles/ProfileSelector';
 import { DevcontainerConfigSelect } from '../../components/devcontainer/DevcontainerConfigSelect';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
+import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../../components/vm/format-vm-size';
 import { useIsMobile } from '../../hooks/useIsMobile';
 
 interface ChatAttachmentDisplay {
@@ -34,12 +35,17 @@ export function ChatInput({
   selectedProfileId,
   onProfileChange,
   onUpdateProfile,
+  selectedVmSize,
+  onVmSizeChange,
   selectedWorkspaceProfile,
   onWorkspaceProfileChange,
   selectedDevcontainerConfigName,
   onDevcontainerConfigNameChange,
   selectedTaskMode,
   onTaskModeChange,
+  providerCatalogs,
+  projectDefaultProvider,
+  projectDefaultLocation,
   slashCommands,
   attachments,
   onFilesSelected,
@@ -62,12 +68,17 @@ export function ChatInput({
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
+  selectedVmSize: VMSize;
+  onVmSizeChange: (size: VMSize) => void;
   selectedWorkspaceProfile: WorkspaceProfile;
   onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
   selectedDevcontainerConfigName: string;
   onDevcontainerConfigNameChange: (name: string) => void;
   selectedTaskMode: TaskMode;
   onTaskModeChange: (mode: TaskMode) => void;
+  providerCatalogs: ProviderCatalog[];
+  projectDefaultProvider?: string | null;
+  projectDefaultLocation?: string | null;
   slashCommands?: SlashCommand[];
   attachments?: ChatAttachmentDisplay[];
   onFilesSelected?: (files: FileList | null) => void;
@@ -82,6 +93,13 @@ export function ChatInput({
   const selectedProfile = hasProfile
     ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
     : null;
+  const activeCatalog = selectProviderCatalog(providerCatalogs, projectDefaultProvider);
+  const providerContext = formatProviderCatalogContext(activeCatalog, projectDefaultLocation);
+  const vmSizeOptions = (['small', 'medium', 'large'] as VMSize[]).map((size) => (
+    <option key={size} value={size}>
+      {formatVmSizeOption(size, activeCatalog?.sizes[size] ?? null)}
+    </option>
+  ));
 
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
@@ -133,6 +151,15 @@ export function ChatInput({
                   ))}
                 </select>
               )}
+              <select
+                value={selectedVmSize}
+                onChange={(e) => onVmSizeChange(e.target.value as VMSize)}
+                disabled={submitting}
+                aria-label="VM size"
+                className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+              >
+                {vmSizeOptions}
+              </select>
               <select
                 value={selectedWorkspaceProfile}
                 onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
@@ -218,6 +245,20 @@ export function ChatInput({
                   </select>
                 </div>
               )}
+              <div className="flex items-center gap-2">
+                <label htmlFor="vm-size-select" className="text-xs text-fg-muted whitespace-nowrap">
+                  VM{providerContext ? ` (${providerContext})` : ''}:
+                </label>
+                <select
+                  id="vm-size-select"
+                  value={selectedVmSize}
+                  onChange={(e) => onVmSizeChange(e.target.value as VMSize)}
+                  disabled={submitting}
+                  className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+                >
+                  {vmSizeOptions}
+                </select>
+              </div>
               <div className="flex items-center gap-2">
                 <label htmlFor="workspace-profile-select" className="text-xs text-fg-muted whitespace-nowrap">Workspace:</label>
                 <select
