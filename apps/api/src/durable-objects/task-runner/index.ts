@@ -50,9 +50,6 @@ import { handleAttachmentTransfer, handleWorkspaceCreation, handleWorkspaceReady
 export type { StartTaskInput, TaskRunnerState } from './types';
 
 export class TaskRunner extends DurableObject<Env> {
-  /** Tracks the last D1 execution step to skip redundant writes (idempotent guard). */
-  private lastD1Step: TaskExecutionStep | null = null;
-
   // =========================================================================
   // Public RPCs (called from Worker routes)
   // =========================================================================
@@ -99,6 +96,7 @@ export class TaskRunner extends DurableObject<Env> {
       provisioningStartedAt: null,
       agentReadyStartedAt: null,
       workspaceReadyStartedAt: null,
+      lastD1Step: null,
       completed: false,
     };
 
@@ -260,8 +258,13 @@ export class TaskRunner extends DurableObject<Env> {
         // Idempotent guard: skip redundant D1 writes when the step hasn't changed.
         // This prevents updated_at from being refreshed on every poll cycle,
         // which was defeating the stuck-tasks cron's staleness detection.
-        if (step === this.lastD1Step) return;
-        this.lastD1Step = step;
+        // Persisted in DO state so the guard survives DO eviction/reload.
+        const currentState = await this.ctx.storage.get<TaskRunnerState>('state');
+        if (currentState && step === currentState.lastD1Step) return;
+        if (currentState) {
+          currentState.lastD1Step = step;
+          await this.ctx.storage.put('state', currentState);
+        }
         await this.env.DATABASE.prepare(
           `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`
         ).bind(step, new Date().toISOString(), taskId).run();
@@ -280,6 +283,9 @@ export class TaskRunner extends DurableObject<Env> {
     // for DOs started before deployment of the field).
     raw.config.systemPromptAppend ??= null;
     raw.provisioningStartedAt ??= null;
+    raw.agentReadyStartedAt ??= null;
+    raw.workspaceReadyStartedAt ??= null;
+    raw.lastD1Step ??= null;
     return raw;
   }
 

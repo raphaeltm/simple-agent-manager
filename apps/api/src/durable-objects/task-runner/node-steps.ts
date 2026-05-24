@@ -116,7 +116,7 @@ export async function handleNodeProvisioning(
     if (elapsed > timeoutMs) {
       const minutes = Math.round(timeoutMs / 60_000);
       throw Object.assign(
-        new Error(`Node provisioning timed out after ${minutes} minutes`),
+        new Error(`Node provisioning timed out after ${minutes} minute${minutes === 1 ? '' : 's'}`),
         { permanent: true },
       );
     }
@@ -133,7 +133,10 @@ export async function handleNodeProvisioning(
       return;
     }
     if (node?.status === 'error' || node?.status === 'stopped') {
-      throw new Error(node.error_message || 'Node provisioning failed');
+      throw Object.assign(
+        new Error(node.error_message || 'Node provisioning failed'),
+        { permanent: true },
+      );
     }
     // Still creating — schedule another poll
     await rc.ctx.storage.setAlarm(Date.now() + rc.getProvisionPollIntervalMs());

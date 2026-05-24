@@ -73,6 +73,7 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
     workspaceReadyStartedAt: null,
+    lastD1Step: null,
     completed: false,
     ...overrides,
   };
@@ -191,7 +192,7 @@ describe('handleNodeProvisioning — timeout', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toThrow(
-      /Node provisioning timed out after 1 minutes/
+      /Node provisioning timed out after 1 minute$/
     );
   });
 
@@ -286,27 +287,50 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
 // Bug 2: Idempotent updateD1ExecutionStep
 // ---------------------------------------------------------------------------
 
-describe('idempotent updateD1ExecutionStep', () => {
-  it('skips redundant D1 writes when step has not changed', async () => {
-    // Simulate the idempotent guard behavior by tracking calls
-    let lastStep: string | null = null;
+describe('idempotent updateD1ExecutionStep — state-persisted guard', () => {
+  /**
+   * Creates an updateD1ExecutionStep closure that mirrors the production
+   * implementation in TaskRunner.buildContext(): it reads lastD1Step from
+   * DO storage, skips D1 writes when the step hasn't changed, and persists
+   * the updated lastD1Step back to storage.
+   */
+  function buildUpdateD1ExecutionStep() {
     const dbRun = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
     const dbBind = vi.fn().mockReturnValue({ run: dbRun });
     const dbPrepare = vi.fn().mockReturnValue({ bind: dbBind });
 
+    // Simulate DO storage with state object (mirrors ctx.storage.get/put)
+    let storedState: TaskRunnerState = makeState();
+    const storagePut = vi.fn().mockImplementation((_key: string, val: TaskRunnerState) => {
+      storedState = val;
+      return Promise.resolve();
+    });
+    const storageGet = vi.fn().mockImplementation(() => Promise.resolve(storedState));
+
     const updateD1ExecutionStep = async (taskId: string, step: string) => {
-      if (step === lastStep) return;
-      lastStep = step;
+      // Production pattern from index.ts buildContext():
+      const currentState = await storageGet('state');
+      if (currentState && step === currentState.lastD1Step) return;
+      if (currentState) {
+        currentState.lastD1Step = step;
+        await storagePut('state', currentState);
+      }
       await dbPrepare(`UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`)
         .bind(step, new Date().toISOString(), taskId)
         .run();
     };
 
+    return { updateD1ExecutionStep, dbRun, storagePut, storageGet };
+  }
+
+  it('skips redundant D1 writes when step has not changed', async () => {
+    const { updateD1ExecutionStep, dbRun } = buildUpdateD1ExecutionStep();
+
     // First call — should write
     await updateD1ExecutionStep('task-1', 'node_provisioning');
     expect(dbRun).toHaveBeenCalledTimes(1);
 
-    // Second call with same step — should skip
+    // Second call with same step — should skip (guard reads from persisted state)
     await updateD1ExecutionStep('task-1', 'node_provisioning');
     expect(dbRun).toHaveBeenCalledTimes(1); // still 1
 
@@ -320,18 +344,7 @@ describe('idempotent updateD1ExecutionStep', () => {
   });
 
   it('writes on step change after skipping', async () => {
-    let lastStep: string | null = null;
-    const dbRun = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
-    const dbBind = vi.fn().mockReturnValue({ run: dbRun });
-    const dbPrepare = vi.fn().mockReturnValue({ bind: dbBind });
-
-    const updateD1ExecutionStep = async (taskId: string, step: string) => {
-      if (step === lastStep) return;
-      lastStep = step;
-      await dbPrepare(`UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`)
-        .bind(step, new Date().toISOString(), taskId)
-        .run();
-    };
+    const { updateD1ExecutionStep, dbRun } = buildUpdateD1ExecutionStep();
 
     await updateD1ExecutionStep('task-1', 'node_selection');
     await updateD1ExecutionStep('task-1', 'node_selection');
@@ -341,6 +354,17 @@ describe('idempotent updateD1ExecutionStep', () => {
 
     // 3 step transitions, 3 writes
     expect(dbRun).toHaveBeenCalledTimes(3);
+  });
+
+  it('persists lastD1Step to storage so guard survives DO eviction', async () => {
+    const { updateD1ExecutionStep, storagePut } = buildUpdateD1ExecutionStep();
+
+    await updateD1ExecutionStep('task-1', 'node_provisioning');
+
+    // Verify lastD1Step was persisted to storage
+    expect(storagePut).toHaveBeenCalled();
+    const persistedState = storagePut.mock.calls[0][1] as TaskRunnerState;
+    expect(persistedState.lastD1Step).toBe('node_provisioning');
   });
 });
 

@@ -99,6 +99,8 @@ export interface TaskRunnerState {
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
   workspaceReadyStartedAt: number | null;
+  /** Last D1 execution step written — idempotent guard to skip redundant D1 writes */
+  lastD1Step: TaskExecutionStep | null;
   /** Terminal — DO has completed or failed, no more alarms */
   completed: boolean;
 }
