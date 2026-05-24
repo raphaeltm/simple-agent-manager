@@ -53,6 +53,76 @@ export interface NodeCleanupResult {
   errors: number;
 }
 
+type CleanupContext = Record<string, string | number | null | undefined>;
+
+async function destroyAutoProvisionedNodeForCleanup(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
+  nowIso: string,
+  node: { id: string; user_id: string },
+  options: {
+    logEvent: string;
+    failureLogEvent: string;
+    successMessage: string;
+    failureMessagePrefix: string;
+    recoveryType: string;
+    failureRecoveryType: string;
+    context: CleanupContext;
+  }
+): Promise<boolean> {
+  try {
+    log.info(options.logEvent, {
+      nodeId: node.id,
+      userId: node.user_id,
+      ...options.context,
+    });
+
+    await deleteNodeResources(node.id, node.user_id, env);
+
+    await persistError(env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'warn',
+      message: options.successMessage,
+      context: {
+        recoveryType: options.recoveryType,
+        nodeId: node.id,
+        ...options.context,
+      },
+      userId: node.user_id,
+      nodeId: node.id,
+    });
+
+    await db
+      .update(schema.nodes)
+      .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: nowIso })
+      .where(eq(schema.nodes.id, node.id));
+
+    return true;
+  } catch (err) {
+    log.error(options.failureLogEvent, {
+      nodeId: node.id,
+      userId: node.user_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+
+    await persistError(env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'error',
+      message: options.failureMessagePrefix + ': ' + (err instanceof Error ? err.message : String(err)),
+      stack: err instanceof Error ? err.stack : undefined,
+      context: {
+        recoveryType: options.failureRecoveryType,
+        nodeId: node.id,
+        ...options.context,
+      },
+      userId: node.user_id,
+      nodeId: node.id,
+    });
+
+    return false;
+  }
+}
+
 /**
  * Run the node cleanup sweep. Called from the cron handler.
  */
@@ -191,55 +261,19 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       continue;
     }
 
-    try {
-      log.info('node_cleanup.destroying_max_lifetime', {
-        nodeId: node.id,
-        userId: node.user_id,
-        createdAt: node.created_at,
-      });
+    const destroyed = await destroyAutoProvisionedNodeForCleanup(db, env, now.toISOString(), node, {
+      logEvent: 'node_cleanup.destroying_max_lifetime',
+      failureLogEvent: 'node_cleanup.max_lifetime_destroy_failed',
+      successMessage: 'Destroyed auto-provisioned node exceeding max lifetime (no active workspaces)',
+      failureMessagePrefix: 'Failed to destroy max-lifetime node',
+      recoveryType: 'max_lifetime_node_cleanup',
+      failureRecoveryType: 'max_lifetime_node_cleanup_failure',
+      context: { createdAt: node.created_at, maxLifetimeMs },
+    });
 
-      await deleteNodeResources(node.id, node.user_id, env);
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Destroyed auto-provisioned node exceeding max lifetime (no active workspaces)`,
-        context: {
-          recoveryType: 'max_lifetime_node_cleanup',
-          nodeId: node.id,
-          createdAt: node.created_at,
-          maxLifetimeMs,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-      await db
-        .update(schema.nodes)
-        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
-        .where(eq(schema.nodes.id, node.id));
-
+    if (destroyed) {
       result.lifetimeDestroyed++;
-    } catch (err) {
-      log.error('node_cleanup.max_lifetime_destroy_failed', {
-        nodeId: node.id,
-        userId: node.user_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Failed to destroy max-lifetime node: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'max_lifetime_node_cleanup_failure',
-          nodeId: node.id,
-          createdAt: node.created_at,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
+    } else {
       result.errors++;
     }
   }
@@ -279,58 +313,23 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       continue;
     }
 
-    try {
-      log.info('node_cleanup.destroying_stopped_handoff', {
-        nodeId: node.id,
-        userId: node.user_id,
+    const destroyed = await destroyAutoProvisionedNodeForCleanup(db, env, now.toISOString(), node, {
+      logEvent: 'node_cleanup.destroying_stopped_handoff',
+      failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
+      successMessage: 'Destroyed stopped auto-provisioned node left by NodeLifecycle alarm',
+      failureMessagePrefix: 'Failed to destroy stopped handoff node',
+      recoveryType: 'stopped_node_handoff_cleanup',
+      failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
+      context: {
+        createdAt: node.created_at,
         updatedAt: node.updated_at,
-      });
+        gracePeriodMs: orphanGracePeriodMs,
+      },
+    });
 
-      await deleteNodeResources(node.id, node.user_id, env);
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Destroyed stopped auto-provisioned node left by NodeLifecycle alarm`,
-        context: {
-          recoveryType: 'stopped_node_handoff_cleanup',
-          nodeId: node.id,
-          createdAt: node.created_at,
-          updatedAt: node.updated_at,
-          gracePeriodMs: orphanGracePeriodMs,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
-      await db
-        .update(schema.nodes)
-        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
-        .where(eq(schema.nodes.id, node.id));
-
+    if (destroyed) {
       result.lifetimeDestroyed++;
-    } catch (err) {
-      log.error('node_cleanup.stopped_handoff_destroy_failed', {
-        nodeId: node.id,
-        userId: node.user_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Failed to destroy stopped handoff node: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'stopped_node_handoff_cleanup_failure',
-          nodeId: node.id,
-          createdAt: node.created_at,
-          updatedAt: node.updated_at,
-        },
-        userId: node.user_id,
-        nodeId: node.id,
-      });
-
+    } else {
       result.errors++;
     }
   }
