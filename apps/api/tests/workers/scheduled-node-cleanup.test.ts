@@ -263,6 +263,36 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     });
   });
 
+  describe('DO alarm handoff node cleanup', () => {
+    it('attempts to destroy stopped auto-provisioned node left by NodeLifecycle alarm', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stopped-handoff';
+      const taskId = 'task-nc-stopped-handoff';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'stopped',
+        warmSince: null,
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'completed',
+        autoProvisionedNodeId: nodeId,
+      });
+
+      const testEnv = {
+        ...env,
+        MAX_AUTO_NODE_LIFETIME_MS: '1000',
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.lifetimeDestroyed + result.errors).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters', async () => {
       await seedBaseData();

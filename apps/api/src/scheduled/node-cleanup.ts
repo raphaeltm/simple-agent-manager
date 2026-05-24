@@ -160,7 +160,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
   const autoProvisionedNodesWithCounts = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at,
-            COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count
      FROM nodes n
      INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
      LEFT JOIN workspaces w ON w.node_id = n.id
@@ -244,7 +244,98 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 3. Orphan cleanup: task-created workspaces still running after task ended (TDF-7)
+  // 3. Destroy stopped auto-provisioned nodes left by the NodeLifecycle alarm.
+  //    The DO alarm transitions warm nodes to D1 status='stopped' and clears
+  //    warm_since. Without this handoff phase, those nodes no longer match the
+  //    stale-warm query above and are skipped by max-lifetime cleanup.
+  const stoppedHandoffThreshold = new Date(now.getTime() - orphanGracePeriodMs).toISOString();
+  const stoppedHandoffNodes = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.status, n.created_at, n.updated_at,
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count
+     FROM nodes n
+     INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
+     LEFT JOIN workspaces w ON w.node_id = n.id
+     WHERE n.status = 'stopped'
+       AND n.created_at < ?
+     GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at`
+  ).bind(stoppedHandoffThreshold).all<{
+    id: string;
+    user_id: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    active_ws_count: number;
+  }>();
+
+  for (const node of stoppedHandoffNodes.results) {
+    if (node.active_ws_count > 0) {
+      log.warn('node_cleanup.stopped_handoff_skipped_active_workspaces', {
+        nodeId: node.id,
+        userId: node.user_id,
+        activeWorkspaces: node.active_ws_count,
+        updatedAt: node.updated_at,
+      });
+      result.lifetimeSkipped++;
+      continue;
+    }
+
+    try {
+      log.info('node_cleanup.destroying_stopped_handoff', {
+        nodeId: node.id,
+        userId: node.user_id,
+        updatedAt: node.updated_at,
+      });
+
+      await deleteNodeResources(node.id, node.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Destroyed stopped auto-provisioned node left by NodeLifecycle alarm`,
+        context: {
+          recoveryType: 'stopped_node_handoff_cleanup',
+          nodeId: node.id,
+          createdAt: node.created_at,
+          updatedAt: node.updated_at,
+          gracePeriodMs: orphanGracePeriodMs,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      await db
+        .update(schema.nodes)
+        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .where(eq(schema.nodes.id, node.id));
+
+      result.lifetimeDestroyed++;
+    } catch (err) {
+      log.error('node_cleanup.stopped_handoff_destroy_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Failed to destroy stopped handoff node: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'stopped_node_handoff_cleanup_failure',
+          nodeId: node.id,
+          createdAt: node.created_at,
+          updatedAt: node.updated_at,
+        },
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      result.errors++;
+    }
+  }
+
+  // 4. Orphan cleanup: task-created workspaces still running after task ended (TDF-7)
   //    Only checks workspaces that were EVER associated with a task (via tasks.workspace_id).
   //    User-created workspaces (never referenced by any task) are excluded — they are
   //    intentionally long-lived and not orphans.
@@ -327,7 +418,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 4. Orphan detection: running nodes with no workspaces past warm timeout (TDF-7)
+  // 5. Orphan detection: running nodes with no workspaces past warm timeout (TDF-7)
   //    A node is orphaned if it's 'running' with no warm_since, no workspaces,
   //    and its updated_at is older than the grace period.
   const orphanedNodes = await env.DATABASE.prepare(
@@ -372,7 +463,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     result.orphanedNodesFlagged++;
   }
 
-  // 5. Safety-net: delete stopped workspaces past TTL that the DO alarm missed.
+  // 6. Safety-net: delete stopped workspaces past TTL that the DO alarm missed.
   //    This catches cases where the DO alarm failed to fire or wasn't scheduled.
   const stoppedTtlMs = parseMs(env.WORKSPACE_STOPPED_TTL_MS, DEFAULT_WORKSPACE_STOPPED_TTL_MS);
   // Add a 2x grace buffer so the DO alarm has time to fire first

@@ -60,7 +60,13 @@ function mockPreparedStatement(results: unknown[] = []) {
 function createMockEnv(prepareResponses: Map<string, unknown[]> = new Map()): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
-      for (const [substring, results] of prepareResponses.entries()) {
+      if (sql.includes("WHERE n.status = 'stopped'")) {
+        return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'stopped'") ?? []);
+      }
+      const orderedResponses = Array.from(prepareResponses.entries()).sort(
+        ([left], [right]) => right.length - left.length,
+      );
+      for (const [substring, results] of orderedResponses) {
         if (sql.includes(substring)) {
           return mockPreparedStatement(results);
         }
@@ -226,6 +232,64 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.staleDestroyed).toBe(0);
+    });
+  });
+
+  describe('DO alarm handoff cleanup', () => {
+    it('destroys stopped auto-provisioned nodes left behind by the NodeLifecycle alarm', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const now = Date.now();
+      const createdAt = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+      const updatedAt = new Date(now - 30 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      responses.set('n.warm_since IS NULL', []);
+      responses.set("WHERE n.status = 'stopped'", [
+        {
+          id: 'node-stopped-handoff',
+          user_id: 'user-1',
+          status: 'stopped',
+          created_at: createdAt,
+          updated_at: updatedAt,
+          active_ws_count: 0,
+        },
+      ]);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.lifetimeDestroyed).toBe(1);
+      expect(deleteNodeResources).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env);
+    });
+
+    it('does not destroy stopped handoff nodes with active workspaces', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const updatedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      responses.set('n.warm_since IS NULL', []);
+      responses.set("WHERE n.status = 'stopped'", [
+        {
+          id: 'node-stopped-active',
+          user_id: 'user-1',
+          status: 'stopped',
+          updated_at: updatedAt,
+          active_ws_count: 1,
+        },
+      ]);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.lifetimeDestroyed).toBe(0);
+      expect(result.lifetimeSkipped).toBe(1);
+      expect(deleteNodeResources).not.toHaveBeenCalledWith('node-stopped-active', 'user-1', env);
     });
   });
 
