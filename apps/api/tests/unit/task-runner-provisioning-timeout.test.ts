@@ -246,6 +246,50 @@ describe('handleNodeProvisioning — timeout', () => {
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toThrow('Server creation failed');
   });
+
+  it('throws permanent error on node error status', async () => {
+    const state = makeState({
+      provisioningStartedAt: Date.now() - 10_000,
+      stepResults: { ...makeState().stepResults, nodeId: 'node-1' },
+    });
+
+    const rc = makeContext();
+    (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'error', error_message: 'Server creation failed' }),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+      }),
+    });
+
+    try {
+      await handleNodeProvisioning(state, rc);
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect((err as Error & { permanent?: boolean }).permanent).toBe(true);
+    }
+  });
+
+  it('throws permanent error on stopped node status', async () => {
+    const state = makeState({
+      provisioningStartedAt: Date.now() - 10_000,
+      stepResults: { ...makeState().stepResults, nodeId: 'node-1' },
+    });
+
+    const rc = makeContext();
+    (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'stopped', error_message: null }),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+      }),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toThrow('Node provisioning failed');
+    try {
+      await handleNodeProvisioning(state, rc);
+    } catch (err) {
+      expect((err as Error & { permanent?: boolean }).permanent).toBe(true);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
