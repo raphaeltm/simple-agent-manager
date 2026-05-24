@@ -4,6 +4,8 @@ import {
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
+  PROVIDER_LABELS,
+  VM_LOCATIONS,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
@@ -12,6 +14,7 @@ import { useNavigate } from 'react-router';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { ScalingSettings } from '../components/ScalingSettings';
+import { selectProviderCatalog } from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
@@ -52,7 +55,18 @@ export function ProjectSettings() {
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
 
   // Provider catalog for accurate VM size descriptions
-  const { catalog, loading: catalogLoading } = useProviderCatalog();
+  const { catalogs, loading: catalogLoading } = useProviderCatalog();
+  const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
+  const activeProviderLabel = activeCatalog
+    ? (PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider)
+    : null;
+  const activeLocation = project?.defaultLocation
+    ? VM_LOCATIONS[project.defaultLocation]
+    : undefined;
+  const activeLocationLabel = project?.defaultLocation
+    ? (activeLocation ? `${activeLocation.name}, ${activeLocation.country}` : project.defaultLocation)
+    : null;
+  const catalogContext = [activeProviderLabel, activeLocationLabel].filter(Boolean).join(' / ');
 
   // Sync from project when it reloads
   useEffect(() => {
@@ -280,6 +294,7 @@ export function ProjectSettings() {
           </h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
             Used when launching new workspaces from this project. Click again to clear.
+            {catalogContext ? ` Catalog: ${catalogContext}.` : ' Exact specs depend on the selected provider.'}
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -287,7 +302,7 @@ export function ProjectSettings() {
             <VmSizeCard
               key={size}
               size={size}
-              sizeInfo={catalog?.sizes[size] ?? null}
+              sizeInfo={activeCatalog?.sizes[size] ?? null}
               selected={defaultVmSize === size}
               disabled={savingVmSize || catalogLoading}
               onClick={() => void handleSaveVmSize(size)}

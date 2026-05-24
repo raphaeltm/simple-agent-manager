@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -261,6 +261,49 @@ describe('CreateWorkspace', () => {
 
     // getProject should have been called with the project ID from location state
     expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
+  });
+
+  it('submits the displayed project default VM size, provider, and location', async () => {
+    mocks.getProviderCatalog.mockResolvedValue({
+      catalogs: [{
+        provider: 'hetzner',
+        defaultLocation: 'nbg1',
+        locations: [{ id: 'nbg1', name: 'Nuremberg', country: 'DE' }],
+        sizes: {
+          small: { type: 'cx22', vcpu: 2, ramGb: 4, storageGb: 40, price: '€4.35/mo' },
+          medium: { type: 'cx32', vcpu: 4, ramGb: 8, storageGb: 80, price: '€7.69/mo' },
+          large: { type: 'cx42', vcpu: 8, ramGb: 16, storageGb: 160, price: '€14.51/mo' },
+        },
+      }],
+    });
+    mocks.getProject.mockResolvedValue({
+      id: 'proj-1',
+      name: 'My Project',
+      repository: 'octo/my-repo',
+      defaultBranch: 'main',
+      installationId: 'inst-1',
+      defaultVmSize: 'large',
+      defaultProvider: 'hetzner',
+      defaultLocation: 'nbg1',
+    });
+    mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
+
+    renderCreateWorkspace();
+
+    await waitFor(() => {
+      expect(screen.getByText(/cx42/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Workspace' }));
+
+    await waitFor(() => {
+      expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: 'proj-1',
+        vmSize: 'large',
+        vmLocation: 'nbg1',
+        provider: 'hetzner',
+      }));
+    });
   });
 
 });

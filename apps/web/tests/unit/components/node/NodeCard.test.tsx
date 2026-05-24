@@ -109,6 +109,35 @@ describe('NodeCard', () => {
       expect(screen.getByText(/medium/i)).toBeInTheDocument();
     });
 
+    it('renders exact catalog VM specs when provider data is available', () => {
+      const node = createNode({ vmSize: 'medium', vmLocation: 'nbg1', cloudProvider: 'hetzner' });
+
+      const { container } = render(
+        <MemoryRouter>
+          <NodeCard
+            node={node}
+            workspaces={[]}
+            {...defaultHandlers}
+            catalogs={[{
+              provider: 'hetzner',
+              defaultLocation: 'nbg1',
+              locations: [{ id: 'nbg1', name: 'Nuremberg', country: 'DE' }],
+              sizes: {
+                small: { type: 'cx22', vcpu: 2, ramGb: 4, storageGb: 40, price: '€4.35/mo' },
+                medium: { type: 'cx32', vcpu: 4, ramGb: 8, storageGb: 80, price: '€7.69/mo' },
+                large: { type: 'cx42', vcpu: 8, ramGb: 16, storageGb: 160, price: '€14.51/mo' },
+              },
+            }]}
+          />
+        </MemoryRouter>
+      );
+
+      expect(container.textContent).toContain('cx32');
+      expect(container.textContent).toContain('4 vCPU, 8 GB RAM');
+      expect(container.textContent).toContain('80 GB storage');
+      expect(container.textContent).toContain('€7.69/mo');
+    });
+
     it('renders error message when present', () => {
       const node = createNode({ errorMessage: 'Failed to provision server' });
 

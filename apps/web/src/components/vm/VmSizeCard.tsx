@@ -57,12 +57,14 @@ export const VmSizeCard: FC<VmSizeCardProps> = ({
       {sizeInfo ? (
         <>
           <span className="mt-0.5 block text-xs text-fg-muted">
-            {sizeInfo.type} &middot; {sizeInfo.vcpu} vCPU &middot; {sizeInfo.ramGb} GB
+            {sizeInfo.type} &middot; {sizeInfo.vcpu} vCPU &middot; {sizeInfo.ramGb} GB RAM
           </span>
-          <span className="mt-0.5 block text-xs text-fg-muted">{sizeInfo.price}</span>
+          <span className="mt-0.5 block text-xs text-fg-muted">
+            {sizeInfo.storageGb} GB storage &middot; {sizeInfo.price}
+          </span>
         </>
       ) : (
-        <span className="mt-0.5 block text-xs text-fg-muted">{label}</span>
+        <span className="mt-0.5 block text-xs text-fg-muted">Exact specs unavailable</span>
       )}
     </button>
   );

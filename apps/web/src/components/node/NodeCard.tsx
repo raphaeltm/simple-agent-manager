@@ -129,6 +129,8 @@ export const NodeCard: FC<NodeCardProps> = ({
               <span aria-hidden="true">&middot;</span>
               <span>{sizeInfo.vcpu} vCPU, {sizeInfo.ramGb} GB RAM</span>
               <span aria-hidden="true">&middot;</span>
+              <span>{sizeInfo.storageGb} GB storage</span>
+              <span aria-hidden="true">&middot;</span>
               <span>{sizeInfo.price}</span>
             </>
           ) : (

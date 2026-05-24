@@ -1,11 +1,12 @@
 import type { CredentialProvider, GitHubInstallation, NodeResponse, Project, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { BranchSelector } from '../components/BranchSelector';
 import { RepoSelector } from '../components/RepoSelector';
+import { formatVmSizeInline, lookupSizeInfo } from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import {
   createWorkspace,
@@ -115,6 +116,7 @@ export function CreateWorkspace() {
 
   // Get the active catalog based on selected provider
   const activeCatalog = catalogs.find((c) => c.provider === selectedProvider);
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
 
   // Check each prerequisite independently so status appears incrementally
   useEffect(() => {
@@ -137,8 +139,8 @@ export function CreateWorkspace() {
               setCatalogs(resp.catalogs);
               const first = resp.catalogs[0];
               if (first) {
-                setSelectedProvider(first.provider);
-                setVmLocation(first.defaultLocation);
+                setSelectedProvider((current) => current || first.provider);
+                setVmLocation((current) => current || first.defaultLocation);
               }
             })
             .catch(() => {
@@ -252,6 +254,12 @@ export function CreateWorkspace() {
         if (proj.defaultVmSize) {
           setVmSize(proj.defaultVmSize as VMSize);
         }
+        if (proj.defaultProvider) {
+          setSelectedProvider(proj.defaultProvider);
+        }
+        if (proj.defaultLocation) {
+          setVmLocation(proj.defaultLocation);
+        }
         void fetchBranches(proj.repository, proj.installationId ?? '', defBranch);
       })
       .catch(() => {
@@ -311,6 +319,12 @@ export function CreateWorkspace() {
         return;
       }
 
+      const effectiveVmSize = selectedNode?.vmSize ?? vmSize;
+      const effectiveVmLocation = selectedNode?.vmLocation
+        ?? vmLocation
+        ?? activeCatalog?.defaultLocation
+        ?? DEFAULT_VM_LOCATION;
+
       const workspace = await createWorkspace({
         name,
         projectId: linkedProject.id,
@@ -318,8 +332,8 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        vmSize,
-        vmLocation,
+        vmSize: effectiveVmSize,
+        vmLocation: effectiveVmLocation || undefined,
         ...(selectedProvider && !selectedNodeId ? { provider: selectedProvider as CredentialProvider } : {}),
       });
 
@@ -540,11 +554,15 @@ export function CreateWorkspace() {
               onChange={(e) => setSelectedNodeId(e.target.value)}
             >
               <option value="">Create a new node automatically</option>
-              {nodes.map((node) => (
-                <option key={node.id} value={node.id}>
-                  {node.name} ({node.status})
-                </option>
-              ))}
+              {nodes.map((node) => {
+                const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
+                const provider = node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown provider';
+                return (
+                  <option key={node.id} value={node.id}>
+                    {node.name} ({node.status}) - {provider} - {formatVmSizeInline(node.vmSize, sizeInfo)}
+                  </option>
+                );
+              })}
             </Select>
           </div>
 
