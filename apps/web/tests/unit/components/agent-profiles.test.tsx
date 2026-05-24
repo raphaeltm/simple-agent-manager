@@ -12,6 +12,19 @@ import { ToastProvider } from '../../../src/hooks/useToast';
 
 // Mock the profile runtime API so ProfileRuntimeSection doesn't make real requests
 vi.mock('../../../src/lib/api', () => ({
+  getProviderCatalog: vi.fn().mockResolvedValue({
+    catalogs: [{
+      provider: 'hetzner',
+      defaultLocation: 'fsn1',
+      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
+      sizes: {
+        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+      },
+    }],
+  }),
+  getProject: vi.fn().mockResolvedValue({ id: 'proj-test-1', defaultProvider: 'hetzner', defaultLocation: 'fsn1' }),
   getProfileRuntimeConfig: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
   upsertProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
   deleteProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
@@ -363,6 +376,16 @@ describe('ProfileFormDialog', () => {
     await user.click(screen.getByText('Create Profile'));
     expect(screen.getByRole('alert')).toHaveTextContent('Profile name is required');
     expect(defaultOnSave).not.toHaveBeenCalled();
+  });
+
+  it('shows provider catalog details for VM size overrides', async () => {
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Medium — cx32 (4 vCPU, 8 GB RAM, 80 GB storage) €7.69/mo' })).toBeInTheDocument();
+    });
   });
 
   it('calls onSave with correct payload in create mode', async () => {

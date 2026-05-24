@@ -5,7 +5,7 @@ import { Plus,Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
-import { lookupSizeInfo } from '../vm/format-vm-size';
+import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
 
@@ -135,7 +135,7 @@ export const NodeCard: FC<NodeCardProps> = ({
             </>
           ) : (
             <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
-              {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize}
+              {formatVmSizeInline(node.vmSize, null)}
             </span>
           )}
           <span aria-hidden="true">&middot;</span>
