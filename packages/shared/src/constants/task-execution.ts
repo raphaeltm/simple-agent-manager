@@ -81,3 +81,10 @@ export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = 30_000; // 3
 
 /** Default poll interval (ms) for provisioning status checks. Override via TASK_RUNNER_PROVISION_POLL_INTERVAL_MS env var. */
 export const DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS = 10_000;
+
+/**
+ * Default timeout (ms) for node provisioning (Hetzner API → node status 'running').
+ * If the node stays in 'creating' longer than this, the task fails with a permanent error.
+ * Override via TASK_RUNNER_PROVISION_TIMEOUT_MS env var.
+ */
+export const DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS = 900_000; // 15 minutes
