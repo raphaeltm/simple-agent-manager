@@ -93,6 +93,8 @@ export interface TaskRunnerState {
   workspaceErrorMessage: string | null;
   createdAt: number;
   lastStepAt: number;
+  /** Set when we started waiting for node provisioning — used for timeout detection */
+  provisioningStartedAt: number | null;
   /** Set when we started waiting for agent ready — used for timeout detection */
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
@@ -124,6 +126,7 @@ export interface TaskRunnerContext {
   getWorkspaceReadyTimeoutMs: () => number;
   getWorkspaceReadyPollIntervalMs: () => number;
   getProvisionPollIntervalMs: () => number;
+  getProvisionTimeoutMs: () => number;
   /** Update D1 execution step */
   updateD1ExecutionStep: (taskId: string, step: TaskExecutionStep) => Promise<void>;
 }

@@ -102,8 +102,25 @@ export async function handleNodeProvisioning(
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'node_provisioning');
 
+  // Initialize timeout tracking on first entry (mirrors handleNodeAgentReady pattern)
+  if (!state.provisioningStartedAt) {
+    state.provisioningStartedAt = Date.now();
+    await rc.ctx.storage.put('state', state);
+  }
+
   // If we already created the node (retry scenario), check its status
   if (state.stepResults.nodeId) {
+    // Check timeout before polling
+    const timeoutMs = rc.getProvisionTimeoutMs();
+    const elapsed = Date.now() - state.provisioningStartedAt;
+    if (elapsed > timeoutMs) {
+      const minutes = Math.round(timeoutMs / 60_000);
+      throw Object.assign(
+        new Error(`Node provisioning timed out after ${minutes} minutes`),
+        { permanent: true },
+      );
+    }
+
     const node = await rc.env.DATABASE.prepare(
       `SELECT id, status, error_message FROM nodes WHERE id = ?`
     )
