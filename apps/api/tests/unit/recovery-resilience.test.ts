@@ -293,7 +293,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   it('uses grace period to avoid flagging recently created resources', () => {
     // Both orphan queries filter by created_at/updated_at to avoid false positives
     const orphanSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('// 3. Orphan cleanup:'),
+      nodeCleanupSource.indexOf('Orphan cleanup: task-created workspaces'),
     );
     // Orphan workspace query uses gracePeriodMs cutoff on created_at
     expect(orphanSection).toContain('w.created_at < ?');
