@@ -1,11 +1,11 @@
 import type { AgentProfile, CreateAgentProfileRequest, ProviderCatalog, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS, PROVIDER_LABELS, VALID_PERMISSION_MODES, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS, VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
 import { Button, Dialog,Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect,useState } from 'react';
 
 import { getProject, getProviderCatalog } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
-import { formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
+import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
@@ -132,10 +132,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const effectiveProvider = profile?.provider ?? projectProvider;
   const activeCatalog = selectProviderCatalog(catalogs, effectiveProvider);
   const effectiveLocation = profile?.vmLocation ?? projectLocation ?? activeCatalog?.defaultLocation ?? null;
-  const activeLocation = effectiveLocation ? VM_LOCATIONS[effectiveLocation] : null;
-  const providerContext = activeCatalog
-    ? `${PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider}${effectiveLocation ? ` / ${activeLocation ? `${activeLocation.name}, ${activeLocation.country}` : effectiveLocation}` : ''}`
-    : null;
+  const providerContext = formatProviderCatalogContext(activeCatalog, effectiveLocation);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();

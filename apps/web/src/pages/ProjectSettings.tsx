@@ -4,8 +4,6 @@ import {
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
-  PROVIDER_LABELS,
-  VM_LOCATIONS,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
@@ -14,7 +12,7 @@ import { useNavigate } from 'react-router';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { ScalingSettings } from '../components/ScalingSettings';
-import { selectProviderCatalog } from '../components/vm/format-vm-size';
+import { formatProviderCatalogContext, selectProviderCatalog } from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
@@ -57,16 +55,7 @@ export function ProjectSettings() {
   // Provider catalog for accurate VM size descriptions
   const { catalogs, loading: catalogLoading } = useProviderCatalog();
   const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
-  const activeProviderLabel = activeCatalog
-    ? (PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider)
-    : null;
-  const activeLocation = project?.defaultLocation
-    ? VM_LOCATIONS[project.defaultLocation]
-    : undefined;
-  const activeLocationLabel = project?.defaultLocation
-    ? (activeLocation ? `${activeLocation.name}, ${activeLocation.country}` : project.defaultLocation)
-    : null;
-  const catalogContext = [activeProviderLabel, activeLocationLabel].filter(Boolean).join(' / ');
+  const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
 
   // Sync from project when it reloads
   useEffect(() => {

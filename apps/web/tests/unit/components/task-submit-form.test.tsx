@@ -174,7 +174,7 @@ describe('TaskSubmitForm', () => {
     });
 
     const [, vmSizeSelect] = screen.getAllByRole('combobox');
-    fireEvent.change(vmSizeSelect!, { target: { value: 'large' } });
+    fireEvent.change(vmSizeSelect, { target: { value: 'large' } });
     fireEvent.change(screen.getByPlaceholderText('Describe the task for the agent...'), { target: { value: 'Use a large node' } });
     fireEvent.click(screen.getByText('Run Now'));
 

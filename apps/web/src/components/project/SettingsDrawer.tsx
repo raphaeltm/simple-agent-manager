@@ -8,7 +8,6 @@
  * See: specs/022-simplified-chat-ux/tasks.md (T038-T040)
  */
 import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -28,7 +27,7 @@ import { listTriggers } from '../../lib/api/triggers';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeploymentSettings } from '../DeploymentSettings';
-import { selectProviderCatalog } from '../vm/format-vm-size';
+import { formatProviderCatalogContext, selectProviderCatalog } from '../vm/format-vm-size';
 import { VmSizeCard } from '../vm/VmSizeCard';
 
 const WORKSPACE_PROFILES: { value: WorkspaceProfile; label: string; description: string }[] = [
@@ -47,16 +46,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const { projectId, project, reload } = useProjectContext();
   const { catalogs, loading: catalogLoading } = useProviderCatalog();
   const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
-  const activeProviderLabel = activeCatalog
-    ? (PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider)
-    : null;
-  const activeLocation = project?.defaultLocation
-    ? VM_LOCATIONS[project.defaultLocation]
-    : undefined;
-  const activeLocationLabel = project?.defaultLocation
-    ? (activeLocation ? `${activeLocation.name}, ${activeLocation.country}` : project.defaultLocation)
-    : null;
-  const catalogContext = [activeProviderLabel, activeLocationLabel].filter(Boolean).join(' / ');
+  const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Track dirty state for unsaved changes confirmation (T040)

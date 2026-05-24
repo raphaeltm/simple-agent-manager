@@ -79,6 +79,10 @@ type LocationState = {
   projectId?: string;
 };
 
+function keepExistingOr(fallback: string): (current: string) => string {
+  return (current) => current || fallback;
+}
+
 export function CreateWorkspace() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -116,6 +120,7 @@ export function CreateWorkspace() {
 
   // Get the active catalog based on selected provider
   const activeCatalog = catalogs.find((c) => c.provider === selectedProvider);
+
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
 
   // Check each prerequisite independently so status appears incrementally
@@ -139,8 +144,8 @@ export function CreateWorkspace() {
               setCatalogs(resp.catalogs);
               const first = resp.catalogs[0];
               if (first) {
-                setSelectedProvider((current) => current || first.provider);
-                setVmLocation((current) => current || first.defaultLocation);
+                setSelectedProvider(keepExistingOr(first.provider));
+                setVmLocation(keepExistingOr(first.defaultLocation));
               }
             })
             .catch(() => {

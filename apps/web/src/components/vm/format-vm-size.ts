@@ -1,5 +1,5 @@
 import type { ProviderCatalog, SizeInfo, VMSize } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 
 /**
  * Select the catalog that matches the provider SAM will use.
@@ -62,4 +62,18 @@ export function formatVmSizeOption(
     return `${label} \u2014 ${sizeInfo.type} (${sizeInfo.vcpu} vCPU, ${sizeInfo.ramGb} GB RAM, ${sizeInfo.storageGb} GB storage) ${sizeInfo.price}`;
   }
   return `${label} \u2014 exact specs unavailable`;
+}
+
+export function formatProviderCatalogContext(
+  catalog: ProviderCatalog | null,
+  location: string | null | undefined,
+): string {
+  if (!catalog) return '';
+
+  const providerLabel = PROVIDER_LABELS[catalog.provider] ?? catalog.provider;
+  if (!location) return providerLabel;
+
+  const locationMeta = VM_LOCATIONS[location];
+  const locationLabel = locationMeta ? `${locationMeta.name}, ${locationMeta.country}` : location;
+  return `${providerLabel} / ${locationLabel}`;
 }
