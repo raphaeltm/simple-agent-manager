@@ -197,6 +197,9 @@ export interface Env {
   LOG_JOURNAL_MAX_RETENTION?: string;
   // Docker daemon DNS servers (comma-separated quoted IPs, default: "1.1.1.1", "8.8.8.8")
   DOCKER_DNS_SERVERS?: string;
+  // Swap file configuration
+  SWAP_SIZE_MB?: string;        // Swap file size in MB (default: 2048, set to "0" to disable)
+  SWAP_SWAPPINESS?: string;     // vm.swappiness value 0-100 (default: 60)
   // Hetzner base image override (e.g., "ubuntu-24.04" to roll back from the
   // default "docker-ce" marketplace image). Only applies to Hetzner nodes.
   HETZNER_BASE_IMAGE?: string;

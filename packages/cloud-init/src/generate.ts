@@ -128,6 +128,18 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push('originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)');
     }
   }
+  if (variables.swapSizeMb !== undefined && variables.swapSizeMb !== '') {
+    const size = Number(variables.swapSizeMb);
+    if (!NUMERIC_RE.test(variables.swapSizeMb) || size < 0 || size > 65536) {
+      errors.push(`swapSizeMb: must be numeric 0-65536 (got ${JSON.stringify(variables.swapSizeMb)})`);
+    }
+  }
+  if (variables.swapSwappiness !== undefined && variables.swapSwappiness !== '') {
+    const val = Number(variables.swapSwappiness);
+    if (!NUMERIC_RE.test(variables.swapSwappiness) || val < 0 || val > 100) {
+      errors.push(`swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`);
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
@@ -175,6 +187,10 @@ export interface CloudInitVariables {
   cfIpFetchTimeout?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
   devcontainerCacheEnabled?: string;
+  /** Swap file size in MB (default: 2048). Set to "0" to disable swap. */
+  swapSizeMb?: string;
+  /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
+  swapSwappiness?: string;
 }
 
 /**
@@ -219,6 +235,8 @@ export function generateCloudInit(
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
+    '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
+    '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.
