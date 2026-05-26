@@ -14,12 +14,12 @@ The BetterAuth `user.create.before` hook checks for any existing row in `users` 
 
 ## Implementation Checklist
 
-- [ ] Import `ne` and `TRIAL_ANONYMOUS_USER_ID` in `apps/api/src/auth.ts`.
-- [ ] Exclude the sentinel user from the first-real-user query.
-- [ ] Add a unit test proving sentinel-only databases still promote the new user to `superadmin` and `active`.
-- [ ] Add a unit test proving sentinel plus a real user produces `user` and `pending`.
-- [ ] Verify the self-hosting guide needs no doc update or update it if stale.
-- [ ] Run targeted and relevant validation.
+- [x] Import `ne` and `TRIAL_ANONYMOUS_USER_ID` in `apps/api/src/auth.ts`.
+- [x] Exclude the sentinel user from the first-real-user query.
+- [x] Add a unit test proving sentinel-only databases still promote the new user to `superadmin` and `active`.
+- [x] Add a unit test proving sentinel plus a real user produces `user` and `pending`.
+- [x] Verify the self-hosting guide needs no doc update or update it if stale.
+- [x] Run targeted auth unit validation.
 
 ## Acceptance Criteria
 

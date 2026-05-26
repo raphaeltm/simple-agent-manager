@@ -1,5 +1,7 @@
+import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -219,6 +221,7 @@ export function createAuth(env: Env) {
             const existing = await hookDb
               .select({ id: schema.users.id })
               .from(schema.users)
+              .where(ne(schema.users.id, TRIAL_ANONYMOUS_USER_ID))
               .limit(1)
               .all();
 
