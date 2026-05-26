@@ -381,6 +381,9 @@ describe('ProjectChat new chat button', () => {
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
     expect((textarea as HTMLTextAreaElement).value).toContain('Previous session: "Fix the login bug"');
+    expect((textarea as HTMLTextAreaElement).value).toContain(`Parent project ID: ${PROJECT_ID}`);
+    expect((textarea as HTMLTextAreaElement).value).toContain(`Parent session ID: ${SESSION_WITH_TASK.id}`);
+    expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
 
     await waitFor(() => {
       expect(mocks.summarizeSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
@@ -392,7 +395,13 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
         parentTaskId: 'task-1',
-        contextSummary: 'Summary of previous session',
+        contextSummary: expect.stringContaining('Parent session ID: session-with-task'),
+      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        contextSummary: expect.stringContaining('Parent task ID: task-1'),
+      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        contextSummary: expect.stringContaining('Summary of previous session'),
       }));
     });
   });

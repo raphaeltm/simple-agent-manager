@@ -55,6 +55,7 @@ export interface PendingDerived {
 }
 
 const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
+Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
 
 `;
 
@@ -459,7 +460,13 @@ export function useProjectChatState() {
     const taskId = session.task?.id ?? session.taskId;
     if (!taskId) return;
     const sessionLabel = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
-    const prefilled = `${FORK_MESSAGE_TEMPLATE}Previous session: "${sessionLabel}" (${session.id.slice(0, 8)})\n\n`;
+    const forkContext = [
+      `Previous session: "${sessionLabel}"`,
+      `Parent project ID: ${projectId}`,
+      `Parent session ID: ${session.id}`,
+      `Parent task ID: ${taskId}`,
+    ].join('\n');
+    const prefilled = `${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`;
 
     const derived: PendingDerived = {
       type: 'fork',
@@ -481,7 +488,16 @@ export function useProjectChatState() {
     void summarizeSession(projectId, session.id)
       .then((result) => {
         setPendingDerived((prev) => prev?.parentSessionId === session.id
-          ? { ...prev, contextSummary: result.summary, summaryLoading: false }
+          ? {
+              ...prev,
+              contextSummary: [
+                `## Fork Context`,
+                forkContext,
+                '',
+                result.summary ? `## Previous Session Summary\n${result.summary}` : '',
+              ].filter(Boolean).join('\n'),
+              summaryLoading: false,
+            }
           : prev);
       })
       .catch(() => {
