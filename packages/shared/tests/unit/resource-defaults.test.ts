@@ -121,6 +121,58 @@ describe('resolveResourceReservation', () => {
     expect(result.source).toBe('task');
     expect(result.sourceId).toBe('');
   });
+
+  it('uses trigger layer as sole contributor with correct sourceId', () => {
+    const result = resolveResourceReservation(
+      { trigger: { minVcpu: 4, minMemoryGb: 8 } },
+      { triggerId: 'trig-1' },
+    );
+
+    expect(result.cpuMillis).toBe(4000);
+    expect(result.memoryMb).toBe(8 * 1024);
+    expect(result.source).toBe('trigger');
+    expect(result.sourceId).toBe('trig-1');
+  });
+
+  it('uses project layer as sole contributor with correct sourceId', () => {
+    const result = resolveResourceReservation(
+      { project: { minVcpu: 4, minDiskGb: 80 } },
+      { projectId: 'proj-1' },
+    );
+
+    expect(result.cpuMillis).toBe(4000);
+    expect(result.diskMb).toBe(80 * 1024);
+    expect(result.source).toBe('project');
+    expect(result.sourceId).toBe('proj-1');
+  });
+
+  it('handles value 0 correctly (not treated as undefined)', () => {
+    const result = resolveResourceReservation({
+      task: { maxCoTenants: 0 },
+      project: { maxCoTenants: 4 },
+    });
+
+    // 0 is a defined value; task layer should win
+    expect(result.maxCoTenants).toBe(0);
+    expect(result.source).toBe('task');
+  });
+
+  it('produces output safe for JSON.stringify (no undefined values)', () => {
+    const result = resolveResourceReservation({});
+    const json = JSON.stringify(result);
+    const parsed = JSON.parse(json);
+
+    // Every field survives round-trip (undefined would be dropped by JSON.stringify)
+    expect(parsed.cpuMillis).toBe(result.cpuMillis);
+    expect(parsed.memoryMb).toBe(result.memoryMb);
+    expect(parsed.diskMb).toBe(result.diskMb);
+    expect(parsed.exclusiveNode).toBe(result.exclusiveNode);
+    expect(parsed.maxCoTenants).toBe(result.maxCoTenants);
+    expect(parsed.source).toBe(result.source);
+    expect(parsed.sourceId).toBe(result.sourceId);
+    expect(parsed.version).toBe(result.version);
+    expect(Object.keys(parsed).length).toBe(Object.keys(result).length);
+  });
 });
 
 describe('selectVmSizeForRequirements', () => {
