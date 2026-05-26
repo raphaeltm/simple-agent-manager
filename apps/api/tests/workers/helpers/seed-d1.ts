@@ -45,10 +45,10 @@ export async function seedInstallation(
     .run();
 
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO github_installations (id, user_id, installation_id, account_type, account_name, created_at, updated_at)
-     VALUES (?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO github_installations (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
   )
-    .bind(installationId, userId, externalInstallationId, accountName)
+    .bind(installationId, userId, externalInstallationId, externalInstallationId, accountName)
     .run();
 }
 

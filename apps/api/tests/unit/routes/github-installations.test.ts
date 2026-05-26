@@ -274,7 +274,8 @@ describe('GitHub App installation sharing', () => {
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
-      installationId: '123',
+      installationId: 'user-1:123',
+      externalInstallationId: '123',
       accountType: 'organization',
       accountName: 'acme',
     });
@@ -468,7 +469,8 @@ describe('GitHub App installation sharing', () => {
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
-      installationId: '222',
+      installationId: 'user-1:222',
+      externalInstallationId: '222',
       accountType: 'organization',
       accountName: 'acme',
     });
@@ -524,7 +526,8 @@ describe('GitHub App installation sharing', () => {
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
-      installationId: '120081765',
+      installationId: 'user-1:120081765',
+      externalInstallationId: '120081765',
       accountType: 'organization',
       accountName: 'effprop',
     });

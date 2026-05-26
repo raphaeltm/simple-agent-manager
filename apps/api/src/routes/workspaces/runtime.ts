@@ -16,6 +16,7 @@ import { AgentCredentialSyncSchema, AgentTypeBodySchema, BootLogEntrySchema, jso
 import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
@@ -593,7 +594,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   }
 
   const installations = await db
-    .select({ installationId: schema.githubInstallations.installationId })
+    .select({
+      installationId: schema.githubInstallations.installationId,
+      externalInstallationId: schema.githubInstallations.externalInstallationId,
+    })
     .from(schema.githubInstallations)
     .where(eq(schema.githubInstallations.id, workspace.installationId))
     .limit(1);
@@ -606,7 +610,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Request packages:write when devcontainer caching is enabled so the
   // VM agent can push cache images to GHCR on behalf of this installation.
   const token = await getInstallationToken(
-    installation.installationId,
+    getExternalInstallationId(installation),
     c.env,
   );
   return c.json({ token: token.token, expiresAt: token.expiresAt });

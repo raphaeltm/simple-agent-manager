@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
+import { getExternalInstallationId } from '../../../services/github-installation-ids';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const getAccountSetupStatusDef: AnthropicToolDef = {
@@ -33,6 +34,7 @@ export async function getAccountSetupStatus(
     db
       .select({
         installationId: schema.githubInstallations.installationId,
+        externalInstallationId: schema.githubInstallations.externalInstallationId,
         accountName: schema.githubInstallations.accountName,
         accountType: schema.githubInstallations.accountType,
       })
@@ -92,7 +94,10 @@ export async function getAccountSetupStatus(
     completed: completedCount,
     total: totalSteps,
     steps,
-    github_installations: installations,
+    github_installations: installations.map((installation) => ({
+      ...installation,
+      installationId: getExternalInstallationId(installation),
+    })),
     projects: projects.map((p) => ({ id: p.id, name: p.name, repository: p.repository })),
   };
 }

@@ -238,6 +238,7 @@ export const githubInstallations = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     installationId: text('installation_id').notNull(),
+    externalInstallationId: text('external_installation_id'),
     accountType: text('account_type').notNull(),
     accountName: text('account_name').notNull(),
     createdAt: text('created_at')
@@ -248,10 +249,9 @@ export const githubInstallations = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    userInstallationIdx: uniqueIndex('idx_github_installations_user_installation').on(
-      table.userId,
-      table.installationId
-    ),
+    userInstallationIdx: uniqueIndex('idx_github_installations_user_external_installation')
+      .on(table.userId, table.externalInstallationId)
+      .where(sql`external_installation_id IS NOT NULL`),
   })
 );
 
