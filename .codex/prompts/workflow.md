@@ -134,9 +134,9 @@ REPEAT until all subtasks are complete or failed:
 - **ALWAYS use `sleep` via the Bash tool**, not any other waiting mechanism. The Bash tool execution is what registers as session activity.
 - **ALWAYS re-read `.workflow-state.md` before each poll cycle.** Context compaction may have erased your memory of previous polls.
 - **ALWAYS call `update_task_status`** after each poll. This is your progress report AND your activity signal.
-- **If a subtask has been in_progress for more than 30 minutes** (6 poll cycles), send it a check-in message via `send_message_to_subtask` asking for a status update.
-- **If a subtask has been in_progress for more than 60 minutes** (12 poll cycles), flag it in your status update as potentially stuck.
-- **Maximum poll count: 200** (about 16 hours). If you hit this limit, report the timeout and stop.
+- **If a subtask has been in_progress for more than 30 minutes** (6 poll cycles), inspect available evidence and optionally send a check-in message via `send_message_to_subtask` asking for a status update.
+- **Do not treat duration alone as a stall.** Some `/do` subtasks legitimately run for multiple hours. Only report a subtask as stuck, retry it, or stop it when you have concrete failure evidence, impossible progress, an explicit blocker, or human instruction.
+- **Maximum poll count: 200** (about 16 hours). If you hit this limit, report the timeout with the evidence checked and stop.
 
 ### What to Do If Context Feels Fuzzy
 

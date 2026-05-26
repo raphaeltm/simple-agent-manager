@@ -50,6 +50,21 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 - `$do` — End-to-end task executor: research → plan → implement → review → staging → PR
 - `$workflow` — Multi-step workflow orchestration with foreground polling
 
+## Operational Guardrails
+
+These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md` and `.claude/rules/*.md`.
+
+| Situation | Do |
+| --------- | -- |
+| Starting SAM-managed work | Call the SAM MCP `get_instructions` tool first and apply returned knowledge and policy directives. |
+| Debugging a live issue Raphaël is seeing | Inspect production evidence first unless the issue is explicitly about staging or a branch verification. Use staging for PR validation and new-change verification. |
+| Debugging staging or deployment behavior | Query Cloudflare state/logs before guessing or redeploying. Staging deploys are slow; CF API checks are fast. |
+| User asks for "subtasks" | Use SAM `dispatch_task` for visible delegated work. |
+| User asks for "local subagents" | Use local Claude/Codex subagents for in-session critique or reasoning, not SAM-dispatched tasks. |
+| Dispatching a SAM task | Verify the task started, the title matches, the requested profile/agent is observable, and critical constraints such as `/do`, branch, `draft PR`, or `do not merge` survived. |
+| Draft PR / do-not-merge request | Preserve the constraint in task state and PR wording. Stop at the draft/open PR unless Raphaël later authorizes readiness or merge. |
+| Incidental bug found | If it is not blocking and not a small adjacent fix, file a backlog task with reproduction/evidence and continue the assigned work. |
+
 ## Prompts
 
 Workflow prompts in `.codex/prompts/` (Codex) and `.claude/commands/` (Claude Code):

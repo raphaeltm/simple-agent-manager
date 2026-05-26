@@ -201,6 +201,8 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 2. Include: Problem description, Context (where/when discovered), Acceptance Criteria checklist
 3. Continue with your current work
 
+If the bug is blocking the current task or is a small adjacent fix, fix it in the current branch with evidence. Otherwise file it and keep the assigned work moving.
+
 ## Troubleshooting
 
 - **Build errors**: Run builds in dependency order (see Build Order above)
@@ -213,6 +215,8 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
 
 **Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill, then verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
+
+**Memory and ideas**: Keep SAM knowledge, ideas, and policies current when human feedback or shipped work changes what future agents should believe. Do not mark ideas complete unless they are merged or otherwise verifiably shipped. See `.claude/rules/38-agent-feedback-and-memory.md`.
 
 ## Strategy Planning
 
