@@ -1616,6 +1616,10 @@ describe('swap file configuration', () => {
     const swapBlock = findSwapBlock(parsed);
     expect(swapBlock).toContain('SWAP_SIZE_MB="2048"');
     expect(swapBlock).toContain('SWAP_SWAPPINESS="60"');
+    expect(swapBlock).toContain('cryptsetup open --type plain');
+    expect(swapBlock).toContain('/dev/mapper/cryptswap');
+    expect(swapBlock).not.toContain('mkswap /swapfile');
+    expect(swapBlock).not.toContain('swapon /swapfile');
 
     // Check sysctl.d persistence file
     const sysctlFile = parsed.write_files.find(
@@ -1684,6 +1688,21 @@ describe('swap file configuration', () => {
     expect(swapIdx).toBeGreaterThan(-1);
     expect(agentIdx).toBeGreaterThan(-1);
     expect(swapIdx).toBeLessThan(agentIdx);
+  });
+
+  it('configures encrypted swap with an ephemeral random key and XTS cipher', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('cryptsetup open');
+    expect(swapBlock).toContain('--key-file /dev/urandom');
+    expect(swapBlock).toContain('--cipher aes-xts-plain64');
+    expect(swapBlock).toContain('--key-size 256');
+    expect(swapBlock).toContain('/swapfile cryptswap');
+    expect(swapBlock).toContain('mkswap /dev/mapper/cryptswap');
+    expect(swapBlock).toContain('swapon /dev/mapper/cryptswap');
+    expect(swapBlock).toContain("echo '/dev/mapper/cryptswap none swap sw 0 0' >> /etc/fstab");
   });
 
   it('rejects non-numeric swapSizeMb', () => {

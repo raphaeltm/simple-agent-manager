@@ -46,9 +46,10 @@ runcmd:
       logger -t sam-boot "Configuring \${SWAP_SIZE_MB}MB swap file"
       fallocate -l "\${SWAP_SIZE_MB}M" /swapfile
       chmod 600 /swapfile
-      mkswap /swapfile
-      swapon /swapfile
-      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      cryptsetup open --type plain --cipher aes-xts-plain64 --key-size 256 --key-file /dev/urandom /swapfile cryptswap
+      mkswap /dev/mapper/cryptswap
+      swapon /dev/mapper/cryptswap
+      echo '/dev/mapper/cryptswap none swap sw 0 0' >> /etc/fstab
       sysctl -w "vm.swappiness=\${SWAP_SWAPPINESS}"
       logger -t sam-boot "Swap configured: \${SWAP_SIZE_MB}MB, swappiness=\${SWAP_SWAPPINESS}"
     else

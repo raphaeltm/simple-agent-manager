@@ -19,12 +19,12 @@ Replace the current unencrypted swap activation with dm-crypt encrypted swap bac
 
 ## Implementation Checklist
 
-- [ ] Update `packages/cloud-init/src/template.ts` to run `cryptsetup open --type plain --cipher aes-xts-plain64 --key-size 256 --key-file /dev/urandom /swapfile cryptswap` after `chmod 600 /swapfile`.
-- [ ] Change production cloud-init `mkswap`, `swapon`, and `/etc/fstab` entries to target `/dev/mapper/cryptswap`.
-- [ ] Update `scripts/vm/cloud-init.yaml` with the same encrypted swap setup.
-- [ ] Update `packages/cloud-init/tests/generate.test.ts` to assert `cryptsetup`, `/dev/mapper/cryptswap`, `--key-file /dev/urandom`, and `--cipher aes-xts-plain64` are present.
-- [ ] Ensure no new env vars, no new `CloudInitVariables` fields, and no validation logic changes.
-- [ ] Run focused cloud-init tests and full repository quality checks.
+- [x] Update `packages/cloud-init/src/template.ts` to run `cryptsetup open --type plain --cipher aes-xts-plain64 --key-size 256 --key-file /dev/urandom /swapfile cryptswap` after `chmod 600 /swapfile`.
+- [x] Change production cloud-init `mkswap`, `swapon`, and `/etc/fstab` entries to target `/dev/mapper/cryptswap`.
+- [x] Update `scripts/vm/cloud-init.yaml` with the same encrypted swap setup.
+- [x] Update `packages/cloud-init/tests/generate.test.ts` to assert `cryptsetup`, `/dev/mapper/cryptswap`, `--key-file /dev/urandom`, and `--cipher aes-xts-plain64` are present.
+- [x] Ensure no new env vars, no new `CloudInitVariables` fields, and no validation logic changes.
+- [ ] Run focused cloud-init tests and full repository quality checks. Focused cloud-init tests passed: `pnpm --filter -agent-manager/cloud-init test` (162 tests).
 - [ ] Deploy to staging, delete existing nodes before testing, provision a fresh VM, and verify active swap is `/dev/mapper/cryptswap` with cipher `aes-xts-plain64`.
 
 ## Acceptance Criteria
