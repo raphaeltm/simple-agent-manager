@@ -24,7 +24,7 @@ Replace the current unencrypted swap activation with dm-crypt encrypted swap bac
 - [x] Update `scripts/vm/cloud-init.yaml` with the same encrypted swap setup.
 - [x] Update `packages/cloud-init/tests/generate.test.ts` to assert `cryptsetup`, `/dev/mapper/cryptswap`, `--key-file /dev/urandom`, and `--cipher aes-xts-plain64` are present.
 - [x] Ensure no new env vars, no new `CloudInitVariables` fields, and no validation logic changes.
-- [ ] Run focused cloud-init tests and full repository quality checks. Focused cloud-init tests passed: `pnpm --filter -agent-manager/cloud-init test` (162 tests).
+- [ ] Run focused cloud-init tests and full repository quality checks. Focused cloud-init tests passed: `pnpm --filter @simple-agent-manager/cloud-init test` (162 tests).
 - [ ] Deploy to staging, delete existing nodes before testing, provision a fresh VM, and verify active swap is `/dev/mapper/cryptswap` with cipher `aes-xts-plain64`.
 
 ## Acceptance Criteria
