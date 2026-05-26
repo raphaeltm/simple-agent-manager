@@ -1,4 +1,5 @@
 import type { CredentialProvider } from './user';
+import type { ResourceRequirements, ResourceRequirementsSource } from './resource';
 import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
 
 // =============================================================================
@@ -97,6 +98,18 @@ export interface Task {
   triggerId: string | null;
   /** ID of the specific trigger execution, if any. */
   triggerExecutionId: string | null;
+  /** Resolved VM size for audit. */
+  requestedVmSize: string | null;
+  /** Where the VM size came from in the precedence chain. */
+  requestedVmSizeSource: ResourceRequirementsSource | 'explicit' | null;
+  /** JSON snapshot of the resolved ResourceRequirements. */
+  resourceRequirementsJson: string | null;
+  /** Which precedence level provided the resource requirements. */
+  resourceRequirementsSource: ResourceRequirementsSource | null;
+  /** JSON snapshot of the ResolvedResourceReservation. */
+  resolvedReservationJson: string | null;
+  /** JSON snapshot of the PlacementExplanation. */
+  placementExplanationJson: string | null;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
@@ -259,6 +272,8 @@ export interface SubmitTaskRequest {
   agentProfileId?: string;
   /** File attachments uploaded to R2 via presigned URLs (validated on submit). */
   attachments?: TaskAttachment[];
+  /** Explicit resource requirements for this task. Overrides profile/project/platform defaults. */
+  resourceRequirements?: ResourceRequirements;
 }
 
 /** Response from the session summarize endpoint. */

@@ -17,7 +17,7 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider, MAX_CONTEXT_SUMMARY_BYTES, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider, MAX_CONTEXT_SUMMARY_BYTES, resolveResourceReservation, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -173,6 +173,11 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     : null;
 
   // Determine VM config (with profile overrides in the middle of the precedence chain)
+  // Track which level provided the VM size for audit
+  const vmSizeSource = body.vmSize ? 'task' as const
+    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
+    : project.defaultVmSize ? 'project' as const
+    : 'platform' as const;
   const vmSize: VMSize = body.vmSize
     ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
@@ -209,6 +214,23 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       ?? resolvedProfile?.devcontainerConfigName
       ?? project.defaultDevcontainerConfigName
       ?? null);
+
+  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
+  // Resolve using the same precedence chain: task > profile > project > platform.
+  // The resolved reservation is persisted for observability but does NOT affect placement.
+  const resolvedReservation = resolveResourceReservation(
+    {
+      task: body.resourceRequirements,
+      // Agent profile, project, and user-level resource requirements are future additions.
+      // For Phase 0, only task-level explicit requirements are supported.
+    },
+    {
+      taskId,
+      agentProfileId: resolvedProfile?.profileId ?? undefined,
+      projectId,
+      userId,
+    },
+  );
 
   if (provider !== null && !CREDENTIAL_PROVIDERS.includes(provider)) {
     throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
@@ -279,6 +301,11 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     agentProfileHint: resolvedProfile?.profileId ?? null,
     taskMode,
     outputBranch: branchName,
+    requestedVmSize: vmSize,
+    requestedVmSizeSource: vmSizeSource,
+    resourceRequirementsJson: body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null,
+    resourceRequirementsSource: resolvedReservation.source,
+    resolvedReservationJson: JSON.stringify(resolvedReservation),
     createdBy: userId,
     createdAt: now,
     updatedAt: now,
@@ -448,6 +475,9 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: body.resourceRequirements ?? null,
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.

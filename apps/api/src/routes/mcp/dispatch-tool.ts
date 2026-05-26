@@ -7,7 +7,7 @@
  * Config precedence: explicit field → profile value → project default → platform default.
  */
 import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider, resolveResourceReservation } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -327,6 +327,16 @@ export async function handleDispatchTask(
     fullDescription = fullDescription.slice(0, limits.dispatchDescriptionMaxLength);
   }
 
+  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
+  const resolvedReservation = resolveResourceReservation(
+    {}, // MCP dispatch: no task-level resource requirements in Phase 0
+    {
+      agentProfileId: resolvedProfile?.profileId ?? undefined,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+    },
+  );
+
   // ── Create the task ─────────────────────────────────────────────────────
   const taskId = ulid();
   const now = new Date().toISOString();
@@ -340,6 +350,10 @@ export async function handleDispatchTask(
   });
 
   // ── Resolve config (explicit → profile → project default → platform default) ──
+  const vmSizeSource = vmSize ? 'task' as const
+    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
+    : project.defaultVmSize ? 'project' as const
+    : 'platform' as const;
   const resolvedVmSize: VMSize = vmSize
     ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
@@ -441,9 +455,11 @@ export async function handleDispatchTask(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, mission_id, triggered_by,
+     requested_vm_size, requested_vm_size_source, resolved_reservation_json,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, 'mcp',
+     ?, ?, ?,
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -462,6 +478,7 @@ export async function handleDispatchTask(
     tokenData.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null,
     explicitMissionId ?? currentTask.missionId ?? null,
+    resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
@@ -590,6 +607,8 @@ export async function handleDispatchTask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed

@@ -5,7 +5,17 @@
  * This is the bridge between HTTP routes and the DO. Routes should call
  * these functions instead of accessing the DO binding directly.
  */
-import type { CredentialProvider, TaskAttachment,TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  ResolvedResourceReservation,
+  ResourceRequirements,
+  ResourceRequirementsSource,
+  TaskAttachment,
+  TaskMode,
+  VMLocation,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
 
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
@@ -75,6 +85,12 @@ export async function startTaskRunnerDO(
       nodeMemoryThresholdPercent?: number | null;
       warmNodeTimeoutMs?: number | null;
     } | null;
+    /** Resolved resource requirements (audit-only, Phase 0). */
+    resourceRequirements?: ResourceRequirements | null;
+    /** Resolved reservation in scheduler units (audit-only, Phase 0). */
+    resolvedReservation?: ResolvedResourceReservation | null;
+    /** Where the VM size came from in the precedence chain. */
+    vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -110,6 +126,9 @@ export async function startTaskRunnerDO(
       systemPromptAppend: input.systemPromptAppend ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
+      resourceRequirements: input.resourceRequirements ?? null,
+      resolvedReservation: input.resolvedReservation ?? null,
+      vmSizeSource: input.vmSizeSource ?? null,
     },
   };
 
