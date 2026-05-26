@@ -366,3 +366,14 @@ export {
   resolveSamConfig,
   SAM_ANTHROPIC_VERSION,
 } from './sam';
+
+// Resource Defaults & Resolver
+export type { VmCapacity } from './resource-defaults';
+export {
+  DEFAULT_VM_CAPACITY,
+  PLATFORM_RESOURCE_DEFAULTS,
+  PROVIDER_VM_CAPACITY,
+  resolveResourceReservation,
+  RESOURCE_RESERVATION_VERSION,
+  selectVmSizeForRequirements,
+} from './resource-defaults';

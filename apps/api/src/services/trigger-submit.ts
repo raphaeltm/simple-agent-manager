@@ -19,6 +19,7 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   getDefaultLocationForProvider,
   isValidProvider,
+  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -105,6 +106,10 @@ export async function submitTriggeredTask(
     : null;
 
   // VM config precedence: trigger override → profile → project default → platform default
+  const vmSizeSource = input.vmSizeOverride ? 'trigger' as const
+    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
+    : project.defaultVmSize ? 'project' as const
+    : 'platform' as const;
   const vmSize: VMSize = (input.vmSizeOverride as VMSize | null)
     ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
@@ -151,6 +156,21 @@ export async function submitTriggeredTask(
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env.AI, input.renderedPrompt, titleConfig);
 
+  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
+  const resolvedReservation = resolveResourceReservation(
+    {
+      // Trigger-level resource requirements are a future addition.
+      // For Phase 0, only platform defaults apply for trigger-submitted tasks.
+    },
+    {
+      taskId,
+      triggerId: input.triggerId,
+      agentProfileId: resolvedProfile?.profileId ?? undefined,
+      projectId: input.projectId,
+      userId: input.userId,
+    },
+  );
+
   const now = new Date().toISOString();
 
   // Create task in D1 with trigger metadata
@@ -169,6 +189,9 @@ export async function submitTriggeredTask(
     triggeredBy: input.triggeredBy,
     triggerId: input.triggerId,
     triggerExecutionId: input.triggerExecutionId,
+    requestedVmSize: vmSize,
+    requestedVmSizeSource: vmSizeSource,
+    resolvedReservationJson: JSON.stringify(resolvedReservation),
     createdBy: input.userId,
     createdAt: now,
     updatedAt: now,
@@ -270,6 +293,8 @@ export async function submitTriggeredTask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();

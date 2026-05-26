@@ -480,3 +480,12 @@ export type {
   SandboxFileListResult,
   SandboxFileReadResult,
 } from './sandbox';
+
+// Resource Requirements & Reservations
+export type {
+  PlacementExplanation,
+  ResolvedResourceReservation,
+  ResourceRequirements,
+  ResourceRequirementsSource,
+  ResourceResolutionInput,
+} from './resource';

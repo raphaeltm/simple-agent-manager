@@ -5,6 +5,9 @@
  */
 import type {
   CredentialProvider,
+  ResolvedResourceReservation,
+  ResourceRequirements,
+  ResourceRequirementsSource,
   TaskAttachment,
   TaskExecutionStep,
   TaskMode,
@@ -77,6 +80,12 @@ export interface TaskRunConfig {
     nodeMemoryThresholdPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
+  /** Resolved resource requirements (audit-only, Phase 0). */
+  resourceRequirements?: ResourceRequirements | null;
+  /** Resolved reservation in scheduler units (audit-only, Phase 0). */
+  resolvedReservation?: ResolvedResourceReservation | null;
+  /** Where the VM size came from in the precedence chain. */
+  vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
 }
 
 export interface TaskRunnerState {

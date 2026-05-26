@@ -10,6 +10,7 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   getDefaultLocationForProvider,
   isValidProvider,
+  resolveResourceReservation,
   type TaskMode,
   type VMSize,
   type WorkspaceProfile,
@@ -121,6 +122,7 @@ export async function retrySubtask(
       ? original.projectDefaultProvider
       : null;
 
+  const vmSizeSource = original.projectDefaultVmSize ? 'project' as const : 'platform' as const;
   const resolvedVmSize: VMSize = (original.projectDefaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
 
   const resolvedVmLocation =
@@ -153,6 +155,16 @@ export async function retrySubtask(
     maxLength: branchMaxLength,
   });
 
+  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
+  const resolvedReservation = resolveResourceReservation(
+    {}, // Retry: no task-level resource requirements in Phase 0
+    {
+      taskId: newTaskId,
+      projectId: original.projectId,
+      userId: ctx.userId,
+    },
+  );
+
   const now = new Date().toISOString();
 
   // Insert new task + status event (batched for atomicity)
@@ -161,8 +173,10 @@ export async function retrySubtask(
       `INSERT INTO tasks (id, project_id, user_id, title, description,
        status, execution_step, priority, dispatch_depth, output_branch, created_by,
        task_mode, agent_profile_hint, mission_id,
+       requested_vm_size, requested_vm_size_source, resolved_reservation_json,
        created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
+       ?, ?, ?,
        ?, ?, ?,
        ?, ?)`,
     ).bind(
@@ -170,6 +184,7 @@ export async function retrySubtask(
       taskTitle, description, 0, branchName,
       ctx.userId,
       resolvedTaskMode, original.agentProfileHint ?? null, original.missionId ?? null,
+      resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
       now, now,
     ),
     env.DATABASE.prepare(
@@ -242,6 +257,8 @@ export async function retrySubtask(
         nodeMemoryThresholdPercent: original.projectNodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: original.projectWarmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
