@@ -1,9 +1,8 @@
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context,Hono } from 'hono';
+import { Hono } from 'hono';
 
-import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -33,11 +32,11 @@ import {
   getStoredInstallationId,
 } from '../services/github-installation-ids';
 import {
-  getTokenType,
   isDatabaseConflictError,
   summarizeAccessibleInstallations,
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
+import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -780,38 +779,6 @@ async function insertSharedInstallation(
     } else {
       log.error('github.shared_org_installations.insert_result', details);
     }
-  }
-}
-
-/**
- * Get the current user's GitHub access token from BetterAuth.
- * BetterAuth owns OAuth token encryption/refresh; callers should not read the
- * encrypted accounts table directly.
- */
-async function getGitHubUserAccessToken(
-  c: Context<{ Bindings: Env }>,
-  userId: string
-): Promise<string | null> {
-  try {
-    const auth = createAuth(c.env);
-    const token = await auth.api.getAccessToken({
-      headers: c.req.raw.headers,
-      body: { providerId: 'github', userId },
-    });
-    log.info('github.user_access_token.lookup', {
-      userId,
-      tokenPresent: Boolean(token.accessToken),
-      tokenType: getTokenType(token),
-      scopes: token.scopes,
-    });
-    return token.accessToken || null;
-  } catch (err) {
-    log.warn('github.user_access_token_unavailable', {
-      userId,
-      tokenPresent: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
   }
 }
 
