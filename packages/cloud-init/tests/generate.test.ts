@@ -1716,6 +1716,12 @@ describe('swap file configuration', () => {
     ).toThrow('swapSwappiness');
   });
 
+  it('rejects shell metacharacters in swapSwappiness', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: '60; rm -rf /' })),
+    ).toThrow('swapSwappiness');
+  });
+
   it('accepts boundary values (swapSizeMb=0, swapSwappiness=0 and 100)', () => {
     expect(() =>
       validateCloudInitVariables(baseVariables({ swapSizeMb: '0', swapSwappiness: '0' })),
@@ -1723,5 +1729,19 @@ describe('swap file configuration', () => {
     expect(() =>
       validateCloudInitVariables(baseVariables({ swapSizeMb: '65536', swapSwappiness: '100' })),
     ).not.toThrow();
+  });
+
+  it('still writes sysctl.d with default swappiness when swap is disabled', () => {
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '0' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.content.trim()).toBe('vm.swappiness=60');
   });
 });
