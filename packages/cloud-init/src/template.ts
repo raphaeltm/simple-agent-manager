@@ -41,6 +41,7 @@ runcmd:
   - 'logger -t sam-boot "PHASE START: swap-setup"'
   - |
     SWAP_SIZE_MB="{{ swap_size_mb }}"
+    SWAP_SWAPPINESS="{{ swap_swappiness }}"
     if [ "$SWAP_SIZE_MB" -gt 0 ] 2>/dev/null; then
       logger -t sam-boot "Configuring \${SWAP_SIZE_MB}MB swap file"
       fallocate -l "\${SWAP_SIZE_MB}M" /swapfile
@@ -48,8 +49,8 @@ runcmd:
       mkswap /swapfile
       swapon /swapfile
       echo '/swapfile none swap sw 0 0' >> /etc/fstab
-      sysctl -w vm.swappiness={{ swap_swappiness }}
-      logger -t sam-boot "Swap configured: \${SWAP_SIZE_MB}MB, swappiness={{ swap_swappiness }}"
+      sysctl -w "vm.swappiness=\${SWAP_SWAPPINESS}"
+      logger -t sam-boot "Swap configured: \${SWAP_SIZE_MB}MB, swappiness=\${SWAP_SWAPPINESS}"
     else
       logger -t sam-boot "Swap disabled (SWAP_SIZE_MB=0)"
     fi

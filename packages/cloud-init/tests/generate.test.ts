@@ -1615,7 +1615,7 @@ describe('swap file configuration', () => {
 
     const swapBlock = findSwapBlock(parsed);
     expect(swapBlock).toContain('SWAP_SIZE_MB="2048"');
-    expect(swapBlock).toContain('vm.swappiness=60');
+    expect(swapBlock).toContain('SWAP_SWAPPINESS="60"');
 
     // Check sysctl.d persistence file
     const sysctlFile = parsed.write_files.find(
@@ -1634,7 +1634,7 @@ describe('swap file configuration', () => {
 
     const swapBlock = findSwapBlock(parsed);
     expect(swapBlock).toContain('SWAP_SIZE_MB="4096"');
-    expect(swapBlock).toContain('vm.swappiness=10');
+    expect(swapBlock).toContain('SWAP_SWAPPINESS="10"');
 
     const sysctlFile = parsed.write_files.find(
       (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
