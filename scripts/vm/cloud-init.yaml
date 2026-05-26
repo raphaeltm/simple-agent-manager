@@ -10,7 +10,17 @@ packages:
   - curl
   - git
 
+swap:
+  filename: /swapfile
+  size: 4G
+  maxsize: 4G
+
 write_files:
+  - path: /etc/sysctl.d/99-swappiness.conf
+    permissions: '0644'
+    content: |
+      vm.swappiness=10
+
   - path: /etc/workspace/config
     permissions: '0600'
     content: |
@@ -19,6 +29,7 @@ write_files:
       BASE_DOMAIN=${BASE_DOMAIN}
       API_URL=${API_URL}
       API_TOKEN=${API_TOKEN}
+      HETZNER_TOKEN=${HETZNER_TOKEN}
 
   - path: /usr/local/bin/idle-check.sh
     permissions: '0755'
@@ -76,6 +87,10 @@ write_files:
       fi
 
 runcmd:
+  # Check swap status
+  - swapon --show || true
+  - sysctl --system
+
   # Enable Docker
   - systemctl enable docker
   - systemctl start docker
