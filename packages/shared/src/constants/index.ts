@@ -373,7 +373,7 @@ export {
   DEFAULT_VM_CAPACITY,
   PLATFORM_RESOURCE_DEFAULTS,
   PROVIDER_VM_CAPACITY,
-  RESOURCE_RESERVATION_VERSION,
   resolveResourceReservation,
+  RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from './resource-defaults';

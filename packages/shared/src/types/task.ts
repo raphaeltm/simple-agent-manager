@@ -1,5 +1,5 @@
-import type { CredentialProvider } from './user';
 import type { ResourceRequirements, ResourceRequirementsSource } from './resource';
+import type { CredentialProvider } from './user';
 import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
 
 // =============================================================================

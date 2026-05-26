@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PLATFORM_RESOURCE_DEFAULTS,
-  RESOURCE_RESERVATION_VERSION,
   resolveResourceReservation,
+  RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from '../../src/constants/resource-defaults';
 

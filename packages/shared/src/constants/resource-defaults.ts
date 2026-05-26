@@ -1,10 +1,10 @@
-import type { VMSize } from '../types/workspace';
 import type {
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,
 } from '../types/resource';
+import type { VMSize } from '../types/workspace';
 
 // =============================================================================
 // Resource Reservation Schema Version
