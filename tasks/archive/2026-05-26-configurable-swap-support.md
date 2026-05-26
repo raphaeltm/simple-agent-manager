@@ -33,52 +33,52 @@ The production cloud-init path (`packages/cloud-init/src/template.ts` + `generat
 ## Implementation Checklist
 
 ### 1. `packages/cloud-init/src/generate.ts`
-- [ ] Add `swapSizeMb?: string` and `swapSwappiness?: string` to `CloudInitVariables` interface
-- [ ] Add validation: swapSizeMb must be numeric 0-65536, swapSwappiness must be numeric 0-100
-- [ ] Add template replacements with defaults: `{{ swap_size_mb }}` → 2048, `{{ swap_swappiness }}` → 60
+- [x] Add `swapSizeMb?: string` and `swapSwappiness?: string` to `CloudInitVariables` interface
+- [x] Add validation: swapSizeMb must be numeric 0-65536, swapSwappiness must be numeric 0-100
+- [x] Add template replacements with defaults: `{{ swap_size_mb }}` → 2048, `{{ swap_swappiness }}` → 60
 
 ### 2. `packages/cloud-init/src/template.ts`
-- [ ] Add conditional runcmd block before vm-agent download: fallocate → chmod → mkswap → swapon → sysctl
-- [ ] Wrap in `if [ "{{ swap_size_mb }}" -gt 0 ]` conditional
-- [ ] Add `logger -t sam-boot` phase markers
-- [ ] Add write_files entry for `/etc/sysctl.d/99-sam-swap.conf` for persistent swappiness
+- [x] Add conditional runcmd block before vm-agent download: fallocate → chmod → mkswap → swapon → sysctl
+- [x] Wrap in `if [ "{{ swap_size_mb }}" -gt 0 ]` conditional
+- [x] Add `logger -t sam-boot` phase markers
+- [x] Add write_files entry for `/etc/sysctl.d/99-sam-swap.conf` for persistent swappiness
 
 ### 3. `packages/cloud-init/tests/generate.test.ts`
-- [ ] Test default swap values (2048 MB, swappiness 60)
-- [ ] Test custom swap values
-- [ ] Test swap disabled via "0"
-- [ ] Test sysctl persistence file generated
-- [ ] Test swap commands ordered before vm-agent download
-- [ ] Test validation rejects non-numeric swapSizeMb
-- [ ] Test validation rejects out-of-range swapSwappiness (>100)
-- [ ] Test validation rejects shell metacharacters
+- [x] Test default swap values (2048 MB, swappiness 60)
+- [x] Test custom swap values
+- [x] Test swap disabled via "0"
+- [x] Test sysctl persistence file generated
+- [x] Test swap commands ordered before vm-agent download
+- [x] Test validation rejects non-numeric swapSizeMb
+- [x] Test validation rejects out-of-range swapSwappiness (>100)
+- [x] Test validation rejects shell metacharacters
 
 ### 4. `apps/api/src/env.ts`
-- [ ] Add `SWAP_SIZE_MB?: string` to Env interface
-- [ ] Add `SWAP_SWAPPINESS?: string` to Env interface
+- [x] Add `SWAP_SIZE_MB?: string` to Env interface
+- [x] Add `SWAP_SWAPPINESS?: string` to Env interface
 
 ### 5. `apps/api/src/services/nodes.ts`
-- [ ] Pass `swapSizeMb: env.SWAP_SIZE_MB` to generateCloudInit()
-- [ ] Pass `swapSwappiness: env.SWAP_SWAPPINESS` to generateCloudInit()
+- [x] Pass `swapSizeMb: env.SWAP_SIZE_MB` to generateCloudInit()
+- [x] Pass `swapSwappiness: env.SWAP_SWAPPINESS` to generateCloudInit()
 
 ### 6. `apps/api/.env.example`
-- [ ] Document `SWAP_SIZE_MB` with description and default
-- [ ] Document `SWAP_SWAPPINESS` with description and default
+- [x] Document `SWAP_SIZE_MB` with description and default
+- [x] Document `SWAP_SWAPPINESS` with description and default
 
 ### 7. `scripts/vm/cloud-init.yaml`
-- [ ] Update reference template to match production output
-- [ ] Ensure NO HETZNER_TOKEN present
+- [x] Update reference template to match production output
+- [x] Ensure NO HETZNER_TOKEN present
 
 ## Acceptance Criteria
 
-- [ ] Swap file is created on VM boot with configurable size (default 2048 MB)
-- [ ] Swappiness is configurable (default 60) and persists across reboots via sysctl.d
-- [ ] Setting swap size to "0" disables swap entirely (no fallocate, no swapon)
-- [ ] All values validated with strict numeric checks — no shell injection possible
-- [ ] No HETZNER_TOKEN or provider credentials on VMs
-- [ ] All existing tests pass
-- [ ] New tests cover defaults, custom values, disabled, validation, ordering
-- [ ] Reference template updated to match production
+- [ ] Swap file is created on VM boot with configurable size (default 2048 MB) — requires infrastructure verification
+- [x] Swappiness is configurable (default 60) and persists across reboots via sysctl.d
+- [x] Setting swap size to "0" disables swap entirely (no fallocate, no swapon)
+- [x] All values validated with strict numeric checks — no shell injection possible
+- [x] No HETZNER_TOKEN or provider credentials on VMs
+- [x] All existing tests pass
+- [x] New tests cover defaults, custom values, disabled, validation, ordering
+- [x] Reference template updated to match production
 
 ## References
 
