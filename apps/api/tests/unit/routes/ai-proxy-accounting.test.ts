@@ -32,6 +32,7 @@ vi.mock('../../../src/services/ai-proxy-shared', () => {
     buildAIGatewayMetadata: () => '{"test":"metadata"}',
     buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
     buildAnthropicCountTokensUrl: () => 'https://gateway.example.com/anthropic/v1/messages/count_tokens',
+    buildWorkersAIGatewayUrl: () => 'https://gateway.example.com/workers-ai/v1/chat/completions',
     isAnthropicModel: (id: string) => id.startsWith('claude-'),
   };
 });
@@ -295,7 +296,7 @@ describe('native Anthropic AI proxy token accounting', () => {
 
     expect(res.status).toBe(200);
     await res.text();
-  expect(mockCheckAiUsageGate).toHaveBeenCalledOnce();
+    expect(mockCheckAiUsageGate).toHaveBeenCalledOnce();
     expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
   });
 });
