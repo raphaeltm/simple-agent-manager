@@ -13,7 +13,7 @@ The failure originates in the ACP layer when the agent process disconnects befor
 ## Constraints
 
 - Execute with the `/do` workflow.
-- Do not merge the PR. Leave it ready for human review.
+- Original task asked to leave the PR ready for human review. Carry-forward task 01KSM4J3VM8M85MVMYTBKHMYPD authorizes merge after rebase, current checks, staging verification, and CI pass.
 - Coordinate staging deployment with other active staging deploys before triggering.
 - Use production/staging evidence and debug packages before making claims.
 
@@ -46,9 +46,9 @@ The failure originates in the ACP layer when the agent process disconnects befor
 - [x] Implement targeted hardening for uncovered peer disconnect cases.
 - [x] Add focused Go tests covering the failure and recovery behavior.
 - [x] Run VM agent tests and broader project checks appropriate to touched files.
-- [ ] Run required specialist review for Go/VM agent changes.
+- [x] Run required specialist review for Go/VM agent changes. Prior go-specialist review findings were addressed in commit 4ba659d6; carry-forward review rechecked the preserved HostError/StatusError and single-lock behavior.
 - [ ] Deploy to staging only after checking active staging deployments.
-- [ ] Create PR on `sam/investigate-resolve-recurring-peer-01ksa6` and do not merge.
+- [ ] Refresh PR #1108 on `sam/investigate-resolve-recurring-peer-01ksa6`, rerun checks, complete staging verification, and merge only if gates pass.
 
 ## Acceptance Criteria
 
@@ -56,7 +56,7 @@ The failure originates in the ACP layer when the agent process disconnects befor
 - Peer disconnects caused by agent process death are handled by crash recovery when resumable instead of immediately failing the task.
 - Non-resumable peer disconnects still produce actionable failure detail.
 - Tests prove the peer-disconnect handling behavior.
-- PR is ready for human review and explicitly not merged.
+- PR is refreshed, verified, and merged only if all required gates pass.
 
 ## References
 
