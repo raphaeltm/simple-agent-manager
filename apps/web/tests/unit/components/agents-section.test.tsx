@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -118,6 +119,7 @@ describe('AgentsSection', () => {
   });
 
   it('saves Gemini CLI model settings from the agent card', async () => {
+    const user = userEvent.setup();
     mocks.getAgentSettings.mockImplementation((agentType: string) =>
       Promise.resolve(
         makeSettings(agentType, {
@@ -134,7 +136,7 @@ describe('AgentsSection', () => {
 
     render(<AgentsSection />);
     const modelInput = await screen.findByTestId('model-input-google-gemini');
-    fireEvent.change(modelInput, { target: { value: 'gemini-2.5-pro' } });
+    await user.type(modelInput, 'gemini-2.5-pro');
 
     await waitFor(() => {
       expect(

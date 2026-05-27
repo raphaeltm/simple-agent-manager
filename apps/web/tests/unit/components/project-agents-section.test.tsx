@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -97,6 +98,7 @@ describe('ProjectAgentsSection', () => {
   });
 
   it('calls updateProject when Save Override is clicked in Configuration', async () => {
+    const user = userEvent.setup();
     mocks.updateProject.mockResolvedValue({
       id: 'proj-1',
       agentDefaults: {
@@ -117,9 +119,9 @@ describe('ProjectAgentsSection', () => {
       expect(screen.getByTestId('project-agent-permission-select-claude-code')).toBeInTheDocument();
     });
 
-    fireEvent.change(
+    await user.selectOptions(
       screen.getByTestId('project-agent-permission-select-claude-code'),
-      { target: { value: 'acceptEdits' } },
+      'acceptEdits',
     );
 
     const saveButton = screen.getByTestId('project-agent-save-claude-code');
@@ -231,6 +233,7 @@ describe('ProjectAgentsSection', () => {
   });
 
   it('displays an error alert when Save Override fails', async () => {
+    const user = userEvent.setup();
     mocks.updateProject.mockRejectedValue(new Error('Network save failed'));
 
     render(
@@ -245,9 +248,9 @@ describe('ProjectAgentsSection', () => {
       expect(screen.getByTestId('project-agent-permission-select-claude-code')).toBeInTheDocument();
     });
 
-    fireEvent.change(
+    await user.selectOptions(
       screen.getByTestId('project-agent-permission-select-claude-code'),
-      { target: { value: 'acceptEdits' } },
+      'acceptEdits',
     );
 
     const saveButton = screen.getByTestId('project-agent-save-claude-code');
