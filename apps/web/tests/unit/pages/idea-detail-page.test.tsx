@@ -34,8 +34,6 @@ vi.mock('../../../src/pages/ProjectContext', () => ({
   useProjectContext: () => ({
     projectId: 'proj-test',
     project: { name: 'Test Project' },
-    infoPanelOpen: false,
-    setInfoPanelOpen: vi.fn(),
   }),
 }));
 

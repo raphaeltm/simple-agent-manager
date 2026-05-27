@@ -6,8 +6,6 @@ export interface ProjectContextValue {
   project: ProjectDetailResponse | null;
   installations: GitHubInstallation[];
   reload: () => Promise<void>;
-  infoPanelOpen: boolean;
-  setInfoPanelOpen: (open: boolean) => void;
 }
 
 export const ProjectContext = createContext<ProjectContextValue | null>(null);

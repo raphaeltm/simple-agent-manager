@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, List, Search, Settings, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -77,15 +77,6 @@ export function ProjectChat() {
                 />
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => state.setInfoPanelOpen(!state.infoPanelOpen)}
-              title="Project status"
-              aria-label="Project status"
-              className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
-            >
-              <LayoutGrid size={15} />
-            </button>
             <TriggerDropdown
               projectId={state.projectId}
               open={triggerDropdownOpen}

@@ -134,8 +134,6 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
     project: null,
     installations: [],
     reload: vi.fn(),
-    infoPanelOpen: false,
-    setInfoPanelOpen: vi.fn(),
   };
 
   return render(
@@ -817,8 +815,6 @@ describe('ProjectChat workspace profile selection', () => {
       },
       installations: [],
       reload: vi.fn(),
-      infoPanelOpen: false,
-      setInfoPanelOpen: vi.fn(),
     };
 
     render(
