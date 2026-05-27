@@ -33,8 +33,6 @@ vi.mock('../../../src/pages/ProjectContext', () => ({
     project: { name: 'Test Project' },
     installations: [],
     reload: vi.fn(),
-    infoPanelOpen: false,
-    setInfoPanelOpen: vi.fn(),
   }),
 }));
 

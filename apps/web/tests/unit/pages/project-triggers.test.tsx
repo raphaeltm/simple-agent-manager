@@ -49,8 +49,6 @@ const projectCtx: ProjectContextValue = {
   project: null,
   installations: [],
   reload: vi.fn().mockResolvedValue(undefined),
-  infoPanelOpen: false,
-  setInfoPanelOpen: vi.fn(),
 };
 
 function renderTriggers(initialRoute = '/projects/proj-test/triggers') {

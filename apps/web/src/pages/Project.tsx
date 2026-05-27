@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
-import { ProjectInfoPanel } from '../components/project/ProjectInfoPanel';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { getProject, listGitHubInstallations } from '../lib/api';
 import { ProjectContext } from './ProjectContext';
@@ -19,7 +18,6 @@ export function Project() {
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [projectLoading, setProjectLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [infoPanelOpen, setInfoPanelOpen] = useState(false);
 
   // Chat routes get a full-bleed layout (no PageLayout wrapper)
   const isChatRoute = /\/(chat|agent)(\/|$)/.test(location.pathname);
@@ -56,8 +54,6 @@ export function Project() {
     project,
     installations,
     reload: loadProject,
-    infoPanelOpen,
-    setInfoPanelOpen,
   };
 
   if (!projectId) {
@@ -90,7 +86,6 @@ export function Project() {
         ) : (
           <ProjectContext.Provider value={contextValue}>
             <Outlet />
-            <ProjectInfoPanel projectId={projectId} open={infoPanelOpen} onClose={() => setInfoPanelOpen(false)} />
           </ProjectContext.Provider>
         )}
       </div>
@@ -129,7 +124,6 @@ export function Project() {
           <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
             <ProjectContext.Provider value={contextValue}>
               <Outlet />
-              <ProjectInfoPanel projectId={projectId} open={infoPanelOpen} onClose={() => setInfoPanelOpen(false)} />
             </ProjectContext.Provider>
           </div>
         )}
