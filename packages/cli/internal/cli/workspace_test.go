@@ -1,21 +1,29 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
+// orderedResponse is a pattern-response pair for deterministic URL matching.
+type orderedResponse struct {
+	pattern string
+	body    string
+	status  int
+}
+
 // multiResponseDoer returns different responses based on request URL path.
+// Patterns are matched in order (first match wins) for deterministic behavior.
 type multiResponseDoer struct {
-	responses map[string]struct {
-		body   string
-		status int
-	}
-	requests []capturedRequest
+	responses []orderedResponse
+	requests  []capturedRequest
 }
 
 func (m *multiResponseDoer) Do(req *http.Request) (*http.Response, error) {
@@ -26,8 +34,8 @@ func (m *multiResponseDoer) Do(req *http.Request) (*http.Response, error) {
 	}
 	m.requests = append(m.requests, captured)
 
-	for pattern, resp := range m.responses {
-		if strings.Contains(req.URL.Path, pattern) {
+	for _, resp := range m.responses {
+		if strings.Contains(req.URL.Path, resp.pattern) {
 			return jsonResponse(resp.body, resp.status), nil
 		}
 	}
@@ -132,6 +140,17 @@ func TestWorkspacePortsAPIError(t *testing.T) {
 	}
 }
 
+func TestWorkspacePortsRequiresAuth(t *testing.T) {
+	runtime, _, stderr := testRuntime(t, []string{"workspace", "ws-123", "ports"}, nil, map[string]string{})
+	code := Run(context.Background(), runtime)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "not authenticated") {
+		t.Fatalf("expected auth error, got: %s", stderr.String())
+	}
+}
+
 func TestWorkspaceForwardRequiresAuth(t *testing.T) {
 	runtime, _, stderr := testRuntime(t, []string{"workspace", "ws-123", "forward"}, nil, map[string]string{})
 	code := Run(context.Background(), runtime)
@@ -145,14 +164,8 @@ func TestWorkspaceForwardRequiresAuth(t *testing.T) {
 
 func TestWorkspaceForwardRejectsNotRunning(t *testing.T) {
 	doer := &multiResponseDoer{
-		responses: map[string]struct {
-			body   string
-			status int
-		}{
-			"/api/workspaces/ws-stopped": {
-				body:   `{"id":"ws-stopped","url":"https://ws-stopped.example.com","status":"stopped","nodeId":"node-1"}`,
-				status: http.StatusOK,
-			},
+		responses: []orderedResponse{
+			{"/api/workspaces/ws-stopped", `{"id":"ws-stopped","url":"https://ws-stopped.example.com","status":"stopped","nodeId":"node-1"}`, http.StatusOK},
 		},
 	}
 	runtime, _, stderr := testRuntime(t, []string{"workspace", "ws-stopped", "forward", "--port", "3000"}, doer, nil)
@@ -166,8 +179,27 @@ func TestWorkspaceForwardRejectsNotRunning(t *testing.T) {
 	}
 }
 
+func TestWorkspaceForwardAcceptsRecoveryStatus(t *testing.T) {
+	// "recovery" is a valid status that should proceed (not rejected like "stopped")
+	doer := &multiResponseDoer{
+		responses: []orderedResponse{
+			{"/api/workspaces/ws-recovery", `{"id":"ws-recovery","url":"https://ws-recovery.example.com","status":"recovery","nodeId":"node-1"}`, http.StatusOK},
+			{"/ports", `{"ports":[]}`, http.StatusOK},
+		},
+	}
+	runtime, _, stderr := testRuntime(t, []string{"workspace", "ws-recovery", "forward"}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 1 {
+		t.Fatalf("expected exit code 1 (no ports detected, not status rejection), got %d", code)
+	}
+	// Should fail because no ports detected, NOT because status is invalid
+	if !strings.Contains(stderr.String(), "no ports detected") {
+		t.Fatalf("expected 'no ports detected' error (recovery is a valid status), got: %s", stderr.String())
+	}
+}
+
 func TestWorkspaceForwardParsesMultiplePorts(t *testing.T) {
-	// Test that --port flags are collected correctly
 	parsed, err := parseArgs([]string{"workspace", "ws-123", "forward", "--port", "3000", "--port", "8080"})
 	if err != nil {
 		t.Fatalf("parseArgs failed: %v", err)
@@ -207,18 +239,8 @@ func TestWorkspaceForwardRejectsInvalidPort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			doer := &multiResponseDoer{
-				responses: map[string]struct {
-					body   string
-					status int
-				}{
-					"/api/workspaces/ws-123": {
-						body:   `{"id":"ws-123","url":"https://ws-123.example.com","status":"running","nodeId":"node-1"}`,
-						status: http.StatusOK,
-					},
-				},
-			}
-			runtime, _, stderr := testRuntime(t, tt.args, doer, nil)
+			// Port validation happens before any API call, so no mock needed
+			runtime, _, stderr := testRuntime(t, tt.args, nil, nil)
 			code := Run(context.Background(), runtime)
 			if code != 1 {
 				t.Fatalf("expected exit code 1, got %d", code)
@@ -232,18 +254,9 @@ func TestWorkspaceForwardRejectsInvalidPort(t *testing.T) {
 
 func TestWorkspaceForwardNoPortsDetected(t *testing.T) {
 	doer := &multiResponseDoer{
-		responses: map[string]struct {
-			body   string
-			status int
-		}{
-			"/ports": {
-				body:   `{"ports":[]}`,
-				status: http.StatusOK,
-			},
-			"/api/workspaces/ws-empty": {
-				body:   `{"id":"ws-empty","url":"https://ws-empty.example.com","status":"running","nodeId":"node-1"}`,
-				status: http.StatusOK,
-			},
+		responses: []orderedResponse{
+			{"/api/workspaces/ws-empty/ports", `{"ports":[]}`, http.StatusOK},
+			{"/api/workspaces/ws-empty", `{"id":"ws-empty","url":"https://ws-empty.example.com","status":"running","nodeId":"node-1"}`, http.StatusOK},
 		},
 	}
 	runtime, _, stderr := testRuntime(t, []string{"workspace", "ws-empty", "forward"}, doer, nil)
@@ -298,6 +311,9 @@ func TestFormatPortsList(t *testing.T) {
 	if !strings.Contains(output, "8080") || !strings.Contains(output, "unknown") {
 		t.Fatalf("expected port 8080 with 'unknown' label, got: %s", output)
 	}
+	if !strings.Contains(output, "https://ws-abc--3000.example.com") {
+		t.Fatalf("expected URL in output, got: %s", output)
+	}
 }
 
 func TestMultiFlagsCollectsRepeatedFlags(t *testing.T) {
@@ -329,7 +345,6 @@ func TestMultiFlagsEqualsForm(t *testing.T) {
 }
 
 func TestMultiFlagsBackwardCompatible(t *testing.T) {
-	// Verify that single-value Flags still works (last value wins)
 	parsed, err := parseArgs([]string{"task", "submit", "--agent", "claude-code"})
 	if err != nil {
 		t.Fatalf("parseArgs failed: %v", err)
@@ -388,6 +403,42 @@ func TestTokenCacheRefreshesExpiredToken(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected 1 API call, got %d", calls)
 	}
+
+	// Force expiry by setting expiresAt to the past
+	tc.expiresAt = time.Now().Add(-1 * time.Second)
+
+	// Third call should fetch a new token
+	tok3, err := tc.getToken(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tok3 == tok1 {
+		t.Fatalf("expected new token after expiry, got same token %q", tok3)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 API calls after expiry, got %d", calls)
+	}
+}
+
+func TestTokenCacheReturnsErrorOnAPIFailure(t *testing.T) {
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"error":"UNAUTHORIZED","message":"Invalid session"}`, http.StatusUnauthorized), nil
+	})
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
+
+	tc := &tokenCache{
+		client:      client,
+		workspaceID: "ws-1",
+		port:        3000,
+	}
+
+	_, err := tc.getToken(context.Background())
+	if err == nil {
+		t.Fatal("expected error from getToken when API returns error")
+	}
+	if !strings.Contains(err.Error(), "Invalid session") {
+		t.Fatalf("expected API error message, got: %v", err)
+	}
 }
 
 // Verify the workspace client methods construct correct URLs.
@@ -430,7 +481,6 @@ func TestClientGetPortTokenURL(t *testing.T) {
 	}
 }
 
-// Verify Accept: application/json header is set on port-token request.
 func TestClientGetPortTokenSetsAcceptJSON(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"token":"tok","url":"https://example.com","port":3000}`, http.StatusOK)
 	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
@@ -441,5 +491,168 @@ func TestClientGetPortTokenSetsAcceptJSON(t *testing.T) {
 	}
 }
 
-// Suppress unused import warning for bytes.
-var _ = bytes.NewBuffer
+// --- Tests for startForwarders and acceptConnections (previously 0% coverage) ---
+
+func TestStartForwardersBindsListenersAndReturnsForwarders(t *testing.T) {
+	// Find two available ports
+	port1 := findAvailablePort(t)
+	port2 := findAvailablePort(t)
+
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, nil)
+	runtime := Runtime{Stderr: io.Discard}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	forwarders, err := startForwarders(ctx, runtime, client, "ws-ABC", "example.com", []int{port1, port2})
+	if err != nil {
+		t.Fatalf("startForwarders failed: %v", err)
+	}
+	defer cancel() // triggers server.Shutdown in goroutines
+
+	if len(forwarders) != 2 {
+		t.Fatalf("expected 2 forwarders, got %d", len(forwarders))
+	}
+
+	// Verify remoteURL construction (lowercase workspaceID, double-dash port separator)
+	expectedURL1 := fmt.Sprintf("https://ws-ws-abc--%d.example.com", port1)
+	if forwarders[0].remoteURL != expectedURL1 {
+		t.Fatalf("expected remoteURL %q, got %q", expectedURL1, forwarders[0].remoteURL)
+	}
+	if forwarders[0].localPort != port1 {
+		t.Fatalf("expected localPort %d, got %d", port1, forwarders[0].localPort)
+	}
+	if forwarders[1].localPort != port2 {
+		t.Fatalf("expected localPort %d, got %d", port2, forwarders[1].localPort)
+	}
+}
+
+func TestStartForwardersCleanupOnPartialFailure(t *testing.T) {
+	// Bind a port so startForwarders will fail on it
+	port1 := findAvailablePort(t)
+	blocker, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port1))
+	if err != nil {
+		t.Fatalf("failed to bind blocker port: %v", err)
+	}
+	defer blocker.Close()
+
+	availablePort := findAvailablePort(t)
+
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, nil)
+	runtime := Runtime{Stderr: io.Discard}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// First port succeeds, second port (blocked) fails — should clean up the first
+	_, err = startForwarders(ctx, runtime, client, "ws-1", "example.com", []int{availablePort, port1})
+	if err == nil {
+		t.Fatal("expected error when port is already bound")
+	}
+	if !strings.Contains(err.Error(), "failed to listen") {
+		t.Fatalf("expected listen error, got: %v", err)
+	}
+
+	// Verify the first port was cleaned up (we can re-bind it)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", availablePort))
+	if err != nil {
+		t.Fatalf("first port should have been cleaned up but is still bound: %v", err)
+	}
+	ln.Close()
+}
+
+func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
+	tokenCalls := 0
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		tokenCalls++
+		return jsonResponse(`{"token":"test-port-token","url":"https://example.com","port":3000}`, http.StatusOK), nil
+	})
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
+
+	// Start a local listener
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runtime := Runtime{Stderr: io.Discard}
+	remoteURL := fmt.Sprintf("https://ws-test--%d.example.com", port)
+
+	go acceptConnections(ctx, runtime, client, "ws-test", port, ln, remoteURL)
+
+	// Give the server a moment to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Make a request to the proxy — it will fail to reach the remote host
+	// but we can verify the proxy is running and the token was fetched
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/test-path", port))
+	if err != nil {
+		t.Fatalf("failed to connect to proxy: %v", err)
+	}
+	resp.Body.Close()
+
+	// The proxy should have fetched a token
+	if tokenCalls != 1 {
+		t.Fatalf("expected 1 token API call, got %d", tokenCalls)
+	}
+
+	// The response will be 502 (Bad Gateway) since the remote host doesn't exist
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502 from proxy (remote unreachable), got %d", resp.StatusCode)
+	}
+}
+
+func TestAcceptConnectionsShutdownOnContextCancel(t *testing.T) {
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"token":"tok","url":"https://example.com","port":3000}`, http.StatusOK), nil
+	})
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runtime := Runtime{Stderr: io.Discard}
+
+	done := make(chan struct{})
+	go func() {
+		acceptConnections(ctx, runtime, client, "ws-test", port, ln, fmt.Sprintf("https://ws-test--%d.example.com", port))
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel context — should trigger graceful shutdown
+	cancel()
+
+	select {
+	case <-done:
+		// acceptConnections returned — shutdown worked
+	case <-time.After(5 * time.Second):
+		t.Fatal("acceptConnections did not shut down within 5 seconds")
+	}
+
+	// Port should be released after shutdown
+	ln2, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("port should be released after shutdown: %v", err)
+	}
+	ln2.Close()
+}
+
+// findAvailablePort returns a port that is currently available for binding.
+func findAvailablePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find available port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
+}
