@@ -29,6 +29,7 @@ import { KnowledgePage } from './pages/KnowledgePage';
 import { Landing } from './pages/Landing';
 import { Node } from './pages/Node';
 import { Nodes } from './pages/Nodes';
+import { AgentContextPrototype } from './pages/agent-context-prototype';
 import { Project } from './pages/Project';
 import { ProjectChat } from './pages/project-chat';
 import { ProjectActivity } from './pages/ProjectActivity';
@@ -86,6 +87,8 @@ export default function App() {
           <Route path="/try/:trialId" element={<TryDiscovery />} />
           {/* SAM prototype — public, no auth */}
           <Route path="/sam" element={<SamPrototype />} />
+          {/* Agent Context prototype — public, no auth, throwaway design exploration */}
+          <Route path="/prototype/agent-context" element={<AgentContextPrototype />} />
 {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
           {/* Protected routes with AppShell (persistent navigation) */}
