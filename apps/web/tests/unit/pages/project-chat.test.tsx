@@ -144,6 +144,7 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
         <Routes>
           <Route path="/projects/:id/chat" element={<ProjectChat />} />
           <Route path="/projects/:id/chat/:sessionId" element={<ProjectChat />} />
+          <Route path="/projects/:id/settings" element={<div data-testid="settings-page">Settings</div>} />
         </Routes>
       </ProjectContext.Provider>
     </MemoryRouter>
@@ -280,6 +281,21 @@ describe('ProjectChat new chat button', () => {
     // Should show that session's messages
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-2');
+    });
+  });
+
+  it('gear icon navigates to the project settings page', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Project settings')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Project settings'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-page')).toBeInTheDocument();
     });
   });
 
@@ -801,8 +817,6 @@ describe('ProjectChat workspace profile selection', () => {
       },
       installations: [],
       reload: vi.fn(),
-      settingsOpen: false,
-      setSettingsOpen: vi.fn(),
       infoPanelOpen: false,
       setInfoPanelOpen: vi.fn(),
     };
