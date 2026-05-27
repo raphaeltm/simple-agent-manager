@@ -86,6 +86,7 @@ interface PassthroughAuthResult {
   userId: string;
   workspaceId: string;
   projectId: string | null;
+  chatSessionId?: string | null;
   trialId?: string;
 }
 
@@ -133,7 +134,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     return anthropicError('Invalid or expired workspace token', 'authentication_error', 401);
   }
 
-  const { userId, workspaceId, projectId, trialId } = auth;
+  const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   // --- Rate limit ---
   const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(c.env, userId);
@@ -184,7 +185,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   // --- Build metadata for AI Gateway analytics ---
   const isStreaming = body.stream === true;
   const aigMetadata = buildAIGatewayMetadata({
-    userId, workspaceId, projectId, trialId, modelId,
+    userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId,
     stream: isStreaming,
     hasTools: Array.isArray(body.tools) && body.tools.length > 0,
   });
@@ -287,7 +288,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
     return anthropicError('Invalid or expired workspace token', 'authentication_error', 401);
   }
 
-  const { userId, workspaceId, projectId, trialId } = auth;
+  const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(c.env, userId);
   c.header('X-RateLimit-Limit', limit.toString());
@@ -321,7 +322,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   }
 
   const aigMetadata = buildAIGatewayMetadata({
-    userId, workspaceId, projectId, trialId, modelId, stream: false, hasTools: false,
+    userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId, stream: false, hasTools: false,
   });
 
   const upstreamHeaders: Record<string, string> = {
@@ -387,7 +388,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     return openaiError('Invalid or expired workspace token', 'invalid_request_error', 401);
   }
 
-  const { userId, workspaceId, projectId, trialId } = auth;
+  const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(c.env, userId);
   c.header('X-RateLimit-Limit', limit.toString());
@@ -427,7 +428,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   }
 
   const aigMetadata = buildAIGatewayMetadata({
-    userId, workspaceId, projectId, trialId, modelId,
+    userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId,
     stream: !!body.stream,
     hasTools: !!body.tools,
   });

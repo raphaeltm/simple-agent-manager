@@ -23,6 +23,7 @@ export interface AIProxyAuthResult {
   workspaceId: string;
   userId: string;
   projectId: string | null;
+  chatSessionId?: string | null;
   trialId?: string;
 }
 
@@ -58,7 +59,11 @@ export async function verifyAIProxyAuth(
   const workspaceId = tokenPayload.workspace;
 
   const workspace = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
+    .select({
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
@@ -83,6 +88,7 @@ export async function verifyAIProxyAuth(
     workspaceId,
     userId: workspace.userId,
     projectId: workspace.projectId,
+    chatSessionId: workspace.chatSessionId,
     trialId,
   };
 }
@@ -117,6 +123,7 @@ export function buildAIGatewayMetadata(opts: {
   userId: string;
   workspaceId: string;
   projectId?: string | null;
+  sessionId?: string | null;
   trialId?: string;
   modelId: string;
   stream: boolean;
@@ -126,6 +133,7 @@ export function buildAIGatewayMetadata(opts: {
     userId: opts.userId,
     workspaceId: opts.workspaceId,
     projectId: opts.projectId ?? undefined,
+    sessionId: opts.sessionId ?? undefined,
     trialId: opts.trialId ?? undefined,
     modelId: opts.modelId,
     stream: opts.stream,
@@ -145,6 +153,15 @@ export function buildAnthropicGatewayUrl(env: Env): string {
   }
   // Fallback: direct Anthropic API (no gateway monitoring)
   return 'https://api.anthropic.com/v1/messages';
+}
+
+/** Build upstream URL for Workers AI chat completions via AI Gateway. */
+export function buildWorkersAIGatewayUrl(env: Env): string {
+  const gatewayId = env.AI_GATEWAY_ID;
+  if (gatewayId) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
+  }
+  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
 }
 
 /** Build upstream URL for Anthropic token counting via AI Gateway. */

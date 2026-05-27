@@ -237,6 +237,7 @@ export class ProjectAgent extends DurableObject<AppEnv> {
               executeTool: executeProjectTool,
               toolContextExtras: { projectId },
             },
+            { waitUntil: this.ctx.waitUntil.bind(this.ctx) },
           );
         } catch (err) {
           log.error('project_agent.agent_loop_error', {

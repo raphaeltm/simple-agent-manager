@@ -281,7 +281,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
 
   // Generate concise task title via AI (falls back to truncation on failure)
   const titleConfig = getTaskTitleConfig(c.env);
-  const taskTitle = await generateTaskTitle(c.env.AI, message, titleConfig);
+  const taskTitle = await generateTaskTitle(c.env, message, titleConfig);
 
   // Enrich message with @mention context for the agent.
   // The enriched version (with hidden profile hints) is stored as the task description

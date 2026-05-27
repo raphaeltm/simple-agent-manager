@@ -5,10 +5,9 @@
  * long-form chat messages. Falls back to naive truncation on failure.
  *
  * Architecture:
- *   Workers AI binding (env.AI)
- *     → workers-ai-provider (Vercel AI SDK bridge)
- *       → Mastra Agent (structured AI interaction)
- *         → concise task title
+ *   Direct fetch to Cloudflare AI Gateway Workers AI endpoint
+ *     → OpenAI-compatible chat completion
+ *       → concise task title
  *
  * Design decision: the AI call is synchronous (awaited before DB insert)
  * rather than async via waitUntil. This keeps the title consistent across
@@ -24,7 +23,6 @@
  * 30-second wall-clock budget.
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
   DEFAULT_TASK_TITLE_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_RETRIES,
@@ -34,9 +32,11 @@ import {
   DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
   DEFAULT_TASK_TITLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
+import { buildWorkersAIGatewayUrl } from './ai-proxy-shared';
 
 /**
  * Build the system instructions for the title generation agent.
@@ -204,8 +204,45 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+
+async function fetchTaskTitle(
+  env: Env,
+  modelId: string,
+  message: string,
+  maxLength: number,
+  timeoutMs: number,
+): Promise<string | null> {
+  const response = await fetch(buildWorkersAIGatewayUrl(env), {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': JSON.stringify({ source: 'task-title', modelId }),
+    },
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: maxLength,
+      messages: [
+        { role: 'system', content: buildSystemInstructions(maxLength) },
+        { role: 'user', content: message },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Workers AI Gateway request failed with HTTP ${response.status}`);
+  }
+
+  const payload = expectJsonRecord(await response.json(), 'task_title.gateway_response');
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const firstChoice = choices[0] ? expectJsonRecord(choices[0], 'task_title.gateway_response.choices[0]') : undefined;
+  const messageRecord = firstChoice?.message ? expectJsonRecord(firstChoice.message, 'task_title.gateway_response.message') : undefined;
+  return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
+}
+
 /**
- * Generate a concise task title from a message using Workers AI via Mastra.
+ * Generate a concise task title from a message using Workers AI via AI Gateway.
  *
  * - Short messages (≤ threshold) are returned as-is
  * - If AI generation is disabled or fails, falls back to truncation
@@ -213,7 +250,7 @@ function sleep(ms: number): Promise<void> {
  * - Retries with exponential backoff on rate-limit and generic errors (NOT timeouts)
  */
 export async function generateTaskTitle(
-  ai: Ai,
+  env: Env,
   message: string,
   config: TaskTitleConfig = {},
 ): Promise<string> {
@@ -236,53 +273,31 @@ export async function generateTaskTitle(
     return truncateTitle(message, maxLength);
   }
 
-  // Construct agent once outside the retry loop — no per-attempt state to reset
-  const workersAi = createWorkersAI({ binding: ai });
-  const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
-  const agent = new Agent({
-    id: 'task-title-generator',
-    name: 'Task Title Generator',
-    instructions: buildSystemInstructions(maxLength),
-    model,
-  });
-
   const totalAttempts = 1 + maxRetries;
   let lastError: { category: string; message: string } | undefined;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
-      // Use AbortSignal.timeout for clean cancellation without timer leaks.
-      // Supported in Workers runtime since compatibility_date 2023-03-14.
-      const result = await agent.generate(message, {
-        abortSignal: AbortSignal.timeout(timeoutMs),
-      });
-
-      const rawTitle = result.text?.trim();
+      const rawTitle = await fetchTaskTitle(env, modelId, message, maxLength, timeoutMs);
       if (!rawTitle) {
         log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
         return truncateTitle(message, maxLength);
       }
 
-      // Strip markdown formatting that the LLM may have included despite instructions
       const title = stripMarkdown(rawTitle);
       if (!title) {
         log.warn('task_title.empty_after_strip', { modelId, rawTitle, messageLength: message.length, attempt });
         return truncateTitle(message, maxLength);
       }
 
-      // Enforce max length on LLM output (models sometimes exceed the limit)
       return truncateTitle(title, maxLength);
     } catch (err) {
       const classified = classifyError(err);
       lastError = classified;
 
-      // Timeouts are not retried — if Workers AI is already slow, retrying
-      // immediately wastes more of the Worker's 30-second wall-clock budget.
-      // Only rate-limit and generic errors are worth retrying.
       const shouldRetry = attempt < totalAttempts && classified.category !== 'timeout';
 
       if (shouldRetry) {
-        // Exponential backoff with cap: min(baseDelay * 2^(attempt-1), maxDelay)
         const delay = Math.min(retryDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs);
         log.warn('task_title.retrying', {
           error: classified.message,
@@ -303,7 +318,7 @@ export async function generateTaskTitle(
           attempt,
           totalAttempts,
         });
-        break; // No more retries — exit loop
+        break;
       }
     }
   }

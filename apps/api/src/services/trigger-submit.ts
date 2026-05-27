@@ -154,7 +154,7 @@ export async function submitTriggeredTask(
 
   // Generate concise task title
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env.AI, input.renderedPrompt, titleConfig);
+  const taskTitle = await generateTaskTitle(env, input.renderedPrompt, titleConfig);
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(

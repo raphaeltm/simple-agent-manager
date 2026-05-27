@@ -222,7 +222,7 @@ export async function handleDispatchTask(
       .from(schema.projects)
       .where(eq(schema.projects.id, tokenData.projectId))
       .limit(1),
-    generateTaskTitle(env.AI, description, titleConfig),
+    generateTaskTitle(env, description, titleConfig),
   ]);
 
   // ── Apply per-project overrides to dispatch limits ──────────────────────

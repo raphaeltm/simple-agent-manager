@@ -4,14 +4,16 @@
  * Tests period parsing, period bounds, aggregation functions,
  * and pagination resolution — all pure logic, no bindings needed.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../src/lib/logger';
 import {
   aggregateByDay,
   aggregateByModel,
   type AIGatewayLogEntry,
   getGatewayPeriodBounds,
   getPeriodLabel,
+  iterateGatewayLogs,
   parseGatewayPeriod,
   resolveGatewayPagination,
   type UsageByDay,
@@ -162,6 +164,43 @@ describe('resolveGatewayPagination', () => {
       maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
     });
     expect(maxPages).toBe(500);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// iterateGatewayLogs
+// ---------------------------------------------------------------------------
+
+describe('iterateGatewayLogs', () => {
+  it('warns when pagination reaches maxPages while more pages exist', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '1',
+    } as never;
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      result: [makeEntry()],
+      result_info: { page: 1, per_page: 1, count: 1, total_count: 3, total_pages: 3 },
+      success: true,
+      errors: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', () => undefined, {
+      defaultMaxPages: 2,
+      maxPagesHardCap: 2,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith('ai_gateway.logs_pagination_truncated', {
+      maxPages: 2,
+      totalPages: 3,
+      pageSize: 1,
+      startDate: '2026-05-01T00:00:00.000Z',
+    });
+    warnSpy.mockRestore();
   });
 });
 

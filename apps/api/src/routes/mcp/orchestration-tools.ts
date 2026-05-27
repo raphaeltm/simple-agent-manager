@@ -272,7 +272,7 @@ export async function handleRetrySubtask(
   }
 
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env.AI, replacementDescription, titleConfig);
+  const taskTitle = await generateTaskTitle(env, replacementDescription, titleConfig);
 
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);

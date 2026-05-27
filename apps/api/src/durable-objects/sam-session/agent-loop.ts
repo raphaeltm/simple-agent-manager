@@ -21,6 +21,9 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
+import { buildWorkersAIGatewayUrl } from '../../services/ai-proxy-shared';
+import { checkAiUsageGate } from '../../services/ai-token-budget';
+import { attachTokenUsageAccounting } from '../../services/ai-token-usage-accounting';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import type { OpenAIMessage } from './payload-size';
 import { estimateMessagesBytes, trimMessagesToFit, truncateToolResult } from './payload-size';
@@ -228,14 +231,6 @@ function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
     }
   }
   return messages;
-}
-
-function buildWorkersAIGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
-  }
-  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
 }
 
 function buildAnthropicGatewayUrl(env: Env): string {
@@ -626,6 +621,7 @@ export async function runAgentLoop(
   ) => void,
   searchMessages?: (query: string, limit: number) => Array<{ snippet: string; role: string; sequence: number; createdAt: string }>,
   options?: AgentLoopOptions,
+  executionCtx?: Pick<ExecutionContext, 'waitUntil'>,
 ): Promise<void> {
   const messages: OpenAIMessage[] = [
     ...toOpenAIMessages(historyRows),
@@ -642,6 +638,7 @@ export async function runAgentLoop(
     ...options?.toolContextExtras,
   };
   const useAnthropicParser = isAnthropicModel(config.model);
+  const tokenUsageFormat = useAnthropicParser ? 'anthropic' as const : 'openai' as const;
 
   // Workers AI models have smaller context windows, so use a tighter budget
   // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
@@ -669,9 +666,30 @@ export async function runAgentLoop(
       });
     }
 
+    const usageGate = await checkAiUsageGate(env.KV, userId, env);
+    if (!usageGate.allowed) {
+      const message = usageGate.reason === 'daily-token-budget'
+        ? 'Daily token budget exceeded. Resets at midnight UTC.'
+        : 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.';
+      log.warn('sam.ai_usage_gate_denied', {
+        userId,
+        conversationId,
+        reason: usageGate.reason,
+        model: config.model,
+      });
+      await writer.write(encodeSseEvent({ type: 'error', message }));
+      break;
+    }
+
     let response: Response;
     try {
       response = await callLLM(env, config, llmMessages, userId, conversationId, systemPrompt, tools);
+      response = await attachTokenUsageAccounting(response, {
+        env,
+        userId,
+        format: tokenUsageFormat,
+        executionCtx,
+      });
     } catch (fetchErr) {
       const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       const isTimeout = errMsg.includes('abort');

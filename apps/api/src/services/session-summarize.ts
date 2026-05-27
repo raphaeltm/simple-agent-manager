@@ -9,16 +9,14 @@
  *   ProjectData DO (message source)
  *     → filter (keep user + assistant, exclude tool/system/thinking/plan)
  *       → chunk (strategy varies by message count)
- *         → Workers AI via Mastra Agent → structured summary
+ *         → Workers AI via AI Gateway → structured summary
  *
  * Fallback: If AI fails or times out, produces a heuristic summary by
  * concatenating the last N messages with role labels + task metadata.
  *
- * Follows the same patterns as task-title.ts: Mastra Agent, timeout,
- * retry with exponential backoff, and graceful fallback.
+ * Follows the same timeout and graceful fallback patterns as task-title.ts.
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
   DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES,
   DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES,
@@ -29,9 +27,11 @@ import {
   DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD,
   DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
+import { buildWorkersAIGatewayUrl } from './ai-proxy-shared';
 import { classifyError } from './task-title';
 
 /** Message shape expected from the ProjectData DO. */
@@ -234,6 +234,44 @@ export function buildHeuristicSummary(
   return parts.join('\n').trim();
 }
 
+
+async function fetchSessionSummary(
+  env: Env,
+  modelId: string,
+  promptInput: string,
+  maxLength: number,
+  timeoutMs: number,
+  messageCount: number,
+): Promise<string | null> {
+  const response = await fetch(buildWorkersAIGatewayUrl(env), {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': JSON.stringify({ source: 'session-summarize', modelId, messageCount }),
+    },
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: maxLength,
+      messages: [
+        { role: 'system', content: buildSystemInstructions(maxLength) },
+        { role: 'user', content: promptInput },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Workers AI Gateway request failed with HTTP ${response.status}`);
+  }
+
+  const payload = expectJsonRecord(await response.json(), 'session_summarize.gateway_response');
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const firstChoice = choices[0] ? expectJsonRecord(choices[0], 'session_summarize.gateway_response.choices[0]') : undefined;
+  const messageRecord = firstChoice?.message ? expectJsonRecord(firstChoice.message, 'session_summarize.gateway_response.message') : undefined;
+  return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
+}
+
 /**
  * Generate a context summary from a session's messages.
  *
@@ -242,7 +280,7 @@ export function buildHeuristicSummary(
  * - Falls back to heuristic extraction on AI failure
  */
 export async function summarizeSession(
-  ai: Ai,
+  env: Env,
   allMessages: SummarizeMessage[],
   config: SummarizeConfig = {},
   taskContext?: TaskContext,
@@ -285,20 +323,7 @@ export async function summarizeSession(
 
   // Try AI summarization
   try {
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
-    const agent = new Agent({
-      id: 'session-summarizer',
-      name: 'Session Summarizer',
-      instructions: buildSystemInstructions(maxLength),
-      model,
-    });
-
-    const result = await agent.generate(promptInput, {
-      abortSignal: AbortSignal.timeout(timeoutMs),
-    });
-
-    const summary = result.text?.trim();
+    const summary = await fetchSessionSummary(env, modelId, promptInput, maxLength, timeoutMs, messageCount);
     if (!summary) {
       log.warn('session_summarize.empty_response', { modelId, messageCount, filteredCount });
       return {

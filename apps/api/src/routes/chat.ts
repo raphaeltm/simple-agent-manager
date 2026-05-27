@@ -640,7 +640,7 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
   const { summarizeSession, getSummarizeConfig } = await import('../services/session-summarize');
   const config = getSummarizeConfig(c.env);
   const result = await summarizeSession(
-    c.env.AI,
+    c.env,
     allMessages.map((m) => ({
       role: m.role as string,
       content: m.content as string,
