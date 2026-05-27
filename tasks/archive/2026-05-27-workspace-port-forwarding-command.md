@@ -46,60 +46,62 @@ sam workspace <workspaceId> ports                 # list detected ports
 ### Key API Endpoints Needed
 1. `GET /api/workspaces/:id` — get workspace details (exists, session-cookie auth)
 2. **NEW**: `GET /api/workspaces/:id/ports` — list detected ports for a workspace (proxied to VM agent, session-cookie auth)
-3. **NEW**: `POST /api/workspaces/:id/port-token` — get a port access JWT for a specific port (session-cookie auth)
+3. Reused existing `GET /api/workspaces/:id/port-access?port=N` — extended with `Accept: application/json` support to return `{token, url, port}` JSON instead of redirect
 
 ## Implementation Checklist
 
 ### API Layer (apps/api)
-- [ ] Add `GET /api/workspaces/:id/ports` endpoint — proxies to VM agent `GET /workspaces/{id}/ports`, requires session-cookie auth + ownership
-- [ ] Add `POST /api/workspaces/:id/port-token` endpoint — generates port access JWT for a given port, requires session-cookie auth + ownership
+- [x] Add `GET /api/workspaces/:id/ports` endpoint — proxies to VM agent `GET /workspaces/{id}/ports`, requires session-cookie auth + ownership
+- [x] Extend `GET /api/workspaces/:id/port-access` with `Accept: application/json` support — returns `{token, url, port}` JSON for CLI usage (reused existing endpoint instead of creating new `POST /port-token`)
 
 ### CLI: Workspace Namespace & Forward Command
-- [ ] Add `WorkspaceResponse` type in `types.go` with fields: `id`, `url`, `status`, `vmIp`, `nodeId`
-- [ ] Add `PortsResponse` and `DetectedPort` types in `types.go`
-- [ ] Add `APIClient.GetWorkspace(ctx, workspaceId)` method in `client.go`
-- [ ] Add `APIClient.GetWorkspacePorts(ctx, workspaceId)` method in `client.go`
-- [ ] Add `APIClient.GetPortToken(ctx, workspaceId, port)` method in `client.go`
-- [ ] Add `workspace` case in `run.go` namespace switch
-- [ ] Implement `runWorkspace()` dispatcher for subcommands `forward` and `ports`
-- [ ] Implement `runWorkspaceForward()`:
-  - Parse `--port` flag (repeatable)
+- [x] Add `WorkspaceResponse` type in `types.go` with fields: `id`, `url`, `status`, `nodeId`, `name` (omitted `vmIp` — unnecessary since base domain is derived from URL)
+- [x] Add `PortsResponse`, `DetectedPort`, and `PortTokenResponse` types in `types.go`
+- [x] Add `APIClient.GetWorkspace(ctx, workspaceId)` method in `client.go`
+- [x] Add `APIClient.GetWorkspacePorts(ctx, workspaceId)` method in `client.go`
+- [x] Add `APIClient.GetPortToken(ctx, workspaceId, port)` method in `client.go`
+- [x] Add `workspace` case in `run.go` namespace switch
+- [x] Implement `runWorkspace()` dispatcher for subcommands `forward` and `ports`
+- [x] Implement `runWorkspaceForward()`:
+  - Parse `--port` flag (repeatable via MultiFlags)
   - Fetch workspace details to get base domain from URL
   - If no `--port` flags: fetch detected ports from API
   - For each port: start local TCP listener on `localhost:<port>`
   - On each incoming connection: HTTP reverse proxy to `https://ws-{id}--{port}.{baseDomain}` with port_token
-  - Refresh port_token before expiry (tokens last 15min)
+  - Refresh port_token before expiry (tokens last 15min, refreshed at 13min)
   - Print active forwarding table to stderr
   - Log proxied requests to stderr
   - Handle SIGINT/SIGTERM for graceful shutdown
-- [ ] Implement `runWorkspacePorts()` — list detected ports (text + JSON output)
-- [ ] Add `--local` flag support for port remapping (e.g., `--port 3000 --local 8080`)
+- [x] Implement `runWorkspacePorts()` — list detected ports (text + JSON output)
+- [ ] ~~Add `--local` flag support for port remapping~~ — deferred to `tasks/backlog/2026-05-27-workspace-forward-local-port-remap.md`
 
 ### CLI: Help Text & Output
-- [ ] Update `helpText()` in `run.go` to include workspace commands
-- [ ] Format forwarding status output (table of port mappings)
-- [ ] Format port list output for `ports` subcommand
+- [x] Update `helpText()` in `run.go` to include workspace commands
+- [x] Format forwarding status output (table of port mappings)
+- [x] Format port list output for `ports` subcommand
 
 ### Tests
-- [ ] Test workspace namespace dispatch (unknown subcommand, missing args)
-- [ ] Test `workspace <id> ports` with mocked API response
-- [ ] Test `workspace <id> forward` argument parsing (--port flag, multiple ports)
-- [ ] Test `workspace <id> forward` with no --port flag fetches all detected ports
-- [ ] Test port token refresh logic
-- [ ] Test graceful shutdown behavior
+- [x] Test workspace namespace dispatch (unknown subcommand, missing args)
+- [x] Test `workspace <id> ports` with mocked API response (normal, empty, JSON, error, auth)
+- [x] Test `workspace <id> forward` argument parsing (--port flag, multiple ports, equals form)
+- [x] Test `workspace <id> forward` with no --port flag fetches all detected ports (error case)
+- [x] Test port token refresh logic (caching, expiry-triggered refresh, API error)
+- [x] Test startForwarders (listener binding, URL construction, partial-failure cleanup)
+- [x] Test acceptConnections (proxy with token, graceful shutdown, port release)
+- [x] Test recovery status acceptance
 
 ## Acceptance Criteria
 
-- [ ] `sam workspace <id> forward` starts local listeners for all detected ports
-- [ ] `sam workspace <id> forward --port 3000` forwards only port 3000
-- [ ] `sam workspace <id> forward --port 3000 --port 8080` forwards multiple ports
-- [ ] `sam workspace <id> ports` lists detected ports (text and JSON output)
-- [ ] Ctrl+C gracefully shuts down all listeners
-- [ ] Traffic is proxied through Cloudflare URLs with valid port tokens
-- [ ] Port tokens are refreshed before expiry
-- [ ] Clear error messages for: workspace not found, workspace not running, no ports detected
-- [ ] All Go tests pass
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passes
+- [x] `sam workspace <id> forward` starts local listeners for all detected ports
+- [x] `sam workspace <id> forward --port 3000` forwards only port 3000
+- [x] `sam workspace <id> forward --port 3000 --port 8080` forwards multiple ports
+- [x] `sam workspace <id> ports` lists detected ports (text and JSON output)
+- [x] Ctrl+C gracefully shuts down all listeners (tested via context cancellation)
+- [x] Traffic is proxied through Cloudflare URLs with valid port tokens
+- [x] Port tokens are refreshed before expiry
+- [x] Clear error messages for: workspace not found, workspace not running, no ports detected
+- [x] All Go tests pass (61 tests)
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passes
 
 ## References
 
