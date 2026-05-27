@@ -35,8 +35,7 @@ import {
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
-import { buildWorkersAIGatewayUrl } from './ai-proxy-shared';
+import { fetchWorkersAIChatCompletion } from './ai-proxy-shared';
 
 /**
  * Build the system instructions for the title generation agent.
@@ -153,11 +152,17 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
     enabled: env.TASK_TITLE_GENERATION_ENABLED !== 'false',
     shortMessageThreshold: parseInt(
       env.TASK_TITLE_SHORT_MESSAGE_THRESHOLD || String(DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD),
-      10,
+      10
     ),
     maxRetries: parseInt(env.TASK_TITLE_MAX_RETRIES || String(DEFAULT_TASK_TITLE_MAX_RETRIES), 10),
-    retryDelayMs: parseInt(env.TASK_TITLE_RETRY_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_DELAY_MS), 10),
-    retryMaxDelayMs: parseInt(env.TASK_TITLE_RETRY_MAX_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS), 10),
+    retryDelayMs: parseInt(
+      env.TASK_TITLE_RETRY_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_DELAY_MS),
+      10
+    ),
+    retryMaxDelayMs: parseInt(
+      env.TASK_TITLE_RETRY_MAX_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS),
+      10
+    ),
   };
 }
 
@@ -165,7 +170,10 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
  * Classify an error for logging purposes.
  * Helps operators distinguish between timeout, rate limit, and other failures.
  */
-export function classifyError(err: unknown): { category: 'timeout' | 'rate_limit' | 'error'; message: string } {
+export function classifyError(err: unknown): {
+  category: 'timeout' | 'rate_limit' | 'error';
+  message: string;
+} {
   if (!(err instanceof Error)) {
     return { category: 'error', message: String(err) };
   }
@@ -204,41 +212,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-
 async function fetchTaskTitle(
   env: Env,
   modelId: string,
   message: string,
   maxLength: number,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string | null> {
-  const response = await fetch(buildWorkersAIGatewayUrl(env), {
-    method: 'POST',
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': JSON.stringify({ source: 'task-title', modelId }),
-    },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: maxLength,
-      messages: [
-        { role: 'system', content: buildSystemInstructions(maxLength) },
-        { role: 'user', content: message },
-      ],
-    }),
+  return fetchWorkersAIChatCompletion(env, {
+    modelId,
+    maxTokens: maxLength,
+    timeoutMs,
+    metadata: { source: 'task-title', modelId },
+    responseLabel: 'task_title.gateway_response',
+    messages: [
+      { role: 'system', content: buildSystemInstructions(maxLength) },
+      { role: 'user', content: message },
+    ],
   });
-
-  if (!response.ok) {
-    throw new Error(`Workers AI Gateway request failed with HTTP ${response.status}`);
-  }
-
-  const payload = expectJsonRecord(await response.json(), 'task_title.gateway_response');
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  const firstChoice = choices[0] ? expectJsonRecord(choices[0], 'task_title.gateway_response.choices[0]') : undefined;
-  const messageRecord = firstChoice?.message ? expectJsonRecord(firstChoice.message, 'task_title.gateway_response.message') : undefined;
-  return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
 }
 
 /**
@@ -252,7 +243,7 @@ async function fetchTaskTitle(
 export async function generateTaskTitle(
   env: Env,
   message: string,
-  config: TaskTitleConfig = {},
+  config: TaskTitleConfig = {}
 ): Promise<string> {
   const maxLength = config.maxLength ?? DEFAULT_TASK_TITLE_MAX_LENGTH;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TASK_TITLE_TIMEOUT_MS;
@@ -286,7 +277,12 @@ export async function generateTaskTitle(
 
       const title = stripMarkdown(rawTitle);
       if (!title) {
-        log.warn('task_title.empty_after_strip', { modelId, rawTitle, messageLength: message.length, attempt });
+        log.warn('task_title.empty_after_strip', {
+          modelId,
+          rawTitle,
+          messageLength: message.length,
+          attempt,
+        });
         return truncateTitle(message, maxLength);
       }
 

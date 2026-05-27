@@ -30,8 +30,7 @@ import {
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
-import { buildWorkersAIGatewayUrl } from './ai-proxy-shared';
+import { fetchWorkersAIChatCompletion } from './ai-proxy-shared';
 import { classifyError } from './task-title';
 
 /** Message shape expected from the ProjectData DO. */
@@ -84,24 +83,34 @@ export interface SummarizeEnvVars {
 export function getSummarizeConfig(env: SummarizeEnvVars): SummarizeConfig {
   return {
     model: env.CONTEXT_SUMMARY_MODEL || DEFAULT_CONTEXT_SUMMARY_MODEL,
-    maxLength: parseInt(env.CONTEXT_SUMMARY_MAX_LENGTH || String(DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH), 10),
-    timeoutMs: parseInt(env.CONTEXT_SUMMARY_TIMEOUT_MS || String(DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS), 10),
-    maxMessages: parseInt(env.CONTEXT_SUMMARY_MAX_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES), 10),
+    maxLength: parseInt(
+      env.CONTEXT_SUMMARY_MAX_LENGTH || String(DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH),
+      10
+    ),
+    timeoutMs: parseInt(
+      env.CONTEXT_SUMMARY_TIMEOUT_MS || String(DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS),
+      10
+    ),
+    maxMessages: parseInt(
+      env.CONTEXT_SUMMARY_MAX_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES),
+      10
+    ),
     recentMessages: parseInt(
       env.CONTEXT_SUMMARY_RECENT_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES),
-      10,
+      10
     ),
     shortThreshold: parseInt(
       env.CONTEXT_SUMMARY_SHORT_THRESHOLD || String(DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD),
-      10,
+      10
     ),
     headMessages: parseInt(
       env.CONTEXT_SUMMARY_HEAD_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES),
-      10,
+      10
     ),
     heuristicRecentMessages: parseInt(
-      env.CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES),
-      10,
+      env.CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES ||
+        String(DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES),
+      10
     ),
   };
 }
@@ -127,7 +136,7 @@ export function chunkMessages(
   messages: SummarizeMessage[],
   maxMessages: number,
   recentMessages: number,
-  headMessages: number = DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES,
+  headMessages: number = DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES
 ): SummarizeMessage[] {
   if (messages.length <= maxMessages) {
     return messages;
@@ -155,7 +164,7 @@ function truncateMessageContent(content: string, maxChars: number): string {
  */
 export function formatMessagesForPrompt(
   messages: SummarizeMessage[],
-  totalFiltered: number,
+  totalFiltered: number
 ): string {
   const maxContentChars = totalFiltered > 50 ? 300 : totalFiltered > 20 ? 500 : Infinity;
 
@@ -200,7 +209,7 @@ Rules:
 export function buildHeuristicSummary(
   messages: SummarizeMessage[],
   taskContext?: TaskContext,
-  recentCount: number = DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES,
+  recentCount: number = DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES
 ): string {
   const parts: string[] = [];
 
@@ -234,42 +243,25 @@ export function buildHeuristicSummary(
   return parts.join('\n').trim();
 }
 
-
 async function fetchSessionSummary(
   env: Env,
   modelId: string,
   promptInput: string,
   maxLength: number,
   timeoutMs: number,
-  messageCount: number,
+  messageCount: number
 ): Promise<string | null> {
-  const response = await fetch(buildWorkersAIGatewayUrl(env), {
-    method: 'POST',
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': JSON.stringify({ source: 'session-summarize', modelId, messageCount }),
-    },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: maxLength,
-      messages: [
-        { role: 'system', content: buildSystemInstructions(maxLength) },
-        { role: 'user', content: promptInput },
-      ],
-    }),
+  return fetchWorkersAIChatCompletion(env, {
+    modelId,
+    maxTokens: maxLength,
+    timeoutMs,
+    metadata: { source: 'session-summarize', modelId, messageCount },
+    responseLabel: 'session_summarize.gateway_response',
+    messages: [
+      { role: 'system', content: buildSystemInstructions(maxLength) },
+      { role: 'user', content: promptInput },
+    ],
   });
-
-  if (!response.ok) {
-    throw new Error(`Workers AI Gateway request failed with HTTP ${response.status}`);
-  }
-
-  const payload = expectJsonRecord(await response.json(), 'session_summarize.gateway_response');
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  const firstChoice = choices[0] ? expectJsonRecord(choices[0], 'session_summarize.gateway_response.choices[0]') : undefined;
-  const messageRecord = firstChoice?.message ? expectJsonRecord(firstChoice.message, 'session_summarize.gateway_response.message') : undefined;
-  return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
 }
 
 /**
@@ -283,7 +275,7 @@ export async function summarizeSession(
   env: Env,
   allMessages: SummarizeMessage[],
   config: SummarizeConfig = {},
-  taskContext?: TaskContext,
+  taskContext?: TaskContext
 ): Promise<SummarizeResult> {
   const maxLength = config.maxLength ?? DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH;
   const timeoutMs = config.timeoutMs ?? DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS;
@@ -292,7 +284,8 @@ export async function summarizeSession(
   const recentMessages = config.recentMessages ?? DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES;
   const shortThreshold = config.shortThreshold ?? DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD;
   const headMessages = config.headMessages ?? DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES;
-  const heuristicRecentMessages = config.heuristicRecentMessages ?? DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES;
+  const heuristicRecentMessages =
+    config.heuristicRecentMessages ?? DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES;
 
   const messageCount = allMessages.length;
   const filtered = filterMessages(allMessages);
@@ -323,7 +316,14 @@ export async function summarizeSession(
 
   // Try AI summarization
   try {
-    const summary = await fetchSessionSummary(env, modelId, promptInput, maxLength, timeoutMs, messageCount);
+    const summary = await fetchSessionSummary(
+      env,
+      modelId,
+      promptInput,
+      maxLength,
+      timeoutMs,
+      messageCount
+    );
     if (!summary) {
       log.warn('session_summarize.empty_response', { modelId, messageCount, filteredCount });
       return {
@@ -335,7 +335,8 @@ export async function summarizeSession(
     }
 
     // Enforce max length
-    const truncated = summary.length > maxLength ? summary.slice(0, maxLength - 3) + '...' : summary;
+    const truncated =
+      summary.length > maxLength ? summary.slice(0, maxLength - 3) + '...' : summary;
 
     return { summary: truncated, messageCount, filteredCount, method: 'ai' };
   } catch (err) {

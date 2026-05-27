@@ -13,6 +13,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { verifyCallbackToken } from './jwt';
 
 // =============================================================================
@@ -33,7 +34,7 @@ export interface AIProxyAuthResult {
  */
 export function extractCallbackToken(
   authHeader: string | undefined,
-  xApiKeyHeader: string | undefined,
+  xApiKeyHeader: string | undefined
 ): string | null {
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7);
@@ -51,7 +52,7 @@ export function extractCallbackToken(
 export async function verifyAIProxyAuth(
   token: string,
   env: Env,
-  db: ReturnType<typeof drizzle>,
+  db: ReturnType<typeof drizzle>
 ): Promise<AIProxyAuthResult> {
   // Unified scope check — rejects non-workspace tokens via verifyCallbackToken (F-010)
   const tokenPayload = await verifyCallbackToken(token, env, { expectedScope: 'workspace' });
@@ -105,7 +106,7 @@ export function isAnthropicModel(modelId: string): boolean {
 export class AIProxyAuthError extends Error {
   constructor(
     message: string,
-    public statusCode: number,
+    public statusCode: number
   ) {
     super(message);
     this.name = 'AIProxyAuthError';
@@ -162,6 +163,52 @@ export function buildWorkersAIGatewayUrl(env: Env): string {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
   }
   return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
+}
+
+export interface WorkersAIChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export async function fetchWorkersAIChatCompletion(
+  env: Env,
+  options: {
+    modelId: string;
+    maxTokens: number;
+    timeoutMs: number;
+    messages: WorkersAIChatMessage[];
+    metadata: Record<string, unknown>;
+    responseLabel: string;
+  }
+): Promise<string | null> {
+  const response = await fetch(buildWorkersAIGatewayUrl(env), {
+    method: 'POST',
+    signal: AbortSignal.timeout(options.timeoutMs),
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': JSON.stringify(options.metadata),
+    },
+    body: JSON.stringify({
+      model: options.modelId,
+      max_tokens: options.maxTokens,
+      messages: options.messages,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Workers AI Gateway request failed with HTTP ${response.status}`);
+  }
+
+  const payload = expectJsonRecord(await response.json(), options.responseLabel);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const firstChoice = choices[0]
+    ? expectJsonRecord(choices[0], `${options.responseLabel}.choices[0]`)
+    : undefined;
+  const messageRecord = firstChoice?.message
+    ? expectJsonRecord(firstChoice.message, `${options.responseLabel}.message`)
+    : undefined;
+  return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
 }
 
 /** Build upstream URL for Anthropic token counting via AI Gateway. */

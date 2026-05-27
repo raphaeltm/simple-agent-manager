@@ -26,6 +26,13 @@ function mockGatewayTitle(text: string | null, status = 200): Response {
   });
 }
 
+function parseGatewayRequestBody(init: RequestInit): Record<string, unknown> {
+  if (typeof init.body !== 'string') {
+    throw new Error('Expected JSON string request body');
+  }
+  return JSON.parse(init.body) as Record<string, unknown>;
+}
+
 describe('truncateTitle', () => {
   it('returns short messages unchanged', () => {
     expect(truncateTitle('Fix login bug', 100)).toBe('Fix login bug');
@@ -106,19 +113,22 @@ describe('generateTaskTitle', () => {
   });
 
   it('calls Workers AI through AI Gateway with metadata', async () => {
-    const long = 'I need you to refactor the authentication module to use JWT tokens. ' + 'a'.repeat(100);
+    const long =
+      'I need you to refactor the authentication module to use JWT tokens. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(env, long, { model: '@cf/custom/model', maxLength: 80 });
 
     expect(result).toBe('Fix authentication timeout bug');
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions');
+    expect(url).toBe(
+      'https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions'
+    );
     expect(init.headers).toMatchObject({
       Authorization: 'Bearer cf-token',
       'Content-Type': 'application/json',
       'cf-aig-metadata': JSON.stringify({ source: 'task-title', modelId: '@cf/custom/model' }),
     });
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    expect(parseGatewayRequestBody(init)).toMatchObject({
       model: '@cf/custom/model',
       max_tokens: 80,
     });
@@ -161,7 +171,9 @@ describe('generateTaskTitle', () => {
 
 describe('classifyError', () => {
   it('classifies TimeoutError as timeout', () => {
-    expect(classifyError(new DOMException('The operation was aborted', 'TimeoutError')).category).toBe('timeout');
+    expect(
+      classifyError(new DOMException('The operation was aborted', 'TimeoutError')).category
+    ).toBe('timeout');
   });
 
   it('classifies rate limit errors', () => {
