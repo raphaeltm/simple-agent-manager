@@ -47,11 +47,6 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   listGitHubInstallations: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock SettingsDrawer
-vi.mock('../../src/components/project/SettingsDrawer', () => ({
-  SettingsDrawer: () => null,
-}));
-
 function renderProject(path = '/projects/proj-1/overview') {
   return render(
     <MemoryRouter initialEntries={[path]}>

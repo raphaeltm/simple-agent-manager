@@ -6,8 +6,6 @@ export interface ProjectContextValue {
   project: ProjectDetailResponse | null;
   installations: GitHubInstallation[];
   reload: () => Promise<void>;
-  settingsOpen: boolean;
-  setSettingsOpen: (open: boolean) => void;
   infoPanelOpen: boolean;
   setInfoPanelOpen: (open: boolean) => void;
 }

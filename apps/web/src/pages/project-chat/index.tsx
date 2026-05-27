@@ -1,6 +1,7 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ProjectMessageView } from '../../components/project-message-view';
@@ -17,6 +18,7 @@ import { useProjectChatState } from './useProjectChatState';
 
 export function ProjectChat() {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
   const activeSessionId = state.sessionId ?? '';
@@ -91,7 +93,7 @@ export function ProjectChat() {
             />
             <button
               type="button"
-              onClick={() => state.setSettingsOpen(!state.settingsOpen)}
+              onClick={() => navigate(`/projects/${state.projectId}/settings`)}
               title="Project settings"
               aria-label="Project settings"
               className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
@@ -204,7 +206,7 @@ export function ProjectChat() {
           <div className="shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
             <button
               type="button"
-              onClick={() => state.setSettingsOpen(!state.settingsOpen)}
+              onClick={() => navigate(`/projects/${state.projectId}/settings`)}
               aria-label="Project settings"
               className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
             >

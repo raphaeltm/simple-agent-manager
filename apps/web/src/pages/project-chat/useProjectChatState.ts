@@ -67,7 +67,7 @@ export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { projectId, project, settingsOpen, setSettingsOpen, infoPanelOpen, setInfoPanelOpen } = useProjectContext();
+  const { projectId, project, infoPanelOpen, setInfoPanelOpen } = useProjectContext();
 
   // Execute-idea flow: pre-fill message and track ideaId for auto-linking
   const executeIdeaId = searchParams.get('executeIdea');
@@ -584,7 +584,7 @@ export function useProjectChatState() {
 
   return {
     projectId, project, sessionId,
-    settingsOpen, setSettingsOpen, infoPanelOpen, setInfoPanelOpen,
+    infoPanelOpen, setInfoPanelOpen,
     sessions, loading, isRefreshing, hasSessions, showNewChatInput,
     loadSessions, realtimeDegraded,
     sidebarOpen, setSidebarOpen,
