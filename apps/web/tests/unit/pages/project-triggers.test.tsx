@@ -49,8 +49,6 @@ const projectCtx: ProjectContextValue = {
   project: null,
   installations: [],
   reload: vi.fn().mockResolvedValue(undefined),
-  settingsOpen: false,
-  setSettingsOpen: vi.fn(),
   infoPanelOpen: false,
   setInfoPanelOpen: vi.fn(),
 };

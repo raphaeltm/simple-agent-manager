@@ -134,8 +134,6 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
     project: null,
     installations: [],
     reload: vi.fn(),
-    settingsOpen: false,
-    setSettingsOpen: vi.fn(),
     infoPanelOpen: false,
     setInfoPanelOpen: vi.fn(),
   };
