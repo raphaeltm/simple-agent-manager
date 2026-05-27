@@ -10,6 +10,7 @@ type parsedArgs struct {
 	Positionals []string
 	Flags       map[string]string
 	Bools       map[string]bool
+	MultiFlags  map[string][]string // flags that can appear multiple times
 }
 
 type globalOptions struct {
@@ -21,8 +22,9 @@ func parseArgs(args []string) (parsedArgs, error) {
 	parser := argParser{
 		args: args,
 		result: parsedArgs{
-			Flags: make(map[string]string),
-			Bools: make(map[string]bool),
+			Flags:      make(map[string]string),
+			Bools:      make(map[string]bool),
+			MultiFlags: make(map[string][]string),
 		},
 	}
 	for parser.index < len(parser.args) {
@@ -77,10 +79,13 @@ func (p *argParser) parseFlag(arg string) error {
 	}
 	if hasValue {
 		p.result.Flags[name] = value
+		p.result.MultiFlags[name] = append(p.result.MultiFlags[name], value)
 		return nil
 	}
 	if p.index < len(p.args) && !strings.HasPrefix(p.args[p.index], "--") {
-		p.result.Flags[name] = p.args[p.index]
+		v := p.args[p.index]
+		p.result.Flags[name] = v
+		p.result.MultiFlags[name] = append(p.result.MultiFlags[name], v)
 		p.index++
 		return nil
 	}
@@ -105,4 +110,8 @@ func flagValue(flags map[string]string, names ...string) string {
 		}
 	}
 	return ""
+}
+
+func flagValues(multiFlags map[string][]string, name string) []string {
+	return multiFlags[name]
 }

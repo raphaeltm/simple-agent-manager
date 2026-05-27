@@ -30,6 +30,8 @@ func Run(ctx context.Context, runtime Runtime) int {
 		return runTasks(ctx, runtime, parsed, args)
 	case "chat":
 		return runChat(ctx, runtime, parsed, args)
+	case "workspace":
+		return runWorkspace(ctx, runtime, parsed, args)
 	case "runner":
 		return runRunner(ctx, runtime, parsed, args)
 	case "harness":
@@ -312,6 +314,8 @@ Usage:
   sam --project <projectId> task submit <prompt>
   sam --project <projectId> task status <taskId>
   sam --project <projectId> chat [--session <sessionId>] <prompt>
+  sam workspace <workspaceId> forward [--port <port>...]
+  sam workspace <workspaceId> ports
   sam runner doctor
 
 Global flags:

@@ -58,6 +58,32 @@ type TaskStatusResponse struct {
 	UpdatedAt     string  `json:"updatedAt,omitempty"`
 }
 
+type WorkspaceResponse struct {
+	ID     string `json:"id"`
+	URL    string `json:"url,omitempty"`
+	Status string `json:"status,omitempty"`
+	NodeID string `json:"nodeId,omitempty"`
+	Name   string `json:"name,omitempty"`
+}
+
+type DetectedPort struct {
+	Port       int    `json:"port"`
+	Address    string `json:"address,omitempty"`
+	Label      string `json:"label,omitempty"`
+	URL        string `json:"url,omitempty"`
+	DetectedAt string `json:"detectedAt,omitempty"`
+}
+
+type PortsResponse struct {
+	Ports []DetectedPort `json:"ports"`
+}
+
+type PortTokenResponse struct {
+	Token string `json:"token"`
+	URL   string `json:"url"`
+	Port  int    `json:"port"`
+}
+
 type TaskSubmitOptions struct {
 	Agent          string
 	AgentProfile   string

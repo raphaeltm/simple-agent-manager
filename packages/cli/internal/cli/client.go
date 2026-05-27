@@ -11,6 +11,7 @@ import (
 )
 
 const apiProjectsPath = "/api/projects/"
+const apiWorkspacesPath = "/api/workspaces/"
 
 type APIClient struct {
 	config CLIConfig
@@ -53,6 +54,25 @@ func (c APIClient) SubmitTask(ctx context.Context, projectID string, message str
 func (c APIClient) GetTaskStatus(ctx context.Context, projectID string, taskID string) (TaskStatusResponse, error) {
 	var response TaskStatusResponse
 	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "tasks", taskID), nil, &response)
+	return response, err
+}
+
+func (c APIClient) GetWorkspace(ctx context.Context, workspaceID string) (WorkspaceResponse, error) {
+	var response WorkspaceResponse
+	err := c.request(ctx, http.MethodGet, apiWorkspacesPath+url.PathEscape(workspaceID), nil, &response)
+	return response, err
+}
+
+func (c APIClient) GetWorkspacePorts(ctx context.Context, workspaceID string) (PortsResponse, error) {
+	var response PortsResponse
+	err := c.request(ctx, http.MethodGet, apiWorkspacesPath+url.PathEscape(workspaceID)+"/ports", nil, &response)
+	return response, err
+}
+
+func (c APIClient) GetPortToken(ctx context.Context, workspaceID string, port int) (PortTokenResponse, error) {
+	var response PortTokenResponse
+	path := fmt.Sprintf("%s%s/port-access?port=%d", apiWorkspacesPath, url.PathEscape(workspaceID), port)
+	err := c.request(ctx, http.MethodGet, path, nil, &response)
 	return response, err
 }
 
