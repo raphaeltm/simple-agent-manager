@@ -114,9 +114,13 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
-		<-sigCh
-		cancel()
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	// Start forwarding
@@ -136,11 +140,7 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 	<-ctx.Done()
 	fmt.Fprintln(runtime.Stderr, "\nShutting down...")
 
-	// Close all listeners
-	for _, f := range forwarders {
-		f.listener.Close()
-	}
-
+	// server.Shutdown (triggered by ctx cancellation) handles listener close and request drain
 	return 0
 }
 
@@ -182,27 +182,29 @@ type portForwarder struct {
 }
 
 func startForwarders(ctx context.Context, runtime Runtime, client APIClient, workspaceID string, baseDomain string, ports []int) ([]portForwarder, error) {
+	// Phase 1: bind all listeners before launching any goroutines
 	var forwarders []portForwarder
 	for _, port := range ports {
 		remoteURL := fmt.Sprintf("https://ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
 
 		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
-			// Close already-started listeners
 			for _, f := range forwarders {
 				f.listener.Close()
 			}
 			return nil, fmt.Errorf("failed to listen on port %d: %w", port, err)
 		}
 
-		f := portForwarder{
+		forwarders = append(forwarders, portForwarder{
 			localPort: port,
 			remoteURL: remoteURL,
 			listener:  listener,
-		}
-		forwarders = append(forwarders, f)
+		})
+	}
 
-		go acceptConnections(ctx, runtime, client, workspaceID, port, listener, remoteURL)
+	// Phase 2: all listeners bound successfully, now launch goroutines
+	for _, f := range forwarders {
+		go acceptConnections(ctx, runtime, client, workspaceID, f.localPort, f.listener, f.remoteURL)
 	}
 	return forwarders, nil
 }
@@ -215,17 +217,22 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 		port:        port,
 	}
 
-	target, _ := url.Parse(remoteURL)
+	target, err := url.Parse(remoteURL)
+	if err != nil {
+		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", remoteURL, err)
+		return
+	}
+
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
 
-			// Inject port token
-			token, err := tc.getToken(req.Context())
-			if err != nil {
-				fmt.Fprintf(runtime.Stderr, "  [%s] token error: %v\n", time.Now().Format("15:04:05"), err)
+			// Inject port token as query parameter (required by Cloudflare port-access worker)
+			token, tokenErr := tc.getToken(req.Context())
+			if tokenErr != nil {
+				fmt.Fprintf(runtime.Stderr, "  [%s] token error: %v\n", time.Now().Format("15:04:05"), tokenErr)
 				return
 			}
 			q := req.URL.Query()
@@ -235,9 +242,9 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, proxyErr error) {
 			fmt.Fprintf(runtime.Stderr, "  [%s] proxy error for %s %s: %v\n",
-				time.Now().Format("15:04:05"), r.Method, r.URL.Path, err)
+				time.Now().Format("15:04:05"), r.Method, r.URL.Path, proxyErr)
 			w.WriteHeader(http.StatusBadGateway)
 		},
 	}
@@ -248,6 +255,9 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 				time.Now().Format("15:04:05"), r.Method, r.URL.Path, port)
 			proxy.ServeHTTP(w, r)
 		}),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -275,18 +285,22 @@ type tokenCache struct {
 // Tokens are refreshed 2 minutes before expiry (tokens last 15 minutes).
 func (tc *tokenCache) getToken(ctx context.Context) (string, error) {
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
-
 	if tc.token != "" && time.Now().Before(tc.expiresAt) {
-		return tc.token, nil
+		t := tc.token
+		tc.mu.Unlock()
+		return t, nil
 	}
+	tc.mu.Unlock()
 
 	resp, err := tc.client.GetPortToken(ctx, tc.workspaceID, tc.port)
 	if err != nil {
 		return "", err
 	}
+
+	tc.mu.Lock()
 	tc.token = resp.Token
 	// Refresh 2 minutes before the 15-minute expiry
 	tc.expiresAt = time.Now().Add(13 * time.Minute)
+	tc.mu.Unlock()
 	return tc.token, nil
 }
