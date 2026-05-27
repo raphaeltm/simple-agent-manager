@@ -1,5 +1,5 @@
 /**
- * AI-powered task title generation using Mastra + Cloudflare Workers AI.
+ * AI-powered task title generation using Cloudflare AI Gateway + Workers AI.
  *
  * Uses a small LLM to generate concise, descriptive task titles from
  * long-form chat messages. Falls back to naive truncation on failure.
