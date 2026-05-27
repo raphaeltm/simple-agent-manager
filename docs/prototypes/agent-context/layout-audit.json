@@ -1,0 +1,397 @@
+[
+  {
+    "viewport": "desktop",
+    "label": "Overview",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 800,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1113,
+    "wrapperClientHeight": 800,
+    "overflowingCount": 0,
+    "overflowing": []
+  },
+  {
+    "viewport": "desktop",
+    "label": "Memory",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 800,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1584,
+    "wrapperClientHeight": 800,
+    "overflowingCount": 0,
+    "overflowing": []
+  },
+  {
+    "viewport": "desktop",
+    "label": "Policies",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 800,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1572,
+    "wrapperClientHeight": 800,
+    "overflowingCount": 0,
+    "overflowing": []
+  },
+  {
+    "viewport": "desktop",
+    "label": "Agent actions",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 800,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1447,
+    "wrapperClientHeight": 800,
+    "overflowingCount": 0,
+    "overflowing": []
+  },
+  {
+    "viewport": "desktop",
+    "label": "Missions",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 800,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1134,
+    "wrapperClientHeight": 800,
+    "overflowingCount": 0,
+    "overflowing": []
+  },
+  {
+    "viewport": "mobile",
+    "label": "Overview",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 667,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1875,
+    "wrapperClientHeight": 667,
+    "overflowingCount": 9,
+    "overflowing": [
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Agent actions",
+        "right": 478.015625,
+        "left": 343.171875
+      },
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Missions",
+        "right": 590.484375,
+        "left": 486.015625
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-clipboard-list",
+        "text": "",
+        "right": 515.015625,
+        "left": 499.015625
+      },
+      {
+        "tag": "rect",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 504.3489685058594
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 512.3489379882812,
+        "left": 501.6822814941406
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 507.015625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 507.015625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 504.3556213378906,
+        "left": 504.3489685058594
+      }
+    ]
+  },
+  {
+    "viewport": "mobile",
+    "label": "Memory",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 667,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 2468,
+    "wrapperClientHeight": 667,
+    "overflowingCount": 9,
+    "overflowing": [
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Agent actions",
+        "right": 478.015625,
+        "left": 343.171875
+      },
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Missions",
+        "right": 590.484375,
+        "left": 486.015625
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-clipboard-list",
+        "text": "",
+        "right": 515.015625,
+        "left": 499.015625
+      },
+      {
+        "tag": "rect",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 504.3489685058594
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 512.3489379882812,
+        "left": 501.6822814941406
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 507.015625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 507.015625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 504.3556213378906,
+        "left": 504.3489685058594
+      }
+    ]
+  },
+  {
+    "viewport": "mobile",
+    "label": "Policies",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 667,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 2668,
+    "wrapperClientHeight": 667,
+    "overflowingCount": 9,
+    "overflowing": [
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Agent actions",
+        "right": 478.015625,
+        "left": 343.171875
+      },
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Missions",
+        "right": 590.484375,
+        "left": 486.015625
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-clipboard-list",
+        "text": "",
+        "right": 515.015625,
+        "left": 499.015625
+      },
+      {
+        "tag": "rect",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 504.3489685058594
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 512.3489379882812,
+        "left": 501.6822814941406
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 507.015625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 509.6822814941406,
+        "left": 507.015625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 504.3556213378906,
+        "left": 504.3489685058594
+      }
+    ]
+  },
+  {
+    "viewport": "mobile",
+    "label": "Agent actions",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 667,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 2223,
+    "wrapperClientHeight": 667,
+    "overflowingCount": 12,
+    "overflowing": [
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Overview",
+        "right": 5.359375,
+        "left": -103
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-eye",
+        "text": "",
+        "right": -74,
+        "left": -90
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": -75.33299255371094,
+        "left": -88.66700744628906
+      },
+      {
+        "tag": "circle",
+        "className": "",
+        "text": "",
+        "right": -80,
+        "left": -84
+      },
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Missions",
+        "right": 475.484375,
+        "left": 371.015625
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-clipboard-list",
+        "text": "",
+        "right": 400.015625,
+        "left": 384.015625
+      },
+      {
+        "tag": "rect",
+        "className": "",
+        "text": "",
+        "right": 394.6822814941406,
+        "left": 389.3489685058594
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": 397.3489685058594,
+        "left": 386.6822814941406
+      }
+    ]
+  },
+  {
+    "viewport": "mobile",
+    "label": "Missions",
+    "bodyScrollTop": 0,
+    "bodyScrollHeight": 667,
+    "wrapperScrollTop": 0,
+    "wrapperScrollHeight": 1570,
+    "wrapperClientHeight": 667,
+    "overflowingCount": 15,
+    "overflowing": [
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Overview",
+        "right": -106.640625,
+        "left": -215
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-eye",
+        "text": "",
+        "right": -186,
+        "left": -202
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": -187.33299255371094,
+        "left": -200.66700744628906
+      },
+      {
+        "tag": "circle",
+        "className": "",
+        "text": "",
+        "right": -192,
+        "left": -196
+      },
+      {
+        "tag": "BUTTON",
+        "className": "flex min-h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visib",
+        "text": "Memory",
+        "right": 1.921875,
+        "left": -98.640625
+      },
+      {
+        "tag": "svg",
+        "className": "lucide lucide-brain",
+        "text": "",
+        "right": -69.640625,
+        "left": -85.640625
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": -77.64061737060547,
+        "left": -84.30783081054688
+      },
+      {
+        "tag": "path",
+        "className": "",
+        "text": "",
+        "right": -70.97341918945312,
+        "left": -77.64063262939453
+      }
+    ]
+  }
+]
