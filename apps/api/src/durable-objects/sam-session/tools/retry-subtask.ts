@@ -146,7 +146,7 @@ export async function retrySubtask(
   // Generate new task
   const newTaskId = ulid();
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env.AI, description, titleConfig);
+  const taskTitle = await generateTaskTitle(env, description, titleConfig);
 
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);

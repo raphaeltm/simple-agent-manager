@@ -260,6 +260,7 @@ export class SamSession extends DurableObject<AppEnv> {
               tools: SAM_TOOLS,
               executeTool,
             },
+            { waitUntil: this.ctx.waitUntil.bind(this.ctx) },
           );
         } catch (err) {
           log.error('sam_session.agent_loop_error', {

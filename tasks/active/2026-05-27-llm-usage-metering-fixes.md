@@ -18,18 +18,18 @@ SAM-managed LLM calls still have metering gaps. The top-level SAM and ProjectAge
 
 ## Checklist
 
-- [ ] Add AI budget gate checks before every `callLLM()` loop turn and emit an SSE error when denied.
-- [ ] Wrap successful `callLLM()` responses with `attachTokenUsageAccounting()` using the model-derived token usage format and bound execution context.
-- [ ] Add `executionCtx?: Pick<ExecutionContext, 'waitUntil'>` to `runAgentLoop()` and pass it from SamSession and ProjectAgent.
-- [ ] Move `buildWorkersAIGatewayUrl()` into `ai-proxy-shared.ts` and import it where needed.
-- [ ] Replace task-title Mastra/Workers AI binding calls with direct Workers AI Gateway fetches and metadata.
-- [ ] Replace session-summary Mastra/Workers AI binding calls with direct Workers AI Gateway fetches and metadata.
-- [ ] Update all `generateTaskTitle()` and `summarizeSession()` call sites to pass `Env`.
-- [ ] Add `chatSessionId` to AI proxy auth results and propagate `sessionId` into AI Gateway metadata for OpenAI, Anthropic, and passthrough routes.
-- [ ] Log a warning when Gateway log pagination reaches `maxPages` while more pages exist.
-- [ ] Use `resolveUnifiedBillingToken()` for admin model availability checks in GET and PUT handlers.
-- [ ] Update/add tests for Gateway routing, metadata, pagination warning, budget accounting, and billing-token fallback behavior.
-- [ ] Run focused tests and the required quality checks.
+- [x] Add AI budget gate checks before every `callLLM()` loop turn and emit an SSE error when denied.
+- [x] Wrap successful `callLLM()` responses with `attachTokenUsageAccounting()` using the model-derived token usage format and bound execution context.
+- [x] Add `executionCtx?: Pick<ExecutionContext, 'waitUntil'>` to `runAgentLoop()` and pass it from SamSession and ProjectAgent.
+- [x] Move `buildWorkersAIGatewayUrl()` into `ai-proxy-shared.ts` and import it where needed.
+- [x] Replace task-title Mastra/Workers AI binding calls with direct Workers AI Gateway fetches and metadata.
+- [x] Replace session-summary Mastra/Workers AI binding calls with direct Workers AI Gateway fetches and metadata.
+- [x] Update all `generateTaskTitle()` and `summarizeSession()` call sites to pass `Env`.
+- [x] Add `chatSessionId` to AI proxy auth results and propagate `sessionId` into AI Gateway metadata for OpenAI, Anthropic, and passthrough routes.
+- [x] Log a warning when Gateway log pagination reaches `maxPages` while more pages exist.
+- [x] Use `resolveUnifiedBillingToken()` for admin model availability checks in GET and PUT handlers.
+- [x] Update/add tests for Gateway routing, metadata, pagination warning, budget accounting, and billing-token fallback behavior.
+- [x] Run focused tests and the required quality checks.
 
 ## Acceptance Criteria
 

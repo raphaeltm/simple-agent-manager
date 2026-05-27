@@ -42,6 +42,7 @@ import {
   AIProxyAuthError,
   buildAIGatewayMetadata,
   buildAnthropicGatewayUrl,
+  buildWorkersAIGatewayUrl,
   extractCallbackToken,
   isAnthropicModel,
   verifyAIProxyAuth,
@@ -135,15 +136,6 @@ async function resolveModelId(model: string | undefined, env: Env): Promise<stri
 // Upstream URL Builders
 // =============================================================================
 
-/** Build upstream URL for Workers AI (OpenAI-compatible). */
-function buildWorkersAIUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
-  }
-  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
-}
-
 /** Build upstream URL for OpenAI chat completions via AI Gateway. */
 function buildOpenAIUrl(env: Env): string {
   const gatewayId = env.AI_GATEWAY_ID;
@@ -212,7 +204,7 @@ async function forwardToWorkersAI(
   modelId: string,
   aigMetadata: string,
 ): Promise<Response> {
-  const gatewayUrl = buildWorkersAIUrl(env);
+  const gatewayUrl = buildWorkersAIGatewayUrl(env);
   const gatewayBody = { ...body, model: modelId };
 
   const response = await fetch(gatewayUrl, {
@@ -531,7 +523,7 @@ function enforceInputLimit(c: AIProxyContext, estimatedInputTokens: number): Res
 }
 
 function buildProxyMetadata(
-  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId' | 'projectId' | 'trialId'>,
+  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId' | 'projectId' | 'chatSessionId' | 'trialId'>,
   body: Record<string, unknown>,
   modelId: string,
 ): string {
@@ -539,6 +531,7 @@ function buildProxyMetadata(
     userId: auth.userId,
     workspaceId: auth.workspaceId,
     projectId: auth.projectId,
+    sessionId: auth.chatSessionId,
     trialId: auth.trialId,
     modelId,
     stream: !!body.stream,

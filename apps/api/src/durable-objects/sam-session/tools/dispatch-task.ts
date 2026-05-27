@@ -244,7 +244,7 @@ export async function dispatchTask(
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env.AI, description, titleConfig);
+  const taskTitle = await generateTaskTitle(env, description, titleConfig);
 
   const taskId = ulid();
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';

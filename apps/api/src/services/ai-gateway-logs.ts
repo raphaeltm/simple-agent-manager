@@ -199,6 +199,15 @@ export async function iterateGatewayLogs(
       visitor(entry);
     }
 
+    if (page >= maxPages && resp.result_info.total_pages > maxPages) {
+      log.warn('ai_gateway.logs_pagination_truncated', {
+        maxPages,
+        totalPages: resp.result_info.total_pages,
+        pageSize,
+        startDate,
+      });
+    }
+
     if (resp.result.length < pageSize || page >= resp.result_info.total_pages) {
       break;
     }

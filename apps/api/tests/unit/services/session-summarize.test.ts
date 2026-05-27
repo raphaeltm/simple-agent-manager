@@ -6,8 +6,9 @@ import {
   DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD,
   DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
 import {
   buildHeuristicSummary,
   chunkMessages,
@@ -19,29 +20,30 @@ import {
   type TaskContext,
 } from '../../../src/services/session-summarize';
 
-// Mock @mastra/core/agent — use regular function (not arrow) so `new Agent(...)` works in Vitest 4
-const mockGenerate = vi.fn();
-vi.mock('@mastra/core/agent', () => ({
-  Agent: vi.fn().mockImplementation(function () { return {
-    generate: mockGenerate,
-  }; }),
-}));
-
-// Mock workers-ai-provider
-vi.mock('workers-ai-provider', () => ({
-  createWorkersAI: vi.fn().mockReturnValue(
-    vi.fn().mockReturnValue({ modelId: 'test-model' })
-  ),
-}));
-
-function createMockAi(): Ai {
+function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
-    run: vi.fn().mockResolvedValue({ response: 'test' }),
-  } as unknown as Ai;
+    CF_ACCOUNT_ID: 'account-1',
+    CF_API_TOKEN: 'cf-token',
+    AI_GATEWAY_ID: 'gateway-1',
+    ...overrides,
+  } as Env;
+}
+
+function mockGatewaySummary(text: string | null, status = 200): Response {
+  return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function makeMsg(role: string, content: string, createdAt = 0): SummarizeMessage {
   return { role, content, created_at: createdAt };
+}
+
+function makeGatewayMessages(count = 10): SummarizeMessage[] {
+  return Array.from({ length: count }, (_, i) =>
+    makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -65,10 +67,7 @@ describe('filterMessages', () => {
   });
 
   it('returns empty array when no user/assistant messages', () => {
-    const messages = [
-      makeMsg('tool', 'output'),
-      makeMsg('system', 'init'),
-    ];
+    const messages = [makeMsg('tool', 'output'), makeMsg('system', 'init')];
     expect(filterMessages(messages)).toHaveLength(0);
   });
 
@@ -128,10 +127,7 @@ describe('chunkMessages', () => {
 
 describe('formatMessagesForPrompt', () => {
   it('formats messages with role labels', () => {
-    const messages = [
-      makeMsg('user', 'Fix the bug'),
-      makeMsg('assistant', 'I found the issue'),
-    ];
+    const messages = [makeMsg('user', 'Fix the bug'), makeMsg('assistant', 'I found the issue')];
     const result = formatMessagesForPrompt(messages, 2);
     expect(result).toContain('User: Fix the bug');
     expect(result).toContain('Agent: I found the issue');
@@ -237,10 +233,16 @@ describe('getSummarizeConfig', () => {
 // ---------------------------------------------------------------------------
 
 describe('summarizeSession', () => {
-  const mockAi = createMockAi();
+  const env = createMockEnv();
+  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    mockGenerate.mockReset();
+    fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        mockGatewaySummary('## Original Task\nFix the auth module\n\n## Current State\nCompleted')
+      );
+    vi.stubGlobal('fetch', fetchMock);
   });
 
   it('returns verbatim for very short sessions (≤ shortThreshold)', async () => {
@@ -249,84 +251,81 @@ describe('summarizeSession', () => {
       makeMsg('assistant', 'Done, fixed the timeout in auth.ts'),
     ];
 
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.method).toBe('verbatim');
     expect(result.messageCount).toBe(2);
     expect(result.filteredCount).toBe(2);
     expect(result.summary).toContain('Fix login');
     // Should NOT call AI
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('calls AI for sessions above shortThreshold', async () => {
-    mockGenerate.mockResolvedValueOnce({
-      text: '## Original Task\nFix the auth module\n\n## Current State\nCompleted',
-    });
+    const messages = makeGatewayMessages();
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
-    );
-
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.method).toBe('ai');
     expect(result.summary).toContain('## Original Task');
-    expect(mockGenerate).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions'
+    );
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer cf-token',
+      'Content-Type': 'application/json',
+      'cf-aig-metadata': JSON.stringify({
+        source: 'session-summarize',
+        modelId: DEFAULT_CONTEXT_SUMMARY_MODEL,
+        messageCount: 10,
+      }),
+    });
   });
 
   it('falls back to heuristic on AI failure', async () => {
-    mockGenerate.mockRejectedValueOnce(new Error('AI service unavailable'));
+    fetchMock.mockRejectedValueOnce(new Error('AI service unavailable'));
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
-    );
+    const messages = makeGatewayMessages();
 
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.method).toBe('heuristic');
     expect(result.summary).toContain('## Previous Session Context');
   });
 
   it('falls back to heuristic on whitespace-only AI response', async () => {
-    mockGenerate.mockResolvedValueOnce({ text: '   \n  ' });
+    fetchMock.mockResolvedValueOnce(mockGatewaySummary('   \n  '));
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
-    );
+    const messages = makeGatewayMessages();
 
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.method).toBe('heuristic');
   });
 
   it('falls back to heuristic on null AI text', async () => {
-    mockGenerate.mockResolvedValueOnce({ text: null });
+    fetchMock.mockResolvedValueOnce(mockGatewaySummary(null));
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
-    );
+    const messages = makeGatewayMessages();
 
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.method).toBe('heuristic');
   });
 
   it('falls back to heuristic on empty AI response', async () => {
-    mockGenerate.mockResolvedValueOnce({ text: '' });
+    fetchMock.mockResolvedValueOnce(mockGatewaySummary(''));
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
-    );
+    const messages = makeGatewayMessages();
 
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.method).toBe('heuristic');
   });
 
   it('truncates AI response exceeding maxLength', async () => {
     const longResponse = 'x'.repeat(5000);
-    mockGenerate.mockResolvedValueOnce({ text: longResponse });
+    fetchMock.mockResolvedValueOnce(mockGatewaySummary(longResponse));
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
-    );
+    const messages = makeGatewayMessages();
 
-    const result = await summarizeSession(mockAi, messages, {
+    const result = await summarizeSession(env, messages, {
       shortThreshold: 5,
       maxLength: 100,
     });
@@ -336,7 +335,7 @@ describe('summarizeSession', () => {
   });
 
   it('filters out tool/system messages before processing', async () => {
-    mockGenerate.mockResolvedValueOnce({ text: 'Summary of session' });
+    fetchMock.mockResolvedValueOnce(mockGatewaySummary('Summary of session'));
 
     const messages = [
       makeMsg('user', 'Fix the bug'),
@@ -352,7 +351,7 @@ describe('summarizeSession', () => {
       makeMsg('assistant', 'done'),
     ];
 
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 });
     expect(result.messageCount).toBe(11); // total
     expect(result.filteredCount).toBe(8); // only user + assistant
     expect(result.method).toBe('ai');
@@ -366,7 +365,7 @@ describe('summarizeSession', () => {
 
     // For verbatim (short session), task context should appear
     const messages = [makeMsg('user', 'Fix it'), makeMsg('assistant', 'Done')];
-    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 }, ctx);
+    const result = await summarizeSession(env, messages, { shortThreshold: 5 }, ctx);
     expect(result.summary).toContain('**Task**: Fix auth timeout');
     expect(result.summary).toContain('**Branch**: sam/fix-auth');
   });

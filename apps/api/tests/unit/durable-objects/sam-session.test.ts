@@ -36,6 +36,14 @@ import { searchConversationHistory } from '../../../src/durable-objects/sam-sess
 import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
+
+function makeBudgetKv(): KVNamespace {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+  } as unknown as KVNamespace;
+}
+
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
     ctx: unknown;
@@ -459,6 +467,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -531,6 +540,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -582,6 +592,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -629,6 +640,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -686,6 +698,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop('conv-hist', history, 'New question', config, mockEnv, 'user-1', writer, () => {});
@@ -735,6 +748,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: 'test-gw',
       CF_ACCOUNT_ID: 'test-acct',
+      KV: makeBudgetKv(),
       CF_API_TOKEN: 'test-token',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
@@ -784,6 +798,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: 'my-gateway',
       CF_ACCOUNT_ID: 'my-account',
+      KV: makeBudgetKv(),
       CF_API_TOKEN: 'my-token',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
@@ -837,6 +852,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: 'gw',
       CF_ACCOUNT_ID: 'acct',
+      KV: makeBudgetKv(),
       CF_API_TOKEN: 'tok',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
@@ -887,6 +903,7 @@ describe('Agent Loop — Fetch Error Handling', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop('conv-err', [], 'Hello', config, mockEnv, 'user-1', writer, () => {});
@@ -908,6 +925,7 @@ describe('Agent Loop — Fetch Error Handling', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
       SAM_LLM_TIMEOUT_MS: '100',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
