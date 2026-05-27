@@ -17,6 +17,7 @@ import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   deleteWorkspaceOnNode,
+  getWorkspacePortsOnNode,
   waitForNodeAgentReady,
 } from '../../services/node-agent';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
@@ -97,7 +98,29 @@ crudRoutes.get('/:id/port-access', requireAuth(), requireApproved(), async (c) =
   const token = await signPortAccessToken(userId, workspaceId, port, c.env);
   const portUrl = `https://ws-${workspaceId.toLowerCase()}--${port}.${c.env.BASE_DOMAIN}/?port_token=${encodeURIComponent(token)}`;
 
+  // Return JSON when client prefers it (CLI), redirect otherwise (browser)
+  const accept = c.req.header('Accept') ?? '';
+  if (accept.includes('application/json')) {
+    return c.json({ token, url: portUrl, port });
+  }
   return c.redirect(portUrl, 302);
+});
+
+crudRoutes.get('/:id/ports', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace has no node assigned');
+  }
+  if (workspace.status !== 'running' && workspace.status !== 'recovery') {
+    throw errors.badRequest(`Workspace is ${workspace.status}, not running`);
+  }
+
+  const result = await getWorkspacePortsOnNode(workspace.nodeId, workspaceId, c.env, userId);
+  return c.json(result);
 });
 
 crudRoutes.patch('/:id', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspaceSchema), async (c) => {

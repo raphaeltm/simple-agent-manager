@@ -561,6 +561,19 @@ export async function nodeAgentRawRequest(
   return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
 }
 
+export async function getWorkspacePortsOnNode(
+  nodeId: string,
+  workspaceId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/ports`, {
+    method: 'GET',
+    userId,
+    workspaceId,
+  });
+}
+
 export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
