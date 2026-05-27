@@ -45,6 +45,7 @@ import {
   UpsertProjectRuntimeFileSchema,
 } from '../../schemas';
 import { encrypt } from '../../services/encryption';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -192,7 +193,7 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     }
 
     const installation = await requireOwnedInstallation(db, installationId, userId);
-    await assertRepositoryAccess(installation.installationId, repository, c.env);
+    await assertRepositoryAccess(getExternalInstallationId(installation), repository, c.env);
 
     const duplicateRepositoryRows = await db
       .select({ id: schema.projects.id })
@@ -754,8 +755,9 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
 
   // Only verify GitHub repository access for GitHub-backed projects
   if (existing.installationId) {
+    const installation = await requireOwnedInstallation(db, existing.installationId, userId);
     await assertRepositoryAccess(
-      (await requireOwnedInstallation(db, existing.installationId, userId)).installationId,
+      getExternalInstallationId(installation),
       existing.repository,
       c.env
     );

@@ -23,7 +23,7 @@
   "dependencies": {
     "@xterm/xterm": "catalog:",
     "@xterm/addon-fit": "catalog:",
-    "@xterm/addon-attach": "0.11.0"
+    "@xterm/addon-attach": "0.12.0"
   },
   "peerDependencies": {
     "react": "catalog:",

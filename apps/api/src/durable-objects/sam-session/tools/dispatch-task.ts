@@ -21,6 +21,7 @@ import {
   isValidAgentType,
   isValidLocationForProvider,
   isValidProvider,
+  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -193,6 +194,10 @@ export async function dispatchTask(
     ?? projectDefaultProvider
     ?? null;
 
+  const vmSizeSource = vmSize ? 'task' as const
+    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
+    : project.defaultVmSize ? 'project' as const
+    : 'platform' as const;
   const resolvedVmSize: VMSize = vmSize
     ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
     ?? (project.defaultVmSize as VMSize | null)
@@ -249,6 +254,17 @@ export async function dispatchTask(
     maxLength: branchMaxLength,
   });
 
+  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
+  const resolvedReservation = resolveResourceReservation(
+    {}, // MCP dispatch: no task-level resource requirements in Phase 0
+    {
+      taskId,
+      agentProfileId: resolvedProfile?.profileId ?? undefined,
+      projectId: input.projectId,
+      userId: ctx.userId,
+    },
+  );
+
   const now = new Date().toISOString();
 
   // ── Insert task ────────────────────────────────────────────────────────
@@ -256,15 +272,18 @@ export async function dispatchTask(
     `INSERT INTO tasks (id, project_id, user_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, mission_id, triggered_by,
+     requested_vm_size, requested_vm_size_source, resolved_reservation_json,
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
      ?, ?, ?, 'mcp',
+     ?, ?, ?,
      ?, ?)`,
   ).bind(
     taskId, input.projectId, ctx.userId,
     taskTitle, description, priority, branchName,
     ctx.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null, input.missionId?.trim() || null,
+    resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
     now, now,
   ).run();
 
@@ -353,6 +372,8 @@ export async function dispatchTask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

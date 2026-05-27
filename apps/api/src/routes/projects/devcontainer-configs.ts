@@ -11,6 +11,7 @@ import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { getInstallationToken } from '../../services/github-app';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { requireOwnedInstallation } from './_helpers';
 
 export interface DevcontainerConfigEntry {
@@ -203,7 +204,7 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
 
   // Load the GitHub installation to get the external installation ID
   const installation = await requireOwnedInstallation(db, project.installationId, userId);
-  const { token } = await getInstallationToken(installation.installationId, c.env);
+  const { token } = await getInstallationToken(getExternalInstallationId(installation), c.env);
 
   try {
     // Fetch the repo tree recursively

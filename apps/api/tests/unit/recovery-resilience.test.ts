@@ -228,7 +228,7 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('records max lifetime destruction failure in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'max_lifetime_node_cleanup_failure'");
+    expect(nodeCleanupSource).toContain("'max_lifetime_node_cleanup_failure'");
   });
 
   it('uses "info" for successful cleanups and "error" for failures', () => {
@@ -240,10 +240,9 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('uses warn level for max lifetime destruction', () => {
-    // Max lifetime destruction uses warn level (absolute ceiling was removed)
-    const idx = nodeCleanupSource.indexOf("recoveryType: 'max_lifetime_node_cleanup'");
-    const section = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
-    expect(section).toContain("level: 'warn'");
+    // Max lifetime destruction goes through the shared auto-provisioned cleanup helper.
+    expect(nodeCleanupSource).toContain("level: 'warn'");
+    expect(nodeCleanupSource).toContain("'max_lifetime_node_cleanup'");
   });
 });
 
@@ -293,7 +292,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   it('uses grace period to avoid flagging recently created resources', () => {
     // Both orphan queries filter by created_at/updated_at to avoid false positives
     const orphanSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('// 3. Orphan cleanup:'),
+      nodeCleanupSource.indexOf('Orphan cleanup: task-created workspaces'),
     );
     // Orphan workspace query uses gracePeriodMs cutoff on created_at
     expect(orphanSection).toContain('w.created_at < ?');

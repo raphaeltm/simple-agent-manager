@@ -28,6 +28,7 @@ import {
   DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
+  DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS,
   DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS,
   DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
@@ -92,8 +93,10 @@ export class TaskRunner extends DurableObject<Env> {
       workspaceErrorMessage: null,
       createdAt: now,
       lastStepAt: now,
+      provisioningStartedAt: null,
       agentReadyStartedAt: null,
       workspaceReadyStartedAt: null,
+      lastD1Step: null,
       completed: false,
     };
 
@@ -250,7 +253,18 @@ export class TaskRunner extends DurableObject<Env> {
       getWorkspaceReadyTimeoutMs: () => this.getWorkspaceReadyTimeoutMs(),
       getWorkspaceReadyPollIntervalMs: () => this.getWorkspaceReadyPollIntervalMs(),
       getProvisionPollIntervalMs: () => this.getProvisionPollIntervalMs(),
+      getProvisionTimeoutMs: () => this.getProvisionTimeoutMs(),
       updateD1ExecutionStep: async (taskId: string, step: TaskExecutionStep) => {
+        // Idempotent guard: skip redundant D1 writes when the step hasn't changed.
+        // This prevents updated_at from being refreshed on every poll cycle,
+        // which was defeating the stuck-tasks cron's staleness detection.
+        // Persisted in DO state so the guard survives DO eviction/reload.
+        const currentState = await this.ctx.storage.get<TaskRunnerState>('state');
+        if (currentState && step === currentState.lastD1Step) return;
+        if (currentState) {
+          currentState.lastD1Step = step;
+          await this.ctx.storage.put('state', currentState);
+        }
         await this.env.DATABASE.prepare(
           `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`
         ).bind(step, new Date().toISOString(), taskId).run();
@@ -268,6 +282,10 @@ export class TaskRunner extends DurableObject<Env> {
     // Normalize fields added after initial schema version (backward compat
     // for DOs started before deployment of the field).
     raw.config.systemPromptAppend ??= null;
+    raw.provisioningStartedAt ??= null;
+    raw.agentReadyStartedAt ??= null;
+    raw.workspaceReadyStartedAt ??= null;
+    raw.lastD1Step ??= null;
     return raw;
   }
 
@@ -328,6 +346,13 @@ export class TaskRunner extends DurableObject<Env> {
     return parseEnvInt(
       this.env.TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
       DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
+    );
+  }
+
+  private getProvisionTimeoutMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_PROVISION_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
     );
   }
 }

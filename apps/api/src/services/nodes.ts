@@ -166,6 +166,8 @@ export async function provisionNode(
       originCaKey: env.ORIGIN_CA_KEY,
       vmAgentPort: env.VM_AGENT_PORT,
       devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
+      swapSizeMb: env.SWAP_SIZE_MB,
+      swapSwappiness: env.SWAP_SWAPPINESS,
     });
 
     if (!validateCloudInitSize(cloudInit)) {

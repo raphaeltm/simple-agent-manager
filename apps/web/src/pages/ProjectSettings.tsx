@@ -1,29 +1,30 @@
-import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, VMSize } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { Button, Skeleton,Spinner } from '@simple-agent-manager/ui';
+import { Button, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { ScalingSettings } from '../components/ScalingSettings';
+import { formatProviderCatalogContext, selectProviderCatalog } from '../components/vm/format-vm-size';
+import { VmSizeCard } from '../components/vm/VmSizeCard';
+import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
 import {
   deleteProject,
   deleteProjectRuntimeEnvVar,
   deleteProjectRuntimeFile,
   getProjectRuntimeConfig,
-  getProviderCatalog,
   updateProject,
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from '../lib/api';
-import { FALLBACK_VM_SIZES } from '../lib/constants';
 import { useProjectContext } from './ProjectContext';
 
 export function ProjectSettings() {
@@ -52,36 +53,9 @@ export function ProjectSettings() {
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
 
   // Provider catalog for accurate VM size descriptions
-  const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(true);
-
-  useEffect(() => {
-    setCatalogLoading(true);
-    getProviderCatalog()
-      .then((resp) => {
-        setCatalog(resp.catalogs[0] ?? null);
-      })
-      .catch(() => {
-        // Catalog unavailable — use fallback descriptions
-      })
-      .finally(() => {
-        setCatalogLoading(false);
-      });
-  }, []);
-
-  // Build VM size options from catalog or fallback
-  const vmSizes = catalog
-    ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
-        const info = catalog.sizes[size];
-        return {
-          value: size,
-          label: size.charAt(0).toUpperCase() + size.slice(1),
-          description: info
-            ? `${info.vcpu} vCPUs, ${info.ramGb} GB RAM \u2014 ${info.price}`
-            : size,
-        };
-      })
-    : FALLBACK_VM_SIZES;
+  const { catalogs, loading: catalogLoading } = useProviderCatalog();
+  const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
+  const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
 
   // Sync from project when it reloads
   useEffect(() => {
@@ -309,35 +283,20 @@ export function ProjectSettings() {
           </h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
             Used when launching new workspaces from this project. Click again to clear.
+            {catalogContext ? ` Catalog: ${catalogContext}.` : ' Exact specs depend on the selected provider.'}
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {vmSizes.map((size) => {
-            const isSelected = defaultVmSize === size.value;
-            return (
-              <button
-                key={size.value}
-                type="button"
-                aria-pressed={isSelected}
-                disabled={savingVmSize || catalogLoading}
-                onClick={() => void handleSaveVmSize(size.value)}
-                className={`p-3 rounded-md text-left text-fg-primary transition-all ${
-                  isSelected
-                    ? 'border-2 border-accent bg-accent-tint'
-                    : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
-                } ${savingVmSize || catalogLoading ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-              >
-                <div className="font-medium">{size.label}</div>
-                <div className="text-xs text-fg-muted mt-0.5">
-                  {catalogLoading ? (
-                    <Skeleton width="80%" height="10px" />
-                  ) : (
-                    size.description
-                  )}
-                </div>
-              </button>
-            );
-          })}
+          {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
+            <VmSizeCard
+              key={size}
+              size={size}
+              sizeInfo={activeCatalog?.sizes[size] ?? null}
+              selected={defaultVmSize === size}
+              disabled={savingVmSize || catalogLoading}
+              onClick={() => void handleSaveVmSize(size)}
+            />
+          ))}
         </div>
         {!defaultVmSize && (
           <div className="text-xs text-fg-muted">

@@ -12,6 +12,7 @@ import { Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { useToast } from '../../hooks/useToast';
 import {
@@ -23,10 +24,11 @@ import {
   upsertProjectRuntimeFile,
 } from '../../lib/api';
 import { listTriggers } from '../../lib/api/triggers';
-import { FALLBACK_VM_SIZES } from '../../lib/constants';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { DeploymentSettings } from '../DeploymentSettings';
+import { formatProviderCatalogContext, selectProviderCatalog } from '../vm/format-vm-size';
+import { VmSizeCard } from '../vm/VmSizeCard';
 
 const WORKSPACE_PROFILES: { value: WorkspaceProfile; label: string; description: string }[] = [
   { value: 'full', label: 'Full', description: 'Build project devcontainer' },
@@ -42,6 +44,9 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const toast = useToast();
   const navigate = useNavigate();
   const { projectId, project, reload } = useProjectContext();
+  const { catalogs, loading: catalogLoading } = useProviderCatalog();
+  const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
+  const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Track dirty state for unsaved changes confirmation (T040)
@@ -350,31 +355,21 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 </h3>
                 <p className="m-0 mt-1 text-xs text-fg-muted">
                   Used when launching new workspaces. Click again to clear.
+                  {catalogContext ? ` Catalog: ${catalogContext}.` : ' Exact specs depend on the selected provider.'}
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {FALLBACK_VM_SIZES.map((size) => {
-                  const isSelected = defaultVmSize === size.value;
-                  return (
-                    <button
-                      key={size.value}
-                      type="button"
-                      aria-pressed={isSelected}
-                      disabled={savingVmSize}
-                      onClick={() => void handleSaveVmSize(size.value)}
-                      className={`p-2 rounded-md text-left text-fg-primary ${
-                        isSelected
-                          ? 'border-2 border-accent bg-accent-tint'
-                          : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
-                      } ${savingVmSize ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-                    >
-                      <div className="font-medium text-[0.8125rem]">{size.label}</div>
-                      <div className="text-xs text-fg-muted mt-0.5">
-                        {size.description}
-                      </div>
-                    </button>
-                  );
-                })}
+                {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
+                  <VmSizeCard
+                    key={size}
+                    size={size}
+                    sizeInfo={activeCatalog?.sizes[size] ?? null}
+                    selected={defaultVmSize === size}
+                    disabled={savingVmSize || catalogLoading}
+                    onClick={() => void handleSaveVmSize(size)}
+                    compact
+                  />
+                ))}
               </div>
               {!defaultVmSize && (
                 <div className="text-xs text-fg-muted">

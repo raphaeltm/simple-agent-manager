@@ -38,6 +38,24 @@ runcmd:
   - systemctl disable --now unattended-upgrades || true
   - chage -E -1 -M -1 -d "$(date +%Y-%m-%d)" root || true
 
+  - 'logger -t sam-boot "PHASE START: swap-setup"'
+  - |
+    SWAP_SIZE_MB="{{ swap_size_mb }}"
+    SWAP_SWAPPINESS="{{ swap_swappiness }}"
+    if [ "$SWAP_SIZE_MB" -gt 0 ] 2>/dev/null; then
+      logger -t sam-boot "Configuring \${SWAP_SIZE_MB}MB swap file"
+      fallocate -l "\${SWAP_SIZE_MB}M" /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      sysctl -w "vm.swappiness=\${SWAP_SWAPPINESS}"
+      logger -t sam-boot "Swap configured: \${SWAP_SIZE_MB}MB, swappiness=\${SWAP_SWAPPINESS}"
+    else
+      logger -t sam-boot "Swap disabled (SWAP_SIZE_MB=0)"
+    fi
+  - 'logger -t sam-boot "PHASE END: swap-setup"'
+
   - 'logger -t sam-boot "PHASE START: vm-agent-download"'
   - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
   - |
@@ -278,6 +296,11 @@ write_files:
       SystemMaxUse={{ log_journal_max_use }}
       SystemKeepFree={{ log_journal_keep_free }}
       MaxRetentionSec={{ log_journal_max_retention }}
+    permissions: '0644'
+
+  - path: /etc/sysctl.d/99-sam-swap.conf
+    content: |
+      vm.swappiness={{ swap_swappiness }}
     permissions: '0644'
 
   - path: /etc/docker/daemon.json

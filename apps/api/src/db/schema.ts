@@ -238,6 +238,7 @@ export const githubInstallations = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     installationId: text('installation_id').notNull(),
+    externalInstallationId: text('external_installation_id'),
     accountType: text('account_type').notNull(),
     accountName: text('account_name').notNull(),
     createdAt: text('created_at')
@@ -248,10 +249,9 @@ export const githubInstallations = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    userInstallationIdx: uniqueIndex('idx_github_installations_user_installation').on(
-      table.userId,
-      table.installationId
-    ),
+    userInstallationIdx: uniqueIndex('idx_github_installations_user_external_installation')
+      .on(table.userId, table.externalInstallationId)
+      .where(sql`external_installation_id IS NOT NULL`),
   })
 );
 
@@ -529,6 +529,18 @@ export const tasks = sqliteTable(
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
     /** Scheduler classification for mission tasks. Null for standalone tasks. */
     schedulerState: text('scheduler_state'),
+    /** Resolved VM size for audit (e.g. 'small', 'medium', 'large'). */
+    requestedVmSize: text('requested_vm_size'),
+    /** Where the VM size came from (e.g. 'task', 'agent-profile', 'project', 'platform'). */
+    requestedVmSizeSource: text('requested_vm_size_source'),
+    /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
+    resourceRequirementsJson: text('resource_requirements_json'),
+    /** Which level of the precedence chain provided the resource requirements. */
+    resourceRequirementsSource: text('resource_requirements_source'),
+    /** JSON snapshot of ResolvedResourceReservation (scheduler-facing units). */
+    resolvedReservationJson: text('resolved_reservation_json'),
+    /** JSON snapshot of PlacementExplanation (audit trail). */
+    placementExplanationJson: text('placement_explanation_json'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -676,6 +688,12 @@ export const workspaces = sqliteTable(
     chatSessionId: text('chat_session_id'),
     errorMessage: text('error_message'),
     dispatchedAt: text('dispatched_at'),
+    /** JSON snapshot of ResourceRequirements for audit. */
+    resourceRequirementsJson: text('resource_requirements_json'),
+    /** JSON snapshot of ResolvedResourceReservation for audit. */
+    resolvedReservationJson: text('resolved_reservation_json'),
+    /** JSON snapshot of PlacementExplanation for audit. */
+    placementExplanationJson: text('placement_explanation_json'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

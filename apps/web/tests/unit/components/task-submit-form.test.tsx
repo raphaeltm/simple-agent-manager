@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  getProject: vi.fn(),
+  getProviderCatalog: vi.fn(),
   listAgentProfiles: vi.fn(),
   requestAttachmentUpload: vi.fn(),
   uploadAttachmentToR2: vi.fn(),
@@ -10,6 +12,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  getProject: mocks.getProject,
+  getProviderCatalog: mocks.getProviderCatalog,
   listAgentProfiles: mocks.listAgentProfiles,
   requestAttachmentUpload: mocks.requestAttachmentUpload,
   uploadAttachmentToR2: mocks.uploadAttachmentToR2,
@@ -51,6 +55,17 @@ function renderForm(overrides: Partial<React.ComponentProps<typeof TaskSubmitFor
 describe('TaskSubmitForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getProject.mockResolvedValue({ id: 'proj-1', defaultProvider: 'hetzner', defaultLocation: 'nbg1' });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [{
+      provider: 'hetzner',
+      defaultLocation: 'nbg1',
+      locations: [{ id: 'nbg1', name: 'Nuremberg', country: 'DE' }],
+      sizes: {
+        small: { type: 'cx22', vcpu: 2, ramGb: 4, storageGb: 40, price: '€4.35/mo' },
+        medium: { type: 'cx32', vcpu: 4, ramGb: 8, storageGb: 80, price: '€7.69/mo' },
+        large: { type: 'cx42', vcpu: 8, ramGb: 16, storageGb: 160, price: '€14.51/mo' },
+      },
+    }] });
     mocks.listAgentProfiles.mockResolvedValue([]);
   });
 
@@ -148,6 +163,24 @@ describe('TaskSubmitForm', () => {
     expect(screen.getByText('VM Size')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Hide advanced options'));
     expect(screen.queryByText('Priority')).not.toBeInTheDocument();
+  });
+
+  it('submits the selected VM size from advanced options', async () => {
+    const { props } = renderForm();
+    fireEvent.click(screen.getByText('Show advanced options'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Medium — cx32/)).toBeInTheDocument();
+    });
+
+    const [, vmSizeSelect] = screen.getAllByRole('combobox');
+    fireEvent.change(vmSizeSelect, { target: { value: 'large' } });
+    fireEvent.change(screen.getByPlaceholderText('Describe the task for the agent...'), { target: { value: 'Use a large node' } });
+    fireEvent.click(screen.getByText('Run Now'));
+
+    await waitFor(() => {
+      expect(props.onRunNow).toHaveBeenCalledWith('Use a large node', expect.objectContaining({ vmSize: 'large' }));
+    });
   });
 
   it('renders attach files button', () => {

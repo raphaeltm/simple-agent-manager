@@ -1599,3 +1599,149 @@ describe('integrated size validation in generateCloudInit', () => {
     }))).not.toThrow();
   });
 });
+
+describe('swap file configuration', () => {
+  /** Find the runcmd entry containing the swap setup script block. */
+  function findSwapBlock(parsed: { runcmd: (string | unknown)[] }): string {
+    const block = parsed.runcmd.find(
+      (cmd) => typeof cmd === 'string' && cmd.includes('SWAP_SIZE_MB='),
+    );
+    return (block as string) ?? '';
+  }
+
+  it('uses default swap values (2048 MB, swappiness 60)', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('SWAP_SIZE_MB="2048"');
+    expect(swapBlock).toContain('SWAP_SWAPPINESS="60"');
+
+    // Check sysctl.d persistence file
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.content).toContain('vm.swappiness=60');
+  });
+
+  it('accepts custom swap values', () => {
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '4096', swapSwappiness: '10' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('SWAP_SIZE_MB="4096"');
+    expect(swapBlock).toContain('SWAP_SWAPPINESS="10"');
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
+    );
+    expect(sysctlFile.content).toContain('vm.swappiness=10');
+  });
+
+  it('disables swap when swapSizeMb is "0"', () => {
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '0' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('SWAP_SIZE_MB="0"');
+    // The conditional block means fallocate/mkswap/swapon won't execute
+    expect(swapBlock).toContain('Swap disabled (SWAP_SIZE_MB=0)');
+  });
+
+  it('generates sysctl persistence file in write_files', () => {
+    const config = generateCloudInit(
+      baseVariables({ swapSwappiness: '80' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.permissions).toBe('0644');
+    expect(sysctlFile.content.trim()).toBe('vm.swappiness=80');
+  });
+
+  it('places swap setup before vm-agent download in runcmd', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const runcmd = parsed.runcmd as string[];
+    const swapIdx = runcmd.findIndex(
+      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: swap-setup'),
+    );
+    const agentIdx = runcmd.findIndex(
+      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: vm-agent-download'),
+    );
+    expect(swapIdx).toBeGreaterThan(-1);
+    expect(agentIdx).toBeGreaterThan(-1);
+    expect(swapIdx).toBeLessThan(agentIdx);
+  });
+
+  it('rejects non-numeric swapSizeMb', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '2G' })),
+    ).toThrow('swapSizeMb');
+  });
+
+  it('rejects shell metacharacters in swapSizeMb', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '2048; rm -rf /' })),
+    ).toThrow('swapSizeMb');
+  });
+
+  it('rejects out-of-range swapSizeMb (>65536)', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '99999' })),
+    ).toThrow('swapSizeMb');
+  });
+
+  it('rejects out-of-range swapSwappiness (>100)', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: '150' })),
+    ).toThrow('swapSwappiness');
+  });
+
+  it('rejects non-numeric swapSwappiness', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: 'high' })),
+    ).toThrow('swapSwappiness');
+  });
+
+  it('rejects shell metacharacters in swapSwappiness', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: '60; rm -rf /' })),
+    ).toThrow('swapSwappiness');
+  });
+
+  it('accepts boundary values (swapSizeMb=0, swapSwappiness=0 and 100)', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '0', swapSwappiness: '0' })),
+    ).not.toThrow();
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '65536', swapSwappiness: '100' })),
+    ).not.toThrow();
+  });
+
+  it('still writes sysctl.d with default swappiness when swap is disabled', () => {
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '0' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.content.trim()).toBe('vm.swappiness=60');
+  });
+});

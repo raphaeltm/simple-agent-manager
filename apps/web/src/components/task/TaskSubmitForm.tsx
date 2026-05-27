@@ -1,10 +1,12 @@
-import type { AgentProfile, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile, CredentialProvider, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef,useState } from 'react';
 
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import type { TaskAttachmentRef } from '../../lib/api';
 import {
+  getProject,
   listAgentProfiles,
   requestAttachmentUpload,
   updateAgentProfile,
@@ -14,6 +16,7 @@ import { formatFileSize } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { SplitButton } from '../ui/SplitButton';
+import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -47,6 +50,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   onRunNow,
   onSaveToBacklog,
 }) => {
+  const { catalogs } = useProviderCatalog();
   const [title, setTitle] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [description, setDescription] = useState('');
@@ -58,6 +62,8 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [projectProvider, setProjectProvider] = useState<CredentialProvider | null>(null);
+  const [projectLocation, setProjectLocation] = useState<string | null>(null);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentState[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,6 +72,10 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const selectedProfile = hasProfile
     ? profiles.find((p) => p.id === agentProfileId) ?? null
     : null;
+  const displayProvider = selectedProfile?.provider ?? projectProvider;
+  const displayLocation = selectedProfile?.vmLocation ?? projectLocation;
+  const activeCatalog = selectProviderCatalog(catalogs, displayProvider);
+  const providerContext = formatProviderCatalogContext(activeCatalog, displayLocation);
 
   const uploading = attachments.some((a) => a.status === 'uploading' || a.status === 'pending');
   const allUploadsComplete = attachments.length === 0 || attachments.every((a) => a.status === 'complete');
@@ -80,6 +90,22 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getProject(projectId)
+      .then((project) => {
+        if (cancelled) return;
+        setProjectProvider(project.defaultProvider ?? null);
+        setProjectLocation(project.defaultLocation ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProjectProvider(null);
+        setProjectLocation(null);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const handleUpdateProfile = useCallback(async (_profileId: string, data: UpdateAgentProfileRequest) => {
     await updateAgentProfile(projectId, _profileId, data);
@@ -432,16 +458,23 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 <div>
                   <label className="text-xs text-fg-muted block mb-1">
                     VM Size
+                    {providerContext && (
+                      <span className="text-fg-muted font-normal ml-1">
+                        ({providerContext})
+                      </span>
+                    )}
                   </label>
                   <select
                     value={vmSize}
                     onChange={(e) => setVmSize(e.target.value as VMSize | '')}
                     className="py-1 px-2 rounded-sm text-fg-primary text-sm"
                   >
-                    <option value="">Default</option>
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large</option>
+                    <option value="">Project default</option>
+                    {(['small', 'medium', 'large'] as VMSize[]).map((s) => (
+                      <option key={s} value={s}>
+                        {formatVmSizeOption(s, activeCatalog?.sizes[s] ?? null)}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

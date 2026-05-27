@@ -3,7 +3,7 @@
  * for agent-to-agent communication.
  */
 import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider, resolveResourceReservation } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
@@ -282,6 +282,7 @@ export async function handleRetrySubtask(
   });
 
   // Resolve VM size from project defaults (not executionStep, which tracks runner state)
+  const vmSizeSource = project.defaultVmSize ? 'project' as const : 'platform' as const;
   const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
   const resolvedProvider: CredentialProvider | null =
@@ -299,6 +300,16 @@ export async function handleRetrySubtask(
 
   const checkoutBranch = project.defaultBranch;
 
+  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
+  const resolvedReservation = resolveResourceReservation(
+    {}, // MCP orchestration retry: no task-level resource requirements in Phase 0
+    {
+      taskId,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+    },
+  );
+
   // Insert replacement task
   await db.insert(schema.tasks).values({
     id: taskId,
@@ -312,6 +323,9 @@ export async function handleRetrySubtask(
     priority: childTask.priority,
     dispatchDepth: childTask.dispatchDepth,
     outputBranch: branchName,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+    resolvedReservationJson: JSON.stringify(resolvedReservation),
     createdBy: tokenData.userId,
     createdAt: now,
     updatedAt: now,
@@ -395,6 +409,8 @@ export async function handleRetrySubtask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

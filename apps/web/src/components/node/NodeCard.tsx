@@ -1,10 +1,11 @@
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
+import type { NodeResponse, ProviderCatalog, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
 import { Plus,Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
+import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
 
@@ -16,6 +17,8 @@ interface NodeCardProps {
   onStop: (id: string) => void;
   onDelete: (id: string) => void;
   onCreateWorkspace: (nodeId: string) => void;
+  /** Provider catalogs for exact VM spec display (optional). */
+  catalogs?: ProviderCatalog[];
 }
 
 function getNodeActions(
@@ -51,10 +54,12 @@ export const NodeCard: FC<NodeCardProps> = ({
   onStop,
   onDelete,
   onCreateWorkspace,
+  catalogs = [],
 }) => {
   const navigate = useNavigate();
   const overflowItems = getNodeActions(node, { onStop, onDelete });
   const sizeLabels = VM_SIZE_LABELS[node.vmSize];
+  const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
   const hasMetrics = metrics && (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
@@ -118,9 +123,21 @@ export const NodeCard: FC<NodeCardProps> = ({
             {node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}
           </span>
           <span aria-hidden="true">&middot;</span>
-          <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
-            {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize}
-          </span>
+          {sizeInfo ? (
+            <>
+              <span className="font-medium text-fg-primary">{sizeInfo.type}</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>{sizeInfo.vcpu} vCPU, {sizeInfo.ramGb} GB RAM</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>{sizeInfo.storageGb} GB storage</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>{sizeInfo.price}</span>
+            </>
+          ) : (
+            <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
+              {formatVmSizeInline(node.vmSize, null)}
+            </span>
+          )}
           <span aria-hidden="true">&middot;</span>
           <span aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}>
             {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}

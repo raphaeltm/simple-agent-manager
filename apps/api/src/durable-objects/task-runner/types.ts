@@ -5,6 +5,9 @@
  */
 import type {
   CredentialProvider,
+  ResolvedResourceReservation,
+  ResourceRequirements,
+  ResourceRequirementsSource,
   TaskAttachment,
   TaskExecutionStep,
   TaskMode,
@@ -77,6 +80,12 @@ export interface TaskRunConfig {
     nodeMemoryThresholdPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
+  /** Resolved resource requirements (audit-only, Phase 0). */
+  resourceRequirements?: ResourceRequirements | null;
+  /** Resolved reservation in scheduler units (audit-only, Phase 0). */
+  resolvedReservation?: ResolvedResourceReservation | null;
+  /** Where the VM size came from in the precedence chain. */
+  vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
 }
 
 export interface TaskRunnerState {
@@ -93,10 +102,14 @@ export interface TaskRunnerState {
   workspaceErrorMessage: string | null;
   createdAt: number;
   lastStepAt: number;
+  /** Set when we started waiting for node provisioning — used for timeout detection */
+  provisioningStartedAt: number | null;
   /** Set when we started waiting for agent ready — used for timeout detection */
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
   workspaceReadyStartedAt: number | null;
+  /** Last D1 execution step written — idempotent guard to skip redundant D1 writes */
+  lastD1Step: TaskExecutionStep | null;
   /** Terminal — DO has completed or failed, no more alarms */
   completed: boolean;
 }
@@ -124,6 +137,7 @@ export interface TaskRunnerContext {
   getWorkspaceReadyTimeoutMs: () => number;
   getWorkspaceReadyPollIntervalMs: () => number;
   getProvisionPollIntervalMs: () => number;
+  getProvisionTimeoutMs: () => number;
   /** Update D1 execution step */
   updateD1ExecutionStep: (taskId: string, step: TaskExecutionStep) => Promise<void>;
 }

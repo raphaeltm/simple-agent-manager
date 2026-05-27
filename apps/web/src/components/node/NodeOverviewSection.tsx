@@ -1,15 +1,18 @@
-import type { NodeResponse, NodeSystemInfo } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import type { NodeResponse, NodeSystemInfo, ProviderCatalog } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 import { Server } from 'lucide-react';
 import type { FC } from 'react';
 
+import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
 
 interface NodeOverviewSectionProps {
   node: NodeResponse;
   systemInfo?: NodeSystemInfo | null;
+  /** Provider catalogs for exact VM spec display (optional). */
+  catalogs?: ProviderCatalog[];
 }
 
 function formatTimestamp(iso: string | null): string {
@@ -30,12 +33,10 @@ function formatRelativeTime(iso: string | null): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, systemInfo }) => {
-  const sizeInfo = VM_SIZE_LABELS[node.vmSize];
+export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, systemInfo, catalogs = [] }) => {
+  const catalogSizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
-  const sizeLabel = sizeInfo
-    ? `${sizeInfo.label} (${sizeInfo.shortDescription})`
-    : node.vmSize;
+  const sizeLabel = formatVmSizeInline(node.vmSize, catalogSizeInfo);
   const locationLabel = locationConfig
     ? `${locationConfig.name}, ${locationConfig.country}`
     : node.vmLocation;

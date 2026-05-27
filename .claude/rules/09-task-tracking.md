@@ -88,6 +88,10 @@ Verification must confirm all of:
 
 If the session failed immediately, never started, launched under the wrong profile, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile or report the dispatch failure with exact status evidence.
 
+If the requested specialist/profile is not available or cannot be observed from the dispatch result, do not assume it worked. Use the cheapest available status/details check, record what is missing, and either re-dispatch with an explicit supported profile or ask for clarification. A generic task running under the platform default is not a substitute for a requested reviewer, specialist, or constrained profile.
+
+When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile and respected the original constraints. If the result was produced by the wrong profile, ignored `draft PR`/`do not merge`, dropped the requested branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
+
 ### Why This Matters
 
 Without the `/do` instruction, a dispatched agent may skip critical phases like staging verification, specialist review, or proper PR creation. The `/do` workflow enforces all quality gates defined in this project's rules.

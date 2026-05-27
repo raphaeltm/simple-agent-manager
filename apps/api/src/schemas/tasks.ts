@@ -38,6 +38,15 @@ const DevcontainerConfigNameSchema = v.pipe(
   v.maxLength(DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`),
 );
 
+/** Resource requirements — all optional, unset fields inherit from precedence chain. */
+const ResourceRequirementsSchema = v.object({
+  minVcpu: v.optional(v.number()),
+  minMemoryGb: v.optional(v.number()),
+  minDiskGb: v.optional(v.number()),
+  exclusiveNode: v.optional(v.boolean()),
+  maxCoTenants: v.optional(v.number()),
+});
+
 export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
@@ -52,6 +61,7 @@ export const SubmitTaskSchema = v.object({
   taskMode: v.optional(TaskModeSchema),
   agentProfileId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
+  resourceRequirements: v.optional(ResourceRequirementsSchema),
 });
 
 export const CreateTaskSchema = v.object({

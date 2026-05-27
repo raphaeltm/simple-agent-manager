@@ -9,23 +9,25 @@ interface SectionHeaderProps {
 }
 
 export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, description, actions }) => (
-  <div className="flex items-center gap-3 mb-4">
-    <div
-      className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
-      style={{ backgroundColor: iconBg }}
-    >
-      {icon}
-    </div>
-    <div className="flex-1 min-w-0">
-      <div className="text-fg-primary" style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number }}>
-        {title}
+  <div className="flex flex-wrap items-center gap-3 mb-4">
+    <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div
+        className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
+        style={{ backgroundColor: iconBg }}
+      >
+        {icon}
       </div>
-      {description && (
-        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
-          {description}
+      <div className="flex-1 min-w-0">
+        <div className="text-fg-primary" style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number }}>
+          {title}
         </div>
-      )}
+        {description && (
+          <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
+            {description}
+          </div>
+        )}
+      </div>
     </div>
-    {actions && <div className="shrink-0">{actions}</div>}
+    {actions && <div className="w-full min-w-0 sm:w-auto sm:shrink-0">{actions}</div>}
   </div>
 );

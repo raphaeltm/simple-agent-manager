@@ -6,8 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
+import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { createNode, deleteNode, getProviderCatalog, listNodes, listWorkspaces, stopNode } from '../lib/api';
-import { FALLBACK_VM_SIZES } from '../lib/constants';
 
 export function Nodes() {
   const navigate = useNavigate();
@@ -163,33 +163,14 @@ export function Nodes() {
           <div>
             <label className="block text-fg-muted font-medium mb-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Node Size</label>
             <div className="grid grid-cols-3 gap-3">
-              {(activeCatalog
-                ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
-                    const info = activeCatalog.sizes[size];
-                    return {
-                      value: size,
-                      label: size.charAt(0).toUpperCase() + size.slice(1),
-                      description: info ? `${info.vcpu} vCPUs, ${info.ramGb} GB RAM \u2014 ${info.price}` : size,
-                    };
-                  })
-                : FALLBACK_VM_SIZES
-              ).map((size) => (
-                <button
-                  key={size.value}
-                  type="button"
-                  aria-pressed={newNodeSize === size.value}
-                  onClick={() => setNewNodeSize(size.value)}
-                  className={`p-3 rounded-md text-left cursor-pointer text-fg-primary transition-all duration-150 ${
-                    newNodeSize === size.value
-                      ? 'border-2 border-accent bg-accent-tint'
-                      : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
-                  }`}
-                >
-                  <div className="font-medium">{size.label}</div>
-                  <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
-                    {size.description}
-                  </div>
-                </button>
+              {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
+                <VmSizeCard
+                  key={size}
+                  size={size}
+                  sizeInfo={activeCatalog?.sizes[size] ?? null}
+                  selected={newNodeSize === size}
+                  onClick={() => setNewNodeSize(size)}
+                />
               ))}
             </div>
           </div>
@@ -242,6 +223,7 @@ export function Nodes() {
               onStop={handleStopNode}
               onDelete={handleDeleteNode}
               onCreateWorkspace={handleCreateWorkspace}
+              catalogs={catalogs}
             />
           ))}
         </div>

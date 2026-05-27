@@ -1,9 +1,11 @@
-import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS,VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
+import type { AgentProfile, CreateAgentProfileRequest, ProviderCatalog, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
+import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS, VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
 import { Button, Dialog,Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect,useState } from 'react';
 
+import { getProject, getProviderCatalog } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
+import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
@@ -67,6 +69,9 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [workspaceProfile, setWorkspaceProfile] = useState('');
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [taskMode, setTaskMode] = useState('');
+  const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
+  const [projectProvider, setProjectProvider] = useState<string | null>(null);
+  const [projectLocation, setProjectLocation] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,6 +106,33 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     }
     setError(null);
   }, [isOpen, profile]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let cancelled = false;
+    Promise.all([getProviderCatalog(), getProject(projectId)])
+      .then(([catalogResponse, project]) => {
+        if (cancelled) return;
+        setCatalogs(catalogResponse.catalogs);
+        setProjectProvider(project.defaultProvider ?? null);
+        setProjectLocation(project.defaultLocation ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCatalogs([]);
+          setProjectProvider(null);
+          setProjectLocation(null);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [isOpen, projectId]);
+
+  const effectiveProvider = profile?.provider ?? projectProvider;
+  const activeCatalog = selectProviderCatalog(catalogs, effectiveProvider);
+  const effectiveLocation = profile?.vmLocation ?? projectLocation ?? activeCatalog?.defaultLocation ?? null;
+  const providerContext = formatProviderCatalogContext(activeCatalog, effectiveLocation);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
@@ -274,7 +306,12 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         <div className="grid gap-3 sm:grid-cols-2">
           {/* VM Size */}
           <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">VM Size</span>
+            <span className="text-sm text-fg-muted">
+              VM Size
+              {providerContext && (
+                <span className="font-normal ml-1">({providerContext})</span>
+              )}
+            </span>
             <select
               value={vmSizeOverride}
               onChange={(e) => setVmSizeOverride(e.target.value)}
@@ -283,7 +320,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             >
               {VM_SIZES.map((vs) => (
                 <option key={vs.value} value={vs.value}>
-                  {vs.label}
+                  {vs.value ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null) : vs.label}
                 </option>
               ))}
             </select>

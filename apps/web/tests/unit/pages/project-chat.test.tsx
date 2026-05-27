@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
   getTrialStatus: vi.fn(),
+  getProviderCatalog: vi.fn(),
   listProjectTasks: vi.fn(),
   submitTask: vi.fn(),
   getProjectTask: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
   getTrialStatus: mocks.getTrialStatus,
+  getProviderCatalog: mocks.getProviderCatalog,
   listProjectTasks: mocks.listProjectTasks,
   submitTask: mocks.submitTask,
   getProjectTask: mocks.getProjectTask,
@@ -181,6 +183,7 @@ describe('ProjectChat new chat button', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
@@ -327,6 +330,7 @@ describe('ProjectChat new chat button', () => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Build a todo app',
         agentType: 'claude-code',
+        vmSize: 'medium',
         workspaceProfile: 'full',
         taskMode: 'task',
       });
@@ -377,6 +381,9 @@ describe('ProjectChat new chat button', () => {
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
     expect((textarea as HTMLTextAreaElement).value).toContain('Previous session: "Fix the login bug"');
+    expect((textarea as HTMLTextAreaElement).value).toContain(`Parent project ID: ${PROJECT_ID}`);
+    expect((textarea as HTMLTextAreaElement).value).toContain(`Parent session ID: ${SESSION_WITH_TASK.id}`);
+    expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
 
     await waitFor(() => {
       expect(mocks.summarizeSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
@@ -388,7 +395,13 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
         parentTaskId: 'task-1',
-        contextSummary: 'Summary of previous session',
+        contextSummary: expect.stringContaining('Parent session ID: session-with-task'),
+      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        contextSummary: expect.stringContaining('Parent task ID: task-1'),
+      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        contextSummary: expect.stringContaining('Summary of previous session'),
       }));
     });
   });
@@ -512,6 +525,7 @@ describe('ProjectChat voice input', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
@@ -639,9 +653,10 @@ describe('ProjectChat agent type selection', () => {
       expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
     });
 
-    // Switch to openai-codex
+    // Switch to openai-codex and a larger VM tier.
     const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'openai-codex' } });
+    fireEvent.change(screen.getByLabelText('VM:'), { target: { value: 'large' } });
 
     // Type a message and submit
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
@@ -652,6 +667,7 @@ describe('ProjectChat agent type selection', () => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Fix the tests',
         agentType: 'openai-codex',
+        vmSize: 'large',
         workspaceProfile: 'full',
         taskMode: 'task',
       });
@@ -666,6 +682,7 @@ describe('ProjectChat workspace profile selection', () => {
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
@@ -718,6 +735,7 @@ describe('ProjectChat workspace profile selection', () => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Quick question',
         agentType: 'claude-code',
+        vmSize: 'medium',
         workspaceProfile: 'lightweight',
         taskMode: 'conversation',
       });
@@ -760,6 +778,7 @@ describe('ProjectChat workspace profile selection', () => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Help me debug',
         agentType: 'claude-code',
+        vmSize: 'medium',
         workspaceProfile: 'full',
         taskMode: 'conversation',
       });
@@ -827,6 +846,7 @@ describe('ProjectChat close conversation button', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
@@ -907,6 +927,7 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
@@ -997,6 +1018,7 @@ describe('ProjectChat agent profile selection', () => {
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue(TEST_PROFILES);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });

@@ -1,9 +1,8 @@
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
-import { and,eq,inArray,isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context,Hono } from 'hono';
+import { Hono } from 'hono';
 
-import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -29,11 +28,15 @@ import {
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import {
-  getTokenType,
+  getExternalInstallationId,
+  getStoredInstallationId,
+} from '../services/github-installation-ids';
+import {
   isDatabaseConflictError,
   summarizeAccessibleInstallations,
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
+import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -62,7 +65,7 @@ githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) =
   const response: GitHubInstallation[] = installations.map((inst) => ({
     id: inst.id,
     userId: inst.userId,
-    installationId: inst.installationId,
+    installationId: getExternalInstallationId(inst),
     accountType: inst.accountType as 'personal' | 'organization',
     accountName: inst.accountName,
     createdAt: inst.createdAt,
@@ -114,7 +117,7 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
   // Fetch repositories from all installations in parallel
   const repoResults = await Promise.allSettled(
     targetInstallations.map(async (inst) => {
-      const repos = await getInstallationRepositories(inst.installationId, c.env);
+      const repos = await getInstallationRepositories(getExternalInstallationId(inst), c.env);
       return repos.map((repo) => ({
         id: repo.id,
         fullName: repo.fullName,
@@ -196,7 +199,7 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
   try {
     const defaultBranch = c.req.query('default_branch') || undefined;
     const branches = await getRepositoryBranches(
-      targetInstallation.installationId,
+      getExternalInstallationId(targetInstallation),
       owner!,
       repo!,
       c.env,
@@ -265,7 +268,8 @@ githubRoutes.post('/webhook', async (c) => {
           await db.insert(schema.githubInstallations).values({
             id: ulid(),
             userId: foundUser.id,
-            installationId: String(installation.id),
+            installationId: getStoredInstallationId(foundUser.id, String(installation.id)),
+            externalInstallationId: String(installation.id),
             accountType: canonicalAccount.accountType,
             accountName: canonicalAccount.accountName,
             createdAt: now,
@@ -285,7 +289,12 @@ githubRoutes.post('/webhook', async (c) => {
       // account deletion/unlink, which must remove only one user's link rows.
       await db
         .delete(schema.githubInstallations)
-        .where(eq(schema.githubInstallations.installationId, String(installation.id)));
+        .where(
+          or(
+            eq(schema.githubInstallations.installationId, String(installation.id)),
+            eq(schema.githubInstallations.externalInstallationId, String(installation.id))
+          )
+        );
     }
   }
 
@@ -350,7 +359,10 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     .from(schema.githubInstallations)
     .where(
       and(
-        eq(schema.githubInstallations.installationId, installationId),
+        or(
+          eq(schema.githubInstallations.installationId, installationId),
+          eq(schema.githubInstallations.externalInstallationId, installationId)
+        ),
         eq(schema.githubInstallations.userId, auth.user.id)
       )
     )
@@ -422,7 +434,8 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     await db.insert(schema.githubInstallations).values({
       id: ulid(),
       userId: auth.user.id,
-      installationId: installationId,
+      installationId: getStoredInstallationId(auth.user.id, installationId),
+      externalInstallationId: installationId,
       accountType: canonicalAccount.accountType,
       accountName: canonicalAccount.accountName,
       createdAt: now,
@@ -539,11 +552,14 @@ async function syncDirectUserInstallations(
 
     // Get user's existing installation records
     const existingRecords = await db
-      .select({ installationId: schema.githubInstallations.installationId })
+      .select({
+        installationId: schema.githubInstallations.installationId,
+        externalInstallationId: schema.githubInstallations.externalInstallationId,
+      })
       .from(schema.githubInstallations)
       .where(eq(schema.githubInstallations.userId, userId));
 
-    const existingInstallationIds = new Set(existingRecords.map((r) => r.installationId));
+    const existingInstallationIds = new Set(existingRecords.map((record) => getExternalInstallationId(record)));
 
     const missingInstallations = accessibleInstallations.filter(
       (inst) => !existingInstallationIds.has(String(inst.id))
@@ -569,7 +585,8 @@ async function syncDirectUserInstallations(
           .values({
             id: ulid(),
             userId,
-            installationId: String(inst.id),
+            installationId: getStoredInstallationId(userId, String(inst.id)),
+            externalInstallationId: String(inst.id),
             accountType: canonicalAccount.accountType,
             accountName: canonicalAccount.accountName,
             createdAt: now,
@@ -652,11 +669,14 @@ async function getExistingInstallationIds(
   userId: string
 ): Promise<Set<string>> {
   const existingRecords = await db
-    .select({ installationId: schema.githubInstallations.installationId })
+    .select({
+      installationId: schema.githubInstallations.installationId,
+      externalInstallationId: schema.githubInstallations.externalInstallationId,
+    })
     .from(schema.githubInstallations)
     .where(eq(schema.githubInstallations.userId, userId));
 
-  return new Set(existingRecords.map((record) => record.installationId));
+  return new Set(existingRecords.map((record) => getExternalInstallationId(record)));
 }
 
 async function getSharedOrgInstallationCandidates(
@@ -731,7 +751,8 @@ async function insertSharedInstallation(
     await db.insert(schema.githubInstallations).values({
       id: ulid(),
       userId,
-      installationId: candidate.installationId,
+      installationId: getStoredInstallationId(userId, candidate.installationId),
+      externalInstallationId: candidate.installationId,
       accountType: 'organization',
       accountName: candidate.accountName,
       createdAt: now,
@@ -758,38 +779,6 @@ async function insertSharedInstallation(
     } else {
       log.error('github.shared_org_installations.insert_result', details);
     }
-  }
-}
-
-/**
- * Get the current user's GitHub access token from BetterAuth.
- * BetterAuth owns OAuth token encryption/refresh; callers should not read the
- * encrypted accounts table directly.
- */
-async function getGitHubUserAccessToken(
-  c: Context<{ Bindings: Env }>,
-  userId: string
-): Promise<string | null> {
-  try {
-    const auth = createAuth(c.env);
-    const token = await auth.api.getAccessToken({
-      headers: c.req.raw.headers,
-      body: { providerId: 'github', userId },
-    });
-    log.info('github.user_access_token.lookup', {
-      userId,
-      tokenPresent: Boolean(token.accessToken),
-      tokenType: getTokenType(token),
-      scopes: token.scopes,
-    });
-    return token.accessToken || null;
-  } catch (err) {
-    log.warn('github.user_access_token_unavailable', {
-      userId,
-      tokenPresent: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
   }
 }
 

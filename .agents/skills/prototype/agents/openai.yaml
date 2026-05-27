@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prototype Builder"
+  short_description: "Build self-contained UI prototypes with mock data for design exploration"
+  default_prompt: "Use $prototype to build a UI prototype: audit the current UI, create a self-contained page with stress-test mock data, wire the route, start the dev server, expose the port, and run visual audits at mobile and desktop viewports."
