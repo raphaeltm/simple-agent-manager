@@ -573,6 +573,16 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 		clone := r.Clone(r.Context())
 		clone.Header = r.Header.Clone()
 		remoteRequests <- clone
+
+		if r.URL.Query().Get("port_token") != "" {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+		if _, err := r.Cookie("sam_port_access"); err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("proxied-ok"))
 	}))
