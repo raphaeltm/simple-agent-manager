@@ -77,11 +77,24 @@ export const SVG_SANITIZE_CONFIG = {
     // Mermaid uses inline <style> for diagram themes (accepted trade-off;
     // CSS injection risk mitigated by CSP headers on the app origin)
     'style',
-    // NOTE: foreignObject is intentionally NOT allowed. It is the most
-    // dangerous SVG element (switches to HTML parser) and Mermaid's
-    // securityLevel: 'strict' disables it. HTML elements (div, span, etc.)
-    // are also excluded since they only render inside foreignObject.
   ],
+  // Mermaid v11 flowchart/graph diagrams render node labels inside
+  // foreignObject with a minimal HTML subtree (div > span.nodeLabel).
+  // Without foreignObject, all flowchart node text is invisible.
+  // These tags are not part of the SVG profile, so ADD_TAGS extends it.
+  // Security: foreignObject switches from SVG to HTML parser, but we
+  // mitigate via (1) only rendering our own Mermaid library output,
+  // (2) Mermaid securityLevel:'strict' prevents user-injected HTML in
+  // diagram source, (3) DOMPurify still strips dangerous elements
+  // (script, img, form, input, iframe, object, embed) and all event
+  // handlers from the HTML subtree, (4) CSP headers block inline scripts.
+  ADD_TAGS: ['foreignObject', 'div', 'span', 'p', 'br'],
+  // Tell DOMPurify that foreignObject is a valid SVG→HTML namespace bridge
+  // (like annotation-xml in MathML). Without this, DOMPurify rejects HTML
+  // elements inside foreignObject because _checkValidNamespace sees an HTML
+  // element with an SVG parent and no integration point.
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
   ALLOWED_ATTR: [
     // Core SVG attributes
     'id', 'class', 'style', 'xmlns', 'xmlns:xlink',

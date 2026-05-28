@@ -171,8 +171,22 @@ describe('RenderedMarkdown', () => {
       });
     });
 
-    it('strips foreignObject elements (DOMPurify blocks by default)', async () => {
-      const maliciousSvg = '<svg><foreignObject><div><img src="x" onerror="alert(1)"/></div></foreignObject><text>Safe</text></svg>';
+    it('preserves foreignObject with safe Mermaid label content', async () => {
+      const mermaidFlowchartSvg = '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: mermaidFlowchartSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('Node A');
+        expect(diagram.innerHTML).toContain('foreignObject');
+        expect(diagram.innerHTML).toContain('nodeLabel');
+      });
+    });
+
+    it('strips dangerous HTML inside foreignObject', async () => {
+      const maliciousSvg = '<svg><foreignObject><div><img src="x" onerror="alert(1)"/><script>alert(2)</script><span>Safe Label</span></div></foreignObject></svg>';
       mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
 
       render(<RenderedMarkdown content={MERMAID_BLOCK} />);
@@ -180,9 +194,12 @@ describe('RenderedMarkdown', () => {
       await waitFor(() => {
         const diagram = screen.getByTestId('mermaid-diagram');
         expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe');
-        expect(diagram.innerHTML).not.toContain('foreignObject');
+        expect(diagram.innerHTML).toContain('Safe Label');
+        expect(diagram.innerHTML).toContain('foreignObject');
+        expect(diagram.innerHTML).not.toContain('<img');
         expect(diagram.innerHTML).not.toContain('onerror');
+        expect(diagram.innerHTML).not.toContain('<script');
+        expect(diagram.innerHTML).not.toContain('alert');
       });
     });
 
@@ -202,17 +219,18 @@ describe('RenderedMarkdown', () => {
       });
     });
 
-    it('uses explicit ALLOWED_TAGS and ALLOWED_ATTR in SVG sanitize config', () => {
+    it('uses explicit ALLOWED_TAGS, ADD_TAGS, and ALLOWED_ATTR in SVG sanitize config', () => {
       // Verify the config has explicit allowlists (defense-in-depth)
       expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toBeDefined();
       expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS!.length).toBeGreaterThan(10);
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).toBeDefined();
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR!.length).toBeGreaterThan(10);
 
-      // script, iframe, object, embed, foreignObject must NOT be in the allowlist
-      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'foreignObject'];
+      // Dangerous tags must NOT be in any allowlist
+      const allAllowedTags = [...SVG_SANITIZE_CONFIG.ALLOWED_TAGS!, ...SVG_SANITIZE_CONFIG.ADD_TAGS!];
+      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'img'];
       for (const tag of blockedTags) {
-        expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).not.toContain(tag);
+        expect(allAllowedTags).not.toContain(tag);
       }
 
       // Event handler attributes must NOT be in the allowlist
@@ -221,11 +239,23 @@ describe('RenderedMarkdown', () => {
         expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).not.toContain(attr);
       }
 
-      // Core Mermaid-required tags must be present
-      const requiredTags = ['svg', 'g', 'path', 'rect', 'text', 'tspan', 'defs', 'style', 'marker'];
-      for (const tag of requiredTags) {
+      // Core SVG tags must be in ALLOWED_TAGS
+      const requiredSvgTags = ['svg', 'g', 'path', 'rect', 'text', 'tspan', 'defs', 'style', 'marker'];
+      for (const tag of requiredSvgTags) {
         expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toContain(tag);
       }
+
+      // foreignObject and HTML elements must be in ADD_TAGS (extends SVG profile)
+      // Note: jsdom normalizes SVG tag names to lowercase at runtime
+      const addTagsLower = SVG_SANITIZE_CONFIG.ADD_TAGS!.map((t: string) => t.toLowerCase());
+      const requiredAddTags = ['foreignobject', 'div', 'span'];
+      for (const tag of requiredAddTags) {
+        expect(addTagsLower).toContain(tag);
+      }
+
+      // HTML_INTEGRATION_POINTS must include foreignobject for namespace bridging
+      expect(SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS).toBeDefined();
+      expect((SVG_SANITIZE_CONFIG as Record<string, unknown>).HTML_INTEGRATION_POINTS).toHaveProperty('foreignobject', true);
     });
 
     it('preserves complex Mermaid SVG with gradients, markers, and filters', async () => {
