@@ -3,7 +3,7 @@
  * Covers: overview tab, memory tab, policies tab, actions tab, empty states, long text
  * Viewports: iPhone SE 375x667 (mobile), Desktop 1280x800
  */
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
 
@@ -173,6 +173,8 @@ test.describe('Agent Context — Mobile', () => {
   test('overview tab renders', async ({ page }) => {
     await setupMocks(page);
     await page.goto('/projects/proj-1/agent-context');
+    await expect(page.getByText('Memory entities')).toBeVisible();
+    await expect(page.getByText('Active policies')).toBeVisible();
     await screenshot(page, 'agent-context-overview-mobile');
     await assertNoOverflow(page);
   });
@@ -181,6 +183,8 @@ test.describe('Agent Context — Mobile', () => {
     await setupMocks(page);
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Memory")');
+    await expect(page.getByText('CodeStyle')).toBeVisible();
+    await expect(page.getByText('ProjectArchitecture')).toBeVisible();
     await screenshot(page, 'agent-context-memory-mobile');
     await assertNoOverflow(page);
   });
@@ -189,6 +193,8 @@ test.describe('Agent Context — Mobile', () => {
     await setupMocks(page);
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Policies")');
+    await expect(page.getByText('Always run tests')).toBeVisible();
+    await expect(page.getByText('No hardcoded URLs')).toBeVisible();
     await screenshot(page, 'agent-context-policies-mobile');
     await assertNoOverflow(page);
   });
@@ -197,6 +203,8 @@ test.describe('Agent Context — Mobile', () => {
     await setupMocks(page);
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Agent actions")');
+    await expect(page.getByText('task.completed')).toBeVisible();
+    await expect(page.getByText('Build failed')).toBeVisible();
     await screenshot(page, 'agent-context-actions-mobile');
     await assertNoOverflow(page);
   });
@@ -205,8 +213,16 @@ test.describe('Agent Context — Mobile', () => {
     await setupMocks(page, { entities: [], policies: [], actions: [] });
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Memory")');
+    await expect(page.getByText('No data yet.')).toBeVisible();
     await screenshot(page, 'agent-context-empty-mobile');
     await assertNoOverflow(page);
+  });
+
+  test('/knowledge redirects to /agent-context', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-1/knowledge');
+    await page.waitForURL('**/projects/proj-1/agent-context');
+    await expect(page.getByText('Memory entities')).toBeVisible();
   });
 
   test('long text wraps correctly', async ({ page }) => {
