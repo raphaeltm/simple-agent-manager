@@ -25,7 +25,7 @@ export const GLASS_CARD = 'rounded-lg border border-[rgba(34,197,94,0.10)] bg-[r
 export const GLASS_CARD_HOVER = `${GLASS_CARD} hover:border-[rgba(34,197,94,0.25)] transition-colors`;
 export const GLASS_CARD_MUTED = 'rounded-md bg-[rgba(34,197,94,0.04)] border border-[rgba(34,197,94,0.06)]';
 export const GLASS_BADGE = 'inline-flex min-h-[22px] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight';
-const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+export const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
 // ── Shared primitive components ─────────────────────────────────────────────
 
@@ -114,15 +114,18 @@ export function AgentContextPage() {
   return (
     <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-3 sm:px-4 md:px-6 md:py-5">
       {/* Tab bar */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+      <div role="tablist" aria-label="Agent context" className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {TABS.map((tab) => {
           const active = tab.id === activeTab;
           return (
             <button
               key={tab.id}
+              role="tab"
               type="button"
+              aria-selected={active}
+              aria-controls={`tabpanel-${tab.id}`}
               onClick={() => { setActiveTab(tab.id); setFilter(''); }}
-              className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors bg-transparent cursor-pointer ${FOCUS_RING} ${
+              className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors bg-transparent cursor-pointer ${FOCUS_RING} ${
                 active
                   ? 'border-accent/40 bg-accent/10 text-accent'
                   : 'border-[rgba(34,197,94,0.08)] text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.2)]'
@@ -136,7 +139,7 @@ export function AgentContextPage() {
       </div>
 
       {/* Content */}
-      <main className="mt-4 flex-1 space-y-3 pb-8">
+      <div id={`tabpanel-${activeTab}`} role="tabpanel" aria-label={TABS.find((t) => t.id === activeTab)?.label} className="mt-4 flex-1 space-y-3 pb-8">
         {activeTab !== 'overview' && (
           <label className={`flex min-h-11 items-center gap-2 px-3 text-sm text-fg-muted ${GLASS_CARD} focus-within:border-[rgba(34,197,94,0.3)]`}>
             <Search size={15} className="shrink-0 text-fg-muted" />
@@ -144,7 +147,7 @@ export function AgentContextPage() {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter..."
-              className="min-w-0 flex-1 bg-transparent text-fg-primary outline-none placeholder:text-fg-muted"
+              className="min-w-0 flex-1 bg-transparent text-fg-primary outline-none focus-visible:ring-1 focus-visible:ring-accent placeholder:text-fg-muted"
             />
           </label>
         )}
@@ -186,7 +189,7 @@ export function AgentContextPage() {
             </div>
           </Panel>
         )}
-      </main>
+      </div>
     </div>
   );
 }

@@ -9,9 +9,7 @@ import {
 import type { ReactNode } from 'react';
 
 import type { ActivityEventResponse } from '../../lib/api';
-import { GLASS_CARD, GLASS_CARD_HOVER, GLASS_CARD_MUTED, Panel, SectionHeader } from './index';
-
-const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+import { FOCUS_RING, GLASS_CARD, GLASS_CARD_HOVER, GLASS_CARD_MUTED, Panel, SectionHeader } from './index';
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   return (
