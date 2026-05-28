@@ -44,8 +44,8 @@
   --sam-glass-wash-opacity: 0.05;
 
   /* Backdrop dim for modals */
-  --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.5);
-  --sam-glass-backdrop-blur: 4px;
+  --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.68);
+  --sam-glass-backdrop-blur: 12px;
 
   --sam-space-1: 4px;
   --sam-space-2: 8px;

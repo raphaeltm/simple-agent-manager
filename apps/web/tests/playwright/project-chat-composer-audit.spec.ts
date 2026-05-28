@@ -224,6 +224,12 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
       if (subPath === '/agent-profiles') {
         return respond(200, { items: mode === 'wizard' || mode === 'single-default' ? [] : AGENT_PROFILES });
       }
+      if (subPath.match(/^\/agent-profiles\/[^/]+\/runtime\/env-vars/)) {
+        return respond(200, { envVars: [] });
+      }
+      if (subPath.match(/^\/agent-profiles\/[^/]+\/runtime\/files/)) {
+        return respond(200, { files: [] });
+      }
       if (subPath === '/cached-commands') return respond(200, { commands: CACHED_COMMANDS });
       if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
       if (subPath === '/tasks/task-provisioning-1') {
@@ -301,6 +307,15 @@ test.describe('Project chat composer audit', () => {
       page,
       `project-chat-composer-new-long-${getProjectSuffix(testInfo.project.name)}`
     );
+
+    await page.getByRole('button', { name: /Edit Codex/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-edit-modal-${getProjectSuffix(testInfo.project.name)}`
+    );
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();

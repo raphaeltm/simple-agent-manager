@@ -92,7 +92,7 @@ function canAdvanceWizard(profileWizard: ProfileWizardState) {
 
 function getProfileButtonClass(selected: boolean) {
   return [
-    'min-h-[44px] rounded-full border px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 min-w-0 max-w-full',
+    'min-h-8 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors flex items-center gap-1.5 min-w-0 max-w-full',
     selected
       ? 'border-accent bg-accent/10 text-accent'
       : 'border-border-default bg-transparent text-fg-secondary hover:border-accent/60 hover:text-fg-primary',
@@ -237,7 +237,7 @@ export function ChatInput({
       )}
 
       {agentProfiles.length > 0 && !profileWizard.open && (
-        <div className="mb-2 flex flex-wrap items-center gap-2" aria-label="Agent profiles">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent profiles">
           {agentProfiles.map((profile) => (
             <button
               key={profile.id}
@@ -257,7 +257,7 @@ export function ChatInput({
               onClick={() => setEditProfileOpen(true)}
               disabled={submitting}
               aria-label={`Edit ${selectedProfile.name}`}
-              className="min-h-[44px] min-w-[44px] rounded-full border border-border-default bg-page text-fg-muted hover:text-fg-primary flex items-center justify-center disabled:opacity-50"
+              className="min-h-8 min-w-8 rounded-full border border-border-default bg-page text-fg-muted hover:text-fg-primary flex items-center justify-center disabled:opacity-50"
             >
               <Settings size={16} />
             </button>
@@ -266,7 +266,7 @@ export function ChatInput({
             type="button"
             onClick={onOpenProfileWizard}
             disabled={submitting}
-            className="min-h-[44px] rounded-full border border-dashed border-border-default bg-transparent px-3 py-1.5 text-sm text-fg-muted hover:border-accent/60 hover:text-fg-primary flex items-center gap-1.5 disabled:opacity-50"
+            className="min-h-8 rounded-full border border-dashed border-border-default bg-transparent px-2.5 py-1 text-xs text-fg-muted hover:border-accent/60 hover:text-fg-primary flex items-center gap-1 disabled:opacity-50"
           >
             <Plus size={15} />
             New
