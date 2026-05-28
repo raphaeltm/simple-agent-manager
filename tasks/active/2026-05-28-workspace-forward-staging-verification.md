@@ -44,3 +44,13 @@ The workspace port forwarding CLI shipped without a true end-to-end staging test
 - Rebuilt the CLI and verified `curl http://127.0.0.1:3000` returned HTTP 200 with body `sam-cli-forward-ok`.
 
 - Deleted staging workspace `01KSP75VWY0JGT6H3XNGVKWRKV`; API returned `{ "success": true }`.
+
+## Review Evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1135
+- Independent staging validator: `01KSP6X4RVHYYTRFMV9830HG2J` reproduced the CLI HTTP 302 issue that this PR fixes.
+- Task completion validator: `01KSP8S0SNPGDP8ZD9T5VJK21Q` dispatched.
+- Go specialist: `01KSP8SA4RRE33VV4CR4D1CV0G` dispatched.
+- Cloudflare specialist: `01KSP8SJPP1SMCBCTPB4S9Y2GA` dispatched.
+- Security auditor: `01KSP8STCSA5P1HVHSYW0JERXF` dispatched.
+- Test engineer: `01KSP8T2H3D3PSWNVZDS4JGVQJ` dispatched.
