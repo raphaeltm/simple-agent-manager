@@ -318,7 +318,7 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
   };
 
   useEffect(() => {
-    if (!expanded || detail || loadingDetail) return;
+    if (!expanded || detail) return;
     let cancelled = false;
     setLoadingDetail(true);
     getKnowledgeEntity(projectId, entity.id)
@@ -332,7 +332,7 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
         if (!cancelled) setLoadingDetail(false);
       });
     return () => { cancelled = true; };
-  }, [detail, entity.id, expanded, loadingDetail, projectId, toast]);
+  }, [detail, entity.id, expanded, projectId, toast]);
 
   const handleSavedEntity = async () => {
     setEditing(false);

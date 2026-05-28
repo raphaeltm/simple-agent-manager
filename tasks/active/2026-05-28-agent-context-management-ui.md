@@ -30,7 +30,7 @@ The project Agent Context page exposes Memory and Policies as read-only lists. T
 - [x] Add confirmation dialogs with backdrop blur for policy deletes.
 - [x] Preserve existing Agent Context glass styling and mobile-safe layout.
 - [x] Remove prototype route/files if present in the checkout.
-- [ ] Add or update tests for API client and UI behavior where practical.
+- [x] Add or update tests for API client and UI behavior where practical.
 - [ ] Run lint, typecheck, tests, build, and Playwright visual audit.
 
 ## Acceptance Criteria
