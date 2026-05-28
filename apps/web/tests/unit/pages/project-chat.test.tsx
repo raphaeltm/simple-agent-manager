@@ -9,9 +9,9 @@ const mocks = vi.hoisted(() => ({
     id: 'created-profile',
     projectId: 'proj-1',
     userId: 'user-1',
-    name: String(data.name ?? 'Created Profile'),
+    name: typeof data.name === 'string' ? data.name : 'Created Profile',
     description: (data.description as string | null | undefined) ?? null,
-    agentType: String(data.agentType ?? 'claude-code'),
+    agentType: typeof data.agentType === 'string' ? data.agentType : 'claude-code',
     model: null,
     permissionMode: (data.permissionMode as string | null | undefined) ?? null,
     systemPromptAppend: null,
@@ -184,6 +184,17 @@ const AGENTS_MULTI = {
     { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
     { id: 'openai-codex', name: 'OpenAI Codex', configured: true, supportsAcp: true },
   ],
+};
+
+const TEST_PROVIDER_CATALOG = {
+  provider: 'hetzner',
+  defaultLocation: 'fsn1',
+  locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
+  sizes: {
+    small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+    medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+    large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+  },
 };
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
@@ -692,16 +703,7 @@ describe('ProjectChat profile setup wizard', () => {
   it('shows provider specs and hides prices when the user has no BYOC key', async () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: true });
-    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [{
-      provider: 'hetzner',
-      defaultLocation: 'fsn1',
-      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
-      sizes: {
-        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
-        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
-        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
-      },
-    }] });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [TEST_PROVIDER_CATALOG] });
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
     renderProjectChat();
@@ -719,16 +721,7 @@ describe('ProjectChat profile setup wizard', () => {
   });
 
   it('shows provider catalog pricing when the user has BYOC credentials', async () => {
-    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [{
-      provider: 'hetzner',
-      defaultLocation: 'fsn1',
-      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
-      sizes: {
-        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
-        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
-        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
-      },
-    }] });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [TEST_PROVIDER_CATALOG] });
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
     renderProjectChat();
@@ -948,9 +941,10 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
 
     // Invoke the captured onSessionChange callback (this is what the real
     // WebSocket hook calls when a session lifecycle event arrives)
-    expect(mocks.capturedOnSessionChange).toBeTruthy();
+    const onSessionChange = mocks.capturedOnSessionChange;
+    expect(onSessionChange).toBeTruthy();
     await act(async () => {
-      mocks.capturedOnSessionChange!();
+      onSessionChange?.();
     });
 
     // listChatSessions should have been called again
@@ -1067,7 +1061,8 @@ describe('ProjectChat agent profile selection', () => {
       expect(screen.getAllByRole('button', { name: /New/i }).length).toBeGreaterThan(1);
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: /New/i }).at(-1)!);
+    const newButtons = screen.getAllByRole('button', { name: /New/i });
+    fireEvent.click(newButtons[newButtons.length - 1]);
 
     expect(screen.getByText('What kind of work?')).toBeInTheDocument();
     expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();

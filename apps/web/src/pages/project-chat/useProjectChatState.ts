@@ -77,6 +77,64 @@ function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
   return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
 }
 
+type SubmitTaskPayload = Parameters<typeof submitTask>[1];
+
+function selectProfileId(current: string | null, profiles: AgentProfile[]) {
+  if (current && profiles.some((profile) => profile.id === current)) return current;
+  return profiles[0]?.id ?? null;
+}
+
+function getCompletedAttachmentRefs(attachments: Array<{ status: string; ref?: TaskAttachmentRef | null }>) {
+  return attachments.reduce<TaskAttachmentRef[]>((refs, attachment) => {
+    if (attachment.status === 'complete' && attachment.ref) refs.push(attachment.ref);
+    return refs;
+  }, []);
+}
+
+function getDerivedSubmitFields(pendingDerived: PendingDerived | null) {
+  if (!pendingDerived) return {};
+  return { parentTaskId: pendingDerived.parentTaskId, contextSummary: pendingDerived.contextSummary };
+}
+
+function buildBaseSubmitRequest({
+  message,
+  agentProfileId,
+  selectedAgentType,
+  selectedVmSize,
+  selectedWorkspaceProfile,
+  selectedDevcontainerConfigName,
+  selectedTaskMode,
+  pendingDerived,
+}: Readonly<{
+  message: string;
+  agentProfileId: string | null;
+  selectedAgentType: string | null;
+  selectedVmSize: VMSize;
+  selectedWorkspaceProfile: WorkspaceProfile;
+  selectedDevcontainerConfigName: string;
+  selectedTaskMode: TaskMode;
+  pendingDerived: PendingDerived | null;
+}>): SubmitTaskPayload {
+  const derivedFields = getDerivedSubmitFields(pendingDerived);
+  if (agentProfileId) return { message, agentProfileId, ...derivedFields };
+
+  const devcontainerConfigName = selectedDevcontainerConfigName.trim();
+  return {
+    message,
+    ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+    vmSize: selectedVmSize,
+    workspaceProfile: selectedWorkspaceProfile,
+    ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName ? { devcontainerConfigName } : {}),
+    taskMode: selectedTaskMode,
+    ...derivedFields,
+  };
+}
+
+function withAttachmentRefs(baseRequest: SubmitTaskPayload, attachmentRefs: TaskAttachmentRef[]): SubmitTaskPayload {
+  if (attachmentRefs.length === 0) return baseRequest;
+  return { ...baseRequest, attachments: attachmentRefs };
+}
+
 export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -277,10 +335,7 @@ export function useProjectChatState() {
     void listAgentProfiles(projectId)
       .then((data) => {
         setAgentProfiles(data);
-        setSelectedProfileId((current) => {
-          if (current && data.some((profile) => profile.id === current)) return current;
-          return data[0]?.id ?? null;
-        });
+        setSelectedProfileId((current) => selectProfileId(current, data));
       })
       .catch((err: unknown) => { console.error('Failed to load agent profiles', err); });
   }, [projectId]);
@@ -502,6 +557,21 @@ export function useProjectChatState() {
     return profile.id;
   }, [agentProfiles, configuredAgents, createProfile, selectedProfileId]);
 
+  const resolveProfileIdForSubmit = useCallback(async () => {
+    if (selectedProfileId) return selectedProfileId;
+    if (configuredAgents.length === 0) {
+      setSubmitError('Add an agent in Settings before starting a chat.');
+      return null;
+    }
+
+    const profileId = await ensureDefaultProfileForSingleAgent();
+    if (profileId) return profileId;
+
+    openProfileWizard();
+    setSubmitError('Create a profile before sending your first message.');
+    return null;
+  }, [configuredAgents.length, ensureDefaultProfileForSingleAgent, openProfileWizard, selectedProfileId]);
+
   const handleSubmit = async () => {
     const trimmed = message.trim();
     if (!trimmed) return;
@@ -516,45 +586,21 @@ export function useProjectChatState() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      let submitProfileId = selectedProfileId;
-      if (!submitProfileId) {
-        if (configuredAgents.length === 0) {
-          setSubmitError('Add an agent in Settings before starting a chat.');
-          return;
-        }
-        submitProfileId = await ensureDefaultProfileForSingleAgent();
-        if (!submitProfileId) {
-          openProfileWizard();
-          setSubmitError('Create a profile before sending your first message.');
-          return;
-        }
-      }
+      const submitProfileId = await resolveProfileIdForSubmit();
+      if (!submitProfileId) return;
 
-      const attachmentRefs = attachments.chatAttachments
-        .reduce<TaskAttachmentRef[]>((refs, attachment) => {
-          if (attachment.status === 'complete' && attachment.ref) refs.push(attachment.ref);
-          return refs;
-        }, []);
-      const derivedFields = pendingDerived
-        ? { parentTaskId: pendingDerived.parentTaskId, contextSummary: pendingDerived.contextSummary }
-        : {};
-      const baseRequest = submitProfileId
-        ? { message: trimmed, agentProfileId: submitProfileId, ...derivedFields }
-        : {
-            message: trimmed,
-            ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
-            vmSize: selectedVmSize,
-            workspaceProfile: selectedWorkspaceProfile,
-            ...(selectedWorkspaceProfile !== 'lightweight' && selectedDevcontainerConfigName.trim()
-              ? { devcontainerConfigName: selectedDevcontainerConfigName.trim() }
-              : {}),
-            taskMode: selectedTaskMode,
-            ...derivedFields,
-          };
-      const result = await submitTask(projectId, attachmentRefs.length > 0
-        ? { ...baseRequest, attachments: attachmentRefs }
-        : baseRequest,
-      );
+      const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
+      const baseRequest = buildBaseSubmitRequest({
+        message: trimmed,
+        agentProfileId: submitProfileId,
+        selectedAgentType,
+        selectedVmSize,
+        selectedWorkspaceProfile,
+        selectedDevcontainerConfigName,
+        selectedTaskMode,
+        pendingDerived,
+      });
+      const result = await submitTask(projectId, withAttachmentRefs(baseRequest, attachmentRefs));
       setMessage('');
       setPendingDerived(null);
       attachments.clearAttachments();

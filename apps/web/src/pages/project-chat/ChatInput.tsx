@@ -40,6 +40,91 @@ function getVmSizeLabel(size: VMSize) {
   return VM_SIZE_LABELS[size]?.label ?? `${size.charAt(0).toUpperCase()}${size.slice(1)}`;
 }
 
+type ChatInputProps = Readonly<{
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  error: string | null;
+  placeholder: string;
+  transcribeApiUrl: string;
+  projectId: string;
+  agents: AgentInfo[];
+  agentProfiles: AgentProfile[];
+  selectedProfileId: string | null;
+  onProfileChange: (profileId: string | null) => void;
+  onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
+  providerCatalogs: ProviderCatalog[];
+  projectDefaultProvider?: string | null;
+  projectDefaultLocation?: string | null;
+  hasUserCloudCredentials: boolean;
+  profileWizard: ProfileWizardState;
+  onOpenProfileWizard: () => void;
+  onCloseProfileWizard: () => void;
+  onUpdateProfileWizard: (patch: Partial<ProfileWizardState>) => void;
+  onCreateProfileFromWizard: () => Promise<AgentProfile | null>;
+  suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
+  slashCommands?: SlashCommand[];
+  attachments?: ChatAttachmentDisplay[];
+  onFilesSelected?: (files: FileList | null) => void;
+  onRemoveAttachment?: (index: number) => void;
+  fileInputRef?: MutableRefObject<HTMLInputElement | null>;
+  uploading?: boolean;
+}>;
+
+function getComposerPlaceholder({
+  noAgents,
+  needsProfileBeforeSubmit,
+  wizardOpen,
+  placeholder,
+}: Readonly<{ noAgents: boolean; needsProfileBeforeSubmit: boolean; wizardOpen: boolean; placeholder: string }>) {
+  if (noAgents) return 'Add an agent in Settings to start chatting...';
+  if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
+  return placeholder;
+}
+
+function canAdvanceWizard(profileWizard: ProfileWizardState) {
+  if (profileWizard.step === 'agent') return Boolean(profileWizard.selectedAgentType);
+  if (profileWizard.step === 'work-type') return Boolean(profileWizard.workType);
+  if (profileWizard.step === 'vm-size') return Boolean(profileWizard.vmSize);
+  return Boolean(profileWizard.profileName.trim());
+}
+
+function getProfileButtonClass(selected: boolean) {
+  return [
+    'min-h-[44px] rounded-full border px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 min-w-0 max-w-full',
+    selected
+      ? 'border-accent bg-accent/10 text-accent'
+      : 'border-border-default bg-transparent text-fg-secondary hover:border-accent/60 hover:text-fg-primary',
+  ].join(' ');
+}
+
+function getWizardBackLabel(step: ProfileWizardStep, skipAgentStep: boolean) {
+  if (step === 'agent') return 'Cancel';
+  if (skipAgentStep && step === 'work-type') return 'Cancel';
+  return 'Back';
+}
+
+function getWizardTitle(step: ProfileWizardStep) {
+  const titles: Record<ProfileWizardStep, string> = {
+    agent: 'Which agent?',
+    'work-type': 'What kind of work?',
+    'vm-size': 'VM size',
+    name: 'Name the profile',
+  };
+  return titles[step];
+}
+
+function getWizardDescription(step: ProfileWizardStep, providerContext: string) {
+  const descriptions: Record<ProfileWizardStep, string> = {
+    agent: 'Choose the agent this profile should use.',
+    'work-type': 'Pick whether this profile should work independently or stay conversational.',
+    'vm-size': providerContext ? `Specs are from ${providerContext}.` : 'Choose a general machine tier.',
+    name: 'Use a short name that will be easy to pick later.',
+  };
+  return descriptions[step];
+}
+
 export function ChatInput({
   value,
   onChange,
@@ -70,37 +155,7 @@ export function ChatInput({
   onRemoveAttachment,
   fileInputRef,
   uploading,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSubmit: () => void;
-  submitting: boolean;
-  error: string | null;
-  placeholder: string;
-  transcribeApiUrl: string;
-  projectId: string;
-  agents: AgentInfo[];
-  agentProfiles: AgentProfile[];
-  selectedProfileId: string | null;
-  onProfileChange: (profileId: string | null) => void;
-  onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
-  providerCatalogs: ProviderCatalog[];
-  projectDefaultProvider?: string | null;
-  projectDefaultLocation?: string | null;
-  hasUserCloudCredentials: boolean;
-  profileWizard: ProfileWizardState;
-  onOpenProfileWizard: () => void;
-  onCloseProfileWizard: () => void;
-  onUpdateProfileWizard: (patch: Partial<ProfileWizardState>) => void;
-  onCreateProfileFromWizard: () => Promise<AgentProfile | null>;
-  suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
-  slashCommands?: SlashCommand[];
-  attachments?: ChatAttachmentDisplay[];
-  onFilesSelected?: (files: FileList | null) => void;
-  onRemoveAttachment?: (index: number) => void;
-  fileInputRef?: MutableRefObject<HTMLInputElement | null>;
-  uploading?: boolean;
-}) {
+}: ChatInputProps) {
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
 
@@ -114,33 +169,18 @@ export function ChatInput({
   const noAgents = agents.length === 0;
   const singleAgentDefault = agentProfiles.length === 0 && agents.length === 1 && !profileWizard.open;
   const inputDisabled = noAgents || needsProfileBeforeSubmit || profileWizard.open;
-  const composerPlaceholder = noAgents
-    ? 'Add an agent in Settings to start chatting...'
-    : needsProfileBeforeSubmit || profileWizard.open
-      ? 'Create a profile to start chatting...'
-      : placeholder;
-
-  const canProceed = Boolean(
-    (profileWizard.step === 'agent' && profileWizard.selectedAgentType) ||
-    (profileWizard.step === 'work-type' && profileWizard.workType) ||
-    (profileWizard.step === 'vm-size' && profileWizard.vmSize) ||
-    (profileWizard.step === 'name' && profileWizard.profileName.trim()),
-  );
+  const composerPlaceholder = getComposerPlaceholder({
+    noAgents,
+    needsProfileBeforeSubmit,
+    wizardOpen: profileWizard.open,
+    placeholder,
+  });
+  const canProceed = canAdvanceWizard(profileWizard);
 
   const selectedWizardAgent = agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
   const selectedWizardSize = profileWizard.vmSize ?? 'medium';
   const stepNumber = getWizardStepNumber(profileWizard.step, skipAgentStep);
   const totalSteps = getWizardTotalSteps(skipAgentStep);
-
-  const profileButtonClass = (profile: AgentProfile) => {
-    const selected = profile.id === selectedProfileId;
-    return [
-      'min-h-[44px] rounded-full border px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 min-w-0 max-w-full',
-      selected
-        ? 'border-accent bg-accent/10 text-accent'
-        : 'border-border-default bg-transparent text-fg-secondary hover:border-accent/60 hover:text-fg-primary',
-    ].join(' ');
-  };
 
   const updateWizardStep = (step: ProfileWizardStep) => onUpdateProfileWizard({ step });
 
@@ -204,7 +244,7 @@ export function ChatInput({
               type="button"
               onClick={() => onProfileChange(profile.id)}
               disabled={submitting}
-              className={profileButtonClass(profile)}
+              className={getProfileButtonClass(profile.id === selectedProfileId)}
               aria-pressed={profile.id === selectedProfileId}
               title={profile.name}
             >
@@ -250,16 +290,10 @@ export function ChatInput({
             <div className="mb-3">
               <div className="text-[10px] uppercase text-fg-muted">Step {stepNumber} of {totalSteps}</div>
               <h2 className="m-0 mt-1 text-sm font-semibold text-fg-primary">
-                {profileWizard.step === 'agent' && 'Which agent?'}
-                {profileWizard.step === 'work-type' && 'What kind of work?'}
-                {profileWizard.step === 'vm-size' && 'VM size'}
-                {profileWizard.step === 'name' && 'Name the profile'}
+                {getWizardTitle(profileWizard.step)}
               </h2>
               <p className="m-0 mt-1 text-xs text-fg-muted">
-                {profileWizard.step === 'agent' && 'Choose the agent this profile should use.'}
-                {profileWizard.step === 'work-type' && 'Pick whether this profile should work independently or stay conversational.'}
-                {profileWizard.step === 'vm-size' && (providerContext ? `Specs are from ${providerContext}.` : 'Choose a general machine tier.')}
-                {profileWizard.step === 'name' && 'Use a short name that will be easy to pick later.'}
+                {getWizardDescription(profileWizard.step, providerContext)}
               </p>
             </div>
 
@@ -369,7 +403,7 @@ export function ChatInput({
                 disabled={profileWizard.saving}
                 className="min-h-[44px] rounded-md border border-border-default bg-transparent px-3 py-2 text-sm text-fg-muted hover:text-fg-primary disabled:opacity-50"
               >
-                {profileWizard.step === 'agent' || (skipAgentStep && profileWizard.step === 'work-type') ? 'Cancel' : 'Back'}
+                {getWizardBackLabel(profileWizard.step, skipAgentStep)}
               </button>
               <button
                 type="button"
@@ -427,7 +461,7 @@ export function ChatInput({
   );
 }
 
-function NoAgentsNotice({ projectId }: { projectId: string }) {
+function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
   const navigate = useNavigate();
   return (
     <div className="mb-2 flex flex-col gap-3 rounded-md border border-border-default bg-surface px-3 py-3 sm:flex-row sm:items-center">
@@ -446,7 +480,7 @@ function NoAgentsNotice({ projectId }: { projectId: string }) {
   );
 }
 
-function DefaultProfileBanner({ agent, onCustomize }: { agent: AgentInfo; onCustomize: () => void }) {
+function DefaultProfileBanner({ agent, onCustomize }: Readonly<{ agent: AgentInfo; onCustomize: () => void }>) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/20 bg-accent/5 px-3 py-2 text-xs text-fg-muted">
       <Zap size={14} className="shrink-0 text-accent" />
@@ -464,7 +498,7 @@ function DefaultProfileBanner({ agent, onCustomize }: { agent: AgentInfo; onCust
   );
 }
 
-function NoProfilesGate({ onStartWizard }: { onStartWizard: () => void }) {
+function NoProfilesGate({ onStartWizard }: Readonly<{ onStartWizard: () => void }>) {
   return (
     <div className="mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
@@ -488,12 +522,12 @@ function SelectionCard({
   disabled,
   onClick,
   children,
-}: {
+}: Readonly<{
   selected: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
-}) {
+}>) {
   return (
     <button
       type="button"
@@ -518,14 +552,14 @@ function WorkTypeCard({
   selected,
   disabled,
   onClick,
-}: {
+}: Readonly<{
   icon: ReactNode;
   title: string;
   description: string;
   selected: boolean;
   disabled?: boolean;
   onClick: () => void;
-}) {
+}>) {
   return (
     <button
       type="button"
