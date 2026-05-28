@@ -20,12 +20,12 @@ import { AdminOverview } from './pages/AdminOverview';
 import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
 import { AdminStream } from './pages/AdminStream';
 import { AdminUsers } from './pages/AdminUsers';
+import { AgentContextPage } from './pages/AgentContextPage';
 import { Chats } from './pages/Chats';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Dashboard } from './pages/Dashboard';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { IdeasPage } from './pages/IdeasPage';
-import { KnowledgePage } from './pages/KnowledgePage';
 import { Landing } from './pages/Landing';
 import { Node } from './pages/Node';
 import { Nodes } from './pages/Nodes';
@@ -103,7 +103,8 @@ export default function App() {
               <Route path="agent" element={<ProjectAgentChat />} />
               <Route path="library" element={<ProjectLibrary />} />
               <Route path="ideas" element={<IdeasPage />} />
-              <Route path="knowledge" element={<KnowledgePage />} />
+              <Route path="agent-context" element={<AgentContextPage />} />
+              <Route path="knowledge" element={<Navigate to="../agent-context" replace />} />
               <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
               <Route path="tasks" element={<Navigate to="../ideas" replace />} />
               <Route path="tasks/:taskId" element={<TaskDetail />} />

@@ -190,6 +190,8 @@ export {
   markNotificationRead,
   updateNotificationPreference,
 } from './notifications';
+export type { ListPoliciesResponse, ProjectPolicy } from './policies';
+export { getPolicy, listPolicies } from './policies';
 export type { AccountMapResponse, DevcontainerConfigEntry, DevcontainerConfigsResponse } from './projects';
 export {
   createProject,

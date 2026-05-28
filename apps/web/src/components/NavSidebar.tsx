@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
-  Bot,
   Brain,
   ChevronDown,
   ChevronRight,
@@ -48,7 +47,7 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   // { label: 'Agent', path: 'agent', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
-  { label: 'Knowledge', path: 'knowledge', icon: <Brain size={18} /> },
+  { label: 'Agent Context', path: 'agent-context', icon: <Brain size={18} /> },
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
   { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
   { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
