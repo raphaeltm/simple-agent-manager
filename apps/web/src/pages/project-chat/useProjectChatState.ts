@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentProfile, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -9,6 +9,7 @@ import { useProjectWebSocket } from '../../hooks/useProjectWebSocket';
 import type { ChatSessionListItem, ChatSessionResponse, TaskAttachmentRef } from '../../lib/api';
 import {
   closeConversationTask,
+  createAgentProfile,
   getProjectTask,
   getProviderCatalog,
   getTranscribeApiUrl,
@@ -54,6 +55,19 @@ export interface PendingDerived {
   summaryLoading: boolean;
 }
 
+export type ProfileWizardStep = 'agent' | 'work-type' | 'vm-size' | 'name';
+
+export interface ProfileWizardState {
+  open: boolean;
+  step: ProfileWizardStep;
+  selectedAgentType: string | null;
+  workType: TaskMode | null;
+  vmSize: VMSize | null;
+  profileName: string;
+  saving: boolean;
+  error: string | null;
+}
+
 const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
 Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
 
@@ -78,6 +92,7 @@ export function useProjectChatState() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
+  const [hasUserCloudCredentials, setHasUserCloudCredentials] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering
@@ -100,6 +115,16 @@ export function useProjectChatState() {
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [providerCatalogs, setProviderCatalogs] = useState<ProviderCatalog[]>([]);
+  const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
+    open: false,
+    step: 'agent',
+    selectedAgentType: null,
+    workType: null,
+    vmSize: null,
+    profileName: '',
+    saving: false,
+    error: null,
+  });
 
   // Slash command cache for pre-session autocomplete
   // Pass sessionId as refreshKey so cached commands are re-fetched when switching sessions
@@ -220,10 +245,11 @@ export function useProjectChatState() {
       const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
       const trialAvailable = trial?.available ?? false;
       const hasCloud = hasUserCreds || trialAvailable;
+      setHasUserCloudCredentials(hasUserCreds);
       setHasCloudCredentials(hasCloud);
       if (hasCloud) {
         void getProviderCatalog()
-          .then((response) => setProviderCatalogs(response.catalogs))
+          .then((response) => setProviderCatalogs(response.catalogs ?? []))
           .catch(() => setProviderCatalogs([]));
       } else {
         setProviderCatalogs([]);
@@ -249,7 +275,13 @@ export function useProjectChatState() {
 
   const loadProfiles = useCallback(() => {
     void listAgentProfiles(projectId)
-      .then((data) => setAgentProfiles(data))
+      .then((data) => {
+        setAgentProfiles(data);
+        setSelectedProfileId((current) => {
+          if (current && data.some((profile) => profile.id === current)) return current;
+          return data[0]?.id ?? null;
+        });
+      })
       .catch((err: unknown) => { console.error('Failed to load agent profiles', err); });
   }, [projectId]);
 
@@ -372,6 +404,104 @@ export function useProjectChatState() {
   // Handlers
   // ---------------------------------------------------------------------------
 
+  const suggestProfileName = useCallback((agentType: string | null, workType: TaskMode | null) => {
+    const agent = configuredAgents.find((candidate) => candidate.id === agentType);
+    const agentName = agent?.name ?? 'Agent';
+    return workType === 'task' ? `${agentName} Tasks` : `${agentName} Chat`;
+  }, [configuredAgents]);
+
+  const openProfileWizard = useCallback(() => {
+    const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
+    const initialAgentType = soleAgent?.id ?? selectedAgentType ?? configuredAgents[0]?.id ?? null;
+    const initialWorkType: TaskMode = 'conversation';
+    setProfileWizard({
+      open: true,
+      step: soleAgent ? 'work-type' : 'agent',
+      selectedAgentType: initialAgentType,
+      workType: initialWorkType,
+      vmSize: DEFAULT_VM_SIZE,
+      profileName: '',
+      saving: false,
+      error: null,
+    });
+  }, [configuredAgents, selectedAgentType]);
+
+  const closeProfileWizard = useCallback(() => {
+    setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
+  }, []);
+
+  const updateProfileWizard = useCallback((patch: Partial<ProfileWizardState>) => {
+    setProfileWizard((current) => ({ ...current, ...patch, error: null }));
+  }, []);
+
+  const createProfile = useCallback(async (data: CreateAgentProfileRequest) => {
+    const profile = await createAgentProfile(projectId, data);
+    setAgentProfiles((current) => {
+      const withoutDuplicate = current.filter((candidate) => candidate.id !== profile.id);
+      return [...withoutDuplicate, profile];
+    });
+    setSelectedProfileId(profile.id);
+    return profile;
+  }, [projectId]);
+
+  const createProfileFromWizard = useCallback(async () => {
+    const name = profileWizard.profileName.trim();
+    if (!name) {
+      setProfileWizard((current) => ({ ...current, error: 'Profile name is required' }));
+      return null;
+    }
+    if (agentProfiles.some((profile) => profile.name.toLowerCase() === name.toLowerCase())) {
+      setProfileWizard((current) => ({ ...current, error: `Profile "${name}" already exists` }));
+      return null;
+    }
+    const agentType = profileWizard.selectedAgentType ?? configuredAgents[0]?.id;
+    if (!agentType) {
+      setProfileWizard((current) => ({ ...current, error: 'Choose an agent before creating a profile' }));
+      return null;
+    }
+    const workType = profileWizard.workType ?? 'conversation';
+    const vmSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
+    setProfileWizard((current) => ({ ...current, saving: true, error: null }));
+    try {
+      const profile = await createProfile({
+        name,
+        description: workType === 'task' ? 'Write code and open pull requests' : 'Chat and explore with a lightweight workspace',
+        agentType,
+        vmSizeOverride: vmSize,
+        workspaceProfile: workType === 'conversation' ? 'lightweight' : 'full',
+        taskMode: workType,
+      });
+      setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
+      return profile;
+    } catch (err) {
+      setProfileWizard((current) => ({
+        ...current,
+        saving: false,
+        error: err instanceof Error ? err.message : 'Failed to create profile',
+      }));
+      return null;
+    }
+  }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
+
+  const ensureDefaultProfileForSingleAgent = useCallback(async () => {
+    if (selectedProfileId) return selectedProfileId;
+    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
+    if (configuredAgents.length !== 1) return null;
+
+    const agent = configuredAgents[0];
+    if (!agent) return null;
+    const profile = await createProfile({
+      name: `${agent.name} Default`,
+      description: 'Default conversation profile',
+      agentType: agent.id,
+      permissionMode: 'bypassPermissions',
+      vmSizeOverride: 'medium',
+      workspaceProfile: 'lightweight',
+      taskMode: 'conversation',
+    });
+    return profile.id;
+  }, [agentProfiles, configuredAgents, createProfile, selectedProfileId]);
+
   const handleSubmit = async () => {
     const trimmed = message.trim();
     if (!trimmed) return;
@@ -386,6 +516,20 @@ export function useProjectChatState() {
     setSubmitError(null);
     setSubmitting(true);
     try {
+      let submitProfileId = selectedProfileId;
+      if (!submitProfileId) {
+        if (configuredAgents.length === 0) {
+          setSubmitError('Add an agent in Settings before starting a chat.');
+          return;
+        }
+        submitProfileId = await ensureDefaultProfileForSingleAgent();
+        if (!submitProfileId) {
+          openProfileWizard();
+          setSubmitError('Create a profile before sending your first message.');
+          return;
+        }
+      }
+
       const attachmentRefs = attachments.chatAttachments
         .reduce<TaskAttachmentRef[]>((refs, attachment) => {
           if (attachment.status === 'complete' && attachment.ref) refs.push(attachment.ref);
@@ -394,8 +538,8 @@ export function useProjectChatState() {
       const derivedFields = pendingDerived
         ? { parentTaskId: pendingDerived.parentTaskId, contextSummary: pendingDerived.contextSummary }
         : {};
-      const baseRequest = selectedProfileId
-        ? { message: trimmed, agentProfileId: selectedProfileId, ...derivedFields }
+      const baseRequest = submitProfileId
+        ? { message: trimmed, agentProfileId: submitProfileId, ...derivedFields }
         : {
             message: trimmed,
             ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
@@ -593,7 +737,8 @@ export function useProjectChatState() {
     handleSubmit, handleNewChat, handleSelect,
     configuredAgents, selectedAgentType, setSelectedAgentType,
     agentProfiles, selectedProfileId, setSelectedProfileId,
-    providerCatalogs,
+    providerCatalogs, hasUserCloudCredentials,
+    profileWizard, openProfileWizard, closeProfileWizard, updateProfileWizard, createProfileFromWizard, suggestProfileName,
     handleUpdateProfile, slashCommands,
     selectedVmSize, handleVmSizeChange,
     selectedWorkspaceProfile, setSelectedWorkspaceProfile,

@@ -19,6 +19,7 @@ interface ProjectChatComposerProps {
   onChange: (value: string) => void;
   onSend: () => void;
   sending: boolean;
+  disabled?: boolean;
   placeholder: string;
   transcribeApiUrl: string;
   slashCommands?: SlashCommand[];
@@ -43,6 +44,7 @@ export function ProjectChatComposer({
   onChange,
   onSend,
   sending,
+  disabled = false,
   placeholder,
   transcribeApiUrl,
   slashCommands = [],
@@ -140,13 +142,13 @@ export function ProjectChatComposer({
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashPaletteRef.current?.handleKeyDown(event)) return;
     if (mentionPaletteRef.current?.handleKeyDown(event)) return;
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sending) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sending && !disabled) {
       event.preventDefault();
       onSend();
     }
-  }, [onSend, sending]);
+  }, [disabled, onSend, sending]);
 
-  const sendDisabled = sending || !value.trim() || uploading;
+  const sendDisabled = sending || disabled || !value.trim() || uploading;
 
   return (
     <>
@@ -231,7 +233,7 @@ export function ProjectChatComposer({
             <button
               type="button"
               onClick={() => internalFileInputRef.current?.click()}
-              disabled={sending || uploading}
+              disabled={sending || disabled || uploading}
               className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               aria-label={attachTitle}
               title={attachTitle}
@@ -250,7 +252,7 @@ export function ProjectChatComposer({
           onSelect={(event) => setCursorPos(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          disabled={sending}
+          disabled={sending || disabled}
           rows={1}
           role="combobox"
           aria-autocomplete="list"
@@ -261,7 +263,7 @@ export function ProjectChatComposer({
         />
         <VoiceButton
           onTranscription={handleTranscription}
-          disabled={sending}
+          disabled={sending || disabled}
           apiUrl={transcribeApiUrl}
         />
         <button

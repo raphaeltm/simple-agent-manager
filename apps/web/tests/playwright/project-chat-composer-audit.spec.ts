@@ -2,7 +2,7 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, getProjectSuffix, makeMockUser, screenshot } from './audit-helpers';
 
-type AuditMode = 'new' | 'active' | 'provisioning';
+type AuditMode = 'new' | 'active' | 'provisioning' | 'wizard' | 'single-default';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
@@ -198,10 +198,12 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
     if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') {
       return respond(200, {
-        agents: [
-          { id: 'openai-codex', name: 'OpenAI Codex', configured: true, supportsAcp: true },
-          { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
-        ],
+        agents: mode === 'single-default'
+          ? [{ id: 'openai-codex', name: 'OpenAI Codex', description: 'Focused implementation agent', configured: true, supportsAcp: true }]
+          : [
+              { id: 'openai-codex', name: 'OpenAI Codex', description: 'Focused implementation agent', configured: true, supportsAcp: true },
+              { id: 'claude-code', name: 'Claude Code', description: 'General coding agent', configured: true, supportsAcp: true },
+            ],
       });
     }
     if (path === '/api/github/installations') return respond(200, []);
@@ -219,7 +221,9 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
-      if (subPath === '/agent-profiles') return respond(200, { items: AGENT_PROFILES });
+      if (subPath === '/agent-profiles') {
+        return respond(200, { items: mode === 'wizard' || mode === 'single-default' ? [] : AGENT_PROFILES });
+      }
       if (subPath === '/cached-commands') return respond(200, { commands: CACHED_COMMANDS });
       if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
       if (subPath === '/tasks/task-provisioning-1') {
@@ -259,7 +263,7 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
 
     if (path === '/api/projects')
       return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
+    if (path === '/api/providers/catalog' || path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
 
     return respond(200, {});
   });
@@ -288,12 +292,7 @@ test.describe('Project chat composer audit', () => {
       `Implement shared composer behavior with unicode π, emoji, HTML-like <button>, and ${'very long wrapping text '.repeat(16)}`
     );
 
-    await expect(
-      page.locator('select[aria-label="Workspace profile"], select#workspace-profile-select')
-    ).toBeVisible();
-    await expect(
-      page.locator('select[aria-label="Run mode"], select#task-mode-select')
-    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-composer-new-long-${getProjectSuffix(testInfo.project.name)}`
@@ -313,6 +312,46 @@ test.describe('Project chat composer audit', () => {
       `project-chat-composer-new-mention-${getProjectSuffix(testInfo.project.name)}`
     );
   });
+  test('single-agent no-profile state shows default banner with active composer', async ({
+    page,
+  }, testInfo) => {
+    await setupApiMocks(page, 'single-default');
+    await page.goto(`/projects/${MOCK_PROJECT.id}/chat`);
+    await page.waitForTimeout(1200);
+
+    await expect(page.getByText(/Using/)).toBeVisible();
+    await expect(page.getByText(/OpenAI Codex/)).toBeVisible();
+    const textarea = page.locator('textarea[role="combobox"]');
+    await expect(textarea).toBeEnabled();
+    await textarea.fill('Quick question with long wrapping text '.repeat(8));
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-default-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
+  test('multi-agent no-profile state gates composer and opens wizard', async ({
+    page,
+  }, testInfo) => {
+    await setupApiMocks(page, 'wizard');
+    await page.goto(`/projects/${MOCK_PROJECT.id}/chat`);
+    await page.waitForTimeout(1200);
+
+    await expect(page.getByText('Create a profile to start')).toBeVisible();
+    await expect(page.locator('textarea[role="combobox"]')).toBeDisabled();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-gate-${getProjectSuffix(testInfo.project.name)}`
+    );
+
+    await page.getByRole('button', { name: /Create profile/i }).click();
+    await expect(page.getByText('Which agent?')).toBeVisible();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-wizard-agent-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
 
   test('active follow-up composer has shared autocomplete without new-task controls', async ({
     page,
@@ -323,12 +362,7 @@ test.describe('Project chat composer audit', () => {
 
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeVisible();
-    await expect(
-      page.locator('select[aria-label="Workspace profile"], select#workspace-profile-select')
-    ).toHaveCount(0);
-    await expect(
-      page.locator('select[aria-label="Run mode"], select#task-mode-select')
-    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toHaveCount(0);
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();

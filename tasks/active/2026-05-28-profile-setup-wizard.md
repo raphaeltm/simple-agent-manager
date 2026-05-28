@@ -21,19 +21,19 @@ Project chat currently falls back to raw agent, VM, workspace, devcontainer, and
 
 ## Implementation Checklist
 
-- [ ] Add profile wizard state and actions in `useProjectChatState.ts`, including creating profiles with `createAgentProfile`.
-- [ ] Auto-create a default profile on first message for the single-agent/no-profile case using sole agent, `bypassPermissions`, medium VM, lightweight workspace, and conversation mode.
-- [ ] Gate multi-agent/no-profile submissions until a profile exists, with inline wizard validation and profile creation errors.
-- [ ] Replace raw fallback dropdowns in `ChatInput.tsx` with:
-  - [ ] subtle single-agent default banner plus Customize action,
-  - [ ] multi-agent inline 4-step wizard,
-  - [ ] pill-style profile selector bar with gear edit and `+ New`.
-- [ ] Use real provider catalog data through `selectProviderCatalog()` and `lookupSizeInfo()` for VM specs/pricing, hiding pricing when user lacks BYOC credentials.
-- [ ] Handle no agents, empty provider catalogs, profile name collisions, single-agent `+ New` wizard skipping agent selection, and existing profiles.
-- [ ] Pass any needed provider catalog, credential, and wizard state through `index.tsx`.
-- [ ] Add or update unit tests for single-agent auto profile creation, multi-agent gating/wizard profile creation, profile selector behavior, pricing visibility, and no-agent handling.
-- [ ] Add or update Playwright visual audit coverage at 375px and desktop for the new onboarding states.
-- [ ] Remove any production prototype artifacts if present.
+- [x] Add profile wizard state and actions in `useProjectChatState.ts`, including creating profiles with `createAgentProfile`.
+- [x] Auto-create a default profile on first message for the single-agent/no-profile case using sole agent, `bypassPermissions`, medium VM, lightweight workspace, and conversation mode.
+- [x] Gate multi-agent/no-profile submissions until a profile exists, with inline wizard validation and profile creation errors.
+- [x] Replace raw fallback dropdowns in `ChatInput.tsx` with:
+  - [x] subtle single-agent default banner plus Customize action,
+  - [x] multi-agent inline 4-step wizard,
+  - [x] pill-style profile selector bar with gear edit and `+ New`.
+- [x] Use real provider catalog data through `selectProviderCatalog()` and `lookupSizeInfo()` for VM specs/pricing, hiding pricing when user lacks BYOC credentials.
+- [x] Handle no agents, empty provider catalogs, profile name collisions, single-agent `+ New` wizard skipping agent selection, and existing profiles.
+- [x] Pass any needed provider catalog, credential, and wizard state through `index.tsx`.
+- [x] Add or update unit tests for single-agent auto profile creation, multi-agent gating/wizard profile creation, profile selector behavior, pricing visibility, and no-agent handling.
+- [x] Add or update Playwright visual audit coverage at 375px and desktop for the new onboarding states.
+- [x] Remove any production prototype artifacts if present.
 
 ## Acceptance Criteria
 

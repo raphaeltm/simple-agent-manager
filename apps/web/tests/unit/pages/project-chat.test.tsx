@@ -5,6 +5,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentProfiles: vi.fn(),
+  createAgentProfile: vi.fn().mockImplementation((_projectId: string, data: Record<string, unknown>) => Promise.resolve({
+    id: 'created-profile',
+    projectId: 'proj-1',
+    userId: 'user-1',
+    name: String(data.name ?? 'Created Profile'),
+    description: (data.description as string | null | undefined) ?? null,
+    agentType: String(data.agentType ?? 'claude-code'),
+    model: null,
+    permissionMode: (data.permissionMode as string | null | undefined) ?? null,
+    systemPromptAppend: null,
+    maxTurns: null,
+    timeoutMinutes: null,
+    vmSizeOverride: (data.vmSizeOverride as string | null | undefined) ?? null,
+    provider: null,
+    vmLocation: null,
+    workspaceProfile: (data.workspaceProfile as string | null | undefined) ?? null,
+    devcontainerConfigName: null,
+    taskMode: (data.taskMode as string | null | undefined) ?? null,
+    isBuiltin: false,
+    createdAt: '2026-05-28T00:00:00.000Z',
+    updatedAt: '2026-05-28T00:00:00.000Z',
+  })),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
   getTrialStatus: vi.fn(),
@@ -24,6 +46,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listAgents: mocks.listAgents,
   listAgentProfiles: mocks.listAgentProfiles,
+  createAgentProfile: mocks.createAgentProfile,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
   getTrialStatus: mocks.getTrialStatus,
@@ -162,19 +185,6 @@ const AGENTS_MULTI = {
     { id: 'openai-codex', name: 'OpenAI Codex', configured: true, supportsAcp: true },
   ],
 };
-const AGENTS_WITH_PLATFORM_OPENCODE = {
-  agents: [
-    { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
-    {
-      id: 'opencode',
-      name: 'OpenCode',
-      configured: true,
-      supportsAcp: true,
-      fallbackCredentialSource: 'platform-opencode',
-    },
-  ],
-};
-
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -339,13 +349,17 @@ describe('ProjectChat new chat button', () => {
 
     // Should submit the task with the default agent type, default workspace profile, and navigate to the new session
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
-        message: 'Build a todo app',
+      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
         agentType: 'claude-code',
-        vmSize: 'medium',
-        workspaceProfile: 'full',
-        taskMode: 'task',
-      });
+        permissionMode: 'bypassPermissions',
+        vmSizeOverride: 'medium',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        message: 'Build a todo app',
+        agentProfileId: 'created-profile',
+      }));
     });
 
     // Should navigate to the new session's message view
@@ -388,7 +402,7 @@ describe('ProjectChat new chat button', () => {
     });
     expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Branch: sam/fix-login-bug')).toBeInTheDocument();
-    expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
+    expect(screen.getByText(/Using/)).toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
@@ -453,7 +467,7 @@ describe('ProjectChat new chat button', () => {
     });
     expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeInTheDocument();
-    expect(screen.getByLabelText('Run mode:')).toBeInTheDocument();
+    expect(screen.getByText(/Using/)).toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     await waitFor(() => {
@@ -586,108 +600,7 @@ describe('ProjectChat voice input', () => {
   });
 });
 
-describe('ProjectChat agent type selection', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.listCredentials.mockResolvedValue([
-      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
-    ]);
-    mocks.getTrialStatus.mockResolvedValue({ available: false });
-    mocks.listAgentProfiles.mockResolvedValue([]);
-    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-  });
-
-  it('does not show agent selector when only one agent is configured', async () => {
-    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByLabelText('Agent:')).not.toBeInTheDocument();
-  });
-
-  it('shows agent selector dropdown when multiple agents are configured', async () => {
-    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
-    });
-
-    const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
-    expect(select.options).toHaveLength(2);
-    expect(select.options[0]!.textContent).toBe('Claude Code');
-    expect(select.options[1]!.textContent).toBe('OpenAI Codex');
-    // Default is first agent
-    expect(select.value).toBe('claude-code');
-  });
-
-  it('shows platform-backed OpenCode when the catalog marks it configured', async () => {
-    mocks.listAgents.mockResolvedValue(AGENTS_WITH_PLATFORM_OPENCODE);
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
-    });
-
-    const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
-    const optionLabels = Array.from(select.options, (option) => option.textContent);
-    expect(optionLabels).toEqual(['Claude Code', 'OpenCode']);
-  });
-
-  it('submits task with selected agent type', async () => {
-    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-    mocks.submitTask.mockResolvedValue({
-      taskId: 'task-new',
-      sessionId: 'session-new',
-      branchName: 'sam/task-new',
-      status: 'queued',
-    });
-    mocks.getProjectTask.mockResolvedValue({
-      id: 'task-new',
-      status: 'queued',
-      executionStep: null,
-      errorMessage: null,
-    });
-
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
-    });
-
-    // Switch to openai-codex and a larger VM tier.
-    const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'openai-codex' } });
-    fireEvent.change(screen.getByLabelText('VM:'), { target: { value: 'large' } });
-
-    // Type a message and submit
-    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
-    fireEvent.change(textarea, { target: { value: 'Fix the tests' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
-        message: 'Fix the tests',
-        agentType: 'openai-codex',
-        vmSize: 'large',
-        workspaceProfile: 'full',
-        taskMode: 'task',
-      });
-    });
-  });
-});
-
-describe('ProjectChat workspace profile selection', () => {
+describe('ProjectChat profile setup wizard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([
@@ -695,27 +608,9 @@ describe('ProjectChat workspace profile selection', () => {
     ]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
-    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-  });
-
-  it('shows workspace profile dropdown with Full selected by default', async () => {
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
-    });
-
-    const select = screen.getByLabelText('Workspace:') as HTMLSelectElement;
-    expect(select.value).toBe('full');
-    expect(select.options).toHaveLength(2);
-    expect(select.options[0]!.textContent).toBe('Full');
-    expect(select.options[1]!.textContent).toBe('Lightweight');
-  });
-
-  it('submits task with selected workspace profile', async () => {
     mocks.submitTask.mockResolvedValue({
       taskId: 'task-new',
       sessionId: 'session-new',
@@ -728,112 +623,161 @@ describe('ProjectChat workspace profile selection', () => {
       executionStep: null,
       errorMessage: null,
     });
+  });
+
+  it('shows the default banner and auto-creates a profile for a single agent', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
 
     renderProjectChat();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
+      expect(screen.getByText(/Using/)).toBeInTheDocument();
+      expect(screen.getByText(/Claude Code/)).toBeInTheDocument();
     });
 
-    // Switch to lightweight
-    fireEvent.change(screen.getByLabelText('Workspace:'), { target: { value: 'lightweight' } });
-
-    // Type a message and submit
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
-    fireEvent.change(textarea, { target: { value: 'Quick question' } });
+    fireEvent.change(textarea, { target: { value: 'Build a profile-first chat' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
-        message: 'Quick question',
+      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        name: 'Claude Code Default',
         agentType: 'claude-code',
-        vmSize: 'medium',
+        permissionMode: 'bypassPermissions',
+        vmSizeOverride: 'medium',
         workspaceProfile: 'lightweight',
         taskMode: 'conversation',
-      });
+      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        message: 'Build a profile-first chat',
+        agentProfileId: 'created-profile',
+      }));
     });
   });
 
-  it('submits task with explicitly selected task mode', async () => {
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-    mocks.listCredentials.mockResolvedValue([
-      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
-    ]);
-    mocks.submitTask.mockResolvedValue({
-      taskId: 'task-mode-test',
-      sessionId: 'session-mode-test',
-      branchName: 'sam/mode-test',
-      status: 'queued',
-    });
-    mocks.getProjectTask.mockResolvedValue({
-      id: 'task-mode-test',
-      status: 'queued',
-      executionStep: null,
-      errorMessage: null,
-    });
+  it('gates multiple agents behind the setup wizard and creates a profile', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
     renderProjectChat();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Run mode:')).toBeInTheDocument();
+      expect(screen.getByText('Create a profile to start')).toBeInTheDocument();
     });
+    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
 
-    // Default is 'task' for full workspace profile — change to conversation explicitly
-    fireEvent.change(screen.getByLabelText('Run mode:'), { target: { value: 'conversation' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI Codex/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Build and open PRs/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Large/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
 
-    // Type and submit
-    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
-    fireEvent.change(textarea, { target: { value: 'Help me debug' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    const nameInput = screen.getByLabelText('Profile name');
+    expect(nameInput).toHaveValue('OpenAI Codex Tasks');
+    fireEvent.change(nameInput, { target: { value: 'Codex Builder' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
-        message: 'Help me debug',
-        agentType: 'claude-code',
-        vmSize: 'medium',
+      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        name: 'Codex Builder',
+        agentType: 'openai-codex',
+        vmSizeOverride: 'large',
         workspaceProfile: 'full',
-        taskMode: 'conversation',
-      });
+        taskMode: 'task',
+      }));
     });
   });
 
-  it('defaults to project workspace profile when set', async () => {
-    // Re-render with a project that has a default workspace profile
-    const contextValue: ProjectContextValue = {
-      projectId: PROJECT_ID,
-      project: {
-        id: PROJECT_ID,
-        userId: 'user-1',
-        name: 'Test Project',
-        description: null,
-        installationId: 'inst-1',
-        repository: 'test/repo',
-        defaultBranch: 'main',
-        defaultWorkspaceProfile: 'lightweight',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+  it('shows provider specs and hides prices when the user has no BYOC key', async () => {
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: true });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [{
+      provider: 'hetzner',
+      defaultLocation: 'fsn1',
+      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
+      sizes: {
+        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
       },
-      installations: [],
-      reload: vi.fn(),
-    };
+    }] });
+    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
-    render(
-      <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/chat`]}>
-        <ProjectContext.Provider value={contextValue}>
-          <Routes>
-            <Route path="/projects/:id/chat" element={<ProjectChat />} />
-          </Routes>
-        </ProjectContext.Provider>
-      </MemoryRouter>
-    );
+    renderProjectChat();
+
+    await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Claude Code/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Chat and explore/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+
+    expect(screen.getByText(/cx32/)).toBeInTheDocument();
+    expect(screen.getByText(/4 vCPU, 8 GB RAM, 80 GB storage/)).toBeInTheDocument();
+    expect(screen.queryByText(/€7.69/)).not.toBeInTheDocument();
+  });
+
+  it('directs users to settings when no agents are configured', async () => {
+    mocks.listAgents.mockResolvedValue({ agents: [] });
+
+    renderProjectChat();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
+      expect(screen.getByText('Add an agent to start chatting')).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText('Add an agent in Settings to start chatting...')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Settings > Agents/i }));
+    expect(screen.getByTestId('settings-page')).toBeInTheDocument();
+  });
+
+  it('shows inline validation for duplicate profile names', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
+    mocks.listAgentProfiles.mockResolvedValue([{
+      id: 'prof-existing',
+      projectId: PROJECT_ID,
+      userId: 'user-1',
+      name: 'Codex Builder',
+      description: null,
+      agentType: 'openai-codex',
+      model: null,
+      permissionMode: null,
+      systemPromptAppend: null,
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      devcontainerConfigName: null,
+      taskMode: null,
+      isBuiltin: false,
+      createdAt: '2026-03-15T00:00:00Z',
+      updatedAt: '2026-03-15T00:00:00Z',
+    }]);
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /New/i }).length).toBeGreaterThan(1);
     });
 
-    const select = screen.getByLabelText('Workspace:') as HTMLSelectElement;
-    expect(select.value).toBe('lightweight');
+    const newButtons = screen.getAllByRole('button', { name: /New/i });
+    fireEvent.click(newButtons[newButtons.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI Codex/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Build and open PRs/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.change(screen.getByLabelText('Profile name'), { target: { value: 'Codex Builder' } });
+    const createButtons = screen.getAllByRole('button', { name: /Create profile/i });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    expect(await screen.findByText('Profile "Codex Builder" already exists')).toBeInTheDocument();
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
   });
+
 });
 
 describe('ProjectChat close conversation button', () => {
@@ -1013,6 +957,29 @@ describe('ProjectChat agent profile selection', () => {
       provider: null,
       vmLocation: null,
       workspaceProfile: null,
+      devcontainerConfigName: null,
+      taskMode: null,
+      isBuiltin: false,
+      createdAt: '2026-03-15T00:00:00Z',
+      updatedAt: '2026-03-15T00:00:00Z',
+    },
+    {
+      id: 'prof-2',
+      projectId: PROJECT_ID,
+      userId: 'user-1',
+      name: 'Reviewer',
+      description: null,
+      agentType: 'openai-codex',
+      model: null,
+      permissionMode: null,
+      systemPromptAppend: null,
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      devcontainerConfigName: null,
       taskMode: null,
       isBuiltin: false,
       createdAt: '2026-03-15T00:00:00Z',
@@ -1045,18 +1012,15 @@ describe('ProjectChat agent profile selection', () => {
     });
   });
 
-  it('submits task with agentProfileId when a profile is selected', async () => {
+  it('submits task with the selected profile id', async () => {
     renderProjectChat();
 
-    // Wait for profiles to load and the selector to appear
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent profile')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Fast Implementer' })).toBeInTheDocument();
     });
 
-    // Select the profile
-    fireEvent.change(screen.getByLabelText('Agent profile'), { target: { value: 'prof-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reviewer' }));
 
-    // Type and submit
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     fireEvent.change(textarea, { target: { value: 'Build a feature' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -1064,27 +1028,21 @@ describe('ProjectChat agent profile selection', () => {
     await waitFor(() => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
         message: 'Build a feature',
-        agentProfileId: 'prof-1',
+        agentProfileId: 'prof-2',
       }));
     });
   });
 
-  it('does not include agentProfileId when default is selected', async () => {
+  it('opens a new profile wizard from the profile bar', async () => {
     renderProjectChat();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent profile')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /New/i }).length).toBeGreaterThan(1);
     });
 
-    // Leave on default (no profile)
-    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
-    fireEvent.change(textarea, { target: { value: 'Quick task' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /New/i }).at(-1)!);
 
-    await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.not.objectContaining({
-        agentProfileId: expect.anything(),
-      }));
-    });
+    expect(screen.getByText('What kind of work?')).toBeInTheDocument();
+    expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
   });
 });
