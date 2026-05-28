@@ -27,7 +27,7 @@ SAM deployments need to own and serve their own CLI binaries from the same deplo
 - [x] Add `GET /api/cli/version` returning available metadata from `cli/version.json` and unavailable metadata when missing or unconfigured.
 - [x] Add focused API route tests for successful macOS arm64 download, unsupported platform, missing R2 binding, missing object, available version metadata, and missing version metadata.
 - [x] Run focused local checks: CLI race+coverage tests, CLI cross-build, API route tests, and relevant typecheck/build.
-- [ ] Run specialist validation for task completion, Cloudflare/R2 deployment, tests, CLI quality, and hardcoded-value compliance.
+- [x] Run specialist validation for task completion, Cloudflare/R2 deployment, tests, CLI quality, and hardcoded-value compliance.
 - [ ] Deploy to staging through the normal workflow, verify real R2/API evidence for version and download endpoints, then open PR, wait for CI, merge, and verify production endpoints.
 
 ## Acceptance Criteria

@@ -12,6 +12,21 @@ go test ./...
 go build -o bin/sam ./cmd/sam
 ```
 
+For deployment artifacts, use the package Makefile:
+
+```bash
+cd packages/cli
+make build-all version
+```
+
+This writes Linux and macOS binaries for `amd64` and `arm64` to `packages/cli/bin/`, plus `version.json`. The staging and production deploy workflows upload those files to the deployment-owned R2 bucket under `cli/`, and the API serves them through:
+
+- `GET /api/cli/version`
+- `GET /api/cli/download?os=linux&arch=amd64`
+- `GET /api/cli/download?os=linux&arch=arm64`
+- `GET /api/cli/download?os=darwin&arch=amd64`
+- `GET /api/cli/download?os=darwin&arch=arm64`
+
 ## Auth
 
 Configure the API origin and session cookie:
