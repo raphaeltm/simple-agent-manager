@@ -114,11 +114,14 @@ const NORMAL_ACTIONS = [
   makeActivity({ id: 'a3', eventType: 'error.reported', actorType: 'agent', payload: { summary: 'Build failed' } }),
 ];
 
+type CapturedRequest = { method: string; path: string; body: unknown };
+
 async function setupMocks(page: Page, opts: {
   entities?: ReturnType<typeof makeEntity>[];
   policies?: ReturnType<typeof makePolicy>[];
   actions?: ReturnType<typeof makeActivity>[];
   observations?: ReturnType<typeof makeObservation>[];
+  requests?: CapturedRequest[];
 } = {}) {
   const entities = opts.entities ?? NORMAL_ENTITIES;
   const policies = opts.policies ?? NORMAL_POLICIES;
@@ -128,6 +131,10 @@ async function setupMocks(page: Page, opts: {
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
     const path = new URL(url).pathname;
+    const method = route.request().method();
+    if (opts.requests && (method === 'PATCH' || method === 'DELETE')) {
+      opts.requests.push({ method, path, body: route.request().postDataJSON() ?? null });
+    }
 
     // Auth — catch all auth endpoints
     if (path.includes('/api/auth/')) {
@@ -164,21 +171,21 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: { entity: { ...entities[0], observations, relations: [] }, observations, relations: [] } });
     }
     if (path.includes('/api/projects/proj-1/knowledge/observations/')) {
-      return route.fulfill({ json: route.request().method() === 'DELETE' ? { removed: true } : { updated: true } });
+      return route.fulfill({ json: method === 'DELETE' ? { removed: true } : { updated: true } });
     }
-    if (path.includes('/api/projects/proj-1/knowledge/') && route.request().method() === 'PATCH') {
+    if (path.includes('/api/projects/proj-1/knowledge/') && method === 'PATCH') {
       return route.fulfill({ json: { updated: true } });
     }
-    if (path.includes('/api/projects/proj-1/knowledge/') && route.request().method() === 'DELETE') {
+    if (path.includes('/api/projects/proj-1/knowledge/') && method === 'DELETE') {
       return route.fulfill({ json: { deleted: true } });
     }
     if (path.includes('/api/projects/proj-1/knowledge') && !path.includes('search')) {
       return route.fulfill({ json: { entities, total: entities.length } });
     }
-    if (path.includes('/api/projects/proj-1/policies/') && route.request().method() === 'PATCH') {
+    if (path.includes('/api/projects/proj-1/policies/') && method === 'PATCH') {
       return route.fulfill({ json: { updated: true, policyId: path.split('/').pop() } });
     }
-    if (path.includes('/api/projects/proj-1/policies/') && route.request().method() === 'DELETE') {
+    if (path.includes('/api/projects/proj-1/policies/') && method === 'DELETE') {
       return route.fulfill({ json: { removed: true, policyId: path.split('/').pop() } });
     }
     if (path.includes('/api/projects/proj-1/policies')) {
@@ -253,6 +260,61 @@ test.describe('Agent Context — Mobile', () => {
     await page.getByRole('button', { name: 'Delete policy' }).first().click();
     await expect(page.getByRole('alertdialog', { name: 'Delete policy' })).toBeVisible();
     await screenshot(page, 'agent-context-policy-delete-dialog-mobile');
+    await assertNoOverflow(page);
+  });
+
+
+  test('management actions submit mutation requests', async ({ page }) => {
+    const requests: CapturedRequest[] = [];
+    await setupMocks(page, { requests });
+    await page.goto('/projects/proj-1/agent-context');
+
+    await page.click('button:has-text("Memory")');
+    await page.getByRole('button', { name: 'Edit memory entity' }).first().click();
+    await page.getByLabel('Name').fill('Updated Memory');
+    await page.getByLabel('Description').fill('Updated memory description');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => requests.some((request) => request.method === 'PATCH' && request.path === '/api/projects/proj-1/knowledge/e1')).toBe(true);
+
+    await page.getByRole('button', { name: /CodeStyle/ }).click();
+    await page.getByRole('button', { name: 'Edit observation' }).first().click();
+    await page.getByRole('textbox', { name: 'Observation' }).fill('Updated observation content');
+    await page.getByRole('spinbutton', { name: 'Confidence' }).fill('77');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => requests.some((request) => request.method === 'PATCH' && request.path === '/api/projects/proj-1/knowledge/observations/o1')).toBe(true);
+
+    await page.getByRole('button', { name: 'Delete observation' }).first().click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect.poll(() => requests.some((request) => request.method === 'DELETE' && request.path.includes('/api/projects/proj-1/knowledge/observations/'))).toBe(true);
+
+    await page.click('button:has-text("Policies")');
+    await page.getByRole('button', { name: 'Edit policy' }).first().click();
+    await page.getByLabel('Title').fill('Updated policy');
+    await page.getByLabel('Content').fill('Updated policy content');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => requests.some((request) => request.method === 'PATCH' && request.path === '/api/projects/proj-1/policies/p1')).toBe(true);
+
+    await page.getByRole('button', { name: 'Delete policy' }).first().click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect.poll(() => requests.some((request) => request.method === 'DELETE' && request.path === '/api/projects/proj-1/policies/p1')).toBe(true);
+
+    expect(requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: 'PATCH',
+        path: '/api/projects/proj-1/knowledge/e1',
+        body: expect.objectContaining({ name: 'Updated Memory', description: 'Updated memory description' }),
+      }),
+      expect.objectContaining({
+        method: 'PATCH',
+        path: '/api/projects/proj-1/knowledge/observations/o1',
+        body: expect.objectContaining({ content: 'Updated observation content', confidence: 0.77 }),
+      }),
+      expect.objectContaining({
+        method: 'PATCH',
+        path: '/api/projects/proj-1/policies/p1',
+        body: expect.objectContaining({ title: 'Updated policy', content: 'Updated policy content' }),
+      }),
+    ]));
     await assertNoOverflow(page);
   });
 
