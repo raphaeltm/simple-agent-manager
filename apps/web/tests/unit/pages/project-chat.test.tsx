@@ -718,6 +718,33 @@ describe('ProjectChat profile setup wizard', () => {
     expect(screen.queryByText(/€7.69/)).not.toBeInTheDocument();
   });
 
+  it('shows provider catalog pricing when the user has BYOC credentials', async () => {
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [{
+      provider: 'hetzner',
+      defaultLocation: 'fsn1',
+      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
+      sizes: {
+        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+      },
+    }] });
+    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
+
+    renderProjectChat();
+
+    await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Claude Code/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Chat and explore/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+
+    expect(screen.getByText(/cx32/)).toBeInTheDocument();
+    expect(screen.getByText(/4 vCPU, 8 GB RAM, 80 GB storage/)).toBeInTheDocument();
+    expect(screen.getByText(/€7.69\/mo/)).toBeInTheDocument();
+  });
+
   it('directs users to settings when no agents are configured', async () => {
     mocks.listAgents.mockResolvedValue({ agents: [] });
 
