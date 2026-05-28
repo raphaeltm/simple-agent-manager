@@ -18,18 +18,18 @@ The project Agent Context page exposes Memory and Policies as read-only lists. T
 
 ## Checklist
 
-- [ ] Add `updatePolicy` and `deletePolicy` functions to `apps/web/src/lib/api/policies.ts`.
-- [ ] Pass a refresh callback from `AgentContextPage` into Memory and Policies tabs.
-- [ ] Update Memory tab to support click-to-expand entity cards and fetch observations via `getKnowledgeEntity`.
-- [ ] Add hover/focus-revealed edit and delete controls for memory entities.
-- [ ] Add inline edit forms for memory entity fields without adding create controls.
-- [ ] Add inline edit and delete controls for observations without adding create controls.
-- [ ] Add confirmation dialogs with backdrop blur for memory entity and observation deletes.
-- [ ] Add hover/focus-revealed edit and delete controls for policies.
-- [ ] Add inline edit forms for policy fields without adding create controls.
-- [ ] Add confirmation dialogs with backdrop blur for policy deletes.
-- [ ] Preserve existing Agent Context glass styling and mobile-safe layout.
-- [ ] Remove prototype route/files if present in the checkout.
+- [x] Add `updatePolicy` and `deletePolicy` functions to `apps/web/src/lib/api/policies.ts`.
+- [x] Pass a refresh callback from `AgentContextPage` into Memory and Policies tabs.
+- [x] Update Memory tab to support click-to-expand entity cards and fetch observations via `getKnowledgeEntity`.
+- [x] Add hover/focus-revealed edit and delete controls for memory entities.
+- [x] Add inline edit forms for memory entity fields without adding create controls.
+- [x] Add inline edit and delete controls for observations without adding create controls.
+- [x] Add confirmation dialogs with backdrop blur for memory entity and observation deletes.
+- [x] Add hover/focus-revealed edit and delete controls for policies.
+- [x] Add inline edit forms for policy fields without adding create controls.
+- [x] Add confirmation dialogs with backdrop blur for policy deletes.
+- [x] Preserve existing Agent Context glass styling and mobile-safe layout.
+- [x] Remove prototype route/files if present in the checkout.
 - [ ] Add or update tests for API client and UI behavior where practical.
 - [ ] Run lint, typecheck, tests, build, and Playwright visual audit.
 

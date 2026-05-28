@@ -39,6 +39,21 @@ function makeEntity(overrides: Partial<{ id: string; name: string; entityType: s
   };
 }
 
+function makeObservation(overrides: Partial<{ id: string; entityId: string; content: string; confidence: number; sourceType: string }> = {}) {
+  return {
+    id: overrides.id ?? 'obs-1',
+    entityId: overrides.entityId ?? 'e1',
+    content: overrides.content ?? 'Prefers focused implementation notes with direct evidence.',
+    confidence: overrides.confidence ?? 0.92,
+    sourceType: overrides.sourceType ?? 'explicit',
+    sourceSessionId: null,
+    createdAt: Date.now() - 86400000,
+    lastConfirmedAt: Date.now(),
+    supersededBy: null,
+    isActive: true,
+  };
+}
+
 function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string }> = {}) {
   return {
     id: overrides.id ?? 'pol-1',
@@ -88,6 +103,11 @@ const NORMAL_POLICIES = [
   makePolicy({ id: 'p3', category: 'preference', title: 'Prefer concise code', active: false, confidence: 0.7 }),
 ];
 
+const NORMAL_OBSERVATIONS = [
+  makeObservation({ id: 'o1', entityId: 'e1' }),
+  makeObservation({ id: 'o2', entityId: 'e1', content: 'A'.repeat(240), confidence: 0.81, sourceType: 'behavioral' }),
+];
+
 const NORMAL_ACTIONS = [
   makeActivity({ id: 'a1', eventType: 'task.completed', actorType: 'agent' }),
   makeActivity({ id: 'a2', eventType: 'knowledge.created', actorType: 'system' }),
@@ -98,10 +118,12 @@ async function setupMocks(page: Page, opts: {
   entities?: ReturnType<typeof makeEntity>[];
   policies?: ReturnType<typeof makePolicy>[];
   actions?: ReturnType<typeof makeActivity>[];
+  observations?: ReturnType<typeof makeObservation>[];
 } = {}) {
   const entities = opts.entities ?? NORMAL_ENTITIES;
   const policies = opts.policies ?? NORMAL_POLICIES;
   const actions = opts.actions ?? NORMAL_ACTIONS;
+  const observations = opts.observations ?? NORMAL_OBSERVATIONS;
 
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
@@ -138,8 +160,26 @@ async function setupMocks(page: Page, opts: {
     }
 
     // Project-scoped routes
+    if (path === '/api/projects/proj-1/knowledge/e1') {
+      return route.fulfill({ json: { entity: { ...entities[0], observations, relations: [] }, observations, relations: [] } });
+    }
+    if (path.includes('/api/projects/proj-1/knowledge/observations/')) {
+      return route.fulfill({ json: route.request().method() === 'DELETE' ? { removed: true } : { updated: true } });
+    }
+    if (path.includes('/api/projects/proj-1/knowledge/') && route.request().method() === 'PATCH') {
+      return route.fulfill({ json: { updated: true } });
+    }
+    if (path.includes('/api/projects/proj-1/knowledge/') && route.request().method() === 'DELETE') {
+      return route.fulfill({ json: { deleted: true } });
+    }
     if (path.includes('/api/projects/proj-1/knowledge') && !path.includes('search')) {
       return route.fulfill({ json: { entities, total: entities.length } });
+    }
+    if (path.includes('/api/projects/proj-1/policies/') && route.request().method() === 'PATCH') {
+      return route.fulfill({ json: { updated: true, policyId: path.split('/').pop() } });
+    }
+    if (path.includes('/api/projects/proj-1/policies/') && route.request().method() === 'DELETE') {
+      return route.fulfill({ json: { removed: true, policyId: path.split('/').pop() } });
     }
     if (path.includes('/api/projects/proj-1/policies')) {
       return route.fulfill({ json: { policies, total: policies.length } });
@@ -179,23 +219,40 @@ test.describe('Agent Context — Mobile', () => {
     await assertNoOverflow(page);
   });
 
-  test('memory tab with normal data', async ({ page }) => {
+  test('memory tab expands and exposes management controls', async ({ page }) => {
     await setupMocks(page);
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Memory")');
-    await expect(page.getByText('CodeStyle')).toBeVisible();
-    await expect(page.getByText('ProjectArchitecture')).toBeVisible();
-    await screenshot(page, 'agent-context-memory-mobile');
+    await page.getByRole('button', { name: /CodeStyle/ }).click();
+    await expect(page.getByText('Prefers focused implementation notes')).toBeVisible();
+    await page.getByRole('button', { name: 'Edit memory entity' }).first().click();
+    await expect(page.getByLabel('Name')).toBeVisible();
+    await screenshot(page, 'agent-context-memory-expanded-edit-mobile');
     await assertNoOverflow(page);
   });
 
-  test('policies tab with normal data', async ({ page }) => {
+  test('memory delete confirmation uses blurred dialog', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Memory")');
+    await page.getByRole('button', { name: 'Delete memory entity' }).first().click();
+    await expect(page.getByRole('alertdialog', { name: 'Delete entity' })).toBeVisible();
+    await screenshot(page, 'agent-context-memory-delete-dialog-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('policies tab edits and confirms deletes', async ({ page }) => {
     await setupMocks(page);
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Policies")');
     await expect(page.getByText('Always run tests')).toBeVisible();
-    await expect(page.getByText('No hardcoded URLs')).toBeVisible();
-    await screenshot(page, 'agent-context-policies-mobile');
+    await page.getByRole('button', { name: 'Edit policy' }).first().click();
+    await expect(page.getByLabel('Title')).toBeVisible();
+    await screenshot(page, 'agent-context-policy-edit-mobile');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Delete policy' }).first().click();
+    await expect(page.getByRole('alertdialog', { name: 'Delete policy' })).toBeVisible();
+    await screenshot(page, 'agent-context-policy-delete-dialog-mobile');
     await assertNoOverflow(page);
   });
 
@@ -249,6 +306,16 @@ test.describe('Agent Context — Desktop', () => {
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Memory")');
     await screenshot(page, 'agent-context-many-items-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('memory expanded state', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Memory")');
+    await page.getByRole('button', { name: /CodeStyle/ }).click();
+    await expect(page.getByText('Prefers focused implementation notes')).toBeVisible();
+    await screenshot(page, 'agent-context-memory-expanded-desktop');
     await assertNoOverflow(page);
   });
 

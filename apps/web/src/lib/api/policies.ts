@@ -1,7 +1,7 @@
 /**
  * Project Policies API client functions.
  */
-import type { ListPoliciesResponse, ProjectPolicy } from '@simple-agent-manager/shared';
+import type { ListPoliciesResponse, ProjectPolicy, UpdatePolicyRequest } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -28,4 +28,25 @@ export async function getPolicy(
   policyId: string,
 ): Promise<ProjectPolicy> {
   return request<ProjectPolicy>(`/api/projects/${projectId}/policies/${policyId}`);
+}
+
+
+export async function updatePolicy(
+  projectId: string,
+  policyId: string,
+  body: UpdatePolicyRequest,
+): Promise<{ updated: boolean; policyId: string }> {
+  return request(`/api/projects/${projectId}/policies/${policyId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deletePolicy(
+  projectId: string,
+  policyId: string,
+): Promise<{ removed: boolean; policyId: string }> {
+  return request(`/api/projects/${projectId}/policies/${policyId}`, {
+    method: 'DELETE',
+  });
 }

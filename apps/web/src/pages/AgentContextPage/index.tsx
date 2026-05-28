@@ -168,11 +168,11 @@ export function AgentContextPage() {
         )}
 
         {activeTab === 'memory' && !loading && (
-          <MemoryTab entities={filteredEntities} />
+          <MemoryTab entities={filteredEntities} projectId={projectId} onRefresh={loadData} />
         )}
 
         {activeTab === 'policies' && !loading && (
-          <PoliciesTab policies={filteredPolicies} />
+          <PoliciesTab policies={filteredPolicies} projectId={projectId} onRefresh={loadData} />
         )}
 
         {activeTab === 'actions' && !loading && (
