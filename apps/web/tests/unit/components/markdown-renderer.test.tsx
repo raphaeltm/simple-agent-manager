@@ -178,13 +178,35 @@ describe('RenderedMarkdown', () => {
       for (const s of mustNotContain) expect(html).not.toContain(s);
     });
 
-    it('preserves foreignObject with safe Mermaid label content', async () => {
-      const html = await renderMermaidSvg(
-        '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>',
-      );
-      expect(html).toContain('Node A');
-      expect(html).toContain('foreignObject');
-      expect(html).toContain('nodeLabel');
+    // Parameterized preservation tests — verify safe SVG structures survive sanitization.
+    const preservationCases: Array<{ name: string; svg: string; mustContain: string[]; mustNotContain?: string[] }> = [
+      {
+        name: 'foreignObject with safe Mermaid label content',
+        svg: '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>',
+        mustContain: ['Node A', 'foreignObject', 'nodeLabel'],
+      },
+      {
+        name: 'valid SVG content (rect, text, fill)',
+        svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>',
+        mustContain: ['Node A', '<rect', '<text', 'fill="#1a3a32"'],
+      },
+      {
+        name: 'sequence diagram SVG using text elements (no foreignObject)',
+        svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect x="50" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/><text x="110" y="35" text-anchor="middle" fill="#e6f2ee">Alice</text><rect x="250" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/><text x="310" y="35" text-anchor="middle" fill="#e6f2ee">Bob</text><line x1="110" y1="50" x2="310" y2="80" stroke="#9fb7ae"/><text x="210" y="70" text-anchor="middle" fill="#e6f2ee">Hello</text></svg>',
+        mustContain: ['Alice', 'Bob', 'Hello', '<text', '<line'],
+      },
+      {
+        name: 'nested foreignObject strips inner (attacker-crafted)',
+        svg: '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span>Outer label</span><foreignObject width="50" height="20"><div><script>alert(1)</script></div></foreignObject></div></foreignObject></svg>',
+        mustContain: ['Outer label'],
+        mustNotContain: ['<script', 'alert'],
+      },
+    ];
+
+    it.each(preservationCases)('preserves $name', async ({ svg, mustContain, mustNotContain }) => {
+      const html = await renderMermaidSvg(svg);
+      for (const s of mustContain) expect(html).toContain(s);
+      for (const s of mustNotContain ?? []) expect(html).not.toContain(s);
     });
 
     it('preserves multiple foreignObject elements in one SVG (multi-node flowchart)', async () => {
@@ -199,46 +221,6 @@ describe('RenderedMarkdown', () => {
       expect(html).toContain('Node B');
       expect(html).toContain('Node C');
       expect((html.match(/foreignObject/gi) ?? []).length).toBeGreaterThanOrEqual(3);
-    });
-
-    it('strips nested foreignObject elements', async () => {
-      const html = await renderMermaidSvg([
-        '<svg><foreignObject width="100" height="40">',
-        '<div xmlns="http://www.w3.org/1999/xhtml"><span>Outer label</span>',
-        '<foreignObject width="50" height="20"><div><script>alert(1)</script></div></foreignObject>',
-        '</div></foreignObject></svg>',
-      ].join(''));
-      expect(html).toContain('Outer label');
-      expect(html).not.toContain('<script');
-      expect(html).not.toContain('alert');
-    });
-
-    it('preserves valid SVG content through sanitization', async () => {
-      const html = await renderMermaidSvg(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>',
-      );
-      expect(html).toContain('Node A');
-      expect(html).toContain('<rect');
-      expect(html).toContain('<text');
-      expect(html).toContain('fill="#1a3a32"');
-    });
-
-    it('preserves sequence diagram SVG using text elements (no foreignObject)', async () => {
-      const html = await renderMermaidSvg([
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">',
-        '<rect x="50" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/>',
-        '<text x="110" y="35" text-anchor="middle" fill="#e6f2ee">Alice</text>',
-        '<rect x="250" y="10" width="120" height="40" fill="#1a3a32" stroke="#29423b"/>',
-        '<text x="310" y="35" text-anchor="middle" fill="#e6f2ee">Bob</text>',
-        '<line x1="110" y1="50" x2="310" y2="80" stroke="#9fb7ae"/>',
-        '<text x="210" y="70" text-anchor="middle" fill="#e6f2ee">Hello</text>',
-        '</svg>',
-      ].join(''));
-      expect(html).toContain('Alice');
-      expect(html).toContain('Bob');
-      expect(html).toContain('Hello');
-      expect(html).toContain('<text');
-      expect(html).toContain('<line');
     });
 
     it('uses explicit ALLOWED_TAGS, ADD_TAGS, and ALLOWED_ATTR in SVG sanitize config', () => {
