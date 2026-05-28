@@ -196,6 +196,59 @@ const TEST_PROVIDER_CATALOG = {
     large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
   },
 };
+
+
+function makeAgentProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'prof-1',
+    projectId: PROJECT_ID,
+    userId: 'user-1',
+    name: 'Default Profile',
+    description: null,
+    agentType: 'claude-code',
+    model: null,
+    permissionMode: null,
+    systemPromptAppend: null,
+    maxTurns: null,
+    timeoutMinutes: null,
+    vmSizeOverride: null,
+    provider: null,
+    vmLocation: null,
+    workspaceProfile: null,
+    devcontainerConfigName: null,
+    taskMode: null,
+    isBuiltin: false,
+    createdAt: '2026-03-15T00:00:00Z',
+    updatedAt: '2026-03-15T00:00:00Z',
+    ...overrides,
+  };
+}
+
+async function openProfileWizardFromGate() {
+  await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+}
+
+function chooseAgent(agentName: RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: agentName }));
+  fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+}
+
+function chooseWorkType(workType: RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: workType }));
+  fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+}
+
+function chooseVmSize(size: RegExp = /Medium/i) {
+  fireEvent.click(screen.getByRole('button', { name: size }));
+  fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+}
+
+async function openWizardVmStep(agentName = /Claude Code/i, workType = /Chat and explore/i) {
+  await openProfileWizardFromGate();
+  chooseAgent(agentName);
+  chooseWorkType(workType);
+}
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -677,12 +730,9 @@ describe('ProjectChat profile setup wizard', () => {
     expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
-    fireEvent.click(screen.getByRole('button', { name: /OpenAI Codex/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Build and open PRs/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Large/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    chooseAgent(/OpenAI Codex/i);
+    chooseWorkType(/Build and open PRs/i);
+    chooseVmSize(/Large/i);
 
     const nameInput = screen.getByLabelText('Profile name');
     expect(nameInput).toHaveValue('OpenAI Codex Tasks');
@@ -708,12 +758,7 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Claude Code/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Chat and explore/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    await openWizardVmStep();
 
     expect(screen.getByText(/cx32/)).toBeInTheDocument();
     expect(screen.getByText(/4 vCPU, 8 GB RAM, 80 GB storage/)).toBeInTheDocument();
@@ -726,12 +771,7 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Claude Code/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Chat and explore/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    await openWizardVmStep();
 
     expect(screen.getByText(/cx32/)).toBeInTheDocument();
     expect(screen.getByText(/4 vCPU, 8 GB RAM, 80 GB storage/)).toBeInTheDocument();
@@ -754,28 +794,13 @@ describe('ProjectChat profile setup wizard', () => {
 
   it('shows inline validation for duplicate profile names', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
-    mocks.listAgentProfiles.mockResolvedValue([{
-      id: 'prof-existing',
-      projectId: PROJECT_ID,
-      userId: 'user-1',
-      name: 'Codex Builder',
-      description: null,
-      agentType: 'openai-codex',
-      model: null,
-      permissionMode: null,
-      systemPromptAppend: null,
-      maxTurns: null,
-      timeoutMinutes: null,
-      vmSizeOverride: null,
-      provider: null,
-      vmLocation: null,
-      workspaceProfile: null,
-      devcontainerConfigName: null,
-      taskMode: null,
-      isBuiltin: false,
-      createdAt: '2026-03-15T00:00:00Z',
-      updatedAt: '2026-03-15T00:00:00Z',
-    }]);
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({
+        id: 'prof-existing',
+        name: 'Codex Builder',
+        agentType: 'openai-codex',
+      }),
+    ]);
 
     renderProjectChat();
 
@@ -785,11 +810,9 @@ describe('ProjectChat profile setup wizard', () => {
 
     const newButtons = screen.getAllByRole('button', { name: /New/i });
     fireEvent.click(newButtons[newButtons.length - 1]);
-    fireEvent.click(screen.getByRole('button', { name: /OpenAI Codex/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Build and open PRs/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    chooseAgent(/OpenAI Codex/i);
+    chooseWorkType(/Build and open PRs/i);
+    chooseVmSize();
     fireEvent.change(screen.getByLabelText('Profile name'), { target: { value: 'Codex Builder' } });
     const createButtons = screen.getAllByRole('button', { name: /Create profile/i });
     fireEvent.click(createButtons[createButtons.length - 1]);
@@ -962,50 +985,16 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
 
 describe('ProjectChat agent profile selection', () => {
   const TEST_PROFILES = [
-    {
+    makeAgentProfile({
       id: 'prof-1',
-      projectId: PROJECT_ID,
-      userId: 'user-1',
       name: 'Fast Implementer',
-      description: null,
-      agentType: 'claude-code',
       model: 'claude-sonnet-4-5-20250929',
-      permissionMode: null,
-      systemPromptAppend: null,
-      maxTurns: null,
-      timeoutMinutes: null,
-      vmSizeOverride: null,
-      provider: null,
-      vmLocation: null,
-      workspaceProfile: null,
-      devcontainerConfigName: null,
-      taskMode: null,
-      isBuiltin: false,
-      createdAt: '2026-03-15T00:00:00Z',
-      updatedAt: '2026-03-15T00:00:00Z',
-    },
-    {
+    }),
+    makeAgentProfile({
       id: 'prof-2',
-      projectId: PROJECT_ID,
-      userId: 'user-1',
       name: 'Reviewer',
-      description: null,
       agentType: 'openai-codex',
-      model: null,
-      permissionMode: null,
-      systemPromptAppend: null,
-      maxTurns: null,
-      timeoutMinutes: null,
-      vmSizeOverride: null,
-      provider: null,
-      vmLocation: null,
-      workspaceProfile: null,
-      devcontainerConfigName: null,
-      taskMode: null,
-      isBuiltin: false,
-      createdAt: '2026-03-15T00:00:00Z',
-      updatedAt: '2026-03-15T00:00:00Z',
-    },
+    }),
   ];
 
   beforeEach(() => {

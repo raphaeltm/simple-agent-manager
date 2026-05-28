@@ -269,13 +269,17 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
   });
 }
 
+async function openMockedChat(page: Page, mode: AuditMode, sessionId?: string) {
+  await setupApiMocks(page, mode);
+  await page.goto(`/projects/${MOCK_PROJECT.id}/chat${sessionId ? `/${sessionId}` : ''}`);
+  await page.waitForTimeout(sessionId ? 1500 : 1200);
+}
+
 test.describe('Project chat composer audit', () => {
   test('new-chat composer handles controls, long text, slash, and mentions', async ({
     page,
   }, testInfo) => {
-    await setupApiMocks(page, 'new');
-    await page.goto(`/projects/${MOCK_PROJECT.id}/chat`);
-    await page.waitForTimeout(1200);
+    await openMockedChat(page, 'new');
 
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeVisible();
@@ -315,9 +319,7 @@ test.describe('Project chat composer audit', () => {
   test('single-agent no-profile state shows default banner with active composer', async ({
     page,
   }, testInfo) => {
-    await setupApiMocks(page, 'single-default');
-    await page.goto(`/projects/${MOCK_PROJECT.id}/chat`);
-    await page.waitForTimeout(1200);
+    await openMockedChat(page, 'single-default');
 
     await expect(page.getByText(/Using/)).toBeVisible();
     await expect(page.getByText(/OpenAI Codex/)).toBeVisible();
@@ -333,9 +335,7 @@ test.describe('Project chat composer audit', () => {
   test('multi-agent no-profile state gates composer and opens wizard', async ({
     page,
   }, testInfo) => {
-    await setupApiMocks(page, 'wizard');
-    await page.goto(`/projects/${MOCK_PROJECT.id}/chat`);
-    await page.waitForTimeout(1200);
+    await openMockedChat(page, 'wizard');
 
     await expect(page.getByText('Create a profile to start')).toBeVisible();
     await expect(page.locator('textarea[role="combobox"]')).toBeDisabled();
@@ -356,9 +356,7 @@ test.describe('Project chat composer audit', () => {
   test('active follow-up composer has shared autocomplete without new-task controls', async ({
     page,
   }, testInfo) => {
-    await setupApiMocks(page, 'active');
-    await page.goto(`/projects/${MOCK_PROJECT.id}/chat/${ACTIVE_SESSION.id}`);
-    await page.waitForTimeout(1500);
+    await openMockedChat(page, 'active', ACTIVE_SESSION.id);
 
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeVisible();
@@ -382,9 +380,7 @@ test.describe('Project chat composer audit', () => {
   test('restored provisioning session shows staged progress without overflow', async ({
     page,
   }, testInfo) => {
-    await setupApiMocks(page, 'provisioning');
-    await page.goto(`/projects/${MOCK_PROJECT.id}/chat/${PROVISIONING_SESSION.id}`);
-    await page.waitForTimeout(1500);
+    await openMockedChat(page, 'provisioning', PROVISIONING_SESSION.id);
 
     await expect(page.getByText('Installing dependencies (3/4)')).toBeVisible();
     await expect(page.getByText(/Usually takes 2-4 minutes/)).toBeVisible();
