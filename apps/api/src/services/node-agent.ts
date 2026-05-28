@@ -1,7 +1,7 @@
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { signNodeManagementToken } from './jwt';
+import { signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
@@ -567,11 +567,54 @@ export async function getWorkspacePortsOnNode(
   env: Env,
   userId: string
 ): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/ports`, {
-    method: 'GET',
-    userId,
+  // The VM agent ports endpoint is workspace-scoped and uses the same
+  // workspace-terminal audience accepted by browser/direct workspace calls.
+  // A node-management token fails requireWorkspaceRequestAuth().
+  const { token } = await signTerminalToken(userId, workspaceId, env);
+  const url = `${getNodeBackendBaseUrl(nodeId, env)}/workspaces/${workspaceId}/ports`;
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('X-SAM-Node-Id', nodeId);
+  headers.set('X-SAM-Workspace-Id', workspaceId);
+
+  const startedAt = Date.now();
+  recordNodeRoutingMetric({
+    metric: 'node_agent_request',
+    nodeId,
     workspaceId,
-  });
+  }, env);
+
+  const requestTimeoutMs = getTimeoutMs(
+    env.NODE_AGENT_REQUEST_TIMEOUT_MS,
+    DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
+  );
+  const response = await fetchWithTimeout(url, {
+    method: 'GET',
+    headers,
+  }, requestTimeoutMs);
+
+  recordNodeRoutingMetric({
+    metric: 'node_agent_response',
+    nodeId,
+    workspaceId,
+    statusCode: response.status,
+    durationMs: Date.now() - startedAt,
+  }, env);
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Node Agent request failed: ${response.status} ${body}`);
+  }
+
+  try {
+    return await response.json();
+  } catch (err) {
+    throw new Error(
+      err instanceof Error
+        ? `Node Agent returned invalid JSON: ${err.message}`
+        : 'Node Agent returned invalid JSON'
+    );
+  }
 }
 
 export async function rebuildWorkspaceOnNode(
