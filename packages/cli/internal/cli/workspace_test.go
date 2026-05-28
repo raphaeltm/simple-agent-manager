@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -567,7 +568,16 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	})
 	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
 
-	// Start a local listener
+	remoteRequests := make(chan *http.Request, 1)
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clone := r.Clone(r.Context())
+		clone.Header = r.Header.Clone()
+		remoteRequests <- clone
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("proxied-ok"))
+	}))
+	defer remote.Close()
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
@@ -578,29 +588,48 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	defer cancel()
 
 	runtime := Runtime{Stderr: io.Discard}
-	remoteURL := fmt.Sprintf("https://ws-test--%d.example.com", port)
-
-	go acceptConnections(ctx, runtime, client, "ws-test", port, ln, remoteURL)
+	go acceptConnections(ctx, runtime, client, "ws-test", port, ln, remote.URL)
 
 	// Give the server a moment to start
 	time.Sleep(50 * time.Millisecond)
 
-	// Make a request to the proxy — it will fail to reach the remote host
-	// but we can verify the proxy is running and the token was fetched
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/test-path", port))
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/test-path?client_query=1", port))
 	if err != nil {
 		t.Fatalf("failed to connect to proxy: %v", err)
 	}
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
 
-	// The proxy should have fetched a token
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from proxy, got %d", resp.StatusCode)
+	}
+	if string(body) != "proxied-ok" {
+		t.Fatalf("expected proxied response body, got %q", string(body))
+	}
 	if tokenCalls != 1 {
 		t.Fatalf("expected 1 token API call, got %d", tokenCalls)
 	}
 
-	// The response will be 502 (Bad Gateway) since the remote host doesn't exist
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("expected 502 from proxy (remote unreachable), got %d", resp.StatusCode)
+	select {
+	case req := <-remoteRequests:
+		cookie, err := req.Cookie("sam_port_access")
+		if err != nil {
+			t.Fatalf("expected sam_port_access cookie: %v", err)
+		}
+		if cookie.Value != "test-port-token" {
+			t.Fatalf("expected token cookie value, got %q", cookie.Value)
+		}
+		if got := req.URL.Query().Get("port_token"); got != "" {
+			t.Fatalf("expected no port_token query parameter, got %q", got)
+		}
+		if got := req.URL.Query().Get("client_query"); got != "1" {
+			t.Fatalf("expected client query to be preserved, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("remote server did not receive proxied request")
 	}
 }
 

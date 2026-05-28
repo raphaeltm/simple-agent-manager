@@ -20,16 +20,27 @@ The workspace port forwarding CLI shipped without a true end-to-end staging test
 - [x] Use the terminal WebSocket or an equivalent user path to start a trivial HTTP server on port 3000 inside that workspace.
 - [x] Build the current Go CLI locally.
 - [x] Authenticate the CLI against staging with the smoke-test user BetterAuth session cookie.
-- [ ] Run `sam workspace <workspaceId> ports` and confirm port 3000 is detected or manually forward it with `--port 3000`.
-- [ ] Run `sam workspace <workspaceId> forward --port 3000`.
-- [ ] Verify `curl http://127.0.0.1:3000` returns the server response through the CLI proxy.
+- [x] Run `sam workspace <workspaceId> ports` and confirm port 3000 is detected or manually forward it with `--port 3000`.
+- [x] Run `sam workspace <workspaceId> forward --port 3000`.
+- [x] Verify `curl http://127.0.0.1:3000` returns the server response through the CLI proxy.
 - [x] If the CLI fails, inspect staging state/logs first, fix the CLI or API as needed, then repeat.
-- [ ] Clean up the test server and any test workspace/node created for validation.
+- [x] Clean up the test server and any test workspace/node created for validation.
 - [ ] Record staging evidence and independent validator result.
 
 ## Acceptance Criteria
 
-- [ ] The end-to-end CLI forwarding flow works on staging with a real running workspace and a real server response from `localhost:3000`.
-- [ ] Any CLI/API defects discovered during staging are fixed and covered by tests.
+- [x] The end-to-end CLI forwarding flow works on staging with a real running workspace and a real server response from `localhost:3000`.
+- [x] Any CLI/API defects discovered during staging are fixed and covered by tests.
 - [ ] If code changes are required, all required quality gates, specialist reviews, staging deployment, PR, and post-merge monitoring are completed via `/do`.
 
+
+## Staging Evidence
+
+- Created staging workspace `01KSP75VWY0JGT6H3XNGVKWRKV` on node `01KSP75VF7CJSQAWHVCPCQMEJD`; workspace reached `running`.
+- Started a Node HTTP server on port 3000 inside the workspace through the terminal WebSocket.
+- Initial staging test found `sam workspace <workspaceId> ports --json` returned HTTP 500 because the API used node-management auth against a VM-agent workspace endpoint. Fixed by using a workspace terminal token for VM-agent port listing.
+- After staging deploy `26551679057`, `sam workspace <workspaceId> ports --json` detected port 3000.
+- Initial local forward returned the Cloudflare port proxy bootstrap redirect (HTTP 302). Fixed the CLI reverse proxy to send `sam_port_access` as a cookie instead of `port_token` as a query parameter.
+- Rebuilt the CLI and verified `curl http://127.0.0.1:3000` returned HTTP 200 with body `sam-cli-forward-ok`.
+
+- Deleted staging workspace `01KSP75VWY0JGT6H3XNGVKWRKV`; API returned `{ "success": true }`.

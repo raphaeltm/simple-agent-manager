@@ -229,15 +229,15 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 			req.URL.Host = target.Host
 			req.Host = target.Host
 
-			// Inject port token as query parameter (required by Cloudflare port-access worker)
+			// Authenticate directly with the port proxy. Browser flows use
+			// port_token to bootstrap this cookie via a redirect; the CLI needs
+			// localhost requests to proxy transparently without exposing that 302.
 			token, tokenErr := tc.getToken(req.Context())
 			if tokenErr != nil {
 				fmt.Fprintf(runtime.Stderr, "  [%s] token error: %v\n", time.Now().Format("15:04:05"), tokenErr)
 				return
 			}
-			q := req.URL.Query()
-			q.Set("port_token", token)
-			req.URL.RawQuery = q.Encode()
+			req.AddCookie(&http.Cookie{Name: "sam_port_access", Value: token})
 		},
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
