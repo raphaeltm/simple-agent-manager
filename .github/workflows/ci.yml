@@ -391,6 +391,10 @@ jobs:
         working-directory: packages/cli
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      - name: Cross-build CLI
+        working-directory: packages/cli
+        run: make build-all
+
       - name: Print CLI coverage summary
         working-directory: packages/cli
         run: go tool cover -func=coverage.out

@@ -19,14 +19,14 @@ SAM deployments need to own and serve their own CLI binaries from the same deplo
 
 ## Implementation Checklist
 
-- [ ] Add `packages/cli/Makefile` with cross-build targets for `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64`.
-- [ ] Update ignore rules for generated `packages/cli/bin/` artifacts if needed.
-- [ ] Update CI CLI job to run the cross-build in addition to the existing race+coverage test command.
-- [ ] Update deployment workflow to build the CLI and upload four binaries plus `cli/version.json` to the Pulumi-provisioned R2 bucket.
-- [ ] Add `GET /api/cli/download?os=<linux|darwin>&arch=<amd64|arm64>` using the existing R2 binding, with binary streaming headers and cache headers.
-- [ ] Add `GET /api/cli/version` returning available metadata from `cli/version.json` and unavailable metadata when missing or unconfigured.
-- [ ] Add focused API route tests for successful macOS arm64 download, unsupported platform, missing R2 binding, missing object, available version metadata, and missing version metadata.
-- [ ] Run focused local checks: CLI race+coverage tests, CLI cross-build, API route tests, and relevant typecheck/build.
+- [x] Add `packages/cli/Makefile` with cross-build targets for `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64`.
+- [x] Update ignore rules for generated `packages/cli/bin/` artifacts if needed.
+- [x] Update CI CLI job to run the cross-build in addition to the existing race+coverage test command.
+- [x] Update deployment workflow to build the CLI and upload four binaries plus `cli/version.json` to the Pulumi-provisioned R2 bucket.
+- [x] Add `GET /api/cli/download?os=<linux|darwin>&arch=<amd64|arm64>` using the existing R2 binding, with binary streaming headers and cache headers.
+- [x] Add `GET /api/cli/version` returning available metadata from `cli/version.json` and unavailable metadata when missing or unconfigured.
+- [x] Add focused API route tests for successful macOS arm64 download, unsupported platform, missing R2 binding, missing object, available version metadata, and missing version metadata.
+- [x] Run focused local checks: CLI race+coverage tests, CLI cross-build, API route tests, and relevant typecheck/build.
 - [ ] Run specialist validation for task completion, Cloudflare/R2 deployment, tests, CLI quality, and hardcoded-value compliance.
 - [ ] Deploy to staging through the normal workflow, verify real R2/API evidence for version and download endpoints, then open PR, wait for CI, merge, and verify production endpoints.
 

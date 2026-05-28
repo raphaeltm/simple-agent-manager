@@ -54,6 +54,7 @@ import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
 import { chatRoutes } from './routes/chat';
 import { chatsRoutes } from './routes/chats';
+import { cliRoutes } from './routes/cli';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { codexRefreshRoutes } from './routes/codex-refresh';
 import { credentialsRoutes } from './routes/credentials';
@@ -523,6 +524,7 @@ app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
+app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before

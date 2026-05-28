@@ -646,7 +646,7 @@ jobs:
       # Phase 4: VM Agent
       # ========================================
       - name: Setup Go
-        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
+        if: ${{ inputs.dry_run != true }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -663,6 +663,28 @@ jobs:
           # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
           pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
           pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Build CLI
+        if: ${{ inputs.dry_run != true }}
+        run: make -C packages/cli build-all version
+
+      - name: Upload CLI Binaries
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          R2_BUCKET=$(pulumi stack output r2Name)
+          # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/cli/sam-linux-amd64 --file $GITHUB_WORKSPACE/packages/cli/bin/sam-linux-amd64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/cli/sam-linux-arm64 --file $GITHUB_WORKSPACE/packages/cli/bin/sam-linux-arm64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/cli/sam-darwin-amd64 --file $GITHUB_WORKSPACE/packages/cli/bin/sam-darwin-amd64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/cli/sam-darwin-arm64 --file $GITHUB_WORKSPACE/packages/cli/bin/sam-darwin-arm64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/cli/version.json --file $GITHUB_WORKSPACE/packages/cli/bin/version.json --remote
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

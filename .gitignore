@@ -11,6 +11,9 @@ build/
 coverage/
 packages/cli/coverage.out
 
+# Generated Go binaries
+packages/cli/bin/
+
 # Environment files
 .env
 .env.local
