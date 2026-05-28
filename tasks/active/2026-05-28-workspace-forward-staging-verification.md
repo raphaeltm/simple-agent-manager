@@ -54,3 +54,12 @@ The workspace port forwarding CLI shipped without a true end-to-end staging test
 - Cloudflare specialist: `01KSP8SJPP1SMCBCTPB4S9Y2GA` dispatched.
 - Security auditor: `01KSP8STCSA5P1HVHSYW0JERXF` dispatched.
 - Test engineer: `01KSP8T2H3D3PSWNVZDS4JGVQJ` dispatched.
+
+## Local Review Results
+
+- Local review results superseded the mistaken SAM-dispatched reviewer tasks after user clarification that `/do` subagents means local subagents.
+- Go review: PASS, no blocking CLI proxy issues.
+- Cloudflare/API review: PASS, workspace terminal token matches the VM-agent workspace endpoint auth contract.
+- Security review: PASS, cookie-based port token forwarding reduces URL token leakage versus query strings.
+- Task completion review: PASS, staging evidence and cleanup align with implementation.
+- Test review: ADDRESSED in commit `3eb137d6`; the CLI test now simulates a remote 302 bootstrap response if `port_token` is sent in the query.
