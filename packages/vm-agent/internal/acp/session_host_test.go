@@ -1192,7 +1192,7 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 	}
 
 	got := strings.TrimSpace(stdin.String())
-	want := `{"jsonrpc":"2.0","method":"session/cancel","params":{}}`
+	want := `{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"test-session"}}`
 	if got != want {
 		t.Fatalf("forwarded cancel = %q, want %q", got, want)
 	}
