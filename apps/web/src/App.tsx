@@ -50,6 +50,8 @@ import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
+import { Tools } from './pages/Tools';
+import { ToolsCli } from './pages/ToolsCli';
 import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
 import { Try } from './pages/Try';
 import { TryCapExceeded } from './pages/TryCapExceeded';
@@ -132,6 +134,8 @@ export default function App() {
               <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
             </Route>
             <Route path="/account-map" element={<AccountMap />} />
+            <Route path="/tools" element={<Tools />} />
+            <Route path="/tools/cli" element={<ToolsCli />} />
             <Route path="/ui-standards" element={<UiStandards />} />
             <Route path="/admin" element={<Admin />}>
               <Route index element={<Navigate to="users" replace />} />

@@ -87,6 +87,7 @@ export {
   upsertProfileRuntimeFile,
 } from './agents';
 export { getCurrentUser } from './auth';
+export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
 export type { CredentialValidationResponse, GcpProject, GcpSetupRequest, GcpSetupResponse } from './credentials';
 export { createCredential, deleteCredential, listCredentials, validateAgentCredential, validateCredential } from './credentials';

@@ -27,6 +27,8 @@ This writes Linux and macOS binaries for `amd64` and `arm64` to `packages/cli/bi
 - `GET /api/cli/download?os=darwin&arch=amd64`
 - `GET /api/cli/download?os=darwin&arch=arm64`
 
+Users can download the CLI from the **Tools** page in the web app (`/tools/cli`), which auto-detects the user's OS and provides a one-click download button.
+
 ## Auth
 
 Configure the API origin and session cookie:

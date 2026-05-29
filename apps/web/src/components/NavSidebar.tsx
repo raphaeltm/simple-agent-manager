@@ -18,6 +18,7 @@ import {
   Settings,
   Shield,
   UserCog,
+  Wrench,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
@@ -38,6 +39,7 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
   { label: 'Chats', path: '/chats', icon: <MessageSquare size={18} /> },
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Map', path: '/account-map', icon: <Map size={18} /> },
+  { label: 'Tools', path: '/tools', icon: <Wrench size={18} /> },
   { label: 'Settings', path: '/settings', icon: <Settings size={18} /> },
 ];
 
