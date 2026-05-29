@@ -1013,6 +1013,15 @@ func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 	if !strings.Contains(config, codexManagedMcpStartMarker) {
 		t.Fatal("expected managed start marker")
 	}
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatal("expected sandbox mode to disable Codex bubblewrap inside containers")
+	}
+	if !strings.Contains(config, `approval_policy = "never"`) {
+		t.Fatal("expected approval policy to avoid Codex sandbox prompts inside containers")
+	}
+	if strings.Index(config, `sandbox_mode = "danger-full-access"`) > strings.Index(config, `[mcp_servers.sam-mcp]`) {
+		t.Fatal("expected sandbox settings before MCP server entries")
+	}
 	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
 		t.Fatal("expected sam-mcp server entry")
 	}
@@ -1100,6 +1109,12 @@ func TestGenerateCodexMcpConfigWithProxyProvider(t *testing.T) {
 		model:   "gpt-4.1",
 	})
 
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatal("expected sandbox mode to disable Codex bubblewrap inside containers")
+	}
+	if !strings.Contains(config, `approval_policy = "never"`) {
+		t.Fatal("expected approval policy to avoid Codex sandbox prompts inside containers")
+	}
 	if !strings.Contains(config, `model = "gpt-4.1"`) {
 		t.Fatal("expected model override")
 	}

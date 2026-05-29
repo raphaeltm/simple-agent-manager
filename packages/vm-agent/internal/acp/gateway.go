@@ -1073,6 +1073,8 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 
 	config.WriteString(codexManagedMcpStartMarker)
 	config.WriteString("\n# Added by SAM vm-agent for Codex ACP sessions.\n")
+	config.WriteString("sandbox_mode = \"danger-full-access\"\n")
+	config.WriteString("approval_policy = \"never\"\n")
 	config.WriteString(providerConfig)
 
 	for i, server := range validServers {
