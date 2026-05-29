@@ -191,6 +191,60 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
     });
   });
 
+  describe('reportActivity resolves ACP → chat session ID', () => {
+    it('broadcasts session.activity with the chat session ID, not the ACP session ID', async () => {
+      const acpSessionId = 'acp-session-xyz';
+      const chatSessionId = 'session-a'; // matches sessionASocket tag
+
+      mockCtx.storage.sql.exec = vi.fn((query: string, ..._args: any[]) => {
+        if (query.includes('SELECT chat_session_id FROM acp_sessions')) {
+          return {
+            toArray: () => [{ chat_session_id: chatSessionId }],
+            columnNames: [], rowsRead: 1, rowsWritten: 0,
+          };
+        }
+        // session_state upsert
+        return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 };
+      });
+
+      await projectData.reportActivity(acpSessionId, 'prompting');
+
+      // Session A socket (tagged session:session-a) should receive the event
+      expect(sessionASocket.send).toHaveBeenCalled();
+      const sent = JSON.parse(sessionASocket._sent[0]);
+      expect(sent.type).toBe('session.activity');
+      expect(sent.payload.sessionId).toBe(chatSessionId);
+      expect(sent.payload.activity).toBe('prompting');
+
+      // Session B socket (tagged session:session-b) should NOT receive it
+      expect(sessionBSocket.send).not.toHaveBeenCalled();
+
+      // Untagged socket should receive it (project-wide listener)
+      expect(untaggedSocket.send).toHaveBeenCalled();
+    });
+
+    it('falls back to ACP session ID when no acp_sessions row exists', async () => {
+      const acpSessionId = 'orphan-acp-id';
+
+      mockCtx.storage.sql.exec = vi.fn((query: string) => {
+        if (query.includes('SELECT chat_session_id FROM acp_sessions')) {
+          return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 };
+        }
+        return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 };
+      });
+
+      await projectData.reportActivity(acpSessionId, 'idle');
+
+      // With no matching chat session, broadcasts with the original ACP ID
+      // (goes to untagged sockets only since no socket is tagged session:orphan-acp-id)
+      expect(untaggedSocket.send).toHaveBeenCalled();
+      const sent = JSON.parse(untaggedSocket._sent[0]);
+      expect(sent.type).toBe('session.activity');
+      expect(sent.payload.sessionId).toBe(acpSessionId);
+      expect(sent.payload.activity).toBe('idle');
+    });
+  });
+
   describe('session-scoped message broadcast', () => {
     it('sends message.new only to subscribed session socket and untagged sockets', async () => {
       // Set up the SQL mock to return a valid session and next sequence

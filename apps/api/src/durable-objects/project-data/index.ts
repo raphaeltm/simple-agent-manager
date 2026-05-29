@@ -299,7 +299,18 @@ export class ProjectData extends DurableObject<Env> {
       restartCount: extra?.restartCount,
       statusError: extra?.statusError,
     });
-    this.broadcastEvent('session.activity', { sessionId, activity }, sessionId);
+
+    // Resolve ACP session ID → chat session ID for broadcast.
+    // Browser WebSockets are tagged with `session:<chatSessionId>`, but the
+    // VM agent reports activity using the ACP session ID. Without this lookup
+    // the broadcast targets sockets tagged with the ACP ID (none exist) and
+    // the event never reaches the browser.
+    const acpRow = this.sql.exec(
+      'SELECT chat_session_id FROM acp_sessions WHERE id = ?', sessionId,
+    ).toArray()[0];
+    const chatSessionId = (acpRow?.chat_session_id as string | undefined) ?? sessionId;
+
+    this.broadcastEvent('session.activity', { sessionId: chatSessionId, activity }, chatSessionId);
   }
 
   getSessionState(sessionId: string) {
@@ -412,7 +423,12 @@ export class ProjectData extends DurableObject<Env> {
     try {
       const healedSessionIds = sessionState.reconcileStaleActivity(this.sql);
       for (const healedId of healedSessionIds) {
-        this.broadcastEvent('session.activity', { sessionId: healedId, activity: 'idle' }, healedId);
+        // Resolve ACP session ID → chat session ID (same mismatch as reportActivity)
+        const healedRow = this.sql.exec(
+          'SELECT chat_session_id FROM acp_sessions WHERE id = ?', healedId,
+        ).toArray()[0];
+        const healedChatId = (healedRow?.chat_session_id as string | undefined) ?? healedId;
+        this.broadcastEvent('session.activity', { sessionId: healedChatId, activity: 'idle' }, healedChatId);
       }
     } catch (err) {
       log.error('alarm.stale_activity_reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
