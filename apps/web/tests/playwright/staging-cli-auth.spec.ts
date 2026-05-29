@@ -12,7 +12,7 @@
  * 8. Device flow approval with invalid code shows error
  * 9. Dashboard regression check
  */
-import { test, expect, type Page } from '@playwright/test';
+import { type Page, expect, test } from '@playwright/test';
 
 const API_URL = 'https://api.sammy.party';
 const APP_URL = 'https://app.sammy.party';
