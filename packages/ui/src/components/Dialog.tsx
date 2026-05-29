@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 interface DialogProps {
   isOpen: boolean;
@@ -36,7 +37,7 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-dialog-backdrop flex items-center justify-center p-4"
       aria-labelledby="dialog-title"
@@ -57,6 +58,7 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
