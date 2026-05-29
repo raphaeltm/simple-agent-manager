@@ -63,41 +63,7 @@ func ExchangeDeviceCode(ctx context.Context, httpClient HTTPDoer, apiURL string,
 }
 
 func postAuthJSON(ctx context.Context, httpClient HTTPDoer, endpoint string, body map[string]any, out any) error {
-	var reader io.Reader
-	if body != nil {
-		content, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		reader = bytes.NewReader(content)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, reader)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	response, err := httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	content, err := io.ReadAll(response.Body)
-	if err != nil {
-		return err
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return parseAPIError(response.StatusCode, content)
-	}
-	if len(content) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(content, out); err != nil {
-		return APIError{Status: response.StatusCode, Code: "INVALID_JSON", Message: "SAM API returned invalid JSON"}
-	}
-	return nil
+	return doJSON(ctx, httpClient, http.MethodPost, endpoint, "", body, out)
 }
 
 func (c APIClient) SubmitTask(ctx context.Context, projectID string, message string, options TaskSubmitOptions) (SubmitTaskResponse, error) {
@@ -159,6 +125,10 @@ func projectAPIPath(projectID string, segments ...string) string {
 }
 
 func (c APIClient) request(ctx context.Context, method string, path string, body map[string]any, out any) error {
+	return doJSON(ctx, c.http, method, c.config.APIURL+path, c.config.SessionCookie, body, out)
+}
+
+func doJSON(ctx context.Context, httpClient HTTPDoer, method string, endpoint string, cookie string, body map[string]any, out any) error {
 	var reader io.Reader
 	if body != nil {
 		content, err := json.Marshal(body)
@@ -167,17 +137,19 @@ func (c APIClient) request(ctx context.Context, method string, path string, body
 		}
 		reader = bytes.NewReader(content)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.config.APIURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Cookie", c.config.SessionCookie)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	response, err := c.http.Do(req)
+	response, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
