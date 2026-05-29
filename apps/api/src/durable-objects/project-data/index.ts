@@ -300,11 +300,8 @@ export class ProjectData extends DurableObject<Env> {
       statusError: extra?.statusError,
     });
 
-    // Resolve ACP session ID → chat session ID for broadcast.
-    // Browser WebSockets are tagged with `session:<chatSessionId>`, but the
-    // VM agent reports activity using the ACP session ID. Without this lookup
-    // the broadcast targets sockets tagged with the ACP ID (none exist) and
-    // the event never reaches the browser.
+    // Resolve ACP → chat session ID: browser sockets are tagged with the
+    // chat session ID, but the VM agent reports using the ACP session ID.
     const acpRow = this.sql.exec(
       'SELECT chat_session_id FROM acp_sessions WHERE id = ?', sessionId,
     ).toArray()[0];
