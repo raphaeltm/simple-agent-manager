@@ -12,16 +12,16 @@ test.describe('Settings', () => {
     expect(pageText).toContain('Settings');
   });
 
-  test('smoke test tokens tab is visible when enabled', async ({ context }) => {
+  test('api tokens tab is visible', async ({ context }) => {
     const page = await loginWithToken(context);
     await page.goto(
-      `${process.env.SMOKE_TEST_URL || 'https://app.sammy.party'}/settings/smoke-test-tokens`
+      `${process.env.SMOKE_TEST_URL || 'https://app.sammy.party'}/settings/api-tokens`
     );
     await page.waitForLoadState('networkidle');
 
-    // Should show the smoke test tokens section
+    // Should show the API tokens section
     const pageText = await page.textContent('body');
-    expect(pageText).toContain('Smoke Test Auth Tokens');
+    expect(pageText).toContain('API Tokens');
   });
 
   test('can navigate between settings tabs', async ({ context }) => {
