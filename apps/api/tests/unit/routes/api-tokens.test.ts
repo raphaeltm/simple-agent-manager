@@ -1,15 +1,9 @@
-import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { AppError } from '../../../src/middleware/error';
+import { buildAuthTestApp, createMockAuth } from './auth-test-helpers';
 
-const mockGetSession = vi.fn();
-const mockCreateSession = vi.fn();
-const mockAuth = {
-  api: { getSession: mockGetSession },
-  $context: Promise.resolve({ internalAdapter: { createSession: mockCreateSession } }),
-};
+const { mockGetSession, mockCreateSession, mockAuth } = createMockAuth();
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => currentMockDB) }));
 vi.mock('drizzle-orm', async (importOriginal) => {
@@ -62,26 +56,7 @@ function createMockDB(options: {
 }
 
 function buildApp(envOverrides: Partial<Env> = {}) {
-  const env: Record<string, unknown> = {
-    BASE_DOMAIN: 'test.example.com',
-    ENCRYPTION_KEY: 'test-secret-key-for-hmac-signing',
-    DATABASE: {},
-    KV: {},
-    ...envOverrides,
-  };
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError((err, c) => {
-    if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as never);
-    }
-    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-  });
-  app.use('*', async (c, next) => {
-    (c as unknown as { env: Record<string, unknown> }).env = { ...(c.env || {}), ...env };
-    await next();
-  });
-  app.route('/api/auth', apiTokenRoutes);
-  return app;
+  return buildAuthTestApp(apiTokenRoutes, '/api/auth', envOverrides);
 }
 
 describe('API token routes', () => {
