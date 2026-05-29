@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1140,5 +1141,73 @@ func TestReadBatch_OrdersByID(t *testing.T) {
 			t.Fatalf("outbox IDs not monotonic: batch[%d].id=%d <= batch[%d].id=%d",
 				i, batch[i].id, i-1, batch[i-1].id)
 		}
+	}
+}
+
+func TestEnqueue_TruncatesOversizedContent(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer r.Shutdown()
+
+	// Create content exceeding MaxMessageContentBytes.
+	oversized := strings.Repeat("x", MaxMessageContentBytes+1000)
+	msg := Message{
+		MessageID: "msg-oversized",
+		Role:      "assistant",
+		Content:   oversized,
+	}
+	if err := r.Enqueue(msg); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	// Read back from outbox and verify truncation.
+	var content string
+	err = db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", "msg-oversized").Scan(&content)
+	if err != nil {
+		t.Fatalf("query outbox: %v", err)
+	}
+
+	if !strings.HasSuffix(content, truncationMarker) {
+		t.Fatalf("expected content to end with truncation marker, got last 30 chars: %q", content[len(content)-30:])
+	}
+
+	// Content should be MaxMessageContentBytes + len(truncationMarker).
+	expectedLen := MaxMessageContentBytes + len(truncationMarker)
+	if len(content) != expectedLen {
+		t.Fatalf("truncated content length = %d, want %d", len(content), expectedLen)
+	}
+}
+
+func TestEnqueue_DoesNotTruncateSmallContent(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer r.Shutdown()
+
+	small := strings.Repeat("y", 1000)
+	msg := Message{
+		MessageID: "msg-small",
+		Role:      "assistant",
+		Content:   small,
+	}
+	if err := r.Enqueue(msg); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	var content string
+	err = db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", "msg-small").Scan(&content)
+	if err != nil {
+		t.Fatalf("query outbox: %v", err)
+	}
+
+	if content != small {
+		t.Fatalf("small content should not be truncated, got length %d want %d", len(content), len(small))
 	}
 }

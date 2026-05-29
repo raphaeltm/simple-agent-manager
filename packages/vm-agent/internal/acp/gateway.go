@@ -412,7 +412,9 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 			g.host.StopProcessForPromptCancel()
 		} else {
 			g.host.CancelPrompt()
-			g.host.ForwardToAgent(data)
+			// Construct a well-formed cancel message with sessionId rather than
+			// forwarding raw browser data which may omit required params.
+			g.host.ForwardToAgent([]byte(`{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"` + string(g.host.sessionID) + `"}}`))
 		}
 	default:
 		g.host.ForwardToAgent(data)

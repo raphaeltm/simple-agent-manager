@@ -121,7 +121,7 @@ func (op *orderedPipe) run(processedCh <-chan struct{}, done <-chan struct{}) {
 			case <-processedCh:
 				timer.Stop()
 			case <-timer.C:
-				slog.Warn("orderedPipe: timeout waiting for notification processing, proceeding",
+				slog.Debug("orderedPipe: timeout waiting for notification processing, proceeding",
 					"timeout", op.timeout)
 				// Drain any stale signal that may arrive later to prevent it
 				// from being consumed as the credit for a future notification.
