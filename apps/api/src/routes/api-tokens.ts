@@ -29,12 +29,16 @@ function generateToken(tokenBytes: number): string {
   return `${TOKEN_PREFIX}${base64url}`;
 }
 
-async function hashToken(rawToken: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(rawToken);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = new Uint8Array(hashBuffer);
-  return Array.from(hashArray)
+async function hmacToken(rawToken: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawToken));
+  return Array.from(new Uint8Array(sig))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
@@ -101,7 +105,7 @@ apiTokenRoutes.post('/api-tokens', jsonValidator(ApiTokenCreateSchema), async (c
 
   const tokenBytes = parseInt(c.env.API_TOKEN_BYTES || '', 10) || DEFAULT_TOKEN_BYTES;
   const rawToken = generateToken(tokenBytes);
-  const tokenHash = await hashToken(rawToken);
+  const tokenHash = await hmacToken(rawToken, c.env.ENCRYPTION_KEY);
   const id = ulid();
 
   await db.insert(schema.apiTokens).values({
@@ -148,7 +152,7 @@ apiTokenRoutes.post('/token-login', tokenLoginRateLimit, jsonValidator(ApiTokenR
     throw errors.unauthorized('Invalid token format');
   }
 
-  const tokenHash = await hashToken(rawToken);
+  const tokenHash = await hmacToken(rawToken, c.env.ENCRYPTION_KEY);
   const db = drizzle(c.env.DATABASE, { schema });
 
   const tokenRecord = await db
@@ -183,4 +187,4 @@ apiTokenRoutes.post('/token-login', tokenLoginRateLimit, jsonValidator(ApiTokenR
   return buildSessionLoginResponse(c.env, user);
 });
 
-export { apiTokenRoutes, hashToken };
+export { apiTokenRoutes, hmacToken };
