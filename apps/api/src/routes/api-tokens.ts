@@ -23,9 +23,9 @@ function generateToken(tokenBytes: number): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i] ?? 0);
   const base64url = btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
   return `${TOKEN_PREFIX}${base64url}`;
 }
 
