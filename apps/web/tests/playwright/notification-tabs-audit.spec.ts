@@ -166,11 +166,6 @@ async function setupApiMocks(
       return route.fulfill({ json: [] });
     }
 
-    // Smoke test status
-    if (path.includes('/api/auth/smoke-test-status')) {
-      return route.fulfill({ json: { enabled: false } });
-    }
-
     // Catch-all: return empty object
     return route.fulfill({ status: 200, json: {} });
   });

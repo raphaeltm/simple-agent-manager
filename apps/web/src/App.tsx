@@ -24,6 +24,7 @@ import { AgentContextPage } from './pages/AgentContextPage';
 import { Chats } from './pages/Chats';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Dashboard } from './pages/Dashboard';
+import { DeviceAuth } from './pages/DeviceAuth';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { IdeasPage } from './pages/IdeasPage';
 import { Landing } from './pages/Landing';
@@ -44,11 +45,11 @@ import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
+import { SettingsApiTokens } from './pages/SettingsApiTokens';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
-import { SettingsSmokeTestTokens } from './pages/SettingsSmokeTestTokens';
 import { TaskDetail } from './pages/TaskDetail';
 import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
 import { Try } from './pages/Try';
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="/try/:trialId" element={<TryDiscovery />} />
           {/* SAM prototype — public, no auth */}
           <Route path="/sam" element={<SamPrototype />} />
+          <Route path="/device" element={<DeviceAuth />} />
 {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
           {/* Protected routes with AppShell (persistent navigation) */}
@@ -129,7 +131,7 @@ export default function App() {
               <Route path="agent-config" element={<Navigate to="../agents" replace />} />
               <Route path="notifications" element={<SettingsNotifications />} />
               <Route path="usage" element={<SettingsComputeUsage />} />
-              <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
+              <Route path="api-tokens" element={<SettingsApiTokens />} />
             </Route>
             <Route path="/account-map" element={<AccountMap />} />
             <Route path="/ui-standards" element={<UiStandards />} />

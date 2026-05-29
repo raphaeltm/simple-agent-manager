@@ -2,7 +2,7 @@
 
 The SAM CLI is a Go command-line client for SAM's existing control-plane APIs. It is designed as the foundation for a broader terminal surface that can eventually cover most app navigation actions while keeping remote SAM execution, local runner setup, and local harness execution distinct.
 
-The implemented commands authenticate with the same BetterAuth session cookie used by the web app and call existing project task and chat routes. Personal access tokens, OAuth device flow, local harness execution, runner installation, and runner registration are not implemented in this slice.
+The implemented commands authenticate through interactive device flow, personal access tokens, or the legacy BetterAuth session-cookie path and call existing project task and chat routes. Local harness execution, runner installation, and runner registration are not implemented in this slice.
 
 ## Build From The Workspace
 
@@ -29,7 +29,36 @@ This writes Linux and macOS binaries for `amd64` and `arm64` to `packages/cli/bi
 
 ## Auth
 
-Configure the API origin and session cookie:
+Interactive browser login is the default CLI authentication flow:
+
+```bash
+sam auth login --api-url https://api.example.com
+```
+
+The CLI prints a verification URL and user code, opens the browser when possible, and polls until the request is approved in the web UI.
+
+You can also create a personal access token from Settings -> API Tokens and exchange it for a CLI session:
+
+```bash
+sam auth login --api-url https://api.example.com --token sam_pat_...
+```
+
+The CLI writes `config.json` under `$SAM_CONFIG_DIR`, `$XDG_CONFIG_HOME/sam`, or `~/.config/sam` with file mode `0600` where the platform allows it. Normal status output redacts the session cookie:
+
+```bash
+sam auth status
+```
+
+For CI or short-lived shell use, avoid writing a config file and set an API token:
+
+```bash
+export SAM_API_URL=https://api.example.com
+export SAM_API_TOKEN='sam_pat_...'
+```
+
+`SAM_API_TOKEN` requires `SAM_API_URL`. The CLI exchanges the token for a session cookie in memory before making authenticated API calls.
+
+The legacy raw session-cookie path is still available for local debugging:
 
 ```bash
 printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \
@@ -37,22 +66,7 @@ printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \
   --session-cookie-stdin
 ```
 
-`--session-cookie-stdin` avoids putting the cookie in shell history. `--session-cookie` is also available for local throwaway sessions.
-
-The CLI writes `config.json` under `$SAM_CONFIG_DIR`, `$XDG_CONFIG_HOME/sam`, or `~/.config/sam` with file mode `0600` where the platform allows it. Normal status output redacts the cookie:
-
-```bash
-sam auth status
-```
-
-For CI or short-lived shell use, avoid writing a config file and set both env vars:
-
-```bash
-export SAM_API_URL=https://api.example.com
-export SAM_SESSION_COOKIE='better-auth.session_token=...'
-```
-
-`SAM_SESSION_COOKIE` requires `SAM_API_URL`. `SAM_API_URL` by itself does not replace the stored config file.
+`--session-cookie-stdin` avoids putting the cookie in shell history. `--session-cookie` is also available for local throwaway sessions. `SAM_SESSION_COOKIE` with `SAM_API_URL` is still supported for ephemeral automation, but personal access tokens are preferred.
 
 ## Dispatch A Task
 

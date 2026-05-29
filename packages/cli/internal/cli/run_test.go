@@ -242,3 +242,96 @@ func TestRunnerDoctorCommandPrintsHostReadiness(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthLoginTokenExchangesPATAndSavesConfig(t *testing.T) {
+	env := tempConfigEnv(t)
+	doer, captured := captureJSONRequest(t, `{"success":true,"sessionCookie":"better-auth.session_token=from-pat","user":{"email":"dev@example.com","name":"Dev"}}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"auth", "login", "--api-url", "https://api.example.com", "--token", "sam_pat_secret"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if captured.URL != "https://api.example.com/api/auth/token-login" || captured.JSON["token"] != "sam_pat_secret" {
+		t.Fatalf("unexpected token-login request: %s %#v", captured.URL, captured.JSON)
+	}
+	if strings.Contains(stdout.String(), "sam_pat_secret") || strings.Contains(stdout.String(), "from-pat") {
+		t.Fatalf("stdout leaked secret: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Authenticated as Dev <dev@example.com>") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+	config, err := LoadConfig(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config == nil || config.SessionCookie != "better-auth.session_token=from-pat" {
+		t.Fatalf("config = %#v", config)
+	}
+}
+
+func TestAuthLoginTokenRequiresAPIURL(t *testing.T) {
+	runtime, _, stderr := testRuntime(t, []string{"auth", "login", "--token", "sam_pat_secret"}, nil, map[string]string{})
+
+	code := Run(context.Background(), runtime)
+	if code == 0 {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(stderr.String(), "--api-url is required with --token") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestAuthenticatedClientFromEnvToken(t *testing.T) {
+	var requests []string
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.String())
+		if req.URL.Path == "/api/auth/token-login" {
+			return jsonResponse(`{"success":true,"sessionCookie":"better-auth.session_token=env-cookie","user":{"email":"env@example.com"}}`, http.StatusOK), nil
+		}
+		if got := req.Header.Get("Cookie"); got != "better-auth.session_token=env-cookie" {
+			t.Fatalf("Cookie header = %q", got)
+		}
+		return jsonResponse(`{"id":"task_1","status":"queued","updatedAt":"now"}`, http.StatusOK), nil
+	})
+	runtime, _, stderr := testRuntime(t, []string{"--project", "project_1", "task", "status", "task_1"}, doer, map[string]string{
+		"SAM_API_URL":   "https://api.example.com",
+		"SAM_API_TOKEN": "sam_pat_env",
+	})
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if len(requests) != 2 || requests[0] != "https://api.example.com/api/auth/token-login" {
+		t.Fatalf("requests = %#v", requests)
+	}
+}
+
+func TestDeviceFlowHappyPath(t *testing.T) {
+	env := tempConfigEnv(t)
+	var requests []string
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.String())
+		switch req.URL.Path {
+		case "/api/auth/device/code":
+			return jsonResponse(`{"deviceCode":"device-1","userCode":"ABCD-1234","verificationUriComplete":"https://app.example.com/device?code=ABCD-1234","expiresIn":30,"interval":1}`, http.StatusOK), nil
+		case "/api/auth/device/token":
+			return jsonResponse(`{"success":true,"sessionCookie":"better-auth.session_token=device-cookie","user":{"email":"device@example.com"}}`, http.StatusOK), nil
+		default:
+			return jsonResponse(`{"error":"not_found","message":"not found"}`, http.StatusNotFound), nil
+		}
+	})
+	runtime, stdout, stderr := testRuntime(t, []string{"auth", "login", "--api-url", "https://api.example.com"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ABCD-1234") || !strings.Contains(stdout.String(), "Authenticated as device@example.com") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if len(requests) != 2 || requests[0] != "https://api.example.com/api/auth/device/code" || requests[1] != "https://api.example.com/api/auth/device/token" {
+		t.Fatalf("requests = %#v", requests)
+	}
+}

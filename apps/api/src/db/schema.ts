@@ -6,7 +6,7 @@
 //
 // Timestamp conventions:
 //   - BetterAuth tables (users, sessions, accounts, verifications, agentSettings,
-//     smokeTestTokens) use `integer('...', { mode: 'timestamp_ms' })` which stores
+//     apiTokens) use `integer('...', { mode: 'timestamp_ms' })` which stores
 //     millisecond-epoch integers. Drizzle auto-converts JS Date objects.
 //   - All other tables use `text('...')` with `DEFAULT CURRENT_TIMESTAMP` or
 //     `DEFAULT (datetime('now'))`, storing ISO-8601 strings (e.g. "2026-04-12 14:30:00").
@@ -1166,9 +1166,9 @@ export type AgentSettingsRow = typeof agentSettings.$inferSelect;
 export type NewAgentSettingsRow = typeof agentSettings.$inferInsert;
 
 // =============================================================================
-// Smoke Test Auth Tokens (CI authentication, gated by SMOKE_TEST_AUTH_ENABLED)
+// API Tokens (stored in legacy smoke_test_tokens table)
 // =============================================================================
-export const smokeTestTokens = sqliteTable(
+export const apiTokens = sqliteTable(
   'smoke_test_tokens',
   {
     id: text('id').primaryKey(),
@@ -1189,8 +1189,8 @@ export const smokeTestTokens = sqliteTable(
   })
 );
 
-export type SmokeTestToken = typeof smokeTestTokens.$inferSelect;
-export type NewSmokeTestToken = typeof smokeTestTokens.$inferInsert;
+export type ApiToken = typeof apiTokens.$inferSelect;
+export type NewApiToken = typeof apiTokens.$inferInsert;
 
 // =============================================================================
 // Project File Library (per-project encrypted file storage in R2)

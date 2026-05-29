@@ -1,9 +1,9 @@
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Outlet } from 'react-router';
 
-import { getSmokeTestStatus,listCredentials } from '../lib/api';
+import { listCredentials } from '../lib/api';
 import { SettingsContext } from './SettingsContext';
 
 const BASE_TABS = [
@@ -14,7 +14,7 @@ const BASE_TABS = [
   { id: 'usage', label: 'Usage', path: 'usage' },
 ];
 
-const SMOKE_TEST_TAB = { id: 'smoke-test-tokens', label: 'Test Tokens', path: 'smoke-test-tokens' };
+const API_TOKENS_TAB = { id: 'api-tokens', label: 'API Tokens', path: 'api-tokens' };
 
 /**
  * Settings shell — Tabs + Outlet for sub-route pages.
@@ -23,8 +23,6 @@ export function Settings() {
   const [credentials, setCredentials] = useState<CredentialResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [smokeTestEnabled, setSmokeTestEnabled] = useState(false);
-
   const loadCredentials = useCallback(async () => {
     try {
       setError(null);
@@ -39,12 +37,9 @@ export function Settings() {
 
   useEffect(() => {
     loadCredentials();
-    getSmokeTestStatus()
-      .then((status) => setSmokeTestEnabled(status.enabled))
-      .catch(() => setSmokeTestEnabled(false));
   }, [loadCredentials]);
 
-  const tabs = smokeTestEnabled ? [...BASE_TABS, SMOKE_TEST_TAB] : BASE_TABS;
+  const tabs = [...BASE_TABS, API_TOKENS_TAB];
 
   return (
     <PageLayout title="Settings" maxWidth="xl">

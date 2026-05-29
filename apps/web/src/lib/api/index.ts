@@ -154,19 +154,18 @@ export {
   uploadLibraryFile,
 } from './library';
 export type {
+  ApiTokenResponse,
   CachedCommandResponse,
-  CreateSmokeTestTokenResponse,
-  SmokeTestStatusResponse,
-  SmokeTestTokenResponse,
+  CreateApiTokenResponse,
   TrialStatusResponse,
 } from './misc';
 export {
-  createSmokeTestToken,
+  approveDeviceCode,
+  createApiToken,
   getCachedCommands,
-  getSmokeTestStatus,
   getTrialStatus,
-  listSmokeTestTokens,
-  revokeSmokeTestToken,
+  listApiTokens,
+  revokeApiToken,
   saveCachedCommands,
 } from './misc';
 export {

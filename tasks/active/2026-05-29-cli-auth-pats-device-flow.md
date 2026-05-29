@@ -22,17 +22,17 @@ This task implements two production authentication paths:
 
 ## Implementation Checklist
 
-- [ ] Create shared API session factory service from the existing token-login session creation and cookie signing logic.
-- [ ] Rename smoke-test token API route/module to API tokens, remove feature gate/status endpoint, accept `sam_pat_` for new tokens and both `sam_pat_`/`sam_test_` for token login, and return `sessionCookie` in JSON.
-- [ ] Rename Drizzle exports and validation schemas from smoke-test names to API-token names without changing the D1 table name.
-- [ ] Add device-flow API routes using KV for code creation, approval, polling, one-time redemption, TTLs, and rate limiting.
-- [ ] Update API env interface and `.env.example` from smoke-test variables to API-token and device-flow variables.
-- [ ] Rename web API-token settings UI, make the tab always visible at `/settings/api-tokens`, and remove environment-gate messaging.
-- [ ] Add public `/device` web page with code prefill, unauthenticated login redirect with returnTo, approval submission, success, and error states.
-- [ ] Update Go CLI auth login to support `--token`, default interactive device flow, browser open best effort, polling, and `SAM_API_URL` + `SAM_API_TOKEN` env exchange.
-- [ ] Update CLI docs and any stale references from smoke-test tokens to API tokens where applicable.
-- [ ] Add/update API, web, and CLI tests for PATs, backward compatibility, device flow, env token exchange, and settings/device UI behavior.
-- [ ] Run local quality gates including CLI Go coverage and web visual audit for changed UI surfaces.
+- [x] Create shared API session factory service from the existing token-login session creation and cookie signing logic.
+- [x] Rename smoke-test token API route/module to API tokens, remove feature gate/status endpoint, accept `sam_pat_` for new tokens and both `sam_pat_`/`sam_test_` for token login, and return `sessionCookie` in JSON.
+- [x] Rename Drizzle exports and validation schemas from smoke-test names to API-token names without changing the D1 table name.
+- [x] Add device-flow API routes using KV for code creation, approval, polling, one-time redemption, TTLs, and rate limiting.
+- [x] Update API env interface and `.env.example` from smoke-test variables to API-token and device-flow variables.
+- [x] Rename web API-token settings UI, make the tab always visible at `/settings/api-tokens`, and remove environment-gate messaging.
+- [x] Add public `/device` web page with code prefill, unauthenticated login redirect with returnTo, approval submission, success, and error states.
+- [x] Update Go CLI auth login to support `--token`, default interactive device flow, browser open best effort, polling, and `SAM_API_URL` + `SAM_API_TOKEN` env exchange.
+- [x] Update CLI docs and any stale references from smoke-test tokens to API tokens where applicable.
+- [x] Add/update API, web, and CLI tests for PATs, backward compatibility, device flow, env token exchange, and settings/device UI behavior.
+- [x] Run local quality gates including CLI Go coverage and web visual audit for changed UI surfaces.
 - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, go-specialist, ui-ux-specialist, env-validator, doc-sync-validator, constitution-validator, and test-engineer.
 - [ ] Deploy to staging and run the mandatory PAT, device-flow, edge-case, regression, and cleanup verification plan.
 - [ ] Open PR, wait for CI/Sonar/staging evidence, then merge if all gates pass.

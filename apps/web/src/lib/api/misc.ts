@@ -33,14 +33,10 @@ export async function saveCachedCommands(
 }
 
 // ---------------------------------------------------------------------------
-// Smoke Test Auth Tokens
+// API Tokens
 // ---------------------------------------------------------------------------
 
-export interface SmokeTestStatusResponse {
-  enabled: boolean;
-}
-
-export interface SmokeTestTokenResponse {
+export interface ApiTokenResponse {
   id: string;
   name: string;
   createdAt: string;
@@ -48,33 +44,28 @@ export interface SmokeTestTokenResponse {
   revokedAt: string | null;
 }
 
-export interface CreateSmokeTestTokenResponse {
+export interface CreateApiTokenResponse {
   id: string;
   token: string;
   name: string;
 }
 
-/** Check if smoke test token auth is enabled in this environment */
-export async function getSmokeTestStatus(): Promise<SmokeTestStatusResponse> {
-  return request<SmokeTestStatusResponse>('/api/auth/smoke-test-status');
+/** List all API tokens for the current user */
+export async function listApiTokens(): Promise<ApiTokenResponse[]> {
+  return request<ApiTokenResponse[]>('/api/auth/api-tokens');
 }
 
-/** List all smoke test tokens for the current user */
-export async function listSmokeTestTokens(): Promise<SmokeTestTokenResponse[]> {
-  return request<SmokeTestTokenResponse[]>('/api/auth/smoke-test-tokens');
-}
-
-/** Create a new smoke test token */
-export async function createSmokeTestToken(name: string): Promise<CreateSmokeTestTokenResponse> {
-  return request<CreateSmokeTestTokenResponse>('/api/auth/smoke-test-tokens', {
+/** Create a new API token */
+export async function createApiToken(name: string): Promise<CreateApiTokenResponse> {
+  return request<CreateApiTokenResponse>('/api/auth/api-tokens', {
     method: 'POST',
     body: JSON.stringify({ name }),
   });
 }
 
-/** Revoke a smoke test token */
-export async function revokeSmokeTestToken(id: string): Promise<void> {
-  await request<{ success: boolean }>(`/api/auth/smoke-test-tokens/${encodeURIComponent(id)}`, {
+/** Revoke a API token */
+export async function revokeApiToken(id: string): Promise<void> {
+  await request<{ success: boolean }>(`/api/auth/api-tokens/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
 }
@@ -94,4 +85,15 @@ export interface TrialStatusResponse {
 
 export async function getTrialStatus(): Promise<TrialStatusResponse> {
   return request<TrialStatusResponse>('/api/trial-status');
+}
+
+// -------------------------------------------------------------------------
+// CLI Device Flow
+// -------------------------------------------------------------------------
+
+export async function approveDeviceCode(userCode: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>('/api/auth/device/approve', {
+    method: 'POST',
+    body: JSON.stringify({ userCode }),
+  });
 }

@@ -1,5 +1,5 @@
--- Smoke test auth tokens for CI authentication
--- Gated by SMOKE_TEST_AUTH_ENABLED env var
+-- API tokens for CLI and automation authentication
+-- Physical table name is retained for backward compatibility
 CREATE TABLE smoke_test_tokens (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

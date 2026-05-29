@@ -905,7 +905,7 @@ The **first user** to sign in via GitHub OAuth is automatically assigned the `su
 - Access the admin dashboard at `https://app.example.com/admin` (health overview, error logs, real-time log stream, analytics)
 - Approve/deny user registrations (when `REQUIRE_APPROVAL` is enabled)
 - Promote users to `admin` role
-- Manage smoke test tokens for CI/testing
+- Manage API tokens for CLI and automation
 - View detailed system health and observability data
 
 ### User Approval Mode
@@ -937,14 +937,9 @@ The default agent for autonomous task execution is controlled by `DEFAULT_TASK_A
 
 The sign-in page includes a "Learn more" link. By default, it points to `https://simple-agent-manager.org`. Self-hosters should set `PUBLIC_WEBSITE_URL` as a GitHub Environment variable to point to their own website or documentation. If you don't have a public website, you can set it to your app URL (e.g., `https://app.example.com`).
 
-### Smoke Test Tokens (Optional)
+### API Tokens
 
-For CI/CD pipelines or automated testing against your deployment, you can enable smoke test authentication:
-
-1. Set `SMOKE_TEST_AUTH_ENABLED=true` in `wrangler.toml` top-level `[vars]`
-2. A superadmin can then create test tokens via the admin dashboard
-3. Tokens can be used with `POST /api/auth/token-login` to authenticate without GitHub OAuth
-4. This is useful for Playwright tests, health monitoring, or API integration tests
+For CLI login, CI/CD pipelines, or automated testing against your deployment, signed-in users can create personal API tokens from Settings -> API Tokens. Tokens can be exchanged with `POST /api/auth/token-login` to create a session without an interactive GitHub OAuth round trip. Legacy `sam_test_` tokens created before this feature continue to work until revoked.
 
 ---
 

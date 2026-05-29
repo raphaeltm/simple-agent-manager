@@ -25,7 +25,6 @@ async function setupApiMocks(page: Page) {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/auth/smoke-test-status') return respond(200, { enabled: false });
     if (path === '/api/projects') return respond(200, { projects: [], nextCursor: null });
     if (path === '/api/credentials' && method === 'GET') {
       return respond(200, [

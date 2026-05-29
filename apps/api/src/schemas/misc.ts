@@ -5,13 +5,21 @@ export const TerminalRequestSchema = v.object({
   workspaceId: v.string(),
 });
 
-// Smoke test tokens
-export const SmokeTestCreateSchema = v.object({
+// API tokens
+export const ApiTokenCreateSchema = v.object({
   name: v.optional(v.string()),
 });
 
-export const SmokeTestRedeemSchema = v.object({
+export const ApiTokenRedeemSchema = v.object({
   token: v.optional(v.string()),
+});
+
+export const DeviceApproveSchema = v.object({
+  userCode: v.optional(v.string()),
+});
+
+export const DeviceTokenSchema = v.object({
+  deviceCode: v.optional(v.string()),
 });
 
 // Cached commands — name is optional because the handler filters entries

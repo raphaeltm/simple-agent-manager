@@ -49,6 +49,7 @@ import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
+import { apiTokenRoutes } from './routes/api-tokens';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
@@ -59,6 +60,7 @@ import { clientErrorsRoutes } from './routes/client-errors';
 import { codexRefreshRoutes } from './routes/codex-refresh';
 import { credentialsRoutes } from './routes/credentials';
 import { dashboardRoutes } from './routes/dashboard';
+import { deviceFlowRoutes } from './routes/device-flow';
 import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
 import { googleAuthRoutes } from './routes/google-auth';
@@ -81,7 +83,6 @@ import { agentActivityCallbackRoute } from './routes/projects/agent-activity-cal
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { providersRoutes } from './routes/providers';
 import { samRoutes } from './routes/sam';
-import { smokeTestTokenRoutes } from './routes/smoke-test-tokens';
 import { taskCallbackRoute, tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
@@ -504,10 +505,11 @@ app.get('/.well-known/openid-configuration', async (c) => {
 
 // API routes — codex refresh and smoke test routes registered before BetterAuth catch-all.
 // codexRefreshRoutes uses workspace callback token auth (query param), not session auth.
-// smokeTestTokenRoutes uses dedicated smoke test token auth, not session auth.
+// apiTokenRoutes uses dedicated API token auth, not session auth.
 // Both must be mounted before authRoutes to avoid BetterAuth's wildcard catch-all.
 app.route('/api/auth', codexRefreshRoutes);
-app.route('/api/auth', smokeTestTokenRoutes);
+app.route('/api/auth', apiTokenRoutes);
+app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/providers', providersRoutes);

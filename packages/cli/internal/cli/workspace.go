@@ -37,7 +37,7 @@ func runWorkspace(ctx context.Context, runtime Runtime, parsed parsedArgs, args 
 }
 
 func runWorkspacePorts(ctx context.Context, runtime Runtime, parsed parsedArgs, workspaceID string) int {
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -66,7 +66,7 @@ func formatPortsList(ports PortsResponse) string {
 }
 
 func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs, workspaceID string, _ []string) int {
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
+	"time"
 )
 
 func Run(ctx context.Context, runtime Runtime) int {
@@ -41,42 +43,191 @@ func Run(ctx context.Context, runtime Runtime) int {
 	}
 }
 
-func runAuth(_ context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+func runAuth(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
 	if len(args) == 0 {
 		return fail(runtime.Stderr, errors.New("auth requires an action"))
 	}
 	switch args[0] {
 	case "login":
-		return runAuthLogin(runtime, parsed)
+		return runAuthLogin(ctx, runtime, parsed)
 	case "status":
-		return runAuthStatus(runtime, parsed)
+		return runAuthStatus(ctx, runtime, parsed)
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unknown auth action: %s", args[0]))
 	}
 }
 
-func runAuthLogin(runtime Runtime, parsed parsedArgs) int {
-	apiURL := flagValue(parsed.Flags, "api-url")
+func runAuthLogin(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
+	apiURL := resolveLoginAPIURL(runtime, parsed)
+	token := flagValue(parsed.Flags, "token")
+	if token != "" {
+		if apiURL == "" {
+			return fail(runtime.Stderr, errors.New("--api-url is required with --token"))
+		}
+		return runTokenLogin(ctx, runtime, parsed, apiURL, token)
+	}
+
 	cookie, err := readSessionCookie(runtime, parsed)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if apiURL == "" || cookie == "" {
-		return fail(runtime.Stderr, errors.New("auth login requires --api-url and a session cookie"))
+	if cookie != "" {
+		if apiURL == "" {
+			return fail(runtime.Stderr, errors.New("--api-url is required with a session cookie"))
+		}
+		return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), cookie, AuthUser{})
 	}
 
-	config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: cookie}
+	if apiURL == "" {
+		return fail(runtime.Stderr, errors.New("--api-url is required for interactive login"))
+	}
+	return runDeviceFlow(ctx, runtime, parsed, apiURL)
+}
+
+func resolveLoginAPIURL(runtime Runtime, parsed parsedArgs) string {
+	if apiURL := flagValue(parsed.Flags, "api-url"); apiURL != "" {
+		return apiURL
+	}
+	config, err := LoadConfig(runtime.Env)
+	if err == nil && config != nil {
+		return config.APIURL
+	}
+	return strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL"))
+}
+
+func runTokenLogin(ctx context.Context, runtime Runtime, parsed parsedArgs, apiURL string, token string) int {
+	response, err := ExchangeAPIToken(ctx, runtime.HTTPClient, apiURL, token)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), response.SessionCookie, response.User)
+}
+
+func runDeviceFlow(ctx context.Context, runtime Runtime, parsed parsedArgs, apiURL string) int {
+	code, err := CreateDeviceCode(ctx, runtime.HTTPClient, apiURL)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	if code.Interval <= 0 {
+		code.Interval = 5
+	}
+	if code.ExpiresIn <= 0 {
+		code.ExpiresIn = 900
+	}
+
+	fmt.Fprintf(runtime.Stdout, "Open this URL to authorize SAM CLI:\n%s\n\nUser code: %s\n", code.VerificationURIComplete, code.UserCode)
+	tryOpenBrowser(ctx, runtime, code.VerificationURIComplete)
+
+	response, err := pollDeviceToken(ctx, runtime, apiURL, code)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	fmt.Fprintln(runtime.Stdout)
+	return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), response.SessionCookie, response.User)
+}
+
+func pollDeviceToken(ctx context.Context, runtime Runtime, apiURL string, code DeviceCodeResponse) (TokenLoginResponse, error) {
+	deadline := time.Now().Add(time.Duration(code.ExpiresIn) * time.Second)
+	interval := time.Duration(code.Interval) * time.Second
+	for {
+		response, err := ExchangeDeviceCode(ctx, runtime.HTTPClient, apiURL, code.DeviceCode)
+		if err == nil {
+			return response, nil
+		}
+		var apiErr APIError
+		if !errors.As(err, &apiErr) {
+			return TokenLoginResponse{}, err
+		}
+		switch {
+		case apiErr.Status == http.StatusPreconditionRequired || apiErr.Code == "authorization_pending":
+			fmt.Fprint(runtime.Stdout, ".")
+		case apiErr.Status == http.StatusTooManyRequests || apiErr.Code == "slow_down":
+			interval += 5 * time.Second
+			fmt.Fprint(runtime.Stdout, ".")
+		case apiErr.Status == http.StatusGone || apiErr.Code == "expired_token":
+			return TokenLoginResponse{}, errors.New("code expired. Run `sam auth login` again")
+		default:
+			return TokenLoginResponse{}, err
+		}
+		if time.Now().Add(interval).After(deadline) {
+			return TokenLoginResponse{}, errors.New("code expired. Run `sam auth login` again")
+		}
+		if err := sleepContext(ctx, interval); err != nil {
+			return TokenLoginResponse{}, err
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func tryOpenBrowser(ctx context.Context, runtime Runtime, url string) {
+	commands := browserCommands(runtime.Runner.GOOS(), url)
+	for _, command := range commands {
+		if _, err := runtime.Runner.LookPath(command.name); err != nil {
+			continue
+		}
+		_, _ = runtime.Runner.Command(ctx, command.name, command.args...)
+		return
+	}
+}
+
+type browserCommand struct {
+	name string
+	args []string
+}
+
+func browserCommands(goos string, target string) []browserCommand {
+	switch goos {
+	case "darwin":
+		return []browserCommand{{name: "open", args: []string{target}}}
+	case "windows":
+		return []browserCommand{{name: "rundll32", args: []string{"url.dll,FileProtocolHandler", target}}}
+	default:
+		return []browserCommand{{name: "xdg-open", args: []string{target}}}
+	}
+}
+
+func saveAuthConfig(runtime Runtime, parsed parsedArgs, apiURL string, sessionCookie string, user AuthUser) int {
+	config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: sessionCookie}
 	paths, err := SaveConfig(runtime.Env, config)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	text := fmt.Sprintf("Saved SAM CLI auth config to %s", paths.ConfigFile)
-	value := map[string]string{
+	text := "Authenticated"
+	if user.Email != "" || user.Name != "" {
+		text = "Authenticated as " + formatAuthUser(user)
+	}
+	text += fmt.Sprintf("\nSaved SAM CLI auth config to %s", paths.ConfigFile)
+	value := map[string]any{
+		"authenticated": true,
 		"apiUrl":        config.APIURL,
 		"configFile":    paths.ConfigFile,
 		"sessionCookie": redactSecret(config.SessionCookie),
+		"user":          user,
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
+}
+
+func formatAuthUser(user AuthUser) string {
+	if user.Name != "" && user.Email != "" {
+		return fmt.Sprintf("%s <%s>", user.Name, user.Email)
+	}
+	if user.Email != "" {
+		return user.Email
+	}
+	if user.Name != "" {
+		return user.Name
+	}
+	return "user"
 }
 
 func readSessionCookie(runtime Runtime, parsed parsedArgs) (string, error) {
@@ -94,8 +245,8 @@ func readSessionCookie(runtime Runtime, parsed parsedArgs) (string, error) {
 	return strings.TrimSpace(string(read)), nil
 }
 
-func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
-	config, err := LoadConfig(runtime.Env)
+func runAuthStatus(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
+	config, source, err := resolveAuthenticatedConfig(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -114,6 +265,7 @@ func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
 		"Authenticated",
 		"apiUrl: " + config.APIURL,
 		"sessionCookie: " + redactSecret(config.SessionCookie),
+		"source: " + source,
 		"configFile: " + paths.ConfigFile,
 	}, "\n")
 	value := map[string]any{
@@ -121,6 +273,7 @@ func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
 		"apiUrl":        config.APIURL,
 		"configFile":    paths.ConfigFile,
 		"sessionCookie": redactSecret(config.SessionCookie),
+		"source":        source,
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
 }
@@ -160,7 +313,7 @@ func runTaskStatus(ctx context.Context, runtime Runtime, parsed parsedArgs, proj
 	if len(args) != 1 {
 		return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
 	}
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -202,7 +355,7 @@ func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, errors.New("chat requires <message> or --prompt"))
 	}
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -247,7 +400,7 @@ func runRunner(ctx context.Context, runtime Runtime, parsed parsedArgs, args []s
 }
 
 func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, projectID string, message string, options TaskSubmitOptions) int {
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -277,8 +430,8 @@ func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 	}, nil
 }
 
-func authenticatedClient(runtime Runtime) (APIClient, error) {
-	config, err := LoadConfig(runtime.Env)
+func authenticatedClient(ctx context.Context, runtime Runtime) (APIClient, error) {
+	config, _, err := resolveAuthenticatedConfig(ctx, runtime)
 	if err != nil {
 		return APIClient{}, err
 	}
@@ -286,6 +439,26 @@ func authenticatedClient(runtime Runtime) (APIClient, error) {
 		return APIClient{}, errors.New("not authenticated. Run `sam auth login` first")
 	}
 	return NewAPIClient(*config, runtime.HTTPClient), nil
+}
+
+func resolveAuthenticatedConfig(ctx context.Context, runtime Runtime) (*CLIConfig, string, error) {
+	config, err := LoadConfig(runtime.Env)
+	if err != nil {
+		return nil, "", err
+	}
+	if config != nil {
+		return config, "config-or-session-env", nil
+	}
+	apiURL := strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL"))
+	token := strings.TrimSpace(runtime.Env.Getenv("SAM_API_TOKEN"))
+	if apiURL == "" || token == "" {
+		return nil, "", nil
+	}
+	response, err := ExchangeAPIToken(ctx, runtime.HTTPClient, apiURL, token)
+	if err != nil {
+		return nil, "", err
+	}
+	return &CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: response.SessionCookie}, "env-token", nil
 }
 
 func writeOrFail(runtime Runtime, jsonMode bool, text string, value any) int {
@@ -308,6 +481,8 @@ func helpText() string {
 	return `SAM CLI
 
 Usage:
+  sam auth login --api-url <url>
+  sam auth login --api-url <url> --token <personal-access-token>
   sam auth login --api-url <url> --session-cookie-stdin
   sam auth status
   sam --project <projectId> tasks dispatch --prompt <prompt>

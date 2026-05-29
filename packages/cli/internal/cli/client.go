@@ -32,6 +32,74 @@ func NewAPIClient(config CLIConfig, httpClient HTTPDoer) APIClient {
 	return APIClient{config: config, http: httpClient}
 }
 
+func ExchangeAPIToken(ctx context.Context, httpClient HTTPDoer, apiURL string, token string) (TokenLoginResponse, error) {
+	var response TokenLoginResponse
+	err := postAuthJSON(ctx, httpClient, normalizeAPIURL(apiURL)+"/api/auth/token-login", map[string]any{"token": token}, &response)
+	if err != nil {
+		return response, err
+	}
+	if response.SessionCookie == "" {
+		return response, APIError{Status: http.StatusOK, Code: "MISSING_SESSION_COOKIE", Message: "SAM API did not return a session cookie"}
+	}
+	return response, nil
+}
+
+func CreateDeviceCode(ctx context.Context, httpClient HTTPDoer, apiURL string) (DeviceCodeResponse, error) {
+	var response DeviceCodeResponse
+	err := postAuthJSON(ctx, httpClient, normalizeAPIURL(apiURL)+"/api/auth/device/code", nil, &response)
+	return response, err
+}
+
+func ExchangeDeviceCode(ctx context.Context, httpClient HTTPDoer, apiURL string, deviceCode string) (TokenLoginResponse, error) {
+	var response TokenLoginResponse
+	err := postAuthJSON(ctx, httpClient, normalizeAPIURL(apiURL)+"/api/auth/device/token", map[string]any{"deviceCode": deviceCode}, &response)
+	if err != nil {
+		return response, err
+	}
+	if response.SessionCookie == "" {
+		return response, APIError{Status: http.StatusOK, Code: "MISSING_SESSION_COOKIE", Message: "SAM API did not return a session cookie"}
+	}
+	return response, nil
+}
+
+func postAuthJSON(ctx context.Context, httpClient HTTPDoer, endpoint string, body map[string]any, out any) error {
+	var reader io.Reader
+	if body != nil {
+		content, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(content)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	response, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	content, err := io.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return parseAPIError(response.StatusCode, content)
+	}
+	if len(content) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(content, out); err != nil {
+		return APIError{Status: response.StatusCode, Code: "INVALID_JSON", Message: "SAM API returned invalid JSON"}
+	}
+	return nil
+}
+
 func (c APIClient) SubmitTask(ctx context.Context, projectID string, message string, options TaskSubmitOptions) (SubmitTaskResponse, error) {
 	body := map[string]any{"message": message}
 	addIfSet(body, "agentType", options.Agent)

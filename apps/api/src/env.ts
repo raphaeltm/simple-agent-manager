@@ -78,12 +78,14 @@ export interface Env {
   // User approval / invite-only mode
   REQUIRE_APPROVAL?: string;
   // Smoke test auth tokens (CI authentication — only set in staging/test environments)
-  SMOKE_TEST_AUTH_ENABLED?: string;
-  // Smoke test token configuration (all optional with defaults)
-  SMOKE_TOKEN_BYTES?: string;              // Random bytes for token generation (default: 32)
-  MAX_SMOKE_TOKENS_PER_USER?: string;      // Max active tokens per user (default: 10)
-  MAX_SMOKE_TOKEN_NAME_LENGTH?: string;    // Max token name length (default: 100)
-  SMOKE_TEST_SESSION_DURATION_SECONDS?: string; // Session lifetime for token login (default: 604800 = 7 days)
+  API_TOKEN_BYTES?: string;                       // Random bytes for token generation (default: 32)
+  MAX_API_TOKENS_PER_USER?: string;           // Max active tokens per user (default: 10)
+  MAX_API_TOKEN_NAME_LENGTH?: string;         // Max token name length (default: 100)
+  API_TOKEN_SESSION_DURATION_SECONDS?: string;// Session lifetime for token login (default: 604800 = 7 days)
+  DEVICE_FLOW_CODE_TTL_SECONDS?: string;
+  DEVICE_FLOW_POLL_INTERVAL_SECONDS?: string;
+  RATE_LIMIT_DEVICE_CODE_CREATE?: string;
+  RATE_LIMIT_DEVICE_POLL?: string;
   // Optional configurable values (per constitution principle XI)
   TERMINAL_TOKEN_EXPIRY_MS?: string;
   CALLBACK_TOKEN_EXPIRY_MS?: string;

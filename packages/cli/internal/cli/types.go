@@ -37,6 +37,27 @@ type CLIConfig struct {
 	SessionCookie string `json:"sessionCookie"`
 }
 
+type AuthUser struct {
+	ID    string `json:"id,omitempty"`
+	Email string `json:"email,omitempty"`
+	Name  string `json:"name,omitempty"`
+}
+
+type TokenLoginResponse struct {
+	Success       bool     `json:"success,omitempty"`
+	User          AuthUser `json:"user,omitempty"`
+	SessionCookie string   `json:"sessionCookie,omitempty"`
+}
+
+type DeviceCodeResponse struct {
+	DeviceCode              string `json:"deviceCode"`
+	UserCode                string `json:"userCode"`
+	VerificationURI         string `json:"verificationUri"`
+	VerificationURIComplete string `json:"verificationUriComplete"`
+	ExpiresIn               int    `json:"expiresIn"`
+	Interval                int    `json:"interval"`
+}
+
 type SubmitTaskResponse struct {
 	TaskID     string `json:"taskId,omitempty"`
 	SessionID  string `json:"sessionId,omitempty"`

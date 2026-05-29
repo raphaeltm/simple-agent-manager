@@ -4,13 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
-  getSmokeTestStatus: vi.fn().mockResolvedValue({ enabled: false }),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listCredentials: mocks.listCredentials,
-  getSmokeTestStatus: mocks.getSmokeTestStatus,
 }));
 
 vi.mock('../../../src/components/HetznerTokenForm', () => ({
@@ -86,6 +84,7 @@ describe('Settings shell', () => {
     expect(screen.getByRole('tab', { name: 'Cloud Provider' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'GitHub' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument();
   });
 
   it('renders breadcrumb with Home link', async () => {
