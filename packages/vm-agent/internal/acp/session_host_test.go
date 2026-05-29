@@ -2499,3 +2499,47 @@ func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
 
 	host.Stop()
 }
+
+func TestInjectAgentCredential_OpenCodeProviderEnvVarOverrides(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{WorkspaceID: "test-workspace"},
+	})
+	defer host.Stop()
+
+	tests := []struct {
+		name     string
+		provider string
+		wantEnv  string
+	}{
+		{name: "scaleway keeps legacy env", provider: "scaleway", wantEnv: "SCW_SECRET_KEY=sk-test"},
+		{name: "managed uses opencode env", provider: "opencode-managed", wantEnv: "OPENCODE_API_KEY=sk-test"},
+		{name: "anthropic uses anthropic env", provider: "anthropic", wantEnv: "ANTHROPIC_API_KEY=sk-test"},
+		{name: "google vertex uses google env", provider: "google-vertex", wantEnv: "GOOGLE_API_KEY=sk-test"},
+		{name: "openai compatible uses opencode env", provider: "openai-compatible", wantEnv: "OPENCODE_API_KEY=sk-test"},
+		{name: "custom uses opencode env", provider: "custom", wantEnv: "OPENCODE_API_KEY=sk-test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			envVars, settings, err := host.injectAgentCredential(
+				context.Background(),
+				"container-id",
+				"opencode",
+				&agentCredential{credential: "sk-test"},
+				&agentSettingsPayload{OpencodeProvider: tt.provider},
+				getAgentCommandInfo("opencode", "api-key"),
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("injectAgentCredential returned error: %v", err)
+			}
+			if settings == nil || settings.OpencodeProvider != tt.provider {
+				t.Fatalf("settings provider = %#v, want %q", settings, tt.provider)
+			}
+			assertEnvEntry(t, envVars, tt.wantEnv)
+		})
+	}
+}

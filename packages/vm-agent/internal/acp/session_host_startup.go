@@ -118,7 +118,7 @@ func (h *SessionHost) injectAgentCredential(
 		return envVars, settings, err
 	}
 	if cred.inferenceConfig == nil {
-		return append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential)), settings, nil
+		return append(envVars, fmt.Sprintf("%s=%s", credentialEnvVarName(agentType, settings, info), cred.credential)), settings, nil
 	}
 
 	switch cred.inferenceConfig.APIKeySource {
@@ -127,7 +127,23 @@ func (h *SessionHost) injectAgentCredential(
 	case "callback-token":
 		return h.injectPlatformProxyCredential(agentType, cred, settings, envVars)
 	default:
-		return append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential)), settings, nil
+		return append(envVars, fmt.Sprintf("%s=%s", credentialEnvVarName(agentType, settings, info), cred.credential)), settings, nil
+	}
+}
+
+func credentialEnvVarName(agentType string, settings *agentSettingsPayload, info agentCommandInfo) string {
+	if agentType != "opencode" || settings == nil {
+		return info.envVarName
+	}
+	switch settings.OpencodeProvider {
+	case "opencode-managed", "openai-compatible", "custom":
+		return "OPENCODE_API_KEY"
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "google-vertex":
+		return "GOOGLE_API_KEY"
+	default:
+		return info.envVarName
 	}
 }
 
