@@ -3,14 +3,13 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 
-import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { AppError, errors } from '../middleware/error';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
 import { DeviceApproveSchema, DeviceTokenSchema } from '../schemas/misc';
-import { assertUserCanCreateSession, createSessionCookieForUser } from '../services/session-factory';
+import { buildSessionLoginResponse, getAuthenticatedUser } from '../services/session-factory';
 
 const DEFAULT_DEVICE_CODE_TTL_SECONDS = 15 * 60;
 const DEFAULT_DEVICE_POLL_INTERVAL_SECONDS = 5;
@@ -136,11 +135,7 @@ deviceFlowRoutes.post('/device/code', createCodeRateLimit, async (c) => {
 });
 
 deviceFlowRoutes.post('/device/approve', jsonValidator(DeviceApproveSchema), async (c) => {
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    throw errors.unauthorized('Not authenticated');
-  }
+  const user = await getAuthenticatedUser(c);
 
   const userCode = normalizeUserCode(c.req.valid('json').userCode);
   if (!userCode) {
@@ -164,7 +159,7 @@ deviceFlowRoutes.post('/device/approve', jsonValidator(DeviceApproveSchema), asy
   const ttlSeconds = Math.max(1, Math.ceil((entry.expiresAt - Date.now()) / 1000));
   await c.env.KV.put(
     `device:${deviceCode}`,
-    JSON.stringify({ ...entry, status: 'approved', userId: session.user.id }),
+    JSON.stringify({ ...entry, status: 'approved', userId: user.id }),
     { expirationTtl: ttlSeconds }
   );
   await c.env.KV.delete(`device:user:${userCode}`);
@@ -196,19 +191,9 @@ deviceFlowRoutes.post('/device/token', pollRateLimit, jsonValidator(DeviceTokenS
     throw errors.unauthorized('Device code owner not found');
   }
 
-  assertUserCanCreateSession(c.env, user);
-  const { cookieHeader, sessionCookie } = await createSessionCookieForUser(c.env, entry.userId);
   await c.env.KV.delete(`device:${deviceCode}`);
 
-  return c.json(
-    {
-      success: true,
-      user: { id: user.id, email: user.email, name: user.name },
-      sessionCookie,
-    },
-    200,
-    { 'Set-Cookie': cookieHeader }
-  );
+  return buildSessionLoginResponse(c.env, user);
 });
 
 export { deviceFlowRoutes };

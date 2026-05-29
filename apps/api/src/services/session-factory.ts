@@ -1,3 +1,5 @@
+import type { Context } from 'hono';
+
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { getBetterAuthSecret } from '../lib/secrets';
@@ -67,6 +69,37 @@ export async function createSessionCookieForUser(
   ].join('; ');
 
   return { cookieHeader, sessionCookie };
+}
+
+export async function getAuthenticatedUser(c: Context<{ Bindings: Env }>): Promise<{ id: string }> {
+  const auth = createAuth(c.env);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session?.user) {
+    throw errors.unauthorized('Not authenticated');
+  }
+  return session.user;
+}
+
+export async function buildSessionLoginResponse(
+  env: Env,
+  user: SessionFactoryUser,
+): Promise<Response> {
+  assertUserCanCreateSession(env, user);
+  const { cookieHeader, sessionCookie } = await createSessionCookieForUser(env, user.id);
+  return new Response(
+    JSON.stringify({
+      success: true,
+      user: { id: user.id, email: user.email, name: user.name },
+      sessionCookie,
+    }),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': cookieHeader,
+      },
+    },
+  );
 }
 
 export function assertUserCanCreateSession(env: Env, user: SessionFactoryUser): void {

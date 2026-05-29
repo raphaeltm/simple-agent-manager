@@ -2,14 +2,13 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
 import { ApiTokenCreateSchema, ApiTokenRedeemSchema,jsonValidator } from '../schemas';
-import { assertUserCanCreateSession, createSessionCookieForUser } from '../services/session-factory';
+import { buildSessionLoginResponse, getAuthenticatedUser } from '../services/session-factory';
 
 const TOKEN_PREFIX = 'sam_pat_';
 const LEGACY_TOKEN_PREFIX = 'sam_test_';
@@ -53,11 +52,7 @@ const tokenLoginRateLimit = rateLimit({
 const apiTokenRoutes = new Hono<{ Bindings: Env }>();
 
 apiTokenRoutes.get('/api-tokens', async (c) => {
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    throw errors.unauthorized('Not authenticated');
-  }
+  const user = await getAuthenticatedUser(c);
 
   const db = drizzle(c.env.DATABASE, { schema });
   const tokens = await db
@@ -69,18 +64,14 @@ apiTokenRoutes.get('/api-tokens', async (c) => {
       revokedAt: schema.apiTokens.revokedAt,
     })
     .from(schema.apiTokens)
-    .where(eq(schema.apiTokens.userId, session.user.id))
+    .where(eq(schema.apiTokens.userId, user.id))
     .all();
 
   return c.json(tokens);
 });
 
 apiTokenRoutes.post('/api-tokens', jsonValidator(ApiTokenCreateSchema), async (c) => {
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    throw errors.unauthorized('Not authenticated');
-  }
+  const user = await getAuthenticatedUser(c);
 
   const body = c.req.valid('json');
   const maxNameLength = parseInt(c.env.MAX_API_TOKEN_NAME_LENGTH || '', 10) || DEFAULT_MAX_TOKEN_NAME_LENGTH;
@@ -96,7 +87,7 @@ apiTokenRoutes.post('/api-tokens', jsonValidator(ApiTokenCreateSchema), async (c
     .from(schema.apiTokens)
     .where(
       and(
-        eq(schema.apiTokens.userId, session.user.id),
+        eq(schema.apiTokens.userId, user.id),
         isNull(schema.apiTokens.revokedAt)
       )
     )
@@ -115,7 +106,7 @@ apiTokenRoutes.post('/api-tokens', jsonValidator(ApiTokenCreateSchema), async (c
 
   await db.insert(schema.apiTokens).values({
     id,
-    userId: session.user.id,
+    userId: user.id,
     tokenHash,
     name,
   });
@@ -124,11 +115,7 @@ apiTokenRoutes.post('/api-tokens', jsonValidator(ApiTokenCreateSchema), async (c
 });
 
 apiTokenRoutes.delete('/api-tokens/:id', async (c) => {
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    throw errors.unauthorized('Not authenticated');
-  }
+  const user = await getAuthenticatedUser(c);
 
   const tokenId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -139,7 +126,7 @@ apiTokenRoutes.delete('/api-tokens/:id', async (c) => {
     .where(
       and(
         eq(schema.apiTokens.id, tokenId),
-        eq(schema.apiTokens.userId, session.user.id)
+        eq(schema.apiTokens.userId, user.id)
       )
     );
 
@@ -193,27 +180,7 @@ apiTokenRoutes.post('/token-login', tokenLoginRateLimit, jsonValidator(ApiTokenR
     throw errors.unauthorized('Token owner not found');
   }
 
-  assertUserCanCreateSession(c.env, user);
-  const { cookieHeader, sessionCookie } = await createSessionCookieForUser(c.env, tokenRecord.userId);
-
-  return new Response(
-    JSON.stringify({
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      },
-      sessionCookie,
-    }),
-    {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Set-Cookie': cookieHeader,
-      },
-    }
-  );
+  return buildSessionLoginResponse(c.env, user);
 });
 
 export { apiTokenRoutes, hashToken };
