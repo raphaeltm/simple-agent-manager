@@ -184,11 +184,14 @@ func (h *SessionHost) reportActivity(activity string) {
 	sessionID := h.config.SessionID
 
 	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" {
-		slog.Debug("reportActivity: skipping, missing config",
+		slog.Warn("reportActivity: skipping, missing config",
+			"activity", activity,
 			"hasProjectID", projectID != "",
 			"hasNodeID", nodeID != "",
 			"hasControlPlaneURL", controlPlaneURL != "",
-			"hasSessionID", sessionID != "")
+			"hasSessionID", sessionID != "",
+			"hasCallbackToken", callbackToken != "",
+			"workspaceID", h.config.WorkspaceID)
 		return
 	}
 
@@ -230,20 +233,34 @@ func (h *SessionHost) reportActivity(activity string) {
 			statusCode, doErr := h.doActivityRequest(url, body, callbackToken)
 			if doErr != nil {
 				if attempt < maxAttempts {
-					slog.Debug("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
+					slog.Warn("reportActivity: attempt failed, retrying",
+						"attempt", attempt, "error", doErr, "activity", activity,
+						"workspaceID", h.config.WorkspaceID, "sessionID", sessionID)
 					time.Sleep(500 * time.Millisecond)
 					continue
 				}
-				slog.Debug("reportActivity: all attempts failed", "error", doErr)
+				slog.Warn("reportActivity: all attempts failed",
+					"error", doErr, "activity", activity,
+					"workspaceID", h.config.WorkspaceID, "sessionID", sessionID,
+					"url", url, "hasCallbackToken", callbackToken != "")
 				return
 			}
 			if statusCode >= 500 && attempt < maxAttempts {
-				slog.Debug("reportActivity: server error, retrying", "status", statusCode)
+				slog.Warn("reportActivity: server error, retrying",
+					"status", statusCode, "activity", activity,
+					"workspaceID", h.config.WorkspaceID, "sessionID", sessionID)
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
 			if statusCode >= 400 {
-				slog.Debug("reportActivity: non-2xx response", "status", statusCode)
+				slog.Warn("reportActivity: non-2xx response",
+					"status", statusCode, "activity", activity,
+					"workspaceID", h.config.WorkspaceID, "sessionID", sessionID,
+					"url", url, "hasCallbackToken", callbackToken != "")
+			} else {
+				slog.Info("reportActivity: success",
+					"status", statusCode, "activity", activity,
+					"workspaceID", h.config.WorkspaceID, "sessionID", sessionID)
 			}
 			return
 		}
