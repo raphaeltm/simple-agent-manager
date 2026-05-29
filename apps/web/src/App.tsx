@@ -43,6 +43,8 @@ import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
+import { Tools } from './pages/Tools';
+import { ToolsCli } from './pages/ToolsCli';
 import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
@@ -132,6 +134,8 @@ export default function App() {
               <Route path="smoke-test-tokens" element={<SettingsSmokeTestTokens />} />
             </Route>
             <Route path="/account-map" element={<AccountMap />} />
+            <Route path="/tools" element={<Tools />} />
+            <Route path="/tools/cli" element={<ToolsCli />} />
             <Route path="/ui-standards" element={<UiStandards />} />
             <Route path="/admin" element={<Admin />}>
               <Route index element={<Navigate to="users" replace />} />

@@ -49,6 +49,14 @@ vi.mock('../../src/pages/Node', () => ({
   Node: () => <div data-testid="node-page" />,
 }));
 
+vi.mock('../../src/pages/Tools', () => ({
+  Tools: () => <div data-testid="tools-page" />,
+}));
+
+vi.mock('../../src/pages/ToolsCli', () => ({
+  ToolsCli: () => <div data-testid="tools-cli-page" />,
+}));
+
 vi.mock('../../src/pages/UiStandards', () => ({
   UiStandards: () => <div data-testid="ui-standards-page" />,
 }));
@@ -106,6 +114,16 @@ describe('App routes', () => {
 
     expect(screen.getByTestId('projects-page')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
+  });
+
+  it('routes /tools to the Tools page', () => {
+    renderAt('/tools');
+    expect(screen.getByTestId('tools-page')).toBeInTheDocument();
+  });
+
+  it('routes /tools/cli to the CLI download page', () => {
+    renderAt('/tools/cli');
+    expect(screen.getByTestId('tools-cli-page')).toBeInTheDocument();
   });
 
   it('routes /projects/:id/tasks/:taskId to the task detail page nested inside project', () => {
