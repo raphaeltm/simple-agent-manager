@@ -14,7 +14,7 @@ func TestRunPrintsHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "SAM CLI") || !strings.Contains(stdout.String(), "tasks dispatch") {
+	if !strings.Contains(stdout.String(), "SAM CLI") || !strings.Contains(stdout.String(), "sam projects") {
 		t.Fatalf("help output missing expected text: %s", stdout.String())
 	}
 }
@@ -173,15 +173,17 @@ func TestModelFlagFailsUntilAPIContractExists(t *testing.T) {
 	}
 }
 
-func TestChatWithoutSessionSubmitsConversationTask(t *testing.T) {
+func TestChatNewSubmitsConversationTask(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, stdout, stderr := testRuntime(t, []string{
-		"--project=project_1",
 		"chat",
+		"new",
 		"Plan",
 		"the",
 		"release",
-	}, doer, nil)
+	}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
 	if code != 0 {
@@ -198,22 +200,21 @@ func TestChatWithoutSessionSubmitsConversationTask(t *testing.T) {
 	}
 }
 
-func TestChatWithSessionSendsPrompt(t *testing.T) {
-	doer, captured := captureJSONRequest(t, `{"success":true}`, http.StatusOK)
-	runtime, stdout, stderr := testRuntime(t, []string{"--project", "project_1", "chat", "--session", "session_1", "Follow up", "--json"}, doer, nil)
+func TestChatViewShowsMessages(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	doer, captured := captureJSONRequest(t, `{"messages":[{"id":"msg_1","role":"user","content":"Hello"},{"id":"msg_2","role":"assistant","content":"Hi there"}]}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"chat", "session_1"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1/sessions/session_1/prompt" {
+	if captured.URL != "https://api.example.com/api/projects/project_1/sessions/session_1/messages" {
 		t.Fatalf("path = %s", captured.URL)
 	}
-	if captured.JSON["content"] != "Follow up" {
-		t.Fatalf("payload = %#v", captured.JSON)
-	}
-	if !strings.Contains(stdout.String(), `"success": true`) {
-		t.Fatalf("json output = %s", stdout.String())
+	if !strings.Contains(stdout.String(), "[user]") || !strings.Contains(stdout.String(), "Hello") {
+		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
 

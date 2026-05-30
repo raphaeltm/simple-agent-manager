@@ -116,6 +116,78 @@ func (c APIClient) SendPrompt(ctx context.Context, projectID string, sessionID s
 	return response, err
 }
 
+func (c APIClient) ListProjects(ctx context.Context) (ProjectListResponse, error) {
+	var response ProjectListResponse
+	err := c.request(ctx, http.MethodGet, "/api/projects", nil, &response)
+	return response, err
+}
+
+func (c APIClient) GetProjectDetail(ctx context.Context, projectID string) (ProjectDetail, error) {
+	var response ProjectDetail
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListSessions(ctx context.Context, projectID string) (SessionListResponse, error) {
+	var response SessionListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) GetSessionMessages(ctx context.Context, projectID string, sessionID string) (MessageListResponse, error) {
+	var response MessageListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions", sessionID, "messages"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListIdeas(ctx context.Context, projectID string) (IdeaListResponse, error) {
+	var response IdeaListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "tasks")+"?status=draft", nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListLibraryFiles(ctx context.Context, projectID string) (LibraryListResponse, error) {
+	var response LibraryListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "library"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListKnowledge(ctx context.Context, projectID string) (KnowledgeListResponse, error) {
+	var response KnowledgeListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "knowledge"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListNotifications(ctx context.Context) (NotificationListResponse, error) {
+	var response NotificationListResponse
+	err := c.request(ctx, http.MethodGet, "/api/notifications", nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListTriggers(ctx context.Context, projectID string) (TriggerListResponse, error) {
+	var response TriggerListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "triggers"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListProfiles(ctx context.Context, projectID string) (ProfileListResponse, error) {
+	var response ProfileListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "agent-profiles"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListActivity(ctx context.Context, projectID string) (ActivityListResponse, error) {
+	var response ActivityListResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "activity"), nil, &response)
+	return response, err
+}
+
+func (c APIClient) ListNodes(ctx context.Context) (NodeListResponse, error) {
+	var response NodeListResponse
+	err := c.request(ctx, http.MethodGet, "/api/nodes", nil, &response)
+	return response, err
+}
+
 func projectAPIPath(projectID string, segments ...string) string {
 	path := apiProjectsPath + url.PathEscape(projectID)
 	for _, segment := range segments {

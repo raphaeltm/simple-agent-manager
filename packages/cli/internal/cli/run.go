@@ -26,20 +26,43 @@ func Run(ctx context.Context, runtime Runtime) int {
 	switch namespace {
 	case "auth":
 		return runAuth(ctx, runtime, parsed, args)
+	case "projects":
+		return runListProjects(ctx, runtime, parsed)
+	case "project":
+		return runProjectCommand(ctx, runtime, parsed, args)
+	case "status":
+		return runStatus(ctx, runtime, parsed)
+	case "chat":
+		return runChatCommand(ctx, runtime, parsed, args)
+	case "ideas":
+		return runIdeas(ctx, runtime, parsed)
+	case "library":
+		return runLibrary(ctx, runtime, parsed)
+	case "context":
+		return runContext(ctx, runtime, parsed)
+	case "notifications":
+		return runNotifications(ctx, runtime, parsed)
+	case "triggers":
+		return runTriggers(ctx, runtime, parsed)
+	case "profiles":
+		return runProfiles(ctx, runtime, parsed)
+	case "activity":
+		return runActivity(ctx, runtime, parsed)
+	case "nodes":
+		return runNodes(ctx, runtime, parsed)
+	case "workspace":
+		return runWorkspace(ctx, runtime, parsed, args)
+	// Legacy commands (hidden from help, still functional)
 	case "task":
 		return runTask(ctx, runtime, parsed, args)
 	case "tasks":
 		return runTasks(ctx, runtime, parsed, args)
-	case "chat":
-		return runChat(ctx, runtime, parsed, args)
-	case "workspace":
-		return runWorkspace(ctx, runtime, parsed, args)
 	case "runner":
 		return runRunner(ctx, runtime, parsed, args)
 	case "harness":
 		return fail(runtime.Stderr, plannedCommand("sam harness"))
 	default:
-		return fail(runtime.Stderr, fmt.Errorf("unknown command: %s", strings.Join(parsed.Positionals, " ")))
+		return fail(runtime.Stderr, fmt.Errorf("unknown command: %s\nRun `sam --help` for usage", namespace))
 	}
 }
 
@@ -342,32 +365,29 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	return submitTask(ctx, runtime, parsed, projectID, message, options)
 }
 
-func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
-	projectID, rest, err := projectFromArgs(parsed.Globals, args, "chat")
-	if err != nil {
-		return fail(runtime.Stderr, err)
+func runProjectCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+	if len(args) == 0 {
+		return runProjectDetail(ctx, runtime, parsed)
 	}
-	message := commandMessage(parsed, rest)
-	if strings.TrimSpace(message) == "" {
-		return fail(runtime.Stderr, errors.New("chat requires <message> or --prompt"))
+	switch args[0] {
+	case "use":
+		return runProjectUse(ctx, runtime, parsed, args[1:])
+	default:
+		return fail(runtime.Stderr, fmt.Errorf("unknown project action: %s", args[0]))
 	}
-	client, err := authenticatedClient(ctx, runtime)
-	if err != nil {
-		return fail(runtime.Stderr, err)
+}
+
+func runChatCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+	if len(args) == 0 {
+		return runChatList(ctx, runtime, parsed)
 	}
-	if sessionID := flagValue(parsed.Flags, "session"); sessionID != "" {
-		response, err := client.SendPrompt(ctx, projectID, sessionID, message)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		return writeOrFail(runtime, parsed.Globals.JSON, "Prompt sent to session "+sessionID, response)
+	switch args[0] {
+	case "new":
+		return runChatNew(ctx, runtime, parsed, args[1:])
+	default:
+		// Treat the first arg as a session ID for chat view
+		return runChatView(ctx, runtime, parsed, args[0])
 	}
-	options, err := parseSubmitOptions(parsed)
-	if err != nil {
-		return fail(runtime.Stderr, err)
-	}
-	options.Mode = "conversation"
-	return submitTask(ctx, runtime, parsed, projectID, message, options)
 }
 
 func commandMessage(parsed parsedArgs, args []string) string {
@@ -480,20 +500,32 @@ func helpText() string {
 	return `SAM CLI
 
 Usage:
-  sam auth login [--api-url <url>]
-  sam auth login [--api-url <url>] --token <personal-access-token>
-  sam auth login [--api-url <url>] --session-cookie-stdin
-  sam auth status
-  sam --project <projectId> tasks dispatch --prompt <prompt>
-  sam --project <projectId> task submit <prompt>
-  sam --project <projectId> task status <taskId>
-  sam --project <projectId> chat [--session <sessionId>] <prompt>
-  sam workspace <workspaceId> forward [--port <port>...]
-  sam workspace <workspaceId> ports
-  sam runner doctor
+  sam auth login [--api-url <url>]              Log in to SAM
+  sam auth status                               Show auth status
+
+  sam projects                                  List all projects
+  sam project use [<name-or-id>]                Set the active project
+  sam project                                   Show active project details
+  sam status                                    Project dashboard (detail + recent chats)
+
+  sam chat                                      List chats
+  sam chat new <message>                        Start a new chat
+  sam chat <sessionId>                          View chat messages
+
+  sam ideas                                     List ideas (draft tasks)
+  sam library                                   List library files
+  sam context                                   List knowledge entities
+  sam notifications                             List notifications
+  sam triggers                                  List triggers
+  sam profiles                                  List agent profiles
+  sam activity                                  List recent activity
+  sam nodes                                     List infrastructure nodes
+
+  sam workspace <id> forward [--port <port>]    Forward workspace ports
+  sam workspace <id> ports                      List workspace ports
 
 Global flags:
-  --project <projectId>  Project scope for project commands
-  --json                 Print machine-readable JSON output
+  --project <name-or-id>  Override active project (accepts name, prefix, or full ID)
+  --json                  Print machine-readable JSON output
 `
 }

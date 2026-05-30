@@ -88,6 +88,22 @@ func ResolveConfigPaths(env ConfigEnv) (ConfigPaths, error) {
 	return ConfigPaths{ConfigDir: dir, ConfigFile: filepath.Join(dir, configFileName)}, nil
 }
 
+// SetActiveProject updates the active project in the saved config file.
+// It loads the existing config, sets the project fields, and saves.
+func SetActiveProject(env ConfigEnv, projectID string, projectName string) error {
+	cfg, err := LoadConfig(env)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return errors.New("not authenticated. Run `sam auth login` first")
+	}
+	cfg.ActiveProjectID = projectID
+	cfg.ActiveProjectName = projectName
+	_, err = SaveConfig(env, *cfg)
+	return err
+}
+
 func normalizeAPIURL(value string) string {
 	return strings.TrimRight(strings.TrimSpace(value), "/")
 }

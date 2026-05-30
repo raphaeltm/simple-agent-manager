@@ -33,8 +33,10 @@ type Runner interface {
 }
 
 type CLIConfig struct {
-	APIURL        string `json:"apiUrl"`
-	SessionCookie string `json:"sessionCookie"`
+	APIURL            string `json:"apiUrl"`
+	SessionCookie     string `json:"sessionCookie"`
+	ActiveProjectID   string `json:"activeProjectId,omitempty"`
+	ActiveProjectName string `json:"activeProjectName,omitempty"`
 }
 
 type AuthUser struct {
@@ -117,4 +119,178 @@ type TaskSubmitOptions struct {
 	VMLocation     string
 	VMSize         string
 	Workspace      string
+}
+
+// Project represents a project in list responses.
+type Project struct {
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	Repository           string  `json:"repository,omitempty"`
+	RepoProvider         string  `json:"repoProvider,omitempty"`
+	Status               string  `json:"status,omitempty"`
+	LastActivityAt       *string `json:"lastActivityAt,omitempty"`
+	ActiveSessionCount   int     `json:"activeSessionCount,omitempty"`
+	ActiveWorkspaceCount int     `json:"activeWorkspaceCount,omitempty"`
+}
+
+// ProjectListResponse wraps a list of projects.
+type ProjectListResponse struct {
+	Projects []Project `json:"projects"`
+}
+
+// ProjectDetail contains full project information.
+type ProjectDetail struct {
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	Repository           string    `json:"repository,omitempty"`
+	RepoProvider         string    `json:"repoProvider,omitempty"`
+	Status               string    `json:"status,omitempty"`
+	DefaultBranch        string    `json:"defaultBranch,omitempty"`
+	LastActivityAt       *string   `json:"lastActivityAt,omitempty"`
+	ActiveSessionCount   int       `json:"activeSessionCount,omitempty"`
+	ActiveWorkspaceCount int       `json:"activeWorkspaceCount,omitempty"`
+	RecentSessions       []Session `json:"recentSessions,omitempty"`
+}
+
+// Session represents a chat session.
+type Session struct {
+	ID            string  `json:"id"`
+	Topic         string  `json:"topic,omitempty"`
+	Status        string  `json:"status,omitempty"`
+	MessageCount  int     `json:"messageCount,omitempty"`
+	StartedAt     *string `json:"startedAt,omitempty"`
+	LastMessageAt *string `json:"lastMessageAt,omitempty"`
+	Attention     *string `json:"attention,omitempty"`
+	TaskID        string  `json:"taskId,omitempty"`
+}
+
+// SessionListResponse wraps a list of sessions.
+type SessionListResponse struct {
+	Sessions []Session `json:"sessions"`
+}
+
+// Message represents a chat message.
+type Message struct {
+	ID        string  `json:"id"`
+	Role      string  `json:"role,omitempty"`
+	Content   string  `json:"content,omitempty"`
+	CreatedAt *string `json:"createdAt,omitempty"`
+}
+
+// MessageListResponse wraps a list of messages.
+type MessageListResponse struct {
+	Messages []Message `json:"messages"`
+}
+
+// Idea represents a draft task (idea).
+type Idea struct {
+	ID        string  `json:"id"`
+	Title     string  `json:"title,omitempty"`
+	Status    string  `json:"status,omitempty"`
+	Priority  int     `json:"priority,omitempty"`
+	CreatedAt *string `json:"createdAt,omitempty"`
+	UpdatedAt *string `json:"updatedAt,omitempty"`
+}
+
+// IdeaListResponse wraps a list of ideas.
+type IdeaListResponse struct {
+	Tasks []Idea `json:"tasks"`
+}
+
+// LibraryFile represents a file in the project library.
+type LibraryFile struct {
+	ID         string  `json:"id"`
+	Filename   string  `json:"filename,omitempty"`
+	Size       int64   `json:"size,omitempty"`
+	Source     string  `json:"source,omitempty"`
+	UploadedAt *string `json:"uploadedAt,omitempty"`
+}
+
+// LibraryListResponse wraps a list of library files.
+type LibraryListResponse struct {
+	Files []LibraryFile `json:"files"`
+}
+
+// KnowledgeEntity represents a knowledge graph entity.
+type KnowledgeEntity struct {
+	EntityName       string `json:"entityName"`
+	EntityType       string `json:"entityType,omitempty"`
+	ObservationCount int    `json:"observationCount,omitempty"`
+	UpdatedAt        string `json:"updatedAt,omitempty"`
+}
+
+// KnowledgeListResponse wraps a list of knowledge entities.
+type KnowledgeListResponse struct {
+	Entities []KnowledgeEntity `json:"entities"`
+}
+
+// Notification represents a user notification.
+type Notification struct {
+	ID        string  `json:"id"`
+	Type      string  `json:"type,omitempty"`
+	Title     string  `json:"title,omitempty"`
+	Read      bool    `json:"read"`
+	CreatedAt *string `json:"createdAt,omitempty"`
+}
+
+// NotificationListResponse wraps a list of notifications.
+type NotificationListResponse struct {
+	Notifications []Notification `json:"notifications"`
+}
+
+// Trigger represents a project trigger.
+type Trigger struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name,omitempty"`
+	Schedule string  `json:"schedule,omitempty"`
+	Status   string  `json:"status,omitempty"`
+	NextRun  *string `json:"nextRun,omitempty"`
+}
+
+// TriggerListResponse wraps a list of triggers.
+type TriggerListResponse struct {
+	Triggers []Trigger `json:"triggers"`
+}
+
+// AgentProfile represents an agent profile.
+type AgentProfile struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	AgentType string `json:"agentType,omitempty"`
+	VMSize    string `json:"vmSize,omitempty"`
+	TaskMode  string `json:"taskMode,omitempty"`
+}
+
+// ProfileListResponse wraps a list of agent profiles.
+type ProfileListResponse struct {
+	Profiles []AgentProfile `json:"profiles"`
+}
+
+// ActivityEvent represents a project activity event.
+type ActivityEvent struct {
+	ID        string  `json:"id"`
+	Type      string  `json:"type,omitempty"`
+	Summary   string  `json:"summary,omitempty"`
+	CreatedAt *string `json:"createdAt,omitempty"`
+}
+
+// ActivityListResponse wraps a list of activity events.
+type ActivityListResponse struct {
+	Events []ActivityEvent `json:"events"`
+}
+
+// Node represents an infrastructure node.
+type Node struct {
+	ID             string `json:"id"`
+	Provider       string `json:"provider,omitempty"`
+	VMSize         string `json:"vmSize,omitempty"`
+	Location       string `json:"location,omitempty"`
+	Status         string `json:"status,omitempty"`
+	IP             string `json:"ip,omitempty"`
+	WorkspaceCount int    `json:"workspaceCount,omitempty"`
+}
+
+// NodeListResponse wraps a list of nodes.
+type NodeListResponse struct {
+	Nodes []Node `json:"nodes"`
 }

@@ -152,3 +152,17 @@ func tempConfigEnv(t *testing.T) fakeEnv {
 	t.Helper()
 	return fakeEnv{values: map[string]string{"SAM_CONFIG_DIR": filepath.Join(t.TempDir(), "sam")}}
 }
+
+// setActiveProjectConfig saves a config with auth + active project for tests.
+func setActiveProjectConfig(t *testing.T, env fakeEnv, projectID string, projectName string) {
+	t.Helper()
+	cfg := CLIConfig{
+		APIURL:            "https://api.example.com",
+		SessionCookie:     "cookie=value",
+		ActiveProjectID:   projectID,
+		ActiveProjectName: projectName,
+	}
+	if _, err := SaveConfig(env, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
