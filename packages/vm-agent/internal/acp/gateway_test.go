@@ -53,7 +53,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantInstallCmd:    "npm install -g @zed-industries/codex-acp",
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
-			wantArgs:          []string{"--sandbox", "danger-full-access"},
+			wantArgs:          []string{"-c", `sandbox_mode="danger-full-access"`},
 		},
 		{
 			name:           "OpenAI Codex with API key uses env var",
@@ -62,7 +62,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
 			wantInstallCmd: "npm install -g @zed-industries/codex-acp",
-			wantArgs:       []string{"--sandbox", "danger-full-access"},
+			wantArgs:       []string{"-c", `sandbox_mode="danger-full-access"`},
 		},
 		{
 			name:           "Google Gemini always uses API key",
@@ -246,8 +246,8 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.injectionMode != "" {
 		t.Fatalf("injectionMode=%q, want empty for api-key", info.injectionMode)
 	}
-	if len(info.args) != 2 || info.args[0] != "--sandbox" || info.args[1] != "danger-full-access" {
-		t.Fatalf("args=%v, want [--sandbox danger-full-access]", info.args)
+	if len(info.args) != 2 || info.args[0] != "-c" || info.args[1] != `sandbox_mode="danger-full-access"` {
+		t.Fatalf("args=%v, want [-c sandbox_mode=\"danger-full-access\"]", info.args)
 	}
 }
 
@@ -267,8 +267,8 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
 	}
-	if len(info.args) != 2 || info.args[0] != "--sandbox" || info.args[1] != "danger-full-access" {
-		t.Fatalf("args=%v, want [--sandbox danger-full-access]", info.args)
+	if len(info.args) != 2 || info.args[0] != "-c" || info.args[1] != `sandbox_mode="danger-full-access"` {
+		t.Fatalf("args=%v, want [-c sandbox_mode=\"danger-full-access\"]", info.args)
 	}
 }
 

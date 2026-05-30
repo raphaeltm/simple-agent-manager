@@ -800,13 +800,15 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
 	case "openai-codex":
-		// Pass --sandbox danger-full-access as CLI args. CLI flags have the
-		// highest priority in the Codex config hierarchy, overriding both
-		// project and user config.toml files. This is required because SAM
-		// workspaces run inside containers without CAP_NET_ADMIN, which
+		// Use -c to override sandbox_mode via codex-acp's config override flag.
+		// This takes the highest priority in the Codex config hierarchy,
+		// overriding both project and user config.toml files. Required because
+		// SAM workspaces run inside containers without CAP_NET_ADMIN, which
 		// causes bubblewrap (bwrap) sandbox to fail with
 		// "RTM_NEWADDR: Operation not permitted".
-		codexSandboxArgs := []string{"--sandbox", "danger-full-access"}
+		// NOTE: --sandbox is a flag on the `codex` CLI, NOT on `codex-acp`.
+		// codex-acp uses -c key=value for config overrides.
+		codexSandboxArgs := []string{"-c", `sandbox_mode="danger-full-access"`}
 		if credentialKind == "oauth-token" {
 			return agentCommandInfo{
 				command:       "codex-acp",
