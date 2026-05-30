@@ -96,13 +96,13 @@ describe('model allowlist parsing', () => {
 
   it('handles mixed provider model lists', () => {
     const models = parseAndNormalizeModels(
-      '@cf/meta/llama-4-scout-17b-16e-instruct,claude-sonnet-4-6,gpt-4.1,@cf/google/gemma-4-26b-a4b-it',
+      '@cf/meta/llama-4-scout-17b-16e-instruct,claude-sonnet-4-6,gpt-4.1,@cf/qwen/qwen3-30b-a3b-fp8',
     );
     expect(models.size).toBe(4);
     expect(models.has('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(true);
     expect(models.has('claude-sonnet-4-6')).toBe(true);
     expect(models.has('gpt-4.1')).toBe(true);
-    expect(models.has('@cf/google/gemma-4-26b-a4b-it')).toBe(true);
+    expect(models.has('@cf/qwen/qwen3-30b-a3b-fp8')).toBe(true);
   });
 });
 
@@ -245,7 +245,6 @@ describe('isOpenAIModel', () => {
 
   it('does not match Workers AI models', () => {
     expect(isOpenAIModel('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(false);
-    expect(isOpenAIModel('@cf/google/gemma-4-26b-a4b-it')).toBe(false);
   });
 
   it('does not match Anthropic models', () => {
@@ -279,7 +278,6 @@ describe('getModelProvider', () => {
   it('returns workers-ai for @cf/ models', () => {
     expect(getModelProvider('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe('workers-ai');
     expect(getModelProvider('@cf/qwen/qwen3-30b-a3b-fp8')).toBe('workers-ai');
-    expect(getModelProvider('@cf/google/gemma-4-26b-a4b-it')).toBe('workers-ai');
   });
 
   it('returns workers-ai for unknown models', () => {
