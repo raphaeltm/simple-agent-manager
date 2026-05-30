@@ -30,14 +30,14 @@ Pass `--sandbox danger-full-access` as CLI arguments to `codex-acp`. CLI flags h
 
 ## Checklist
 
-- [ ] Add `--sandbox` and `danger-full-access` to args in `getAgentCommandInfo()` for both openai-codex credential paths
-- [ ] Update existing tests to expect the new args
-- [ ] Run `go test ./...` from `packages/vm-agent`
-- [ ] Verify config.toml generation still includes sandbox_mode as belt-and-suspenders
+- [x] Add `--sandbox` and `danger-full-access` to args in `getAgentCommandInfo()` for both openai-codex credential paths
+- [x] Update existing tests to expect the new args
+- [x] Run `go test ./...` from `packages/vm-agent`
+- [x] Verify config.toml generation still includes sandbox_mode as belt-and-suspenders
 
 ## Acceptance Criteria
 
-- [ ] `getAgentCommandInfo("openai-codex", "oauth-token")` returns args containing `--sandbox danger-full-access`
-- [ ] `getAgentCommandInfo("openai-codex", "api-key")` returns args containing `--sandbox danger-full-access`
-- [ ] All existing vm-agent tests pass
-- [ ] No other agent types are affected
+- [x] `getAgentCommandInfo("openai-codex", "oauth-token")` returns args containing `--sandbox danger-full-access`
+- [x] `getAgentCommandInfo("openai-codex", "api-key")` returns args containing `--sandbox danger-full-access`
+- [x] All existing vm-agent tests pass
+- [x] No other agent types are affected
