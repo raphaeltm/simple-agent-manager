@@ -508,7 +508,7 @@ test.describe('Unified Agent Cards — Mobile', () => {
     // All three platform models must be present
     expect(optionValues).toContain('@cf/meta/llama-4-scout-17b-16e-instruct');
     expect(optionValues).toContain('@cf/qwen/qwen3-30b-a3b-fp8');
-    expect(optionValues).toContain('@cf/google/gemma-3-12b-it');
+    expect(optionValues).toContain('@cf/google/gemma-4-26b-a4b-it');
 
     await takeScreenshot(page, 'agent-settings-mobile-platform-model-select-options');
     await assertNoOverflow(page);

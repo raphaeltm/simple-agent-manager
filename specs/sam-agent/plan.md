@@ -416,7 +416,7 @@ samRoutes.get('/overview', requireAuth(), async (c) => {
 
 For each project, generate a one-line summary like "3 agents running: auth refactor, policy tests, blog post. Auth agent 80% done."
 
-- Use a cheap/fast model via Mastra + Workers AI (same pattern as task-title.ts): `@cf/google/gemma-3-12b-it` default
+- Use a cheap/fast model via Mastra + Workers AI (same pattern as task-title.ts): `@cf/google/gemma-4-26b-a4b-it` default
 - Cache in KV with 60s TTL, keyed by `sam-overview-${projectId}`
 - Summaries regenerated on cache miss or when project activity changes
 - Fallback to template-based summary if LLM fails: "${activeCount} active tasks, last activity ${timeAgo}"
@@ -511,7 +511,7 @@ All configurable via env vars with defaults in `packages/shared/src/constants/sa
 | `SAM_MAX_TURNS` | `20` | Max tool-use loop iterations per message |
 | `SAM_SYSTEM_PROMPT_APPEND` | `""` | Additional system prompt (user customization) |
 | `SAM_OVERVIEW_CACHE_TTL_MS` | `60000` | Overview summary cache duration |
-| `SAM_OVERVIEW_MODEL` | `@cf/google/gemma-3-12b-it` | Cheap model for overview summaries (via Mastra + Workers AI) |
+| `SAM_OVERVIEW_MODEL` | `@cf/google/gemma-4-26b-a4b-it` | Cheap model for overview summaries (via Mastra + Workers AI) |
 | `SAM_RATE_LIMIT_RPM` | `30` | Max messages per minute per user |
 | `SAM_MAX_CONVERSATIONS` | `100` | Max stored conversations per user |
 | `SAM_MAX_MESSAGES_PER_CONVERSATION` | `500` | Max messages before truncation |

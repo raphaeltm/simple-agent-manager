@@ -3,7 +3,7 @@
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
-export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-3-12b-it';
+export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
 export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
@@ -29,7 +29,7 @@ export const DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS = 4000;
 // =============================================================================
 
 /** Default Workers AI model for session summarization. Override via CONTEXT_SUMMARY_MODEL env var. */
-export const DEFAULT_CONTEXT_SUMMARY_MODEL = '@cf/google/gemma-3-12b-it';
+export const DEFAULT_CONTEXT_SUMMARY_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Default max summary output length in characters. Override via CONTEXT_SUMMARY_MAX_LENGTH env var. */
 export const DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH = 4000;
@@ -72,7 +72,7 @@ export const DEFAULT_TTS_SPEAKER = 'luna';
 export const DEFAULT_TTS_ENCODING = 'mp3';
 
 /** Default Workers AI model for cleaning markdown before TTS. Override via TTS_CLEANUP_MODEL env var. */
-export const DEFAULT_TTS_CLEANUP_MODEL = '@cf/google/gemma-3-12b-it';
+export const DEFAULT_TTS_CLEANUP_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Default max text length (characters) for TTS input. Override via TTS_MAX_TEXT_LENGTH env var.
  * With chunking enabled, this is a soft limit — text beyond this is summarized rather than read verbatim. */
@@ -282,17 +282,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
-  }),
-  workersAIModel({
-    id: '@cf/google/gemma-3-12b-it',
-    label: 'Gemma 3 12B',
-    tier: 'low-cost',
-    costPer1kInputTokens: 0.00035,
-    costPer1kOutputTokens: 0.00056,
-    contextWindow: 32768,
-    toolCallSupport: 'none',
-    intendedRole: 'utility',
-    fallbackGroup: 'workers-utility',
   }),
   // --- Anthropic (via AI Gateway) ---
   anthropicModel({

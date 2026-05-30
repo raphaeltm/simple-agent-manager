@@ -107,7 +107,7 @@ For short conversations (5 or fewer messages), the messages are passed directly 
 
 | Variable                          | Default                     | Description                          |
 | --------------------------------- | --------------------------- | ------------------------------------ |
-| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-3-12b-it` | Model for context summarization      |
+| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for context summarization      |
 | `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                      | Max summary length (characters)      |
 | `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                     | Summarization timeout                |
 | `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                        | Max messages to include              |

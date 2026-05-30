@@ -104,7 +104,7 @@ SAM-managed AI uses the existing `CF_API_TOKEN` secret for Cloudflare AI Gateway
 
 | Variable                             | Description                                                                | Default                     |
 | ------------------------------------ | -------------------------------------------------------------------------- | --------------------------- |
-| `TASK_TITLE_MODEL`                   | Workers AI model for task title generation                                 | `@cf/google/gemma-3-12b-it` |
+| `TASK_TITLE_MODEL`                   | Workers AI model for task title generation                                 | `@cf/google/gemma-4-26b-a4b-it` |
 | `TASK_TITLE_MAX_LENGTH`              | Max characters in a generated title                                        | `100`                       |
 | `TASK_TITLE_TIMEOUT_MS`              | Timeout (ms) for AI title generation before falling back to truncation     | `5000`                      |
 | `TASK_TITLE_GENERATION_ENABLED`      | Set to `false` to disable AI generation entirely                           | `true`                      |

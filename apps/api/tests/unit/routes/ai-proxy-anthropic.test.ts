@@ -144,6 +144,6 @@ describe('Anthropic model validation', () => {
   it('rejects non-Anthropic models', () => {
     expect(isAnthropicModel('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(false);
     expect(isAnthropicModel('gpt-4')).toBe(false);
-    expect(isAnthropicModel('gemma-3-12b-it')).toBe(false);
+    expect(isAnthropicModel('gemma-4-26b-a4b-it')).toBe(false);
   });
 });

@@ -69,7 +69,7 @@ When an agent finishes its work:
 SAM automatically generates concise titles for ideas using Workers AI:
 
 - Messages **at or below 100 characters** are used as the title directly (no AI needed)
-- Longer messages are summarized by a Workers AI model (default: `@cf/google/gemma-3-12b-it`)
+- Longer messages are summarized by a Workers AI model (default: `@cf/google/gemma-4-26b-a4b-it`)
 - If AI generation fails or times out, the message is truncated to 100 characters as a fallback
 - Generation uses exponential backoff with up to 2 retries
 
@@ -77,7 +77,7 @@ Configure via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASK_TITLE_MODEL` | `@cf/google/gemma-3-12b-it` | Workers AI model for title generation |
+| `TASK_TITLE_MODEL` | `@cf/google/gemma-4-26b-a4b-it` | Workers AI model for title generation |
 | `TASK_TITLE_GENERATION_ENABLED` | `true` | Set `false` to always use truncation |
 | `TASK_TITLE_TIMEOUT_MS` | `5000` | Per-attempt timeout |
 | `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100` | Messages at or below this length bypass AI |

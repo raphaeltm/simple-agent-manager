@@ -19,13 +19,13 @@ Cloudflare is deprecating older Workers AI models on May 30, 2026, including `@c
 
 ## Implementation Checklist
 
-- [ ] Replace deprecated utility defaults with a current Workers AI model.
-- [ ] Remove deprecated Gemma 3 12B from the platform AI model catalog and default allowed model list.
-- [ ] Update `.env.example` and user-facing docs to reflect the replacement default.
-- [ ] Update tests and Playwright fixtures that expect Gemma 3 12B in active catalogs/defaults.
-- [ ] Leave historical specs, archived tasks, and blog posts unchanged unless they are presented as current configuration.
-- [ ] Run targeted tests for shared model catalog, API utility defaults, and affected web/admin fixtures.
-- [ ] Run broader validation required by `/do`.
+- [x] Replace deprecated utility defaults with a current Workers AI model.
+- [x] Remove deprecated Gemma 3 12B from the platform AI model catalog and default allowed model list.
+- [x] Update `.env.example` and user-facing docs to reflect the replacement default.
+- [x] Update tests and Playwright fixtures that expect Gemma 3 12B in active catalogs/defaults.
+- [x] Leave historical specs, archived tasks, and blog posts unchanged unless they are presented as current configuration.
+- [x] Run targeted tests for shared model catalog, API utility defaults, and affected web/admin fixtures.
+- [x] Run broader validation required by `/do`.
 
 ## Acceptance Criteria
 

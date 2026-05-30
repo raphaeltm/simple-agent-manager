@@ -35,7 +35,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     models: [
       { id: '@cf/meta/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.00027, costPer1kOutputTokens: 0.00085, isDefault: true, available: true },
       { id: '@cf/qwen/qwen3-30b-a3b-fp8', label: 'Qwen3 30B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.000051, costPer1kOutputTokens: 0.000335, available: true },
-      { id: '@cf/google/gemma-3-12b-it', label: 'Gemma 3 12B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.00035, costPer1kOutputTokens: 0.00056, available: true },
+      { id: '@cf/google/gemma-4-26b-a4b-it', label: 'Gemma 4 26B', provider: 'workers-ai', tier: 'low-cost', costPer1kInputTokens: 0.0001, costPer1kOutputTokens: 0.0003, available: true },
       { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', tier: 'standard', costPer1kInputTokens: 0.001, costPer1kOutputTokens: 0.005, available: false },
       { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', tier: 'standard', costPer1kInputTokens: 0.003, costPer1kOutputTokens: 0.015, available: false },
       { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', provider: 'openai', tier: 'standard', costPer1kInputTokens: 0.0004, costPer1kOutputTokens: 0.0016, available: false },

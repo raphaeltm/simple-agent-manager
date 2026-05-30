@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_AI_PROXY_ALLOWED_MODELS,
+  DEFAULT_CONTEXT_SUMMARY_MODEL,
   DEFAULT_SANDBOX_MODEL,
+  DEFAULT_TASK_TITLE_MODEL,
+  DEFAULT_TTS_CLEANUP_MODEL,
   filterModelsForAgentLoop,
   type ModelAllowedScope,
   PLATFORM_AI_MODELS,
@@ -26,6 +30,40 @@ describe('AI Model Registry', () => {
     it('has unique model IDs', () => {
       const ids = PLATFORM_AI_MODELS.map((m) => m.id);
       expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('does not expose Cloudflare models deprecated on May 30 2026', () => {
+      const deprecatedModels = [
+        '@cf/moonshotai/kimi-k2.5',
+        '@hf/meta-llama/meta-llama-3-8b-instruct',
+        '@cf/meta/llama-3-8b-instruct',
+        '@cf/meta/llama-3-8b-instruct-awq',
+        '@cf/meta/llama-3.1-8b-instruct',
+        '@cf/meta/llama-3.1-8b-instruct-awq',
+        '@cf/meta/llama-3.1-70b-instruct',
+        '@cf/meta/llama-2-7b-chat-int8',
+        '@cf/meta/llama-2-7b-chat-fp16',
+        '@cf/mistral/mistral-7b-instruct-v0.1',
+        '@hf/google/gemma-7b-it',
+        '@cf/google/gemma-3-12b-it',
+        '@hf/nousresearch/hermes-2-pro-mistral-7b',
+        '@cf/microsoft/phi-2',
+        '@cf/defog/sqlcoder-7b-2',
+        '@cf/unum/uform-gen2-qwen-500m',
+        '@cf/facebook/bart-large-cnn',
+        '@hf/mistral/mistral-7b-instruct-v0.2',
+      ];
+      const activeModelIds = new Set([
+        DEFAULT_TASK_TITLE_MODEL,
+        DEFAULT_CONTEXT_SUMMARY_MODEL,
+        DEFAULT_TTS_CLEANUP_MODEL,
+        ...DEFAULT_AI_PROXY_ALLOWED_MODELS.split(','),
+        ...PLATFORM_AI_MODELS.map((m) => m.id),
+      ]);
+
+      for (const deprecatedModel of deprecatedModels) {
+        expect(activeModelIds.has(deprecatedModel), deprecatedModel + ' should not be active').toBe(false);
+      }
     });
 
     it('all models have non-empty labels', () => {

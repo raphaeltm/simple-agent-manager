@@ -63,7 +63,7 @@ describe('stripMarkdown', () => {
 describe('getTaskTitleConfig', () => {
   it('returns defaults when no env vars set', () => {
     const config = getTaskTitleConfig({});
-    expect(config.model).toBe('@cf/google/gemma-3-12b-it');
+    expect(config.model).toBe('@cf/google/gemma-4-26b-a4b-it');
     expect(config.maxLength).toBe(100);
     expect(config.timeoutMs).toBe(5000);
     expect(config.enabled).toBe(true);
