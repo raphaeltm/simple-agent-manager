@@ -70,53 +70,58 @@ printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \
 
 `--session-cookie-stdin` avoids putting the cookie in shell history. `--session-cookie` is also available for local throwaway sessions. `SAM_SESSION_COOKIE` with `SAM_API_URL` is still supported for ephemeral automation, but personal access tokens are preferred.
 
-## Dispatch A Task
+## Commands
 
-The forward-looking command vocabulary is `tasks dispatch`, scoped with `--project`:
+The CLI uses a hierarchical command structure. Most commands are project-scoped and use the active project set via `sam project use`, or accept `--project <name-or-id>` to override.
 
-```bash
-sam --project 01PROJECTID tasks dispatch \
-  --agent sam \
-  --mode task \
-  --workspace lightweight \
-  --prompt "manage the development of idea 123DSFD8902"
-```
-
-This calls `POST /api/projects/:projectId/tasks/submit`. Options map to fields that the current submit API already accepts. The CLI does not invent runner or harness behavior behind this command.
-
-`--model` is reserved for the command shape Raphaël described, but the current submit API does not accept a per-dispatch model field. For this slice, model selection should flow through `--agent-profile` until the server API supports an explicit model override.
-
-Compatibility command:
+### Project Management
 
 ```bash
-sam task submit 01PROJECTID "Add a README section for the CLI"
-sam --project 01PROJECTID task submit "Add a README section for the CLI"
+sam projects                    # List all projects
+sam project use [<name-or-id>]  # Set active project (interactive picker if no arg)
+sam project                     # Show active project details
+sam status                      # Dashboard: project info + recent chats (falls back to project list if none set)
 ```
 
-## Check Task Status
+Project references accept a project name (case-insensitive), a short ULID prefix (5+ chars), or a full ULID. Full ULIDs are never required.
+
+### Chat
 
 ```bash
-sam task status 01PROJECTID 01TASKID
-sam --project 01PROJECTID task status 01TASKID
+sam chat                        # List chat sessions
+sam chat new <message>          # Start a new conversation
+sam chat <sessionId>            # View messages in a session
 ```
 
-The command reads `GET /api/projects/:projectId/tasks/:taskId` and prints status, execution step, output branch, PR URL, finalization time, and any error message.
+`sam chat new` calls `POST /api/projects/:projectId/tasks/submit` with `taskMode: "conversation"`. Options `--agent`, `--mode`, `--workspace`, and `--prompt` are supported.
 
-## Start Or Continue Chat
-
-Start a conversation-mode run:
+### Project Resources (Read-Only)
 
 ```bash
-sam --project 01PROJECTID chat "Can you inspect the failing tests?"
+sam ideas                       # List project ideas (draft tasks)
+sam library                     # List library files
+sam context                     # List project knowledge
+sam notifications               # List notifications
+sam triggers                    # List project triggers
+sam profiles                    # List agent profiles
+sam activity                    # List recent activity
 ```
 
-Send a follow-up prompt to an existing session:
+### Infrastructure
 
 ```bash
-sam --project 01PROJECTID chat --session 01SESSIONID "Try the smaller repro first"
+sam nodes                       # List nodes across all projects
 ```
 
-`sam chat` without `--session` submits through `POST /api/projects/:projectId/tasks/submit` with `taskMode: "conversation"`. `sam chat --session` calls `POST /api/projects/:projectId/sessions/:sessionId/prompt`.
+### Legacy Commands (Hidden From Help)
+
+The old command vocabulary still works for backward compatibility but is hidden from `sam --help`:
+
+```bash
+sam task submit <projectId> <message>           # → use sam chat new
+sam --project <id> tasks dispatch --prompt ...   # → use sam chat new
+sam task status <projectId> <taskId>             # still functional
+```
 
 ## Runner Preflight
 

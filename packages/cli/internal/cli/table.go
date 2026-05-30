@@ -100,14 +100,6 @@ func FormatSize(bytes int64) string {
 	}
 }
 
-// derefStr safely dereferences a string pointer, returning empty string for nil.
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 // or returns fallback if value is empty.
 func or(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {

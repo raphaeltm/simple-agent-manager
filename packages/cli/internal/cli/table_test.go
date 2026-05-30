@@ -95,12 +95,3 @@ func TestOr(t *testing.T) {
 	}
 }
 
-func TestDerefStr(t *testing.T) {
-	s := "hello"
-	if got := derefStr(&s); got != "hello" {
-		t.Errorf("derefStr(&hello) = %q", got)
-	}
-	if got := derefStr(nil); got != "" {
-		t.Errorf("derefStr(nil) = %q", got)
-	}
-}

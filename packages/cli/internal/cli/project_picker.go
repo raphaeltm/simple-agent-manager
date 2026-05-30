@@ -44,6 +44,9 @@ func PickProject(ctx context.Context, client APIClient, stdin io.Reader, stdout 
 
 	scanner := bufio.NewScanner(stdin)
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return Project{}, fmt.Errorf("reading selection: %w", err)
+		}
 		return Project{}, fmt.Errorf("no input received")
 	}
 	input := strings.TrimSpace(scanner.Text())

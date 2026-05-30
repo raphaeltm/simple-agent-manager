@@ -412,6 +412,137 @@ func TestLegacyTasksDispatchStillWorks(t *testing.T) {
 	}
 }
 
+func TestStatusFallsBackToProjectList(t *testing.T) {
+	env := tempConfigEnv(t)
+	// Auth but no active project — status should fall back to listing projects
+	cfg := CLIConfig{APIURL: "https://api.example.com", SessionCookie: "cookie=value"}
+	if _, err := SaveConfig(env, cfg); err != nil {
+		t.Fatal(err)
+	}
+	doer, _ := captureJSONRequest(t, `{"projects":[{"id":"01ABC","name":"My App","repository":"github.com/org/app","activeSessionCount":1}]}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"status"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "My App") {
+		t.Fatalf("expected project list fallback, stdout = %s", stdout.String())
+	}
+}
+
+func TestIdeasEmptyState(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	doer, _ := captureJSONRequest(t, `{"tasks":[]}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"ideas"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No ideas found") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestLibraryEmptyState(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	doer, _ := captureJSONRequest(t, `{"files":[]}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"library"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No library files found") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestContextEmptyState(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	doer, _ := captureJSONRequest(t, `{"entities":[]}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"context"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No knowledge entities found") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestNodesEmptyState(t *testing.T) {
+	doer, _ := captureJSONRequest(t, `{"nodes":[]}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"nodes"}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No nodes found") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestPickerInvalidNumber(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "", "")
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"projects":[{"id":"01ABC","name":"Only"}]}`, http.StatusOK), nil
+	})
+	runtime, _, stderr := testRuntime(t, []string{"project", "use"}, doer, env.values)
+	runtime.Stdin = bytes.NewBufferString("99\n")
+
+	code := Run(context.Background(), runtime)
+	if code != 1 {
+		t.Fatalf("expected failure, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "invalid selection") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestPickerNonNumericInput(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "", "")
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"projects":[{"id":"01ABC","name":"Only"}]}`, http.StatusOK), nil
+	})
+	runtime, _, stderr := testRuntime(t, []string{"project", "use"}, doer, env.values)
+	runtime.Stdin = bytes.NewBufferString("abc\n")
+
+	code := Run(context.Background(), runtime)
+	if code != 1 {
+		t.Fatalf("expected failure, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "invalid selection") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestPickerEmptyInput(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "", "")
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"projects":[{"id":"01ABC","name":"Only"}]}`, http.StatusOK), nil
+	})
+	runtime, _, stderr := testRuntime(t, []string{"project", "use"}, doer, env.values)
+	runtime.Stdin = bytes.NewBufferString("\n")
+
+	code := Run(context.Background(), runtime)
+	if code != 1 {
+		t.Fatalf("expected failure, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "no selection made") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
 func TestUnknownCommandShowsHint(t *testing.T) {
 	runtime, _, stderr := testRuntime(t, []string{"foobar"}, nil, nil)
 	code := Run(context.Background(), runtime)

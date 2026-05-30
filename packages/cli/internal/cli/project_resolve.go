@@ -58,7 +58,13 @@ func isULID(s string) bool {
 }
 
 func isULIDPrefix(s string) bool {
-	if len(s) < minPrefixLen {
+	if len(s) < minPrefixLen || len(s) >= 26 {
+		return false
+	}
+	// ULIDs start with a timestamp digit (0-9), not a letter.
+	// This prevents uppercase project names like "MYAPP" from being
+	// misrouted through prefix matching.
+	if s[0] < '0' || s[0] > '9' {
 		return false
 	}
 	for _, c := range s {

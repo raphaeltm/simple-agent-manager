@@ -139,13 +139,33 @@ func TestIsULIDPrefix(t *testing.T) {
 	}{
 		{"01ABC", true},
 		{"01ABCDEF", true},
-		{"01AB", false},   // too short (< 5)
-		{"hello", false},  // lowercase
+		{"01AB", false},    // too short (< 5)
+		{"hello", false},   // lowercase
 		{"01ab!", false},   // invalid char
+		{"MYAPP", false},   // uppercase name, but starts with letter not digit
+		{"DEMO1", false},   // starts with letter
+		{"01ABCDEFGHIJKLMNOPQRSTUVWX", false}, // full ULID length (26 chars)
 	}
 	for _, tt := range tests {
 		if got := isULIDPrefix(tt.input); got != tt.want {
 			t.Errorf("isULIDPrefix(%q) = %v, want %v", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestResolveProjectUppercaseNameNotMistaken(t *testing.T) {
+	// A project named "MYAPP" (all uppercase, looks like base32) should resolve by name
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"projects":[{"id":"01ABCDEFGHIJKLMNOPQRSTUVWX","name":"MYAPP"}]}`, http.StatusOK), nil
+	})
+	runtime, _, _ := testRuntime(t, nil, doer, nil)
+	client, _, _ := authenticatedClientWithConfig(context.Background(), runtime)
+
+	id, name, err := ResolveProject(context.Background(), client, "MYAPP", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "01ABCDEFGHIJKLMNOPQRSTUVWX" || name != "MYAPP" {
+		t.Fatalf("expected name match, got id=%s name=%s", id, name)
 	}
 }
