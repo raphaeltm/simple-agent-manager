@@ -37,6 +37,7 @@ import {
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
+import { handleGitHubEventForTriggers } from '../services/github-trigger-handler';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -319,6 +320,32 @@ githubRoutes.post('/webhook', async (c) => {
         .update(schema.projects)
         .set({ status: 'detached', updatedAt: now })
         .where(eq(schema.projects.githubRepoId, repoId));
+    }
+  }
+
+  // Route supported events to GitHub trigger matching (best-effort, non-blocking)
+  const deliveryId = c.req.header('x-github-delivery');
+  if (event && deliveryId) {
+    try {
+      const triggerResult = await handleGitHubEventForTriggers(c.env, {
+        deliveryId,
+        eventType: event,
+        payload: data,
+      });
+      if (triggerResult.matchedTriggers > 0) {
+        log.info('github.webhook.triggers_matched', {
+          deliveryId,
+          eventType: event,
+          matchedTriggers: triggerResult.matchedTriggers,
+        });
+      }
+    } catch (err) {
+      // Trigger matching is best-effort — don't fail the webhook response
+      log.error('github.webhook.trigger_handler_error', {
+        deliveryId,
+        eventType: event,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

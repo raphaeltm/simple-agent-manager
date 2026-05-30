@@ -318,8 +318,14 @@ export type {
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
+  GitHubTriggerFilters,
+  GitHubTriggerConfig,
+  GitHubTriggerEventType,
+  CreateGitHubTriggerRequest,
+  GitHubTemplateContext,
 } from './trigger';
 export {
+  GITHUB_TRIGGER_EVENT_TYPES,
   TRIGGER_EXECUTION_STATUSES,
   TRIGGER_SKIP_REASONS,
   TRIGGER_SOURCE_TYPES,

@@ -105,28 +105,33 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     throw errors.badRequest(`promptTemplate must be ${maxTemplateLength} characters or less`);
   }
 
-  // Only cron sourceType is supported in Phase 0
-  if (body.sourceType !== 'cron') {
-    throw errors.badRequest('Only cron sourceType is supported currently');
-  }
+  // Source-type-specific validation
+  if (body.sourceType === 'cron') {
+    // Validate cron expression (required for cron triggers)
+    if (!body.cronExpression) {
+      throw errors.badRequest('cronExpression is required for cron triggers');
+    }
 
-  // Validate cron expression (required for cron triggers)
-  if (!body.cronExpression) {
-    throw errors.badRequest('cronExpression is required for cron triggers');
-  }
+    const minInterval = parsePositiveInt(c.env.CRON_MIN_INTERVAL_MINUTES, DEFAULT_CRON_MIN_INTERVAL_MINUTES);
+    const cronValidation = validateCronExpression(body.cronExpression, minInterval);
+    if (!cronValidation.valid) {
+      throw errors.badRequest(`Invalid cron expression: ${cronValidation.error}`);
+    }
 
-  const minInterval = parsePositiveInt(c.env.CRON_MIN_INTERVAL_MINUTES, DEFAULT_CRON_MIN_INTERVAL_MINUTES);
-  const cronValidation = validateCronExpression(body.cronExpression, minInterval);
-  if (!cronValidation.valid) {
-    throw errors.badRequest(`Invalid cron expression: ${cronValidation.error}`);
-  }
-
-  // Validate timezone
-  const timezone = body.cronTimezone ?? 'UTC';
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone: timezone });
-  } catch {
-    throw errors.badRequest(`Invalid timezone: ${timezone}`);
+    // Validate timezone
+    const timezone = body.cronTimezone ?? 'UTC';
+    try {
+      Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    } catch {
+      throw errors.badRequest(`Invalid timezone: ${timezone}`);
+    }
+  } else if (body.sourceType === 'github') {
+    // GitHub triggers require githubConfig
+    if (!body.githubConfig?.eventType) {
+      throw errors.badRequest('githubConfig.eventType is required for github triggers');
+    }
+  } else {
+    throw errors.badRequest('Only cron and github sourceType are supported currently');
   }
 
   // Validate agent profile if specified
@@ -178,8 +183,10 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
   }
 
-  // Compute initial nextFireAt
-  const nextFireAt = cronToNextFire(body.cronExpression, timezone);
+  // Compute initial nextFireAt (only for cron)
+  const nextFireAt = body.sourceType === 'cron' && body.cronExpression
+    ? cronToNextFire(body.cronExpression, body.cronTimezone ?? 'UTC')
+    : null;
 
   const id = ulid();
   const now = new Date().toISOString();
@@ -192,8 +199,8 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     description: body.description?.trim() ?? null,
     status: 'active',
     sourceType: body.sourceType,
-    cronExpression: body.cronExpression,
-    cronTimezone: timezone,
+    cronExpression: body.sourceType === 'cron' ? body.cronExpression! : null,
+    cronTimezone: body.sourceType === 'cron' ? (body.cronTimezone ?? 'UTC') : null,
     skipIfRunning: body.skipIfRunning ?? true,
     promptTemplate,
     agentProfileId: body.agentProfileId ?? null,
@@ -205,15 +212,43 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     updatedAt: now,
   });
 
+  // Create GitHub-specific config if needed
+  if (body.sourceType === 'github' && body.githubConfig) {
+    await db.insert(schema.githubTriggerConfigs).values({
+      id: ulid(),
+      triggerId: id,
+      eventType: body.githubConfig.eventType,
+      filtersJson: JSON.stringify(body.githubConfig.filters ?? {}),
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
   const [created] = await db
     .select()
     .from(schema.triggers)
     .where(eq(schema.triggers.id, id))
     .limit(1);
 
-  log.info('trigger.created', { triggerId: id, projectId, name, cronExpression: body.cronExpression });
+  // Fetch GitHub config if applicable
+  let githubConfig: { eventType: string; filters: Record<string, unknown> } | undefined;
+  if (body.sourceType === 'github') {
+    const [config] = await db
+      .select()
+      .from(schema.githubTriggerConfigs)
+      .where(eq(schema.githubTriggerConfigs.triggerId, id))
+      .limit(1);
+    if (config) {
+      githubConfig = {
+        eventType: config.eventType,
+        filters: JSON.parse(config.filtersJson) as Record<string, unknown>,
+      };
+    }
+  }
 
-  return c.json(toTriggerResponse(created!), 201);
+  log.info('trigger.created', { triggerId: id, projectId, name, sourceType: body.sourceType });
+
+  return c.json({ ...toTriggerResponse(created!), githubConfig }, 201);
 });
 
 // =============================================================================
@@ -302,6 +337,22 @@ crudRoutes.get('/:triggerId', async (c) => {
     throw errors.notFound('Trigger');
   }
 
+  // Fetch GitHub config if applicable
+  let githubConfig: { eventType: string; filters: Record<string, unknown> } | undefined;
+  if (trigger.sourceType === 'github') {
+    const [config] = await db
+      .select()
+      .from(schema.githubTriggerConfigs)
+      .where(eq(schema.githubTriggerConfigs.triggerId, triggerId))
+      .limit(1);
+    if (config) {
+      githubConfig = {
+        eventType: config.eventType,
+        filters: JSON.parse(config.filtersJson) as Record<string, unknown>,
+      };
+    }
+  }
+
   // Get last 5 executions
   const recentExecutions = await db
     .select()
@@ -312,6 +363,7 @@ crudRoutes.get('/:triggerId', async (c) => {
 
   return c.json({
     ...toTriggerResponse(trigger),
+    githubConfig,
     recentExecutions: recentExecutions.map((e) => ({
       id: e.id,
       triggerId: e.triggerId,
@@ -508,7 +560,8 @@ crudRoutes.delete('/:triggerId', async (c) => {
     throw errors.notFound('Trigger');
   }
 
-  // Cascade delete executions first, then trigger
+  // Cascade delete: github configs, executions, then trigger
+  await db.delete(schema.githubTriggerConfigs).where(eq(schema.githubTriggerConfigs.triggerId, triggerId));
   await db.delete(schema.triggerExecutions).where(eq(schema.triggerExecutions.triggerId, triggerId));
   await db.delete(schema.triggers).where(eq(schema.triggers.id, triggerId));
 

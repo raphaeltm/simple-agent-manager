@@ -1344,6 +1344,62 @@ export type TriggerExecutionRow = typeof triggerExecutions.$inferSelect;
 export type NewTriggerExecutionRow = typeof triggerExecutions.$inferInsert;
 
 // =============================================================================
+// GitHub Trigger Configs (source-specific config for GitHub event triggers)
+// =============================================================================
+export const githubTriggerConfigs = sqliteTable(
+  'github_trigger_configs',
+  {
+    id: text('id').primaryKey(),
+    triggerId: text('trigger_id')
+      .notNull()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    filtersJson: text('filters_json').notNull().default('{}'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    triggerIdUnique: uniqueIndex('idx_github_trigger_configs_trigger_id').on(table.triggerId),
+    eventTypeIdx: index('idx_github_trigger_configs_event_type').on(table.eventType),
+  })
+);
+
+export type GitHubTriggerConfigRow = typeof githubTriggerConfigs.$inferSelect;
+export type NewGitHubTriggerConfigRow = typeof githubTriggerConfigs.$inferInsert;
+
+// =============================================================================
+// GitHub Webhook Deliveries (dedup and audit trail)
+// =============================================================================
+export const githubWebhookDeliveries = sqliteTable(
+  'github_webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    eventType: text('event_type').notNull(),
+    action: text('action'),
+    installationId: text('installation_id'),
+    repositoryFullName: text('repository_full_name'),
+    senderLogin: text('sender_login'),
+    matchedTriggerId: text('matched_trigger_id'),
+    decision: text('decision').notNull(),
+    decisionReason: text('decision_reason'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    createdIdx: index('idx_github_webhook_deliveries_created').on(table.createdAt),
+    installationIdx: index('idx_github_webhook_deliveries_installation').on(table.installationId),
+  })
+);
+
+export type GitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferSelect;
+export type NewGitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferInsert;
+
+// =============================================================================
 // Platform Credentials (admin-managed fallback keys)
 //
 // Unlike user `credentials`, these are shared across all users and managed by

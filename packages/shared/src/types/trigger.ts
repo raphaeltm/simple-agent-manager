@@ -28,7 +28,7 @@ export const TRIGGER_SKIP_REASONS = [
 export type TriggerSkipReason = (typeof TRIGGER_SKIP_REASONS)[number];
 
 /** Sources that can create a task. */
-export const TRIGGERED_BY_VALUES = ['user', 'cron', 'webhook', 'mcp'] as const;
+export const TRIGGERED_BY_VALUES = ['user', 'cron', 'webhook', 'github', 'mcp'] as const;
 export type TriggeredBy = (typeof TRIGGERED_BY_VALUES)[number];
 
 // =============================================================================
@@ -113,6 +113,11 @@ export interface UpdateTriggerRequest {
 export interface TriggerResponse extends Trigger {
   /** Human-readable description of the cron schedule (e.g., "Every weekday at 9:00 AM UTC"). */
   cronHumanReadable?: string;
+  /** GitHub trigger configuration, present when sourceType is 'github'. */
+  githubConfig?: {
+    eventType: GitHubTriggerEventType;
+    filters: GitHubTriggerFilters;
+  };
 }
 
 export interface TriggerExecutionResponse extends TriggerExecution {
@@ -168,6 +173,96 @@ export interface CronTemplateContext {
     /** Execution ID. */
     id: string;
     /** Sequence number for this trigger. */
+    sequenceNumber: string;
+  };
+}
+
+// =============================================================================
+// GitHub Trigger Configuration
+// =============================================================================
+
+/** GitHub event types supported by triggers. */
+export const GITHUB_TRIGGER_EVENT_TYPES = [
+  'issues',
+  'issue_comment',
+  'pull_request',
+  'push',
+] as const;
+export type GitHubTriggerEventType = (typeof GITHUB_TRIGGER_EVENT_TYPES)[number];
+
+/** Deterministic filter configuration for GitHub event triggers. */
+export interface GitHubTriggerFilters {
+  /** GitHub event actions to match (e.g., ['opened', 'labeled'] for issues). Empty = match all actions. */
+  actions?: string[];
+  /** Required labels — event must have ALL of these labels. */
+  labels?: string[];
+  /** Actors to ignore (bot usernames like 'dependabot[bot]'). */
+  ignoreActors?: string[];
+  /** Comment must start with this command prefix (e.g., '/sam' or '@sam'). For issue_comment events. */
+  commandPrefix?: string;
+  /** Title/body/comment must contain this substring (case-insensitive). */
+  bodyContains?: string;
+  /** Branch filter — for push/PR events, only match these branches. */
+  branches?: string[];
+  /** Ignore draft PRs. Default true for pull_request events. */
+  ignoreDrafts?: boolean;
+}
+
+/** Configuration for a GitHub event trigger (stored in github_trigger_configs table). */
+export interface GitHubTriggerConfig {
+  id: string;
+  triggerId: string;
+  eventType: GitHubTriggerEventType;
+  filters: GitHubTriggerFilters;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** API request shape for creating a GitHub trigger. */
+export interface CreateGitHubTriggerRequest extends Omit<CreateTriggerRequest, 'cronExpression' | 'cronTimezone'> {
+  sourceType: 'github';
+  githubEventType: GitHubTriggerEventType;
+  githubFilters?: GitHubTriggerFilters;
+}
+
+/** Context variables available for GitHub trigger template interpolation. */
+export interface GitHubTemplateContext {
+  github: {
+    /** The event type (e.g., 'issues', 'issue_comment'). */
+    event: string;
+    /** The event action (e.g., 'opened', 'labeled'). */
+    action: string;
+    /** The actor login who triggered the event. */
+    actor: string;
+    /** The repository full name (e.g., 'owner/repo'). */
+    repository: string;
+    /** The issue or PR number, if applicable. */
+    number: string;
+    /** The issue or PR title, if applicable. */
+    title: string;
+    /** The issue or PR body, if applicable. */
+    body: string;
+    /** The comment body, for issue_comment events. */
+    comment: string;
+    /** Comma-separated label names. */
+    labels: string;
+    /** The branch name (for push/PR events). */
+    branch: string;
+    /** The commit SHA (for push events). */
+    sha: string;
+  };
+  trigger: {
+    id: string;
+    name: string;
+    description: string;
+    fireCount: string;
+  };
+  project: {
+    id: string;
+    name: string;
+  };
+  execution: {
+    id: string;
     sequenceNumber: string;
   };
 }
