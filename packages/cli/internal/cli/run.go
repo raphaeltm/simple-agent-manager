@@ -61,9 +61,6 @@ func runAuthLogin(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	apiURL := resolveLoginAPIURL(runtime, parsed)
 	token := flagValue(parsed.Flags, "token")
 	if token != "" {
-		if apiURL == "" {
-			return fail(runtime.Stderr, errors.New("--api-url is required with --token"))
-		}
 		return runTokenLogin(ctx, runtime, parsed, apiURL, token)
 	}
 
@@ -72,17 +69,13 @@ func runAuthLogin(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 		return fail(runtime.Stderr, err)
 	}
 	if cookie != "" {
-		if apiURL == "" {
-			return fail(runtime.Stderr, errors.New("--api-url is required with a session cookie"))
-		}
 		return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), cookie, AuthUser{})
 	}
 
-	if apiURL == "" {
-		return fail(runtime.Stderr, errors.New("--api-url is required for interactive login"))
-	}
 	return runDeviceFlow(ctx, runtime, parsed, apiURL)
 }
+
+const defaultAPIURL = "https://api.simple-agent-manager.org"
 
 func resolveLoginAPIURL(runtime Runtime, parsed parsedArgs) string {
 	if apiURL := flagValue(parsed.Flags, "api-url"); apiURL != "" {
@@ -92,7 +85,10 @@ func resolveLoginAPIURL(runtime Runtime, parsed parsedArgs) string {
 	if err == nil && config != nil {
 		return config.APIURL
 	}
-	return strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL"))
+	if envURL := strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL")); envURL != "" {
+		return envURL
+	}
+	return defaultAPIURL
 }
 
 func runTokenLogin(ctx context.Context, runtime Runtime, parsed parsedArgs, apiURL string, token string) int {
@@ -449,10 +445,13 @@ func resolveAuthenticatedConfig(ctx context.Context, runtime Runtime) (*CLIConfi
 	if config != nil {
 		return config, "config-or-session-env", nil
 	}
-	apiURL := strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL"))
 	token := strings.TrimSpace(runtime.Env.Getenv("SAM_API_TOKEN"))
-	if apiURL == "" || token == "" {
+	if token == "" {
 		return nil, "", nil
+	}
+	apiURL := strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL"))
+	if apiURL == "" {
+		apiURL = defaultAPIURL
 	}
 	response, err := ExchangeAPIToken(ctx, runtime.HTTPClient, apiURL, token)
 	if err != nil {
@@ -481,9 +480,9 @@ func helpText() string {
 	return `SAM CLI
 
 Usage:
-  sam auth login --api-url <url>
-  sam auth login --api-url <url> --token <personal-access-token>
-  sam auth login --api-url <url> --session-cookie-stdin
+  sam auth login [--api-url <url>]
+  sam auth login [--api-url <url>] --token <personal-access-token>
+  sam auth login [--api-url <url>] --session-cookie-stdin
   sam auth status
   sam --project <projectId> tasks dispatch --prompt <prompt>
   sam --project <projectId> task submit <prompt>

@@ -270,15 +270,17 @@ func TestAuthLoginTokenExchangesPATAndSavesConfig(t *testing.T) {
 	}
 }
 
-func TestAuthLoginTokenRequiresAPIURL(t *testing.T) {
-	runtime, _, stderr := testRuntime(t, []string{"auth", "login", "--token", "sam_pat_secret"}, nil, map[string]string{})
+func TestAuthLoginTokenUsesDefaultAPIURLWhenNotSpecified(t *testing.T) {
+	env := tempConfigEnv(t)
+	doer, captured := captureJSONRequest(t, `{"success":true,"sessionCookie":"better-auth.session_token=from-pat","user":{"email":"dev@example.com"}}`, http.StatusOK)
+	runtime, _, stderr := testRuntime(t, []string{"auth", "login", "--token", "sam_pat_secret"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
-	if code == 0 {
-		t.Fatal("expected failure")
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "--api-url is required with --token") {
-		t.Fatalf("stderr = %s", stderr.String())
+	if captured.URL != defaultAPIURL+"/api/auth/token-login" {
+		t.Fatalf("expected default API URL, got: %s", captured.URL)
 	}
 }
 
@@ -305,6 +307,31 @@ func TestAuthenticatedClientFromEnvToken(t *testing.T) {
 	}
 	if len(requests) != 2 || requests[0] != "https://api.example.com/api/auth/token-login" {
 		t.Fatalf("requests = %#v", requests)
+	}
+}
+
+func TestDeviceFlowUsesDefaultAPIURLWhenNotSpecified(t *testing.T) {
+	env := tempConfigEnv(t)
+	var requests []string
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req.URL.String())
+		switch req.URL.Path {
+		case "/api/auth/device/code":
+			return jsonResponse(`{"deviceCode":"device-1","userCode":"ABCD-1234","verificationUriComplete":"https://app.example.com/device?code=ABCD-1234","expiresIn":30,"interval":1}`, http.StatusOK), nil
+		case "/api/auth/device/token":
+			return jsonResponse(`{"success":true,"sessionCookie":"better-auth.session_token=device-cookie","user":{"email":"device@example.com"}}`, http.StatusOK), nil
+		default:
+			return jsonResponse(`{"error":"not_found","message":"not found"}`, http.StatusNotFound), nil
+		}
+	})
+	runtime, _, stderr := testRuntime(t, []string{"auth", "login"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if len(requests) < 1 || requests[0] != defaultAPIURL+"/api/auth/device/code" {
+		t.Fatalf("expected default API URL, got requests: %#v", requests)
 	}
 }
 
