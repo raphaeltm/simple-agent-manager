@@ -1,5 +1,6 @@
 import { Download, Eye, MoreVertical, Tag, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { deleteLibraryFile, downloadLibraryFile } from '../../lib/api';
 import { isPreviewableMime } from '../../lib/file-utils';
@@ -22,11 +23,16 @@ export function FileActionsMenu({
 }: FileActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = menuRef.current?.contains(target);
+      const insidePortal = portalRef.current?.contains(target);
+      if (!insideTrigger && !insidePortal) {
         setOpen(false);
       }
     };
@@ -53,6 +59,7 @@ export function FileActionsMenu({
   return (
     <div ref={menuRef} className="relative">
       <button
+        ref={triggerRef}
         onClick={() => setOpen(!open)}
         className={`p-1.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded ${FOCUS_RING}`}
         aria-label={`Actions for ${file.filename}`}
@@ -61,8 +68,19 @@ export function FileActionsMenu({
       >
         <MoreVertical size={16} />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-lg py-1">
+      {open && createPortal(
+        <div
+          ref={portalRef}
+          className="min-w-[160px] rounded-lg glass-surface shadow-lg py-1"
+          style={{
+            position: 'fixed',
+            zIndex: 20,
+            ...(triggerRef.current ? (() => {
+              const r = triggerRef.current!.getBoundingClientRect();
+              return { top: r.bottom + 4, right: window.innerWidth - r.right };
+            })() : {}),
+          }}
+        >
           {onPreview && isPreviewableMime(file.mimeType) && (
             <button
               type="button"
@@ -96,7 +114,8 @@ export function FileActionsMenu({
           >
             <Trash2 size={14} /> Delete
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

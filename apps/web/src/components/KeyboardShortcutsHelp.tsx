@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
 import { formatShortcut,getShortcutsByCategory } from '../lib/keyboard-shortcuts';
@@ -36,7 +37,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
 
   const grouped = getShortcutsByCategory();
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -99,6 +100,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
           })}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

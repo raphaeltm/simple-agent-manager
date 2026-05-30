@@ -17,6 +17,7 @@ import {
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useToast } from '../../hooks/useToast';
 import { createTrigger, listAgentProfiles, updateTrigger } from '../../lib/api';
@@ -205,7 +206,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
     isEdit, editTrigger, projectId, toast, onSaved, onClose,
   ]);
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       {open && (
@@ -449,6 +450,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
           </Button>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 };

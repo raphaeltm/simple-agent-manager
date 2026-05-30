@@ -1,6 +1,7 @@
 import { LIBRARY_DIRECTORY_SEGMENT_PATTERN } from '@simple-agent-manager/shared';
 import type { FC } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { FOCUS_RING } from './types';
 
@@ -64,7 +65,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
       ? '…' + currentDirectory.slice(-38)
       : currentDirectory;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       role="dialog"
@@ -124,6 +125,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

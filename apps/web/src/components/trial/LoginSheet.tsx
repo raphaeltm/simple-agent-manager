@@ -18,6 +18,7 @@
  * - `prefers-reduced-motion` disables the slide-up animation
  */
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { authClient } from '../../lib/auth';
@@ -117,7 +118,7 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
     : // Centered modal on desktop.
       'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-2xl px-6 py-6 w-full max-w-md';
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-dialog-backdrop"
       role="dialog"
@@ -195,6 +196,7 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
           Continue with GitHub
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

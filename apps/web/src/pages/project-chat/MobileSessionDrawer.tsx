@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
@@ -82,7 +83,7 @@ export function MobileSessionDrawer({
   // Prevent body scroll — always active while this drawer is mounted
   useScrollLock(true);
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -200,6 +201,7 @@ export function MobileSessionDrawer({
           )}
         </nav>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

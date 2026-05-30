@@ -1,6 +1,7 @@
 import type { Repository } from '@simple-agent-manager/shared';
 import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { listRepositories } from '../lib/api';
 
@@ -36,6 +37,7 @@ export function RepoSelector({
   const [lastCheckedRepo, setLastCheckedRepo] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch GitHub repositories when installationId changes
@@ -199,7 +201,7 @@ export function RepoSelector({
   };
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <div className="flex items-center">
         <Input
           ref={inputRef}
@@ -220,16 +222,17 @@ export function RepoSelector({
       </div>
 
       {/* Dropdown with repository suggestions */}
-      {showDropdown && filteredRepos.length > 0 && (
+      {showDropdown && filteredRepos.length > 0 && createPortal(
         <div
           ref={dropdownRef}
+          className="glass-surface"
           style={{
-            position: 'absolute',
+            position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            width: '100%',
-            marginTop: '4px',
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            border: '1px solid var(--sam-color-border-default)',
+            ...(containerRef.current ? (() => {
+              const r = containerRef.current!.getBoundingClientRect();
+              return { top: r.bottom + 4, left: r.left, width: r.width };
+            })() : {}),
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             maxHeight: '15rem',
@@ -268,7 +271,8 @@ export function RepoSelector({
               </div>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Status messages */}

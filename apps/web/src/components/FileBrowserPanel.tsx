@@ -1,6 +1,7 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronRight, FileText, Folder, RefreshCw, X } from 'lucide-react';
 import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { type FileEntry,getFileList } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
@@ -101,7 +102,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
     flexShrink: 0,
   };
 
-  return (
+  return createPortal(
     <div style={overlayStyle}>
       {/* Header */}
       <header style={headerStyle}>
@@ -258,7 +259,8 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
         )}
       </div>
 
-    </div>
+    </div>,
+    document.body,
   );
 };
 

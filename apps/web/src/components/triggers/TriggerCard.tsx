@@ -8,8 +8,8 @@ import {
   Pause,
   Play,
 } from 'lucide-react';
-import type { FC } from 'react';
-import { useState } from 'react';
+import { type FC, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { timeAgo } from '../../lib/time-utils';
 
@@ -57,6 +57,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
   onViewHistory,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
   const disabledClass = trigger.status === 'disabled' ? 'opacity-60' : '';
 
@@ -83,6 +84,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         {/* Actions menu */}
         <div className="relative shrink-0">
           <button
+            ref={menuBtnRef}
             onClick={() => setMenuOpen(!menuOpen)}
             onBlur={() => setTimeout(() => setMenuOpen(false), 200)}
             className={`p-1.5 rounded-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
@@ -91,8 +93,18 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           >
             <MoreVertical size={16} />
           </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 w-40 glass-surface rounded-md shadow-lg z-20 py-1">
+          {menuOpen && createPortal(
+            <div
+              className="w-40 glass-surface rounded-md shadow-lg py-1"
+              style={{
+                position: 'fixed',
+                zIndex: 20,
+                ...(menuBtnRef.current ? (() => {
+                  const r = menuBtnRef.current!.getBoundingClientRect();
+                  return { top: r.bottom + 4, right: window.innerWidth - r.right };
+                })() : {}),
+              }}
+            >
               <button
                 onClick={() => { setMenuOpen(false); onEdit(trigger); }}
                 className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
@@ -118,7 +130,8 @@ export const TriggerCard: FC<TriggerCardProps> = ({
               >
                 View History
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
       </div>

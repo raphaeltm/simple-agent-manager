@@ -1,5 +1,6 @@
 import { Input, Spinner } from '@simple-agent-manager/ui';
 import { useEffect, useMemo,useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface BranchSelectorProps {
   id?: string;
@@ -30,6 +31,7 @@ export function BranchSelector({
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const filteredBranches = useMemo(() => {
     if (!value) {
@@ -137,7 +139,7 @@ export function BranchSelector({
   const inputHeight = compact ? 36 : undefined;
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <div className="flex items-center">
         <Input
           ref={inputRef}
@@ -165,16 +167,17 @@ export function BranchSelector({
         )}
       </div>
 
-      {showDropdown && filteredBranches.length > 0 && (
+      {showDropdown && filteredBranches.length > 0 && createPortal(
         <div
           ref={dropdownRef}
+          className="glass-surface"
           style={{
-            position: 'absolute',
+            position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            width: '100%',
-            marginTop: '4px',
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            border: '1px solid var(--sam-color-border-default)',
+            ...(containerRef.current ? (() => {
+              const r = containerRef.current!.getBoundingClientRect();
+              return { top: r.bottom + 4, left: r.left, width: r.width };
+            })() : {}),
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             maxHeight: compact ? '12rem' : '15rem',
@@ -233,17 +236,20 @@ export function BranchSelector({
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {showDropdown && value && filteredBranches.length === 0 && branches.length > 0 && (
+      {showDropdown && value && filteredBranches.length === 0 && branches.length > 0 && createPortal(
         <div
           ref={dropdownRef}
           style={{
-            position: 'absolute',
+            position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            width: '100%',
-            marginTop: '4px',
+            ...(containerRef.current ? (() => {
+              const r = containerRef.current!.getBoundingClientRect();
+              return { top: r.bottom + 4, left: r.left, width: r.width };
+            })() : {}),
             backgroundColor: 'var(--sam-color-bg-surface)',
             border: '1px solid var(--sam-color-border-default)',
             borderRadius: 'var(--sam-radius-md)',
@@ -254,7 +260,8 @@ export function BranchSelector({
           <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
             No matching branches
           </span>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {error && (

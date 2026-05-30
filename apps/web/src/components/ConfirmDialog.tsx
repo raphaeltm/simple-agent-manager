@@ -1,5 +1,6 @@
 import { Button } from '@simple-agent-manager/ui';
 import { type ReactNode, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../hooks/useScrollLock';
 
@@ -75,7 +76,7 @@ export function ConfirmDialog({
 
   const config = variantConfig[variant];
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-dialog-backdrop overflow-y-auto"
       aria-labelledby="modal-title"
@@ -127,6 +128,7 @@ export function ConfirmDialog({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

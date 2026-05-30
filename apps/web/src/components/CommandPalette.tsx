@@ -1,4 +1,5 @@
 import { useEffect, useMemo,useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { fileNameFromPath, fuzzyMatch, type FuzzyMatchResult } from '../lib/fuzzy-match';
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
@@ -294,7 +295,7 @@ export function CommandPalette({
   // Track the flat index for rendering
   let flatIndex = -1;
 
-  return (
+  return createPortal(
     <>
       <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop" />
 
@@ -377,7 +378,8 @@ export function CommandPalette({
           ))}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 

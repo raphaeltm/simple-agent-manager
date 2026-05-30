@@ -342,10 +342,10 @@ describe('GlobalCommandPalette', () => {
 
   it('closes on backdrop click', async () => {
     const onClose = vi.fn();
-    const { container } = renderPalette(onClose);
+    renderPalette(onClose);
 
-    // Backdrop is the first child (fixed overlay)
-    const backdrop = container.querySelector('.fixed.inset-0');
+    // Backdrop is portaled to document.body
+    const backdrop = document.querySelector('.fixed.inset-0');
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop!);
     expect(onClose).toHaveBeenCalledTimes(1);

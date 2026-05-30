@@ -2,6 +2,7 @@ import type { WorktreeInfo } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { Check, GitFork, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { BranchSelector } from './BranchSelector';
 
@@ -48,6 +49,7 @@ export function WorktreeSelector({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const active = useMemo(
     () =>
@@ -71,7 +73,10 @@ export function WorktreeSelector({
   useEffect(() => {
     if (!open || isMobile) return;
     const handler = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = popoverRef.current?.contains(target);
+      const insideContent = contentRef.current?.contains(target);
+      if (!insideTrigger && !insideContent) {
         setOpen(false);
       }
     };
@@ -147,8 +152,9 @@ export function WorktreeSelector({
         {isMobile ? <GitFork size={18} /> : `Worktree: ${activeLabel}`}
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
+          ref={contentRef}
           style={
             isMobile
               ? { position: 'fixed', inset: 0, zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number }
@@ -170,18 +176,20 @@ export function WorktreeSelector({
             />
           )}
           <div
+            className="glass-surface"
             style={{
-              position: 'absolute',
-              top: isMobile ? undefined : '100%',
-              right: isMobile ? 8 : 0,
-              left: isMobile ? 8 : undefined,
-              bottom: isMobile ? 8 : undefined,
+              position: 'fixed',
+              ...(isMobile ? {
+                right: 8,
+                left: 8,
+                bottom: 8,
+              } : (() => {
+                const r = popoverRef.current?.getBoundingClientRect();
+                return r ? { top: r.bottom + 6, right: window.innerWidth - r.right } : {};
+              })()),
               zIndex: (isMobile ? 'var(--sam-z-drawer)' : 'var(--sam-z-dropdown)') as unknown as number,
               width: isMobile ? undefined : 280,
-              marginTop: isMobile ? 0 : 6,
               borderRadius: 'var(--sam-radius-md, 10px)',
-              border: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-surface)',
               padding: 8,
               maxHeight: isMobile ? '50vh' : 320,
               overflow: 'auto',
@@ -430,7 +438,8 @@ export function WorktreeSelector({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

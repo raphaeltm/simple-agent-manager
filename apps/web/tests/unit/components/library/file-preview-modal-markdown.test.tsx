@@ -208,7 +208,7 @@ describe('FilePreviewModal — Markdown', () => {
 
   it('renders ImageViewer for image files (regression)', () => {
     const file = makeMarkdownFile({ mimeType: 'image/png', filename: 'photo.png', sizeBytes: 1024 });
-    const { container } = render(
+    render(
       <FilePreviewModal
         file={file}
         previewUrl="https://example.com/preview/photo.png"
@@ -217,8 +217,8 @@ describe('FilePreviewModal — Markdown', () => {
       />,
     );
 
-    // ImageViewer renders an img element
-    const img = container.querySelector('img');
+    // ImageViewer renders an img element (portaled to document.body)
+    const img = document.querySelector('img');
     expect(img).toBeTruthy();
     // No markdown content should be rendered
     expect(screen.queryByTestId('rendered-markdown')).not.toBeInTheDocument();
@@ -226,7 +226,7 @@ describe('FilePreviewModal — Markdown', () => {
 
   it('renders PDF iframe for PDF files (regression)', () => {
     const file = makeMarkdownFile({ mimeType: 'application/pdf', filename: 'doc.pdf', sizeBytes: 2048 });
-    const { container } = render(
+    render(
       <FilePreviewModal
         file={file}
         previewUrl="https://example.com/preview/doc.pdf"
@@ -235,8 +235,8 @@ describe('FilePreviewModal — Markdown', () => {
       />,
     );
 
-    // PDF renders an iframe
-    const iframe = container.querySelector('iframe');
+    // PDF renders an iframe (portaled to document.body)
+    const iframe = document.querySelector('iframe');
     expect(iframe).toBeTruthy();
     expect(iframe!.getAttribute('title')).toContain('doc.pdf');
     // No markdown content should be rendered
