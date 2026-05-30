@@ -342,7 +342,7 @@ describe('GlobalCommandPalette', () => {
 
   it('closes on backdrop click', async () => {
     const onClose = vi.fn();
-    const { container } = renderPalette(onClose);
+    renderPalette(onClose);
 
     // Backdrop is portaled to document.body
     const backdrop = document.querySelector('.fixed.inset-0');

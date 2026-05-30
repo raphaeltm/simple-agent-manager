@@ -208,7 +208,7 @@ describe('FilePreviewModal — Markdown', () => {
 
   it('renders ImageViewer for image files (regression)', () => {
     const file = makeMarkdownFile({ mimeType: 'image/png', filename: 'photo.png', sizeBytes: 1024 });
-    const { container } = render(
+    render(
       <FilePreviewModal
         file={file}
         previewUrl="https://example.com/preview/photo.png"
@@ -226,7 +226,7 @@ describe('FilePreviewModal — Markdown', () => {
 
   it('renders PDF iframe for PDF files (regression)', () => {
     const file = makeMarkdownFile({ mimeType: 'application/pdf', filename: 'doc.pdf', sizeBytes: 2048 });
-    const { container } = render(
+    render(
       <FilePreviewModal
         file={file}
         previewUrl="https://example.com/preview/doc.pdf"
