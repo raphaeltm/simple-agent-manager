@@ -36,7 +36,7 @@ const INPUT_CLASSES =
   `w-full min-h-11 py-2 pl-3 pr-9 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border ${FOCUS_RING}`;
 
 const DROPDOWN_CLASSES =
-  'max-h-60 overflow-y-auto rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.78)] shadow-lg backdrop-blur-xl';
+  'max-h-60 overflow-y-auto rounded-md glass-surface shadow-lg';
 
 const OPTION_CLASSES =
   'px-3 min-h-11 py-2.5 text-sm cursor-pointer text-fg-primary w-full text-left flex items-center';

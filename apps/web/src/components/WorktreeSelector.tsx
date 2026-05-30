@@ -176,6 +176,7 @@ export function WorktreeSelector({
             />
           )}
           <div
+            className="glass-surface"
             style={{
               position: 'fixed',
               ...(isMobile ? {
@@ -189,8 +190,6 @@ export function WorktreeSelector({
               zIndex: (isMobile ? 'var(--sam-z-drawer)' : 'var(--sam-z-dropdown)') as unknown as number,
               width: isMobile ? undefined : 280,
               borderRadius: 'var(--sam-radius-md, 10px)',
-              border: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-surface)',
               padding: 8,
               maxHeight: isMobile ? '50vh' : 320,
               overflow: 'auto',

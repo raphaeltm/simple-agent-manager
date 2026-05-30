@@ -225,6 +225,7 @@ export function RepoSelector({
       {showDropdown && filteredRepos.length > 0 && createPortal(
         <div
           ref={dropdownRef}
+          className="glass-surface"
           style={{
             position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
@@ -232,8 +233,6 @@ export function RepoSelector({
               const r = containerRef.current!.getBoundingClientRect();
               return { top: r.bottom + 4, left: r.left, width: r.width };
             })() : {}),
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            border: '1px solid var(--sam-color-border-default)',
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             maxHeight: '15rem',

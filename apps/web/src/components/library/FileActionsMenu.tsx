@@ -71,7 +71,7 @@ export function FileActionsMenu({
       {open && createPortal(
         <div
           ref={portalRef}
-          className="min-w-[160px] rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-lg py-1"
+          className="min-w-[160px] rounded-lg glass-surface shadow-lg py-1"
           style={{
             position: 'fixed',
             zIndex: 20,

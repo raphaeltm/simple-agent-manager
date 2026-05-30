@@ -82,7 +82,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
       {open && createPortal(
         <div
           ref={contentRef}
-          className="w-72 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-lg overflow-hidden"
+          className="w-72 rounded-lg glass-surface shadow-lg overflow-hidden"
           style={{
             position: 'fixed',
             zIndex: 50,
