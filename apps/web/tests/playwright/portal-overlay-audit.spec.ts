@@ -4,7 +4,7 @@
  *
  * Tests the 23 components converted to createPortal in the portal-ify PR.
  */
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot } from './audit-helpers';
 
@@ -276,6 +276,113 @@ async function setupApiMocks(page: Page) {
   });
 }
 
+async function expectOverlayVisibleBlurredAndInViewport(overlay: Locator) {
+  await expect(overlay).toBeVisible();
+
+  const result = await overlay.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    const backdropFilter = style.backdropFilter || style.getPropertyValue('-webkit-backdrop-filter');
+    const filter = style.filter;
+    const rect = element.getBoundingClientRect();
+
+    return {
+      backdropFilter,
+      filter,
+      rect: {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      },
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+    };
+  });
+
+  const blurSource = `${result.backdropFilter} ${result.filter}`;
+  expect(blurSource).toMatch(/blur\(/);
+  expect(blurSource).not.toMatch(/blur\(0(px|rem|em)?\)/);
+
+  expect(result.rect.width).toBeGreaterThan(0);
+  expect(result.rect.height).toBeGreaterThan(0);
+  expect(result.rect.left).toBeGreaterThanOrEqual(0);
+  expect(result.rect.top).toBeGreaterThanOrEqual(0);
+  expect(result.rect.right).toBeLessThanOrEqual(result.viewport.width + 1);
+  expect(result.rect.bottom).toBeLessThanOrEqual(result.viewport.height + 1);
+}
+
+async function expectPortaledToBody(overlay: Locator) {
+  await expect(
+    overlay.evaluate((element) => element.parentElement === document.body),
+  ).resolves.toBe(true);
+}
+
+async function expectNotInsideBlurDisabledContext(overlay: Locator) {
+  await expect(
+    overlay.evaluate((element) => {
+      for (let current = element.parentElement; current; current = current.parentElement) {
+        if (
+          current.classList.contains('glass-chrome') ||
+          current.classList.contains('glass-surface') ||
+          current.classList.contains('glass-modal')
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }),
+  ).resolves.toBe(true);
+}
+
+async function expectOverlayNearTrigger(
+  trigger: Locator,
+  overlay: Locator,
+  options: { side?: 'below' | 'above'; maxGap?: number } = {},
+) {
+  const { side = 'below', maxGap = 16 } = options;
+  const geometry = await trigger.evaluate((triggerElement, overlayElement) => {
+    const triggerRect = triggerElement.getBoundingClientRect();
+    const overlayRect = (overlayElement as Element).getBoundingClientRect();
+    const horizontalOverlap =
+      Math.min(triggerRect.right, overlayRect.right) - Math.max(triggerRect.left, overlayRect.left);
+    const triggerCenterX = triggerRect.left + triggerRect.width / 2;
+
+    return {
+      trigger: {
+        bottom: triggerRect.bottom,
+        top: triggerRect.top,
+        centerX: triggerCenterX,
+      },
+      overlay: {
+        bottom: overlayRect.bottom,
+        top: overlayRect.top,
+        left: overlayRect.left,
+        right: overlayRect.right,
+      },
+      horizontalOverlap,
+      centerInsideOverlay: triggerCenterX >= overlayRect.left && triggerCenterX <= overlayRect.right,
+    };
+  }, await overlay.elementHandle());
+
+  expect(geometry.horizontalOverlap > 0 || geometry.centerInsideOverlay).toBe(true);
+  if (side === 'below') {
+    expect(geometry.overlay.top).toBeGreaterThanOrEqual(geometry.trigger.bottom - 1);
+    expect(geometry.overlay.top - geometry.trigger.bottom).toBeLessThanOrEqual(maxGap);
+  } else {
+    expect(geometry.overlay.bottom).toBeLessThanOrEqual(geometry.trigger.top + 1);
+    expect(geometry.trigger.top - geometry.overlay.bottom).toBeLessThanOrEqual(maxGap);
+  }
+}
+
+async function expectBackdropBlurred(page: Page) {
+  const backdrop = page.locator('.glass-backdrop-dim').first();
+  await expectOverlayVisibleBlurredAndInViewport(backdrop);
+}
+
 // ---------------------------------------------------------------------------
 // Tests — Mobile (default viewport from Playwright config)
 // ---------------------------------------------------------------------------
@@ -498,6 +605,118 @@ test.describe('Portal Overlays — Desktop', () => {
       await page.waitForTimeout(400);
       await screenshot(page, 'portal-file-actions-menu-desktop');
     }
+
+    await assertNoOverflow(page);
+  });
+
+  test('shared DropdownMenu and Tooltip have blur and trigger geometry', async ({ page }) => {
+    await page.goto('/ui-standards');
+    await page.waitForTimeout(800);
+
+    const dropdownTrigger = page.locator('h3:has-text("DropdownMenu") + div button[aria-haspopup="true"]').first();
+    await expect(dropdownTrigger).toBeVisible();
+    await dropdownTrigger.click();
+
+    const menu = page.getByRole('menu').filter({ hasText: 'Duplicate' }).first();
+    await expectOverlayVisibleBlurredAndInViewport(menu);
+    await expectNotInsideBlurDisabledContext(menu);
+    await expectOverlayNearTrigger(dropdownTrigger, menu);
+    await screenshot(page, 'portal-shared-dropdown-geometry-desktop');
+
+    await page.keyboard.press('Escape');
+
+    const tooltipTrigger = page.locator('h3:has-text("Tooltip") + div button:has-text("Instant")').first();
+    await expect(tooltipTrigger).toBeVisible();
+    await tooltipTrigger.hover();
+
+    const tooltip = page.getByRole('tooltip', { name: 'Instant tooltip' });
+    await expectOverlayVisibleBlurredAndInViewport(tooltip);
+    await expectNotInsideBlurDisabledContext(tooltip);
+    await expectOverlayNearTrigger(tooltipTrigger, tooltip, { side: 'above' });
+    await screenshot(page, 'portal-shared-tooltip-geometry-desktop');
+
+    await assertNoOverflow(page);
+  });
+
+  test('trigger and file action menus are portaled, blurred, and aligned', async ({ page }) => {
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForTimeout(800);
+
+    const triggerActions = page.locator('button[aria-label="Trigger actions"]').first();
+    await expect(triggerActions).toBeVisible();
+    await triggerActions.click();
+
+    const triggerMenu = page.locator('body > div.glass-surface:has-text("Run Now"):has-text("View History")').first();
+    await expectOverlayVisibleBlurredAndInViewport(triggerMenu);
+    await expectPortaledToBody(triggerMenu);
+    await expectOverlayNearTrigger(triggerActions, triggerMenu);
+    await screenshot(page, 'portal-trigger-card-actions-geometry-desktop');
+
+    await page.mouse.click(10, 10);
+    await page.goto('/projects/proj-test-1/library');
+    await page.waitForTimeout(800);
+
+    const fileActions = page.locator('button[aria-label*="Actions for"]').first();
+    await expect(fileActions).toBeVisible();
+    await fileActions.click();
+
+    const fileMenu = page.locator('body > div.glass-surface:has-text("Download"):has-text("Edit Tags")').first();
+    await expectOverlayVisibleBlurredAndInViewport(fileMenu);
+    await expectPortaledToBody(fileMenu);
+    await expectOverlayNearTrigger(fileActions, fileMenu);
+    await screenshot(page, 'portal-file-actions-menu-geometry-desktop');
+
+    await assertNoOverflow(page);
+  });
+
+  test('global command palette has blurred backdrop and body portal', async ({ page }) => {
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForTimeout(800);
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'k',
+        code: 'KeyK',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    const palette = page.getByRole('dialog', { name: /command palette/i });
+    await expectOverlayVisibleBlurredAndInViewport(palette);
+    await expectPortaledToBody(palette);
+    await expectBackdropBlurred(page);
+    await screenshot(page, 'portal-command-palette-geometry-desktop');
+
+    await assertNoOverflow(page);
+  });
+
+  test('recent chat and notification panels are portaled, blurred, and aligned', async ({ page }) => {
+    await page.goto('/chats');
+    await page.waitForTimeout(800);
+
+    const recentTrigger = page.getByLabel(/Recent chats/).first();
+    await expect(recentTrigger).toBeVisible();
+    await recentTrigger.click();
+
+    const recentPanel = page.locator('[role="menu"][aria-label="Recent chats"]');
+    await expectOverlayVisibleBlurredAndInViewport(recentPanel);
+    await expectPortaledToBody(recentPanel);
+    await expectOverlayNearTrigger(recentTrigger, recentPanel);
+    await screenshot(page, 'portal-recent-chats-panel-geometry-desktop');
+
+    await page.keyboard.press('Escape');
+
+    const notificationTrigger = page.getByRole('button', { name: /notifications/i }).first();
+    await expect(notificationTrigger).toBeVisible();
+    await notificationTrigger.click();
+
+    const notificationPanel = page.locator('[role="dialog"][aria-label="Notifications"]');
+    await expectOverlayVisibleBlurredAndInViewport(notificationPanel);
+    await expectPortaledToBody(notificationPanel);
+    await expectOverlayNearTrigger(notificationTrigger, notificationPanel);
+    await screenshot(page, 'portal-notification-panel-geometry-desktop');
 
     await assertNoOverflow(page);
   });
