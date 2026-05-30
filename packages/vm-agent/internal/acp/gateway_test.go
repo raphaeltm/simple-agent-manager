@@ -18,6 +18,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 		wantInstallCmd    string
 		wantInjectionMode string
 		wantAuthFilePath  string
+		wantArgs          []string
 	}{
 		{
 			name:           "Claude Code with OAuth token",
@@ -52,6 +53,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantInstallCmd:    "npm install -g @zed-industries/codex-acp",
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
+			wantArgs:          []string{"--sandbox", "danger-full-access"},
 		},
 		{
 			name:           "OpenAI Codex with API key uses env var",
@@ -60,6 +62,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
 			wantInstallCmd: "npm install -g @zed-industries/codex-acp",
+			wantArgs:       []string{"--sandbox", "danger-full-access"},
 		},
 		{
 			name:           "Google Gemini always uses API key",
@@ -111,9 +114,20 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 				t.Errorf("getAgentCommandInfo() authFilePath = %v, want %v", info.authFilePath, tt.wantAuthFilePath)
 			}
 
-			// Verify args for Gemini
+			// Verify args
 			if tt.agentType == "google-gemini" && len(info.args) == 0 {
 				t.Errorf("getAgentCommandInfo() expected args for google-gemini")
+			}
+			if tt.wantArgs != nil {
+				if len(info.args) != len(tt.wantArgs) {
+					t.Errorf("getAgentCommandInfo() args = %v, want %v", info.args, tt.wantArgs)
+				} else {
+					for i, a := range tt.wantArgs {
+						if info.args[i] != a {
+							t.Errorf("getAgentCommandInfo() args[%d] = %q, want %q", i, info.args[i], a)
+						}
+					}
+				}
 			}
 		})
 	}
@@ -232,6 +246,9 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.injectionMode != "" {
 		t.Fatalf("injectionMode=%q, want empty for api-key", info.injectionMode)
 	}
+	if len(info.args) != 2 || info.args[0] != "--sandbox" || info.args[1] != "danger-full-access" {
+		t.Fatalf("args=%v, want [--sandbox danger-full-access]", info.args)
+	}
 }
 
 func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
@@ -249,6 +266,9 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	}
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
+	}
+	if len(info.args) != 2 || info.args[0] != "--sandbox" || info.args[1] != "danger-full-access" {
+		t.Fatalf("args=%v, want [--sandbox danger-full-access]", info.args)
 	}
 }
 

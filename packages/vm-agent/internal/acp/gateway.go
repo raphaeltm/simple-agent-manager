@@ -800,10 +800,17 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
 	case "openai-codex":
+		// Pass --sandbox danger-full-access as CLI args. CLI flags have the
+		// highest priority in the Codex config hierarchy, overriding both
+		// project and user config.toml files. This is required because SAM
+		// workspaces run inside containers without CAP_NET_ADMIN, which
+		// causes bubblewrap (bwrap) sandbox to fail with
+		// "RTM_NEWADDR: Operation not permitted".
+		codexSandboxArgs := []string{"--sandbox", "danger-full-access"}
 		if credentialKind == "oauth-token" {
 			return agentCommandInfo{
 				command:       "codex-acp",
-				args:          nil,
+				args:          codexSandboxArgs,
 				envVarName:    "",
 				installCmd:    "npm install -g @zed-industries/codex-acp",
 				isNpmBased:    true,
@@ -811,7 +818,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 				authFilePath:  ".codex/auth.json",
 			}
 		}
-		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", true, "", ""}
+		return agentCommandInfo{"codex-acp", codexSandboxArgs, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", true, "", ""}
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
 	case "mistral-vibe":
