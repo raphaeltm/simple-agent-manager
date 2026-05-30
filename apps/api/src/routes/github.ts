@@ -324,29 +324,33 @@ githubRoutes.post('/webhook', async (c) => {
   }
 
   // Route supported events to GitHub trigger matching (best-effort, non-blocking)
+  // Use waitUntil to return 200 immediately and process triggers asynchronously,
+  // avoiding GitHub's 10-second webhook delivery timeout.
   const deliveryId = c.req.header('x-github-delivery');
   if (event && deliveryId) {
-    try {
-      const triggerResult = await handleGitHubEventForTriggers(c.env, {
+    c.executionCtx.waitUntil(
+      handleGitHubEventForTriggers(c.env, {
         deliveryId,
         eventType: event,
         payload: data,
-      });
-      if (triggerResult.matchedTriggers > 0) {
-        log.info('github.webhook.triggers_matched', {
-          deliveryId,
-          eventType: event,
-          matchedTriggers: triggerResult.matchedTriggers,
-        });
-      }
-    } catch (err) {
-      // Trigger matching is best-effort — don't fail the webhook response
-      log.error('github.webhook.trigger_handler_error', {
-        deliveryId,
-        eventType: event,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+      })
+        .then((triggerResult) => {
+          if (triggerResult.matchedTriggers > 0) {
+            log.info('github.webhook.triggers_matched', {
+              deliveryId,
+              eventType: event,
+              matchedTriggers: triggerResult.matchedTriggers,
+            });
+          }
+        })
+        .catch((err) => {
+          log.error('github.webhook.trigger_handler_error', {
+            deliveryId,
+            eventType: event,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+    );
   }
 
   return c.json({ received: true });

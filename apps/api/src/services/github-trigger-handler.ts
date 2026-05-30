@@ -13,7 +13,7 @@
  * 6. For matching triggers, create execution records and submit tasks
  */
 import type { GitHubTriggerFilters } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -53,8 +53,8 @@ export async function handleGitHubEventForTriggers(
 ): Promise<HandleGitHubEventResult> {
   const { deliveryId, eventType, payload } = input;
 
-  // Feature flag gate
-  if (!env.GITHUB_TRIGGERS_ENABLED) {
+  // Feature flag gate — must be explicitly set to "true" to enable
+  if (env.GITHUB_TRIGGERS_ENABLED !== 'true') {
     return { processed: false, deliveryId, matchedTriggers: 0, reason: 'feature_disabled' };
   }
 
@@ -177,27 +177,12 @@ async function processTriggersForProject(
 
   if (triggers.length === 0) return 0;
 
-  // Get GitHub configs for these triggers
+  // Get GitHub configs for these triggers in a single query
   const triggerIds = triggers.map((t) => t.id);
   const configs = await db
     .select()
     .from(schema.githubTriggerConfigs)
-    .where(
-      // Filter by trigger IDs individually since we can't use inArray with Drizzle on small sets
-      // We already have the set of active triggers
-      eq(schema.githubTriggerConfigs.triggerId, triggerIds[0]!)
-    );
-
-  // If more than one trigger, get the rest
-  if (triggerIds.length > 1) {
-    for (let i = 1; i < triggerIds.length; i++) {
-      const additional = await db
-        .select()
-        .from(schema.githubTriggerConfigs)
-        .where(eq(schema.githubTriggerConfigs.triggerId, triggerIds[i]!));
-      configs.push(...additional);
-    }
-  }
+    .where(inArray(schema.githubTriggerConfigs.triggerId, triggerIds));
 
   const configByTriggerId = new Map(configs.map((c) => [c.triggerId, c]));
 
@@ -279,7 +264,7 @@ async function processTriggersForProject(
         projectId: project.id,
         userId: trigger.userId,
         renderedPrompt: rendered.rendered,
-        triggeredBy: 'webhook',
+        triggeredBy: 'github',
         agentProfileId: trigger.agentProfileId,
         taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
         vmSizeOverride: trigger.vmSizeOverride,
