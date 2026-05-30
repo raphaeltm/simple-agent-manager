@@ -12,6 +12,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation,useNavigate } from 'react-router';
 
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
@@ -561,7 +562,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
 
   const modKey = isMacPlatform() ? '\u2318' : 'Ctrl';
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
@@ -677,6 +678,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
           </kbd>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

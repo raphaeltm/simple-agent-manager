@@ -1,6 +1,7 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, RefreshCw, X } from 'lucide-react';
 import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { getGitStatus, type GitFileStatus, type GitStatusData } from '../lib/api';
 
@@ -117,7 +118,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
     flexShrink: 0,
   };
 
-  return (
+  return createPortal(
     <div style={overlayStyle}>
       {/* Header */}
       <header style={headerStyle}>
@@ -250,7 +251,8 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
         )}
       </div>
 
-    </div>
+    </div>,
+    document.body,
   );
 };
 

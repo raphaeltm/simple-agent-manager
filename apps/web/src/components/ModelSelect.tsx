@@ -2,6 +2,7 @@ import type { ModelDefinition, ModelGroup } from '@simple-agent-manager/shared';
 import { getModelGroupsForAgent } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type FC, useCallback, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -35,7 +36,7 @@ const INPUT_CLASSES =
   `w-full min-h-11 py-2 pl-3 pr-9 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border ${FOCUS_RING}`;
 
 const DROPDOWN_CLASSES =
-  'absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.78)] shadow-lg backdrop-blur-xl';
+  'max-h-60 overflow-y-auto rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.78)] shadow-lg backdrop-blur-xl';
 
 const OPTION_CLASSES =
   'px-3 min-h-11 py-2.5 text-sm cursor-pointer text-fg-primary w-full text-left flex items-center';
@@ -258,8 +259,20 @@ export const ModelSelect: FC<ModelSelectProps> = ({
         </span>
       </div>
 
-      {isOpen && (
-        <div id={listboxId} className={DROPDOWN_CLASSES} role="listbox">
+      {isOpen && createPortal(
+        <div
+          id={listboxId}
+          className={DROPDOWN_CLASSES}
+          style={{
+            position: 'fixed',
+            zIndex: 50,
+            ...(containerRef.current ? (() => {
+              const r = containerRef.current!.getBoundingClientRect();
+              return { top: r.bottom + 4, left: r.left, width: r.width };
+            })() : {}),
+          }}
+          role="listbox"
+        >
           {/* Clear / No override option */}
           <button
             type="button"
@@ -304,7 +317,8 @@ export const ModelSelect: FC<ModelSelectProps> = ({
               No matching models — press Enter to use &quot;{filterText}&quot; as custom model
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

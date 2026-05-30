@@ -10,6 +10,7 @@ import {
   useEffect,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -122,7 +123,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
   // Parse diff to get set of added line numbers (for full-file view highlighting)
   const addedLines = parseDiffAddedLines(diff);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-panel bg-canvas flex flex-col">
       {/* Header */}
       <header
@@ -276,7 +277,8 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
             diff !== '' && <DiffRenderer diff={diff} />
           ))}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

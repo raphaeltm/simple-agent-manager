@@ -1,6 +1,7 @@
 import type { BootLogEntry } from '@simple-agent-manager/shared';
 import { X } from 'lucide-react';
 import { type FC, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import { BootLogList } from '../shared/BootLogList';
 
@@ -38,7 +39,7 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
     }
   }, [logs.length]);
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop — visible only on desktop */}
       <div
@@ -85,6 +86,7 @@ export const BootLogPanel: FC<BootLogPanelProps> = ({ logs, onClose }) => {
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 };

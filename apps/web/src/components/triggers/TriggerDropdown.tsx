@@ -7,6 +7,7 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
 import { AlertTriangle, Clock, Plus } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
 import { listTriggers } from '../../lib/api/triggers';
@@ -22,6 +23,8 @@ interface TriggerDropdownProps {
 export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onToggle }) => {
   const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const triggerBtnRef = useRef<HTMLButtonElement>(null);
   const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -48,7 +51,10 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = dropdownRef.current?.contains(target);
+      const insideContent = contentRef.current?.contains(target);
+      if (!insideTrigger && !insideContent) {
         onToggle();
       }
     }
@@ -62,6 +68,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   return (
     <div className="relative" ref={dropdownRef}>
       <button
+        ref={triggerBtnRef}
         type="button"
         onClick={onToggle}
         title="Automation triggers"
@@ -72,9 +79,18 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
         <Clock size={15} />
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
-          className="absolute top-full left-0 mt-1 w-72 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-lg z-50 overflow-hidden"
+          ref={contentRef}
+          className="w-72 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-lg overflow-hidden"
+          style={{
+            position: 'fixed',
+            zIndex: 50,
+            ...(triggerBtnRef.current ? (() => {
+              const r = triggerBtnRef.current!.getBoundingClientRect();
+              return { top: r.bottom + 4, left: r.left };
+            })() : {}),
+          }}
           role="menu"
         >
           {/* Header */}
@@ -170,7 +186,8 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
               Manage
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

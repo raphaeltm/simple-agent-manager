@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -77,7 +78,7 @@ export function MobileNavDrawer({
     ? navItems.filter((item) => item.label !== 'Back to Projects')
     : navItems;
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -321,6 +322,7 @@ export function MobileNavDrawer({
           </button>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

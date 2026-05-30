@@ -1,6 +1,7 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { AlertTriangle, Code, Download, Eye, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
 import {
@@ -157,7 +158,7 @@ export function FilePreviewModal({
     return () => clearTimeout(timer);
   }, [isPdf, pdfLoading]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-dialog-backdrop overflow-hidden">
       {/* Backdrop */}
       <div
@@ -328,6 +329,7 @@ export function FilePreviewModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

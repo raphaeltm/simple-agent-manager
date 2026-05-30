@@ -4,6 +4,7 @@ import {
   FileText, Folder, Image, RefreshCw, Search, X,
 } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   downloadSessionFile,
@@ -268,7 +269,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   const isMd = isMarkdownFile(filePath);
   const language = detectLanguage(filePath);
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop — visible only on desktop */}
       <div
@@ -638,7 +639,8 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 };
 
