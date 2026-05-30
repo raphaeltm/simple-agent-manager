@@ -1,5 +1,13 @@
 import type { AgentInfo, AgentType } from '@simple-agent-manager/shared';
-import type { RefObject } from 'react';
+import {
+  type CSSProperties,
+  type RefObject,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 
 export interface WorkspaceCreateMenuProps {
   createMenuRef: RefObject<HTMLDivElement | null>;
@@ -26,9 +34,59 @@ export function WorkspaceCreateMenu({
   onCreateTerminalTab,
   onCreateSession,
 }: WorkspaceCreateMenuProps) {
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+
+    const rect = button.getBoundingClientRect();
+    const minWidth = 220;
+    const gutter = 8;
+    setMenuStyle({
+      position: 'fixed',
+      top: rect.bottom + 6,
+      left: Math.max(
+        gutter,
+        Math.min(rect.right - minWidth, window.innerWidth - minWidth - gutter)
+      ),
+      minWidth,
+      borderRadius: 'var(--sam-radius-md)',
+      border: '1px solid var(--sam-color-border-default)',
+      boxShadow: '0 10px 30px var(--sam-shadow-overlay)',
+      zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+      overflow: 'hidden',
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!createMenuOpen) return;
+    updateMenuPosition();
+
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [createMenuOpen, updateMenuPosition]);
+
+  const handleCreateTerminalTab = () => {
+    onCreateTerminalTab();
+    setCreateMenuOpen(false);
+  };
+
+  const handleCreateSession = (agentId?: AgentInfo['id']) => {
+    onCreateSession(agentId);
+    setCreateMenuOpen(false);
+  };
+
   return (
     <div ref={createMenuRef} className="relative shrink-0">
       <button
+        ref={buttonRef}
         onClick={() => setCreateMenuOpen((prev: boolean) => !prev)}
         disabled={sessionsLoading}
         style={{
@@ -53,85 +111,85 @@ export function WorkspaceCreateMenu({
         +
       </button>
 
-      {createMenuOpen && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            minWidth: 220,
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            boxShadow: '0 10px 30px var(--sam-shadow-overlay)',
-            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            overflow: 'hidden',
-          }}
-        >
-          <button
-            onClick={onCreateTerminalTab}
-            disabled={sessionsLoading}
-            style={{
-              width: '100%',
-              textAlign: 'left',
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--sam-color-fg-primary)',
-              padding: isMobile ? '14px 16px' : '10px 12px',
-              fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
-              cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-              opacity: sessionsLoading ? 0.65 : 1,
-            }}
+      {createMenuOpen &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="glass-surface"
+            onMouseDown={(event) => event.stopPropagation()}
+            style={menuStyle}
           >
-            Terminal
-          </button>
-
-          {configuredAgents.length <= 1 ? (
             <button
-              onClick={() => onCreateSession(defaultAgentId ?? undefined)}
-              disabled={configuredAgents.length === 0 || sessionsLoading}
+              onClick={handleCreateTerminalTab}
+              disabled={sessionsLoading}
               style={{
                 width: '100%',
                 textAlign: 'left',
                 border: 'none',
                 background: 'transparent',
-                color:
-                  configuredAgents.length === 0 || sessionsLoading
-                    ? 'var(--sam-color-fg-muted)'
-                    : 'var(--sam-color-fg-primary)',
+                color: 'var(--sam-color-fg-primary)',
                 padding: isMobile ? '14px 16px' : '10px 12px',
-                fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
-                cursor:
-                  configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
-                opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
+                fontSize: isMobile
+                  ? 'var(--sam-type-secondary-size)'
+                  : 'var(--sam-type-caption-size)',
+                cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+                opacity: sessionsLoading ? 0.65 : 1,
               }}
             >
-              {defaultAgentName ?? 'Chat'}
+              Terminal
             </button>
-          ) : (
-            configuredAgents.map((agent) => (
+
+            {configuredAgents.length <= 1 ? (
               <button
-                key={agent.id}
-                onClick={() => onCreateSession(agent.id)}
-                disabled={sessionsLoading}
+                onClick={() => handleCreateSession(defaultAgentId ?? undefined)}
+                disabled={configuredAgents.length === 0 || sessionsLoading}
                 style={{
                   width: '100%',
                   textAlign: 'left',
                   border: 'none',
                   background: 'transparent',
-                  color: 'var(--sam-color-fg-primary)',
+                  color:
+                    configuredAgents.length === 0 || sessionsLoading
+                      ? 'var(--sam-color-fg-muted)'
+                      : 'var(--sam-color-fg-primary)',
                   padding: isMobile ? '14px 16px' : '10px 12px',
-                  fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
-                  cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-                  opacity: sessionsLoading ? 0.65 : 1,
+                  fontSize: isMobile
+                    ? 'var(--sam-type-secondary-size)'
+                    : 'var(--sam-type-caption-size)',
+                  cursor:
+                    configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
+                  opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
                 }}
               >
-                {agent.name}
+                {defaultAgentName ?? 'Chat'}
               </button>
-            ))
-          )}
-        </div>
-      )}
+            ) : (
+              configuredAgents.map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() => handleCreateSession(agent.id)}
+                  disabled={sessionsLoading}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--sam-color-fg-primary)',
+                    padding: isMobile ? '14px 16px' : '10px 12px',
+                    fontSize: isMobile
+                      ? 'var(--sam-type-secondary-size)'
+                      : 'var(--sam-type-caption-size)',
+                    cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+                    opacity: sessionsLoading ? 0.65 : 1,
+                  }}
+                >
+                  {agent.name}
+                </button>
+              ))
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

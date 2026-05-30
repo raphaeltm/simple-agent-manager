@@ -2,7 +2,8 @@ import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceR
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import { AlertTriangle, Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -116,10 +117,37 @@ const RECOVERY_CONTAINER_HELP = 'The devcontainer build failed, so SAM started a
 
 function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceResponse }>) {
   const [open, setOpen] = useState(false);
+  const [tooltipStyle, setTooltipStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const tooltipId = useId();
   const isRecovery = workspace.status === 'recovery';
   const label = getWorkspaceProfileLabel(workspace);
   const badgeClassName = 'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0';
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const tooltipWidth = Math.min(280, window.innerWidth - 32);
+      const left = Math.max(16, Math.min(rect.right - tooltipWidth, window.innerWidth - tooltipWidth - 16));
+      setTooltipStyle({
+        position: 'fixed',
+        left,
+        top: rect.bottom + 4,
+        width: tooltipWidth,
+        zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open]);
 
   if (!isRecovery) {
     return (
@@ -139,6 +167,7 @@ function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceRes
   return (
     <span className="relative inline-flex shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         aria-label="Recovery container: devcontainer build failed"
         aria-describedby={open ? tooltipId : undefined}
@@ -157,18 +186,20 @@ function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceRes
         <AlertTriangle size={10} aria-hidden="true" />
         {label}
       </button>
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal(
         <span
           id={tooltipId}
           role="tooltip"
-          className="absolute right-0 top-full mt-1 w-[min(280px,calc(100vw-2rem))] rounded-sm glass-surface bg-[rgba(8,15,12,0.94)] px-3 py-2 text-left text-fg-primary shadow-tooltip z-dropdown whitespace-normal pointer-events-none"
+          className="rounded-sm glass-surface bg-[rgba(8,15,12,0.94)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
           style={{
             fontSize: 'var(--sam-type-caption-size)',
             lineHeight: 'var(--sam-type-caption-line-height)',
+            ...tooltipStyle,
           }}
         >
           {RECOVERY_CONTAINER_HELP}
-        </span>
+        </span>,
+        document.body,
       )}
     </span>
   );

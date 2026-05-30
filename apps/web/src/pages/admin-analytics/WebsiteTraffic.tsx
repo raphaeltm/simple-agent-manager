@@ -1,5 +1,5 @@
 import { Body } from '@simple-agent-manager/ui';
-import { type FC } from 'react';
+import { type CSSProperties, type FC } from 'react';
 import {
   Bar,
   BarChart,
@@ -35,6 +35,12 @@ const SECTION_COLORS: Record<string, string> = {
   other: 'var(--sam-color-fg-muted, #9fb7ae)',
 };
 
+const CHART_TOOLTIP_STYLE: CSSProperties = {
+  background: 'rgba(8,15,12,0.78)',
+  WebkitBackdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+  backdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+};
+
 function formatNumber(n: number): string {
   return n.toLocaleString();
 }
@@ -44,7 +50,7 @@ function TrafficTooltip({ active, payload }: { active?: boolean; payload?: Array
   if (!active || !payload?.length) return null;
   const d = payload[0]!.payload;
   return (
-    <div className="rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-primary px-3 py-2 shadow-lg text-sm">
+    <div className="rounded-md border border-[rgba(34,197,94,0.10)] px-3 py-2 shadow-lg text-sm" style={CHART_TOOLTIP_STYLE}>
       <div className="text-fg-primary font-medium">{d.label}</div>
       <div className="text-fg-secondary tabular-nums">{formatNumber(d.views)} views</div>
       <div className="text-fg-muted text-xs tabular-nums">{formatNumber(d.visitors)} visitors</div>

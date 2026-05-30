@@ -1,5 +1,5 @@
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -14,6 +14,15 @@ import {
 
 import type { CostByModel, CostSummaryResponse } from '../lib/api';
 import { fetchAdminCosts } from '../lib/api';
+
+const CHART_TOOLTIP_STYLE: CSSProperties = {
+  background: 'rgba(8,15,12,0.78)',
+  border: '1px solid var(--sam-color-border-default)',
+  borderRadius: 6,
+  fontSize: 12,
+  WebkitBackdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+  backdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+};
 
 // ---------------------------------------------------------------------------
 // Formatters
@@ -256,10 +265,7 @@ export function AdminCosts() {
                     formatter={(value) => [formatCost(Number(value)), 'Cost']}
                     labelFormatter={(label) => String(label)}
                     contentStyle={{
-                      background: 'var(--sam-color-surface-primary)',
-                      border: '1px solid var(--sam-color-border-default)',
-                      borderRadius: 6,
-                      fontSize: 12,
+                      ...CHART_TOOLTIP_STYLE,
                     }}
                   />
                   <Area
@@ -310,10 +316,7 @@ export function AdminCosts() {
                     <Tooltip
                       formatter={(value) => [formatCost(Number(value)), 'Cost']}
                       contentStyle={{
-                        background: 'var(--sam-color-surface-primary)',
-                        border: '1px solid var(--sam-color-border-default)',
-                        borderRadius: 6,
-                        fontSize: 12,
+                        ...CHART_TOOLTIP_STYLE,
                       }}
                     />
                     <Bar dataKey="costUsd" fill={BAR_COLORS[0]} name="Cost" />

@@ -243,6 +243,7 @@ export function BranchSelector({
       {showDropdown && value && filteredBranches.length === 0 && branches.length > 0 && createPortal(
         <div
           ref={dropdownRef}
+          className="glass-surface"
           style={{
             position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
@@ -250,8 +251,6 @@ export function BranchSelector({
               const r = containerRef.current!.getBoundingClientRect();
               return { top: r.bottom + 4, left: r.left, width: r.width };
             })() : {}),
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            border: '1px solid var(--sam-color-border-default)',
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             padding: '0.5rem 0.75rem',

@@ -67,7 +67,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center glass-backdrop-dim"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-dir-title"
@@ -75,7 +75,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
     >
       <div
         ref={dialogRef}
-        className="bg-surface rounded-xl border border-border-default p-5 w-full max-w-sm mx-4 shadow-lg"
+        className="glass-modal glass-panel-container glass-composited rounded-xl p-5 w-full max-w-sm mx-4 shadow-overlay"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 id="create-dir-title" className="text-base font-semibold text-fg-primary m-0 mb-4">

@@ -12,6 +12,8 @@ describe('CreateDirectoryDialog', () => {
 
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveClass('glass-backdrop-dim');
+    expect(dialog.firstElementChild).toHaveClass('glass-modal');
     expect(screen.getByText('New Folder')).toBeInTheDocument();
   });
 

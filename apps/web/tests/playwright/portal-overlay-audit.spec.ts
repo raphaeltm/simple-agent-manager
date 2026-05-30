@@ -4,7 +4,7 @@
  *
  * Tests the 23 components converted to createPortal in the portal-ify PR.
  */
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot } from './audit-helpers';
 
@@ -110,7 +110,8 @@ const MOCK_SESSIONS = [
   },
   {
     id: 'sess-2',
-    topic: 'Refactor database schema for better performance and scalability across multiple regions',
+    topic:
+      'Refactor database schema for better performance and scalability across multiple regions',
     createdAt: new Date(Date.now() - 86400000).toISOString(),
     updatedAt: new Date(Date.now() - 43200000).toISOString(),
     lastMessageAt: new Date(Date.now() - 43200000).toISOString(),
@@ -159,6 +160,120 @@ const MOCK_LIBRARY_FILES = [
   },
 ];
 
+const MOCK_NODES = [
+  {
+    id: 'node-1',
+    name: 'portal-node-running-with-a-very-long-name',
+    status: 'running',
+    healthStatus: 'healthy',
+    cloudProvider: 'hetzner',
+    vmSize: 'medium',
+    vmLocation: 'fsn1',
+    ipAddress: '192.0.2.10',
+    lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+    lastMetrics: {
+      cpuLoadAvg1: 0.42,
+      memoryPercent: 51,
+      diskPercent: 38,
+    },
+    errorMessage: null,
+    createdAt: '2026-03-03T00:00:00Z',
+    updatedAt: '2026-03-03T00:00:00Z',
+  },
+  {
+    id: 'node-2',
+    name: 'portal-node-creating',
+    status: 'creating',
+    healthStatus: 'unknown',
+    cloudProvider: 'hetzner',
+    vmSize: 'small',
+    vmLocation: 'nbg1',
+    ipAddress: null,
+    lastHeartbeatAt: null,
+    lastMetrics: null,
+    errorMessage: null,
+    createdAt: '2026-03-02T00:00:00Z',
+    updatedAt: '2026-03-02T00:00:00Z',
+  },
+];
+
+const MOCK_NODE_WORKSPACES = [
+  {
+    id: 'workspace-node-1',
+    nodeId: 'node-1',
+    projectId: 'proj-test-1',
+    name: 'portal-workspace',
+    displayName: 'Portal Workspace',
+    repository: 'testuser/portal-repo',
+    branch: 'main',
+    status: 'running',
+    vmSize: 'medium',
+    vmLocation: 'fsn1',
+    workspaceProfile: 'standard',
+    vmIp: '192.0.2.11',
+    lastActivityAt: new Date(Date.now() - 120_000).toISOString(),
+    errorMessage: null,
+    createdAt: '2026-03-03T00:00:00Z',
+    updatedAt: '2026-03-03T00:00:00Z',
+  },
+];
+
+const MOCK_ACCOUNT_MAP = {
+  projects: [
+    {
+      id: 'proj-test-1',
+      name: 'Portal Test Project',
+      repository: 'testuser/portal-repo',
+      status: 'active',
+      lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+      activeSessionCount: 1,
+    },
+  ],
+  nodes: [
+    {
+      id: 'node-1',
+      name: 'portal-node-running-with-a-very-long-name',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      cloudProvider: 'hetzner',
+      ipAddress: '192.0.2.10',
+      healthStatus: 'healthy',
+      lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      lastMetrics: null,
+    },
+  ],
+  workspaces: [
+    {
+      id: 'workspace-node-1',
+      nodeId: 'node-1',
+      projectId: 'proj-test-1',
+      displayName: 'Portal Workspace',
+      branch: 'main',
+      status: 'running',
+      vmSize: 'medium',
+      chatSessionId: 'sess-1',
+    },
+  ],
+  sessions: [
+    {
+      id: 'sess-1',
+      projectId: 'proj-test-1',
+      topic: 'Account map tooltip session',
+      status: 'running',
+      messageCount: 12,
+      workspaceId: 'workspace-node-1',
+      taskId: null,
+    },
+  ],
+  tasks: [],
+  relationships: [
+    { source: 'proj-test-1', target: 'workspace-node-1', type: 'has_workspace', active: true },
+    { source: 'workspace-node-1', target: 'node-1', type: 'runs_on', active: true },
+    { source: 'proj-test-1', target: 'sess-1', type: 'has_session', active: true },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Setup — single handler pattern (proven to work with BetterAuth)
 // ---------------------------------------------------------------------------
@@ -182,6 +297,19 @@ async function setupApiMocks(page: Page) {
       return respond(200, { notifications: [], unreadCount: 0 });
     }
 
+    // Nodes and workspace list
+    if (path === '/api/nodes') {
+      return respond(200, MOCK_NODES);
+    }
+
+    if (path === '/api/workspaces') {
+      return respond(200, MOCK_NODE_WORKSPACES);
+    }
+
+    if (path === '/api/account-map') {
+      return respond(200, MOCK_ACCOUNT_MAP);
+    }
+
     // Credentials
     if (path.startsWith('/api/credentials')) {
       return respond(200, []);
@@ -193,7 +321,7 @@ async function setupApiMocks(page: Page) {
     }
 
     // Provider catalog
-    if (path.startsWith('/api/provider-catalog')) {
+    if (path.startsWith('/api/provider-catalog') || path.startsWith('/api/providers/catalog')) {
       return respond(200, { catalogs: [] });
     }
 
@@ -223,7 +351,11 @@ async function setupApiMocks(page: Page) {
       }
 
       // Library files — listLibraryFiles calls /api/projects/:id/library (no /files suffix)
-      if (subPath === '/library' || subPath.startsWith('/library?') || subPath.startsWith('/library/files')) {
+      if (
+        subPath === '/library' ||
+        subPath.startsWith('/library?') ||
+        subPath.startsWith('/library/files')
+      ) {
         return respond(200, { files: MOCK_LIBRARY_FILES, totalCount: MOCK_LIBRARY_FILES.length });
       }
 
@@ -244,7 +376,12 @@ async function setupApiMocks(page: Page) {
 
       // Agent settings
       if (subPath === '/agent-settings' || subPath.startsWith('/agent-settings')) {
-        return respond(200, { agentType: 'claude-code', model: '', providerMode: 'user-api-key', customInstructions: '' });
+        return respond(200, {
+          agentType: 'claude-code',
+          model: '',
+          providerMode: 'user-api-key',
+          customInstructions: '',
+        });
       }
 
       // Agent profiles
@@ -311,13 +448,15 @@ test.describe('Portal Overlays — Mobile', () => {
 
     // Dispatch Ctrl+K directly on the window (where useGlobalCommandPalette listens)
     await page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'k',
-        code: 'KeyK',
-        ctrlKey: true,
-        bubbles: true,
-        cancelable: true,
-      }));
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'k',
+          code: 'KeyK',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
     });
     await page.waitForTimeout(600);
     await screenshot(page, 'portal-command-palette-mobile');
@@ -331,13 +470,15 @@ test.describe('Portal Overlays — Mobile', () => {
 
     // Dispatch Ctrl+K on document (capture phase listener on window)
     await page.evaluate(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'k',
-        code: 'KeyK',
-        ctrlKey: true,
-        bubbles: true,
-        cancelable: true,
-      }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'k',
+          code: 'KeyK',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
     });
     await page.waitForTimeout(600);
     await screenshot(page, 'portal-command-palette-keyboard-mobile');
@@ -352,7 +493,9 @@ test.describe('Portal Overlays — Mobile', () => {
     await page.waitForTimeout(800);
 
     // Look for the mobile menu button (hamburger)
-    const menuBtn = page.locator('button[aria-label*="menu" i], button[aria-label*="nav" i]').first();
+    const menuBtn = page
+      .locator('button[aria-label*="menu" i], button[aria-label*="nav" i]')
+      .first();
     if (await menuBtn.isVisible()) {
       await menuBtn.click();
       await page.waitForTimeout(400);
@@ -369,7 +512,11 @@ test.describe('Portal Overlays — Mobile', () => {
     await page.waitForTimeout(800);
 
     // Look for the sessions/chats button
-    const sessionsBtn = page.locator('button[aria-label*="session" i], button[aria-label*="chat" i], button[aria-label*="history" i]').first();
+    const sessionsBtn = page
+      .locator(
+        'button[aria-label*="session" i], button[aria-label*="chat" i], button[aria-label*="history" i]'
+      )
+      .first();
     if (await sessionsBtn.isVisible()) {
       await sessionsBtn.click();
       await page.waitForTimeout(400);
@@ -425,6 +572,79 @@ test.describe('Portal Overlays — Mobile', () => {
 
     await assertNoOverflow(page);
   });
+
+  test('Nodes shared DropdownMenu portal renders with glass surface', async ({ page }) => {
+    await page.goto('/nodes');
+    await page.waitForTimeout(800);
+
+    const actionsBtn = page.locator('button[aria-label*="Actions for portal-node"]').first();
+    await expect(actionsBtn).toBeVisible();
+    await actionsBtn.click();
+    await page.waitForTimeout(400);
+    await screenshot(page, 'portal-node-dropdown-menu-mobile');
+
+    const menuInfo = await page
+      .locator('body > [role="menu"]')
+      .first()
+      .evaluate((menu) => {
+        const style = window.getComputedStyle(menu);
+        return {
+          backdropFilter: style.backdropFilter,
+          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
+          position: style.position,
+          scrollWidth: document.documentElement.scrollWidth,
+          innerWidth: window.innerWidth,
+          top: menu.getBoundingClientRect().top,
+          bottom: menu.getBoundingClientRect().bottom,
+          innerHeight: window.innerHeight,
+        };
+      });
+    expect(menuInfo.position).toBe('fixed');
+    expect(menuInfo.scrollWidth).toBeLessThanOrEqual(menuInfo.innerWidth);
+    expect(menuInfo.top).toBeGreaterThanOrEqual(0);
+    expect(menuInfo.bottom).toBeLessThanOrEqual(menuInfo.innerHeight);
+    expect(`${menuInfo.backdropFilter} ${menuInfo.webkitBackdropFilter}`).toContain('blur');
+
+    const triggerBox = await actionsBtn.boundingBox();
+    const menuBox = await page.locator('body > [role="menu"]').first().boundingBox();
+    if (!triggerBox || !menuBox) throw new Error('Expected trigger and menu boxes to be measurable');
+    expect(Math.abs((menuBox.x + menuBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThanOrEqual(24);
+
+    await assertNoOverflow(page);
+  });
+
+  test('Shared Tooltip portal renders with blurred surface', async ({ page }) => {
+    await page.goto('/ui-standards');
+    await page.waitForTimeout(800);
+
+    const tooltipTrigger = page.getByRole('button', { name: 'Instant' });
+    await tooltipTrigger.scrollIntoViewIfNeeded();
+    await tooltipTrigger.focus();
+    await expect(page.locator('body > [role="tooltip"]').first()).toBeVisible();
+    await screenshot(page, 'portal-shared-tooltip-mobile');
+
+    const tooltipInfo = await page
+      .locator('body > [role="tooltip"]')
+      .first()
+      .evaluate((tooltip) => {
+        const style = window.getComputedStyle(tooltip);
+        const rect = tooltip.getBoundingClientRect();
+        return {
+          backdropFilter: style.backdropFilter,
+          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
+          position: style.position,
+          left: rect.left,
+          right: rect.right,
+          innerWidth: window.innerWidth,
+        };
+      });
+    expect(tooltipInfo.position).toBe('fixed');
+    expect(tooltipInfo.left).toBeGreaterThanOrEqual(0);
+    expect(tooltipInfo.right).toBeLessThanOrEqual(tooltipInfo.innerWidth);
+    expect(`${tooltipInfo.backdropFilter} ${tooltipInfo.webkitBackdropFilter}`).toContain('blur');
+
+    await assertNoOverflow(page);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -444,13 +664,15 @@ test.describe('Portal Overlays — Desktop', () => {
 
     // Dispatch Ctrl+K on window (where useGlobalCommandPalette listens in capture phase)
     await page.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'k',
-        code: 'KeyK',
-        ctrlKey: true,
-        bubbles: true,
-        cancelable: true,
-      }));
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'k',
+          code: 'KeyK',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
     });
     await page.waitForTimeout(600);
     await screenshot(page, 'portal-command-palette-desktop');
@@ -498,6 +720,121 @@ test.describe('Portal Overlays — Desktop', () => {
       await page.waitForTimeout(400);
       await screenshot(page, 'portal-file-actions-menu-desktop');
     }
+
+    await assertNoOverflow(page);
+  });
+
+  test('Nodes shared DropdownMenu portal positioned correctly', async ({ page }) => {
+    await page.goto('/nodes');
+    await page.waitForTimeout(800);
+
+    const actionsBtn = page.locator('button[aria-label*="Actions for portal-node"]').first();
+    await expect(actionsBtn).toBeVisible();
+    await actionsBtn.click();
+    await page.waitForTimeout(400);
+    await screenshot(page, 'portal-node-dropdown-menu-desktop');
+
+    const menuInfo = await page
+      .locator('body > [role="menu"]')
+      .first()
+      .evaluate((menu) => {
+        const style = window.getComputedStyle(menu);
+        const rect = menu.getBoundingClientRect();
+        return {
+          backdropFilter: style.backdropFilter,
+          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
+          position: style.position,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+        };
+      });
+    expect(menuInfo.position).toBe('fixed');
+    expect(menuInfo.left).toBeGreaterThanOrEqual(0);
+    expect(menuInfo.right).toBeLessThanOrEqual(menuInfo.innerWidth);
+    expect(menuInfo.top).toBeGreaterThanOrEqual(0);
+    expect(menuInfo.bottom).toBeLessThanOrEqual(menuInfo.innerHeight);
+    expect(`${menuInfo.backdropFilter} ${menuInfo.webkitBackdropFilter}`).toContain('blur');
+
+    const triggerBox = await actionsBtn.boundingBox();
+    const menuBox = await page.locator('body > [role="menu"]').first().boundingBox();
+    if (!triggerBox || !menuBox) throw new Error('Expected trigger and menu boxes to be measurable');
+    expect(Math.abs((menuBox.x + menuBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThanOrEqual(24);
+
+    await assertNoOverflow(page);
+  });
+
+  test('Shared Tooltip portal renders with blurred surface', async ({ page }) => {
+    await page.goto('/ui-standards');
+    await page.waitForTimeout(800);
+
+    const tooltipTrigger = page.getByRole('button', { name: 'Instant' });
+    await tooltipTrigger.scrollIntoViewIfNeeded();
+    await tooltipTrigger.focus();
+    await expect(page.locator('body > [role="tooltip"]').first()).toBeVisible();
+    await screenshot(page, 'portal-shared-tooltip-desktop');
+
+    const tooltipInfo = await page
+      .locator('body > [role="tooltip"]')
+      .first()
+      .evaluate((tooltip) => {
+        const style = window.getComputedStyle(tooltip);
+        const rect = tooltip.getBoundingClientRect();
+        return {
+          backdropFilter: style.backdropFilter,
+          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
+          position: style.position,
+          left: rect.left,
+          right: rect.right,
+          innerWidth: window.innerWidth,
+        };
+      });
+    expect(tooltipInfo.position).toBe('fixed');
+    expect(tooltipInfo.left).toBeGreaterThanOrEqual(0);
+    expect(tooltipInfo.right).toBeLessThanOrEqual(tooltipInfo.innerWidth);
+    expect(`${tooltipInfo.backdropFilter} ${tooltipInfo.webkitBackdropFilter}`).toContain('blur');
+
+    await assertNoOverflow(page);
+  });
+
+  test('Account map hover tooltip portal renders with blurred surface', async ({ page }) => {
+    await page.goto('/account-map');
+    await page.waitForTimeout(1200);
+
+    const node = page.locator('.react-flow__node').first();
+    await expect(node).toBeVisible();
+    await node.hover();
+    await page.waitForTimeout(400);
+    await screenshot(page, 'portal-account-map-tooltip-desktop');
+
+    const tooltipInfo = await page
+      .locator('body > .glass-surface')
+      .filter({ hasText: 'Portal Test Project' })
+      .first()
+      .evaluate((tooltip) => {
+        const style = window.getComputedStyle(tooltip);
+        const rect = tooltip.getBoundingClientRect();
+        return {
+          backdropFilter: style.backdropFilter,
+          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
+          position: style.position,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+        };
+      });
+    expect(tooltipInfo.position).toBe('fixed');
+    expect(tooltipInfo.left).toBeGreaterThanOrEqual(0);
+    expect(tooltipInfo.right).toBeLessThanOrEqual(tooltipInfo.innerWidth);
+    expect(tooltipInfo.top).toBeGreaterThanOrEqual(0);
+    expect(tooltipInfo.bottom).toBeLessThanOrEqual(tooltipInfo.innerHeight);
+    expect(`${tooltipInfo.backdropFilter} ${tooltipInfo.webkitBackdropFilter}`).toContain('blur');
 
     await assertNoOverflow(page);
   });

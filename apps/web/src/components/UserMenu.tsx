@@ -1,4 +1,12 @@
-import { useEffect,useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 
 import { signOut } from '../lib/auth';
 import { useAuth } from './AuthProvider';
@@ -10,18 +18,54 @@ import { useAuth } from './AuthProvider';
 export function UserMenu({ compact = false }: { compact?: boolean }) {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 192;
+    const gutter = 8;
+    setMenuStyle({
+      position: 'fixed',
+      top: rect.bottom + 8,
+      left: Math.max(
+        gutter,
+        Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - gutter)
+      ),
+      width: menuWidth,
+      zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+    });
+  }, []);
 
   useEffect(() => {
+    if (!isOpen) return;
+
     function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !panelRef.current?.contains(target)) {
         setIsOpen(false);
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [isOpen, updateMenuPosition]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updateMenuPosition();
+  }, [isOpen, updateMenuPosition]);
 
   const handleSignOut = async () => {
     try {
@@ -34,11 +78,7 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
   if (!user) return null;
 
   const avatarElement = user.image ? (
-    <img
-      src={user.image}
-      alt={user.name || user.email}
-      className="h-8 w-8 rounded-full"
-    />
+    <img src={user.image} alt={user.name || user.email} className="h-8 w-8 rounded-full" />
   ) : (
     <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-fg-on-accent text-sm font-medium">
       {(user.name || user.email).charAt(0).toUpperCase()}
@@ -48,6 +88,7 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
   return (
     <div className="relative" ref={menuRef}>
       <button
+        ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 text-fg-muted bg-transparent border-none cursor-pointer p-1"
       >
@@ -64,31 +105,42 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
               viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </>
         )}
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-48 bg-surface rounded-md shadow-dropdown border border-border-default z-dropdown overflow-hidden">
-          <div className="px-4 py-2 border-b border-border-default">
-            <p className="text-sm font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap m-0">
-              {user.name || 'User'}
-            </p>
-            <p className="text-xs text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap m-0">
-              {user.email}
-            </p>
-          </div>
-
-          <button
-            onClick={handleSignOut}
-            className="block w-full text-left px-4 py-2 text-sm text-danger-fg bg-transparent border-none cursor-pointer hover:bg-surface-hover"
+      {isOpen &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="glass-surface rounded-md shadow-dropdown border border-border-default overflow-hidden"
+            style={menuStyle}
           >
-            Sign out
-          </button>
-        </div>
-      )}
+            <div className="px-4 py-2 border-b border-border-default">
+              <p className="text-sm font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap m-0">
+                {user.name || 'User'}
+              </p>
+              <p className="text-xs text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap m-0">
+                {user.email}
+              </p>
+            </div>
+
+            <button
+              onClick={handleSignOut}
+              className="block w-full text-left px-4 py-2 text-sm text-danger-fg bg-transparent border-none cursor-pointer hover:bg-surface-hover"
+            >
+              Sign out
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

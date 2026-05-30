@@ -1,5 +1,5 @@
 import { Body } from '@simple-agent-manager/ui';
-import { type FC, useId } from 'react';
+import { type CSSProperties, type FC, useId } from 'react';
 import {
   Area,
   AreaChart,
@@ -9,6 +9,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+
+const CHART_TOOLTIP_STYLE: CSSProperties = {
+  background: 'rgba(8,15,12,0.78)',
+  WebkitBackdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+  backdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+};
 
 /** Format date for X-axis ticks — "Mar 5" style. */
 function formatDateTick(dateStr: string): string {
@@ -21,7 +27,7 @@ function formatDateTick(dateStr: string): string {
 function DauTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-primary px-3 py-2 shadow-lg text-sm">
+    <div className="rounded-md border border-[rgba(34,197,94,0.10)] px-3 py-2 shadow-lg text-sm" style={CHART_TOOLTIP_STYLE}>
       <div className="text-fg-muted text-xs">{label ? formatDateTick(label) : ''}</div>
       <div className="text-fg-primary font-semibold tabular-nums">
         {payload[0]!.value.toLocaleString()} users

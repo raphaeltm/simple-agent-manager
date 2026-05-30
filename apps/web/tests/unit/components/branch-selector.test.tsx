@@ -99,7 +99,9 @@ describe('BranchSelector', () => {
 
     fireEvent.focus(screen.getByPlaceholderText('Search or type branch name'));
 
-    expect(screen.getByText('No matching branches')).toBeInTheDocument();
+    const emptyState = screen.getByText('No matching branches');
+    expect(emptyState).toBeInTheDocument();
+    expect(emptyState.parentElement).toHaveClass('glass-surface');
   });
 
   it('shows error message when provided', () => {

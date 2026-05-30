@@ -1,4 +1,13 @@
-import { type FC, useCallback,useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type FC,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 
 export interface SplitButtonOption {
   label: string;
@@ -21,10 +30,32 @@ export const SplitButton: FC<SplitButtonProps> = ({
   loading = false,
 }) => {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = containerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 180;
+    const gutter = 8;
+    setMenuStyle({
+      position: 'fixed',
+      top: rect.bottom + 4,
+      left: Math.max(
+        gutter,
+        Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - gutter)
+      ),
+      minWidth: menuWidth,
+      zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+    });
+  }, []);
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+    const target = e.target as Node;
+    if (!containerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
       setOpen(false);
     }
   }, []);
@@ -37,12 +68,21 @@ export const SplitButton: FC<SplitButtonProps> = ({
     if (open) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('resize', updateMenuPosition);
+      window.addEventListener('scroll', updateMenuPosition, true);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
         document.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('resize', updateMenuPosition);
+        window.removeEventListener('scroll', updateMenuPosition, true);
       };
     }
-  }, [open, handleClickOutside, handleKeyDown]);
+  }, [open, handleClickOutside, handleKeyDown, updateMenuPosition]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+  }, [open, updateMenuPosition]);
 
   const isDisabled = disabled || loading;
 
@@ -85,28 +125,40 @@ export const SplitButton: FC<SplitButtonProps> = ({
         }}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+          <path
+            d="M3 4.5L6 7.5L9 4.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+          />
         </svg>
       </button>
 
       {/* Dropdown menu */}
-      {open && (
-        <div className="absolute top-full right-0 mt-1 min-w-[180px] glass-surface rounded-md shadow-dropdown z-dropdown overflow-hidden">
-          {options.map((option, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => {
-                option.onClick();
-                setOpen(false);
-              }}
-              className="block w-full text-left px-3 py-2 bg-transparent text-fg-primary border-none text-sm cursor-pointer transition-colors duration-100 hover:bg-surface-hover"
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="glass-surface rounded-md shadow-dropdown overflow-hidden"
+            style={menuStyle}
+          >
+            {options.map((option, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  option.onClick();
+                  setOpen(false);
+                }}
+                className="block w-full text-left px-3 py-2 bg-transparent text-fg-primary border-none text-sm cursor-pointer transition-colors duration-100 hover:bg-surface-hover"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

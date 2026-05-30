@@ -1,5 +1,5 @@
 import { Body } from '@simple-agent-manager/ui';
-import { type FC, useMemo } from 'react';
+import { type CSSProperties, type FC, useMemo } from 'react';
 import {
   Area,
   AreaChart,
@@ -22,6 +22,15 @@ const BAR_COLORS = [
   '#ec4899',
   '#14b8a6',
 ];
+
+const CHART_TOOLTIP_STYLE: CSSProperties = {
+  background: 'rgba(8,15,12,0.78)',
+  border: '1px solid var(--sam-color-border-default)',
+  borderRadius: 6,
+  fontSize: 12,
+  WebkitBackdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+  backdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
+};
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -78,7 +87,7 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
                 <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }} />
                 <Tooltip
                   formatter={(value) => [formatTokens(Number(value)), '']}
-                  contentStyle={{ background: 'var(--sam-color-surface-primary)', border: '1px solid var(--sam-color-border-default)', borderRadius: 6, fontSize: 12 }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                 />
                 <Bar dataKey="inputTokens" stackId="tokens" fill={BAR_COLORS[0]} name="Input" />
                 <Bar dataKey="outputTokens" stackId="tokens" fill={BAR_COLORS[1]} name="Output" />
@@ -104,7 +113,7 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
                 <YAxis tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }} />
                 <Tooltip
                   formatter={(value) => [Number(value).toLocaleString(), 'Requests']}
-                  contentStyle={{ background: 'var(--sam-color-surface-primary)', border: '1px solid var(--sam-color-border-default)', borderRadius: 6, fontSize: 12 }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                 />
                 <Area
                   type="monotone"

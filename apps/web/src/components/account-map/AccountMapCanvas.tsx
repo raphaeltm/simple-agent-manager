@@ -16,7 +16,16 @@ import {
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
-import { type FC, useCallback, useEffect, useRef,useState } from 'react';
+import {
+  type CSSProperties,
+  type FC,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { AnimatedFlowEdge } from './edges/AnimatedFlowEdge';
@@ -70,7 +79,9 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: Node } | null>(null);
+  const [tooltipStyle, setTooltipStyle] = useState<CSSProperties>({});
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Sync external changes
   useEffect(() => {
@@ -107,6 +118,22 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   const handlePaneClick = useCallback(() => {
     setTooltip(null);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!tooltip || isMobile) {
+      setTooltipStyle({});
+      return;
+    }
+
+    const tooltipEl = tooltipRef.current;
+    const width = tooltipEl?.offsetWidth ?? 260;
+    const height = tooltipEl?.offsetHeight ?? 96;
+    const gutter = 8;
+    setTooltipStyle({
+      left: Math.max(gutter, Math.min(tooltip.x, window.innerWidth - width - gutter)),
+      top: Math.max(gutter, Math.min(tooltip.y, window.innerHeight - height - gutter)),
+    });
+  }, [isMobile, tooltip]);
 
   return (
     <div className="relative w-full h-full" role="region" aria-label="Account map visualization">
@@ -145,22 +172,24 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
       </ReactFlow>
 
       {/* Tooltip */}
-      {tooltip && (
+      {tooltip && typeof document !== 'undefined' && createPortal(
         <div
+          ref={tooltipRef}
           className={`fixed z-dropdown glass-surface rounded-lg px-3 py-2 shadow-lg pointer-events-none max-w-[260px] ${
             isMobile ? 'left-4 right-4' : ''
           }`}
           style={
             isMobile
               ? { bottom: 'max(1rem, env(safe-area-inset-bottom, 1rem))' }
-              : { left: tooltip.x, top: tooltip.y }
+              : tooltipStyle
           }
         >
           <div className="sam-type-secondary text-fg-primary font-medium mb-1 truncate">
             {(tooltip.node.data?.label as string) ?? 'Entity'}
           </div>
           <TooltipDetails data={expectJsonRecord(tooltip.node.data, 'account-map.tooltip.node.data')} />
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Keyboard hint — desktop only */}
