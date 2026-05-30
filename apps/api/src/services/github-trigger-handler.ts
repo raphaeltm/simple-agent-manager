@@ -22,8 +22,8 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import {
   evaluateFilters,
-  parseWebhookPayload,
   type GitHubWebhookEvent,
+  parseWebhookPayload,
 } from './github-trigger-filter';
 import { submitTriggeredTask } from './trigger-submit';
 import { renderTemplate } from './trigger-template';

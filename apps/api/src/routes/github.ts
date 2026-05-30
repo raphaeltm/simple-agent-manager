@@ -36,8 +36,8 @@ import {
   summarizeAccessibleInstallations,
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
-import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 import { handleGitHubEventForTriggers } from '../services/github-trigger-handler';
+import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 

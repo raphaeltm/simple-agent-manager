@@ -303,9 +303,14 @@ export {
 
 // Triggers (Event-Driven Agent Triggers)
 export type {
+  CreateGitHubTriggerRequest,
   CreateTriggerRequest,
   CronTemplateContext,
   CronValidationResult,
+  GitHubTemplateContext,
+  GitHubTriggerConfig,
+  GitHubTriggerEventType,
+  GitHubTriggerFilters,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
   Trigger,
@@ -318,11 +323,6 @@ export type {
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
-  GitHubTriggerFilters,
-  GitHubTriggerConfig,
-  GitHubTriggerEventType,
-  CreateGitHubTriggerRequest,
-  GitHubTemplateContext,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,

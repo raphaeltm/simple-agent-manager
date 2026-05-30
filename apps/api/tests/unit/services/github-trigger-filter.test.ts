@@ -1,11 +1,10 @@
-import { describe, expect, it } from 'vitest';
-
 import type { GitHubTriggerFilters } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 import {
   evaluateFilters,
-  parseWebhookPayload,
   type GitHubWebhookEvent,
+  parseWebhookPayload,
 } from '../../../src/services/github-trigger-filter';
 
 // =============================================================================
