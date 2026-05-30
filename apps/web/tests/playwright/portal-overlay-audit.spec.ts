@@ -466,6 +466,51 @@ async function openSharedTooltip(page: Page, screenshotName: string) {
   await assertNoOverflow(page);
 }
 
+async function openCommandPalette(page: Page, screenshotName: string, target: 'window' | 'document') {
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForTimeout(800);
+
+  await page.evaluate((dispatchTarget) => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'k',
+      code: 'KeyK',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    (dispatchTarget === 'window' ? window : document).dispatchEvent(event);
+  }, target);
+
+  await page.waitForTimeout(600);
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+}
+
+async function openOptionalButtonOverlay(
+  page: Page,
+  options: {
+    buttonSelector: string;
+    overlayScreenshotName: string;
+    pageScreenshotName?: string;
+    url: string;
+  }
+) {
+  await page.goto(options.url);
+  await page.waitForTimeout(800);
+  if (options.pageScreenshotName) {
+    await screenshot(page, options.pageScreenshotName);
+  }
+
+  const button = page.locator(options.buttonSelector).first();
+  if (await button.isVisible()) {
+    await button.click();
+    await page.waitForTimeout(400);
+    await screenshot(page, options.overlayScreenshotName);
+  }
+
+  await assertNoOverflow(page);
+}
+
 // ---------------------------------------------------------------------------
 // Tests — Mobile (default viewport from Playwright config)
 // ---------------------------------------------------------------------------
@@ -495,48 +540,11 @@ test.describe('Portal Overlays — Mobile', () => {
   });
 
   test('CommandPalette portal renders above page', async ({ page }) => {
-    // Use triggers page (which renders correctly with our mocks) instead of chat
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    // Dispatch Ctrl+K directly on the window (where useGlobalCommandPalette listens)
-    await page.evaluate(() => {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'k',
-          code: 'KeyK',
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    });
-    await page.waitForTimeout(600);
-    await screenshot(page, 'portal-command-palette-mobile');
-
-    await assertNoOverflow(page);
+    await openCommandPalette(page, 'portal-command-palette-mobile', 'window');
   });
 
   test('GlobalCommandPalette portal renders (keyboard dispatch)', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    // Dispatch Ctrl+K on document (capture phase listener on window)
-    await page.evaluate(() => {
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'k',
-          code: 'KeyK',
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    });
-    await page.waitForTimeout(600);
-    await screenshot(page, 'portal-command-palette-keyboard-mobile');
-
-    await assertNoOverflow(page);
+    await openCommandPalette(page, 'portal-command-palette-keyboard-mobile', 'document');
   });
 
   test('MobileNavDrawer portal renders with backdrop', async ({ page, isMobile }) => {
@@ -580,50 +588,28 @@ test.describe('Portal Overlays — Mobile', () => {
   });
 
   test('TriggerDropdown portal renders positioned correctly', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    // The TriggerDropdown is in the chat sidebar; test it from triggers page
-    // where there may be a clock icon. If not visible, just assert no overflow.
-    const clockBtn = page.locator('button[aria-label="Automation triggers"]').first();
-    if (await clockBtn.isVisible()) {
-      await clockBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-trigger-dropdown-mobile');
-    }
-
-    await assertNoOverflow(page);
+    await openOptionalButtonOverlay(page, {
+      buttonSelector: 'button[aria-label="Automation triggers"]',
+      overlayScreenshotName: 'portal-trigger-dropdown-mobile',
+      url: '/projects/proj-test-1/triggers',
+    });
   });
 
   test('Library page with FileActionsMenu portal', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/library');
-    await page.waitForTimeout(800);
-    await screenshot(page, 'portal-library-page-mobile');
-
-    // Click the actions menu on a file
-    const actionsBtn = page.locator('button[aria-label*="Actions for"]').first();
-    if (await actionsBtn.isVisible()) {
-      await actionsBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-file-actions-menu-mobile');
-    }
-
-    await assertNoOverflow(page);
+    await openOptionalButtonOverlay(page, {
+      buttonSelector: 'button[aria-label*="Actions for"]',
+      overlayScreenshotName: 'portal-file-actions-menu-mobile',
+      pageScreenshotName: 'portal-library-page-mobile',
+      url: '/projects/proj-test-1/library',
+    });
   });
 
   test('Triggers page with TriggerCard context menu', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    // Open the trigger card actions menu
-    const actionsBtn = page.locator('button[aria-label="Trigger actions"]').first();
-    if (await actionsBtn.isVisible()) {
-      await actionsBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-trigger-card-actions-mobile');
-    }
-
-    await assertNoOverflow(page);
+    await openOptionalButtonOverlay(page, {
+      buttonSelector: 'button[aria-label="Trigger actions"]',
+      overlayScreenshotName: 'portal-trigger-card-actions-mobile',
+      url: '/projects/proj-test-1/triggers',
+    });
   });
 
   test('Nodes shared DropdownMenu portal renders with glass surface', async ({ page }) => {
@@ -647,69 +633,33 @@ test.describe('Portal Overlays — Desktop', () => {
   });
 
   test('CommandPalette portal renders centered with backdrop', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    // Dispatch Ctrl+K on window (where useGlobalCommandPalette listens in capture phase)
-    await page.evaluate(() => {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'k',
-          code: 'KeyK',
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    });
-    await page.waitForTimeout(600);
-    await screenshot(page, 'portal-command-palette-desktop');
-
-    await assertNoOverflow(page);
+    await openCommandPalette(page, 'portal-command-palette-desktop', 'window');
   });
 
   test('TriggerDropdown portal positioned below trigger button', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    const clockBtn = page.locator('button[aria-label="Automation triggers"]').first();
-    if (await clockBtn.isVisible()) {
-      await clockBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-trigger-dropdown-desktop');
-    }
-
-    await assertNoOverflow(page);
+    await openOptionalButtonOverlay(page, {
+      buttonSelector: 'button[aria-label="Automation triggers"]',
+      overlayScreenshotName: 'portal-trigger-dropdown-desktop',
+      url: '/projects/proj-test-1/triggers',
+    });
   });
 
   test('TriggerCard context menu portal positioned correctly', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-    await screenshot(page, 'portal-triggers-page-desktop');
-
-    const actionsBtn = page.locator('button[aria-label="Trigger actions"]').first();
-    if (await actionsBtn.isVisible()) {
-      await actionsBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-trigger-card-actions-desktop');
-    }
-
-    await assertNoOverflow(page);
+    await openOptionalButtonOverlay(page, {
+      buttonSelector: 'button[aria-label="Trigger actions"]',
+      overlayScreenshotName: 'portal-trigger-card-actions-desktop',
+      pageScreenshotName: 'portal-triggers-page-desktop',
+      url: '/projects/proj-test-1/triggers',
+    });
   });
 
   test('Library FileActionsMenu portal positioned correctly', async ({ page }) => {
-    await page.goto('/projects/proj-test-1/library');
-    await page.waitForTimeout(800);
-    await screenshot(page, 'portal-library-page-desktop');
-
-    const actionsBtn = page.locator('button[aria-label*="Actions for"]').first();
-    if (await actionsBtn.isVisible()) {
-      await actionsBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-file-actions-menu-desktop');
-    }
-
-    await assertNoOverflow(page);
+    await openOptionalButtonOverlay(page, {
+      buttonSelector: 'button[aria-label*="Actions for"]',
+      overlayScreenshotName: 'portal-file-actions-menu-desktop',
+      pageScreenshotName: 'portal-library-page-desktop',
+      url: '/projects/proj-test-1/library',
+    });
   });
 
   test('Nodes shared DropdownMenu portal positioned correctly', async ({ page }) => {
