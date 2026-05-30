@@ -4,7 +4,7 @@
  *
  * Tests the 23 components converted to createPortal in the portal-ify PR.
  */
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot } from './audit-helpers';
 
@@ -413,6 +413,73 @@ async function setupApiMocks(page: Page) {
   });
 }
 
+async function assertFixedBlurredWithinViewport(locator: Locator) {
+  const overlayInfo = await locator.first().evaluate((overlay) => {
+    const style = window.getComputedStyle(overlay);
+    const rect = overlay.getBoundingClientRect();
+    return {
+      backdropFilter: style.backdropFilter,
+      webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
+      position: style.position,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+    };
+  });
+
+  expect(overlayInfo.position).toBe('fixed');
+  expect(overlayInfo.left).toBeGreaterThanOrEqual(0);
+  expect(overlayInfo.right).toBeLessThanOrEqual(overlayInfo.innerWidth);
+  expect(overlayInfo.top).toBeGreaterThanOrEqual(0);
+  expect(overlayInfo.bottom).toBeLessThanOrEqual(overlayInfo.innerHeight);
+  expect(overlayInfo.scrollWidth).toBeLessThanOrEqual(overlayInfo.innerWidth);
+  expect(`${overlayInfo.backdropFilter} ${overlayInfo.webkitBackdropFilter}`).toContain('blur');
+}
+
+async function assertAlignedToTriggerEnd(trigger: Locator, overlay: Locator) {
+  const triggerBox = await trigger.boundingBox();
+  const overlayBox = await overlay.first().boundingBox();
+  if (!triggerBox || !overlayBox) {
+    throw new Error('Expected trigger and overlay boxes to be measurable');
+  }
+  expect(Math.abs((overlayBox.x + overlayBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThanOrEqual(24);
+}
+
+async function openNodeDropdown(page: Page, screenshotName: string) {
+  await page.goto('/nodes');
+  await page.waitForTimeout(800);
+
+  const actionsBtn = page.locator('button[aria-label*="Actions for portal-node"]').first();
+  await expect(actionsBtn).toBeVisible();
+  await actionsBtn.click();
+  await page.waitForTimeout(400);
+  await screenshot(page, screenshotName);
+
+  const menu = page.locator('body > [role="menu"]').first();
+  await assertFixedBlurredWithinViewport(menu);
+  await assertAlignedToTriggerEnd(actionsBtn, menu);
+  await assertNoOverflow(page);
+}
+
+async function openSharedTooltip(page: Page, screenshotName: string) {
+  await page.goto('/ui-standards');
+  await page.waitForTimeout(800);
+
+  const tooltipTrigger = page.getByRole('button', { name: 'Instant' });
+  await tooltipTrigger.scrollIntoViewIfNeeded();
+  await tooltipTrigger.focus();
+
+  const tooltip = page.locator('body > [role="tooltip"]').first();
+  await expect(tooltip).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertFixedBlurredWithinViewport(tooltip);
+  await assertNoOverflow(page);
+}
+
 // ---------------------------------------------------------------------------
 // Tests — Mobile (default viewport from Playwright config)
 // ---------------------------------------------------------------------------
@@ -574,76 +641,11 @@ test.describe('Portal Overlays — Mobile', () => {
   });
 
   test('Nodes shared DropdownMenu portal renders with glass surface', async ({ page }) => {
-    await page.goto('/nodes');
-    await page.waitForTimeout(800);
-
-    const actionsBtn = page.locator('button[aria-label*="Actions for portal-node"]').first();
-    await expect(actionsBtn).toBeVisible();
-    await actionsBtn.click();
-    await page.waitForTimeout(400);
-    await screenshot(page, 'portal-node-dropdown-menu-mobile');
-
-    const menuInfo = await page
-      .locator('body > [role="menu"]')
-      .first()
-      .evaluate((menu) => {
-        const style = window.getComputedStyle(menu);
-        return {
-          backdropFilter: style.backdropFilter,
-          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
-          position: style.position,
-          scrollWidth: document.documentElement.scrollWidth,
-          innerWidth: window.innerWidth,
-          top: menu.getBoundingClientRect().top,
-          bottom: menu.getBoundingClientRect().bottom,
-          innerHeight: window.innerHeight,
-        };
-      });
-    expect(menuInfo.position).toBe('fixed');
-    expect(menuInfo.scrollWidth).toBeLessThanOrEqual(menuInfo.innerWidth);
-    expect(menuInfo.top).toBeGreaterThanOrEqual(0);
-    expect(menuInfo.bottom).toBeLessThanOrEqual(menuInfo.innerHeight);
-    expect(`${menuInfo.backdropFilter} ${menuInfo.webkitBackdropFilter}`).toContain('blur');
-
-    const triggerBox = await actionsBtn.boundingBox();
-    const menuBox = await page.locator('body > [role="menu"]').first().boundingBox();
-    if (!triggerBox || !menuBox) throw new Error('Expected trigger and menu boxes to be measurable');
-    expect(Math.abs((menuBox.x + menuBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThanOrEqual(24);
-
-    await assertNoOverflow(page);
+    await openNodeDropdown(page, 'portal-node-dropdown-menu-mobile');
   });
 
   test('Shared Tooltip portal renders with blurred surface', async ({ page }) => {
-    await page.goto('/ui-standards');
-    await page.waitForTimeout(800);
-
-    const tooltipTrigger = page.getByRole('button', { name: 'Instant' });
-    await tooltipTrigger.scrollIntoViewIfNeeded();
-    await tooltipTrigger.focus();
-    await expect(page.locator('body > [role="tooltip"]').first()).toBeVisible();
-    await screenshot(page, 'portal-shared-tooltip-mobile');
-
-    const tooltipInfo = await page
-      .locator('body > [role="tooltip"]')
-      .first()
-      .evaluate((tooltip) => {
-        const style = window.getComputedStyle(tooltip);
-        const rect = tooltip.getBoundingClientRect();
-        return {
-          backdropFilter: style.backdropFilter,
-          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
-          position: style.position,
-          left: rect.left,
-          right: rect.right,
-          innerWidth: window.innerWidth,
-        };
-      });
-    expect(tooltipInfo.position).toBe('fixed');
-    expect(tooltipInfo.left).toBeGreaterThanOrEqual(0);
-    expect(tooltipInfo.right).toBeLessThanOrEqual(tooltipInfo.innerWidth);
-    expect(`${tooltipInfo.backdropFilter} ${tooltipInfo.webkitBackdropFilter}`).toContain('blur');
-
-    await assertNoOverflow(page);
+    await openSharedTooltip(page, 'portal-shared-tooltip-mobile');
   });
 });
 
@@ -725,79 +727,11 @@ test.describe('Portal Overlays — Desktop', () => {
   });
 
   test('Nodes shared DropdownMenu portal positioned correctly', async ({ page }) => {
-    await page.goto('/nodes');
-    await page.waitForTimeout(800);
-
-    const actionsBtn = page.locator('button[aria-label*="Actions for portal-node"]').first();
-    await expect(actionsBtn).toBeVisible();
-    await actionsBtn.click();
-    await page.waitForTimeout(400);
-    await screenshot(page, 'portal-node-dropdown-menu-desktop');
-
-    const menuInfo = await page
-      .locator('body > [role="menu"]')
-      .first()
-      .evaluate((menu) => {
-        const style = window.getComputedStyle(menu);
-        const rect = menu.getBoundingClientRect();
-        return {
-          backdropFilter: style.backdropFilter,
-          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
-          position: style.position,
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-          innerWidth: window.innerWidth,
-          innerHeight: window.innerHeight,
-        };
-      });
-    expect(menuInfo.position).toBe('fixed');
-    expect(menuInfo.left).toBeGreaterThanOrEqual(0);
-    expect(menuInfo.right).toBeLessThanOrEqual(menuInfo.innerWidth);
-    expect(menuInfo.top).toBeGreaterThanOrEqual(0);
-    expect(menuInfo.bottom).toBeLessThanOrEqual(menuInfo.innerHeight);
-    expect(`${menuInfo.backdropFilter} ${menuInfo.webkitBackdropFilter}`).toContain('blur');
-
-    const triggerBox = await actionsBtn.boundingBox();
-    const menuBox = await page.locator('body > [role="menu"]').first().boundingBox();
-    if (!triggerBox || !menuBox) throw new Error('Expected trigger and menu boxes to be measurable');
-    expect(Math.abs((menuBox.x + menuBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThanOrEqual(24);
-
-    await assertNoOverflow(page);
+    await openNodeDropdown(page, 'portal-node-dropdown-menu-desktop');
   });
 
   test('Shared Tooltip portal renders with blurred surface', async ({ page }) => {
-    await page.goto('/ui-standards');
-    await page.waitForTimeout(800);
-
-    const tooltipTrigger = page.getByRole('button', { name: 'Instant' });
-    await tooltipTrigger.scrollIntoViewIfNeeded();
-    await tooltipTrigger.focus();
-    await expect(page.locator('body > [role="tooltip"]').first()).toBeVisible();
-    await screenshot(page, 'portal-shared-tooltip-desktop');
-
-    const tooltipInfo = await page
-      .locator('body > [role="tooltip"]')
-      .first()
-      .evaluate((tooltip) => {
-        const style = window.getComputedStyle(tooltip);
-        const rect = tooltip.getBoundingClientRect();
-        return {
-          backdropFilter: style.backdropFilter,
-          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
-          position: style.position,
-          left: rect.left,
-          right: rect.right,
-          innerWidth: window.innerWidth,
-        };
-      });
-    expect(tooltipInfo.position).toBe('fixed');
-    expect(tooltipInfo.left).toBeGreaterThanOrEqual(0);
-    expect(tooltipInfo.right).toBeLessThanOrEqual(tooltipInfo.innerWidth);
-    expect(`${tooltipInfo.backdropFilter} ${tooltipInfo.webkitBackdropFilter}`).toContain('blur');
-
-    await assertNoOverflow(page);
+    await openSharedTooltip(page, 'portal-shared-tooltip-desktop');
   });
 
   test('Account map hover tooltip portal renders with blurred surface', async ({ page }) => {
@@ -810,31 +744,9 @@ test.describe('Portal Overlays — Desktop', () => {
     await page.waitForTimeout(400);
     await screenshot(page, 'portal-account-map-tooltip-desktop');
 
-    const tooltipInfo = await page
-      .locator('body > .glass-surface')
-      .filter({ hasText: 'Portal Test Project' })
-      .first()
-      .evaluate((tooltip) => {
-        const style = window.getComputedStyle(tooltip);
-        const rect = tooltip.getBoundingClientRect();
-        return {
-          backdropFilter: style.backdropFilter,
-          webkitBackdropFilter: style.getPropertyValue('-webkit-backdrop-filter'),
-          position: style.position,
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-          innerWidth: window.innerWidth,
-          innerHeight: window.innerHeight,
-        };
-      });
-    expect(tooltipInfo.position).toBe('fixed');
-    expect(tooltipInfo.left).toBeGreaterThanOrEqual(0);
-    expect(tooltipInfo.right).toBeLessThanOrEqual(tooltipInfo.innerWidth);
-    expect(tooltipInfo.top).toBeGreaterThanOrEqual(0);
-    expect(tooltipInfo.bottom).toBeLessThanOrEqual(tooltipInfo.innerHeight);
-    expect(`${tooltipInfo.backdropFilter} ${tooltipInfo.webkitBackdropFilter}`).toContain('blur');
+    await assertFixedBlurredWithinViewport(
+      page.locator('body > .glass-surface').filter({ hasText: 'Portal Test Project' })
+    );
 
     await assertNoOverflow(page);
   });
