@@ -1,5 +1,7 @@
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 export const CreateAgentProfileSchema = v.object({
   name: v.string(),
   description: v.optional(v.nullable(v.string())),
@@ -15,6 +17,7 @@ export const CreateAgentProfileSchema = v.object({
   workspaceProfile: v.optional(v.nullable(v.string())),
   devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const UpdateAgentProfileSchema = v.object({
@@ -32,6 +35,7 @@ export const UpdateAgentProfileSchema = v.object({
   workspaceProfile: v.optional(v.nullable(v.string())),
   devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const SetProjectDefaultProfileSchema = v.object({

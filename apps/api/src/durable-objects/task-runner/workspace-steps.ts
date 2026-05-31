@@ -151,6 +151,12 @@ async function createAndProvisionWorkspace(
     vmLocation: state.config.vmLocation,
     workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: state.config.devcontainerConfigName ?? null,
+    resourceRequirementsJson: state.config.resourceRequirements
+      ? JSON.stringify(state.config.resourceRequirements)
+      : null,
+    resolvedReservationJson: state.config.resolvedReservation
+      ? JSON.stringify(state.config.resolvedReservation)
+      : null,
     createdAt: now,
     updatedAt: now,
   });

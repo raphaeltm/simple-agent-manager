@@ -10,16 +10,18 @@ import type { VMSize } from './workspace';
  * chain (task > trigger > agent-profile > project > platform).
  */
 export interface ResourceRequirements {
-  /** Minimum vCPU count (maps to VM size). */
+  /** Minimum vCPU reservation. Scheduling intent only; not a runtime guarantee. */
   minVcpu?: number;
-  /** Minimum memory in GB. */
-  minMemoryGb?: number;
-  /** Minimum disk in GB. */
-  minDiskGb?: number;
+  /** Minimum memory reservation in MB. Scheduling intent only; not a runtime guarantee. */
+  minMemoryMb?: number;
+  /** Minimum disk reservation in MB. Scheduling intent only; not a runtime guarantee. */
+  minDiskMb?: number;
   /** If true, the task must have a node to itself (no co-tenants). */
   exclusiveNode?: boolean;
   /** Maximum number of workspaces sharing a node (1 = exclusive). */
   maxCoTenants?: number;
+  /** Optional named preset used by UI/API clients for provenance. */
+  preset?: string | null;
 }
 
 // =============================================================================
@@ -54,10 +56,14 @@ export interface ResolvedResourceReservation {
   exclusiveNode: boolean;
   /** Max co-tenants allowed on the same node. */
   maxCoTenants: number;
+  /** Concrete user-facing requirements after inheritance. */
+  requirements: Required<Omit<ResourceRequirements, 'preset'>> & { preset: string | null };
   /** Which level in the precedence chain provided the requirements. */
   source: ResourceRequirementsSource;
   /** ID of the source entity (profile ID, project ID, 'platform', etc.). */
   sourceId: string;
+  /** Per-field provenance for inherited requirements. */
+  fieldSources: Record<keyof Omit<ResourceRequirements, 'preset'> | 'preset', ResourceRequirementsSource>;
   /** Schema version for forward compatibility. */
   version: number;
 }

@@ -1,3 +1,5 @@
+import type { ResourceRequirements } from './resource';
+
 // =============================================================================
 // Agent Settings (per-user, per-agent configuration)
 // =============================================================================
@@ -181,6 +183,7 @@ export interface AgentProfile {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  resourceRequirements: ResourceRequirements | null;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -203,6 +206,7 @@ export interface CreateAgentProfileRequest {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
+  resourceRequirements?: ResourceRequirements | null;
 }
 
 /** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
@@ -222,6 +226,7 @@ export interface UpdateAgentProfileRequest {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
+  resourceRequirements?: ResourceRequirements | null;
 }
 
 /** Resolved agent profile for task execution */
@@ -241,4 +246,5 @@ export interface ResolvedAgentProfile {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  resourceRequirements: ResourceRequirements | null;
 }

@@ -11,13 +11,14 @@
  */
 import type {
   CredentialProvider,
+  ResourceRequirements,
   SubmitTaskResponse,
   TaskAttachment,
   VMLocation,
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider, MAX_CONTEXT_SUMMARY_BYTES, resolveResourceReservation, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, getLocationsForProvider, isValidLocationForProvider, MAX_CONTEXT_SUMMARY_BYTES, SAFE_FILENAME_REGEX, validateResourceRequirements } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -27,7 +28,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
-import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
@@ -38,11 +39,19 @@ import { enrichMessageWithMentions } from '../../services/mention-enrichment';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from '../../services/task-start-audit';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
 const submitRoutes = new Hono<{ Bindings: Env }>();
+
+function validateSubmitResourceRequirements(value: ResourceRequirements | undefined): void {
+  const result = validateResourceRequirements(value);
+  if (!result.valid) {
+    throw errors.badRequest(`Invalid resourceRequirements: ${result.errors.join('; ')}`);
+  }
+}
 
 // Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
@@ -78,6 +87,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
   }
   // vmSize, workspaceProfile validated by schema (picklist)
   // vmLocation validated as string by schema
+  validateSubmitResourceRequirements(body.resourceRequirements);
 
   // Validate contextSummary size if provided
   if (body.contextSummary) {
@@ -172,39 +182,43 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     ? await resolveAgentProfile(db, projectId, body.agentProfileId, userId, c.env)
     : null;
 
-  // Determine VM config (with profile overrides in the middle of the precedence chain)
-  // Track which level provided the VM size for audit
-  const vmSizeSource = body.vmSize ? 'task' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const vmSize: VMSize = body.vmSize
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-  // Determine cloud provider: explicit override > profile > project default > null (system picks)
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const provider: CredentialProvider | null = body.provider
-    ?? profileProvider
-    ?? projectDefaultProvider
-    ?? null;
-  // Location resolution: explicit > profile > project default > provider default > platform default
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
+  const audit = resolveTaskStartAudit({
+    taskId,
+    agentProfileId: resolvedProfile?.profileId ?? null,
+    projectId,
+    userId,
+    explicit: {
+      vmSize: body.vmSize ?? null,
+      provider: body.provider ?? null,
+      vmLocation: body.vmLocation as VMLocation | null,
+      workspaceProfile: body.workspaceProfile ?? null,
+      taskMode: body.taskMode ?? null,
+      resourceRequirements: body.resourceRequirements ?? null,
+    },
+    agentProfile: {
+      vmSize: resolvedProfile?.vmSizeOverride ?? null,
+      provider: resolvedProfile?.provider ?? null,
+      vmLocation: resolvedProfile?.vmLocation ?? null,
+      workspaceProfile: resolvedProfile?.workspaceProfile ?? null,
+      taskMode: resolvedProfile?.taskMode ?? null,
+      resourceRequirements: resolvedProfile?.resourceRequirements ?? null,
+    },
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: project.defaultProvider as CredentialProvider | null,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'workspace-profile',
+  });
+  const vmSize = audit.vmSize;
+  const vmSizeSource = audit.vmSizeSource;
+  const provider = audit.provider;
+  const vmLocation = audit.vmLocation;
+  const workspaceProfile = audit.workspaceProfile;
+  const taskMode = audit.taskMode;
+  const resolvedReservation = audit.resources.resolvedReservation;
 
   // Devcontainer config name resolution: explicit > profile > project default > null (auto-discover).
   // Only meaningful when workspaceProfile is 'full' — lightweight skips devcontainer build entirely.
@@ -214,23 +228,6 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       ?? resolvedProfile?.devcontainerConfigName
       ?? project.defaultDevcontainerConfigName
       ?? null);
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  // Resolve using the same precedence chain: task > profile > project > platform.
-  // The resolved reservation is persisted for observability but does NOT affect placement.
-  const resolvedReservation = resolveResourceReservation(
-    {
-      task: body.resourceRequirements,
-      // Agent profile, project, and user-level resource requirements are future additions.
-      // For Phase 0, only task-level explicit requirements are supported.
-    },
-    {
-      taskId,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId,
-      userId,
-    },
-  );
 
   if (provider !== null && !CREDENTIAL_PROVIDERS.includes(provider)) {
     throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
@@ -269,11 +266,6 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     }
   }
 
-  // Determine task mode: explicit override > profile > inferred from workspace profile > default 'task'
-  const taskMode = body.taskMode
-    ?? (resolvedProfile?.taskMode as import('@simple-agent-manager/shared').TaskMode | null)
-    ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
-
   // Always clone from the project's default branch. Forked tasks get parent
   // context via contextSummary — the parent's output branch may not exist on
   // the remote (agent may not have pushed, or branch was deleted).
@@ -303,9 +295,17 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     outputBranch: branchName,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
-    resourceRequirementsJson: body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null,
-    resourceRequirementsSource: resolvedReservation.source,
-    resolvedReservationJson: JSON.stringify(resolvedReservation),
+    requestedProvider: provider,
+    requestedProviderSource: audit.providerSource,
+    requestedVmLocation: vmLocation,
+    requestedVmLocationSource: audit.vmLocationSource,
+    requestedWorkspaceProfile: workspaceProfile,
+    requestedWorkspaceProfileSource: audit.workspaceProfileSource,
+    requestedTaskMode: taskMode,
+    requestedTaskModeSource: audit.taskModeSource,
+    resourceRequirementsJson: audit.resources.resourceRequirementsJson,
+    resourceRequirementsSource: audit.resources.resourceRequirementsSource,
+    resolvedReservationJson: audit.resources.resolvedReservationJson,
     createdBy: userId,
     createdAt: now,
     updatedAt: now,
@@ -475,7 +475,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
-      resourceRequirements: body.resourceRequirements ?? null,
+      resourceRequirements: audit.resources.resourceRequirements,
       resolvedReservation,
       vmSizeSource,
     });

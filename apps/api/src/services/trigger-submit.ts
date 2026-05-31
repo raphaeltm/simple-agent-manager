@@ -8,18 +8,11 @@
  */
 import type {
   CredentialProvider,
+  ResourceRequirements,
   TaskMode,
   VMLocation,
   VMSize,
   WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -32,6 +25,7 @@ import { resolveAgentProfile } from './agent-profiles';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
 import { startTaskRunnerDO } from './task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from './task-start-audit';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
 
 export interface SubmitTriggeredTaskInput {
@@ -53,6 +47,8 @@ export interface SubmitTriggeredTaskInput {
   taskMode: TaskMode;
   /** VM size override from trigger config. */
   vmSizeOverride: string | null;
+  /** Trigger-level resource requirement override from trigger config. */
+  resourceRequirements?: ResourceRequirements | null;
   /** Trigger name (for branch naming). */
   triggerName: string;
 }
@@ -105,48 +101,45 @@ export async function submitTriggeredTask(
     ? await resolveAgentProfile(db, input.projectId, input.agentProfileId, input.userId, env)
     : null;
 
-  // VM config precedence: trigger override → profile → project default → platform default
-  const vmSizeSource = input.vmSizeOverride ? 'trigger' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const vmSize: VMSize = (input.vmSizeOverride as VMSize | null)
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const provider: CredentialProvider | null =
-    profileProvider
-    ?? projectDefaultProvider
-    ?? null;
-
-  const vmLocation: VMLocation =
-    (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null)
-    ?? DEFAULT_VM_LOCATION;
-
-  const workspaceProfile: WorkspaceProfile =
-    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  const taskMode: TaskMode = input.taskMode
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  const taskId = ulid();
+  const audit = resolveTaskStartAudit({
+    taskId,
+    triggerId: input.triggerId,
+    agentProfileId: resolvedProfile?.profileId ?? null,
+    projectId: input.projectId,
+    userId: input.userId,
+    trigger: {
+      vmSize: input.vmSizeOverride as VMSize | null,
+      taskMode: input.taskMode,
+      resourceRequirements: input.resourceRequirements,
+    },
+    agentProfile: {
+      vmSize: resolvedProfile?.vmSizeOverride ?? null,
+      provider: resolvedProfile?.provider ?? null,
+      vmLocation: resolvedProfile?.vmLocation ?? null,
+      workspaceProfile: resolvedProfile?.workspaceProfile ?? null,
+      taskMode: resolvedProfile?.taskMode ?? null,
+      resourceRequirements: resolvedProfile?.resourceRequirements ?? null,
+    },
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: project.defaultProvider as CredentialProvider | null,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'workspace-profile',
+  });
+  const vmSize = audit.vmSize;
+  const vmSizeSource = audit.vmSizeSource;
+  const provider = audit.provider;
+  const vmLocation = audit.vmLocation;
+  const workspaceProfile = audit.workspaceProfile;
+  const taskMode = audit.taskMode;
 
   // Generate branch name from trigger name + date
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
-  const taskId = ulid();
   const branchName = generateBranchName(input.triggerName, taskId, {
     prefix: branchPrefix,
     maxLength: branchMaxLength,
@@ -156,20 +149,7 @@ export async function submitTriggeredTask(
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, input.renderedPrompt, titleConfig);
 
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {
-      // Trigger-level resource requirements are a future addition.
-      // For Phase 0, only platform defaults apply for trigger-submitted tasks.
-    },
-    {
-      taskId,
-      triggerId: input.triggerId,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: input.projectId,
-      userId: input.userId,
-    },
-  );
+  const resolvedReservation = audit.resources.resolvedReservation;
 
   const now = new Date().toISOString();
 
@@ -191,7 +171,17 @@ export async function submitTriggeredTask(
     triggerExecutionId: input.triggerExecutionId,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
-    resolvedReservationJson: JSON.stringify(resolvedReservation),
+    requestedProvider: provider,
+    requestedProviderSource: audit.providerSource,
+    requestedVmLocation: vmLocation,
+    requestedVmLocationSource: audit.vmLocationSource,
+    requestedWorkspaceProfile: workspaceProfile,
+    requestedWorkspaceProfileSource: audit.workspaceProfileSource,
+    requestedTaskMode: taskMode,
+    requestedTaskModeSource: audit.taskModeSource,
+    resourceRequirementsJson: audit.resources.resourceRequirementsJson,
+    resourceRequirementsSource: audit.resources.resourceRequirementsSource,
+    resolvedReservationJson: audit.resources.resolvedReservationJson,
     createdBy: input.userId,
     createdAt: now,
     updatedAt: now,
@@ -293,6 +283,7 @@ export async function submitTriggeredTask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: audit.resources.resourceRequirements,
       resolvedReservation,
       vmSizeSource,
     });

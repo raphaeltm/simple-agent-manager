@@ -1,6 +1,7 @@
 import type { AgentType } from '../agents';
 import type { ActivityEvent } from './activity';
 import type { AgentPermissionMode } from './agent-settings';
+import type { ResourceRequirements } from './resource';
 import type { ChatSession } from './session';
 import type { TaskStatus } from './task';
 import type { CredentialProvider } from './user';
@@ -49,6 +50,7 @@ export interface Project {
   defaultDevcontainerConfigName?: string | null;
   defaultProvider?: CredentialProvider | null;
   defaultLocation?: string | null;
+  defaultResourceRequirements?: ResourceRequirements | null;
   /** Per-agent-type model + permission mode overrides.
    *  Resolution chain: task explicit > agent profile > project.agentDefaults[agentType] > user agent_settings > platform default. */
   agentDefaults?: ProjectAgentDefaults | null;
@@ -124,6 +126,7 @@ export interface UpdateProjectRequest {
   defaultDevcontainerConfigName?: string | null;
   defaultProvider?: CredentialProvider | null;
   defaultLocation?: string | null;
+  defaultResourceRequirements?: ResourceRequirements | null;
   /** Per-agent-type model + permission mode overrides.
    *  null = clear all project-level agent defaults. */
   agentDefaults?: ProjectAgentDefaults | null;

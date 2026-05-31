@@ -102,6 +102,22 @@ export interface Task {
   requestedVmSize: string | null;
   /** Where the VM size came from in the precedence chain. */
   requestedVmSizeSource: ResourceRequirementsSource | 'explicit' | null;
+  /** Resolved provider requested for audit. Null means provider was selected by credential resolution. */
+  requestedProvider: string | null;
+  /** Where the provider came from in the precedence chain. */
+  requestedProviderSource: ResourceRequirementsSource | 'explicit' | null;
+  /** Resolved VM location requested for audit. */
+  requestedVmLocation: string | null;
+  /** Where the VM location came from in the precedence chain. */
+  requestedVmLocationSource: ResourceRequirementsSource | 'explicit' | null;
+  /** Resolved workspace profile requested for audit. */
+  requestedWorkspaceProfile: string | null;
+  /** Where the workspace profile came from in the precedence chain. */
+  requestedWorkspaceProfileSource: ResourceRequirementsSource | 'explicit' | null;
+  /** Resolved task mode requested for audit. */
+  requestedTaskMode: TaskMode | null;
+  /** Where the task mode came from in the precedence chain. */
+  requestedTaskModeSource: ResourceRequirementsSource | 'explicit' | null;
   /** JSON snapshot of the resolved ResourceRequirements. */
   resourceRequirementsJson: string | null;
   /** Which precedence level provided the resource requirements. */

@@ -13,6 +13,25 @@ import type { VMSize } from '../types/workspace';
 /** Current schema version for ResolvedResourceReservation. Bump when fields change. */
 export const RESOURCE_RESERVATION_VERSION = 1;
 
+const RESOURCE_REQUIREMENT_FIELDS = [
+  'minVcpu',
+  'minMemoryMb',
+  'minDiskMb',
+  'exclusiveNode',
+  'maxCoTenants',
+  'preset',
+] as const;
+
+type RequirementField = (typeof RESOURCE_REQUIREMENT_FIELDS)[number];
+type NumericRequirementField = 'minVcpu' | 'minMemoryMb' | 'minDiskMb' | 'maxCoTenants';
+
+export const RESOURCE_REQUIREMENT_LIMITS: Record<NumericRequirementField, { min: number; max: number }> = {
+  minVcpu: { min: 1, max: 256 },
+  minMemoryMb: { min: 128, max: 2_097_152 },
+  minDiskMb: { min: 1_024, max: 10_485_760 },
+  maxCoTenants: { min: 1, max: 1_000 },
+};
+
 // =============================================================================
 // Platform Defaults (bottom of the precedence chain)
 // =============================================================================
@@ -20,10 +39,11 @@ export const RESOURCE_RESERVATION_VERSION = 1;
 /** Platform default resource requirements — used when no layer specifies a value. */
 export const PLATFORM_RESOURCE_DEFAULTS: Required<ResourceRequirements> = {
   minVcpu: 2,
-  minMemoryGb: 4,
-  minDiskGb: 40,
+  minMemoryMb: 4 * 1024,
+  minDiskMb: 40 * 1024,
   exclusiveNode: false,
   maxCoTenants: 4,
+  preset: 'platform-default',
 };
 
 // =============================================================================
@@ -36,13 +56,15 @@ export interface VmCapacity {
   storageGb: number;
 }
 
+const HETZNER_VM_CAPACITY: Record<VMSize, VmCapacity> = {
+  small: { vcpu: 2, ramGb: 4, storageGb: 40 },
+  medium: { vcpu: 4, ramGb: 8, storageGb: 80 },
+  large: { vcpu: 8, ramGb: 16, storageGb: 160 },
+};
+
 /** Full capacity per VM size per provider. */
 export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> = {
-  hetzner: {
-    small: { vcpu: 2, ramGb: 4, storageGb: 40 },
-    medium: { vcpu: 4, ramGb: 8, storageGb: 80 },
-    large: { vcpu: 8, ramGb: 16, storageGb: 160 },
-  },
+  hetzner: HETZNER_VM_CAPACITY,
   scaleway: {
     small: { vcpu: 3, ramGb: 4, storageGb: 40 },
     medium: { vcpu: 4, ramGb: 12, storageGb: 120 },
@@ -56,8 +78,7 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> = 
 };
 
 /** Default capacity when provider is unknown. Uses Hetzner as baseline. */
-export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> =
-  PROVIDER_VM_CAPACITY['hetzner']!;
+export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> = HETZNER_VM_CAPACITY;
 
 // =============================================================================
 // VM Size Selection from Resource Requirements
@@ -68,7 +89,7 @@ export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> =
  * them for the given provider. Returns 'large' if nothing fits (best-effort).
  */
 export function selectVmSizeForRequirements(
-  requirements: Required<ResourceRequirements>,
+  requirements: Required<Omit<ResourceRequirements, 'preset'>> & { preset?: string | null },
   provider: string = 'hetzner',
 ): VMSize {
   const capacities = PROVIDER_VM_CAPACITY[provider] ?? DEFAULT_VM_CAPACITY;
@@ -78,8 +99,8 @@ export function selectVmSizeForRequirements(
     const cap = capacities[size];
     if (
       cap.vcpu >= requirements.minVcpu &&
-      cap.ramGb >= requirements.minMemoryGb &&
-      cap.storageGb >= requirements.minDiskGb
+      cap.ramGb * 1024 >= requirements.minMemoryMb &&
+      cap.storageGb * 1024 >= requirements.minDiskMb
     ) {
       return size;
     }
@@ -89,7 +110,7 @@ export function selectVmSizeForRequirements(
 }
 
 // =============================================================================
-// Resolver: ResourceRequirements → ResolvedResourceReservation
+// Validation and Resolver: ResourceRequirements → ResolvedResourceReservation
 // =============================================================================
 
 interface ResolutionLayer {
@@ -98,7 +119,64 @@ interface ResolutionLayer {
   requirements?: ResourceRequirements;
 }
 
-type RequirementField = keyof ResourceRequirements;
+export interface ResourceRequirementsValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validatePositiveInteger(
+  requirements: Record<string, unknown>,
+  field: NumericRequirementField,
+  errors: string[],
+): void {
+  const value = requirements[field];
+  if (value === undefined) return;
+  const limits = RESOURCE_REQUIREMENT_LIMITS[field];
+  if (!Number.isInteger(value) || (value as number) < limits.min || (value as number) > limits.max) {
+    errors.push(`${field} must be an integer between ${limits.min} and ${limits.max}`);
+  }
+}
+
+export function validateResourceRequirements(value: unknown): ResourceRequirementsValidationResult {
+  if (value === undefined || value === null) {
+    return { valid: true, errors: [] };
+  }
+  if (!isRecord(value)) {
+    return { valid: false, errors: ['resource requirements must be an object'] };
+  }
+
+  const errors: string[] = [];
+  for (const key of Object.keys(value)) {
+    if (!(RESOURCE_REQUIREMENT_FIELDS as readonly string[]).includes(key)) {
+      errors.push(`${key} is not a supported resource requirement field`);
+    }
+  }
+
+  validatePositiveInteger(value, 'minVcpu', errors);
+  validatePositiveInteger(value, 'minMemoryMb', errors);
+  validatePositiveInteger(value, 'minDiskMb', errors);
+  validatePositiveInteger(value, 'maxCoTenants', errors);
+
+  if (value.exclusiveNode !== undefined && typeof value.exclusiveNode !== 'boolean') {
+    errors.push('exclusiveNode must be a boolean');
+  }
+  if (value.preset !== undefined && (typeof value.preset !== 'string' || value.preset.trim().length === 0)) {
+    errors.push('preset must be a non-empty string');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function assertValidResourceRequirements(value: unknown): asserts value is ResourceRequirements {
+  const result = validateResourceRequirements(value);
+  if (!result.valid) {
+    throw new Error(result.errors.join('; '));
+  }
+}
 
 /**
  * Resolve resource requirements from the precedence chain.
@@ -126,12 +204,19 @@ export function resolveResourceReservation(
     { source: 'user', sourceId: ids.userId ?? '', requirements: input.user },
   ];
 
-  const fields: RequirementField[] = [
-    'minVcpu', 'minMemoryGb', 'minDiskGb', 'exclusiveNode', 'maxCoTenants',
-  ];
+  const validationErrors = layers.flatMap((layer) => {
+    const result = validateResourceRequirements(layer.requirements);
+    return result.valid ? [] : result.errors.map((error) => `${layer.source}: ${error}`);
+  });
+  if (validationErrors.length > 0) {
+    throw new Error(`Invalid resource requirements: ${validationErrors.join('; ')}`);
+  }
+
+  const fields: RequirementField[] = [...RESOURCE_REQUIREMENT_FIELDS];
 
   const resolved: Record<string, unknown> = {};
   const seen = new Set<RequirementField>();
+  const fieldSources = {} as ResolvedResourceReservation['fieldSources'];
   let winningSource: ResourceRequirementsSource = 'platform';
   let winningSourceId = 'platform';
   let firstWinnerFound = false;
@@ -146,6 +231,7 @@ export function resolveResourceReservation(
       if (req[field] !== undefined) {
         resolved[field] = req[field];
         seen.add(field);
+        fieldSources[field] = layer.source;
         layerContributed = true;
       }
     }
@@ -161,21 +247,31 @@ export function resolveResourceReservation(
   for (const field of fields) {
     if (!seen.has(field)) {
       resolved[field] = PLATFORM_RESOURCE_DEFAULTS[field];
+      fieldSources[field] = 'platform';
     }
   }
 
   const minVcpu = resolved['minVcpu'] as number;
-  const minMemoryGb = resolved['minMemoryGb'] as number;
-  const minDiskGb = resolved['minDiskGb'] as number;
+  const minMemoryMb = resolved['minMemoryMb'] as number;
+  const minDiskMb = resolved['minDiskMb'] as number;
 
   return {
     cpuMillis: minVcpu * 1000,
-    memoryMb: minMemoryGb * 1024,
-    diskMb: minDiskGb * 1024,
+    memoryMb: minMemoryMb,
+    diskMb: minDiskMb,
     exclusiveNode: resolved['exclusiveNode'] as boolean,
     maxCoTenants: resolved['maxCoTenants'] as number,
+    requirements: {
+      minVcpu,
+      minMemoryMb,
+      minDiskMb,
+      exclusiveNode: resolved['exclusiveNode'] as boolean,
+      maxCoTenants: resolved['maxCoTenants'] as number,
+      preset: resolved['preset'] as string | null,
+    },
     source: winningSource,
     sourceId: winningSourceId,
+    fieldSources,
     version: RESOURCE_RESERVATION_VERSION,
   };
 }

@@ -1,6 +1,8 @@
 import { DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
@@ -37,15 +39,6 @@ const DevcontainerConfigNameSchema = v.pipe(
   v.regex(DEVCONTAINER_CONFIG_NAME_REGEX, 'Config name must be alphanumeric with hyphens/underscores'),
   v.maxLength(DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`),
 );
-
-/** Resource requirements — all optional, unset fields inherit from precedence chain. */
-const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.number()),
-  minMemoryGb: v.optional(v.number()),
-  minDiskGb: v.optional(v.number()),
-  exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.number()),
-});
 
 export const SubmitTaskSchema = v.object({
   message: v.string(),

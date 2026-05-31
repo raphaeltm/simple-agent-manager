@@ -1,5 +1,7 @@
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github']);
 const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
@@ -33,6 +35,7 @@ export const CreateTriggerSchema = v.object({
   agentProfileId: v.optional(v.string()),
   taskMode: v.optional(TaskModeSchema),
   vmSizeOverride: v.optional(VMSizeSchema),
+  resourceRequirements: v.optional(ResourceRequirementsSchema),
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
 });
@@ -48,5 +51,6 @@ export const UpdateTriggerSchema = v.object({
   agentProfileId: v.optional(v.nullable(v.string())),
   taskMode: v.optional(TaskModeSchema),
   vmSizeOverride: v.optional(v.nullable(VMSizeSchema)),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
   maxConcurrent: v.optional(v.number()),
 });

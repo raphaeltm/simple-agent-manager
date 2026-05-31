@@ -25,6 +25,7 @@ import {
   type GitHubWebhookEvent,
   parseWebhookPayload,
 } from './github-trigger-filter';
+import { parseResourceRequirementsJson } from './task-start-audit';
 import { submitTriggeredTask } from './trigger-submit';
 import { renderTemplate } from './trigger-template';
 
@@ -276,6 +277,7 @@ async function processTriggersForProject(
         agentProfileId: trigger.agentProfileId,
         taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
         vmSizeOverride: trigger.vmSizeOverride,
+        resourceRequirements: parseResourceRequirementsJson(trigger.resourceRequirementsJson, 'trigger resource requirements'),
         triggerName: trigger.name,
       });
 

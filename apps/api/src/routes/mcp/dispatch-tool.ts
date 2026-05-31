@@ -6,8 +6,8 @@
  *
  * Config precedence: explicit field → profile value → project default → platform default.
  */
-import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider, resolveResourceReservation } from '@simple-agent-manager/shared';
+import type { CredentialProvider, ResourceRequirements, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider, validateResourceRequirements } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -21,6 +21,7 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from '../../services/task-start-audit';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
   ACTIVE_STATUSES,
@@ -37,6 +38,18 @@ import {
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 /** Valid workspace profiles for dispatch */
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
+
+function parseMcpResourceRequirements(
+  requestId: string | number | null,
+  value: unknown,
+): ResourceRequirements | JsonRpcResponse | undefined {
+  if (value === undefined) return undefined;
+  const result = validateResourceRequirements(value);
+  if (!result.valid) {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Invalid resourceRequirements: ${result.errors.join('; ')}`);
+  }
+  return value as ResourceRequirements;
+}
 
 export function getConversationTaskModeWarning(): string {
   return 'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
@@ -159,6 +172,11 @@ export async function handleDispatchTask(
       return jsonRpcError(requestId, INVALID_PARAMS, 'vmLocation must be a non-empty string');
     }
     explicitVmLocation = params.vmLocation.trim();
+  }
+
+  const parsedResourceRequirements = parseMcpResourceRequirements(requestId, params.resourceRequirements);
+  if (parsedResourceRequirements && 'jsonrpc' in parsedResourceRequirements) {
+    return parsedResourceRequirements;
   }
 
   // missionId — inherit from parent task or explicit override
@@ -327,16 +345,6 @@ export async function handleDispatchTask(
     fullDescription = fullDescription.slice(0, limits.dispatchDescriptionMaxLength);
   }
 
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {}, // MCP dispatch: no task-level resource requirements in Phase 0
-    {
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: tokenData.projectId,
-      userId: tokenData.userId,
-    },
-  );
-
   // ── Create the task ─────────────────────────────────────────────────────
   const taskId = ulid();
   const now = new Date().toISOString();
@@ -409,6 +417,38 @@ export async function handleDispatchTask(
     ?? (resolvedProfile?.taskMode as TaskMode | null)
     ?? 'task';
 
+  const audit = resolveTaskStartAudit({
+    taskId,
+    agentProfileId: resolvedProfile?.profileId ?? null,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    explicit: {
+      vmSize: vmSize ?? null,
+      provider: explicitProvider,
+      vmLocation: explicitVmLocation as VMLocation | null,
+      workspaceProfile: explicitWorkspaceProfile,
+      taskMode: explicitTaskMode,
+      resourceRequirements: parsedResourceRequirements ?? null,
+    },
+    agentProfile: {
+      vmSize: resolvedProfile?.vmSizeOverride ?? null,
+      provider: resolvedProfile?.provider ?? null,
+      vmLocation: resolvedProfile?.vmLocation ?? null,
+      workspaceProfile: resolvedProfile?.workspaceProfile ?? null,
+      taskMode: resolvedProfile?.taskMode ?? null,
+      resourceRequirements: resolvedProfile?.resourceRequirements ?? null,
+    },
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: project.defaultProvider as CredentialProvider | null,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'task',
+  });
+  const resolvedReservation = audit.resources.resolvedReservation;
+
   // Agent type: explicit → profile → project default → platform default
   const resolvedAgentType: string | null = explicitAgentType
     ?? resolvedProfile?.agentType
@@ -455,11 +495,23 @@ export async function handleDispatchTask(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resolved_reservation_json,
+     requested_vm_size, requested_vm_size_source,
+     requested_provider, requested_provider_source,
+     requested_vm_location, requested_vm_location_source,
+     requested_workspace_profile, requested_workspace_profile_source,
+     requested_task_mode, requested_task_mode_source,
+     resource_requirements_json, resource_requirements_source,
+     resolved_reservation_json,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, 'mcp',
-     ?, ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?,
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -478,7 +530,13 @@ export async function handleDispatchTask(
     tokenData.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null,
     explicitMissionId ?? currentTask.missionId ?? null,
-    resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
+    resolvedVmSize, vmSizeSource,
+    resolvedProvider, audit.providerSource,
+    resolvedVmLocation, audit.vmLocationSource,
+    resolvedWorkspaceProfile, audit.workspaceProfileSource,
+    resolvedTaskMode, audit.taskModeSource,
+    audit.resources.resourceRequirementsJson, audit.resources.resourceRequirementsSource,
+    audit.resources.resolvedReservationJson,
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
@@ -607,6 +665,7 @@ export async function handleDispatchTask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: audit.resources.resourceRequirements,
       resolvedReservation,
       vmSizeSource,
     });

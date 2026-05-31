@@ -13,6 +13,7 @@ import type {
   GitHubTriggerEventType,
   GitHubTriggerFilters,
   ListTriggersResponse,
+  ResourceRequirements,
   TriggerResponse,
   TriggerStatus,
 } from '@simple-agent-manager/shared';
@@ -23,6 +24,7 @@ import {
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+  validateResourceRequirements,
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -40,10 +42,18 @@ import { requireOwnedProject } from '../../middleware/project-auth';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import { validateCronExpression } from '../../services/cron-utils';
 import { cronToHumanReadable, cronToNextFire } from '../../services/cron-utils';
+import { parseResourceRequirementsJson } from '../../services/task-start-audit';
 import { submitTriggeredTask } from '../../services/trigger-submit';
 import { buildCronContext, renderTemplate } from '../../services/trigger-template';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
+
+function validateTriggerResourceRequirements(value: ResourceRequirements | null | undefined): void {
+  const result = validateResourceRequirements(value);
+  if (!result.valid) {
+    throw errors.badRequest(`Invalid resourceRequirements: ${result.errors.join('; ')}`);
+  }
+}
 
 /** Convert a DB trigger row to a TriggerResponse with human-readable cron. */
 function toTriggerResponse(row: schema.TriggerRow): TriggerResponse {
@@ -62,6 +72,7 @@ function toTriggerResponse(row: schema.TriggerRow): TriggerResponse {
     agentProfileId: row.agentProfileId,
     taskMode: row.taskMode as TriggerResponse['taskMode'],
     vmSizeOverride: row.vmSizeOverride,
+    resourceRequirements: parseResourceRequirementsJson(row.resourceRequirementsJson, 'trigger resource requirements'),
     maxConcurrent: row.maxConcurrent ?? 1,
     lastTriggeredAt: row.lastTriggeredAt,
     triggerCount: row.triggerCount ?? 0,
@@ -184,6 +195,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   if (maxConcurrent < 1 || maxConcurrent > maxConcurrentLimit) {
     throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
   }
+  validateTriggerResourceRequirements(body.resourceRequirements);
 
   // Compute initial nextFireAt (only for cron)
   const nextFireAt = body.sourceType === 'cron' && body.cronExpression
@@ -208,6 +220,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     agentProfileId: body.agentProfileId ?? null,
     taskMode: body.taskMode ?? 'task',
     vmSizeOverride: body.vmSizeOverride ?? null,
+    resourceRequirementsJson: body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null,
     maxConcurrent,
     nextFireAt,
     createdAt: now,
@@ -471,6 +484,10 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.agentProfileId !== undefined) updates.agentProfileId = body.agentProfileId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
+  if (body.resourceRequirements !== undefined) {
+    validateTriggerResourceRequirements(body.resourceRequirements);
+    updates.resourceRequirementsJson = body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null;
+  }
 
   if (body.maxConcurrent !== undefined) {
     const maxConcurrentLimit = parsePositiveInt(c.env.TRIGGER_MAX_CONCURRENT_LIMIT, DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT);
@@ -743,6 +760,7 @@ crudRoutes.post('/:triggerId/run', async (c) => {
       agentProfileId: trigger.agentProfileId,
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
+      resourceRequirements: parseResourceRequirementsJson(trigger.resourceRequirementsJson, 'trigger resource requirements'),
       triggerName: trigger.name,
     });
 

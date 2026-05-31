@@ -1,3 +1,4 @@
+import type { ResourceRequirements } from './resource';
 import type { TaskMode } from './task';
 
 // =============================================================================
@@ -50,6 +51,7 @@ export interface Trigger {
   agentProfileId: string | null;
   taskMode: TaskMode;
   vmSizeOverride: string | null;
+  resourceRequirements: ResourceRequirements | null;
   maxConcurrent: number;
   lastTriggeredAt: string | null;
   triggerCount: number;
@@ -93,6 +95,7 @@ export interface CreateTriggerRequest {
   agentProfileId?: string;
   taskMode?: TaskMode;
   vmSizeOverride?: string;
+  resourceRequirements?: ResourceRequirements;
   maxConcurrent?: number;
   githubConfig?: {
     eventType: GitHubTriggerEventType;
@@ -111,6 +114,7 @@ export interface UpdateTriggerRequest {
   agentProfileId?: string | null;
   taskMode?: TaskMode;
   vmSizeOverride?: string | null;
+  resourceRequirements?: ResourceRequirements | null;
   maxConcurrent?: number;
 }
 

@@ -124,7 +124,10 @@ describe('submitTriggeredTask', () => {
     );
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
-    const result = await submitTriggeredTask({} as any, defaultInput);
+    const result = await submitTriggeredTask({} as any, {
+      ...defaultInput,
+      resourceRequirements: { minVcpu: 6, preset: 'trigger-large' },
+    });
 
     expect(result.taskId).toBeDefined();
     expect(result.sessionId).toBe('session-001');
@@ -137,6 +140,44 @@ describe('submitTriggeredTask', () => {
     expect(insertCall.triggerId).toBe('trigger-1');
     expect(insertCall.triggerExecutionId).toBe('exec-1');
     expect(insertCall.status).toBe('queued');
+    expect(insertCall.requestedVmSize).toBe('medium');
+    expect(insertCall.requestedVmSizeSource).toBe('platform');
+    expect(insertCall.requestedProvider).toBeNull();
+    expect(insertCall.requestedProviderSource).toBe('platform');
+    expect(insertCall.requestedVmLocation).toBe('nbg1');
+    expect(insertCall.requestedVmLocationSource).toBe('platform');
+    expect(insertCall.requestedWorkspaceProfile).toBe('full');
+    expect(insertCall.requestedWorkspaceProfileSource).toBe('platform');
+    expect(insertCall.requestedTaskMode).toBe('task');
+    expect(insertCall.resourceRequirementsSource).toBe('trigger');
+
+    const requirements = JSON.parse(insertCall.resourceRequirementsJson);
+    expect(requirements).toMatchObject({
+      minVcpu: 6,
+      minMemoryMb: 4096,
+      minDiskMb: 40960,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      preset: 'trigger-large',
+    });
+
+    const reservation = JSON.parse(insertCall.resolvedReservationJson);
+    expect(reservation).toMatchObject({
+      cpuMillis: 6000,
+      memoryMb: 4096,
+      diskMb: 40960,
+      source: 'trigger',
+      fieldSources: {
+        minVcpu: 'trigger',
+        minMemoryMb: 'platform',
+      },
+    });
+
+    const { startTaskRunnerDO } = await import('../../../src/services/task-runner-do');
+    expect(startTaskRunnerDO).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      resourceRequirements: expect.objectContaining({ minVcpu: 6, preset: 'trigger-large' }),
+      resolvedReservation: expect.objectContaining({ cpuMillis: 6000, source: 'trigger' }),
+    }));
   });
 
   it('throws when project is not found', async () => {

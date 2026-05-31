@@ -370,10 +370,13 @@ export {
 // Resource Defaults & Resolver
 export type { VmCapacity } from './resource-defaults';
 export {
+  assertValidResourceRequirements,
   DEFAULT_VM_CAPACITY,
   PLATFORM_RESOURCE_DEFAULTS,
   PROVIDER_VM_CAPACITY,
   resolveResourceReservation,
+  RESOURCE_REQUIREMENT_LIMITS,
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
+  validateResourceRequirements,
 } from './resource-defaults';

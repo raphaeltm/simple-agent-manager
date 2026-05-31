@@ -11,7 +11,7 @@
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
 import type { CredentialProvider,RunTaskResponse, TaskStatus, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
+import { getLocationsForProvider, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -28,6 +28,7 @@ import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
 import { cleanupTaskRun } from '../../services/task-runner';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from '../../services/task-start-audit';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
 
@@ -144,31 +145,44 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     throw errors.notFound('Project');
   }
 
-  // Determine VM config (precedence: explicit override > project default > platform default)
-  const vmSize: VMSize = body.vmSize
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
   const provider: CredentialProvider | null =
     typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
       ? project.defaultProvider
       : null;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
+  const audit = resolveTaskStartAudit({
+    taskId: task.id,
+    projectId,
+    userId,
+    explicit: {
+      vmSize: body.vmSize ?? null,
+      vmLocation: body.vmLocation as VMLocation | null,
+      workspaceProfile: body.workspaceProfile ?? null,
+      taskMode: task.taskMode as import('@simple-agent-manager/shared').TaskMode,
+      resourceRequirements: parseResourceRequirementsJson(task.resourceRequirementsJson, 'task resource requirements'),
+    },
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: provider,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'workspace-profile',
+  });
+  const vmSize = audit.vmSize;
+  const providerForRun = audit.provider;
+  const vmLocation = audit.vmLocation;
+  const workspaceProfile = audit.workspaceProfile;
   const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
     ? null
     : (body.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
   const branch = body.branch ?? project.defaultBranch;
 
   // Validate location against provider
-  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
+  if (providerForRun !== null && !isValidLocationForProvider(providerForRun, vmLocation)) {
+    const validLocations = getLocationsForProvider(providerForRun).map((l) => l.id);
     throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+      `Location '${vmLocation}' is not valid for provider '${providerForRun}'. Valid locations: ${validLocations.join(', ')}`
     );
   }
 
@@ -182,8 +196,25 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   // Transition task to queued with initial execution step (optimistic lock on 'ready')
   const now = new Date().toISOString();
   const transitionResult = await c.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ? AND status = 'ready'`
-  ).bind(now, task.id).run();
+    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection',
+     requested_vm_size = ?, requested_vm_size_source = ?,
+     requested_provider = ?, requested_provider_source = ?,
+     requested_vm_location = ?, requested_vm_location_source = ?,
+     requested_workspace_profile = ?, requested_workspace_profile_source = ?,
+     requested_task_mode = ?, requested_task_mode_source = ?,
+     resource_requirements_json = ?, resource_requirements_source = ?,
+     resolved_reservation_json = ?, updated_at = ?
+     WHERE id = ? AND status = 'ready'`
+  ).bind(
+    vmSize, audit.vmSizeSource,
+    providerForRun, audit.providerSource,
+    vmLocation, audit.vmLocationSource,
+    workspaceProfile, audit.workspaceProfileSource,
+    audit.taskMode, audit.taskModeSource,
+    audit.resources.resourceRequirementsJson, audit.resources.resourceRequirementsSource,
+    audit.resources.resolvedReservationJson,
+    now, task.id,
+  ).run();
 
   // If another request already transitioned this task, reject (double-click protection)
   if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
@@ -260,7 +291,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       agentType: project.defaultAgentType ?? null,
       workspaceProfile,
       devcontainerConfigName,
-      cloudProvider: provider,
+      cloudProvider: providerForRun,
+      taskMode: audit.taskMode,
       // Agent profile resolution is not supported on the kanban Run path — tasks
       // re-run with project defaults. Profile support (model, permissionMode,
       // systemPromptAppend) deferred to a future PR.
@@ -273,6 +305,9 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: audit.resources.resourceRequirements,
+      resolvedReservation: audit.resources.resolvedReservation,
+      vmSizeSource: audit.vmSizeSource,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();

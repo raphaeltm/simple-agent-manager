@@ -10,7 +10,6 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   getDefaultLocationForProvider,
   isValidProvider,
-  resolveResourceReservation,
   type TaskMode,
   type VMSize,
   type WorkspaceProfile,
@@ -26,6 +25,7 @@ import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from '../../../services/task-start-audit';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -75,6 +75,7 @@ export async function retrySubtask(
       missionId: schema.tasks.missionId,
       taskMode: schema.tasks.taskMode,
       agentProfileHint: schema.tasks.agentProfileHint,
+      resourceRequirementsJson: schema.tasks.resourceRequirementsJson,
       projectName: schema.projects.name,
       projectRepository: schema.projects.repository,
       projectInstallationId: schema.projects.installationId,
@@ -90,6 +91,7 @@ export async function retrySubtask(
       projectNodeCpuThresholdPercent: schema.projects.nodeCpuThresholdPercent,
       projectNodeMemoryThresholdPercent: schema.projects.nodeMemoryThresholdPercent,
       projectWarmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
+      projectDefaultResourceRequirementsJson: schema.projects.defaultResourceRequirementsJson,
     })
     .from(schema.tasks)
     .innerJoin(schema.projects, eq(schema.tasks.projectId, schema.projects.id))
@@ -155,15 +157,25 @@ export async function retrySubtask(
     maxLength: branchMaxLength,
   });
 
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {}, // Retry: no task-level resource requirements in Phase 0
-    {
-      taskId: newTaskId,
-      projectId: original.projectId,
-      userId: ctx.userId,
+  const audit = resolveTaskStartAudit({
+    taskId: newTaskId,
+    agentProfileId: original.agentProfileHint,
+    projectId: original.projectId,
+    userId: ctx.userId,
+    explicit: {
+      resourceRequirements: parseResourceRequirementsJson(original.resourceRequirementsJson, 'original task resource requirements'),
+      taskMode: resolvedTaskMode,
     },
-  );
+    project: {
+      defaultVmSize: original.projectDefaultVmSize as VMSize | null,
+      defaultProvider: resolvedProvider,
+      defaultLocation: original.projectDefaultLocation,
+      defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
+      defaultResourceRequirements: parseResourceRequirementsJson(original.projectDefaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'workspace-profile',
+  });
+  const resolvedReservation = audit.resources.resolvedReservation;
 
   const now = new Date().toISOString();
 
@@ -173,18 +185,36 @@ export async function retrySubtask(
       `INSERT INTO tasks (id, project_id, user_id, title, description,
        status, execution_step, priority, dispatch_depth, output_branch, created_by,
        task_mode, agent_profile_hint, mission_id,
-       requested_vm_size, requested_vm_size_source, resolved_reservation_json,
+       requested_vm_size, requested_vm_size_source,
+       requested_provider, requested_provider_source,
+       requested_vm_location, requested_vm_location_source,
+       requested_workspace_profile, requested_workspace_profile_source,
+       requested_task_mode, requested_task_mode_source,
+       resource_requirements_json, resource_requirements_source,
+       resolved_reservation_json,
        created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
        ?, ?, ?,
-       ?, ?, ?,
+       ?, ?,
+       ?, ?,
+       ?, ?,
+       ?, ?,
+       ?, ?,
+       ?, ?,
+       ?,
        ?, ?)`,
     ).bind(
       newTaskId, original.projectId, ctx.userId,
       taskTitle, description, 0, branchName,
       ctx.userId,
       resolvedTaskMode, original.agentProfileHint ?? null, original.missionId ?? null,
-      resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
+      resolvedVmSize, vmSizeSource,
+      resolvedProvider, audit.providerSource,
+      resolvedVmLocation, audit.vmLocationSource,
+      resolvedWorkspaceProfile, audit.workspaceProfileSource,
+      resolvedTaskMode, audit.taskModeSource,
+      audit.resources.resourceRequirementsJson, audit.resources.resourceRequirementsSource,
+      audit.resources.resolvedReservationJson,
       now, now,
     ),
     env.DATABASE.prepare(
@@ -257,6 +287,7 @@ export async function retrySubtask(
         nodeMemoryThresholdPercent: original.projectNodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: original.projectWarmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: audit.resources.resourceRequirements,
       resolvedReservation,
       vmSizeSource,
     });

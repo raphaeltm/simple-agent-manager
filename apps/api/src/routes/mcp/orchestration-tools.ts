@@ -3,7 +3,7 @@
  * for agent-to-agent communication.
  */
 import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider, resolveResourceReservation } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
@@ -16,6 +16,7 @@ import { generateBranchName } from '../../services/branch-name';
 import { stopAgentSessionOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from '../../services/task-start-audit';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
@@ -300,15 +301,23 @@ export async function handleRetrySubtask(
 
   const checkoutBranch = project.defaultBranch;
 
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {}, // MCP orchestration retry: no task-level resource requirements in Phase 0
-    {
-      taskId,
-      projectId: tokenData.projectId,
-      userId: tokenData.userId,
+  const audit = resolveTaskStartAudit({
+    taskId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    explicit: {
+      resourceRequirements: parseResourceRequirementsJson(childTask.resourceRequirementsJson, 'child task resource requirements'),
     },
-  );
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: resolvedProvider,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'task',
+  });
+  const resolvedReservation = audit.resources.resolvedReservation;
 
   // Insert replacement task
   await db.insert(schema.tasks).values({
@@ -325,7 +334,17 @@ export async function handleRetrySubtask(
     outputBranch: branchName,
     requestedVmSize: resolvedVmSize,
     requestedVmSizeSource: vmSizeSource,
-    resolvedReservationJson: JSON.stringify(resolvedReservation),
+    requestedProvider: resolvedProvider,
+    requestedProviderSource: audit.providerSource,
+    requestedVmLocation: resolvedVmLocation,
+    requestedVmLocationSource: audit.vmLocationSource,
+    requestedWorkspaceProfile: resolvedWorkspaceProfile,
+    requestedWorkspaceProfileSource: audit.workspaceProfileSource,
+    requestedTaskMode: audit.taskMode,
+    requestedTaskModeSource: audit.taskModeSource,
+    resourceRequirementsJson: audit.resources.resourceRequirementsJson,
+    resourceRequirementsSource: audit.resources.resourceRequirementsSource,
+    resolvedReservationJson: audit.resources.resolvedReservationJson,
     createdBy: tokenData.userId,
     createdAt: now,
     updatedAt: now,
@@ -409,6 +428,7 @@ export async function handleRetrySubtask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: audit.resources.resourceRequirements,
       resolvedReservation,
       vmSizeSource,
     });

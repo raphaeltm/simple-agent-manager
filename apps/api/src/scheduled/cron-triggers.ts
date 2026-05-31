@@ -25,6 +25,7 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { cronToNextFire } from '../services/cron-utils';
+import { parseResourceRequirementsJson } from '../services/task-start-audit';
 import { submitTriggeredTask } from '../services/trigger-submit';
 import { buildCronContext, renderTemplate } from '../services/trigger-template';
 
@@ -214,6 +215,7 @@ async function processTrigger(
       agentProfileId: trigger.agentProfileId,
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
+      resourceRequirements: parseResourceRequirementsJson(trigger.resourceRequirementsJson, 'trigger resource requirements'),
       triggerName: trigger.name,
     });
 

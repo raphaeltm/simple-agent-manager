@@ -22,6 +22,7 @@ import {
   SCALING_PARAMS,
   VALID_PERMISSION_MODES,
   VALID_WORKSPACE_PROFILES,
+  validateResourceRequirements,
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -642,7 +643,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   const allFieldKeys: (keyof UpdateProjectRequest)[] = [
     'name', 'description', 'defaultBranch', 'defaultVmSize', 'defaultAgentType',
     'defaultWorkspaceProfile', 'defaultDevcontainerConfigName', 'defaultProvider', 'defaultLocation',
-    'agentDefaults',
+    'defaultResourceRequirements', 'agentDefaults',
     'workspaceIdleTimeoutMs', 'nodeIdleTimeoutMs',
     'taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask',
     'warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent',
@@ -683,6 +684,13 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
 
   if (body.defaultProvider !== undefined && body.defaultProvider !== null && !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)) {
     throw errors.badRequest(`defaultProvider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+  }
+
+  if (body.defaultResourceRequirements !== undefined) {
+    const result = validateResourceRequirements(body.defaultResourceRequirements);
+    if (!result.valid) {
+      throw errors.badRequest(`Invalid defaultResourceRequirements: ${result.errors.join('; ')}`);
+    }
   }
 
   // Determine the effective provider for location validation
@@ -807,6 +815,9 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       defaultDevcontainerConfigName: body.defaultDevcontainerConfigName === undefined ? existing.defaultDevcontainerConfigName : (body.defaultDevcontainerConfigName ?? null),
       defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
       defaultLocation: body.defaultLocation === undefined ? existing.defaultLocation : (body.defaultLocation ?? null),
+      defaultResourceRequirementsJson: body.defaultResourceRequirements === undefined
+        ? existing.defaultResourceRequirementsJson
+        : (body.defaultResourceRequirements ? JSON.stringify(body.defaultResourceRequirements) : null),
       agentDefaults: agentDefaultsColumn === undefined ? existing.agentDefaults : agentDefaultsColumn,
       workspaceIdleTimeoutMs: body.workspaceIdleTimeoutMs === undefined ? existing.workspaceIdleTimeoutMs : (body.workspaceIdleTimeoutMs ?? null),
       nodeIdleTimeoutMs: body.nodeIdleTimeoutMs === undefined ? existing.nodeIdleTimeoutMs : (body.nodeIdleTimeoutMs ?? null),

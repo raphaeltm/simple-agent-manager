@@ -128,6 +128,9 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
       systemPromptAppend: null,
       attachments: null,
       projectScaling: null,
+      resourceRequirements: null,
+      resolvedReservation: null,
+      vmSizeSource: null,
     },
     retryCount: 0,
     workspaceReadyReceived: false,
@@ -135,8 +138,10 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
     workspaceErrorMessage: null,
     createdAt: Date.now(),
     lastStepAt: Date.now(),
+    provisioningStartedAt: null,
     agentReadyStartedAt: null,
     workspaceReadyStartedAt: null,
+    lastD1Step: null,
     completed: false,
     ...overrides,
   };
@@ -208,6 +213,72 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     await handleNodeSelection(state, rc);
 
     expect(state.stepResults.nodeId).toBe('node-large');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('does not use audit-only reservations for placement decisions yet', async () => {
+    const state = createState({
+      config: {
+        ...createState().config,
+        vmSize: 'small',
+        resourceRequirements: {
+          minVcpu: 64,
+          minMemoryMb: 262144,
+          minDiskMb: 1048576,
+          exclusiveNode: true,
+          maxCoTenants: 1,
+          preset: 'oversized-audit-only',
+        },
+        resolvedReservation: {
+          cpuMillis: 64000,
+          memoryMb: 262144,
+          diskMb: 1048576,
+          exclusiveNode: true,
+          maxCoTenants: 1,
+          requirements: {
+            minVcpu: 64,
+            minMemoryMb: 262144,
+            minDiskMb: 1048576,
+            exclusiveNode: true,
+            maxCoTenants: 1,
+            preset: 'oversized-audit-only',
+          },
+          source: 'task',
+          sourceId: 'task-1',
+          fieldSources: {
+            minVcpu: 'task',
+            minMemoryMb: 'task',
+            minDiskMb: 'task',
+            exclusiveNode: 'task',
+            maxCoTenants: 'task',
+            preset: 'task',
+          },
+          version: 1,
+        },
+      },
+    });
+    const rc = createContext({
+      existingNodes: [
+        {
+          id: 'node-small',
+          vm_size: 'small',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+        },
+      ],
+      healthByNode: {
+        'node-small': {
+          health_status: 'healthy',
+          last_heartbeat_at: new Date().toISOString(),
+          agent_ready_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-small');
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
   });
 });

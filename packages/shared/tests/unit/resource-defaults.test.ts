@@ -5,6 +5,7 @@ import {
   resolveResourceReservation,
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
+  validateResourceRequirements,
 } from '../../src/constants/resource-defaults';
 
 describe('resolveResourceReservation', () => {
@@ -12,12 +13,28 @@ describe('resolveResourceReservation', () => {
     const result = resolveResourceReservation({});
     expect(result).toEqual({
       cpuMillis: PLATFORM_RESOURCE_DEFAULTS.minVcpu * 1000,
-      memoryMb: PLATFORM_RESOURCE_DEFAULTS.minMemoryGb * 1024,
-      diskMb: PLATFORM_RESOURCE_DEFAULTS.minDiskGb * 1024,
+      memoryMb: PLATFORM_RESOURCE_DEFAULTS.minMemoryMb,
+      diskMb: PLATFORM_RESOURCE_DEFAULTS.minDiskMb,
       exclusiveNode: false,
       maxCoTenants: 4,
+      requirements: {
+        minVcpu: PLATFORM_RESOURCE_DEFAULTS.minVcpu,
+        minMemoryMb: PLATFORM_RESOURCE_DEFAULTS.minMemoryMb,
+        minDiskMb: PLATFORM_RESOURCE_DEFAULTS.minDiskMb,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+        preset: PLATFORM_RESOURCE_DEFAULTS.preset,
+      },
       source: 'platform',
       sourceId: 'platform',
+      fieldSources: {
+        minVcpu: 'platform',
+        minMemoryMb: 'platform',
+        minDiskMb: 'platform',
+        exclusiveNode: 'platform',
+        maxCoTenants: 'platform',
+        preset: 'platform',
+      },
       version: RESOURCE_RESERVATION_VERSION,
     });
   });
@@ -25,16 +42,16 @@ describe('resolveResourceReservation', () => {
   it('resolves task-level requirements as highest priority', () => {
     const result = resolveResourceReservation(
       {
-        task: { minVcpu: 8, minMemoryGb: 16 },
-        project: { minVcpu: 2, minMemoryGb: 4, minDiskGb: 80 },
+        task: { minVcpu: 8, minMemoryMb: 16384 },
+        project: { minVcpu: 2, minMemoryMb: 4096, minDiskMb: 81920 },
       },
       { taskId: 'task-1', projectId: 'proj-1' },
     );
 
-    // task wins for minVcpu and minMemoryGb
+    // task wins for minVcpu and minMemoryMb
     expect(result.cpuMillis).toBe(8000);
     expect(result.memoryMb).toBe(16 * 1024);
-    // project fills in minDiskGb (task didn't set it)
+    // project fills in minDiskMb (task didn't set it)
     expect(result.diskMb).toBe(80 * 1024);
     // source is task (highest-priority contributor)
     expect(result.source).toBe('task');
@@ -45,7 +62,7 @@ describe('resolveResourceReservation', () => {
     const result = resolveResourceReservation(
       {
         task: { minVcpu: 4 },
-        agentProfile: { minMemoryGb: 8, minDiskGb: 100 },
+        agentProfile: { minMemoryMb: 8192, minDiskMb: 102400 },
         project: { exclusiveNode: true },
       },
       { taskId: 't1', agentProfileId: 'ap1', projectId: 'p1' },
@@ -100,7 +117,7 @@ describe('resolveResourceReservation', () => {
 
   it('converts units correctly (vcpu→millis, gb→mb)', () => {
     const result = resolveResourceReservation({
-      task: { minVcpu: 3, minMemoryGb: 12, minDiskGb: 200 },
+      task: { minVcpu: 3, minMemoryMb: 12288, minDiskMb: 204800 },
     });
 
     expect(result.cpuMillis).toBe(3000);
@@ -124,7 +141,7 @@ describe('resolveResourceReservation', () => {
 
   it('uses trigger layer as sole contributor with correct sourceId', () => {
     const result = resolveResourceReservation(
-      { trigger: { minVcpu: 4, minMemoryGb: 8 } },
+      { trigger: { minVcpu: 4, minMemoryMb: 8192 } },
       { triggerId: 'trig-1' },
     );
 
@@ -136,7 +153,7 @@ describe('resolveResourceReservation', () => {
 
   it('uses project layer as sole contributor with correct sourceId', () => {
     const result = resolveResourceReservation(
-      { project: { minVcpu: 4, minDiskGb: 80 } },
+      { project: { minVcpu: 4, minDiskMb: 81920 } },
       { projectId: 'proj-1' },
     );
 
@@ -146,15 +163,21 @@ describe('resolveResourceReservation', () => {
     expect(result.sourceId).toBe('proj-1');
   });
 
-  it('handles value 0 correctly (not treated as undefined)', () => {
+  it('rejects invalid numeric requirements', () => {
+    const result = validateResourceRequirements({ maxCoTenants: 0 });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toContain('maxCoTenants');
+  });
+
+  it('records per-field provenance', () => {
     const result = resolveResourceReservation({
-      task: { maxCoTenants: 0 },
-      project: { maxCoTenants: 4 },
+      task: { minVcpu: 4 },
+      project: { maxCoTenants: 2 },
     });
 
-    // 0 is a defined value; task layer should win
-    expect(result.maxCoTenants).toBe(0);
-    expect(result.source).toBe('task');
+    expect(result.fieldSources.minVcpu).toBe('task');
+    expect(result.fieldSources.maxCoTenants).toBe('project');
+    expect(result.fieldSources.minMemoryMb).toBe('platform');
   });
 
   it('produces output safe for JSON.stringify (no undefined values)', () => {
@@ -179,8 +202,8 @@ describe('selectVmSizeForRequirements', () => {
   it('selects small for requirements that fit small', () => {
     const size = selectVmSizeForRequirements({
       minVcpu: 2,
-      minMemoryGb: 4,
-      minDiskGb: 40,
+      minMemoryMb: 4096,
+      minDiskMb: 40960,
       exclusiveNode: false,
       maxCoTenants: 4,
     });
@@ -190,8 +213,8 @@ describe('selectVmSizeForRequirements', () => {
   it('selects medium when small is too small', () => {
     const size = selectVmSizeForRequirements({
       minVcpu: 4,
-      minMemoryGb: 8,
-      minDiskGb: 80,
+      minMemoryMb: 8192,
+      minDiskMb: 81920,
       exclusiveNode: false,
       maxCoTenants: 4,
     });
@@ -201,8 +224,8 @@ describe('selectVmSizeForRequirements', () => {
   it('selects large when medium is too small', () => {
     const size = selectVmSizeForRequirements({
       minVcpu: 8,
-      minMemoryGb: 16,
-      minDiskGb: 160,
+      minMemoryMb: 16384,
+      minDiskMb: 163840,
       exclusiveNode: false,
       maxCoTenants: 4,
     });
@@ -212,8 +235,8 @@ describe('selectVmSizeForRequirements', () => {
   it('returns large as best-effort when nothing fits', () => {
     const size = selectVmSizeForRequirements({
       minVcpu: 64,
-      minMemoryGb: 256,
-      minDiskGb: 2000,
+      minMemoryMb: 262144,
+      minDiskMb: 2048000,
       exclusiveNode: false,
       maxCoTenants: 1,
     });
@@ -225,8 +248,8 @@ describe('selectVmSizeForRequirements', () => {
     const size = selectVmSizeForRequirements(
       {
         minVcpu: 4,
-        minMemoryGb: 10,
-        minDiskGb: 100,
+        minMemoryMb: 10240,
+        minDiskMb: 102400,
         exclusiveNode: false,
         maxCoTenants: 4,
       },
@@ -241,8 +264,8 @@ describe('selectVmSizeForRequirements', () => {
     const size = selectVmSizeForRequirements(
       {
         minVcpu: 2,
-        minMemoryGb: 4,
-        minDiskGb: 40,
+        minMemoryMb: 4096,
+        minDiskMb: 40960,
         exclusiveNode: false,
         maxCoTenants: 4,
       },
@@ -255,8 +278,8 @@ describe('selectVmSizeForRequirements', () => {
     const size = selectVmSizeForRequirements(
       {
         minVcpu: 2,
-        minMemoryGb: 4,
-        minDiskGb: 40,
+        minMemoryMb: 4096,
+        minDiskMb: 40960,
         exclusiveNode: false,
         maxCoTenants: 4,
       },
@@ -269,8 +292,8 @@ describe('selectVmSizeForRequirements', () => {
     // CPU and RAM fit small, but disk needs medium
     const size = selectVmSizeForRequirements({
       minVcpu: 1,
-      minMemoryGb: 2,
-      minDiskGb: 60,
+      minMemoryMb: 2048,
+      minDiskMb: 61440,
       exclusiveNode: false,
       maxCoTenants: 4,
     });

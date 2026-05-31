@@ -7,21 +7,18 @@
  */
 import type {
   CredentialProvider,
+  ResourceRequirements,
   TaskMode,
   VMLocation,
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
   getLocationsForProvider,
   isValidAgentType,
   isValidLocationForProvider,
   isValidProvider,
-  resolveResourceReservation,
+  validateResourceRequirements,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -35,12 +32,18 @@ import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
+import { parseResourceRequirementsJson, resolveTaskStartAudit } from '../../../services/task-start-audit';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 const DEFAULT_MAX_DESCRIPTION_LENGTH = 32_000;
+
+function validateDispatchResourceRequirements(value: ResourceRequirements | undefined): string | null {
+  const result = validateResourceRequirements(value);
+  return result.valid ? null : `Invalid resourceRequirements: ${result.errors.join('; ')}`;
+}
 
 export function getConversationTaskModeWarning(): string {
   return 'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
@@ -99,6 +102,18 @@ export const dispatchTaskDef: AnthropicToolDef = {
         type: 'string',
         description: 'Mission ID to associate this task with. Use after create_mission.',
       },
+      resourceRequirements: {
+        type: 'object',
+        description: 'Optional scheduling reservation intent for this task. Audit-only; does not change placement behavior yet.',
+        properties: {
+          minVcpu: { type: 'number' },
+          minMemoryMb: { type: 'number' },
+          minDiskMb: { type: 'number' },
+          exclusiveNode: { type: 'boolean' },
+          maxCoTenants: { type: 'number' },
+          preset: { type: 'string' },
+        },
+      },
     },
     required: ['projectId', 'description'],
   },
@@ -115,6 +130,7 @@ interface DispatchTaskInput {
   taskMode?: string;
   agentProfileId?: string;
   missionId?: string;
+  resourceRequirements?: ResourceRequirements;
 }
 
 export async function dispatchTask(
@@ -156,6 +172,11 @@ export async function dispatchTask(
     return { error: `taskMode must be one of: ${VALID_TASK_MODES.join(', ')}` };
   }
 
+  const resourceRequirementsError = validateDispatchResourceRequirements(input.resourceRequirements);
+  if (resourceRequirementsError) {
+    return { error: resourceRequirementsError };
+  }
+
   const priority = typeof input.priority === 'number'
     ? Math.min(Math.max(0, Math.round(input.priority)), 10)
     : 0;
@@ -194,33 +215,39 @@ export async function dispatchTask(
     ?? projectDefaultProvider
     ?? null;
 
-  const vmSizeSource = vmSize ? 'task' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const resolvedVmSize: VMSize = vmSize
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-
-  const resolvedVmLocation: VMLocation = (
-    (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION
-  ) as VMLocation;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile = (input.workspaceProfile as WorkspaceProfile | undefined)
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  // Task mode: explicit -> profile -> task.
-  // MCP dispatch is agent-to-agent delegated work; workspace profile controls
-  // provisioning shape, not whether the task reports completion.
-  const resolvedTaskMode: TaskMode = (input.taskMode as TaskMode | undefined)
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? 'task';
+  const audit = resolveTaskStartAudit({
+    taskId: 'pending',
+    agentProfileId: resolvedProfile?.profileId ?? null,
+    projectId: input.projectId,
+    userId: ctx.userId,
+    explicit: {
+      vmSize: vmSize ?? null,
+      workspaceProfile: input.workspaceProfile as WorkspaceProfile | undefined,
+      taskMode: input.taskMode as TaskMode | undefined,
+      resourceRequirements: input.resourceRequirements ?? null,
+    },
+    agentProfile: {
+      vmSize: resolvedProfile?.vmSizeOverride ?? null,
+      provider: resolvedProfile?.provider ?? null,
+      vmLocation: resolvedProfile?.vmLocation ?? null,
+      workspaceProfile: resolvedProfile?.workspaceProfile ?? null,
+      taskMode: resolvedProfile?.taskMode ?? null,
+      resourceRequirements: resolvedProfile?.resourceRequirements ?? null,
+    },
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: resolvedProvider,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'task',
+  });
+  const vmSizeSource = audit.vmSizeSource;
+  const resolvedVmSize = audit.vmSize;
+  const resolvedVmLocation = audit.vmLocation;
+  const resolvedWorkspaceProfile = audit.workspaceProfile;
+  const resolvedTaskMode = audit.taskMode;
 
   const resolvedAgentType: string | null = input.agentType
     ?? resolvedProfile?.agentType
@@ -255,15 +282,35 @@ export async function dispatchTask(
   });
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {}, // MCP dispatch: no task-level resource requirements in Phase 0
-    {
-      taskId,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: input.projectId,
-      userId: ctx.userId,
+  const resolvedAudit = resolveTaskStartAudit({
+    taskId,
+    agentProfileId: resolvedProfile?.profileId ?? null,
+    projectId: input.projectId,
+    userId: ctx.userId,
+    explicit: {
+      vmSize: vmSize ?? null,
+      workspaceProfile: input.workspaceProfile as WorkspaceProfile | undefined,
+      taskMode: input.taskMode as TaskMode | undefined,
+      resourceRequirements: input.resourceRequirements ?? null,
     },
-  );
+    agentProfile: {
+      vmSize: resolvedProfile?.vmSizeOverride ?? null,
+      provider: resolvedProfile?.provider ?? null,
+      vmLocation: resolvedProfile?.vmLocation ?? null,
+      workspaceProfile: resolvedProfile?.workspaceProfile ?? null,
+      taskMode: resolvedProfile?.taskMode ?? null,
+      resourceRequirements: resolvedProfile?.resourceRequirements ?? null,
+    },
+    project: {
+      defaultVmSize: project.defaultVmSize as VMSize | null,
+      defaultProvider: resolvedProvider,
+      defaultLocation: project.defaultLocation as VMLocation | null,
+      defaultWorkspaceProfile: project.defaultWorkspaceProfile as WorkspaceProfile | null,
+      defaultResourceRequirements: parseResourceRequirementsJson(project.defaultResourceRequirementsJson, 'project resource requirements'),
+    },
+    taskModeFallback: 'task',
+  });
+  const resolvedReservation = resolvedAudit.resources.resolvedReservation;
 
   const now = new Date().toISOString();
 
@@ -272,18 +319,36 @@ export async function dispatchTask(
     `INSERT INTO tasks (id, project_id, user_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resolved_reservation_json,
+     requested_vm_size, requested_vm_size_source,
+     requested_provider, requested_provider_source,
+     requested_vm_location, requested_vm_location_source,
+     requested_workspace_profile, requested_workspace_profile_source,
+     requested_task_mode, requested_task_mode_source,
+     resource_requirements_json, resource_requirements_source,
+     resolved_reservation_json,
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
      ?, ?, ?, 'mcp',
-     ?, ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?, ?,
+     ?,
      ?, ?)`,
   ).bind(
     taskId, input.projectId, ctx.userId,
     taskTitle, description, priority, branchName,
     ctx.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null, input.missionId?.trim() || null,
-    resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
+    resolvedVmSize, vmSizeSource,
+    audit.provider, audit.providerSource,
+    resolvedVmLocation, audit.vmLocationSource,
+    resolvedWorkspaceProfile, audit.workspaceProfileSource,
+    resolvedTaskMode, audit.taskModeSource,
+    resolvedAudit.resources.resourceRequirementsJson, resolvedAudit.resources.resourceRequirementsSource,
+    resolvedAudit.resources.resolvedReservationJson,
     now, now,
   ).run();
 
@@ -372,6 +437,7 @@ export async function dispatchTask(
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resourceRequirements: resolvedAudit.resources.resourceRequirements,
       resolvedReservation,
       vmSizeSource,
     });

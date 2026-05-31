@@ -4,7 +4,7 @@ import type {
   ResolvedAgentProfile,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
-import { isValidAgentType } from '@simple-agent-manager/shared';
+import { isValidAgentType, validateResourceRequirements } from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -12,8 +12,16 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import { parseResourceRequirementsJson } from './task-start-audit';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+function validateProfileResourceRequirements(value: unknown): void {
+  const result = validateResourceRequirements(value);
+  if (!result.valid) {
+    throw errors.badRequest(`Invalid resourceRequirements: ${result.errors.join('; ')}`);
+  }
+}
 
 /** Env vars used by agent profile service */
 type ProfileEnv = Pick<Env,
@@ -85,6 +93,7 @@ function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
     workspaceProfile: row.workspaceProfile,
     devcontainerConfigName: row.devcontainerConfigName,
     taskMode: row.taskMode,
+    resourceRequirements: parseResourceRequirementsJson(row.resourceRequirementsJson, 'agent profile resource requirements'),
     isBuiltin: row.isBuiltin === 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -216,6 +225,9 @@ export async function createProfile(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  if (body.resourceRequirements !== undefined) {
+    validateProfileResourceRequirements(body.resourceRequirements);
+  }
 
   // Check for duplicate name in this project
   const existing = await db
@@ -252,6 +264,7 @@ export async function createProfile(
     workspaceProfile: body.workspaceProfile ?? null,
     devcontainerConfigName: body.devcontainerConfigName ?? null,
     taskMode: body.taskMode ?? null,
+    resourceRequirementsJson: body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null,
     isBuiltin: 0,
   });
 
@@ -271,6 +284,9 @@ export async function updateProfile(
 
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
+  }
+  if (body.resourceRequirements !== undefined) {
+    validateProfileResourceRequirements(body.resourceRequirements);
   }
 
   // If renaming, check for duplicate in the same project scope
@@ -316,6 +332,9 @@ export async function updateProfile(
   if (body.workspaceProfile !== undefined) updates.workspaceProfile = body.workspaceProfile;
   if (body.devcontainerConfigName !== undefined) updates.devcontainerConfigName = body.devcontainerConfigName;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
+  if (body.resourceRequirements !== undefined) {
+    updates.resourceRequirementsJson = body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null;
+  }
 
   await db
     .update(schema.agentProfiles)
@@ -382,6 +401,7 @@ export async function resolveAgentProfile(
       workspaceProfile: p.workspaceProfile,
       devcontainerConfigName: p.devcontainerConfigName,
       taskMode: p.taskMode,
+      resourceRequirements: parseResourceRequirementsJson(p.resourceRequirementsJson, 'agent profile resource requirements'),
     };
   }
 
@@ -402,6 +422,7 @@ export async function resolveAgentProfile(
       workspaceProfile: null,
       devcontainerConfigName: null,
       taskMode: null,
+      resourceRequirements: null,
     };
   }
 
@@ -483,5 +504,6 @@ export async function resolveAgentProfile(
     workspaceProfile: null,
     devcontainerConfigName: null,
     taskMode: null,
+    resourceRequirements: null,
   };
 }

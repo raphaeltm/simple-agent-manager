@@ -22,15 +22,15 @@ Important constraint: this work must stop at a draft or clearly do-not-merge PR.
 
 ## Checklist
 
-- [ ] Add/adjust shared resource types and validation helpers for concrete scheduling reservations.
-- [ ] Add additive D1 columns for project, profile, and trigger resource defaults/overrides as JSON snapshots.
-- [ ] Add a shared API resolver helper for resource requirements and VM/provider/location/workspace/task-mode audit snapshots.
-- [ ] Wire resolver consistently through task submit, trigger submit, SAM dispatch, MCP dispatch, retry/fork, and active task run paths.
-- [ ] Persist resolved task snapshots and pass resolved reservation snapshots into TaskRunner DO.
-- [ ] Verify workspace audit fields are populated by TaskRunner workspace creation without changing placement behavior.
-- [ ] Add tests for precedence, validation, persisted snapshots, MCP taskMode default, and no scheduler placement behavior change.
-- [ ] Run migration safety and relevant quality checks.
-- [ ] Run Cloudflare specialist and constitution validator review before finalizing.
+- [x] Add/adjust shared resource types and validation helpers for concrete scheduling reservations.
+- [x] Add additive D1 columns for project, profile, and trigger resource defaults/overrides as JSON snapshots.
+- [x] Add a shared API resolver helper for resource requirements and VM/provider/location/workspace/task-mode audit snapshots.
+- [x] Wire resolver consistently through task submit, trigger submit, SAM dispatch, MCP dispatch, retry/fork, and active task run paths.
+- [x] Persist resolved task snapshots and pass resolved reservation snapshots into TaskRunner DO.
+- [x] Verify workspace audit fields are populated by TaskRunner workspace creation without changing placement behavior.
+- [x] Add tests for precedence, validation, persisted snapshots, MCP taskMode default, and no scheduler placement behavior change.
+- [x] Run migration safety and relevant quality checks.
+- [x] Run Cloudflare specialist and constitution validator review before finalizing.
 - [ ] Open draft/do-not-merge PR and stop.
 
 ## Acceptance Criteria
@@ -52,4 +52,3 @@ Important constraint: this work must stop at a draft or clearly do-not-merge PR.
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/10-e2e-verification.md`
 - `.claude/rules/35-vertical-slice-testing.md`
-

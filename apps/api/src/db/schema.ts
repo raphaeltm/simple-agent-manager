@@ -288,6 +288,8 @@ export const projects = sqliteTable(
     defaultDevcontainerConfigName: text('default_devcontainer_config_name'),
     defaultProvider: text('default_provider'),
     defaultLocation: text('default_location'),
+    /** JSON: ResourceRequirements defaults for task/session/trigger audit resolution. */
+    defaultResourceRequirementsJson: text('default_resource_requirements_json'),
     /** Per-agent-type model + permission mode overrides.
      *  JSON: Record<AgentType, { model?: string | null, permissionMode?: string | null }>
      *  Null/missing for an agent type = fall through to user-level agent_settings. */
@@ -533,6 +535,22 @@ export const tasks = sqliteTable(
     requestedVmSize: text('requested_vm_size'),
     /** Where the VM size came from (e.g. 'task', 'agent-profile', 'project', 'platform'). */
     requestedVmSizeSource: text('requested_vm_size_source'),
+    /** Resolved cloud provider requested for audit. Null means system chose credential/provider later. */
+    requestedProvider: text('requested_provider'),
+    /** Where the requested provider came from. */
+    requestedProviderSource: text('requested_provider_source'),
+    /** Resolved VM/provider location requested for audit. */
+    requestedVmLocation: text('requested_vm_location'),
+    /** Where the requested location came from. */
+    requestedVmLocationSource: text('requested_vm_location_source'),
+    /** Resolved workspace profile requested for audit. */
+    requestedWorkspaceProfile: text('requested_workspace_profile'),
+    /** Where the requested workspace profile came from. */
+    requestedWorkspaceProfileSource: text('requested_workspace_profile_source'),
+    /** Resolved task mode snapshot for audit. Mirrors task_mode for explicit provenance. */
+    requestedTaskMode: text('requested_task_mode'),
+    /** Where the requested task mode came from. */
+    requestedTaskModeSource: text('requested_task_mode_source'),
     /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
     resourceRequirementsJson: text('resource_requirements_json'),
     /** Which level of the precedence chain provided the resource requirements. */
@@ -836,6 +854,8 @@ export const agentProfiles = sqliteTable(
     /** Devcontainer config name override. null = inherit from project/platform defaults. */
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode'),
+    /** JSON: ResourceRequirements default for tasks using this profile. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
       .notNull()
@@ -1282,6 +1302,8 @@ export const triggers = sqliteTable(
     }),
     taskMode: text('task_mode').default('task'),
     vmSizeOverride: text('vm_size_override'),
+    /** JSON: ResourceRequirements override for tasks spawned by this trigger. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
