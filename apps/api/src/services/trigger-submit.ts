@@ -46,7 +46,7 @@ export interface SubmitTriggeredTaskInput {
   /** The rendered prompt to use as the task description. */
   renderedPrompt: string;
   /** How the task was triggered (e.g., 'cron'). */
-  triggeredBy: 'cron' | 'webhook';
+  triggeredBy: 'cron' | 'webhook' | 'github';
   /** Agent profile ID to use (from trigger config). */
   agentProfileId: string | null;
   /** Task execution mode from trigger config. */
