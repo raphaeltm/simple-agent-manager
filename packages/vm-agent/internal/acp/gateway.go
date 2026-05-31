@@ -198,7 +198,7 @@ type GatewayConfig struct {
 	// user agent settings. Set by the control plane when an agent profile specifies a permission mode.
 	PermissionModeOverride string
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
-	// Values: "platform", "scaleway", "google-vertex", "openai-compatible", "anthropic", "custom".
+	// Values: "platform", "scaleway", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
 	OpencodeProviderOverride string
 	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
 	// (used for "custom" and "openai-compatible" providers).
@@ -1258,7 +1258,7 @@ func getOpencodeDefault(envKey, fallback string) string {
 //   - "models": a map registering model aliases so OpenCode recognises them
 //   - model field: formatted as "providerID/modelAlias"
 //
-// Built-in providers (scaleway, anthropic) have pre-registered models and
+// Built-in providers (scaleway, opencode-managed, anthropic) have pre-registered models and
 // don't need the npm/models keys.
 
 // opencodeConfigOverrides holds optional direct values to embed in the config
@@ -1342,6 +1342,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 			"fullModelKey", "sam-platform/"+modelAlias,
 			"baseURL", baseURL,
 			"apiKeyLen", len(apiKey))
+	case "opencode-managed":
+		config["model"] = model
 	case "scaleway":
 		// Scaleway is a built-in OpenCode provider with pre-registered models.
 		config["model"] = model

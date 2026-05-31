@@ -21,6 +21,7 @@ func TestIsSecretEnvVar(t *testing.T) {
 		{"GH_TOKEN=ghp_abc123", true},
 		{"GEMINI_API_KEY=gemini-key", true},
 		{"MISTRAL_API_KEY=mistral-key", true},
+		{"OPENCODE_API_KEY=opencode-key", true},
 
 		// Substring matches
 		{"CUSTOM_API_KEY=some-key", true},
@@ -121,6 +122,7 @@ func TestEnvFileOperations(t *testing.T) {
 			EnvVars: []string{
 				"SAM_WORKSPACE_ID=ws-123",
 				"ANTHROPIC_API_KEY=sk-ant-super-secret",
+				"OPENCODE_API_KEY=sk-opencode-super-secret",
 				"GH_TOKEN=ghp_also_secret",
 				"VIBE_CLIENT_NAME=sam",
 			},
@@ -136,8 +138,8 @@ func TestEnvFileOperations(t *testing.T) {
 			}
 		}
 
-		if len(secrets) != 2 {
-			t.Fatalf("expected 2 secrets, got %d: %v", len(secrets), secrets)
+		if len(secrets) != 3 {
+			t.Fatalf("expected 3 secrets, got %d: %v", len(secrets), secrets)
 		}
 		if len(nonSecrets) != 2 {
 			t.Fatalf("expected 2 non-secrets, got %d: %v", len(nonSecrets), nonSecrets)
@@ -165,6 +167,9 @@ func TestEnvFileOperations(t *testing.T) {
 		}
 		if strings.Contains(argsStr, "ghp_also_secret") {
 			t.Error("secret GH_TOKEN value found in command args")
+		}
+		if strings.Contains(argsStr, "sk-opencode-super-secret") {
+			t.Error("secret OPENCODE_API_KEY value found in command args")
 		}
 
 		// Verify non-secret values DO appear in args

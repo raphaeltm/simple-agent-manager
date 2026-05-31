@@ -12,7 +12,11 @@
 export type AgentProviderMode = 'sam' | 'user-api-key' | 'oauth';
 
 /** Valid provider modes — single source of truth for validation. */
-export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = ['sam', 'user-api-key', 'oauth'] as const;
+export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = [
+  'sam',
+  'user-api-key',
+  'oauth',
+] as const;
 
 /** Valid permission modes for agent sessions */
 export type AgentPermissionMode =
@@ -26,6 +30,7 @@ export type AgentPermissionMode =
 export type OpenCodeProvider =
   | 'platform'
   | 'scaleway'
+  | 'opencode-managed'
   | 'google-vertex'
   | 'openai-compatible'
   | 'anthropic'
@@ -62,6 +67,14 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
     requiresApiKey: true,
     keyLabel: 'Scaleway Secret Key',
     keyHelpText: 'Create a Scaleway API key with GenerativeApisModelAccess permission',
+  },
+  'opencode-managed': {
+    label: 'OpenCode Managed',
+    modelPlaceholder: 'e.g. opencode-zen/claude-sonnet-4-5 or opencode-go/glm-5',
+    requiresBaseUrl: false,
+    requiresApiKey: true,
+    keyLabel: 'OpenCode API Key',
+    keyHelpText: 'Enter your opencode.ai API key for managed Zen and Go models',
   },
   'google-vertex': {
     label: 'Google Vertex',
@@ -101,6 +114,7 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
 export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
   'platform',
   'scaleway',
+  'opencode-managed',
   'google-vertex',
   'openai-compatible',
   'anthropic',

@@ -1360,3 +1360,32 @@ func TestAuthFilePathValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildOpencodeConfig_OpenCodeManagedUsesBuiltInModelPrefixes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{name: "zen prefix", model: "opencode-zen/claude-sonnet-4-5"},
+		{name: "go prefix", model: "opencode-go/glm-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			config := buildOpencodeConfig(&agentSettingsPayload{
+				OpencodeProvider: "opencode-managed",
+				Model:            tt.model,
+			}, nil)
+
+			if got := config["model"]; got != tt.model {
+				t.Fatalf("model = %v, want %q", got, tt.model)
+			}
+			if _, ok := config["provider"]; ok {
+				t.Fatalf("provider block present for OpenCode managed built-in provider: %#v", config["provider"])
+			}
+		})
+	}
+}

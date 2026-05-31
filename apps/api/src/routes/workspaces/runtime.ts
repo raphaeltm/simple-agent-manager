@@ -1,5 +1,15 @@
 // FILE SIZE EXCEPTION: Workspace runtime routes — splitting credential resolution logic across files increases fragmentation risk. See .claude/rules/18-file-size-limits.md
-import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, DEFAULT_AI_PROXY_OPENAI_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import {
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  type AIProxyConfig,
+  type BootstrapTokenData,
+  DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+  DEFAULT_AI_PROXY_MODEL,
+  DEFAULT_AI_PROXY_OPENAI_MODEL,
+  getAgentDefinition,
+  isValidAgentType,
+  OPENCODE_PROVIDERS,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -10,9 +20,15 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
-import { requireApproved,requireAuth } from '../../middleware/auth';
+import { requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { AgentCredentialSyncSchema, AgentTypeBodySchema, BootLogEntrySchema, jsonValidator, MessageBatchSchema } from '../../schemas';
+import {
+  AgentCredentialSyncSchema,
+  AgentTypeBodySchema,
+  BootLogEntrySchema,
+  jsonValidator,
+  MessageBatchSchema,
+} from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
@@ -23,14 +39,14 @@ import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
-import {
-  getWorkspaceRuntimeAssets,
-  safeParseJson,
-  verifyWorkspaceCallbackAuth,
-} from './_helpers';
+import { getWorkspaceRuntimeAssets, safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
-const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(['opencode', 'claude-code', 'openai-codex']);
+const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set([
+  'opencode',
+  'claude-code',
+  'openai-codex',
+]);
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -52,14 +68,42 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     throw errors.notFound('Workspace');
   }
 
+  let selectedOpenCodeProvider: string | null = null;
+  if (body.agentType === 'opencode') {
+    const settingsRows = await db
+      .select({ opencodeProvider: schema.agentSettings.opencodeProvider })
+      .from(schema.agentSettings)
+      .where(
+        and(
+          eq(schema.agentSettings.userId, workspace.userId),
+          eq(schema.agentSettings.agentType, body.agentType)
+        )
+      )
+      .limit(1);
+    const provider = settingsRows[0]?.opencodeProvider ?? null;
+    selectedOpenCodeProvider =
+      provider && Object.prototype.hasOwnProperty.call(OPENCODE_PROVIDERS, provider)
+        ? provider
+        : null;
+  }
+
+  const opencodeRequiresDedicatedCredential =
+    body.agentType === 'opencode' &&
+    selectedOpenCodeProvider !== null &&
+    selectedOpenCodeProvider !== 'platform' &&
+    selectedOpenCodeProvider !== 'scaleway';
+
   const encryptionKey = getCredentialEncryptionKey(c.env);
-  let credentialData = await getDecryptedAgentKey(
-    db,
-    workspace.userId,
-    body.agentType,
-    encryptionKey,
-    workspace.projectId
-  );
+  let credentialData =
+    body.agentType === 'opencode' && selectedOpenCodeProvider === 'platform'
+      ? null
+      : await getDecryptedAgentKey(
+          db,
+          workspace.userId,
+          body.agentType,
+          encryptionKey,
+          workspace.projectId
+        );
 
   // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
   // Platform credentials are control-plane secrets and must only be used via
@@ -71,18 +115,55 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
   // definition specifies a cloud provider whose credential can be used instead.
-  // Currently applies to OpenCode, which shares SCW_SECRET_KEY with Scaleway cloud.
-  const agentDef = isValidAgentType(body.agentType) ? getAgentDefinition(body.agentType) : undefined;
-  if (!credentialData && agentDef?.fallbackCloudProvider) {
-    const scalewayToken = await getDecryptedCredential(db, workspace.userId, agentDef.fallbackCloudProvider, encryptionKey);
+  // Currently applies to OpenCode only when the selected provider is default/Scaleway,
+  // which shares SCW_SECRET_KEY with the Scaleway cloud credential.
+  const agentDef = isValidAgentType(body.agentType)
+    ? getAgentDefinition(body.agentType)
+    : undefined;
+  const allowCloudProviderFallback =
+    body.agentType !== 'opencode' ||
+    selectedOpenCodeProvider === null ||
+    selectedOpenCodeProvider === 'scaleway';
+  if (!credentialData && allowCloudProviderFallback && agentDef?.fallbackCloudProvider) {
+    const scalewayToken = await getDecryptedCredential(
+      db,
+      workspace.userId,
+      agentDef.fallbackCloudProvider,
+      encryptionKey
+    );
     if (scalewayToken) {
       const secretKey = extractScalewaySecretKey(scalewayToken);
       if (secretKey) {
-        credentialData = { credential: secretKey, credentialKind: 'api-key', credentialSource: 'user' };
+        credentialData = {
+          credential: secretKey,
+          credentialKind: 'api-key',
+          credentialSource: 'user',
+        };
       } else {
-        log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, userId: workspace.userId, agentType: body.agentType });
+        log.warn('agent_key.scaleway_credential_missing_secret_key', {
+          workspaceId,
+          userId: workspace.userId,
+          agentType: body.agentType,
+        });
       }
     }
+  }
+
+  if (credentialData && opencodeRequiresDedicatedCredential) {
+    return c.json({
+      apiKey: credentialData.credential,
+      credentialKind: credentialData.credentialKind,
+    });
+  }
+
+  if (!credentialData && opencodeRequiresDedicatedCredential) {
+    log.info('agent_key.opencode_byo_provider_missing_credential', {
+      workspaceId,
+      userId: workspace.userId,
+      agentType: body.agentType,
+      opencodeProvider: selectedOpenCodeProvider,
+    });
+    throw errors.notFound('Agent credential');
   }
 
   // AI proxy: when enabled and agent is eligible, return proxy config when the
@@ -130,7 +211,9 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           const parsed: AIProxyConfig = JSON.parse(kvConfig);
           if (parsed.defaultModel) defaultModel = parsed.defaultModel;
         }
-      } catch { /* KV unavailable or corrupt data — use env/default */ }
+      } catch {
+        /* KV unavailable or corrupt data — use env/default */
+      }
     }
 
     // Claude Code/Codex explicit SAM mode must route through the SAM proxy,
@@ -139,7 +222,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialData = null;
     }
 
-    if (credentialData && !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')) {
+    if (
+      credentialData &&
+      !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')
+    ) {
       // User has their own credential — use passthrough proxy routes.
       // URL-path auth: wstoken embedded in URL, user credential in auth headers.
       let proxyBaseUrl: string;
@@ -164,7 +250,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       }
 
       log.info('agent_key.ai_proxy_passthrough', {
-        workspaceId, userId: workspace.userId, proxyBaseUrl, agentType: body.agentType,
+        workspaceId,
+        userId: workspace.userId,
+        proxyBaseUrl,
+        agentType: body.agentType,
       });
 
       // Track credential source on associated task
@@ -208,7 +297,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
       if (providerMode !== 'sam') {
         log.info('agent_key.no_credential_no_sam_provider', {
-          workspaceId, userId: workspace.userId, agentType: body.agentType, providerMode,
+          workspaceId,
+          userId: workspace.userId,
+          agentType: body.agentType,
+          providerMode,
         });
         throw errors.notFound('Agent credential');
       }
@@ -229,7 +321,12 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       proxyProvider = 'openai-compatible';
     }
 
-    log.info('agent_key.ai_proxy_sam_provider', { workspaceId, userId: workspace.userId, proxyBaseUrl, agentType: body.agentType });
+    log.info('agent_key.ai_proxy_sam_provider', {
+      workspaceId,
+      userId: workspace.userId,
+      proxyBaseUrl,
+      agentType: body.agentType,
+    });
 
     // Track credential source on associated task
     const taskRows = await db
@@ -291,131 +388,138 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
  * The VM agent reads the updated auth file from the container and sends it here.
  * Uses workspace callback auth.
  */
-runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSyncSchema), async (c) => {
-  const workspaceId = c.req.param('id');
-  await verifyWorkspaceCallbackAuth(c, workspaceId);
+runtimeRoutes.post(
+  '/:id/agent-credential-sync',
+  jsonValidator(AgentCredentialSyncSchema),
+  async (c) => {
+    const workspaceId = c.req.param('id');
+    await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (64KB default — auth.json files are typically a few KB).
-  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = parsePositiveInt(c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string, 64 * 1024);
-  if (contentLength > maxPayloadBytes) {
-    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
-  }
+    // Payload size check (64KB default — auth.json files are typically a few KB).
+    const contentLength = parseInt(c.req.header('content-length') || '0', 10);
+    const maxPayloadBytes = parsePositiveInt(
+      c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string,
+      64 * 1024
+    );
+    if (contentLength > maxPayloadBytes) {
+      throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
+    }
 
-  const body = c.req.valid('json');
-  const agentType = body.agentType;
-  const credentialKind = body.credentialKind;
+    const body = c.req.valid('json');
+    const agentType = body.agentType;
+    const credentialKind = body.credentialKind;
 
-  // Validate against known values. Use the shared catalog so new agents
-  // are accepted automatically without a manual allowlist update.
-  const validCredentialKinds = new Set(['api-key', 'oauth-token']);
-  if (!agentType || !isValidAgentType(agentType)) {
-    throw errors.badRequest('Invalid agentType');
-  }
-  if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
-    throw errors.badRequest('Invalid credentialKind');
-  }
+    // Validate against known values. Use the shared catalog so new agents
+    // are accepted automatically without a manual allowlist update.
+    const validCredentialKinds = new Set(['api-key', 'oauth-token']);
+    if (!agentType || !isValidAgentType(agentType)) {
+      throw errors.badRequest('Invalid agentType');
+    }
+    if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
+      throw errors.badRequest('Invalid credentialKind');
+    }
 
-  const db = drizzle(c.env.DATABASE, { schema });
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  // Look up the workspace to get the user ID and project ID.
-  const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  // Find the existing credential row to update. Prefer project-scoped match
-  // when the workspace is in a project; fall back to user-scoped only when
-  // there is no project-scoped row at all.
-  //
-  // Match the same HIGH #2 invariant enforced by runtime credential delivery
-  // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
-  // NOT fall through to the user-scoped row. That would silently collapse a
-  // project override back onto the user default during post-session refresh sync.
-  let existing: typeof schema.credentials.$inferSelect | undefined;
-  if (workspace.projectId) {
-    const projectMatch = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, workspace.userId),
-          eq(schema.credentials.projectId, workspace.projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, agentType),
-          eq(schema.credentials.credentialKind, credentialKind)
-        )
-      )
+    // Look up the workspace to get the user ID and project ID.
+    const workspaceRows = await db
+      .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, workspaceId))
       .limit(1);
-    const projectCredential = projectMatch[0];
-    if (projectCredential) {
-      if (projectCredential.isActive) {
-        existing = projectCredential;
-      } else {
-        return c.json({ success: false, reason: 'credential_not_found' });
+
+    const workspace = workspaceRows[0];
+    if (!workspace) {
+      throw errors.notFound('Workspace');
+    }
+
+    // Find the existing credential row to update. Prefer project-scoped match
+    // when the workspace is in a project; fall back to user-scoped only when
+    // there is no project-scoped row at all.
+    //
+    // Match the same HIGH #2 invariant enforced by runtime credential delivery
+    // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
+    // NOT fall through to the user-scoped row. That would silently collapse a
+    // project override back onto the user default during post-session refresh sync.
+    let existing: typeof schema.credentials.$inferSelect | undefined;
+    if (workspace.projectId) {
+      const projectMatch = await db
+        .select()
+        .from(schema.credentials)
+        .where(
+          and(
+            eq(schema.credentials.userId, workspace.userId),
+            eq(schema.credentials.projectId, workspace.projectId),
+            eq(schema.credentials.credentialType, 'agent-api-key'),
+            eq(schema.credentials.agentType, agentType),
+            eq(schema.credentials.credentialKind, credentialKind)
+          )
+        )
+        .limit(1);
+      const projectCredential = projectMatch[0];
+      if (projectCredential) {
+        if (projectCredential.isActive) {
+          existing = projectCredential;
+        } else {
+          return c.json({ success: false, reason: 'credential_not_found' });
+        }
       }
     }
-  }
-  if (!existing) {
-    const userMatch = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, workspace.userId),
-          isNull(schema.credentials.projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, agentType),
-          eq(schema.credentials.credentialKind, credentialKind),
-          eq(schema.credentials.isActive, true)
+    if (!existing) {
+      const userMatch = await db
+        .select()
+        .from(schema.credentials)
+        .where(
+          and(
+            eq(schema.credentials.userId, workspace.userId),
+            isNull(schema.credentials.projectId),
+            eq(schema.credentials.credentialType, 'agent-api-key'),
+            eq(schema.credentials.agentType, agentType),
+            eq(schema.credentials.credentialKind, credentialKind),
+            eq(schema.credentials.isActive, true)
+          )
         )
-      )
-      .limit(1);
-    existing = userMatch[0];
+        .limit(1);
+      existing = userMatch[0];
+    }
+    if (!existing) {
+      // No credential found — the user may have deleted it while the session was active.
+      return c.json({ success: false, reason: 'credential_not_found' });
+    }
+
+    // Decrypt the current credential to compare.
+    const currentCredential = await decrypt(
+      existing.encryptedToken,
+      existing.iv,
+      getCredentialEncryptionKey(c.env)
+    );
+
+    // Only update if the credential has actually changed.
+    if (currentCredential === body.credential) {
+      return c.json({ success: true, updated: false });
+    }
+
+    // Re-encrypt with a fresh IV and update.
+    const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
+    await db
+      .update(schema.credentials)
+      .set({
+        encryptedToken: ciphertext,
+        iv,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.credentials.id, existing.id));
+
+    log.info('agent_credential_sync.credential_updated', {
+      workspaceId,
+      agentType,
+      credentialKind,
+      credentialId: existing.id,
+    });
+
+    return c.json({ success: true, updated: true });
   }
-  if (!existing) {
-    // No credential found — the user may have deleted it while the session was active.
-    return c.json({ success: false, reason: 'credential_not_found' });
-  }
-
-  // Decrypt the current credential to compare.
-  const currentCredential = await decrypt(
-    existing.encryptedToken,
-    existing.iv,
-    getCredentialEncryptionKey(c.env)
-  );
-
-  // Only update if the credential has actually changed.
-  if (currentCredential === body.credential) {
-    return c.json({ success: true, updated: false });
-  }
-
-  // Re-encrypt with a fresh IV and update.
-  const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
-  await db
-    .update(schema.credentials)
-    .set({
-      encryptedToken: ciphertext,
-      iv,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.credentials.id, existing.id));
-
-  log.info('agent_credential_sync.credential_updated', {
-    workspaceId,
-    agentType,
-    credentialKind,
-    credentialId: existing.id,
-  });
-
-  return c.json({ success: true, updated: true });
-});
+);
 
 /**
  * POST /:id/agent-settings — VM agent callback to fetch user's agent settings.
@@ -518,7 +622,11 @@ runtimeRoutes.get('/:id/runtime-assets', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
   const db = drizzle(c.env.DATABASE, { schema });
-  const assets = await getWorkspaceRuntimeAssets(db, workspaceId, getCredentialEncryptionKey(c.env));
+  const assets = await getWorkspaceRuntimeAssets(
+    db,
+    workspaceId,
+    getCredentialEncryptionKey(c.env)
+  );
   return c.json(assets);
 });
 
@@ -574,7 +682,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
     const ttl = parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || 3600;
     // Use requested scope or default to 'write' (agents need push access)
-    const requestedScope = c.req.query('scope') === 'read' ? 'read' as const : 'write' as const;
+    const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
     const tokenResult = await repo.createToken(requestedScope, ttl);
 
@@ -609,10 +717,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
   // Request packages:write when devcontainer caching is enabled so the
   // VM agent can push cache images to GHCR on behalf of this installation.
-  const token = await getInstallationToken(
-    getExternalInstallationId(installation),
-    c.env,
-  );
+  const token = await getInstallationToken(getExternalInstallationId(installation), c.env);
   return c.json({ token: token.token, expiresAt: token.expiresAt });
 });
 
@@ -662,7 +767,8 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
 
   const validRoles = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
   const maxMessageBytes = c.env.MESSAGE_SIZE_THRESHOLD
-    ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10) : 102400; // 100KB default
+    ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10)
+    : 102400; // 100KB default
 
   // Validate each message and extract sessionId
   let sessionId: string | null = null;
@@ -674,7 +780,9 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
       throw errors.badRequest('Each message must have a sessionId string');
     }
     if (!msg.role || !validRoles.has(msg.role)) {
-      throw errors.badRequest(`Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`);
+      throw errors.badRequest(
+        `Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`
+      );
     }
     if (!msg.content || typeof msg.content !== 'string') {
       throw errors.badRequest('Each message must have non-empty content');
@@ -736,7 +844,7 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     );
     throw errors.badRequest(
       `Session mismatch: workspace is linked to session ${workspace.chatSessionId}, ` +
-      `but messages target session ${sessionId}`
+        `but messages target session ${sessionId}`
     );
   }
 
@@ -827,8 +935,8 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
           role: m.role,
           content: m.content,
           toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
-        })),
-      ),
+        }))
+      )
     );
   }
 

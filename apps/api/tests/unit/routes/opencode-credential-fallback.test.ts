@@ -20,7 +20,9 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ userId: 'test-user-id' }),
 }));
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({
@@ -55,8 +57,13 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
           Authorization: 'Bearer test-callback-token',
         },
       },
-      mockEnv,
+      mockEnv
     );
+  }
+
+  function queueLimitResponses(...responses: unknown[][]): void {
+    const queued = [...responses];
+    mockDB.limit.mockImplementation(() => queued.shift() ?? []);
   }
 
   beforeEach(() => {
@@ -69,13 +76,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         error?: string;
         message?: string;
       };
-      if (
-        typeof appError.statusCode === 'number' &&
-        typeof appError.error === 'string'
-      ) {
+      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500,
+          appError.statusCode as 400 | 401 | 403 | 404 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -92,28 +96,17 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
   });
 
   it('returns Scaleway cloud credential when no dedicated opencode agent key exists', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      if (queryCount === 2) {
-        // agent-api-key for 'opencode' → not found
-        return [];
-      }
-      if (queryCount === 3) {
-        // platform credential → not found
-        return [];
-      }
-      if (queryCount === 4) {
-        // cloud-provider for 'scaleway' → found
-        return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }];
-      }
-      return [];
-    });
+    queueLimitResponses(
+      [{ userId: 'user-1' }],
+      [],
+      [],
+      [],
+      [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]
+    );
 
-    mockDecrypt.mockResolvedValueOnce(JSON.stringify({ secretKey: 'scw-secret-key-123', projectId: 'scw-proj-1' }));
+    mockDecrypt.mockResolvedValueOnce(
+      JSON.stringify({ secretKey: 'scw-secret-key-123', projectId: 'scw-proj-1' })
+    );
 
     const resp = await postAgentKey({ agentType: 'opencode' });
     expect(resp.status).toBe(200);
@@ -124,23 +117,18 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
   });
 
   it('prefers dedicated opencode agent key over Scaleway cloud credential', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      if (queryCount === 2) {
-        // agent-api-key for 'opencode' → found
-        return [{
+    queueLimitResponses(
+      [{ userId: 'user-1' }],
+      [],
+      [
+        {
           encryptedToken: 'encrypted-dedicated',
           iv: 'iv-dedicated',
           credentialKind: 'api-key',
           isActive: true,
-        }];
-      }
-      return [];
-    });
+        },
+      ]
+    );
 
     mockDecrypt.mockResolvedValueOnce('dedicated-opencode-key');
 
@@ -153,14 +141,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
   });
 
   it('returns platform proxy fallback when no opencode key AND no Scaleway cloud credential', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      return [];
-    });
+    queueLimitResponses([{ userId: 'user-1' }], []);
 
     const resp = await postAgentKey({ agentType: 'opencode' });
     // With AI proxy enabled (default), opencode falls back to platform proxy
@@ -186,43 +167,26 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
         body: JSON.stringify({ agentType: 'opencode' }),
       },
-      disabledEnv,
+      disabledEnv
     );
     expect(resp.status).toBe(404);
   });
 
   it('does not use Scaleway fallback for non-opencode agents', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      return [];
-    });
+    queueLimitResponses([{ userId: 'user-1' }]);
 
     const resp = await postAgentKey({ agentType: 'google-gemini' });
     expect(resp.status).toBe(404);
   });
 
   it('handles malformed Scaleway credential JSON gracefully and falls back to platform proxy', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      if (queryCount === 2) {
-        return []; // no dedicated user agent key
-      }
-      if (queryCount === 3) {
-        return []; // no platform credential
-      }
-      if (queryCount === 4) {
-        return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]; // scaleway cloud provider
-      }
-      return [];
-    });
+    queueLimitResponses(
+      [{ userId: 'user-1' }],
+      [],
+      [],
+      [],
+      [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]
+    );
 
     mockDecrypt.mockResolvedValueOnce('not-valid-json');
 
@@ -232,5 +196,39 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     const body = await resp.json();
     expect(body.apiKey).toBe('__platform_proxy__');
     expect(body.credentialSource).toBe('platform');
+  });
+
+  it('returns dedicated key directly for OpenCode managed instead of routing through platform proxy', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1' }],
+      [{ opencodeProvider: 'opencode-managed' }],
+      [
+        {
+          encryptedToken: 'encrypted-managed-key',
+          iv: 'iv-managed',
+          credentialKind: 'api-key',
+          isActive: true,
+        },
+      ]
+    );
+
+    mockDecrypt.mockResolvedValueOnce('opencode-managed-api-key');
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.apiKey).toBe('opencode-managed-api-key');
+    expect(body.credentialKind).toBe('api-key');
+    expect(body.inferenceConfig).toBeUndefined();
+  });
+
+  it('does not fall back to Scaleway or platform credentials when OpenCode managed has no key', async () => {
+    queueLimitResponses([{ userId: 'user-1' }], [{ opencodeProvider: 'opencode-managed' }], []);
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.message).toBe('Agent credential not found');
+    expect(mockDB.limit).toHaveBeenCalledTimes(4);
   });
 });
