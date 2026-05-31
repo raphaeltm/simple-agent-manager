@@ -31,7 +31,7 @@ Important constraint: this work must stop at a draft or clearly do-not-merge PR.
 - [x] Add tests for precedence, validation, persisted snapshots, MCP taskMode default, and no scheduler placement behavior change.
 - [x] Run migration safety and relevant quality checks.
 - [x] Run Cloudflare specialist and constitution validator review before finalizing.
-- [ ] Open draft/do-not-merge PR and stop.
+- [x] Open draft/do-not-merge PR and stop.
 
 ## Acceptance Criteria
 
