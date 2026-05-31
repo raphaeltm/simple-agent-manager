@@ -1,4 +1,5 @@
 ---
+import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
 import type { FeatureSection } from '../data/features';
 
 interface Props {
@@ -25,12 +26,7 @@ const { feature, prevFeature, nextFeature } = Astro.props;
     <p class="feature-hero-subtitle animate-on-scroll">{feature.subtitle}</p>
 
     <div class="feature-hero-image animate-on-scroll">
-      <img
-        src={feature.screenshots[0].src}
-        alt={feature.screenshots[0].alt}
-        loading="eager"
-        decoding="async"
-      />
+      <OptimizedFeatureImage src={feature.screenshots[0].src} alt={feature.screenshots[0].alt} loading="eager" />
     </div>
   </div>
 </section>
@@ -44,12 +40,7 @@ const { feature, prevFeature, nextFeature } = Astro.props;
           <p class="detail-body">{detail.body}</p>
         </div>
         <div class="detail-image">
-          <img
-            src={detail.screenshot.src}
-            alt={detail.screenshot.alt}
-            loading="lazy"
-            decoding="async"
-          />
+          <OptimizedFeatureImage src={detail.screenshot.src} alt={detail.screenshot.alt} />
           <span class="detail-caption">{detail.screenshot.caption}</span>
         </div>
       </div>
@@ -157,8 +148,12 @@ const { feature, prevFeature, nextFeature } = Astro.props;
       0 0 120px rgba(22, 163, 74, 0.06);
   }
 
+  .feature-hero-image picture,
   .feature-hero-image img {
     display: block;
+  }
+
+  .feature-hero-image img {
     width: 100%;
     height: auto;
   }
@@ -234,8 +229,12 @@ const { feature, prevFeature, nextFeature } = Astro.props;
     box-shadow: var(--glass-shadow);
   }
 
+  .detail-image picture,
   .detail-image img {
     display: block;
+  }
+
+  .detail-image img {
     width: 100%;
     height: auto;
   }
