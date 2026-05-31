@@ -225,7 +225,7 @@ String containment tests on structured output create false confidence. The test 
 **Full details in `.claude/rules/13-staging-verification.md`.** Summary of the hard requirements:
 
 1. **Staging deployment MUST be green.** The `Deploy Staging` workflow is manual — you must trigger it via `gh workflow run deploy-staging.yml --ref <branch>`. Check for existing active runs first and wait at least 5 minutes if one is in progress. A failed staging deployment is the same severity as a failed test — it blocks merge.
-2. **Live app MUST be verified via Playwright.** After staging deploys, authenticate to `app.sammy.party` (staging — NOT `app.simple-agent-manager.org`, which is production) using the smoke test token in `SAM_PLAYWRIGHT_PRIMARY_USER` env var via `POST https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }`, then navigate and actively test the application. See `.claude/rules/13-staging-verification.md` for the full login procedure.
+2. **Live app MUST be verified via Playwright.** After staging deploys, authenticate the Playwright browser context for `app.sammy.party` (staging — NOT `app.simple-agent-manager.org`, which is production) using the smoke/API token in `SAM_PLAYWRIGHT_PRIMARY_USER` env var via `POST https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }`, then navigate and actively test the application in that browser. Do not use `SAM_API_URL` for this token; staging tokens correctly fail against production. See `.claude/rules/13-staging-verification.md` for the full login procedure.
 3. **Existing workflows MUST be confirmed working.** Navigate the dashboard, projects, settings. Verify no regressions — pages load, data displays, navigation works, no new console errors.
 4. **New feature/fix MUST be verified on staging.** The specific changes in the PR must work correctly on the live staging environment.
 5. **Evidence MUST be reported.** Include screenshots, API responses, or Playwright observations in the PR.
@@ -236,7 +236,7 @@ String containment tests on structured output create false confidence. The test 
 - A "small refactor" still deploys and verifies — prove no behavior changed
 - A "fix for broken staging" is the STRONGEST reason to verify — confirm the fix works
 - "Tests pass" is not sufficient — tests passed for bugs that only manifested in the real environment
-- If you cannot authenticate (e.g., `SAM_PLAYWRIGHT_PRIMARY_USER` env var not set), ask the human — do NOT skip verification
+- If you cannot authenticate, first confirm `SAM_PLAYWRIGHT_PRIMARY_USER` is set and that Playwright is using `https://api.sammy.party` for token exchange. If the env var is missing, ask the human — do NOT skip verification.
 
 ## Post-Push CI Procedure (Required)
 

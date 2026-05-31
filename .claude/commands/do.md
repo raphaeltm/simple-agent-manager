@@ -209,6 +209,7 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    POST https://api.sammy.party/api/auth/token-login
    Body: { "token": "<SAM_PLAYWRIGHT_PRIMARY_USER env var>" }
    ```
+   Do this inside Playwright so the browser context receives the session cookie, then navigate that browser to `https://app.sammy.party`. Do not exchange the staging smoke/API token against `SAM_API_URL`; these tokens correctly fail against production.
    If the env var is not set, ask the human for credentials.
 
 5. **Verify the changed behavior works end-to-end:**

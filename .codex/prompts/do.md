@@ -267,7 +267,12 @@ Before staging or PR creation, remove or replace prototype-only artifacts unless
 
 3. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
-4. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
+4. **Authenticate** using the staging smoke/API token via token-login API:
+   ```
+   POST https://api.sammy.party/api/auth/token-login
+   Body: { "token": "<SAM_PLAYWRIGHT_PRIMARY_USER env var>" }
+   ```
+   Do this inside Playwright so the browser context receives the session cookie, then navigate that browser to `https://app.sammy.party`. Do not exchange the staging smoke/API token against `SAM_API_URL`; these tokens correctly fail against production. If the env var is not set, ask the human for credentials.
 
 5. **Query staging state via Cloudflare API** before testing in the browser:
    - **After migration changes**: query D1 `d1_migrations` table and verify new tables/columns exist

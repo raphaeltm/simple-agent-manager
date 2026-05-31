@@ -85,6 +85,8 @@ After staging deployment succeeds, use Playwright to test the live app:
    // Verify login succeeded (status 200, response has success: true)
    ```
    - The `SAM_PLAYWRIGHT_PRIMARY_USER` env var contains the smoke test token
+   - The `SAM_PLAYWRIGHT_*` tokens are staging tokens. They must be exchanged by Playwright against `https://api.sammy.party`, not `SAM_API_URL`.
+   - Do not use SAM CLI login as the normal staging verification path. The required flow is browser auth through Playwright, then browser navigation to `https://app.sammy.party`.
    - If the env var is not set, ask the human — do NOT skip this step
 2. Navigate to `https://app.sammy.party` (staging) — the session cookie from step 1 authenticates you
 3. Verify your changes work as intended (see verification checklists below)
@@ -151,7 +153,7 @@ If you find a bug unrelated to your PR, file it as a backlog task (`tasks/backlo
 - **App doesn't load** → fix the issue, do not merge
 - **Your feature doesn't work on staging** → fix the issue, do not merge
 - **Existing workflow is broken** → investigate whether your PR caused it; if yes, fix it; if pre-existing, file a backlog task but still do not merge with NEW regressions
-- **Cannot authenticate** → check that `SAM_PLAYWRIGHT_PRIMARY_USER` env var is set; if not, ask the human — do not skip verification
+- **Cannot authenticate** → check that `SAM_PLAYWRIGHT_PRIMARY_USER` env var is set and that Playwright is posting to `https://api.sammy.party/api/auth/token-login`; if you accidentally use production (`api.simple-agent-manager.org`) the staging token will fail with `401 Invalid token`. If the env var is missing, ask the human — do not skip verification.
 
 ## Feature-Specific Verification Is Mandatory (Not Just Page Loads)
 
