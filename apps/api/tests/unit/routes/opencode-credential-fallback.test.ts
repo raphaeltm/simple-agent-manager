@@ -20,7 +20,9 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ userId: 'test-user-id' }),
 }));
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({
@@ -55,7 +57,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
           Authorization: 'Bearer test-callback-token',
         },
       },
-      mockEnv,
+      mockEnv
     );
   }
 
@@ -69,13 +71,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         error?: string;
         message?: string;
       };
-      if (
-        typeof appError.statusCode === 'number' &&
-        typeof appError.error === 'string'
-      ) {
+      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500,
+          appError.statusCode as 400 | 401 | 403 | 404 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -99,21 +98,27 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         return [{ userId: 'user-1' }];
       }
       if (queryCount === 2) {
-        // agent-api-key for 'opencode' → not found
+        // user opencode settings → default provider
         return [];
       }
       if (queryCount === 3) {
-        // platform credential → not found
+        // agent-api-key for 'opencode' → not found
         return [];
       }
       if (queryCount === 4) {
+        // platform credential → not found
+        return [];
+      }
+      if (queryCount === 5) {
         // cloud-provider for 'scaleway' → found
         return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }];
       }
       return [];
     });
 
-    mockDecrypt.mockResolvedValueOnce(JSON.stringify({ secretKey: 'scw-secret-key-123', projectId: 'scw-proj-1' }));
+    mockDecrypt.mockResolvedValueOnce(
+      JSON.stringify({ secretKey: 'scw-secret-key-123', projectId: 'scw-proj-1' })
+    );
 
     const resp = await postAgentKey({ agentType: 'opencode' });
     expect(resp.status).toBe(200);
@@ -131,13 +136,19 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         return [{ userId: 'user-1' }];
       }
       if (queryCount === 2) {
+        // user opencode settings → default provider
+        return [];
+      }
+      if (queryCount === 3) {
         // agent-api-key for 'opencode' → found
-        return [{
-          encryptedToken: 'encrypted-dedicated',
-          iv: 'iv-dedicated',
-          credentialKind: 'api-key',
-          isActive: true,
-        }];
+        return [
+          {
+            encryptedToken: 'encrypted-dedicated',
+            iv: 'iv-dedicated',
+            credentialKind: 'api-key',
+            isActive: true,
+          },
+        ];
       }
       return [];
     });
@@ -158,6 +169,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
       queryCount++;
       if (queryCount === 1) {
         return [{ userId: 'user-1' }];
+      }
+      if (queryCount === 2) {
+        // user opencode settings → default provider
+        return [];
       }
       return [];
     });
@@ -186,7 +201,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
         body: JSON.stringify({ agentType: 'opencode' }),
       },
-      disabledEnv,
+      disabledEnv
     );
     expect(resp.status).toBe(404);
   });
@@ -213,12 +228,16 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         return [{ userId: 'user-1' }];
       }
       if (queryCount === 2) {
-        return []; // no dedicated user agent key
+        // user opencode settings → default provider
+        return [];
       }
       if (queryCount === 3) {
-        return []; // no platform credential
+        return []; // no dedicated user agent key
       }
       if (queryCount === 4) {
+        return []; // no platform credential
+      }
+      if (queryCount === 5) {
         return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]; // scaleway cloud provider
       }
       return [];
@@ -232,5 +251,66 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     const body = await resp.json();
     expect(body.apiKey).toBe('__platform_proxy__');
     expect(body.credentialSource).toBe('platform');
+  });
+
+  it('returns dedicated key directly for OpenCode managed instead of routing through platform proxy', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        return [{ userId: 'user-1' }];
+      }
+      if (queryCount === 2) {
+        return [{ opencodeProvider: 'opencode-managed' }];
+      }
+      if (queryCount === 3) {
+        return [
+          {
+            encryptedToken: 'encrypted-managed-key',
+            iv: 'iv-managed',
+            credentialKind: 'api-key',
+            isActive: true,
+          },
+        ];
+      }
+      return [];
+    });
+
+    mockDecrypt.mockResolvedValueOnce('opencode-managed-api-key');
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.apiKey).toBe('opencode-managed-api-key');
+    expect(body.credentialKind).toBe('api-key');
+    expect(body.inferenceConfig).toBeUndefined();
+  });
+
+  it('does not fall back to Scaleway or platform credentials when OpenCode managed has no key', async () => {
+    let queryCount = 0;
+    mockDB.limit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) {
+        return [{ userId: 'user-1' }];
+      }
+      if (queryCount === 2) {
+        return [{ opencodeProvider: 'opencode-managed' }];
+      }
+      if (queryCount === 3) {
+        return []; // no dedicated user agent key
+      }
+      if (queryCount === 4) {
+        return []; // no platform agent key
+      }
+      if (queryCount > 4) {
+        throw new Error('OpenCode managed must not query fallback credentials');
+      }
+      return [];
+    });
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.message).toBe('Agent credential not found');
   });
 });

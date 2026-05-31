@@ -79,7 +79,7 @@ describe('DropdownMenu', () => {
     render(<DropdownMenu items={makeItems()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
 
-    const deleteItem = screen.getByText('Delete');
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete' });
     expect(deleteItem.className).toContain('text-danger');
   });
 
@@ -92,7 +92,7 @@ describe('DropdownMenu', () => {
     render(<DropdownMenu items={items} />);
     fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
 
-    const disabledItem = screen.getByText('Duplicate');
+    const disabledItem = screen.getByRole('menuitem', { name: 'Duplicate' });
     expect(disabledItem).toHaveAttribute('aria-disabled', 'true');
     expect(disabledItem).toHaveAttribute('title', 'Not available');
   });

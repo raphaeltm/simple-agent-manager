@@ -105,18 +105,20 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should return existing settings when row exists', async () => {
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-id',
-        userId: 'test-user-id',
-        agentType: 'claude-code',
-        model: 'claude-opus-4-6',
-        permissionMode: 'acceptEdits',
-        allowedTools: JSON.stringify(['Read', 'Bash(npm:*)']),
-        deniedTools: null,
-        additionalEnv: JSON.stringify({ DEBUG: 'true' }),
-        createdAt: new Date('2026-02-13T00:00:00Z'),
-        updatedAt: new Date('2026-02-13T00:00:00Z'),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-id',
+          userId: 'test-user-id',
+          agentType: 'claude-code',
+          model: 'claude-opus-4-6',
+          permissionMode: 'acceptEdits',
+          allowedTools: JSON.stringify(['Read', 'Bash(npm:*)']),
+          deniedTools: null,
+          additionalEnv: JSON.stringify({ DEBUG: 'true' }),
+          createdAt: new Date('2026-02-13T00:00:00Z'),
+          updatedAt: new Date('2026-02-13T00:00:00Z'),
+        },
+      ]);
 
       const res = await getSettings('claude-code');
 
@@ -130,21 +132,23 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should tolerate invalid persisted JSON and enum-like values', async () => {
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-id',
-        userId: 'test-user-id',
-        agentType: 'claude-code',
-        model: 'claude-opus-4-6',
-        permissionMode: 'root',
-        allowedTools: '{not-json',
-        deniedTools: JSON.stringify(['Read', 123]),
-        additionalEnv: JSON.stringify({ DEBUG: true }),
-        opencodeProvider: 'mystery-provider',
-        opencodeBaseUrl: 'https://provider.example.com/v1',
-        opencodeProviderName: 'Provider',
-        createdAt: new Date('2026-02-13T00:00:00Z'),
-        updatedAt: new Date('2026-02-13T00:00:00Z'),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-id',
+          userId: 'test-user-id',
+          agentType: 'claude-code',
+          model: 'claude-opus-4-6',
+          permissionMode: 'root',
+          allowedTools: '{not-json',
+          deniedTools: JSON.stringify(['Read', 123]),
+          additionalEnv: JSON.stringify({ DEBUG: true }),
+          opencodeProvider: 'mystery-provider',
+          opencodeBaseUrl: 'https://provider.example.com/v1',
+          opencodeProviderName: 'Provider',
+          createdAt: new Date('2026-02-13T00:00:00Z'),
+          updatedAt: new Date('2026-02-13T00:00:00Z'),
+        },
+      ]);
 
       const res = await getSettings('claude-code');
 
@@ -172,18 +176,20 @@ describe('Agent Settings Routes', () => {
       // No existing settings
       mockDB.limit.mockResolvedValueOnce([]);
       // After insert, re-fetch
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-ulid',
-        userId: 'test-user-id',
-        agentType: 'claude-code',
-        model: 'claude-sonnet-4-5-20250929',
-        permissionMode: 'default',
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        createdAt: new Date('2026-02-13T00:00:00Z'),
-        updatedAt: new Date('2026-02-13T00:00:00Z'),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-ulid',
+          userId: 'test-user-id',
+          agentType: 'claude-code',
+          model: 'claude-sonnet-4-5-20250929',
+          permissionMode: 'default',
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          createdAt: new Date('2026-02-13T00:00:00Z'),
+          updatedAt: new Date('2026-02-13T00:00:00Z'),
+        },
+      ]);
 
       const res = await putSettings('claude-code', {
         model: 'claude-sonnet-4-5-20250929',
@@ -200,18 +206,20 @@ describe('Agent Settings Routes', () => {
       // Existing settings
       mockDB.limit.mockResolvedValueOnce([{ id: 'existing-id' }]);
       // After update, re-fetch
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'existing-id',
-        userId: 'test-user-id',
-        agentType: 'claude-code',
-        model: 'claude-opus-4-6',
-        permissionMode: 'bypassPermissions',
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        createdAt: new Date('2026-02-13T00:00:00Z'),
-        updatedAt: new Date('2026-02-13T01:00:00Z'),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'existing-id',
+          userId: 'test-user-id',
+          agentType: 'claude-code',
+          model: 'claude-opus-4-6',
+          permissionMode: 'bypassPermissions',
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          createdAt: new Date('2026-02-13T00:00:00Z'),
+          updatedAt: new Date('2026-02-13T01:00:00Z'),
+        },
+      ]);
 
       const res = await putSettings('claude-code', {
         model: 'claude-opus-4-6',
@@ -285,18 +293,20 @@ describe('Agent Settings Routes', () => {
 
     it('should accept null values to clear settings', async () => {
       mockDB.limit.mockResolvedValueOnce([{ id: 'existing-id' }]);
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'existing-id',
-        userId: 'test-user-id',
-        agentType: 'claude-code',
-        model: null,
-        permissionMode: null,
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        createdAt: new Date('2026-02-13T00:00:00Z'),
-        updatedAt: new Date('2026-02-13T01:00:00Z'),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'existing-id',
+          userId: 'test-user-id',
+          agentType: 'claude-code',
+          model: null,
+          permissionMode: null,
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          createdAt: new Date('2026-02-13T00:00:00Z'),
+          updatedAt: new Date('2026-02-13T01:00:00Z'),
+        },
+      ]);
 
       const res = await putSettings('claude-code', {
         model: null,
@@ -311,21 +321,23 @@ describe('Agent Settings Routes', () => {
 
     it('should accept Gemini CLI model and permission settings', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-ulid',
-        userId: 'test-user-id',
-        agentType: 'google-gemini',
-        model: 'gemini-2.5-pro',
-        permissionMode: 'acceptEdits',
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        opencodeProvider: null,
-        opencodeBaseUrl: null,
-        opencodeProviderName: null,
-        createdAt: new Date('2026-05-19T00:00:00Z'),
-        updatedAt: new Date('2026-05-19T00:00:00Z'),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-ulid',
+          userId: 'test-user-id',
+          agentType: 'google-gemini',
+          model: 'gemini-2.5-pro',
+          permissionMode: 'acceptEdits',
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          opencodeProvider: null,
+          opencodeBaseUrl: null,
+          opencodeProviderName: null,
+          createdAt: new Date('2026-05-19T00:00:00Z'),
+          updatedAt: new Date('2026-05-19T00:00:00Z'),
+        },
+      ]);
 
       const res = await putSettings('google-gemini', {
         model: 'gemini-2.5-pro',
@@ -378,21 +390,23 @@ describe('Agent Settings Routes', () => {
 
     it('should accept scaleway provider without opencodeBaseUrl', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-ulid',
-        userId: 'test-user-id',
-        agentType: 'opencode',
-        model: null,
-        permissionMode: null,
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        opencodeProvider: 'scaleway',
-        opencodeBaseUrl: null,
-        opencodeProviderName: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-ulid',
+          userId: 'test-user-id',
+          agentType: 'opencode',
+          model: null,
+          permissionMode: null,
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          opencodeProvider: 'scaleway',
+          opencodeBaseUrl: null,
+          opencodeProviderName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
 
       const res = await putSettings('opencode', { opencodeProvider: 'scaleway' });
 
@@ -402,23 +416,57 @@ describe('Agent Settings Routes', () => {
       expect(body.opencodeBaseUrl).toBeNull();
     });
 
+    it('should accept OpenCode managed provider without opencodeBaseUrl', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-ulid',
+          userId: 'test-user-id',
+          agentType: 'opencode',
+          model: 'opencode-zen/claude-sonnet-4-5',
+          permissionMode: null,
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          opencodeProvider: 'opencode-managed',
+          opencodeBaseUrl: null,
+          opencodeProviderName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+
+      const res = await putSettings('opencode', {
+        opencodeProvider: 'opencode-managed',
+        model: 'opencode-zen/claude-sonnet-4-5',
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.opencodeProvider).toBe('opencode-managed');
+      expect(body.opencodeBaseUrl).toBeNull();
+      expect(body.model).toBe('opencode-zen/claude-sonnet-4-5');
+    });
+
     it('should accept custom provider with valid HTTPS base URL', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-ulid',
-        userId: 'test-user-id',
-        agentType: 'opencode',
-        model: null,
-        permissionMode: null,
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        opencodeProvider: 'custom',
-        opencodeBaseUrl: 'https://my-provider.example.com/v1',
-        opencodeProviderName: 'My Provider',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-ulid',
+          userId: 'test-user-id',
+          agentType: 'opencode',
+          model: null,
+          permissionMode: null,
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          opencodeProvider: 'custom',
+          opencodeBaseUrl: 'https://my-provider.example.com/v1',
+          opencodeProviderName: 'My Provider',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
 
       const res = await putSettings('opencode', {
         opencodeProvider: 'custom',
@@ -440,21 +488,23 @@ describe('Agent Settings Routes', () => {
     });
 
     it('should return opencode fields in GET response', async () => {
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'test-id',
-        userId: 'test-user-id',
-        agentType: 'opencode',
-        model: 'qwen3-coder',
-        permissionMode: null,
-        allowedTools: null,
-        deniedTools: null,
-        additionalEnv: null,
-        opencodeProvider: 'google-vertex',
-        opencodeBaseUrl: null,
-        opencodeProviderName: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-id',
+          userId: 'test-user-id',
+          agentType: 'opencode',
+          model: 'qwen3-coder',
+          permissionMode: null,
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          opencodeProvider: 'google-vertex',
+          opencodeBaseUrl: null,
+          opencodeProviderName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
 
       const res = await getSettings('opencode');
 

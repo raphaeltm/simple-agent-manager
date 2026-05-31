@@ -117,6 +117,7 @@ function startControlPlaneMock(publicJwk) {
   const sockets = new Set();
   const state = {
     lastAgentKeyRequest: null,
+    lastAgentSettingsRequest: null,
     lastGitTokenRequest: null,
   };
 
@@ -162,8 +163,58 @@ function startControlPlaneMock(publicJwk) {
           return;
         }
 
+        if (parsed.agentType === 'opencode') {
+          res.writeHead(404, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'not_found', message: 'Agent credential' }));
+          return;
+        }
+
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ apiKey: `sk-e2e-${parsed.agentType}` }));
+      });
+      return;
+    }
+
+    if (
+      req.method === 'POST' &&
+      url.pathname === `/api/workspaces/${WORKSPACE_ID}/agent-settings`
+    ) {
+      const auth = req.headers.authorization ?? '';
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        let parsed = {};
+        try {
+          parsed = JSON.parse(body || '{}');
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_json', message: 'Invalid JSON body' }));
+          return;
+        }
+
+        state.lastAgentSettingsRequest = {
+          auth,
+          body: parsed,
+        };
+
+        if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
+          res.writeHead(401, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unauthorized', message: 'Invalid callback token' }));
+          return;
+        }
+
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            model: 'opencode-zen/claude-sonnet-4-5',
+            permissionMode: null,
+            opencodeProvider: 'opencode-managed',
+            opencodeBaseUrl: null,
+            opencodeProviderName: null,
+          })
+        );
       });
       return;
     }
@@ -578,6 +629,51 @@ async function runAcpSmoke(jwtToken, controlPlane) {
   }
 }
 
+async function runOpenCodeNoKeySmoke(jwtToken, controlPlane) {
+  const acpWsUrl = `ws://127.0.0.1:${VM_AGENT_PORT}/agent/ws?token=${encodeURIComponent(jwtToken)}`;
+  const ws = await connectWebSocket(acpWsUrl, 10_000, {
+    headers: {
+      'X-SAM-Workspace-Id': WORKSPACE_ID,
+      'X-SAM-Node-Id': WORKSPACE_ID,
+    },
+  });
+
+  try {
+    ws.send(JSON.stringify({ type: 'select_agent', agentType: 'opencode' }));
+
+    await waitForJsonMessage(
+      ws,
+      (msg) =>
+        msg.type === 'agent_status' && msg.status === 'starting' && msg.agentType === 'opencode',
+      15_000
+    );
+
+    const errorMessage = await waitForJsonMessage(
+      ws,
+      (msg) =>
+        msg.type === 'agent_status' &&
+        msg.status === 'error' &&
+        msg.agentType === 'opencode' &&
+        typeof msg.error === 'string' &&
+        msg.error.includes('Failed to fetch credential'),
+      15_000
+    );
+
+    if (/sk-e2e|callback-e2e-token/.test(errorMessage.error)) {
+      throw new Error('OpenCode missing-key error leaked credential material');
+    }
+
+    const controlPlaneState = await controlPlane.getState();
+    if (controlPlaneState.lastAgentKeyRequest?.body?.agentType !== 'opencode') {
+      throw new Error('VM Agent did not request OpenCode credential during no-key smoke');
+    }
+
+    log('OpenCode managed no-key smoke test passed');
+  } finally {
+    ws.close();
+  }
+}
+
 async function runGitCredentialSmoke(controlPlane) {
   const response = await fetch(`http://127.0.0.1:${VM_AGENT_PORT}/git-credential`, {
     headers: {
@@ -688,6 +784,7 @@ async function main() {
     await runTerminalSmoke(vmAgent.sampleToken);
     await runGitCredentialSmoke(controlPlane);
     await runAcpSmoke(vmAgent.sampleToken, controlPlane);
+    await runOpenCodeNoKeySmoke(vmAgent.sampleToken, controlPlane);
 
     log('All smoke checks passed');
   } finally {

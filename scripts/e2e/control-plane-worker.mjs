@@ -1,4 +1,5 @@
 let lastAgentKeyRequest = null;
+let lastAgentSettingsRequest = null;
 let lastGitTokenRequest = null;
 
 function jsonResponse(body, status = 200) {
@@ -25,7 +26,7 @@ export default {
     }
 
     if (request.method === 'GET' && url.pathname === '/__e2e/state') {
-      return jsonResponse({ lastAgentKeyRequest, lastGitTokenRequest });
+      return jsonResponse({ lastAgentKeyRequest, lastAgentSettingsRequest, lastGitTokenRequest });
     }
 
     if (request.method === 'POST' && url.pathname === `/api/workspaces/${workspaceId}/agent-key`) {
@@ -48,7 +49,39 @@ export default {
         return badRequest('agentType is required');
       }
 
+      if (body.agentType === 'opencode') {
+        return jsonResponse({ error: 'not_found', message: 'Agent credential' }, 404);
+      }
+
       return jsonResponse({ apiKey: `sk-e2e-${body.agentType}` });
+    }
+
+    if (
+      request.method === 'POST' &&
+      url.pathname === `/api/workspaces/${workspaceId}/agent-settings`
+    ) {
+      const auth = request.headers.get('authorization') ?? '';
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return badRequest('Invalid JSON body');
+      }
+
+      lastAgentSettingsRequest = { auth, body };
+
+      if (auth !== `Bearer ${callbackToken}`) {
+        return jsonResponse({ error: 'unauthorized', message: 'Invalid callback token' }, 401);
+      }
+
+      return jsonResponse({
+        model: 'opencode-zen/claude-sonnet-4-5',
+        permissionMode: null,
+        opencodeProvider: 'opencode-managed',
+        opencodeBaseUrl: null,
+        opencodeProviderName: null,
+      });
     }
 
     if (request.method === 'POST' && url.pathname === `/api/workspaces/${workspaceId}/git-token`) {
