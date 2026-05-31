@@ -1,0 +1,212 @@
+---
+import { featureSections } from '../data/features';
+---
+
+{featureSections.map((section, sectionIdx) => (
+  <section class="showcase-section" id={`feature-${section.slug}`}>
+    <div class="container">
+      <div class="showcase-header animate-on-scroll">
+        <span class="section-label">{section.label}</span>
+        <h2 class="section-title" set:html={section.title.replace('\n', '<br />')} />
+        <p class="section-subtitle">{section.subtitle}</p>
+      </div>
+
+      <div class={`bento-grid bento-${section.slug}`}>
+        {section.screenshots.map((screenshot, i) => (
+          <a
+            href={`/features/${section.slug}/`}
+            class="bento-card animate-on-scroll"
+            style={`transition-delay: ${i * 100}ms`}
+          >
+            <div class="bento-image">
+              <img
+                src={screenshot.src}
+                alt={screenshot.alt}
+                loading={sectionIdx === 0 && i === 0 ? 'eager' : 'lazy'}
+                decoding="async"
+              />
+            </div>
+            <div class="bento-caption">
+              <span class="caption-text">{screenshot.caption}</span>
+              <svg class="caption-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+))}
+
+<style>
+  .showcase-section {
+    padding: 80px 0;
+  }
+
+  @media (min-width: 768px) {
+    .showcase-section {
+      padding: 120px 0;
+    }
+  }
+
+  .showcase-section + .showcase-section {
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .showcase-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  @media (min-width: 768px) {
+    .showcase-header {
+      margin-bottom: 64px;
+    }
+  }
+
+  .showcase-header .section-subtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ---- Bento grid ---- */
+
+  .bento-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 1fr;
+  }
+
+  @media (min-width: 768px) {
+    .bento-grid {
+      gap: 20px;
+    }
+  }
+
+  /* Chat: 2 cols — large + tall */
+  @media (min-width: 768px) {
+    .bento-chat {
+      grid-template-columns: 3fr 2fr;
+    }
+  }
+
+  /* Visibility: full-width hero + 2 equal below */
+  @media (min-width: 768px) {
+    .bento-visibility {
+      grid-template-columns: 1fr 1fr;
+    }
+    .bento-visibility .bento-card:first-child {
+      grid-column: 1 / -1;
+    }
+  }
+
+  /* Agent context: large card + 3 small */
+  @media (min-width: 768px) {
+    .bento-agent-context {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+    }
+    .bento-agent-context .bento-card:first-child {
+      grid-row: 1 / 3;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bento-agent-context {
+      grid-template-columns: 2fr 1fr 1fr;
+      grid-template-rows: auto auto;
+    }
+    .bento-agent-context .bento-card:first-child {
+      grid-row: 1 / 3;
+      grid-column: 1;
+    }
+  }
+
+  /* Automation: 2 equal */
+  @media (min-width: 768px) {
+    .bento-automation {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  /* Configuration: 2 top + full bottom */
+  @media (min-width: 768px) {
+    .bento-configuration {
+      grid-template-columns: 1fr 1fr;
+    }
+    .bento-configuration .bento-card:last-child {
+      grid-column: 1 / -1;
+    }
+  }
+
+  /* ---- Bento cards ---- */
+
+  .bento-card {
+    position: relative;
+    display: block;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s, opacity 0.6s ease;
+    color: inherit;
+  }
+
+  .bento-card:hover {
+    border-color: var(--glass-border-hover);
+    box-shadow: var(--glass-shadow), 0 0 40px rgba(22, 163, 74, 0.12), 0 0 80px rgba(22, 163, 74, 0.05);
+    transform: translateY(-2px);
+    color: inherit;
+  }
+
+  .bento-image {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .bento-image img {
+    display: block;
+    width: 100%;
+    height: auto;
+    transition: transform 0.4s ease;
+  }
+
+  .bento-card:hover .bento-image img {
+    transform: scale(1.02);
+  }
+
+  .bento-caption {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .caption-text {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    line-height: 1.4;
+  }
+
+  .caption-arrow {
+    flex-shrink: 0;
+    color: var(--color-fg-muted);
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  .bento-card:hover .caption-arrow {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .bento-card:hover .caption-text {
+    color: var(--color-fg-primary);
+  }
+</style>
