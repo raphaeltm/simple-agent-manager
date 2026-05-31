@@ -273,10 +273,12 @@ describe('Agent Profile Service', () => {
         maxTurns: 50,
         timeoutMinutes: 120,
         vmSizeOverride: 'cx22',
+        devcontainerConfigName: undefined,
         provider: null,
         vmLocation: null,
         workspaceProfile: null,
         taskMode: null,
+        resourceRequirements: null,
       });
     });
 
