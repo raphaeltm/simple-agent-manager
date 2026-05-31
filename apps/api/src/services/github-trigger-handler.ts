@@ -5,7 +5,7 @@
  * Called from the webhook endpoint after signature verification.
  *
  * Flow:
- * 1. Check GITHUB_TRIGGERS_ENABLED feature flag
+ * 1. Check GitHub trigger enablement
  * 2. Deduplicate by X-GitHub-Delivery ID
  * 3. Find the project linked to the webhook's repository
  * 4. Find active GitHub triggers for that project matching the event type
@@ -53,8 +53,9 @@ export async function handleGitHubEventForTriggers(
 ): Promise<HandleGitHubEventResult> {
   const { deliveryId, eventType, payload } = input;
 
-  // Feature flag gate — must be explicitly set to "true" to enable
-  if (env.GITHUB_TRIGGERS_ENABLED !== 'true') {
+  // GitHub App webhooks are considered enabled when the signing secret exists.
+  // GITHUB_TRIGGERS_ENABLED remains an explicit kill switch for emergency disable.
+  if (!areGitHubTriggersEnabled(env)) {
     return { processed: false, deliveryId, matchedTriggers: 0, reason: 'feature_disabled' };
   }
 
@@ -152,6 +153,13 @@ export async function handleGitHubEventForTriggers(
   }
 
   return { processed: totalMatched > 0, deliveryId, matchedTriggers: totalMatched };
+}
+
+function areGitHubTriggersEnabled(env: Env): boolean {
+  if (env.GITHUB_TRIGGERS_ENABLED === 'false') {
+    return false;
+  }
+  return env.GITHUB_TRIGGERS_ENABLED === 'true' || Boolean(env.GITHUB_WEBHOOK_SECRET);
 }
 
 async function processTriggersForProject(

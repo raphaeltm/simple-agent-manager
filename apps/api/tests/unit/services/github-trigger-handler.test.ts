@@ -58,7 +58,7 @@ function createMockEnv(overrides: Record<string, unknown> = {}) {
 
   return {
     env: {
-      GITHUB_TRIGGERS_ENABLED: 'true',
+      GITHUB_WEBHOOK_SECRET: 'test-webhook-secret',
       DATABASE: mockDb,
       ...overrides,
     } as unknown as Parameters<typeof handleGitHubEventForTriggers>[0],
@@ -96,10 +96,25 @@ describe('handleGitHubEventForTriggers', () => {
   });
 
   // --- Feature flag gating ---
-  it('returns feature_disabled when GITHUB_TRIGGERS_ENABLED is not true', async () => {
+  it('uses GITHUB_WEBHOOK_SECRET as the default enablement signal', async () => {
     const { env } = createMockEnv({ GITHUB_TRIGGERS_ENABLED: undefined });
     const result = await handleGitHubEventForTriggers(env, {
       deliveryId: 'delivery-1',
+      eventType: 'star',
+      payload: { action: 'created', sender: { login: 'fan' } },
+    });
+    expect(result.processed).toBe(false);
+    expect(result.reason).toBe('unsupported_event_type:star');
+    expect(submitTriggeredTask).not.toHaveBeenCalled();
+  });
+
+  it('returns feature_disabled when neither override nor webhook secret is configured', async () => {
+    const { env } = createMockEnv({
+      GITHUB_TRIGGERS_ENABLED: undefined,
+      GITHUB_WEBHOOK_SECRET: undefined,
+    });
+    const result = await handleGitHubEventForTriggers(env, {
+      deliveryId: 'delivery-no-secret',
       eventType: 'issues',
       payload: makeIssuesPayload(),
     });
@@ -109,7 +124,7 @@ describe('handleGitHubEventForTriggers', () => {
     expect(submitTriggeredTask).not.toHaveBeenCalled();
   });
 
-  it('returns feature_disabled when flag is "false" (not "true")', async () => {
+  it('returns feature_disabled when flag is explicitly "false"', async () => {
     const { env } = createMockEnv({ GITHUB_TRIGGERS_ENABLED: 'false' });
     const result = await handleGitHubEventForTriggers(env, {
       deliveryId: 'delivery-2',
