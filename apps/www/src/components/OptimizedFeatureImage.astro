@@ -1,0 +1,40 @@
+---
+interface Props {
+  src: string;
+  alt: string;
+  loading?: 'eager' | 'lazy';
+}
+
+const { src, alt, loading = 'lazy' } = Astro.props;
+const optimizedFeatureImages: Record<string, string> = {
+  'agent-actions.png': 'sam-agent-actions-activity-log.png',
+  'agent-context-overview.png': 'sam-agent-context-overview.png',
+  'agent-memory.png': 'sam-agent-memory-knowledge.png',
+  'agent-policies.png': 'sam-agent-policies-instructions.png',
+  'dashboard.png': 'sam-dashboard-active-tasks-projects.png',
+  'document-viewer.png': 'sam-document-viewer-mermaid.png',
+  'ideas.png': 'sam-ideas-execute-task.png',
+  'library.png': 'sam-project-library-files.png',
+  'live-session.png': 'sam-live-agent-session-tool-stream.png',
+  'nodes.png': 'sam-nodes-health-workspaces.png',
+  'notifications.png': 'sam-notifications-filtered-feed.png',
+  'project-chat.png': 'sam-project-chat-agent-selector.png',
+  'settings.png': 'sam-project-settings-agents-nodes.png',
+  'triggers.png': 'sam-recurring-triggers-schedules.png',
+};
+
+const pathParts = src.split('/');
+const fileName = pathParts[pathParts.length - 1] ?? '';
+pathParts[pathParts.length - 1] = optimizedFeatureImages[fileName] ?? fileName;
+const optimizedSrc = pathParts.join('/');
+const webpSrc = optimizedSrc.replace(/\.png$/, '.webp');
+const escapeAttribute = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+const pictureHtml = `<picture><source srcset="${escapeAttribute(webpSrc)}" type="image/webp"><img src="${escapeAttribute(optimizedSrc)}" alt="${escapeAttribute(alt)}" loading="${loading}" decoding="async"></picture>`;
+---
+
+<Fragment set:html={pictureHtml} />

@@ -1,5 +1,6 @@
 ---
 import NodeGrid from './NodeGrid.astro';
+import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
 
 const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
 const appUrl = `https://app.${baseDomain}`;
@@ -36,11 +37,10 @@ const appUrl = `https://app.${baseDomain}`;
 
     <!-- App screenshot -->
     <div class="screenshot-preview animate-on-scroll">
-      <img
+      <OptimizedFeatureImage
         src="/images/features/live-session.png"
         alt="SAM project chat showing an agent working on a task — tool calls, code execution, and real-time progress"
         loading="eager"
-        decoding="async"
       />
     </div>
   </div>
@@ -191,8 +191,12 @@ const appUrl = `https://app.${baseDomain}`;
       0 0 120px rgba(22, 163, 74, 0.06);
   }
 
+  .screenshot-preview picture,
   .screenshot-preview img {
     display: block;
+  }
+
+  .screenshot-preview img {
     width: 100%;
     height: auto;
   }
