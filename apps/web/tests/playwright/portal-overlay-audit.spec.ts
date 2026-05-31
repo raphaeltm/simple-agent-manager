@@ -508,6 +508,68 @@ async function openOptionalButtonOverlay(
   await assertNoOverflow(page);
 }
 
+type OverlayViewport = 'mobile' | 'desktop';
+
+type SharedOverlayScenario = {
+  name: string;
+  run: (page: Page, viewport: OverlayViewport) => Promise<void>;
+};
+
+function viewportScreenshot(baseName: string, viewport: OverlayViewport) {
+  return `${baseName}-${viewport}`;
+}
+
+const sharedOverlayScenarios: SharedOverlayScenario[] = [
+  {
+    name: 'TriggerDropdown portal renders positioned correctly',
+    run: (page, viewport) =>
+      openOptionalButtonOverlay(page, {
+        buttonSelector: 'button[aria-label="Automation triggers"]',
+        overlayScreenshotName: viewportScreenshot('portal-trigger-dropdown', viewport),
+        url: '/projects/proj-test-1/triggers',
+      }),
+  },
+  {
+    name: 'Library FileActionsMenu portal renders positioned correctly',
+    run: (page, viewport) =>
+      openOptionalButtonOverlay(page, {
+        buttonSelector: 'button[aria-label*="Actions for"]',
+        overlayScreenshotName: viewportScreenshot('portal-file-actions-menu', viewport),
+        pageScreenshotName: viewportScreenshot('portal-library-page', viewport),
+        url: '/projects/proj-test-1/library',
+      }),
+  },
+  {
+    name: 'TriggerCard context menu portal renders positioned correctly',
+    run: (page, viewport) =>
+      openOptionalButtonOverlay(page, {
+        buttonSelector: 'button[aria-label="Trigger actions"]',
+        overlayScreenshotName: viewportScreenshot('portal-trigger-card-actions', viewport),
+        pageScreenshotName:
+          viewport === 'desktop' ? viewportScreenshot('portal-triggers-page', viewport) : undefined,
+        url: '/projects/proj-test-1/triggers',
+      }),
+  },
+  {
+    name: 'Nodes shared DropdownMenu portal renders with blurred glass surface',
+    run: (page, viewport) =>
+      openNodeDropdown(page, viewportScreenshot('portal-node-dropdown-menu', viewport)),
+  },
+  {
+    name: 'Shared Tooltip portal renders with blurred surface',
+    run: (page, viewport) =>
+      openSharedTooltip(page, viewportScreenshot('portal-shared-tooltip', viewport)),
+  },
+];
+
+function registerSharedOverlayScenarios(viewport: OverlayViewport) {
+  for (const scenario of sharedOverlayScenarios) {
+    test(scenario.name, async ({ page }) => {
+      await scenario.run(page, viewport);
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests — Mobile (default viewport from Playwright config)
 // ---------------------------------------------------------------------------
@@ -584,38 +646,7 @@ test.describe('Portal Overlays — Mobile', () => {
     await assertNoOverflow(page);
   });
 
-  test('TriggerDropdown portal renders positioned correctly', async ({ page }) => {
-    await openOptionalButtonOverlay(page, {
-      buttonSelector: 'button[aria-label="Automation triggers"]',
-      overlayScreenshotName: 'portal-trigger-dropdown-mobile',
-      url: '/projects/proj-test-1/triggers',
-    });
-  });
-
-  test('Library page with FileActionsMenu portal', async ({ page }) => {
-    await openOptionalButtonOverlay(page, {
-      buttonSelector: 'button[aria-label*="Actions for"]',
-      overlayScreenshotName: 'portal-file-actions-menu-mobile',
-      pageScreenshotName: 'portal-library-page-mobile',
-      url: '/projects/proj-test-1/library',
-    });
-  });
-
-  test('Triggers page with TriggerCard context menu', async ({ page }) => {
-    await openOptionalButtonOverlay(page, {
-      buttonSelector: 'button[aria-label="Trigger actions"]',
-      overlayScreenshotName: 'portal-trigger-card-actions-mobile',
-      url: '/projects/proj-test-1/triggers',
-    });
-  });
-
-  test('Nodes shared DropdownMenu portal renders with glass surface', async ({ page }) => {
-    await openNodeDropdown(page, 'portal-node-dropdown-menu-mobile');
-  });
-
-  test('Shared Tooltip portal renders with blurred surface', async ({ page }) => {
-    await openSharedTooltip(page, 'portal-shared-tooltip-mobile');
-  });
+  registerSharedOverlayScenarios('mobile');
 });
 
 // ---------------------------------------------------------------------------
@@ -633,39 +664,7 @@ test.describe('Portal Overlays — Desktop', () => {
     await openCommandPalette(page, 'portal-command-palette-desktop', 'window');
   });
 
-  test('TriggerDropdown portal positioned below trigger button', async ({ page }) => {
-    await openOptionalButtonOverlay(page, {
-      buttonSelector: 'button[aria-label="Automation triggers"]',
-      overlayScreenshotName: 'portal-trigger-dropdown-desktop',
-      url: '/projects/proj-test-1/triggers',
-    });
-  });
-
-  test('TriggerCard context menu portal positioned correctly', async ({ page }) => {
-    await openOptionalButtonOverlay(page, {
-      buttonSelector: 'button[aria-label="Trigger actions"]',
-      overlayScreenshotName: 'portal-trigger-card-actions-desktop',
-      pageScreenshotName: 'portal-triggers-page-desktop',
-      url: '/projects/proj-test-1/triggers',
-    });
-  });
-
-  test('Library FileActionsMenu portal positioned correctly', async ({ page }) => {
-    await openOptionalButtonOverlay(page, {
-      buttonSelector: 'button[aria-label*="Actions for"]',
-      overlayScreenshotName: 'portal-file-actions-menu-desktop',
-      pageScreenshotName: 'portal-library-page-desktop',
-      url: '/projects/proj-test-1/library',
-    });
-  });
-
-  test('Nodes shared DropdownMenu portal positioned correctly', async ({ page }) => {
-    await openNodeDropdown(page, 'portal-node-dropdown-menu-desktop');
-  });
-
-  test('Shared Tooltip portal renders with blurred surface', async ({ page }) => {
-    await openSharedTooltip(page, 'portal-shared-tooltip-desktop');
-  });
+  registerSharedOverlayScenarios('desktop');
 
   test('Account map hover tooltip portal renders with blurred surface', async ({ page }) => {
     await page.goto('/account-map');
