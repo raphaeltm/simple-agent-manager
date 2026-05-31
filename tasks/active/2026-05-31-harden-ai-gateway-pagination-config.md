@@ -17,13 +17,13 @@ That is below the quality bar for cost and usage accounting. A bad config value 
 
 ## Implementation Checklist
 
-- [ ] Add explicit bounded positive integer parsing for AI Gateway pagination values.
-- [ ] Clamp page size to the Cloudflare-supported range rather than trusting env input.
-- [ ] Ensure invalid, zero, negative, fractional, and non-numeric max-page values fall back safely.
-- [ ] Preserve the scheduled aggregation override path and its separate hard cap.
-- [ ] Add unit regression tests for invalid pagination config.
-- [ ] Update environment documentation so operators know the allowed page-size range and fallback behavior.
-- [ ] Run focused API tests and relevant quality checks.
+- [x] Add explicit bounded positive integer parsing for AI Gateway pagination values.
+- [x] Clamp page size to the Cloudflare-supported range rather than trusting env input.
+- [x] Ensure invalid, zero, negative, fractional, and non-numeric max-page values fall back safely.
+- [x] Preserve the scheduled aggregation override path and its separate hard cap.
+- [x] Add unit regression tests for invalid pagination config.
+- [x] Update environment documentation so operators know the allowed page-size range and fallback behavior.
+- [x] Run focused API tests and relevant quality checks.
 
 ## Acceptance Criteria
 

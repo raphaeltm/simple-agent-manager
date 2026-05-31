@@ -140,10 +140,36 @@ describe('resolveGatewayPagination', () => {
     expect(maxPages).toBe(10);
   });
 
+  it('clamps page size to the Cloudflare API bounds', () => {
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '500' } as never).pageSize)
+      .toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '0' } as never).pageSize)
+      .toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '-5' } as never).pageSize)
+      .toBe(50);
+  });
+
+  it('floors fractional page size overrides', () => {
+    const { pageSize } = resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '12.9' } as never);
+    expect(pageSize).toBe(12);
+  });
+
   it('caps maxPages at 20', () => {
     const env = { AI_USAGE_MAX_PAGES: '100' };
     const { maxPages } = resolveGatewayPagination(env as never);
     expect(maxPages).toBe(20);
+  });
+
+  it('falls back for invalid max page overrides', () => {
+    for (const invalid of ['0', '-1', 'abc']) {
+      const { maxPages } = resolveGatewayPagination({ AI_USAGE_MAX_PAGES: invalid } as never);
+      expect(maxPages).toBe(20);
+    }
+  });
+
+  it('floors fractional max page overrides', () => {
+    const { maxPages } = resolveGatewayPagination({ AI_USAGE_MAX_PAGES: '4.8' } as never);
+    expect(maxPages).toBe(4);
   });
 
   it('supports a separate hard cap for scheduled aggregation', () => {
@@ -164,6 +190,16 @@ describe('resolveGatewayPagination', () => {
       maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
     });
     expect(maxPages).toBe(500);
+  });
+
+  it('falls back for invalid scheduled aggregation max pages', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '-10' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(200);
   });
 });
 
