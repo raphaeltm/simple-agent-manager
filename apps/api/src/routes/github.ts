@@ -6,25 +6,21 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
-import { getWebhookSecret } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
-import { getUserId, optionalAuth,requireApproved, requireAuth } from '../middleware/auth';
-import { AppError, errors } from '../middleware/error';
+import { getUserId, optionalAuth, requireApproved, requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import {
   getAuthenticatedUserOrganizations,
   getInstallationRepositories,
   getRepositoryBranches,
   getUserAccessibleInstallations,
   verifyUserInstallationAccess,
-  verifyWebhookSignature,
 } from '../services/github-app';
 import {
   getCanonicalAccountInput,
   type GitHubDb,
   type GitHubInstallationAccountRow,
   normalizeAccountType,
-  tombstoneCanonicalInstallationAccount,
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import {
@@ -36,8 +32,8 @@ import {
   summarizeAccessibleInstallations,
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
-import { handleGitHubEventForTriggers } from '../services/github-trigger-handler';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
+import { handleGitHubWebhook } from './github-webhook';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -53,7 +49,10 @@ githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) =
 
   // Sync: discover installations the user can access but doesn't have a DB record for
   const accessToken = await getGitHubUserAccessToken(c, userId);
-  log.info('github.installations_sync.token_status', { userId, tokenPresent: Boolean(accessToken) });
+  log.info('github.installations_sync.token_status', {
+    userId,
+    tokenPresent: Boolean(accessToken),
+  });
   if (accessToken) {
     await syncUserInstallations(db, userId, accessToken);
   }
@@ -138,7 +137,11 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
       allRepos.push(...result.value);
     } else {
       const inst = targetInstallations[i]!;
-      log.error('github.get_repos_failed', { accountName: inst.accountName, installationId: inst.id, error: String(result.reason) });
+      log.error('github.get_repos_failed', {
+        accountName: inst.accountName,
+        installationId: inst.id,
+        error: String(result.reason),
+      });
       failedInstallations.push(inst.accountName);
     }
   }
@@ -214,147 +217,7 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
   }
 });
 
-/** POST /api/github/webhook - Handle GitHub App webhooks */
-githubRoutes.post('/webhook', async (c) => {
-  const signature = c.req.header('x-hub-signature-256');
-  const event = c.req.header('x-github-event');
-  const payload = await c.req.text();
-
-  if (!signature) {
-    throw errors.unauthorized('Missing webhook signature');
-  }
-
-  const webhookSecret = getWebhookSecret(c.env);
-  const isValid = await verifyWebhookSignature(payload, signature, webhookSecret);
-  if (!isValid) {
-    throw errors.unauthorized('Invalid webhook signature');
-  }
-
-  let data: Record<string, unknown>;
-  try {
-    data = expectJsonRecord(JSON.parse(payload), 'github.webhook');
-  } catch (e) {
-    if (e instanceof AppError) throw e;
-    throw errors.badRequest('Invalid JSON in webhook payload');
-  }
-  const db = drizzle(c.env.DATABASE, { schema });
-  const now = new Date().toISOString();
-
-  // Handle installation events
-  if (event === 'installation') {
-    const action = data.action;
-    const installation = optionalJsonRecord(data.installation, 'github.webhook.installation');
-    const sender = optionalJsonRecord(data.sender, 'github.webhook.sender');
-
-    if (action === 'created' && installation?.id != null) {
-      const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
-      const canonicalAccount = getCanonicalAccountInput(
-        String(installation.id),
-        account?.type,
-        account?.login
-      );
-      await upsertCanonicalInstallationAccount(db, canonicalAccount, now);
-
-      if (sender?.id != null) {
-        // Find user by GitHub ID (from the sender who installed the app)
-        const users = await db
-          .select()
-          .from(schema.users)
-          .where(eq(schema.users.githubId, String(sender.id)))
-          .limit(1);
-
-        const foundUser = users[0];
-        if (foundUser) {
-          // Create installation record
-          await db.insert(schema.githubInstallations).values({
-            id: ulid(),
-            userId: foundUser.id,
-            installationId: getStoredInstallationId(foundUser.id, String(installation.id)),
-            externalInstallationId: String(installation.id),
-            accountType: canonicalAccount.accountType,
-            accountName: canonicalAccount.accountName,
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-      }
-    } else if (action === 'deleted' && installation?.id != null) {
-      const account = optionalJsonRecord(installation.account, 'github.webhook.installation.account');
-      await tombstoneCanonicalInstallationAccount(
-        db,
-        getCanonicalAccountInput(String(installation.id), account?.type, account?.login),
-        now
-      );
-      // GitHub-source-of-truth uninstall: remove every user's per-user link for
-      // this external installation. This is intentionally broader than SAM
-      // account deletion/unlink, which must remove only one user's link rows.
-      await db
-        .delete(schema.githubInstallations)
-        .where(
-          or(
-            eq(schema.githubInstallations.installationId, String(installation.id)),
-            eq(schema.githubInstallations.externalInstallationId, String(installation.id))
-          )
-        );
-    }
-  }
-
-  // Handle repository events (renamed, transferred, deleted)
-  if (event === 'repository') {
-    const action = data.action;
-    const repo = optionalJsonRecord(data.repository, 'github.webhook.repository');
-    const repoId = typeof repo?.id === 'number' ? repo.id : undefined;
-
-    if (repoId !== undefined && (action === 'renamed' || action === 'transferred')) {
-      // Update repository name for all projects linked by github_repo_id
-      const newFullName = typeof repo?.full_name === 'string' ? repo.full_name.toLowerCase() : undefined;
-      if (newFullName) {
-        await db
-          .update(schema.projects)
-          .set({ repository: newFullName, updatedAt: now })
-          .where(eq(schema.projects.githubRepoId, repoId));
-      }
-    } else if (repoId !== undefined && action === 'deleted') {
-      // Mark projects as detached when the repo is deleted
-      await db
-        .update(schema.projects)
-        .set({ status: 'detached', updatedAt: now })
-        .where(eq(schema.projects.githubRepoId, repoId));
-    }
-  }
-
-  // Route supported events to GitHub trigger matching (best-effort, non-blocking)
-  // Use waitUntil to return 200 immediately and process triggers asynchronously,
-  // avoiding GitHub's 10-second webhook delivery timeout.
-  const deliveryId = c.req.header('x-github-delivery');
-  if (event && deliveryId) {
-    c.executionCtx.waitUntil(
-      handleGitHubEventForTriggers(c.env, {
-        deliveryId,
-        eventType: event,
-        payload: data,
-      })
-        .then((triggerResult) => {
-          if (triggerResult.matchedTriggers > 0) {
-            log.info('github.webhook.triggers_matched', {
-              deliveryId,
-              eventType: event,
-              matchedTriggers: triggerResult.matchedTriggers,
-            });
-          }
-        })
-        .catch((err) => {
-          log.error('github.webhook.trigger_handler_error', {
-            deliveryId,
-            eventType: event,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        })
-    );
-  }
-
-  return c.json({ received: true });
-});
+githubRoutes.post('/webhook', handleGitHubWebhook);
 
 /** GET /api/github/callback - Handle callback after GitHub App installation */
 githubRoutes.get('/callback', optionalAuth(), async (c) => {
@@ -444,14 +307,19 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
       installationCount: accessibleInstallations.length,
       installations: summarizeAccessibleInstallations(accessibleInstallations),
     });
-    const accessibleInstallation = accessibleInstallations.find((inst) => String(inst.id) === installationId);
+    const accessibleInstallation = accessibleInstallations.find(
+      (inst) => String(inst.id) === installationId
+    );
     log.info('github.installation_callback.installation_match', {
       userId: auth.user.id,
       installationId,
       found: Boolean(accessibleInstallation),
     });
     if (!accessibleInstallation) {
-      log.warn('github.installation_not_accessible_to_user', { installationId, userId: auth.user.id });
+      log.warn('github.installation_not_accessible_to_user', {
+        installationId,
+        userId: auth.user.id,
+      });
       return c.redirect(`${settingsUrl}?github_app=error&reason=installation_not_accessible`);
     }
 
@@ -557,7 +425,10 @@ async function syncDirectUserInstallations(
   accessToken: string
 ): Promise<void> {
   try {
-    log.info('github.installations_sync.token_status', { userId, tokenPresent: Boolean(accessToken) });
+    log.info('github.installations_sync.token_status', {
+      userId,
+      tokenPresent: Boolean(accessToken),
+    });
 
     // User-context GitHub verification: only sync installations the
     // authenticated GitHub user can access.
@@ -590,7 +461,9 @@ async function syncDirectUserInstallations(
       .from(schema.githubInstallations)
       .where(eq(schema.githubInstallations.userId, userId));
 
-    const existingInstallationIds = new Set(existingRecords.map((record) => getExternalInstallationId(record)));
+    const existingInstallationIds = new Set(
+      existingRecords.map((record) => getExternalInstallationId(record))
+    );
 
     const missingInstallations = accessibleInstallations.filter(
       (inst) => !existingInstallationIds.has(String(inst.id))
@@ -611,18 +484,16 @@ async function syncDirectUserInstallations(
           inst.account.type,
           inst.account.login
         );
-        await db
-          .insert(schema.githubInstallations)
-          .values({
-            id: ulid(),
-            userId,
-            installationId: getStoredInstallationId(userId, String(inst.id)),
-            externalInstallationId: String(inst.id),
-            accountType: canonicalAccount.accountType,
-            accountName: canonicalAccount.accountName,
-            createdAt: now,
-            updatedAt: now,
-          });
+        await db.insert(schema.githubInstallations).values({
+          id: ulid(),
+          userId,
+          installationId: getStoredInstallationId(userId, String(inst.id)),
+          externalInstallationId: String(inst.id),
+          accountType: canonicalAccount.accountType,
+          accountName: canonicalAccount.accountName,
+          createdAt: now,
+          updatedAt: now,
+        });
         log.info('github.installations_sync.insert_result', {
           userId,
           installationId: String(inst.id),
@@ -695,10 +566,7 @@ async function syncSharedOrgInstallations(
   }
 }
 
-async function getExistingInstallationIds(
-  db: GitHubDb,
-  userId: string
-): Promise<Set<string>> {
+async function getExistingInstallationIds(db: GitHubDb, userId: string): Promise<Set<string>> {
   const existingRecords = await db
     .select({
       installationId: schema.githubInstallations.installationId,
