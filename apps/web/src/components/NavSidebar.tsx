@@ -19,6 +19,7 @@ import {
   Shield,
   UserCog,
   Wrench,
+  Zap,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
@@ -53,6 +54,7 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
   { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
   { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
+  { label: 'Skills', path: 'skills', icon: <Zap size={18} /> },
   { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];

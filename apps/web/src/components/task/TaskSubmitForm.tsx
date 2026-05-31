@@ -1,4 +1,4 @@
-import type { AgentProfile, CredentialProvider, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile, AgentSkill, CredentialProvider, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef,useState } from 'react';
@@ -8,6 +8,7 @@ import type { TaskAttachmentRef } from '../../lib/api';
 import {
   getProject,
   listAgentProfiles,
+  listSkills,
   requestAttachmentUpload,
   updateAgentProfile,
   uploadAttachmentToR2,
@@ -15,6 +16,7 @@ import {
 import { formatFileSize } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
+import { SkillSelector } from '../skills/SkillSelector';
 import { SplitButton } from '../ui/SplitButton';
 import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
 
@@ -29,6 +31,7 @@ export interface TaskSubmitOptions {
   description?: string;
   priority?: number;
   agentProfileId?: string;
+  skillId?: string;
   vmSize?: VMSize;
   workspaceProfile?: WorkspaceProfile;
   devcontainerConfigName?: string | null;
@@ -56,12 +59,14 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState(0);
   const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
+  const [skillId, setSkillId] = useState<string | null>(null);
   const [vmSize, setVmSize] = useState<VMSize | ''>('');
   const [workspaceProfile, setWorkspaceProfile] = useState<WorkspaceProfile | ''>('');
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [projectProvider, setProjectProvider] = useState<CredentialProvider | null>(null);
   const [projectLocation, setProjectLocation] = useState<string | null>(null);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
@@ -90,6 +95,12 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
+
+  useEffect(() => {
+    void listSkills(projectId)
+      .then(setSkills)
+      .catch(() => { /* best-effort */ });
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,10 +233,12 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           description: description.trim() || undefined,
           priority: priority || undefined,
           agentProfileId: agentProfileId ?? undefined,
+          skillId: skillId ?? undefined,
         }
       : {
           description: description.trim() || undefined,
           priority: priority || undefined,
+          skillId: skillId ?? undefined,
           vmSize: vmSize || undefined,
           workspaceProfile: workspaceProfile || undefined,
           devcontainerConfigName: devcontainerConfigName.trim() || undefined,
@@ -241,6 +254,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     setDescription('');
     setPriority(0);
     setAgentProfileId(null);
+    setSkillId(null);
     setVmSize('');
     setWorkspaceProfile('');
     setDevcontainerConfigName('');
@@ -409,6 +423,21 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           </div>
 
           <div className="flex gap-3 flex-wrap items-end">
+            {skills.length > 0 && (
+              <div className="min-w-[180px]">
+                <label className="text-xs text-fg-muted block mb-1">
+                  Skill
+                </label>
+                <SkillSelector
+                  skills={skills}
+                  selectedSkillId={skillId}
+                  onChange={setSkillId}
+                  disabled={submitting}
+                  compact
+                />
+              </div>
+            )}
+
             {profiles.length > 0 && (
               <div className="flex items-end gap-1">
                 <div>

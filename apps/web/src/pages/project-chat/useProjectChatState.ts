@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentProfile, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, AgentSkill, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -21,6 +21,7 @@ import {
   listChatSessions,
   listCredentials,
   listProjectTasks,
+  listSkills,
   submitTask,
   summarizeSession,
   updateAgentProfile,
@@ -99,6 +100,7 @@ function getDerivedSubmitFields(pendingDerived: PendingDerived | null) {
 function buildBaseSubmitRequest({
   message,
   agentProfileId,
+  skillId,
   selectedAgentType,
   selectedVmSize,
   selectedWorkspaceProfile,
@@ -108,6 +110,7 @@ function buildBaseSubmitRequest({
 }: Readonly<{
   message: string;
   agentProfileId: string | null;
+  skillId: string | null;
   selectedAgentType: string | null;
   selectedVmSize: VMSize;
   selectedWorkspaceProfile: WorkspaceProfile;
@@ -116,12 +119,13 @@ function buildBaseSubmitRequest({
   pendingDerived: PendingDerived | null;
 }>): SubmitTaskPayload {
   const derivedFields = getDerivedSubmitFields(pendingDerived);
-  if (agentProfileId) return { message, agentProfileId, ...derivedFields };
+  if (agentProfileId) return { message, agentProfileId, ...(skillId ? { skillId } : {}), ...derivedFields };
 
   const devcontainerConfigName = selectedDevcontainerConfigName.trim();
   return {
     message,
     ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+    ...(skillId ? { skillId } : {}),
     vmSize: selectedVmSize,
     workspaceProfile: selectedWorkspaceProfile,
     ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName ? { devcontainerConfigName } : {}),
@@ -172,6 +176,8 @@ export function useProjectChatState() {
   // Agent profile selection
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [skills, setSkills] = useState<AgentSkill[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [providerCatalogs, setProviderCatalogs] = useState<ProviderCatalog[]>([]);
   const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
     open: false,
@@ -341,6 +347,15 @@ export function useProjectChatState() {
   }, [projectId]);
 
   useEffect(() => { loadProfiles(); }, [loadProfiles]);
+
+  useEffect(() => {
+    void listSkills(projectId)
+      .then((data) => {
+        setSkills(data);
+        setSelectedSkillId((current) => (current && data.some((skill) => skill.id === current) ? current : null));
+      })
+      .catch((err: unknown) => { console.error('Failed to load skills', err); });
+  }, [projectId]);
 
   const handleUpdateProfile = useCallback(async (profileId: string, data: UpdateAgentProfileRequest) => {
     await updateAgentProfile(projectId, profileId, data);
@@ -593,6 +608,7 @@ export function useProjectChatState() {
       const baseRequest = buildBaseSubmitRequest({
         message: trimmed,
         agentProfileId: submitProfileId,
+        skillId: selectedSkillId,
         selectedAgentType,
         selectedVmSize,
         selectedWorkspaceProfile,
@@ -783,6 +799,7 @@ export function useProjectChatState() {
     handleSubmit, handleNewChat, handleSelect,
     configuredAgents, selectedAgentType, setSelectedAgentType,
     agentProfiles, selectedProfileId, setSelectedProfileId,
+    skills, selectedSkillId, setSelectedSkillId,
     providerCatalogs, hasUserCloudCredentials,
     profileWizard, openProfileWizard, closeProfileWizard, updateProfileWizard, createProfileFromWizard, suggestProfileName,
     handleUpdateProfile, slashCommands,

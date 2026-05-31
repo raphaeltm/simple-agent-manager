@@ -1,5 +1,5 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, AgentSkill, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Check, ChevronRight, MessageSquare, Monitor, Plus, Settings, Wrench, Zap } from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
@@ -53,6 +53,9 @@ type ChatInputProps = Readonly<{
   agentProfiles: AgentProfile[];
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
+  skills: AgentSkill[];
+  selectedSkillId: string | null;
+  onSkillChange: (skillId: string | null) => void;
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
   providerCatalogs: ProviderCatalog[];
   projectDefaultProvider?: string | null;
@@ -138,6 +141,9 @@ export function ChatInput({
   agentProfiles,
   selectedProfileId,
   onProfileChange,
+  skills,
+  selectedSkillId,
+  onSkillChange,
   onUpdateProfile,
   providerCatalogs,
   projectDefaultProvider,
@@ -237,7 +243,7 @@ export function ChatInput({
       )}
 
       {agentProfiles.length > 0 && !profileWizard.open && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent profiles">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent profiles and skills">
           {agentProfiles.map((profile) => (
             <button
               key={profile.id}
@@ -438,6 +444,9 @@ export function ChatInput({
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}
         agentProfiles={agentProfiles}
+        skills={skills}
+        selectedSkillId={selectedSkillId}
+        onSkillChange={onSkillChange}
         attachments={attachments}
         onFilesSelected={onFilesSelected}
         onRemoveAttachment={onRemoveAttachment}

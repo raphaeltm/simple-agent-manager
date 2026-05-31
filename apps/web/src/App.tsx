@@ -38,6 +38,7 @@ import { ProjectCreate } from './pages/ProjectCreate';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
 import { ProjectProfiles } from './pages/ProjectProfiles';
+import { ProjectSkills } from './pages/ProjectSkills';
 import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
@@ -118,6 +119,7 @@ export default function App() {
               <Route path="triggers" element={<ProjectTriggers />} />
               <Route path="triggers/:triggerId" element={<ProjectTriggerDetail />} />
               <Route path="profiles" element={<ProjectProfiles />} />
+              <Route path="skills" element={<ProjectSkills />} />
             </Route>
 
             <Route path="/nodes" element={<Nodes />} />
