@@ -6,7 +6,7 @@
  */
 import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import { assertNoOverflow, jsonResponse, makeMockUser, screenshot } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data
@@ -266,53 +266,50 @@ const MOCK_ACCOUNT_MAP = {
 
 async function setupApiMocks(page: Page) {
   await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const method = route.request().method();
-
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const requestUrl = new URL(route.request().url());
+    const pathName = requestUrl.pathname;
+    const respond = (status: number, body: unknown) => jsonResponse(route, status, body);
 
     // Auth — BetterAuth calls /api/auth/get-session (and related paths)
-    if (path.includes('/api/auth/')) {
+    if (pathName.includes('/api/auth/')) {
       return respond(200, MOCK_USER);
     }
 
     // Notifications
-    if (path.startsWith('/api/notifications')) {
+    if (pathName.startsWith('/api/notifications')) {
       return respond(200, { notifications: [], unreadCount: 0 });
     }
 
     // Nodes and workspace list
-    if (path === '/api/nodes') {
+    if (pathName === '/api/nodes') {
       return respond(200, MOCK_NODES);
     }
 
-    if (path === '/api/workspaces') {
+    if (pathName === '/api/workspaces') {
       return respond(200, MOCK_NODE_WORKSPACES);
     }
 
-    if (path === '/api/account-map') {
+    if (pathName === '/api/account-map') {
       return respond(200, MOCK_ACCOUNT_MAP);
     }
 
     // Credentials
-    if (path.startsWith('/api/credentials')) {
+    if (pathName.startsWith('/api/credentials')) {
       return respond(200, []);
     }
 
     // GitHub installations
-    if (path.startsWith('/api/github/installations')) {
+    if (pathName.startsWith('/api/github/installations')) {
       return respond(200, []);
     }
 
     // Provider catalog
-    if (path.startsWith('/api/provider-catalog') || path.startsWith('/api/providers/catalog')) {
+    if (pathName.startsWith('/api/provider-catalog') || pathName.startsWith('/api/providers/catalog')) {
       return respond(200, { catalogs: [] });
     }
 
     // Project-scoped routes
-    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    const projectMatch = pathName.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
 
@@ -385,12 +382,12 @@ async function setupApiMocks(page: Page) {
     }
 
     // Projects list
-    if (path === '/api/projects' && method === 'GET') {
+    if (pathName === '/api/projects' && route.request().method() === 'GET') {
       return respond(200, { projects: [MOCK_PROJECT] });
     }
 
     // GitHub (any other github routes)
-    if (path.startsWith('/api/github')) {
+    if (pathName.startsWith('/api/github')) {
       return respond(200, []);
     }
 
