@@ -10,6 +10,8 @@
  * POST   /:triggerId/run     — Manual fire: create execution + task immediately
  */
 import type {
+  GitHubTriggerEventType,
+  GitHubTriggerFilters,
   ListTriggersResponse,
   TriggerResponse,
   TriggerStatus,
@@ -298,9 +300,26 @@ crudRoutes.get('/', async (c) => {
     }
   }
 
-  const triggers: TriggerResponse[] = rows.map((row) => ({
-    ...toTriggerResponse(row),
-  }));
+  const githubConfigs = triggerIds.length > 0
+    ? await db
+        .select()
+        .from(schema.githubTriggerConfigs)
+        .where(inArray(schema.githubTriggerConfigs.triggerId, triggerIds))
+    : [];
+  const githubConfigByTriggerId = new Map(githubConfigs.map((config) => [config.triggerId, config]));
+
+  const triggers: TriggerResponse[] = rows.map((row) => {
+    const response = toTriggerResponse(row);
+    const config = githubConfigByTriggerId.get(row.id);
+    if (!config) return response;
+    return {
+      ...response,
+      githubConfig: {
+        eventType: config.eventType as GitHubTriggerEventType,
+        filters: JSON.parse(config.filtersJson) as GitHubTriggerFilters,
+      },
+    };
+  });
 
   const response: ListTriggersResponse = { triggers };
   return c.json(response);

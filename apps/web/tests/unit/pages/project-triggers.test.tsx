@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';
+import { createTrigger } from '../../../src/lib/api';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggers } from '../../../src/pages/ProjectTriggers';
 
@@ -37,7 +38,7 @@ vi.mock('../../../src/lib/api', () => ({
   runTrigger: vi.fn().mockResolvedValue(undefined),
   updateTrigger: vi.fn().mockResolvedValue(undefined),
   createTrigger: vi.fn().mockResolvedValue(undefined),
-  listAgentProfiles: vi.fn().mockResolvedValue({ profiles: [] }),
+  listAgentProfiles: vi.fn().mockResolvedValue([]),
 }));
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,10 @@ function renderTriggers(initialRoute = '/projects/proj-test/triggers') {
 // ---------------------------------------------------------------------------
 
 describe('ProjectTriggers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders trigger list', async () => {
     renderTriggers();
     await waitFor(() => {
@@ -119,6 +124,37 @@ describe('ProjectTriggers', () => {
       await waitFor(() => {
         // The form heading "New Trigger" should now appear
         expect(screen.getByRole('heading', { name: /new trigger/i })).toBeInTheDocument();
+      });
+    });
+
+    it('creates a GitHub event trigger from the form', async () => {
+      const user = userEvent.setup();
+      renderTriggers();
+      await waitFor(() => {
+        expect(screen.getByText('Daily Sync')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getAllByRole('button', { name: /new trigger/i })[0]);
+      await user.type(screen.getByLabelText(/^name$/i), 'SAM comment command');
+      await user.click(screen.getByRole('button', { name: /github event/i }));
+      await user.clear(screen.getByLabelText(/prompt template/i));
+      await user.type(screen.getByLabelText(/prompt template/i), 'Handle GitHub comment');
+      await user.click(screen.getByRole('button', { name: /create trigger/i }));
+
+      await waitFor(() => {
+        expect(createTrigger).toHaveBeenCalledWith('proj-test', expect.objectContaining({
+          name: 'SAM comment command',
+          sourceType: 'github',
+          promptTemplate: 'Handle GitHub comment',
+          githubConfig: {
+            eventType: 'issue_comment',
+            filters: {
+              actions: ['created'],
+              commandPrefix: '/sam',
+              ignoreActors: ['dependabot[bot]'],
+            },
+          },
+        }));
       });
     });
   });

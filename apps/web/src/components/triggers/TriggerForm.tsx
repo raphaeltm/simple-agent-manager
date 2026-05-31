@@ -5,6 +5,8 @@
 import type {
   AgentProfile,
   CreateTriggerRequest,
+  GitHubTriggerEventType,
+  GitHubTriggerFilters,
   TriggerResponse,
   UpdateTriggerRequest,
 } from '@simple-agent-manager/shared';
@@ -15,7 +17,7 @@ import {
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, Github, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -38,13 +40,66 @@ const VM_SIZES = [
   { value: 'large', label: 'Large (8 vCPU, 16 GB)' },
 ];
 
+const GITHUB_EVENT_OPTIONS: Array<{ value: GitHubTriggerEventType; label: string }> = [
+  { value: 'issue_comment', label: 'Issue comment' },
+  { value: 'issues', label: 'Issue' },
+  { value: 'pull_request', label: 'Pull request' },
+  { value: 'push', label: 'Push' },
+];
+
 /** Template variables available for prompt interpolation. */
-const TEMPLATE_VARIABLES = [
+const CRON_TEMPLATE_VARIABLES = [
   { group: 'schedule', vars: ['schedule.time', 'schedule.date', 'schedule.dayOfWeek', 'schedule.hour', 'schedule.minute', 'schedule.timezone'] },
   { group: 'trigger', vars: ['trigger.id', 'trigger.name', 'trigger.description', 'trigger.fireCount'] },
   { group: 'project', vars: ['project.id', 'project.name'] },
   { group: 'execution', vars: ['execution.id', 'execution.sequenceNumber'] },
 ];
+
+const GITHUB_TEMPLATE_VARIABLES = [
+  { group: 'github', vars: ['github.event', 'github.action', 'github.actor', 'github.repository', 'github.number', 'github.title', 'github.body', 'github.comment', 'github.labels', 'github.branch', 'github.sha'] },
+  { group: 'trigger', vars: ['trigger.id', 'trigger.name', 'trigger.description', 'trigger.fireCount'] },
+  { group: 'project', vars: ['project.id', 'project.name'] },
+  { group: 'execution', vars: ['execution.id', 'execution.sequenceNumber'] },
+];
+
+function splitList(value: string): string[] | undefined {
+  const items = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+function joinList(value?: string[]): string {
+  return value?.join(', ') ?? '';
+}
+
+function buildGitHubFilters(input: {
+  eventType: GitHubTriggerEventType;
+  actions: string;
+  labels: string;
+  ignoreActors: string;
+  commandPrefix: string;
+  bodyContains: string;
+  branches: string;
+  ignoreDrafts: boolean;
+}): GitHubTriggerFilters {
+  const filters: GitHubTriggerFilters = {};
+  const actions = splitList(input.actions);
+  const labels = splitList(input.labels);
+  const ignoreActors = splitList(input.ignoreActors);
+  const branches = splitList(input.branches);
+
+  if (actions) filters.actions = actions;
+  if (labels) filters.labels = labels;
+  if (ignoreActors) filters.ignoreActors = ignoreActors;
+  if (input.commandPrefix.trim()) filters.commandPrefix = input.commandPrefix.trim();
+  if (input.bodyContains.trim()) filters.bodyContains = input.bodyContains.trim();
+  if (branches) filters.branches = branches;
+  if (input.eventType === 'pull_request' && input.ignoreDrafts) filters.ignoreDrafts = true;
+
+  return filters;
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -77,8 +132,17 @@ export const TriggerForm: FC<TriggerFormProps> = ({
   // Form state
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [sourceType, setSourceType] = useState<'cron' | 'github'>('cron');
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
   const [cronTimezone, setCronTimezone] = useState('UTC');
+  const [githubEventType, setGitHubEventType] = useState<GitHubTriggerEventType>('issue_comment');
+  const [githubActions, setGitHubActions] = useState('created');
+  const [githubLabels, setGitHubLabels] = useState('');
+  const [githubIgnoreActors, setGitHubIgnoreActors] = useState('dependabot[bot]');
+  const [githubCommandPrefix, setGitHubCommandPrefix] = useState('/sam');
+  const [githubBodyContains, setGitHubBodyContains] = useState('');
+  const [githubBranches, setGitHubBranches] = useState('');
+  const [githubIgnoreDrafts, setGitHubIgnoreDrafts] = useState(true);
   const [promptTemplate, setPromptTemplate] = useState('');
   const [skipIfRunning, setSkipIfRunning] = useState(true);
   const [maxConcurrent, setMaxConcurrent] = useState(1);
@@ -103,8 +167,17 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       if (editTrigger) {
         setName(editTrigger.name);
         setDescription(editTrigger.description ?? '');
+        setSourceType(editTrigger.sourceType === 'github' ? 'github' : 'cron');
         setCronExpression(editTrigger.cronExpression ?? '0 9 * * *');
         setCronTimezone(editTrigger.cronTimezone);
+        setGitHubEventType(editTrigger.githubConfig?.eventType ?? 'issue_comment');
+        setGitHubActions(joinList(editTrigger.githubConfig?.filters.actions) || 'created');
+        setGitHubLabels(joinList(editTrigger.githubConfig?.filters.labels));
+        setGitHubIgnoreActors(joinList(editTrigger.githubConfig?.filters.ignoreActors) || 'dependabot[bot]');
+        setGitHubCommandPrefix(editTrigger.githubConfig?.filters.commandPrefix ?? '/sam');
+        setGitHubBodyContains(editTrigger.githubConfig?.filters.bodyContains ?? '');
+        setGitHubBranches(joinList(editTrigger.githubConfig?.filters.branches));
+        setGitHubIgnoreDrafts(editTrigger.githubConfig?.filters.ignoreDrafts ?? true);
         setPromptTemplate(editTrigger.promptTemplate);
         setSkipIfRunning(editTrigger.skipIfRunning);
         setMaxConcurrent(editTrigger.maxConcurrent);
@@ -115,8 +188,17 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       } else {
         setName('');
         setDescription('');
+        setSourceType('cron');
         setCronExpression('0 9 * * *');
         setCronTimezone('UTC');
+        setGitHubEventType('issue_comment');
+        setGitHubActions('created');
+        setGitHubLabels('');
+        setGitHubIgnoreActors('dependabot[bot]');
+        setGitHubCommandPrefix('/sam');
+        setGitHubBodyContains('');
+        setGitHubBranches('');
+        setGitHubIgnoreDrafts(true);
         setPromptTemplate('');
         setSkipIfRunning(true);
         setMaxConcurrent(1);
@@ -153,7 +235,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       toast.error('Prompt template is required');
       return;
     }
-    if (!cronExpression.trim()) {
+    if (sourceType === 'cron' && !cronExpression.trim()) {
       toast.error('Schedule is required');
       return;
     }
@@ -164,8 +246,8 @@ export const TriggerForm: FC<TriggerFormProps> = ({
         const data: UpdateTriggerRequest = {
           name: name.trim(),
           description: description.trim() || null,
-          cronExpression,
-          cronTimezone,
+          cronExpression: sourceType === 'cron' ? cronExpression : undefined,
+          cronTimezone: sourceType === 'cron' ? cronTimezone : undefined,
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
@@ -179,15 +261,30 @@ export const TriggerForm: FC<TriggerFormProps> = ({
         const data: CreateTriggerRequest = {
           name: name.trim(),
           description: description.trim() || undefined,
-          sourceType: 'cron',
-          cronExpression,
-          cronTimezone,
+          sourceType,
+          cronExpression: sourceType === 'cron' ? cronExpression : undefined,
+          cronTimezone: sourceType === 'cron' ? cronTimezone : undefined,
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || undefined,
           taskMode,
           agentProfileId: agentProfileId || undefined,
+          githubConfig: sourceType === 'github'
+            ? {
+                eventType: githubEventType,
+                filters: buildGitHubFilters({
+                  eventType: githubEventType,
+                  actions: githubActions,
+                  labels: githubLabels,
+                  ignoreActors: githubIgnoreActors,
+                  commandPrefix: githubCommandPrefix,
+                  bodyContains: githubBodyContains,
+                  branches: githubBranches,
+                  ignoreDrafts: githubIgnoreDrafts,
+                }),
+              }
+            : undefined,
         };
         await createTrigger(projectId, data);
         toast.success('Trigger created');
@@ -201,10 +298,18 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       setSaving(false);
     }
   }, [
-    name, description, cronExpression, cronTimezone, promptTemplate,
+    name, description, sourceType, cronExpression, cronTimezone,
+    githubEventType, githubActions, githubLabels, githubIgnoreActors,
+    githubCommandPrefix, githubBodyContains, githubBranches, githubIgnoreDrafts,
+    promptTemplate,
     skipIfRunning, maxConcurrent, vmSizeOverride, taskMode, agentProfileId,
     isEdit, editTrigger, projectId, toast, onSaved, onClose,
   ]);
+
+  const templateVariables = sourceType === 'github' ? GITHUB_TEMPLATE_VARIABLES : CRON_TEMPLATE_VARIABLES;
+  const promptPlaceholder = sourceType === 'github'
+    ? 'When {{github.actor}} comments {{github.comment}} on {{github.repository}}#{{github.number}}, decide whether to start the requested SAM task.'
+    : 'Review all open pull requests and summarize their status. Current time: {{schedule.time}}';
 
   return createPortal(
     <>
@@ -275,17 +380,193 @@ export const TriggerForm: FC<TriggerFormProps> = ({
             />
           </div>
 
-          {/* Schedule */}
+          {/* Source */}
           <div>
-            <h3 className="text-sm font-medium text-fg-primary mb-2">Schedule</h3>
-            <SchedulePicker
-              value={cronExpression}
-              onChange={setCronExpression}
-              onDescriptionChange={setCronDescription}
-              timezone={cronTimezone}
-              onTimezoneChange={setCronTimezone}
-            />
+            <h3 className="text-sm font-medium text-fg-primary mb-2">Source</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSourceType('cron')}
+                disabled={isEdit}
+                className={`flex items-center gap-3 rounded-md border px-3 py-3 text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-70 ${
+                  sourceType === 'cron'
+                    ? 'border-accent bg-accent/10 text-fg-primary'
+                    : 'border-border-default bg-transparent text-fg-muted hover:bg-surface-hover hover:text-fg-primary'
+                } ${FOCUS_RING}`}
+                aria-pressed={sourceType === 'cron'}
+              >
+                <Clock size={18} aria-hidden="true" />
+                <span>
+                  <span className="block text-sm font-medium">Schedule</span>
+                  <span className="block text-xs">Run on a cron schedule</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSourceType('github')}
+                disabled={isEdit}
+                className={`flex items-center gap-3 rounded-md border px-3 py-3 text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-70 ${
+                  sourceType === 'github'
+                    ? 'border-accent bg-accent/10 text-fg-primary'
+                    : 'border-border-default bg-transparent text-fg-muted hover:bg-surface-hover hover:text-fg-primary'
+                } ${FOCUS_RING}`}
+                aria-pressed={sourceType === 'github'}
+              >
+                <Github size={18} aria-hidden="true" />
+                <span>
+                  <span className="block text-sm font-medium">GitHub event</span>
+                  <span className="block text-xs">Run when repository events match</span>
+                </span>
+              </button>
+            </div>
           </div>
+
+          {/* Schedule */}
+          {sourceType === 'cron' ? (
+            <div>
+              <h3 className="text-sm font-medium text-fg-primary mb-2">Schedule</h3>
+              <SchedulePicker
+                value={cronExpression}
+                onChange={setCronExpression}
+                onDescriptionChange={setCronDescription}
+                timezone={cronTimezone}
+                onTimezoneChange={setCronTimezone}
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="github-event-type" className="block text-sm font-medium text-fg-primary mb-1">
+                  GitHub event
+                </label>
+                <select
+                  id="github-event-type"
+                  value={githubEventType}
+                  onChange={(e) => setGitHubEventType(e.target.value as GitHubTriggerEventType)}
+                  disabled={isEdit}
+                  className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                >
+                  {GITHUB_EVENT_OPTIONS.map((eventOption) => (
+                    <option key={eventOption.value} value={eventOption.value}>
+                      {eventOption.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="github-actions" className="block text-sm font-medium text-fg-primary mb-1">
+                    Actions
+                  </label>
+                  <input
+                    id="github-actions"
+                    type="text"
+                    value={githubActions}
+                    onChange={(e) => setGitHubActions(e.target.value)}
+                    placeholder="opened, labeled, created"
+                    disabled={isEdit}
+                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="github-ignore-actors" className="block text-sm font-medium text-fg-primary mb-1">
+                    Ignore actors
+                  </label>
+                  <input
+                    id="github-ignore-actors"
+                    type="text"
+                    value={githubIgnoreActors}
+                    onChange={(e) => setGitHubIgnoreActors(e.target.value)}
+                    placeholder="dependabot[bot]"
+                    disabled={isEdit}
+                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                  />
+                </div>
+              </div>
+
+              {(githubEventType === 'issues' || githubEventType === 'pull_request') && (
+                <div>
+                  <label htmlFor="github-labels" className="block text-sm font-medium text-fg-primary mb-1">
+                    Required labels
+                  </label>
+                  <input
+                    id="github-labels"
+                    type="text"
+                    value={githubLabels}
+                    onChange={(e) => setGitHubLabels(e.target.value)}
+                    placeholder="needs-agent, bug"
+                    disabled={isEdit}
+                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                  />
+                </div>
+              )}
+
+              {githubEventType === 'issue_comment' && (
+                <div>
+                  <label htmlFor="github-command-prefix" className="block text-sm font-medium text-fg-primary mb-1">
+                    Command prefix
+                  </label>
+                  <input
+                    id="github-command-prefix"
+                    type="text"
+                    value={githubCommandPrefix}
+                    onChange={(e) => setGitHubCommandPrefix(e.target.value)}
+                    placeholder="/sam"
+                    disabled={isEdit}
+                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                  />
+                </div>
+              )}
+
+              {(githubEventType === 'pull_request' || githubEventType === 'push') && (
+                <div>
+                  <label htmlFor="github-branches" className="block text-sm font-medium text-fg-primary mb-1">
+                    Branches
+                  </label>
+                  <input
+                    id="github-branches"
+                    type="text"
+                    value={githubBranches}
+                    onChange={(e) => setGitHubBranches(e.target.value)}
+                    placeholder="main, develop"
+                    disabled={isEdit}
+                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                  />
+                </div>
+              )}
+
+              {githubEventType !== 'push' && (
+                <div>
+                  <label htmlFor="github-body-contains" className="block text-sm font-medium text-fg-primary mb-1">
+                    Text contains
+                  </label>
+                  <input
+                    id="github-body-contains"
+                    type="text"
+                    value={githubBodyContains}
+                    onChange={(e) => setGitHubBodyContains(e.target.value)}
+                    placeholder="optional keyword"
+                    disabled={isEdit}
+                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+                  />
+                </div>
+              )}
+
+              {githubEventType === 'pull_request' && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={githubIgnoreDrafts}
+                    onChange={(e) => setGitHubIgnoreDrafts(e.target.checked)}
+                    disabled={isEdit}
+                    className="rounded border-border-default"
+                  />
+                  <span className="text-sm text-fg-primary">Ignore draft pull requests</span>
+                </label>
+              )}
+            </div>
+          )}
 
           {/* Prompt Template */}
           <div>
@@ -296,7 +577,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
                   ref={templateRef}
                   value={promptTemplate}
                   onChange={(e) => setPromptTemplate(e.target.value)}
-                  placeholder="Review all open pull requests and summarize their status. Current time: {{schedule.time}}"
+                  placeholder={promptPlaceholder}
                   rows={6}
                   maxLength={DEFAULT_CRON_TEMPLATE_MAX_LENGTH}
                   className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm font-mono resize-y ${FOCUS_RING}`}
@@ -310,7 +591,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
               <div className="md:w-48 shrink-0">
                 <p className="text-xs font-medium text-fg-muted mb-2 m-0">Available Variables</p>
                 <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {TEMPLATE_VARIABLES.map((group) => (
+                  {templateVariables.map((group) => (
                     <div key={group.group}>
                       <p className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-1 m-0">
                         {group.group}

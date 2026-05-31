@@ -94,6 +94,10 @@ export interface CreateTriggerRequest {
   taskMode?: TaskMode;
   vmSizeOverride?: string;
   maxConcurrent?: number;
+  githubConfig?: {
+    eventType: GitHubTriggerEventType;
+    filters?: GitHubTriggerFilters;
+  };
 }
 
 export interface UpdateTriggerRequest {

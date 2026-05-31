@@ -4,6 +4,7 @@ import {
   AlertCircle,
   Calendar,
   Clock,
+  Github,
   MoreVertical,
   Pause,
   Play,
@@ -36,6 +37,15 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+
+function formatTriggerSource(trigger: TriggerResponse): string {
+  if (trigger.sourceType === 'github') {
+    const eventLabel = trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? 'event';
+    const commandPrefix = trigger.githubConfig?.filters.commandPrefix;
+    return commandPrefix ? `GitHub ${eventLabel}: ${commandPrefix}` : `GitHub ${eventLabel}`;
+  }
+  return trigger.cronHumanReadable ?? trigger.cronExpression ?? 'No schedule';
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -139,12 +149,16 @@ export const TriggerCard: FC<TriggerCardProps> = ({
       {/* Schedule info */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-sm text-fg-muted">
         <span className="flex items-center gap-1.5">
-          <Clock size={14} aria-hidden="true" />
+          {trigger.sourceType === 'github' ? (
+            <Github size={14} aria-hidden="true" />
+          ) : (
+            <Clock size={14} aria-hidden="true" />
+          )}
           <span className="truncate max-w-[200px]">
-            {trigger.cronHumanReadable ?? trigger.cronExpression ?? 'No schedule'}
+            {formatTriggerSource(trigger)}
           </span>
         </span>
-        {trigger.nextFireAt && (
+        {trigger.sourceType === 'cron' && trigger.nextFireAt && (
           <span className="flex items-center gap-1.5">
             <Calendar size={14} aria-hidden="true" />
             Next: {formatNextRun(trigger.nextFireAt)}

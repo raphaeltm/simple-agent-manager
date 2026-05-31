@@ -471,6 +471,17 @@ test.describe('Trigger Form — Mobile', () => {
     await screenshot(page, 'trigger-form-new-mobile');
     await assertNoOverflow(page);
   });
+
+  test('GitHub event trigger form renders', async ({ page }) => {
+    await setupApiMocks(page, { triggers: [] });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=No triggers yet');
+    await page.click('text=Create your first trigger');
+    await page.click('role=button[name=/GitHub event/]');
+    await page.waitForSelector('text=Command prefix');
+    await screenshot(page, 'trigger-form-github-mobile');
+    await assertNoOverflow(page);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -506,6 +517,17 @@ test.describe('Trigger Form — Desktop', () => {
     await page.click('role=tab[name="Advanced"]');
     await screenshot(page, 'trigger-form-advanced-desktop');
 
+    await assertNoOverflow(page);
+  });
+
+  test('new GitHub event trigger form', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    await page.click('text=New Trigger');
+    await page.click('role=button[name=/GitHub event/]');
+    await page.waitForSelector('text=GitHub event');
+    await screenshot(page, 'trigger-form-github-desktop');
     await assertNoOverflow(page);
   });
 });

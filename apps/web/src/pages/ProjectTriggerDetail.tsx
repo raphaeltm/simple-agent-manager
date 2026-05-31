@@ -342,9 +342,22 @@ export function ProjectTriggerDetail() {
       <div className="mt-8">
         <h2 className="sam-type-section-heading mb-4">Configuration</h2>
         <div className="border border-border-default rounded-lg divide-y divide-border-default">
-          <ConfigRow label="Schedule" value={trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'} />
-          <ConfigRow label="Timezone" value={trigger.cronTimezone} />
           <ConfigRow label="Source Type" value={trigger.sourceType} />
+          {trigger.sourceType === 'github' ? (
+            <>
+              <ConfigRow label="GitHub Event" value={trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? '—'} />
+              <ConfigRow label="Actions" value={trigger.githubConfig?.filters.actions?.join(', ') ?? 'Any'} />
+              <ConfigRow label="Required Labels" value={trigger.githubConfig?.filters.labels?.join(', ') ?? 'None'} />
+              <ConfigRow label="Command Prefix" value={trigger.githubConfig?.filters.commandPrefix ?? 'None'} />
+              <ConfigRow label="Branches" value={trigger.githubConfig?.filters.branches?.join(', ') ?? 'Any'} />
+              <ConfigRow label="Ignored Actors" value={trigger.githubConfig?.filters.ignoreActors?.join(', ') ?? 'None'} />
+            </>
+          ) : (
+            <>
+              <ConfigRow label="Schedule" value={trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'} />
+              <ConfigRow label="Timezone" value={trigger.cronTimezone} />
+            </>
+          )}
           <ConfigRow label="Task Mode" value={trigger.taskMode} />
           <ConfigRow label="Skip if Running" value={trigger.skipIfRunning ? 'Yes' : 'No'} />
           <ConfigRow label="Max Concurrent" value={String(trigger.maxConcurrent)} />
