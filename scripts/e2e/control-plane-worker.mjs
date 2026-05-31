@@ -75,6 +75,10 @@ export default {
         return jsonResponse({ error: 'unauthorized', message: 'Invalid callback token' }, 401);
       }
 
+      if (body.agentType !== 'opencode') {
+        return jsonResponse({ error: 'not_found', message: 'Agent settings' }, 404);
+      }
+
       return jsonResponse({
         model: 'opencode-zen/claude-sonnet-4-5',
         permissionMode: null,

@@ -205,6 +205,12 @@ function startControlPlaneMock(publicJwk) {
           return;
         }
 
+        if (parsed.agentType !== 'opencode') {
+          res.writeHead(404, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'not_found', message: 'Agent settings' }));
+          return;
+        }
+
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
