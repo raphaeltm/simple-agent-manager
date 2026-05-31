@@ -467,8 +467,44 @@ func (h *SessionHost) CancelPromptFromControlPlane() {
 	}
 
 	h.CancelPrompt()
-	h.ForwardToAgent([]byte(`{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"` + string(h.sessionID) + `"}}`))
+	cancelMessage, err := h.cancelNotification()
+	if err != nil {
+		slog.Warn("CancelPromptFromControlPlane: could not build session/cancel notification", "error", err)
+	} else {
+		h.ForwardToAgent(cancelMessage)
+	}
 	h.StopProcessForPromptCancel()
+}
+
+func (h *SessionHost) cancelNotification() ([]byte, error) {
+	sessionID := h.currentSessionIDForCancel()
+	if sessionID == "" {
+		return nil, fmt.Errorf("missing session ID")
+	}
+
+	return json.Marshal(struct {
+		JSONRPC string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  struct {
+			SessionID string `json:"sessionId"`
+		} `json:"params"`
+	}{
+		JSONRPC: "2.0",
+		Method:  "session/cancel",
+		Params: struct {
+			SessionID string `json:"sessionId"`
+		}{SessionID: sessionID},
+	})
+}
+
+func (h *SessionHost) currentSessionIDForCancel() string {
+	h.mu.RLock()
+	acpSessionID := string(h.sessionID)
+	h.mu.RUnlock()
+	if acpSessionID != "" {
+		return acpSessionID
+	}
+	return h.config.SessionID
 }
 
 func (h *SessionHost) cancelPrompt(startGraceTimer bool) {

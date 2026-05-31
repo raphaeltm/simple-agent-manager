@@ -1147,14 +1147,14 @@ func TestReadBatch_OrdersByID(t *testing.T) {
 func TestEnqueue_TruncatesOversizedContent(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
+	cfg.MaxMessageContentBytes = 1024
 	r, err := New(db, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer r.Shutdown()
 
-	// Create content exceeding MaxMessageContentBytes.
-	oversized := strings.Repeat("x", MaxMessageContentBytes+1000)
+	oversized := strings.Repeat("x", cfg.MaxMessageContentBytes+1000)
 	msg := Message{
 		MessageID: "msg-oversized",
 		Role:      "assistant",
@@ -1175,10 +1175,18 @@ func TestEnqueue_TruncatesOversizedContent(t *testing.T) {
 		t.Fatalf("expected content to end with truncation marker, got last 30 chars: %q", content[len(content)-30:])
 	}
 
-	// Content should be MaxMessageContentBytes + len(truncationMarker).
-	expectedLen := MaxMessageContentBytes + len(truncationMarker)
+	expectedLen := cfg.MaxMessageContentBytes + len(truncationMarker)
 	if len(content) != expectedLen {
 		t.Fatalf("truncated content length = %d, want %d", len(content), expectedLen)
+	}
+}
+
+func TestLoadConfigFromEnv_ReadsMaxMessageContentBytes(t *testing.T) {
+	t.Setenv("MSG_MAX_MESSAGE_CONTENT_BYTES", "4096")
+
+	cfg := LoadConfigFromEnv()
+	if cfg.MaxMessageContentBytes != 4096 {
+		t.Fatalf("MaxMessageContentBytes = %d, want 4096", cfg.MaxMessageContentBytes)
 	}
 }
 

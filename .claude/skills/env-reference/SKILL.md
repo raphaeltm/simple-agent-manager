@@ -168,6 +168,10 @@ See `docs/guides/trial-configuration.md` for the full table with meanings and de
 - `ERROR_REPORT_MAX_QUEUE_SIZE` — Max queued error entries (default: 100)
 - `ERROR_REPORT_HTTP_TIMEOUT` — HTTP POST timeout for error reports (default: 10s)
 
+### Message Reporting
+
+- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max single persisted message content before truncation (default: 204800)
+
 ### ACP (Agent Communication Protocol)
 
 - `ACP_MESSAGE_BUFFER_SIZE` — Max buffered messages per SessionHost for late-join replay (default: 5000)

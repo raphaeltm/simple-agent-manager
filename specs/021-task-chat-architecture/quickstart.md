@@ -141,6 +141,7 @@ Message generated → INSERT into SQLite outbox → Background goroutine reads +
 | `MSG_BATCH_MAX_WAIT_MS` | `2000` | Flush interval |
 | `MSG_BATCH_MAX_SIZE` | `50` | Max messages per batch |
 | `MSG_BATCH_MAX_BYTES` | `65536` | Max batch payload |
+| `MSG_MAX_MESSAGE_CONTENT_BYTES` | `204800` | Max single message content before truncation |
 | `MSG_OUTBOX_MAX_SIZE` | `10000` | Max pending messages |
 | `MSG_RETRY_INITIAL_INTERVAL_MS` | `1000` | Initial retry backoff |
 | `MSG_RETRY_MAX_INTERVAL_MS` | `30000` | Max retry backoff |

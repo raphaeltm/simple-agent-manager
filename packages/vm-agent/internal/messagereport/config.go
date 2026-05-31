@@ -24,6 +24,11 @@ type Config struct {
 	// Messages are measured by their JSON-serialized content length.
 	BatchMaxBytes int
 
+	// MaxMessageContentBytes is the maximum message content size before
+	// truncation. This should stay below the Worker request body limit so an
+	// oversized single message does not make the batch permanently fail.
+	MaxMessageContentBytes int
+
 	// OutboxMaxSize is the maximum number of messages retained in the SQLite
 	// outbox. When exceeded, Enqueue returns an error.
 	OutboxMaxSize int
@@ -60,14 +65,15 @@ type Config struct {
 // Override individual fields or call LoadConfigFromEnv for env-var–based loading.
 func DefaultConfig() Config {
 	return Config{
-		BatchMaxWait:    2 * time.Second,
-		BatchMaxSize:    50,
-		BatchMaxBytes:   65536, // 64 KB
-		OutboxMaxSize:   10000,
-		RetryInitial:    1 * time.Second,
-		RetryMax:        30 * time.Second,
-		RetryMaxElapsed: 5 * time.Minute,
-		HTTPTimeout:     10 * time.Second,
+		BatchMaxWait:           2 * time.Second,
+		BatchMaxSize:           50,
+		BatchMaxBytes:          65536,      // 64 KB
+		MaxMessageContentBytes: 200 * 1024, // 200 KB
+		OutboxMaxSize:          10000,
+		RetryInitial:           1 * time.Second,
+		RetryMax:               30 * time.Second,
+		RetryMaxElapsed:        5 * time.Minute,
+		HTTPTimeout:            10 * time.Second,
 	}
 }
 
@@ -79,6 +85,7 @@ func LoadConfigFromEnv() Config {
 	cfg.BatchMaxWait = envDuration("MSG_BATCH_MAX_WAIT", cfg.BatchMaxWait)
 	cfg.BatchMaxSize = envInt("MSG_BATCH_MAX_SIZE", cfg.BatchMaxSize)
 	cfg.BatchMaxBytes = envInt("MSG_BATCH_MAX_BYTES", cfg.BatchMaxBytes)
+	cfg.MaxMessageContentBytes = envInt("MSG_MAX_MESSAGE_CONTENT_BYTES", cfg.MaxMessageContentBytes)
 	cfg.OutboxMaxSize = envInt("MSG_OUTBOX_MAX_SIZE", cfg.OutboxMaxSize)
 	cfg.RetryInitial = envDuration("MSG_RETRY_INITIAL", cfg.RetryInitial)
 	cfg.RetryMax = envDuration("MSG_RETRY_MAX", cfg.RetryMax)

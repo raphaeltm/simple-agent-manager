@@ -18,13 +18,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// MaxMessageContentBytes is the maximum size of message content (bytes) before
-// truncation. Cloudflare Workers enforce a ~262 KB request body limit, and a
-// batch contains multiple messages plus JSON overhead. Truncating individual
-// messages to 200 KB ensures even a single-message batch fits comfortably.
-// Override via MSG_MAX_MESSAGE_CONTENT_BYTES.
-const MaxMessageContentBytes = 200 * 1024 // 200 KB
-
 // truncationMarker is appended to content that was truncated.
 const truncationMarker = "\n\n[truncated]"
 
@@ -83,6 +76,9 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	}
 	if cfg.BatchMaxBytes <= 0 {
 		cfg.BatchMaxBytes = defaults.BatchMaxBytes
+	}
+	if cfg.MaxMessageContentBytes <= 0 {
+		cfg.MaxMessageContentBytes = defaults.MaxMessageContentBytes
 	}
 	if cfg.OutboxMaxSize <= 0 {
 		cfg.OutboxMaxSize = defaults.OutboxMaxSize
@@ -265,7 +261,7 @@ func (r *Reporter) Enqueue(msg Message) error {
 	// Cloudflare Worker enforces a ~262 KB request body limit; messages
 	// exceeding that cause a 400 which sendBatch() treats as permanent,
 	// deleting the batch from the outbox.
-	maxBytes := MaxMessageContentBytes
+	maxBytes := r.cfg.MaxMessageContentBytes
 	if len(msg.Content) > maxBytes {
 		slog.Warn("messagereport: truncating oversized message content",
 			"messageId", msg.MessageID,

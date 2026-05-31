@@ -67,6 +67,7 @@ This research resolves all technical unknowns for spec 021. Five parallel resear
 | Max wait between flushes | 2 seconds | `MSG_BATCH_MAX_WAIT_MS` |
 | Max messages per batch | 50 | `MSG_BATCH_MAX_SIZE` |
 | Max bytes per batch | 64 KB | `MSG_BATCH_MAX_BYTES` |
+| Max bytes per message content | 200 KB | `MSG_MAX_MESSAGE_CONTENT_BYTES` |
 | Max outbox size | 10,000 messages | `MSG_OUTBOX_MAX_SIZE` |
 
 **Rationale**:
