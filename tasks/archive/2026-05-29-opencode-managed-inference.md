@@ -15,12 +15,12 @@ Users should be able to authenticate OpenCode with their own opencode.ai account
 
 ## Implementation Checklist
 
-- [ ] Add `opencode-managed` to shared OpenCode provider types, metadata, and dropdown order.
-- [ ] Add VM agent OpenCode config handling for `opencode-managed`, preserving managed model prefixes like `opencode-zen/*` and `opencode-go/*`.
-- [ ] Map OpenCode credential env vars by selected provider so `opencode-managed`, `anthropic`, `google-vertex`, and custom-compatible providers use the env var referenced by their generated config.
-- [ ] Add `OPENCODE_API_KEY` to explicit secret env handling.
-- [ ] Add Go tests for OpenCode managed config and provider-specific credential env injection.
-- [ ] Run focused TypeScript/Go validation and broader quality checks as feasible.
+- [x] Add `opencode-managed` to shared OpenCode provider types, metadata, and dropdown order.
+- [x] Add VM agent OpenCode config handling for `opencode-managed`, preserving managed model prefixes like `opencode-zen/*` and `opencode-go/*`.
+- [x] Map OpenCode credential env vars by selected provider so `opencode-managed`, `anthropic`, `google-vertex`, and custom-compatible providers use the env var referenced by their generated config.
+- [x] Add `OPENCODE_API_KEY` to explicit secret env handling.
+- [x] Add Go tests for OpenCode managed config and provider-specific credential env injection.
+- [x] Run focused TypeScript/Go validation and broader quality checks as feasible.
 
 ## Acceptance Criteria
 

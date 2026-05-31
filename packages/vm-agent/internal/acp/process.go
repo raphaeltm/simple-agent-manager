@@ -99,6 +99,7 @@ var secretEnvNames = map[string]bool{
 	"MISTRAL_API_KEY":           true,
 	"SCW_SECRET_KEY":            true,
 	"OPENCODE_CONFIG_CONTENT":   true,
+	"OPENCODE_API_KEY":          true,
 	"OPENCODE_PLATFORM_API_KEY": true, // also matches _KEY substring, explicit for clarity
 }
 
