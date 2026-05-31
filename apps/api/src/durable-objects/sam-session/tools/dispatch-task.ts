@@ -30,10 +30,10 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
-import { resolveAgentProfile } from '../../../services/agent-profiles';
 import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
+import { resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -95,6 +95,10 @@ export const dispatchTaskDef: AnthropicToolDef = {
         type: 'string',
         description: 'Agent profile ID or name to use for configuration.',
       },
+      skillId: {
+        type: 'string',
+        description: 'Skill ID or name to use as the repeatable-work configuration layer.',
+      },
       missionId: {
         type: 'string',
         description: 'Mission ID to associate this task with. Use after create_mission.',
@@ -114,6 +118,7 @@ interface DispatchTaskInput {
   branch?: string;
   taskMode?: string;
   agentProfileId?: string;
+  skillId?: string;
   missionId?: string;
 }
 
@@ -177,9 +182,12 @@ export async function dispatchTask(
   }
 
   // ── Resolve agent profile ────────────────────────────────────────────
-  const resolvedProfile = input.agentProfileId
-    ? await resolveAgentProfile(db, input.projectId, input.agentProfileId, ctx.userId, env)
+  const resolvedProfile = input.agentProfileId || input.skillId
+    ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, ctx.userId, env)
     : null;
+  const skillResourceRequirements = resolvedProfile?.resourceRequirementsJson
+    ? JSON.parse(resolvedProfile.resourceRequirementsJson)
+    : undefined;
 
   // ── Resolve config (explicit → profile → project default → platform default) ──
   const profileProvider =
@@ -256,9 +264,10 @@ export async function dispatchTask(
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(
-    {}, // MCP dispatch: no task-level resource requirements in Phase 0
+    { skill: skillResourceRequirements },
     {
       taskId,
+      skillId: resolvedProfile?.skillId ?? undefined,
       agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId: input.projectId,
       userId: ctx.userId,
@@ -271,19 +280,19 @@ export async function dispatchTask(
   await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resolved_reservation_json,
+     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
-     ?, ?, ?, 'mcp',
-     ?, ?, ?,
+     ?, ?, ?, ?, ?, 'mcp',
+     ?, ?, ?, ?, ?,
      ?, ?)`,
   ).bind(
     taskId, input.projectId, ctx.userId,
     taskTitle, description, priority, branchName,
     ctx.userId,
-    resolvedTaskMode, resolvedProfile?.profileId ?? null, input.missionId?.trim() || null,
-    resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
+    resolvedTaskMode, resolvedProfile?.profileId ?? null, resolvedProfile?.skillId ?? null, input.skillId ?? null, input.missionId?.trim() || null,
+    resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
     now, now,
   ).run();
 

@@ -252,12 +252,16 @@ export type {
   AgentProviderMode,
   AgentSettings,
   AgentSettingsResponse,
+  AgentSkill,
   CreateAgentProfileRequest,
+  CreateSkillRequest,
   OpenCodeProvider,
   OpenCodeProviderMeta,
   ResolvedAgentProfile,
+  ResolvedSkillProfile,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpdateSkillRequest,
 } from './agent-settings';
 export {
   OPENCODE_PROVIDER_OPTIONS,

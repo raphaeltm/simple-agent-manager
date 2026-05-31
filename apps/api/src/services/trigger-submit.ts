@@ -28,9 +28,9 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { resolveAgentProfile } from './agent-profiles';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
+import { resolveSkillProfile } from './skills';
 import { startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
 
@@ -49,6 +49,8 @@ export interface SubmitTriggeredTaskInput {
   triggeredBy: 'cron' | 'webhook' | 'github';
   /** Agent profile ID to use (from trigger config). */
   agentProfileId: string | null;
+  /** Skill ID to use (from trigger config). */
+  skillId: string | null;
   /** Task execution mode from trigger config. */
   taskMode: TaskMode;
   /** VM size override from trigger config. */
@@ -101,9 +103,12 @@ export async function submitTriggeredTask(
   }
 
   // Resolve agent profile if specified
-  const resolvedProfile = input.agentProfileId
-    ? await resolveAgentProfile(db, input.projectId, input.agentProfileId, input.userId, env)
+  const resolvedProfile = input.agentProfileId || input.skillId
+    ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, input.userId, env)
     : null;
+  const skillResourceRequirements = resolvedProfile?.resourceRequirementsJson
+    ? JSON.parse(resolvedProfile.resourceRequirementsJson)
+    : undefined;
 
   // VM config precedence: trigger override → profile → project default → platform default
   const vmSizeSource = input.vmSizeOverride ? 'trigger' as const
@@ -159,12 +164,12 @@ export async function submitTriggeredTask(
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(
     {
-      // Trigger-level resource requirements are a future addition.
-      // For Phase 0, only platform defaults apply for trigger-submitted tasks.
+      skill: skillResourceRequirements,
     },
     {
       taskId,
       triggerId: input.triggerId,
+      skillId: resolvedProfile?.skillId ?? undefined,
       agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId: input.projectId,
       userId: input.userId,
@@ -184,6 +189,8 @@ export async function submitTriggeredTask(
     executionStep: 'node_selection',
     priority: 0,
     agentProfileHint: resolvedProfile?.profileId ?? null,
+    skillId: resolvedProfile?.skillId ?? null,
+    skillHint: input.skillId,
     taskMode,
     outputBranch: branchName,
     triggeredBy: input.triggeredBy,
@@ -191,6 +198,8 @@ export async function submitTriggeredTask(
     triggerExecutionId: input.triggerExecutionId,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
+    resourceRequirementsJson: resolvedProfile?.resourceRequirementsJson ?? null,
+    resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     createdBy: input.userId,
     createdAt: now,

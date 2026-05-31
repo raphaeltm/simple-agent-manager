@@ -83,6 +83,8 @@ import { agentActivityCallbackRoute } from './routes/projects/agent-activity-cal
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { providersRoutes } from './routes/providers';
 import { samRoutes } from './routes/sam';
+import { skillRuntimeRoutes } from './routes/skill-runtime';
+import { skillRoutes } from './routes/skills';
 import { taskCallbackRoute, tasksRoutes } from './routes/tasks';
 import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
@@ -547,6 +549,8 @@ app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);
 app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileRuntimeRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
+app.route('/api/projects/:projectId/skills/:skillId/runtime', skillRuntimeRoutes);
+app.route('/api/projects/:projectId/skills', skillRoutes);
 app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects/:projectId/knowledge', knowledgeRoutes);
 app.route('/api/projects/:projectId/mailbox', mailboxRoutes);

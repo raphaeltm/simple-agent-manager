@@ -212,6 +212,7 @@ async function processTrigger(
       renderedPrompt: rendered.rendered,
       triggeredBy: 'cron',
       agentProfileId: trigger.agentProfileId,
+      skillId: trigger.skillId,
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
       triggerName: trigger.name,

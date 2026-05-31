@@ -60,6 +60,12 @@ export {
   UpdateAgentProfileSchema,
 } from './agent-profiles';
 
+// Skill schemas
+export {
+  CreateSkillSchema,
+  UpdateSkillSchema,
+} from './skills';
+
 // Agent settings schemas
 export type { AgentSettingsValidationLimits } from './agent-settings';
 export {

@@ -78,6 +78,10 @@ export const TASK_LIFECYCLE_TOOLS = [
           type: 'string',
           description: 'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
         },
+        skillId: {
+          type: 'string',
+          description: 'Skill ID or name to use as the repeatable-work configuration layer. Skill settings override profile settings.',
+        },
         taskMode: {
           type: 'string',
           description: 'Task execution mode. "task" is recommended for subtasks and reports completion. "conversation" requires active lifecycle management via send_message_to_subtask.',

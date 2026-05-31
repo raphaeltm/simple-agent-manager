@@ -502,6 +502,10 @@ export const tasks = sqliteTable(
     executionStep: text('execution_step'),
     priority: integer('priority').notNull().default(0),
     agentProfileHint: text('agent_profile_hint'),
+    /** Optional skill selected for repeatable-work configuration. */
+    skillId: text('skill_id'),
+    /** Original skill hint/id requested by the caller. */
+    skillHint: text('skill_hint'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
     errorMessage: text('error_message'),
@@ -861,6 +865,54 @@ export const agentProfiles = sqliteTable(
 export type AgentProfileRow = typeof agentProfiles.$inferSelect;
 export type NewAgentProfileRow = typeof agentProfiles.$inferInsert;
 
+// =============================================================================
+// Skills (per-project repeatable-work definitions)
+// =============================================================================
+export const skills = sqliteTable(
+  'skills',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    agentType: text('agent_type').notNull().default('claude-code'),
+    model: text('model'),
+    permissionMode: text('permission_mode'),
+    systemPromptAppend: text('system_prompt_append'),
+    maxTurns: integer('max_turns'),
+    timeoutMinutes: integer('timeout_minutes'),
+    vmSizeOverride: text('vm_size_override'),
+    provider: text('provider'),
+    vmLocation: text('vm_location'),
+    workspaceProfile: text('workspace_profile'),
+    devcontainerConfigName: text('devcontainer_config_name'),
+    taskMode: text('task_mode').default('task'),
+    resourceRequirementsJson: text('resource_requirements_json'),
+    defaultProfileId: text('default_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    isBuiltin: integer('is_builtin').notNull().default(0),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectNameUnique: uniqueIndex('idx_skills_project_name').on(table.projectId, table.name),
+    projectIdIdx: index('idx_skills_project_id').on(table.projectId),
+    userIdIdx: index('idx_skills_user_id').on(table.userId),
+    defaultProfileIdx: index('idx_skills_default_profile_id').on(table.defaultProfileId),
+  })
+);
+
+export type SkillRow = typeof skills.$inferSelect;
+export type NewSkillRow = typeof skills.$inferInsert;
+
 const profileRuntimeBaseColumns = () => ({
   id: text('id').primaryKey(),
   profileId: text('profile_id')
@@ -914,6 +966,51 @@ export const profileRuntimeFiles = sqliteTable(
       table.filePath
     ),
     userProfileIdx: index('idx_profile_runtime_files_user_profile').on(table.userId, table.profileId),
+  })
+);
+
+const skillRuntimeBaseColumns = () => ({
+  id: text('id').primaryKey(),
+  skillId: text('skill_id')
+    .notNull()
+    .references(() => skills.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const skillRuntimeEnvVars = sqliteTable(
+  'skill_runtime_env_vars',
+  {
+    ...skillRuntimeBaseColumns(),
+    envKey: text('env_key').notNull(),
+    storedValue: text('stored_value').notNull(),
+    valueIv: text('value_iv'),
+  },
+  (table) => ({
+    skillKeyUnique: uniqueIndex('idx_skill_runtime_env_skill_key').on(table.skillId, table.envKey),
+    userSkillIdx: index('idx_skill_runtime_env_user_skill').on(table.userId, table.skillId),
+  })
+);
+
+export const skillRuntimeFiles = sqliteTable(
+  'skill_runtime_files',
+  {
+    ...skillRuntimeBaseColumns(),
+    filePath: text('file_path').notNull(),
+    storedContent: text('stored_content').notNull(),
+    contentIv: text('content_iv'),
+  },
+  (table) => ({
+    skillPathUnique: uniqueIndex('idx_skill_runtime_files_skill_path').on(table.skillId, table.filePath),
+    userSkillIdx: index('idx_skill_runtime_files_user_skill').on(table.userId, table.skillId),
   })
 );
 
@@ -1280,6 +1377,8 @@ export const triggers = sqliteTable(
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
     }),
+    /** Optional skill for triggered tasks. set null on skill delete — trigger continues with profile/defaults. */
+    skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     taskMode: text('task_mode').default('task'),
     vmSizeOverride: text('vm_size_override'),
     maxConcurrent: integer('max_concurrent').notNull().default(1),

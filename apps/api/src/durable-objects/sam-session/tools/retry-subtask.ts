@@ -25,6 +25,7 @@ import { ulid } from '../../../lib/ulid';
 import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
+import { resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -75,6 +76,8 @@ export async function retrySubtask(
       missionId: schema.tasks.missionId,
       taskMode: schema.tasks.taskMode,
       agentProfileHint: schema.tasks.agentProfileHint,
+      skillId: schema.tasks.skillId,
+      skillHint: schema.tasks.skillHint,
       projectName: schema.projects.name,
       projectRepository: schema.projects.repository,
       projectInstallationId: schema.projects.installationId,
@@ -116,25 +119,43 @@ export async function retrySubtask(
     return { error: 'Task has no description and no newDescription was provided.' };
   }
 
-  // Resolve config from project defaults
-  const resolvedProvider =
+  const resolvedProfile = original.agentProfileHint || original.skillId
+    ? await resolveSkillProfile(db, original.projectId, original.agentProfileHint, original.skillId, ctx.userId, env)
+    : null;
+
+  const profileProvider =
+    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
+      ? resolvedProfile.provider
+      : null;
+  const projectProvider =
     typeof original.projectDefaultProvider === 'string' && isValidProvider(original.projectDefaultProvider)
       ? original.projectDefaultProvider
       : null;
+  const resolvedProvider = profileProvider ?? projectProvider;
 
-  const vmSizeSource = original.projectDefaultVmSize ? 'project' as const : 'platform' as const;
-  const resolvedVmSize: VMSize = (original.projectDefaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
+  const vmSizeSource = resolvedProfile?.vmSizeOverride ? 'skill' as const
+    : original.projectDefaultVmSize ? 'project' as const
+    : 'platform' as const;
+  const resolvedVmSize: VMSize =
+    (resolvedProfile?.vmSizeOverride as VMSize | null)
+    ?? (original.projectDefaultVmSize as VMSize | null)
+    ?? DEFAULT_VM_SIZE;
 
   const resolvedVmLocation =
-    (original.projectDefaultLocation as string | null)
+    (resolvedProfile?.vmLocation as string | null)
+    ?? (original.projectDefaultLocation as string | null)
     ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) : null)
     ?? DEFAULT_VM_LOCATION;
 
   const resolvedWorkspaceProfile: WorkspaceProfile =
-    (original.projectDefaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
+    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
+    ?? (original.projectDefaultWorkspaceProfile as WorkspaceProfile | null)
+    ?? DEFAULT_WORKSPACE_PROFILE;
 
-  const resolvedTaskMode = (original.taskMode as TaskMode | null) ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-  const resolvedAgentType = original.projectDefaultAgentType ?? null;
+  const resolvedTaskMode = (original.taskMode as TaskMode | null)
+    ?? (resolvedProfile?.taskMode as TaskMode | null)
+    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  const resolvedAgentType = resolvedProfile?.agentType ?? original.projectDefaultAgentType ?? null;
 
   // Verify cloud credentials
   const { resolveCredentialSource } = await import('../../../services/provider-credentials');
@@ -157,9 +178,11 @@ export async function retrySubtask(
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(
-    {}, // Retry: no task-level resource requirements in Phase 0
+    { skill: resolvedProfile?.resourceRequirementsJson ? JSON.parse(resolvedProfile.resourceRequirementsJson) : undefined },
     {
       taskId: newTaskId,
+      skillId: resolvedProfile?.skillId ?? undefined,
+      agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId: original.projectId,
       userId: ctx.userId,
     },
@@ -172,19 +195,20 @@ export async function retrySubtask(
     env.DATABASE.prepare(
       `INSERT INTO tasks (id, project_id, user_id, title, description,
        status, execution_step, priority, dispatch_depth, output_branch, created_by,
-       task_mode, agent_profile_hint, mission_id,
-       requested_vm_size, requested_vm_size_source, resolved_reservation_json,
+       task_mode, agent_profile_hint, skill_id, skill_hint, mission_id,
+       requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
        created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
-       ?, ?, ?,
-       ?, ?, ?,
+       ?, ?, ?, ?, ?,
+       ?, ?, ?, ?, ?,
        ?, ?)`,
     ).bind(
       newTaskId, original.projectId, ctx.userId,
       taskTitle, description, 0, branchName,
       ctx.userId,
-      resolvedTaskMode, original.agentProfileHint ?? null, original.missionId ?? null,
-      resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
+      resolvedTaskMode, resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
+      resolvedProfile?.skillId ?? original.skillId ?? null, original.skillHint ?? original.skillId ?? null, original.missionId ?? null,
+      resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
       now, now,
     ),
     env.DATABASE.prepare(
@@ -245,11 +269,11 @@ export async function retrySubtask(
       workspaceProfile: resolvedWorkspaceProfile,
       cloudProvider: resolvedProvider,
       taskMode: resolvedTaskMode,
-      model: agentDefaults.model,
-      permissionMode: agentDefaults.permissionMode,
+      model: resolvedProfile?.model ?? agentDefaults.model,
+      permissionMode: resolvedProfile?.permissionMode ?? agentDefaults.permissionMode,
       opencodeProvider: null,
       opencodeBaseUrl: null,
-      systemPromptAppend: null,
+      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: original.projectTaskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: original.projectMaxWorkspacesPerNode ?? null,

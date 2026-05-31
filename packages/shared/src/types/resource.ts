@@ -30,6 +30,7 @@ export interface ResourceRequirements {
 export type ResourceRequirementsSource =
   | 'task'
   | 'trigger'
+  | 'skill'
   | 'agent-profile'
   | 'project'
   | 'user'
@@ -90,6 +91,8 @@ export interface ResourceResolutionInput {
   task?: ResourceRequirements;
   /** Trigger-level override (from trigger config). */
   trigger?: ResourceRequirements;
+  /** Skill-level default. */
+  skill?: ResourceRequirements;
   /** Agent profile default. */
   agentProfile?: ResourceRequirements;
   /** Project-level default. */

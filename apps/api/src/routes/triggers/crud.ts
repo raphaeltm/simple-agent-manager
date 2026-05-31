@@ -60,6 +60,7 @@ function toTriggerResponse(row: schema.TriggerRow): TriggerResponse {
     skipIfRunning: row.skipIfRunning ?? true,
     promptTemplate: row.promptTemplate,
     agentProfileId: row.agentProfileId,
+    skillId: row.skillId,
     taskMode: row.taskMode as TriggerResponse['taskMode'],
     vmSizeOverride: row.vmSizeOverride,
     maxConcurrent: row.maxConcurrent ?? 1,
@@ -152,6 +153,14 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
       throw errors.notFound('Agent profile');
     }
   }
+  if (body.skillId) {
+    const [skill] = await db
+      .select({ id: schema.skills.id })
+      .from(schema.skills)
+      .where(and(eq(schema.skills.id, body.skillId), eq(schema.skills.projectId, projectId)))
+      .limit(1);
+    if (!skill) throw errors.notFound('Skill');
+  }
 
   // Check name uniqueness within project
   const [existingName] = await db
@@ -206,6 +215,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     skipIfRunning: body.skipIfRunning ?? true,
     promptTemplate,
     agentProfileId: body.agentProfileId ?? null,
+    skillId: body.skillId ?? null,
     taskMode: body.taskMode ?? 'task',
     vmSizeOverride: body.vmSizeOverride ?? null,
     maxConcurrent,
@@ -469,6 +479,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.description !== undefined) updates.description = body.description?.trim() ?? null;
   if (body.skipIfRunning !== undefined) updates.skipIfRunning = body.skipIfRunning;
   if (body.agentProfileId !== undefined) updates.agentProfileId = body.agentProfileId;
+  if (body.skillId !== undefined) updates.skillId = body.skillId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
 
@@ -741,6 +752,7 @@ crudRoutes.post('/:triggerId/run', async (c) => {
       renderedPrompt: rendered.rendered,
       triggeredBy: 'cron',
       agentProfileId: trigger.agentProfileId,
+      skillId: trigger.skillId,
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
       triggerName: trigger.name,
