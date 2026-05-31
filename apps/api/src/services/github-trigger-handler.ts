@@ -67,16 +67,26 @@ export async function handleGitHubEventForTriggers(
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
 
-  // Deduplicate by delivery ID
-  const [existingDelivery] = await db
-    .select({ id: schema.githubWebhookDeliveries.id })
-    .from(schema.githubWebhookDeliveries)
-    .where(eq(schema.githubWebhookDeliveries.id, deliveryId))
-    .limit(1);
+  // Atomic deduplication: INSERT OR IGNORE the delivery record immediately.
+  // If the row already exists (duplicate delivery), the insert is silently ignored
+  // and we detect it via the returned row count. This prevents race conditions
+  // where concurrent Workers both pass a SELECT-based dedup check.
+  try {
+    const dedupResult = await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO github_webhook_deliveries (id, event_type, decision, decision_reason, created_at)
+       VALUES (?, ?, 'processing', 'pending', ?)`
+    ).bind(deliveryId, eventType, now).run();
 
-  if (existingDelivery) {
-    log.info('github_triggers.duplicate_delivery', { deliveryId, eventType });
-    return { processed: false, deliveryId, matchedTriggers: 0, reason: 'duplicate' };
+    if (!dedupResult.meta.changes || dedupResult.meta.changes === 0) {
+      log.info('github_triggers.duplicate_delivery', { deliveryId, eventType });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'duplicate' };
+    }
+  } catch (err) {
+    log.warn('github_triggers.dedup_check_failed', {
+      deliveryId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Proceed on dedup failure — best-effort, don't block webhook
   }
 
   // Parse event
@@ -87,16 +97,12 @@ export async function handleGitHubEventForTriggers(
     : undefined;
 
   if (!repoFullName) {
-    await recordDelivery(db, {
-      id: deliveryId,
-      eventType,
+    await updateDeliveryDecision(db, deliveryId, {
       action: event.action,
       installationId,
-      repositoryFullName: repoFullName,
       senderLogin: event.sender?.login,
       decision: 'no_match',
       decisionReason: 'no_repository_in_payload',
-      createdAt: now,
     });
     return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_repository' };
   }
@@ -108,16 +114,13 @@ export async function handleGitHubEventForTriggers(
     .where(eq(schema.projects.repository, repoFullName));
 
   if (projects.length === 0) {
-    await recordDelivery(db, {
-      id: deliveryId,
-      eventType,
+    await updateDeliveryDecision(db, deliveryId, {
       action: event.action,
       installationId,
       repositoryFullName: repoFullName,
       senderLogin: event.sender?.login,
       decision: 'no_match',
       decisionReason: 'no_project_for_repository',
-      createdAt: now,
     });
     return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_project' };
   }
@@ -138,16 +141,13 @@ export async function handleGitHubEventForTriggers(
   }
 
   if (totalMatched === 0) {
-    await recordDelivery(db, {
-      id: deliveryId,
-      eventType,
+    await updateDeliveryDecision(db, deliveryId, {
       action: event.action,
       installationId,
       repositoryFullName: repoFullName,
       senderLogin: event.sender?.login,
       decision: 'no_match',
       decisionReason: 'no_triggers_matched',
-      createdAt: now,
     });
   }
 
@@ -394,7 +394,42 @@ function buildGitHubContext(
   };
 }
 
-/** Record a webhook delivery for dedup and audit. */
+/** Update the initial delivery record with final decision details. */
+async function updateDeliveryDecision(
+  db: ReturnType<typeof drizzle>,
+  deliveryId: string,
+  updates: {
+    action?: string;
+    installationId?: string;
+    repositoryFullName?: string;
+    senderLogin?: string;
+    matchedTriggerId?: string;
+    decision: string;
+    decisionReason?: string;
+  }
+): Promise<void> {
+  try {
+    await db
+      .update(schema.githubWebhookDeliveries)
+      .set({
+        action: updates.action,
+        installationId: updates.installationId,
+        repositoryFullName: updates.repositoryFullName,
+        senderLogin: updates.senderLogin,
+        matchedTriggerId: updates.matchedTriggerId,
+        decision: updates.decision,
+        decisionReason: updates.decisionReason,
+      })
+      .where(eq(schema.githubWebhookDeliveries.id, deliveryId));
+  } catch (err) {
+    log.warn('github_triggers.delivery_update_failed', {
+      deliveryId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Record a per-trigger webhook delivery for audit (composite ID). */
 async function recordDelivery(
   db: ReturnType<typeof drizzle>,
   delivery: schema.NewGitHubWebhookDeliveryRow
