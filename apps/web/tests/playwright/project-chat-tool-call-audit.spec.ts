@@ -45,6 +45,9 @@ const MOCK_SESSION = {
   agentType: 'claude-code',
 };
 
+const TOOL_CONTENT = [{ type: 'content', content: { type: 'text', text: 'focused test output' } }];
+const TOOL_BUTTON_NAME = new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
 const MOCK_MESSAGES = [
   {
     id: 'msg-user-1',
@@ -78,6 +81,7 @@ const MOCK_MESSAGES = [
     toolMetadata: {
       toolCallId: 'tc-focused-test',
       status: 'completed',
+      contentSize: 128,
     },
     createdAt: Date.now() - 30_000,
     sequence: 3,
@@ -94,6 +98,8 @@ const MOCK_MESSAGES = [
 ];
 
 async function setupMocks(page: Page) {
+  const toolContentRequests: string[] = [];
+
   await page.route('**/api/auth/get-session', (route: Route) =>
     route.fulfill({
       status: 200,
@@ -112,7 +118,12 @@ async function setupMocks(page: Page) {
     return route.continue();
   });
 
-  await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}*`, (route: Route) =>
+  await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/messages/*/tool-content`, (route: Route) => {
+    toolContentRequests.push(route.request().url());
+    return route.fulfill({ status: 200, json: { content: TOOL_CONTENT } });
+  });
+
+  await page.route(new RegExp(`/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}(?:\\?.*)?$`), (route: Route) =>
     route.fulfill({
       status: 200,
       json: {
@@ -153,19 +164,39 @@ async function setupMocks(page: Page) {
   await page.route(`**/api/projects/${PROJECT_ID}/commands*`, (route: Route) =>
     route.fulfill({ status: 200, json: { commands: [] } }),
   );
+
+  return { toolContentRequests };
+}
+
+async function assertPersistedToolCallLazyLoads(
+  page: Page,
+  toolContentRequests: string[],
+  screenshotName: string
+) {
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+
+  await expect(page.getByText(TOOL_TITLE)).toBeVisible();
+  await expect(page.getByText('execute')).toBeVisible();
+  await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
+  await expect(page.getByText('128 B')).toBeVisible();
+
+  const toolButton = page.getByRole('button', { name: TOOL_BUTTON_NAME });
+  await expect(toolButton).toHaveAttribute('aria-expanded', 'false');
+  await toolButton.click();
+
+  await expect(page.getByText('focused test output')).toBeVisible();
+  expect(toolContentRequests).toEqual([
+    expect.stringContaining('/messages/msg-tool-done/tool-content'),
+  ]);
+
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
 }
 
 test.describe('Project Chat Persisted Tool Calls — Mobile', () => {
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(page.getByText(TOOL_TITLE)).toBeVisible();
-    await expect(page.getByText('execute')).toBeVisible();
-    await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
-
-    await screenshot(page, 'project-chat-tool-call-persisted-mobile');
-    await assertNoOverflow(page);
+    const { toolContentRequests } = await setupMocks(page);
+    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-mobile');
   });
 });
 
@@ -173,14 +204,7 @@ test.describe('Project Chat Persisted Tool Calls — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(page.getByText(TOOL_TITLE)).toBeVisible();
-    await expect(page.getByText('execute')).toBeVisible();
-    await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
-
-    await screenshot(page, 'project-chat-tool-call-persisted-desktop');
-    await assertNoOverflow(page);
+    const { toolContentRequests } = await setupMocks(page);
+    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-desktop');
   });
 });

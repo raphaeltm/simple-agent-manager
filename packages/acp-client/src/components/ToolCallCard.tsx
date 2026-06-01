@@ -147,6 +147,8 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
               </svg>
               Failed to load content.
             </div>
+          ) : displayContent.length === 0 ? (
+            <div className="p-3 text-xs text-gray-500">No output.</div>
           ) : (
             displayContent.map((content, idx) => (
               <ToolCallContentView key={idx} content={content} />

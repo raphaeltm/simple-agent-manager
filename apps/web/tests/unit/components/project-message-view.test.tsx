@@ -542,7 +542,7 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.toolKind).toBe('bash');
   });
 
-  it('uses structured content from metadata when available', () => {
+  it('uses lazy-load metadata for structured tool content', () => {
     const items = chatMessagesToConversationItems([
       {
         id: 't1', sessionId: 's1', role: 'tool', content: 'diff: /src/main.go',
@@ -557,10 +557,12 @@ describe('chatMessagesToConversationItems', () => {
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].type).toBe('diff');
-    expect(tool.content[0].text).toBe('/src/main.go');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 't1',
+      contentSize: expect.any(Number),
+    });
   });
 
   it('uses status from metadata when available', () => {
@@ -576,7 +578,7 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.status).toBe('failed');
   });
 
-  it('falls back to raw content when metadata has no structured content', () => {
+  it('uses lazy-load metadata for raw tool content when metadata has no structured content', () => {
     const items = chatMessagesToConversationItems([
       {
         id: 't1', sessionId: 's1', role: 'tool', content: 'some output',
@@ -585,10 +587,12 @@ describe('chatMessagesToConversationItems', () => {
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].type).toBe('content');
-    expect(tool.content[0].text).toBe('some output');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 't1',
+      contentSize: 'some output'.length,
+    });
   });
 
   it('preserves in_progress status from metadata', () => {
@@ -613,10 +617,12 @@ describe('chatMessagesToConversationItems', () => {
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { title: string; content: Array<{ type: string; text: string }> };
+    const tool = items[0] as { title: string; content: Array<unknown>; contentLoaded?: boolean; messageId?: string; contentSize?: number };
     expect(tool.title).toBe('Tool Call');
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].text).toBe('stdout: build succeeded');
+    expect(tool.content).toHaveLength(0);
+    expect(tool.contentLoaded).toBe(false);
+    expect(tool.messageId).toBe('t1');
+    expect(tool.contentSize).toBe('stdout: build succeeded'.length);
   });
 
   it('skips placeholder content for tool-update string', () => {
@@ -628,7 +634,7 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.content).toHaveLength(0);
   });
 
-  it('handles terminal content type from metadata', () => {
+  it('uses lazy-load metadata for terminal content from metadata', () => {
     const items = chatMessagesToConversationItems([
       {
         id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
@@ -637,10 +643,12 @@ describe('chatMessagesToConversationItems', () => {
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].type).toBe('terminal');
-    expect(tool.content[0].text).toBe('term-1');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 't1',
+      contentSize: expect.any(Number),
+    });
   });
 
   it('does not merge assistant followed by user followed by assistant', () => {
