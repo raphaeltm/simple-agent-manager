@@ -66,6 +66,10 @@ describe('AI Model Registry', () => {
       }
     });
 
+    it('registers the task title default model', () => {
+      expect(PLATFORM_AI_MODELS.some((model) => model.id === DEFAULT_TASK_TITLE_MODEL)).toBe(true);
+    });
+
     it('all models have non-empty labels', () => {
       for (const model of PLATFORM_AI_MODELS) {
         expect(model.label.length, `Model ${model.id} has empty label`).toBeGreaterThan(0);

@@ -7,6 +7,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 ## Research Findings
 
 - `packages/shared/src/constants/ai-services.ts` sets `DEFAULT_TASK_TITLE_MODEL`; this task changes it from `@cf/google/gemma-4-26b-a4b-it` to `@cf/zai-org/glm-4.7-flash`.
+- `packages/shared/src/constants/ai-services.ts` also owns `PLATFORM_AI_MODELS`; the new default should be present there so admin/model metadata surfaces do not reference an unregistered default.
 - `apps/api/src/services/task-title.ts` builds title-generation requests and falls back to `truncateTitle()` when `fetchWorkersAIChatCompletion()` returns null.
 - `apps/api/src/services/ai-proxy-shared.ts` sends OpenAI-compatible Workers AI chat completions through the shared Cloudflare AI Gateway and only extracts `choices[0].message.content`.
 - Production AI Gateway logs for `metadata.source = task-title` showed recent calls using `@cf/google/gemma-4-26b-a4b-it` returned HTTP 200, so this is not a model availability, rate-limit, or timeout problem.
@@ -17,6 +18,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 ## Checklist
 
 - [x] Change task-title default model to `@cf/zai-org/glm-4.7-flash`.
+- [x] Register GLM 4.7 Flash in the shared AI model registry.
 - [x] Add a reusable way for utility Workers AI chat calls to pass reasoning controls.
 - [x] Send thinking-disabled controls for task-title generation.
 - [x] Update unit tests for the default model and outgoing gateway payload.
@@ -29,6 +31,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 
 - Long task title generation no longer falls back solely because a reasoning model returns text outside `message.content`.
 - The default task-title utility model is current and not on Cloudflare's May 30, 2026 deprecation list.
+- The default task-title utility model is present in the shared AI model registry.
 - The title-generation request explicitly disables thinking/reasoning for models that support the controls.
 - Tests prove the gateway request includes the thinking-disabled parameters.
 - Staging and production verification show a new long task receives a concise generated title rather than the prompt prefix.
