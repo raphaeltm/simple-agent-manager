@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentProfile, AgentSkill, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -6,7 +6,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { useProjectWebSocket } from '../../hooks/useProjectWebSocket';
-import type { ChatSessionListItem, ChatSessionResponse, TaskAttachmentRef } from '../../lib/api';
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
   createAgentProfile,
@@ -21,7 +21,6 @@ import {
   listChatSessions,
   listCredentials,
   listProjectTasks,
-  listSkills,
   submitTask,
   summarizeSession,
   updateAgentProfile,
@@ -33,6 +32,7 @@ import {
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
+import { buildBaseSubmitRequest, getCompletedAttachmentRefs, withAttachmentRefs } from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
   CHAT_SESSION_LIST_LIMIT,
@@ -42,6 +42,7 @@ import {
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
+import { useProjectSkills } from './useProjectSkills';
 import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 
 /** Pre-filled fork/retry context shown on the new chat screen. */
@@ -78,65 +79,9 @@ function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
   return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
 }
 
-type SubmitTaskPayload = Parameters<typeof submitTask>[1];
-
 function selectProfileId(current: string | null, profiles: AgentProfile[]) {
   if (current && profiles.some((profile) => profile.id === current)) return current;
   return profiles[0]?.id ?? null;
-}
-
-function getCompletedAttachmentRefs(attachments: Array<{ status: string; ref?: TaskAttachmentRef | null }>) {
-  return attachments.reduce<TaskAttachmentRef[]>((refs, attachment) => {
-    if (attachment.status === 'complete' && attachment.ref) refs.push(attachment.ref);
-    return refs;
-  }, []);
-}
-
-function getDerivedSubmitFields(pendingDerived: PendingDerived | null) {
-  if (!pendingDerived) return {};
-  return { parentTaskId: pendingDerived.parentTaskId, contextSummary: pendingDerived.contextSummary };
-}
-
-function buildBaseSubmitRequest({
-  message,
-  agentProfileId,
-  skillId,
-  selectedAgentType,
-  selectedVmSize,
-  selectedWorkspaceProfile,
-  selectedDevcontainerConfigName,
-  selectedTaskMode,
-  pendingDerived,
-}: Readonly<{
-  message: string;
-  agentProfileId: string | null;
-  skillId: string | null;
-  selectedAgentType: string | null;
-  selectedVmSize: VMSize;
-  selectedWorkspaceProfile: WorkspaceProfile;
-  selectedDevcontainerConfigName: string;
-  selectedTaskMode: TaskMode;
-  pendingDerived: PendingDerived | null;
-}>): SubmitTaskPayload {
-  const derivedFields = getDerivedSubmitFields(pendingDerived);
-  if (agentProfileId) return { message, agentProfileId, ...(skillId ? { skillId } : {}), ...derivedFields };
-
-  const devcontainerConfigName = selectedDevcontainerConfigName.trim();
-  return {
-    message,
-    ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
-    ...(skillId ? { skillId } : {}),
-    vmSize: selectedVmSize,
-    workspaceProfile: selectedWorkspaceProfile,
-    ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName ? { devcontainerConfigName } : {}),
-    taskMode: selectedTaskMode,
-    ...derivedFields,
-  };
-}
-
-function withAttachmentRefs(baseRequest: SubmitTaskPayload, attachmentRefs: TaskAttachmentRef[]): SubmitTaskPayload {
-  if (attachmentRefs.length === 0) return baseRequest;
-  return { ...baseRequest, attachments: attachmentRefs };
 }
 
 export function useProjectChatState() {
@@ -176,8 +121,7 @@ export function useProjectChatState() {
   // Agent profile selection
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [skills, setSkills] = useState<AgentSkill[]>([]);
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const { skills, selectedSkillId, setSelectedSkillId } = useProjectSkills(projectId);
   const [providerCatalogs, setProviderCatalogs] = useState<ProviderCatalog[]>([]);
   const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
     open: false,
@@ -347,15 +291,6 @@ export function useProjectChatState() {
   }, [projectId]);
 
   useEffect(() => { loadProfiles(); }, [loadProfiles]);
-
-  useEffect(() => {
-    void listSkills(projectId)
-      .then((data) => {
-        setSkills(data);
-        setSelectedSkillId((current) => (current && data.some((skill) => skill.id === current) ? current : null));
-      })
-      .catch((err: unknown) => { console.error('Failed to load skills', err); });
-  }, [projectId]);
 
   const handleUpdateProfile = useCallback(async (profileId: string, data: UpdateAgentProfileRequest) => {
     await updateAgentProfile(projectId, profileId, data);
