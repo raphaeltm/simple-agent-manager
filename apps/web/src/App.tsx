@@ -42,6 +42,9 @@ import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
+import { PrototypeChoosePath } from './pages/prototype-onboarding-choose-path';
+import { PrototypeInstantStart } from './pages/prototype-onboarding-instant-start';
+import { PrototypeZeroToHero } from './pages/prototype-onboarding-zero-to-hero';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
@@ -89,6 +92,10 @@ export default function App() {
           <Route path="/try/:trialId" element={<TryDiscovery />} />
           {/* SAM prototype — public, no auth */}
           <Route path="/sam" element={<SamPrototype />} />
+          {/* Onboarding prototypes — public, no auth, NEVER ship to production */}
+          <Route path="/prototype/onboarding-zero-to-hero" element={<PrototypeZeroToHero />} />
+          <Route path="/prototype/onboarding-instant-start" element={<PrototypeInstantStart />} />
+          <Route path="/prototype/onboarding-choose-path" element={<PrototypeChoosePath />} />
           <Route path="/device" element={<DeviceAuth />} />
 {/* Harness for Playwright audits — mounts trial components with mock data */}
           <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
