@@ -135,12 +135,6 @@ func (c APIClient) ListSessions(ctx context.Context, projectID string) (SessionL
 	return response, err
 }
 
-func (c APIClient) GetSessionMessages(ctx context.Context, projectID string, sessionID string) (MessageListResponse, error) {
-	var response MessageListResponse
-	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions", sessionID, "messages"), nil, &response)
-	return response, err
-}
-
 func (c APIClient) GetSessionDetail(ctx context.Context, projectID string, sessionID string) (SessionDetailResponse, error) {
 	var response SessionDetailResponse
 	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions", sessionID), nil, &response)

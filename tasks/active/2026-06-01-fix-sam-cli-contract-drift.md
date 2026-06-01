@@ -44,19 +44,19 @@ Hard workflow constraint: this work must stop at a draft/open PR. The PR title o
 
 ## Acceptance Criteria
 
-- [ ] `sam status` succeeds and shows project detail plus recent active chats.
-- [ ] `sam chat` succeeds and lists chats.
-- [ ] `sam chat <sessionId>` fetches the correct session detail route and renders messages.
-- [ ] `sam ideas` remains working.
-- [ ] `sam library` displays correct file size/source/timestamp and has clear recursive/all-files behavior or an explicit non-misleading root-only default.
-- [ ] `sam context` succeeds and displays entity name/type/observation count/updated time.
-- [ ] `sam notifications` keeps table rows single-line/readable for multiline titles.
-- [ ] `sam triggers` displays useful schedule and next run from current API fields.
-- [ ] `sam profiles` reads `{ items: [...] }` and lists profiles.
-- [ ] `sam activity` succeeds and displays event type, useful payload summary, and timestamp.
-- [ ] `sam nodes` succeeds against raw array response and uses current node fields (`cloudProvider`, `vmLocation`, `ipAddress`).
-- [ ] Successful `--json` output is valid JSON for all fixed commands.
-- [ ] Decode errors include safe actionable context and do not leak cookies/tokens.
+- [x] `sam status` succeeds and shows project detail plus recent active chats.
+- [x] `sam chat` succeeds and lists chats.
+- [x] `sam chat <sessionId>` fetches the correct session detail route and renders messages.
+- [x] `sam ideas` remains working.
+- [x] `sam library` displays correct file size/source/timestamp and has clear recursive/all-files behavior or an explicit non-misleading root-only default.
+- [x] `sam context` succeeds and displays entity name/type/observation count/updated time.
+- [x] `sam notifications` keeps table rows single-line/readable for multiline titles.
+- [x] `sam triggers` displays useful schedule and next run from current API fields.
+- [x] `sam profiles` reads `{ items: [...] }` and lists profiles.
+- [x] `sam activity` succeeds and displays event type, useful payload summary, and timestamp.
+- [x] `sam nodes` succeeds against raw array response and uses current node fields (`cloudProvider`, `vmLocation`, `ipAddress`).
+- [x] Successful `--json` output is valid JSON for all fixed commands.
+- [x] Decode errors include safe actionable context and do not leak cookies/tokens.
 
 ## References
 

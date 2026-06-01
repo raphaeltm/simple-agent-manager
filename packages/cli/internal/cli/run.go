@@ -513,7 +513,7 @@ Usage:
   sam chat <sessionId>                          View chat messages
 
   sam ideas                                     List ideas (draft tasks)
-  sam library                                   List library files
+  sam library [--recursive|--all]               List library files
   sam context                                   List knowledge entities
   sam notifications                             List notifications
   sam triggers                                  List triggers

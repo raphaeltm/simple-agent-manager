@@ -177,11 +177,6 @@ type Message struct {
 	CreatedAt any    `json:"createdAt,omitempty"`
 }
 
-// MessageListResponse wraps a list of messages.
-type MessageListResponse struct {
-	Messages []Message `json:"messages"`
-}
-
 type SessionDetailResponse struct {
 	Session  Session        `json:"session"`
 	Messages []Message      `json:"messages"`
@@ -302,15 +297,14 @@ type ActivityListResponse struct {
 
 // Node represents an infrastructure node.
 type Node struct {
-	ID             string `json:"id"`
-	Name           string `json:"name,omitempty"`
-	CloudProvider  string `json:"cloudProvider,omitempty"`
-	VMSize         string `json:"vmSize,omitempty"`
-	VMLocation     string `json:"vmLocation,omitempty"`
-	Status         string `json:"status,omitempty"`
-	HealthStatus   string `json:"healthStatus,omitempty"`
-	IPAddress      string `json:"ipAddress,omitempty"`
-	WorkspaceCount int    `json:"workspaceCount,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	CloudProvider string `json:"cloudProvider,omitempty"`
+	VMSize        string `json:"vmSize,omitempty"`
+	VMLocation    string `json:"vmLocation,omitempty"`
+	Status        string `json:"status,omitempty"`
+	HealthStatus  string `json:"healthStatus,omitempty"`
+	IPAddress     string `json:"ipAddress,omitempty"`
 }
 
 // NodeListResponse wraps a list of nodes.

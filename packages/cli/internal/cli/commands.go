@@ -516,7 +516,7 @@ func runNodes(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	if len(response.Nodes) == 0 {
 		return writeOrFail(runtime, parsed.Globals.JSON, "No nodes found", response)
 	}
-	headers := []string{"ID", "PROVIDER", "SIZE", "LOCATION", "STATUS", "IP", "WORKSPACES"}
+	headers := []string{"ID", "PROVIDER", "SIZE", "LOCATION", "STATUS", "IP"}
 	var rows [][]string
 	for _, n := range response.Nodes {
 		rows = append(rows, []string{
@@ -526,7 +526,6 @@ func runNodes(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 			or(n.VMLocation, "—"),
 			or(n.Status, "—"),
 			or(n.IPAddress, "—"),
-			fmt.Sprintf("%d", n.WorkspaceCount),
 		})
 	}
 	var sb strings.Builder
