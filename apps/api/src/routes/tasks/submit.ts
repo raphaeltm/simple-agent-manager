@@ -36,7 +36,7 @@ import { generateBranchName } from '../../services/branch-name';
 import { enrichMessageWithMentions } from '../../services/mention-enrichment';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
-import { resolveSkillProfile } from '../../services/skills';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 
@@ -171,9 +171,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
   const resolvedProfile = body.agentProfileId || body.skillId
     ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
     : null;
-  const skillResourceRequirements = resolvedProfile?.resourceRequirementsJson
-    ? JSON.parse(resolvedProfile.resourceRequirementsJson)
-    : undefined;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
   // Determine VM config (with profile overrides in the middle of the precedence chain)
   // Track which level provided the VM size for audit

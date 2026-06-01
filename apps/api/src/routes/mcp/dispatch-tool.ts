@@ -19,7 +19,7 @@ import { generateBranchName } from '../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { resolveSkillProfile } from '../../services/skills';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
@@ -293,9 +293,7 @@ export async function handleDispatchTask(
   const resolvedProfile = agentProfileId || skillId
     ? await resolveSkillProfile(db, tokenData.projectId, agentProfileId, skillId, tokenData.userId, env)
     : null;
-  const skillResourceRequirements = resolvedProfile?.resourceRequirementsJson
-    ? JSON.parse(resolvedProfile.resourceRequirementsJson)
-    : undefined;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;

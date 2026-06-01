@@ -33,7 +33,7 @@ import { ulid } from '../../../lib/ulid';
 import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
-import { resolveSkillProfile } from '../../../services/skills';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -185,9 +185,7 @@ export async function dispatchTask(
   const resolvedProfile = input.agentProfileId || input.skillId
     ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, ctx.userId, env)
     : null;
-  const skillResourceRequirements = resolvedProfile?.resourceRequirementsJson
-    ? JSON.parse(resolvedProfile.resourceRequirementsJson)
-    : undefined;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
   // ── Resolve config (explicit → profile → project default → platform default) ──
   const profileProvider =

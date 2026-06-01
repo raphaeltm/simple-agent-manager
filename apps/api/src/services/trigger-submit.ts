@@ -30,7 +30,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
-import { resolveSkillProfile } from './skills';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
 import { startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
 
@@ -106,9 +106,7 @@ export async function submitTriggeredTask(
   const resolvedProfile = input.agentProfileId || input.skillId
     ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, input.userId, env)
     : null;
-  const skillResourceRequirements = resolvedProfile?.resourceRequirementsJson
-    ? JSON.parse(resolvedProfile.resourceRequirementsJson)
-    : undefined;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
   // VM config precedence: trigger override → profile → project default → platform default
   const vmSizeSource = input.vmSizeOverride ? 'trigger' as const

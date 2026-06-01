@@ -25,7 +25,7 @@ import { ulid } from '../../../lib/ulid';
 import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
-import { resolveSkillProfile } from '../../../services/skills';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -178,7 +178,7 @@ export async function retrySubtask(
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(
-    { skill: resolvedProfile?.resourceRequirementsJson ? JSON.parse(resolvedProfile.resourceRequirementsJson) : undefined },
+    { skill: parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson) },
     {
       taskId: newTaskId,
       skillId: resolvedProfile?.skillId ?? undefined,
@@ -204,7 +204,7 @@ export async function retrySubtask(
        ?, ?)`,
     ).bind(
       newTaskId, original.projectId, ctx.userId,
-      taskTitle, description, 0, branchName,
+      taskTitle, description, branchName,
       ctx.userId,
       resolvedTaskMode, resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
       resolvedProfile?.skillId ?? original.skillId ?? null, original.skillHint ?? original.skillId ?? null, original.missionId ?? null,

@@ -58,6 +58,19 @@ function validateResourceRequirementsJson(value: string | null | undefined): str
   }
 }
 
+export function parseSkillResourceRequirementsJson(value: string | null | undefined): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return undefined;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 async function requireProjectProfile(
   db: Db,
   projectId: string,

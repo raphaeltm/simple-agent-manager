@@ -4,8 +4,8 @@ import { Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { formatResourceSummary } from './SkillSelector';
 import { SkillFormDialog } from './SkillFormDialog';
+import { formatResourceSummary } from './SkillSelector';
 
 interface SkillListProps {
   skills: AgentSkill[];
