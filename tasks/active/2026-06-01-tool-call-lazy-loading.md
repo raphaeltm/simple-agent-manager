@@ -27,6 +27,16 @@ Make every project-chat tool-call card expandable and have expansion fetch conte
 - `pnpm build` passed.
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/project-chat-tool-call-audit.spec.ts --project='Desktop (1280x800)'` passed.
 
+## Staging Validation
+
+- GitHub Actions staging deploy `26743663288` passed, including deploy health check and smoke tests.
+- Cloudflare D1 staging sanity check passed before deploy; latest applied migration was `0057_github_trigger_configs.sql`, and this fix required no new migration.
+- Targeted Playwright/Chrome validation against staging session `bb34957f-fdd5-4108-8d31-452886a7a357` passed.
+- The staging API returned 53 session messages, including 33 persisted tool rows and 15 unique tool calls.
+- The persisted data included 16 compact tool rows with `contentSize` and without inline `toolMetadata.content`.
+- Direct staging `/tool-content` requests returned server-side content for the sampled tool messages, including one existing empty-output tool message returning an empty content array.
+- In the deployed staging UI, 10 visible tool-call cards exposed an expand affordance. Clicking 8 sampled tool-call expanders produced 8 successful `200` `/tool-content` responses and rendered loaded content.
+
 ## Review Notes
 
 - Task completion: implementation matches the checklist; staging validation remains the final proof.
