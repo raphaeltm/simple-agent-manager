@@ -1212,6 +1212,7 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t *testing.T) {
 	t.Parallel()
 
+	process := newExitedAgentProcess(t, "claude-code")
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
 			SessionID:          "test-session",
@@ -1223,17 +1224,6 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 		ViewerSendBuffer:  32,
 	})
 	defer host.Stop()
-
-	cmd := exec.Command("sh", "-c", "exit 0")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start command: %v", err)
-	}
-	process := &AgentProcess{
-		agentType: "claude-code",
-		cmd:       cmd,
-		startTime: time.Now().Add(-10 * time.Second),
-		waitDone:  make(chan struct{}),
-	}
 
 	host.mu.Lock()
 	host.process = process
@@ -1265,6 +1255,7 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
 	t.Parallel()
 
+	process := newExitedAgentProcess(t, "claude-code")
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
 			SessionID:          "test-session",
@@ -1275,17 +1266,6 @@ func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
 		ViewerSendBuffer:  32,
 	})
 	defer host.Stop()
-
-	cmd := exec.Command("sh", "-c", "exit 0")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start command: %v", err)
-	}
-	process := &AgentProcess{
-		agentType: "claude-code",
-		cmd:       cmd,
-		startTime: time.Now().Add(-10 * time.Second),
-		waitDone:  make(chan struct{}),
-	}
 
 	host.mu.Lock()
 	host.process = process
@@ -1311,6 +1291,22 @@ func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
 	}
 	if !strings.Contains(statusErr, "could not be restarted") {
 		t.Fatalf("statusErr = %q, expected max-restarts failure", statusErr)
+	}
+}
+
+func newExitedAgentProcess(t *testing.T, agentType string) *AgentProcess {
+	t.Helper()
+
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+
+	return &AgentProcess{
+		agentType: agentType,
+		cmd:       cmd,
+		startTime: time.Now().Add(-10 * time.Second),
+		waitDone:  make(chan struct{}),
 	}
 }
 
