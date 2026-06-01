@@ -63,6 +63,8 @@ export default defineConfig({
             { slug: 'docs/reference/api' },
             { slug: 'docs/reference/vm-agent' },
             { slug: 'docs/reference/configuration' },
+            { slug: 'docs/reference/contributing' },
+            { slug: 'docs/reference/roadmap' },
           ],
         },
       ],

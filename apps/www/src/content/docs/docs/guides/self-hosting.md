@@ -245,4 +245,4 @@ wrangler d1 migrations apply workspaces --remote
 
 Check Hetzner console for VM status. If the VM is running, SSH in and check `systemctl status vm-agent`.
 
-See the [full troubleshooting section](https://github.com/raphaeltm/simple-agent-manager/blob/main/docs/guides/self-hosting.md#troubleshooting) in the repository for more scenarios.
+This page is the canonical troubleshooting reference for self-hosted deployments.

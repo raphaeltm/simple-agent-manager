@@ -76,7 +76,7 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 
 ### Post-mortem file
 
-<!-- Link to docs/notes/YYYY-MM-DD-*-postmortem.md created in this PR -->
+<!-- Link to the task, issue, PR comment, or www docs page created for the post-mortem -->
 
 ## Specialist Review Evidence (Required for agent-authored PRs)
 
@@ -136,7 +136,7 @@ If not applicable, write `N/A: <reason>`.
 
 ### Documentation & Specs
 
-List docs/spec files updated, or write `N/A: <reason for no updates>`.
+List www docs/spec files updated, or write `N/A: <reason for no updates>`.
 
 ### Constitution & Risk Check
 

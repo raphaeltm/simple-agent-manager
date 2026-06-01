@@ -29,7 +29,7 @@ pnpm --filter @simple-agent-manager/cloud-init typecheck  # Type check only
 
 ## Gotchas
 
-- **YAML indentation is critical** — a single extra/missing space breaks cloud-init parsing on the VM. The TLS YAML indentation bug (`docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) caused production outages.
+- **YAML indentation is critical** — a single extra/missing space breaks cloud-init parsing on the VM. A prior TLS YAML indentation bug caused production outages.
 - **Tests must use realistic multi-line data** — 1-3 line PEM stubs hide indentation bugs that only manifest with real 20+ line certificates.
 - **Always assert round-trip integrity** — `expect(parsedYaml.field).toBe(originalInput)` for embedded content.
 - Built with `tsup` (not plain `tsc`) — outputs ESM with `.d.ts` declarations.
