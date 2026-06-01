@@ -66,7 +66,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                             | Default                     | Description                                      |
 | ------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `TASK_TITLE_MODEL`                   | `@cf/google/gemma-4-26b-a4b-it` | Workers AI model for title generation            |
+| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation            |
 | `TASK_TITLE_MAX_LENGTH`              | `100`                       | Max characters in generated title                |
 | `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Timeout before falling back to truncation        |
 | `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to disable AI generation             |

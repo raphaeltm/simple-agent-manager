@@ -225,6 +225,8 @@ async function fetchTaskTitle(
     timeoutMs,
     metadata: { source: 'task-title', modelId },
     responseLabel: 'task_title.gateway_response',
+    reasoningEffort: null,
+    chatTemplateKwargs: { enable_thinking: false },
     messages: [
       { role: 'system', content: buildSystemInstructions(maxLength) },
       { role: 'user', content: message },

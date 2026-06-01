@@ -63,7 +63,7 @@ describe('stripMarkdown', () => {
 describe('getTaskTitleConfig', () => {
   it('returns defaults when no env vars set', () => {
     const config = getTaskTitleConfig({});
-    expect(config.model).toBe('@cf/google/gemma-4-26b-a4b-it');
+    expect(config.model).toBe('@cf/zai-org/glm-4.7-flash');
     expect(config.maxLength).toBe(100);
     expect(config.timeoutMs).toBe(5000);
     expect(config.enabled).toBe(true);
@@ -131,6 +131,8 @@ describe('generateTaskTitle', () => {
     expect(parseGatewayRequestBody(init)).toMatchObject({
       model: '@cf/custom/model',
       max_tokens: 80,
+      reasoning_effort: null,
+      chat_template_kwargs: { enable_thinking: false },
     });
   });
 

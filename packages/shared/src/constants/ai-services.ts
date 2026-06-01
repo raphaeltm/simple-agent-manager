@@ -3,7 +3,7 @@
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
-export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+export const DEFAULT_TASK_TITLE_MODEL = '@cf/zai-org/glm-4.7-flash';
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
 export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
