@@ -283,6 +283,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
   }),
+  workersAIModel({
+    id: '@cf/zai-org/glm-4.7-flash',
+    label: 'GLM 4.7 Flash',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00006,
+    costPer1kOutputTokens: 0.0004,
+    contextWindow: 131072,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
+  }),
   // --- Anthropic (via AI Gateway) ---
   anthropicModel({
     id: 'claude-haiku-4-5-20251001',
