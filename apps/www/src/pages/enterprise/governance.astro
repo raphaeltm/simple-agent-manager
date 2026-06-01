@@ -36,10 +36,10 @@ import CtaFooter from '../../components/CtaFooter.astro';
         <div class="detail-block animate-on-scroll">
           <h2>Platform Policies</h2>
           <p>
-            SAM platform policies control how agents interact with tools and resources.
-            Policies define what MCP tools agents can call, what actions are allowed or denied,
-            and what constraints apply to agent behavior. Policies propagate to child tasks
-            automatically.
+            SAM platform policies define rules, constraints, and delegation boundaries for agent behavior.
+            Policies are injected into agent instructions so agents operate within the boundaries
+            your team sets. Policies propagate to child tasks automatically — when one agent
+            dispatches work to another, the child inherits the parent's policy set.
           </p>
         </div>
 
@@ -59,9 +59,10 @@ import CtaFooter from '../../components/CtaFooter.astro';
         <div class="detail-block animate-on-scroll">
           <h2>Session Audit Trails</h2>
           <p>
-            Every agent session is recorded: what was requested, what tools were called, what code was
-            produced, how long it ran, and what it cost. Project-scoped activity feeds give team leads
+            Agent sessions are recorded: what was requested, what the agent produced, and task lifecycle
+            events (start, completion, failure). Project-scoped activity feeds give team leads
             visibility without requiring access to the agent's workspace.
+            When using SAM-managed AI billing, token usage and cost are tracked per session.
           </p>
         </div>
 
@@ -74,7 +75,7 @@ import CtaFooter from '../../components/CtaFooter.astro';
             <li>Worker log streaming and error tracking</li>
             <li>VM agent health and heartbeat monitoring</li>
             <li>Cost monitoring with projections</li>
-            <li>AI usage breakdowns by model, user, and project</li>
+            <li>AI usage breakdowns by model and user</li>
             <li>Node and workspace lifecycle tracking</li>
           </ul>
         </div>

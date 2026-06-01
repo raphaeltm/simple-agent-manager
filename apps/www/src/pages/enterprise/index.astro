@@ -40,14 +40,14 @@ const pillars = [
     icon: 'grid',
     label: 'Scale to Hundreds of Agents',
     headline: 'Run 5 or 500 agents in parallel. SAM handles the rest.',
-    description: 'Warm node pooling for fast spinup. Automatic provisioning, scheduling, and cleanup. Every agent gets its own isolated container on a dedicated VM.',
+    description: 'Warm node pooling for fast spinup. Automatic provisioning, scheduling, and cleanup. Every agent gets its own isolated container. Users never share VMs.',
   },
   {
     slug: 'security',
     icon: 'lock',
     label: 'Security Isolation',
     headline: 'One user per VM. One agent per workspace. Hard boundaries.',
-    description: 'No multi-tenant VM sharing. OS-level firewalls baked into every node. Ephemeral VMs destroyed after use. Zero persistent attack surface.',
+    description: 'No multi-tenant VM sharing. OS-level firewalls baked into every node. Short-lived VMs destroyed after idle timeout. Zero persistent attack surface.',
   },
   {
     slug: 'governance',

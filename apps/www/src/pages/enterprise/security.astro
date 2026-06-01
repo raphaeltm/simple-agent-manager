@@ -6,7 +6,7 @@ import CtaFooter from '../../components/CtaFooter.astro';
 
 <Base
   title="Security Isolation — SAM Enterprise"
-  description="One user per VM, one agent per workspace. OS-level firewalls, ephemeral VMs, and hard security boundaries between every user."
+  description="One user per VM, one agent per workspace. OS-level firewalls, short-lived VMs, and hard security boundaries between every user."
 >
   <Header />
   <main>
@@ -23,8 +23,8 @@ import CtaFooter from '../../components/CtaFooter.astro';
           <span class="gradient-text">Hard boundaries.</span>
         </h1>
         <p class="detail-subtitle animate-on-scroll">
-          Every agent runs in its own container on a dedicated VM. No multi-tenant sharing.
-          OS-level firewalls enforce network isolation. Ephemeral VMs leave no persistent attack surface.
+          Each user's workspaces run on their own dedicated VMs — different users never share a node.
+          OS-level firewalls enforce network isolation. VMs are short-lived and destroyed after an idle timeout.
         </p>
       </div>
     </section>
@@ -37,15 +37,19 @@ import CtaFooter from '../../components/CtaFooter.astro';
           <h2>VM-Level User Isolation</h2>
           <p>
             Different users never share the same VM. Each user's workspaces run on their own
-            dedicated node. There is no shared-infrastructure scenario where one user's agent
+            dedicated nodes. There is no shared-infrastructure scenario where one user's agent
             could access another user's code, credentials, or runtime environment.
+          </p>
+          <p>
+            A single node can host multiple workspaces for the same user (up to a configurable limit,
+            default 3) — but cross-user node sharing is structurally prevented by the node selection logic.
           </p>
         </div>
 
         <div class="detail-block animate-on-scroll">
           <h2>One Agent Per Workspace</h2>
           <p>
-            Each workspace hosts exactly one agent session. No concurrent agents sharing
+            Each workspace hosts exactly one agent session in its own container. No concurrent agents sharing
             filesystem, memory, or network within a workspace. This eliminates an entire class
             of inter-agent interference bugs and security risks.
           </p>
@@ -61,11 +65,13 @@ import CtaFooter from '../../components/CtaFooter.astro';
         </div>
 
         <div class="detail-block animate-on-scroll">
-          <h2>Ephemeral by Default</h2>
+          <h2>Short-Lived VMs</h2>
           <p>
-            VMs are created for work and destroyed when done. There is no long-lived server accumulating
-            state, drift, or attack surface. Each task starts from a known-good base image,
-            and the machine is gone when the task is complete.
+            VMs are created for work and destroyed after an idle timeout (default 30 minutes).
+            After a task completes, the node enters a warm pool for fast reuse by the same user.
+            If no new work arrives, the node is automatically destroyed.
+            Each task starts from a known-good base image, and there is no long-lived server accumulating
+            state or drift.
           </p>
         </div>
 
@@ -83,23 +89,23 @@ import CtaFooter from '../../components/CtaFooter.astro';
               <tbody>
                 <tr>
                   <td>Session cookie</td>
-                  <td>Hours</td>
-                  <td>Browser authentication</td>
+                  <td>7 days</td>
+                  <td>Browser authentication (HttpOnly, Secure, SameSite)</td>
                 </tr>
                 <tr>
                   <td>Workspace JWT</td>
-                  <td>Minutes</td>
+                  <td>1 hour</td>
                   <td>Terminal WebSocket auth</td>
                 </tr>
                 <tr>
                   <td>Bootstrap token</td>
-                  <td>5 minutes, one-time use</td>
+                  <td>15 minutes, one-time use</td>
                   <td>VM credential injection</td>
                 </tr>
                 <tr>
                   <td>Callback token</td>
-                  <td>Minutes</td>
-                  <td>VM Agent to API callbacks</td>
+                  <td>24 hours</td>
+                  <td>VM agent → control plane callbacks</td>
                 </tr>
               </tbody>
             </table>
