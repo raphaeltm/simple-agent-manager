@@ -27,21 +27,21 @@ This task implements the first robust slice of generated OpenAPI support for the
 
 ## Implementation Checklist
 
-- [ ] Inspect CLI-facing Hono routes and current response shapes.
-- [ ] Add a minimal typed OpenAPI builder or route/schema-compatible generator for the CLI-facing API.
-- [ ] Add a canonical checked-in OpenAPI artifact, likely under `apps/api/openapi/`.
-- [ ] Add an API route for serving the CLI OpenAPI document if it fits existing routing.
-- [ ] Add a generation/check command and documentation for regenerating/checking the contract.
-- [ ] Add tests that fail if required paths disappear.
-- [ ] Add tests that fail if drift-sensitive fields disappear:
-  - [ ] profile `items`
-  - [ ] node list array/wrapper shape as implemented
-  - [ ] library `sizeBytes`, `uploadSource`, `createdAt`
-  - [ ] knowledge `name`, `entityType`, `updatedAt`
-  - [ ] trigger `cronExpression`, `nextFireAt`
-  - [ ] activity `eventType`, `payload`, `createdAt`
-  - [ ] chat/session detail with `messages`
-- [ ] Run relevant API typecheck/tests.
+- [x] Inspect CLI-facing Hono routes and current response shapes.
+- [x] Add a minimal typed OpenAPI builder or route/schema-compatible generator for the CLI-facing API.
+- [x] Add a canonical checked-in OpenAPI artifact, likely under `apps/api/openapi/`.
+- [x] Add an API route for serving the CLI OpenAPI document if it fits existing routing.
+- [x] Add a generation/check command and documentation for regenerating/checking the contract.
+- [x] Add tests that fail if required paths disappear.
+- [x] Add tests that fail if drift-sensitive fields disappear:
+  - [x] profile `items`
+  - [x] node list array/wrapper shape as implemented
+  - [x] library `sizeBytes`, `uploadSource`, `createdAt`
+  - [x] knowledge `name`, `entityType`, `updatedAt`
+  - [x] trigger `cronExpression`, `nextFireAt`
+  - [x] activity `eventType`, `payload`, `createdAt`
+  - [x] chat/session detail with `messages`
+- [x] Run relevant API typecheck/tests.
 - [ ] Run broader quality gates required by `/do`.
 - [ ] Use specialist review skills before PR.
 - [ ] Open a draft/open PR with `DO NOT MERGE` and stop without merging.
