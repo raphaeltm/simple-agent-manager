@@ -44,7 +44,7 @@ This task implements the first robust slice of generated OpenAPI support for the
 - [x] Run relevant API typecheck/tests.
 - [x] Run broader quality gates required by `/do`.
 - [x] Use specialist review skills before PR.
-- [ ] Open a draft/open PR with `DO NOT MERGE` and stop without merging.
+- [x] Open a draft/open PR with `DO NOT MERGE` and stop without merging: https://github.com/raphaeltm/simple-agent-manager/pull/1172
 
 ## Acceptance Criteria
 
