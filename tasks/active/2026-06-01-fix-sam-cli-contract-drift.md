@@ -27,20 +27,20 @@ Hard workflow constraint: this work must stop at a draft/open PR. The PR title o
 
 ## Implementation Checklist
 
-- [ ] Update CLI response structs and client methods for current API contracts.
-- [ ] Change `sam chat <sessionId>` to request `GET /api/projects/:projectId/sessions/:sessionId` and render returned messages.
-- [ ] Update `sam library` to display `sizeBytes`, `uploadSource`, and `createdAt`; make root-only behavior explicit or add a clear all-files/recursive behavior.
-- [ ] Update `sam context` to display knowledge `name`, `entityType`, `observationCount`, and formatted numeric timestamps.
-- [ ] Sanitize table cells so multiline or long notification/activity text stays readable and single-line.
-- [ ] Update `sam triggers` to render current schedule and next-run fields.
-- [ ] Update `sam profiles` to read `{ items: [...] }`.
-- [ ] Update `sam activity` to render `eventType`, a useful payload summary, and timestamp.
-- [ ] Update `sam nodes` to decode a raw node array and render current provider/location/IP fields.
-- [ ] Improve JSON decode errors with safe actionable context and redaction.
-- [ ] Add/update command-boundary tests for fixed commands in text and JSON modes where practical, using current API shapes.
-- [ ] Add focused table-rendering tests for multiline notification/activity/title values.
-- [ ] Run `go test -race -coverprofile=coverage.out -covermode=atomic ./...` in `packages/cli`.
-- [ ] Inspect coverage with `go tool cover -func=coverage.out`.
+- [x] Update CLI response structs and client methods for current API contracts.
+- [x] Change `sam chat <sessionId>` to request `GET /api/projects/:projectId/sessions/:sessionId` and render returned messages.
+- [x] Update `sam library` to display `sizeBytes`, `uploadSource`, and `createdAt`; make root-only behavior explicit or add a clear all-files/recursive behavior.
+- [x] Update `sam context` to display knowledge `name`, `entityType`, `observationCount`, and formatted numeric timestamps.
+- [x] Sanitize table cells so multiline or long notification/activity text stays readable and single-line.
+- [x] Update `sam triggers` to render current schedule and next-run fields.
+- [x] Update `sam profiles` to read `{ items: [...] }`.
+- [x] Update `sam activity` to render `eventType`, a useful payload summary, and timestamp.
+- [x] Update `sam nodes` to decode a raw node array and render current provider/location/IP fields.
+- [x] Improve JSON decode errors with safe actionable context and redaction.
+- [x] Add/update command-boundary tests for fixed commands in text and JSON modes where practical, using current API shapes.
+- [x] Add focused table-rendering tests for multiline notification/activity/title values.
+- [x] Run `go test -race -coverprofile=coverage.out -covermode=atomic ./...` in `packages/cli`.
+- [x] Inspect coverage with `go tool cover -func=coverage.out`.
 
 ## Acceptance Criteria
 

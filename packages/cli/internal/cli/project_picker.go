@@ -23,10 +23,7 @@ func PickProject(ctx context.Context, client APIClient, stdin io.Reader, stdout 
 	fmt.Fprintln(stdout, "Select a project:")
 	fmt.Fprintln(stdout)
 	for i, p := range projects.Projects {
-		activity := ""
-		if p.LastActivityAt != nil {
-			activity = FormatRelativeTime(*p.LastActivityAt)
-		}
+		activity := FormatAnyTimestamp(p.LastActivityAt)
 		chats := "no chats"
 		if p.ActiveSessionCount == 1 {
 			chats = "1 active chat"

@@ -107,3 +107,27 @@ func TestAPIInvalidJSONErrorIsActionableAndRedacted(t *testing.T) {
 		t.Fatalf("error leaked cookie: %q", err.Error())
 	}
 }
+
+func TestAPIInvalidJSONErrorRedactsSensitiveQueryValues(t *testing.T) {
+	err := doJSON(
+		context.Background(),
+		roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return jsonResponse(`not-json`, http.StatusOK), nil
+		}),
+		http.MethodGet,
+		"https://api.example.com/api/demo?token=secret-token&cursor=abc",
+		"cookie=value",
+		nil,
+		&map[string]any{},
+	)
+	if err == nil {
+		t.Fatal("expected invalid JSON error")
+	}
+	message := err.Error()
+	if strings.Contains(message, "secret-token") || strings.Contains(message, "cookie=value") {
+		t.Fatalf("error leaked secret: %q", message)
+	}
+	if !strings.Contains(message, "token=REDACTED") || !strings.Contains(message, "cursor=abc") {
+		t.Fatalf("error missing safe query context: %q", message)
+	}
+}
