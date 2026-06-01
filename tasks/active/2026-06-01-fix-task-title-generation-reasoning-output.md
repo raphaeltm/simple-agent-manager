@@ -23,6 +23,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 - [x] Send thinking-disabled controls for task-title generation.
 - [x] Update unit tests for the default model and outgoing gateway payload.
 - [x] Update current configuration references for `TASK_TITLE_MODEL`.
+- [x] Add bug-fix process guidance for provider-compatible utility LLM payload controls.
 - [x] Run targeted tests and repository quality checks.
 - [ ] Deploy to staging through GitHub Actions and verify the changed behavior.
 - [ ] Open a PR, wait for green CI, merge, and verify production deployment.
@@ -43,3 +44,12 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 - `packages/shared/src/constants/ai-services.ts`
 - `.claude/rules/32-cf-api-debugging.md`
 - `.claude/rules/33-staging-feature-validation.md`
+
+## Post-Mortem
+
+- **What broke**: Long task submissions often received fallback titles based on the prompt prefix even though task-title AI Gateway requests returned HTTP 200.
+- **Root cause**: The title utility assumed OpenAI-compatible chat responses would always put generated text in `choices[0].message.content`. Reasoning-capable Workers AI models can return `content = null` and place text in reasoning output unless request-level thinking is disabled.
+- **Timeline**: The behavior appeared after SAM moved task-title generation to current reasoning-capable Workers AI defaults. It was discovered when new tasks showed prompt-prefix titles and confirmed through production AI Gateway logs plus direct model probes.
+- **Why it was not caught**: Existing tests verified that SAM parsed normal `message.content` responses and fell back on empty output, but did not assert the provider-specific payload controls needed to keep the response contract stable for utility calls.
+- **Class of bug**: Provider-compatible API response-contract drift hidden behind a successful HTTP response.
+- **Process fix**: `.claude/rules/02-quality-gates.md` now requires regression tests for utility LLM calls to assert exact provider payload controls, including thinking/reasoning-disable parameters when needed.
