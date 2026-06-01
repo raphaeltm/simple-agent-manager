@@ -164,7 +164,7 @@ describe('getMessageToolContent', () => {
 
   it('returns content array for a valid message with tool_metadata', () => {
     const content = [{ type: 'content', text: 'hello' }];
-    const sql = makeSql([{ tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) }]);
+    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toEqual(content);
   });
@@ -175,28 +175,34 @@ describe('getMessageToolContent', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when tool_metadata is not a string', () => {
-    const sql = makeSql([{ tool_metadata: 42 }]);
+  it('returns null when message is not a tool message', () => {
+    const sql = makeSql([{ role: 'assistant', tool_metadata: JSON.stringify({ content: [{ type: 'content', text: 'ignored' }] }) }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toBeNull();
   });
 
-  it('returns null when tool_metadata has no content array', () => {
-    const sql = makeSql([{ tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) }]);
+  it('returns empty content when tool_metadata is not a string', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: 42 }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
   });
 
-  it('returns null when tool_metadata is malformed JSON', () => {
-    const sql = makeSql([{ tool_metadata: '{bad json' }]);
+  it('returns empty content when tool_metadata has no content array', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
   });
 
-  it('returns null when tool_metadata is null string', () => {
-    const sql = makeSql([{ tool_metadata: null }]);
+  it('returns empty content when tool_metadata is malformed JSON', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: '{bad json' }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty content when tool_metadata is null', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: null }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toEqual([]);
   });
 });
 

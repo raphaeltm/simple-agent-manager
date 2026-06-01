@@ -222,13 +222,17 @@ describe('chatMessagesToConversationItems', () => {
     });
   });
 
-  it('maps tool message content to text content item when no structured metadata', () => {
-    const input = [msg({ role: 'tool', content: 'plain output', toolMetadata: null })];
+  it('marks plain tool message content for lazy loading instead of rendering it inline', () => {
+    const input = [msg({ id: 'tool-plain', role: 'tool', content: 'plain output', toolMetadata: null })];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]).toMatchObject({ type: 'content', text: 'plain output' });
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      content: [],
+      contentLoaded: false,
+      messageId: 'tool-plain',
+      contentSize: 'plain output'.length,
+    });
   });
 
   it('uses toolCallId from metadata for tool_call id field', () => {
@@ -302,10 +306,10 @@ describe('chatMessagesToConversationItems', () => {
       toolKind: 'execute',
       status: 'completed',
     });
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content[0]).toMatchObject({
-      type: 'terminal',
-      data: { type: 'terminal', terminalId: 'term-status-only' },
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: expect.any(String),
     });
   });
 
@@ -324,10 +328,10 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Tool messages — structured content (diff/terminal)
+  // Tool messages — lazy content pointers
   // -------------------------------------------------------------------------
 
-  it('uses structured content from metadata when available', () => {
+  it('normalizes structured metadata content to a lazy-load pointer', () => {
     const structuredContent = [
       { type: 'diff', text: '/src/foo.go', path: '/src/foo.go', oldText: 'old', newText: 'new' },
     ];
@@ -341,148 +345,34 @@ describe('chatMessagesToConversationItems', () => {
     const input = [msg({ role: 'tool', content: 'diff: /src/foo.go', toolMetadata: meta as unknown as null })];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('diff');
-    // diff items should carry a data field for ToolCallCard rendering
-    expect(toolItem.content[0]?.data).toMatchObject({
-      type: 'diff',
-      path: '/src/foo.go',
-      oldText: 'old',
-      newText: 'new',
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      content: [],
+      contentLoaded: false,
+      messageId: expect.any(String),
+      contentSize: expect.any(Number),
     });
   });
 
-  it('passes terminal structured content type through as-is', () => {
-    const structuredContent = [{ type: 'terminal', text: 'term-1' }];
-    const meta = {
-      toolCallId: 'tc-term',
-      kind: 'execute',
-      status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string }> };
-    expect(toolItem.content[0]?.type).toBe('terminal');
-  });
-
-  it('populates data field for terminal structured content (parity with workspace chat)', () => {
-    const structuredContent = [{ type: 'terminal', text: 'term-123' }];
-    const meta = {
-      toolCallId: 'tc-term-data',
-      kind: 'execute',
-      status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content[0]?.data).toBeTruthy();
-    expect(toolItem.content[0]?.data).toMatchObject({ type: 'terminal', text: 'term-123' });
-  });
-
-  it('populates data field for content structured content (parity with workspace chat)', () => {
-    const structuredContent = [{ type: 'content', text: 'some output text' }];
-    const meta = {
-      toolCallId: 'tc-content-data',
-      kind: 'read',
-      status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: 'some output text', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content[0]?.data).toBeTruthy();
-    expect(toolItem.content[0]?.data).toMatchObject({ type: 'content', text: 'some output text' });
-  });
-
-  it('populates data field for ALL content types consistently (diff, terminal, content)', () => {
-    const structuredContent = [
-      { type: 'content', text: 'hello' },
-      { type: 'diff', text: '/src/a.ts', path: '/src/a.ts', oldText: 'x', newText: 'y' },
-      { type: 'terminal', text: 'term-99' },
+  it('preserves lazy-load metadata from compact update rows merged into an existing tool call', () => {
+    const meta1 = { toolCallId: 'tc-compact-merge', title: 'Search files', kind: 'search', status: 'in_progress' };
+    const meta2 = { toolCallId: 'tc-compact-merge', status: 'completed', contentSize: 1234 };
+    const input = [
+      msg({ id: 'tool-start', role: 'tool', content: '(tool call)', toolMetadata: meta1 as unknown as null }),
+      msg({ id: 'tool-result', role: 'tool', content: '(tool update)', toolMetadata: meta2 as unknown as null }),
     ];
-    const meta = {
-      toolCallId: 'tc-all-types',
-      kind: 'multi',
+    const items = chatMessagesToConversationItems(input);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      title: 'Search files',
       status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: 'mixed', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(3);
-    // All content types should have a data field
-    for (const c of toolItem.content) {
-      expect(c.data).toBeTruthy();
-    }
-  });
-
-  it('treats unknown structured content type as "content"', () => {
-    const structuredContent = [{ type: 'unknown_future_type', text: 'raw' }];
-    const meta = { toolCallId: 'tc-x', kind: 'read', status: 'completed', content: structuredContent };
-    const input = [msg({ role: 'tool', content: 'raw', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string }> };
-    expect(toolItem.content[0]?.type).toBe('content');
-  });
-
-  // -------------------------------------------------------------------------
-  // Tool messages — raw ACP wire format (from Go marshalRawContent)
-  // These test the exact JSON shapes the Go VM agent now stores.
-  // -------------------------------------------------------------------------
-
-  it('handles raw ACP wire format for diff content (flat fields, no "text" key)', () => {
-    // Exact shape from Go: {"type":"diff","path":"/foo.go","oldText":"old","newText":"new"}
-    const rawDiff = { type: 'diff', path: '/foo.go', oldText: 'old', newText: 'new' };
-    const meta = { toolCallId: 'tc-raw-diff', kind: 'edit', status: 'completed', content: [rawDiff] };
-    const input = [msg({ role: 'tool', content: 'diff: /foo.go', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: Record<string, unknown> }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('diff');
-    // data carries the full raw object for ToolCallCard rendering
-    expect(toolItem.content[0]?.data).toMatchObject({
-      type: 'diff',
-      path: '/foo.go',
-      oldText: 'old',
-      newText: 'new',
+      content: [],
+      contentLoaded: false,
+      messageId: 'tool-result',
+      contentSize: 1234,
     });
-  });
-
-  it('handles raw ACP wire format for content type (nested content block)', () => {
-    // Exact shape from Go: {"type":"content","content":{"type":"text","text":"hello"}}
-    const rawContent = { type: 'content', content: { type: 'text', text: 'hello' } };
-    const meta = { toolCallId: 'tc-raw-content', kind: 'read', status: 'completed', content: [rawContent] };
-    const input = [msg({ role: 'tool', content: 'hello', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; text?: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('content');
-    // extractToolCallText traverses content.content.text to find "hello"
-    expect(toolItem.content[0]?.text).toBe('hello');
-  });
-
-  it('handles raw ACP wire format for terminal type (terminalId field)', () => {
-    // Exact shape from Go: {"type":"terminal","terminalId":"term-1"}
-    const rawTerminal = { type: 'terminal', terminalId: 'term-1' };
-    const meta = { toolCallId: 'tc-raw-term', kind: 'execute', status: 'completed', content: [rawTerminal] };
-    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('terminal');
-    // data carries the raw object with terminalId
-    expect(toolItem.content[0]?.data).toMatchObject({ type: 'terminal', terminalId: 'term-1' });
   });
 
   // -------------------------------------------------------------------------
@@ -505,13 +395,16 @@ describe('chatMessagesToConversationItems', () => {
     expect(toolItem.content).toHaveLength(0);
   });
 
-  it('does NOT suppress non-placeholder content', () => {
-    const input = [msg({ role: 'tool', content: 'real output here', toolMetadata: null })];
+  it('does not render non-placeholder content inline', () => {
+    const input = [msg({ id: 'tool-output', role: 'tool', content: 'real output here', toolMetadata: null })];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ text: string }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.text).toBe('real output here');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 'tool-output',
+      contentSize: 'real output here'.length,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -682,19 +575,23 @@ describe('chatMessagesToConversationItems', () => {
     expect(['in_progress', 'completed']).toContain((items[0] as { status: string }).status);
   });
 
-  it('updates content on deduplication when new content is provided', () => {
+  it('updates lazy-load pointer on deduplication when new content is provided', () => {
     const initialContent = [{ type: 'content', text: 'initial output' }];
     const updatedContent = [{ type: 'content', text: 'final output' }];
     const meta1 = { toolCallId: 'tc-content-update', kind: 'read', status: 'in_progress', content: initialContent };
     const meta2 = { toolCallId: 'tc-content-update', kind: 'read', status: 'completed', content: updatedContent };
     const input = [
-      msg({ role: 'tool', content: 'initial output', toolMetadata: meta1 as unknown as null }),
-      msg({ role: 'tool', content: 'final output', toolMetadata: meta2 as unknown as null }),
+      msg({ id: 'initial-content-message', role: 'tool', content: 'initial output', toolMetadata: meta1 as unknown as null }),
+      msg({ id: 'updated-content-message', role: 'tool', content: 'final output', toolMetadata: meta2 as unknown as null }),
     ];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ text?: string }> };
-    expect(toolItem.content[0]?.text).toBe('final output');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 'updated-content-message',
+      contentSize: expect.any(Number),
+    });
   });
 
   // -------------------------------------------------------------------------
