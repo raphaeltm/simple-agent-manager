@@ -3,6 +3,8 @@ title: Self-Hosting Guide
 description: Deploy SAM to your own infrastructure with Cloudflare Workers, Pulumi, and GitHub Actions.
 ---
 
+import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
+
 This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment is automated via GitHub Actions + Pulumi — push to `main` and everything is provisioned.
 
 ## Prerequisites
@@ -52,36 +54,12 @@ If your registrar has DNSSEC enabled, disable it **before** changing nameservers
 
 ## Step 3: Create GitHub App
 
-Go to [GitHub App Settings](https://github.com/settings/apps) → New GitHub App:
+Use the wizard below to create your GitHub App with all settings pre-filled. Enter your domain, click through to GitHub, and the wizard will generate your environment secrets.
 
-**Basic settings:**
-
-- Homepage URL: `https://app.yourdomain.com`
-- Callback URL: `https://api.yourdomain.com/api/auth/callback/github`
-- Setup URL: `https://api.yourdomain.com/api/github/callback`
-
-**Permissions:**
-
-- Repository → Contents: Read and write
-- Repository → Metadata: Read-only
-- Account → Email addresses: Read-only
-
-**Webhook:**
-
-- URL: `https://api.yourdomain.com/api/github/webhook`
-- Active: checked
-- Secret: generate a random string and save the same value as the `GH_WEBHOOK_SECRET` GitHub Environment secret
-
-After creation, note the **App ID** and **Client ID**, generate a **Client Secret** and **Private Key**.
-
-Base64 encode the private key:
-```bash
-cat your-key.pem | base64 -w0    # Linux
-cat your-key.pem | base64        # macOS
-```
+<GitHubAppSetup />
 
 :::caution
-"Request user authorization (OAuth) during installation" must be **unchecked**. When checked, it disables the Setup URL and breaks post-installation redirects.
+"Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
 :::
 
 ## Step 4: Create R2 API Token
