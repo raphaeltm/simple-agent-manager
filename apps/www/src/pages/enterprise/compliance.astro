@@ -48,33 +48,38 @@ import CtaFooter from '../../components/CtaFooter.astro';
         <div class="detail-block animate-on-scroll">
           <h2>Credential Isolation</h2>
           <p>
-            Every user's cloud tokens and API keys are encrypted individually in the database. They are never stored as
-            environment variables, platform secrets, or shared state. Each credential has its own initialization vector
-            for defense in depth.
+            Every credential is encrypted individually in the database with its own initialization vector.
+            Credentials are never stored as environment variables, platform secrets, or shared state.
+          </p>
+          <p>
+            Agent API keys and OAuth tokens can be scoped at the user level or overridden per project. When an agent needs a key,
+            SAM resolves it through a tiered lookup: project-specific first, then user-level, then platform default.
+            An inactive project credential blocks fallthrough — it doesn't silently fall back to a broader scope.
+            Cloud provider tokens are scoped per-user.
           </p>
           <div class="detail-table-wrap">
             <table class="detail-table">
               <thead>
                 <tr>
                   <th>Credential</th>
-                  <th>Storage</th>
+                  <th>Scope</th>
                   <th>Encryption</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td>Cloud provider tokens</td>
-                  <td>Per-user in D1</td>
+                  <td>Per-user</td>
                   <td>AES-256-GCM, per-credential IV</td>
                 </tr>
                 <tr>
                   <td>Agent API keys</td>
-                  <td>Per-user in D1</td>
+                  <td>Per-user or per-project</td>
                   <td>AES-256-GCM, per-credential IV</td>
                 </tr>
                 <tr>
                   <td>OAuth tokens</td>
-                  <td>Per-user in D1</td>
+                  <td>Per-user or per-project</td>
                   <td>AES-256-GCM, per-credential IV</td>
                 </tr>
               </tbody>
