@@ -58,6 +58,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
+    portsPublicEnabled: ws.portsPublicEnabled,
     errorMessage: ws.errorMessage,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,

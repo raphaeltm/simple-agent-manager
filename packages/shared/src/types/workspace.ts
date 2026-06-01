@@ -150,6 +150,7 @@ export interface Workspace {
   vmIp: string | null;
   dnsRecordId: string | null;
   lastActivityAt: string | null;
+  portsPublicEnabled?: boolean;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -181,6 +182,8 @@ export interface WorkspaceResponse {
   devcontainerConfigName?: string | null;
   vmIp: string | null;
   lastActivityAt: string | null;
+  /** When true, forwarded workspace ports are reachable without per-port browser tokens. */
+  portsPublicEnabled?: boolean;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;

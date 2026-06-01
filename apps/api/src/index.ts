@@ -199,6 +199,7 @@ app.use('*', async (c, next) => {
   // and are NOT sent to ws-{id}--{port}.{BASE_DOMAIN} subdomains.
   let userId: string | null = null;
   let portAccessRedirect: Response | null = null;
+  let publicPortAccess = false;
 
   if (targetPort !== null) {
     // 5a: Check sam_port_access cookie (subsequent requests)
@@ -241,6 +242,23 @@ app.use('*', async (c, next) => {
         } catch (err) {
           log.warn('ws_proxy_port_token_rejected', { workspaceId, targetPort, ...serializeError(err) });
         }
+      }
+    }
+
+    if (!userId) {
+      const db = drizzle(c.env.DATABASE, { schema });
+      const publicWorkspace = await db
+        .select({
+          userId: schema.workspaces.userId,
+          portsPublicEnabled: schema.workspaces.portsPublicEnabled,
+        })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, workspaceId))
+        .get();
+
+      if (publicWorkspace?.portsPublicEnabled) {
+        userId = publicWorkspace.userId;
+        publicPortAccess = true;
       }
     }
 
@@ -333,6 +351,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     nodeId: workspace.nodeId || workspaceId,
     backendHostname,
     targetPort,
+    publicPortAccess,
     method: c.req.raw.method,
     path: url.pathname,
   });

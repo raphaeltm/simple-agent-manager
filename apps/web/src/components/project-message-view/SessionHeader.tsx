@@ -10,8 +10,10 @@ import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, getPortAccessUrl, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
+import { PublicPortsToggleRow } from './PublicPortsToggleRow';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
+import { usePublicPortsToggle } from './usePublicPortsToggle';
 
 /** Labeled value pill used in the session context panel. */
 function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
@@ -247,6 +249,7 @@ export function SessionHeader({
   const [completing, setCompleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  const publicPorts = usePublicPortsToggle(workspace, onSessionMutated);
 
   // Trigger info — fetched on demand when expanding a task-linked session
   const [triggerDetail, setTriggerDetail] = useState<TaskDetailResponse | null>(null);
@@ -296,18 +299,21 @@ export function SessionHeader({
     }
   }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
 
+  const getWorkspacePortHref = useCallback((port: DetectedPort) => {
+    if (!workspace) return sanitizeUrl(port.url);
+    return publicPorts.enabled ? sanitizeUrl(port.url) : getPortAccessUrl(workspace.id, port.port);
+  }, [publicPorts.enabled, workspace]);
+
   return (
     <div
       className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : ' rounded-b-2xl after:content-[\'\'] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10'}`}
       style={{ backgroundColor: 'rgba(8, 15, 12, 0.68)', boxShadow: hasContentBelow ? '0 4px 24px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
     >
-      {/* Compact row — always visible */}
       <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
           {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
 
-        {/* Lineage info for retries/forks */}
         {lineageText && (
           <span
             className="text-[10px] font-medium shrink-0"
@@ -320,17 +326,16 @@ export function SessionHeader({
 
         {workspace && <WorkspaceProfileBadge workspace={workspace} />}
 
-        {/* Active port badges — shown inline in compact row */}
         {detectedPorts.length > 0 && (
           <span className="inline-flex items-center gap-1 shrink-0">
             {detectedPorts
               .slice()
               .sort((a, b) => a.port - b.port)
-              .slice(0, 3) // Show up to 3 port badges inline
+              .slice(0, 3)
               .map((p) => (
                 <a
                   key={p.port}
-                  href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
+                  href={getWorkspacePortHref(p)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
@@ -350,7 +355,6 @@ export function SessionHeader({
           </span>
         )}
 
-        {/* Retry & Fork — always visible when session has a task */}
         {(session.task?.id ?? session.taskId) && (
           <span className="inline-flex items-center gap-0.5 shrink-0">
             {onRetry && (
@@ -378,7 +382,6 @@ export function SessionHeader({
           </span>
         )}
 
-        {/* State indicator */}
         <span
           className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
           style={{
@@ -391,14 +394,12 @@ export function SessionHeader({
           {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
         </span>
 
-        {/* Background refresh indicator */}
         {loading && (
           <span role="status" aria-label="Refreshing messages" className="inline-flex items-center shrink-0">
             <Spinner size="sm" />
           </span>
         )}
 
-        {/* Expand/collapse toggle — only shown when there are details to show */}
         {hasDetails && (
           <button
             type="button"
@@ -412,10 +413,17 @@ export function SessionHeader({
         )}
       </div>
 
-      {/* Expanded details panel */}
+      {workspace && detectedPorts.length > 0 && (
+        <PublicPortsToggleRow
+          enabled={publicPorts.enabled}
+          saving={publicPorts.saving}
+          error={publicPorts.error}
+          onToggle={publicPorts.toggle}
+        />
+      )}
+
       {expanded && hasDetails && (
         <div className="border-t border-[rgba(34,197,94,0.08)] px-4 py-2 space-y-2">
-          {/* Reference IDs — copyable pills for cross-referencing */}
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
               <Hash size={10} />
@@ -435,7 +443,6 @@ export function SessionHeader({
             </div>
           </div>
 
-          {/* Agent info — type, mode, profile */}
           {(session.agentType || taskEmbed?.taskMode || taskEmbed?.agentProfileHint) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted min-w-0">
               {session.agentType && (
@@ -462,10 +469,8 @@ export function SessionHeader({
             </div>
           )}
 
-          {/* Task execution status + timing */}
           {(taskEmbed?.id || session.startedAt) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
-              {/* Task execution step */}
               {taskEmbed?.executionStep && taskEmbed.status === 'in_progress' && (
                 <span className="inline-flex items-center gap-1">
                   <Spinner size="sm" />
@@ -474,7 +479,6 @@ export function SessionHeader({
                   </span>
                 </span>
               )}
-              {/* Task status badge */}
               {taskEmbed?.status && (
                 <span
                   className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded"
@@ -493,14 +497,12 @@ export function SessionHeader({
                   {taskEmbed.status.charAt(0).toUpperCase() + taskEmbed.status.slice(1).replace(/_/g, ' ')}
                 </span>
               )}
-              {/* Started time */}
               {session.startedAt && (
                 <span className="inline-flex items-center gap-1">
                   <Clock size={11} className="opacity-60" />
                   {formatTime(session.startedAt)}
                 </span>
               )}
-              {/* Duration */}
               {session.startedAt && (
                 <span className="inline-flex items-center gap-1">
                   <Timer size={11} className="opacity-60" />
@@ -717,7 +719,7 @@ export function SessionHeader({
                       .map((p) => (
                         <a
                           key={p.port}
-                          href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
+                          href={getWorkspacePortHref(p)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
@@ -745,7 +747,7 @@ export function SessionHeader({
                     .map((p) => (
                       <a
                         key={p.port}
-                        href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
+                        href={getWorkspacePortHref(p)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"

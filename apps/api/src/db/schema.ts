@@ -686,6 +686,7 @@ export const workspaces = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** Soft FK to ProjectData DO session (not a D1 table). Null until a chat session binds to this workspace. */
     chatSessionId: text('chat_session_id'),
+    portsPublicEnabled: integer('ports_public_enabled', { mode: 'boolean' }).notNull().default(false),
     errorMessage: text('error_message'),
     dispatchedAt: text('dispatched_at'),
     /** JSON snapshot of ResourceRequirements for audit. */

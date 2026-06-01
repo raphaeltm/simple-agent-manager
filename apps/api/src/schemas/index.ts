@@ -45,6 +45,7 @@ export {
   CredentialInjectionSchema,
   MessageBatchSchema,
   UpdateAgentSessionSchema,
+  UpdateWorkspacePortsPublicSchema,
   UpdateWorkspaceSchema,
   WorkspaceErrorSchema,
   WorkspaceStatusUpdateSchema,

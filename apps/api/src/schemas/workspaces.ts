@@ -20,6 +20,10 @@ export const UpdateWorkspaceSchema = v.object({
   displayName: v.string(),
 });
 
+export const UpdateWorkspacePortsPublicSchema = v.object({
+  enabled: v.boolean(),
+});
+
 export const CreateAgentSessionSchema = v.object({
   label: v.optional(v.string()),
   agentType: v.optional(v.string()),

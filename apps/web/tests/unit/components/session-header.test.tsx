@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
   getProjectTask: vi.fn(),
+  updateWorkspacePortsPublic: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -15,6 +16,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
   deleteWorkspace: mocks.deleteWorkspace,
   getProjectTask: mocks.getProjectTask,
+  updateWorkspacePortsPublic: mocks.updateWorkspacePortsPublic,
 }));
 
 vi.mock('../../../src/lib/text-utils', () => ({
@@ -41,6 +43,7 @@ vi.mock('@simple-agent-manager/ui', () => ({
 }));
 
 vi.mock('lucide-react', () => ({
+  AlertTriangle: () => <span />,
   Box: () => <span />,
   CheckCircle2: () => <span data-testid="icon-check-circle" />,
   ChevronDown: () => <span />,
@@ -148,6 +151,7 @@ describe('SessionHeader', () => {
     vi.clearAllMocks();
     mocks.updateProjectTaskStatus.mockResolvedValue({});
     mocks.deleteWorkspace.mockResolvedValue({});
+    mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
   });
 
   it('renders session topic', () => {
@@ -314,6 +318,66 @@ describe('SessionHeader', () => {
     await waitFor(() => {
       expect(screen.getByText('Completing...')).toBeInTheDocument();
     });
+  });
+
+  it('shows the public ports switch when detected ports are present', () => {
+    renderHeader({
+      workspace: makeWorkspace({ portsPublicEnabled: false }),
+      detectedPorts: [{
+        port: 5173,
+        address: '127.0.0.1',
+        label: 'Vite',
+        url: 'https://ws-ws-1--5173.workspaces.example.com',
+        detectedAt: '2026-06-01T00:00:00Z',
+      }],
+    });
+
+    expect(screen.getByText('Public ports')).toBeInTheDocument();
+    const toggle = screen.getByRole('switch', { name: 'Enable public forwarded ports' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('Forwarded port URLs require a SAM access token.')).toBeInTheDocument();
+  });
+
+  it('toggles public ports through the workspace API', async () => {
+    const { props } = renderHeader({
+      workspace: makeWorkspace({ portsPublicEnabled: false }),
+      detectedPorts: [{
+        port: 5173,
+        address: '127.0.0.1',
+        label: 'Vite',
+        url: 'https://ws-ws-1--5173.workspaces.example.com',
+        detectedAt: '2026-06-01T00:00:00Z',
+      }],
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable public forwarded ports' }));
+
+    await waitFor(() => {
+      expect(mocks.updateWorkspacePortsPublic).toHaveBeenCalledWith('ws-1', true);
+      expect(props.onSessionMutated).toHaveBeenCalled();
+    });
+    expect(screen.getByRole('switch', { name: 'Disable public forwarded ports' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('rolls back the public ports switch when the API fails', async () => {
+    mocks.updateWorkspacePortsPublic.mockRejectedValueOnce(new Error('Nope'));
+    renderHeader({
+      workspace: makeWorkspace({ portsPublicEnabled: false }),
+      detectedPorts: [{
+        port: 5173,
+        address: '127.0.0.1',
+        label: 'Vite',
+        url: 'https://ws-ws-1--5173.workspaces.example.com',
+        detectedAt: '2026-06-01T00:00:00Z',
+      }],
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable public forwarded ports' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Nope')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('switch', { name: 'Enable public forwarded ports' })).toHaveAttribute('aria-checked', 'false');
   });
 
   // --- CopyableId and Reference IDs ---
