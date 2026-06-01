@@ -77,6 +77,33 @@ const AGENT_PROFILES = [
   },
 ];
 
+const SKILLS = [
+  {
+    id: 'skill-audit',
+    projectId: MOCK_PROJECT.id,
+    userId: 'user-test-1',
+    name: 'Implementation Audit',
+    description: 'Repeatable task setup for implementation work with resource hints.',
+    agentType: null,
+    model: null,
+    permissionMode: null,
+    systemPromptAppend: null,
+    maxTurns: null,
+    timeoutMinutes: null,
+    vmSizeOverride: 'large',
+    provider: null,
+    vmLocation: null,
+    workspaceProfile: null,
+    devcontainerConfigName: null,
+    taskMode: 'task',
+    isBuiltin: false,
+    defaultProfileId: 'profile-codex',
+    resourceRequirementsJson: '{"minVcpu":4,"minMemoryGb":8}',
+    createdAt: '2026-05-18T00:00:00Z',
+    updatedAt: '2026-05-18T00:00:00Z',
+  },
+];
+
 const CACHED_COMMANDS = [
   {
     agentType: 'openai-codex',
@@ -224,6 +251,7 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
       if (subPath === '/agent-profiles') {
         return respond(200, { items: mode === 'wizard' || mode === 'single-default' ? [] : AGENT_PROFILES });
       }
+      if (subPath === '/skills') return respond(200, { items: mode === 'wizard' ? [] : SKILLS });
       if (subPath.match(/^\/agent-profiles\/[^/]+\/runtime\/env-vars/)) {
         return respond(200, { envVars: [] });
       }
@@ -340,6 +368,9 @@ test.describe('Project chat composer audit', () => {
     await expect(page.getByText(/OpenAI Codex/)).toBeVisible();
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeEnabled();
+    await expect(page.getByLabel('Skill')).toBeVisible();
+    await page.getByLabel('Skill').selectOption('skill-audit');
+    await expect(page.getByText(/8 GB RAM/)).toBeVisible();
     await textarea.fill('Quick question with long wrapping text '.repeat(8));
     await captureComposerAudit(
       page,

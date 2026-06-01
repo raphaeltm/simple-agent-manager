@@ -36,7 +36,7 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
   const selected = selectedSkillId ? skills.find((skill) => skill.id === selectedSkillId) ?? null : null;
   const summary = formatResourceSummary(selected);
   const classes = compact
-    ? 'px-2 py-1.5 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]'
+    ? 'min-h-11 px-2 py-1.5 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]'
     : 'w-full py-2.5 px-3 border border-border-default rounded-md bg-surface text-fg-primary min-h-11';
 
   return (

@@ -91,17 +91,18 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         )}
 
         <div className="grid gap-3">
-          <label className="grid gap-1.5">
+          <label htmlFor="skill-name" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Name</span>
-            <Input value={name} onChange={(event) => setName(event.currentTarget.value)} disabled={saving} />
+            <Input id="skill-name" value={name} onChange={(event) => setName(event.currentTarget.value)} disabled={saving} />
           </label>
-          <label className="grid gap-1.5">
+          <label htmlFor="skill-description" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Description</span>
-            <Input value={description} onChange={(event) => setDescription(event.currentTarget.value)} disabled={saving} />
+            <Input id="skill-description" value={description} onChange={(event) => setDescription(event.currentTarget.value)} disabled={saving} />
           </label>
-          <label className="grid gap-1.5">
+          <label htmlFor="skill-default-profile" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Default Profile</span>
             <select
+              id="skill-default-profile"
               value={defaultProfileId}
               onChange={(event) => setDefaultProfileId(event.target.value)}
               disabled={saving}
@@ -113,9 +114,10 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
               ))}
             </select>
           </label>
-          <label className="grid gap-1.5">
+          <label htmlFor="skill-system-prompt" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">System Prompt (append)</span>
             <textarea
+              id="skill-system-prompt"
               value={systemPromptAppend}
               onChange={(event) => setSystemPromptAppend(event.target.value)}
               rows={3}
@@ -124,26 +126,27 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
             />
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5">
+            <label htmlFor="skill-vm-size" className="grid gap-1.5">
               <span className="text-sm text-fg-muted">VM Size</span>
-              <select value={vmSizeOverride} onChange={(event) => setVmSizeOverride(event.target.value)} disabled={saving} className="min-h-11 rounded-md px-3 py-2.5 text-fg-primary">
+              <select id="skill-vm-size" value={vmSizeOverride} onChange={(event) => setVmSizeOverride(event.target.value)} disabled={saving} className="min-h-11 rounded-md px-3 py-2.5 text-fg-primary">
                 <option value="">Default</option>
                 <option value="small">Small</option>
                 <option value="medium">Medium</option>
                 <option value="large">Large</option>
               </select>
             </label>
-            <label className="grid gap-1.5">
+            <label htmlFor="skill-task-mode" className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Task Mode</span>
-              <select value={taskMode} onChange={(event) => setTaskMode(event.target.value)} disabled={saving} className="min-h-11 rounded-md px-3 py-2.5 text-fg-primary">
+              <select id="skill-task-mode" value={taskMode} onChange={(event) => setTaskMode(event.target.value)} disabled={saving} className="min-h-11 rounded-md px-3 py-2.5 text-fg-primary">
                 <option value="task">Task</option>
                 <option value="conversation">Conversation</option>
               </select>
             </label>
           </div>
-          <label className="grid gap-1.5">
+          <label htmlFor="skill-resource-requirements" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Resource Requirements JSON</span>
             <textarea
+              id="skill-resource-requirements"
               value={resourceRequirementsJson}
               onChange={(event) => setResourceRequirementsJson(event.target.value)}
               rows={4}
