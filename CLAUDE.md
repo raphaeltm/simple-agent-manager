@@ -1,5 +1,7 @@
 # Simple Agent Manager (SAM)
 
+> Agent instruction file only. This is not user-facing documentation or a getting-started guide. Canonical public documentation lives in `apps/www/src/content/docs/docs/`.
+
 A serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner Cloud VMs.
 
 ## Repository Structure

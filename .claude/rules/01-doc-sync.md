@@ -11,12 +11,12 @@ However, this does NOT excuse stale documentation:
 After writing or modifying ANY code, you MUST update ALL documentation that references the changed behavior IN THE SAME COMMIT. There are NO exceptions and NO deferrals.
 
 This includes but is not limited to:
-- `docs/guides/self-hosting.md` — setup instructions, permissions, configuration
-- `docs/architecture/` — architecture decisions, credential models
+- `apps/www/src/content/docs/docs/guides/self-hosting.md` — setup instructions, permissions, configuration
+- `apps/www/src/content/docs/docs/architecture/` — architecture decisions, credential models
 - `specs/` — feature specifications, data models
 - `AGENTS.md` — agent configuration pointers
 - `CLAUDE.md` — project instructions for Claude Code
-- `README.md` — if user-facing behavior changed
+- Public docs under `apps/www/src/content/docs/docs/` — if user-facing behavior changed
 
 ### How To Comply
 
@@ -55,7 +55,7 @@ When writing documentation that describes what the system **does** (flow maps, a
 
 ### Why This Matters
 
-The TDF post-mortem (`docs/notes/2026-02-28-missing-initial-prompt-postmortem.md`) showed that flow maps and analysis documents containing uncited aspirational claims were treated as ground truth by downstream work. Eight tasks and seven PRs built on the assumption that "the VM agent starts an ACP session" because a document said so — but no code existed for it.
+The TDF post-mortem (the retained incident lesson in this rule) showed that flow maps and analysis documents containing uncited aspirational claims were treated as ground truth by downstream work. Eight tasks and seven PRs built on the assumption that "the VM agent starts an ACP session" because a document said so — but no code existed for it.
 
 ## No Legacy / Dead Code
 
@@ -66,8 +66,8 @@ This project is pre-production. Do not keep "legacy" code paths that are not use
 ## Documentation & File Naming
 
 - **Location**: Never put documentation files in package roots
-  - Ephemeral working notes: `docs/notes/`
-  - Permanent documentation: `docs/`
+  - Ephemeral working notes: relevant task records under `tasks/`
+  - Permanent public documentation: `apps/www/src/content/docs/docs/`
   - Feature specs and design docs: `specs/<feature>/`
 - **Naming**: Use kebab-case for all markdown files
   - Good: `phase8-implementation-summary.md`

@@ -1,5 +1,7 @@
 # Quickstart: PTY Session Persistence
 
+> Spec validation artifact only. This is not canonical user documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Feature**: 012-pty-session-persistence
 
 ## What This Feature Does

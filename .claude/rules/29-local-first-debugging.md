@@ -220,8 +220,8 @@ Before telling the human you are blocked:
 
 ## References
 
-- Local dev guide: `docs/guides/local-development.md`
-- Deployment troubleshooting: `docs/guides/deployment-troubleshooting.md`
+- Local dev guide: `apps/www/src/content/docs/docs/guides/local-development.md`
+- Deployment troubleshooting: use the public self-hosting guide and current deploy scripts as source of truth
 - Admin observability: `specs/023-admin-observability/` + `/admin/*` routes
 - VM agent log endpoint: `specs/020-node-observability/contracts/vm-agent-logs.md`
 - Rule 13 (staging verification) — applies *in addition* to this rule; local-first does not exempt you from the final staging gate

@@ -6,7 +6,7 @@ If you dispatch specialist review agents during Phase 5 of the `/do` workflow, *
 
 ### Why This Rule Exists
 
-PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and security-auditor were still running. Context compaction caused the agent to lose track of outstanding reviewers. The agent merged the PR, then processed the late-arriving reviews and filed 5 backlog tasks for CRITICAL findings — including JWT tokens exposed in URL query parameters and mutex held during Docker I/O. See `docs/notes/2026-03-31-pr568-premature-merge-postmortem.md`.
+PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and security-auditor were still running. Context compaction caused the agent to lose track of outstanding reviewers. The agent merged the PR, then processed the late-arriving reviews and filed 5 backlog tasks for CRITICAL findings — including JWT tokens exposed in URL query parameters and mutex held during Docker I/O. See the retained incident lesson in this rule.
 
 ### Hard Requirements
 

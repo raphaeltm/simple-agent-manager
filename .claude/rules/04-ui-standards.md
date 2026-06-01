@@ -14,7 +14,7 @@ ALL UI changes MUST be tested for mobile usability before deployment.
 2. Use responsive text sizes (mobile -> tablet -> desktop)
 3. Start with single-column layouts on mobile
 4. Test on mobile viewport before deploying
-5. Follow `docs/guides/mobile-ux-guidelines.md`
+5. Follow the mobile and responsive UI standards in this rule set and the canonical public docs under `apps/www/src/content/docs/docs/`
 
 ### Visual Verification with Playwright (Required During Development)
 

@@ -24,7 +24,7 @@ Before creating ANY content:
 
 Every blog post and long-form piece needs a personal hook. A real story, experience, or observation from Raph that grounds the piece. Before writing:
 
-1. Search the repo for relevant context: `docs/notes/`, `tasks/`, commit history, PR descriptions, post-mortems
+1. Search the repo for relevant context: `tasks/`, `specs/`, public blog content, commit history, PR descriptions, and post-mortems retained in task records
 2. Check `strategy/content/` for any existing notes or hooks the human may have left
 3. **If you cannot find a personal story or hook in the repo, ASK the human before writing.** Say something like: "I have the technical content but I need a personal angle. Do you have a story about how this came up, what prompted it, or what surprised you?"
 

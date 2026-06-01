@@ -1,5 +1,7 @@
 # Quickstart: MVP Hardening Development
 
+> Spec validation artifact only. This is not canonical setup documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 **Date**: 2026-01-27
 

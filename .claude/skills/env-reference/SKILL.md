@@ -76,7 +76,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `AGENT_SETTINGS_VALIDATION_LIMITS` — Optional JSON object overriding
   agent-settings validation bounds for model IDs, tool lists, additional env
   entries, provider display names, and OpenCode base URLs. See
-  `apps/api/.env.example` and `docs/guides/self-hosting.md` for supported keys
+  `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.md` for supported keys
   and defaults.
 
 ### Pagination
@@ -127,7 +127,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 ### Trial Onboarding (`/try` flow)
 
-See `docs/guides/trial-configuration.md` for the full table with meanings and defaults. Summary:
+Trial configuration is currently sourced from `apps/api/.env.example` and `apps/api/src/env.ts`. Summary:
 
 - `TRIAL_CLAIM_TOKEN_SECRET` — Worker secret; HMAC key for trial cookies (auto-provisioned by Pulumi)
 - `TRIAL_MONTHLY_CAP`, `TRIAL_WORKSPACE_TTL_MS`, `TRIAL_DATA_RETENTION_HOURS` — Global cap + lifetimes

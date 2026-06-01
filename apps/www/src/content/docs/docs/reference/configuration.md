@@ -50,6 +50,8 @@ Set in GitHub Settings → Environments → production:
 | `RESOURCE_PREFIX`     | Cloudflare resource name prefix | `sam`              |
 | `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state      | `sam-pulumi-state` |
 
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, and `GH_APP_SLUG`. `GH_WEBHOOK_SECRET` is strongly recommended for webhook signature verification.
+
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. The deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets.
 :::
@@ -120,7 +122,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                              | Default           | Description                                                         |
 | ------------------------------------- | ----------------- | ------------------------------------------------------------------- |
-| `MCP_TOKEN_TTL_SECONDS`               | `14400` (4 hours) | Token lifetime for agent MCP access (must be >= max execution time) |
+| `MCP_TOKEN_TTL_SECONDS`               | `28800` (8 hours) | Sliding inactivity timeout for agent MCP access                     |
 | `MCP_RATE_LIMIT`                      | `120`             | Max MCP requests per window                                         |
 | `MCP_RATE_LIMIT_WINDOW_SECONDS`       | `60`              | Rate limit window                                                   |
 | `MCP_DISPATCH_MAX_DEPTH`              | `3`               | Max recursion depth for dispatch_task                               |
@@ -179,7 +181,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `MAX_NODES_PER_USER`               | `10`    | Max nodes per user            |
 | `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions |
 | `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user         |
-| `MAX_TASKS_PER_PROJECT`            | `500`   | Max ideas per project         |
+| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project         |
 | `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length   |
 
 ## Durable Object Limits

@@ -1,5 +1,7 @@
 # Quick Start: Using OAuth Tokens with Claude Code
 
+> Spec validation artifact only. This is not canonical user documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 This guide shows how to use your Claude Max/Pro subscription with SAM instead of API keys.
 
 ## Prerequisites

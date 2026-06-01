@@ -13,7 +13,7 @@ You execute ideas through the **project chat interface**. Type your description 
 2. **Create a branch** — descriptive branch name with `sam/` prefix
 3. **Select a node** — reuses a warm node if available, otherwise provisions a new one
 4. **Create a workspace** — clones your repo and sets up the environment
-5. **Start the agent** — runs your configured agent (Claude Code, Codex, Gemini, or Mistral Vibe) with your description
+5. **Start the agent** — runs your configured agent (Claude Code, Codex, Gemini, Mistral Vibe, OpenCode, or Amp) with your description
 6. **Stream output** — watch the agent work in real-time through the chat interface
 
 ### Execution Options

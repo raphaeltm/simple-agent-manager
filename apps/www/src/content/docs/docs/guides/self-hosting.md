@@ -15,7 +15,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 **Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
-You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/) or [Scaleway API key](https://console.scaleway.com/iam/api-keys) through the Settings UI.
+You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP support also requires optional Google OAuth configuration on the SAM instance.
 
 ## Step 1: Fork the Repository
 
@@ -127,6 +127,8 @@ In your fork: Settings → Environments → New environment → name it `product
 | `GH_APP_PRIVATE_KEY`       | GitHub App private key (PEM or base64)                                         |
 | `GH_APP_SLUG`              | GitHub App URL slug                                                            |
 | `GH_WEBHOOK_SECRET`        | GitHub App webhook secret; mapped to the Worker secret `GITHUB_WEBHOOK_SECRET` |
+| `GOOGLE_CLIENT_ID`         | Optional Google OAuth client ID for GCP provider setup                         |
+| `GOOGLE_CLIENT_SECRET`     | Optional Google OAuth client secret for GCP provider setup                     |
 
 :::note
 GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. `GH_WEBHOOK_SECRET` becomes the Worker secret `GITHUB_WEBHOOK_SECRET` and must match the GitHub App webhook secret.
@@ -238,8 +240,10 @@ If you changed `BASE_DOMAIN`, old DNS records from a previous deployment may con
 Migrations haven't been applied. The deploy workflow runs them automatically, but you can also run manually:
 
 ```bash
-wrangler d1 migrations apply workspaces --remote
+wrangler d1 migrations apply <deployed-d1-database-name> --remote
 ```
+
+Use the D1 database name from the deploy workflow's Pulumi stack output.
 
 ### "Workspace stuck in provisioning"
 

@@ -13,7 +13,7 @@ This rule applies whenever code:
 
 PR #753 introduced per-project credential overrides with 3-tier resolution. The initial security review passed because the happy path (project-row-found, no-project-falls-through-to-user) was tested. A post-merge re-audit found 11 additional findings — most severely, a `CodexRefreshLock` stale-token branch that returned the live rotating refresh_token to any same-user caller who submitted a non-matching value.
 
-The class of bug is **silent acceptance at credential trust boundaries.** Every finding was a path where the code accepted something it should have rejected, with no user-visible signal. See `docs/notes/2026-04-18-project-credentials-security-hardening-postmortem.md`.
+The class of bug is **silent acceptance at credential trust boundaries.** Every finding was a path where the code accepted something it should have rejected, with no user-visible signal. See the retained incident lesson in this rule.
 
 ## Required Behavioral Tests
 
@@ -79,7 +79,7 @@ Before merging any PR that touches credential resolution, rotation, or compariso
 
 ## References
 
-- Post-mortem: `docs/notes/2026-04-18-project-credentials-security-hardening-postmortem.md`
+- Post-mortem: the retained incident lesson in this rule
 - Rule 02: source-contract tests banned
 - Rule 11: identity validation at system boundaries
 - Rule 25: review merge gate — CRITICAL/HIGH findings block merge

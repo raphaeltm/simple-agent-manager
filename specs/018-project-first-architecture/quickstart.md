@@ -1,5 +1,7 @@
 # Quickstart: Project-First Architecture
 
+> Spec validation artifact only. This is not canonical architecture documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Spec**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md) | **Data Model**: [data-model.md](./data-model.md)
 
 This guide covers how to develop and test the project-first architecture feature locally and on staging.

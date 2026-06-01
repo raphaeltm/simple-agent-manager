@@ -102,7 +102,7 @@ Before advancing past Phase 5, you MUST:
 4. Wait for the outstanding reviewer(s) to complete, then update their status
 5. Only after every reviewer shows `PASS` or `ADDRESSED` may you check off Phase 5
 
-**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See `docs/notes/2026-03-31-pr568-premature-merge-postmortem.md`.
+**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See the retained incident lesson in this rule.
 
 ### Updating the Review Tracker
 

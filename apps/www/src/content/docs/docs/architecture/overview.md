@@ -67,12 +67,12 @@ Every request to `*.domain` passes through the same Cloudflare Worker. The `Host
 |---------|-------------|-----|
 | `app.{domain}` | Cloudflare Pages | Worker proxies to `{project}.pages.dev` |
 | `api.{domain}` | Worker API routes | Direct handling by Hono router |
-| `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via DNS-only `vm-{nodeId}.{domain}` |
+| `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via `{nodeId}.vm.{domain}` backend hostname |
 | `ws-{id}--{port}.{domain}` | Workspace port proxy | Worker proxies to dev server running on `{port}` |
 | `*.{domain}` (other) | 404 | No matching route |
 
-:::note[Why DNS-only backend hostnames?]
-Cloudflare Workers can't fetch IP addresses directly (Error 1003). Non-proxied DNS A records (`vm-{nodeId}.{domain}` → VM IP) are created so the Worker can proxy through hostnames.
+:::note[Why backend hostnames?]
+Cloudflare Workers can't fetch IP addresses directly (Error 1003). Node backend DNS records (`{nodeId}.vm.{domain}` → VM IP) are created so the Worker can proxy through hostnames, with `*.vm.{domain}` excluded from the Worker route.
 :::
 
 ## Control Plane — API Worker

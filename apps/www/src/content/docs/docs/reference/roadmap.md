@@ -34,15 +34,14 @@ Browser-based terminal access to running workspaces:
 
 Planned follow-up work:
 
-- File explorer integration.
-- Terminal session persistence.
+- Workspace logs and debugging.
+- Better error UX for build failures.
 
 ## Planned: Enhanced UX
 
 Reliability and product experience improvements:
 
-- Workspace logs and debugging.
-- Better error UX for build failures.
+- Deeper file and terminal workflow polish.
 - Retry support for failed workspace builds.
 - Custom devcontainer support.
 - Multiple repository sources.
@@ -92,4 +91,3 @@ Future security hardening:
 - Workspace snapshots and restore.
 - GPU instances for AI workloads.
 - Kubernetes-based workspaces.
-

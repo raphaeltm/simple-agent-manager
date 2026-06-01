@@ -21,7 +21,7 @@ These are Cloudflare Worker secrets set during deployment:
 | `GITHUB_APP_*`            | GitHub App for repository access                                                         |
 | `GITHUB_WEBHOOK_SECRET`   | GitHub App webhook HMAC verification; set from GitHub Actions secret `GH_WEBHOOK_SECRET` |
 
-Platform secrets are automatically generated and persisted by Pulumi on first deployment. They never appear in source control.
+Security keys and Origin CA credentials are automatically generated and persisted by Pulumi on first deployment. Cloudflare and GitHub secrets are external inputs supplied through GitHub Actions and mapped into Worker secrets by the deploy scripts. They never appear in source control.
 
 ### User Credentials
 

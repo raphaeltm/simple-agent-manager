@@ -15,40 +15,31 @@ GET /health
 
 Returns agent health status, version, uptime, and system information.
 
-### Authentication
-
-```
-POST /auth/token
-```
-
-Exchange credentials for a session cookie. Used by the browser after obtaining a workspace JWT from the API.
-
 ### Shell Sessions
 
 ```
-WebSocket /workspaces/:id/shell
+WebSocket /terminal/ws
+WebSocket /terminal/ws/multi
 ```
 
 Opens a PTY terminal session inside the workspace container. Supports:
 - Binary and text frames
 - Terminal resize events
 - Ring buffer replay on reconnect (catches up missed output)
+- Multi-session terminal tabs
 
 ### Agent Sessions
 
 ```
-WebSocket /workspaces/:id/agent
+WebSocket /agent/ws
 ```
 
-Opens an AI coding agent session using the Agent Communication Protocol (ACP). Messages are JSON-encoded with types:
-- `session/prompt` — send a user prompt
-- `session/update` — streaming agent output
-- `session/complete` — agent finished
+Opens an AI coding agent session using the Agent Communication Protocol (ACP). Session creation, prompt, cancel, stop, suspend, and resume commands are exposed through the control-plane-authenticated `/workspaces/{workspaceId}/agent-sessions/*` HTTP endpoints.
 
 ### Tab Management
 
 ```
-GET /workspaces/:id/tabs
+GET /workspaces/{workspaceId}/tabs
 ```
 
 Returns the list of open tabs (shell and agent sessions) for a workspace. Used to restore tabs on page refresh.
@@ -62,7 +53,7 @@ POST /workspaces
 Create a new workspace container. Called by the API Worker during workspace provisioning.
 
 ```
-DELETE /workspaces/:id
+DELETE /workspaces/{workspaceId}
 ```
 
 Delete a workspace container and clean up resources.

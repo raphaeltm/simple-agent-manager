@@ -6,7 +6,7 @@ Before adding any new form field, settings control, dropdown, toggle, or input t
 
 ### Why This Rule Exists
 
-PR #558 added a `ScalingSettings` component with a provider dropdown that managed `project.defaultProvider`. The pre-existing "Default Cloud Provider" toggle-button section in `ProjectSettings.tsx` already managed the same field. Both were visible on the same page, using different interaction patterns, and out of sync until page reload. See `docs/notes/2026-03-30-duplicate-settings-controls-postmortem.md`.
+PR #558 added a `ScalingSettings` component with a provider dropdown that managed `project.defaultProvider`. The pre-existing "Default Cloud Provider" toggle-button section in `ProjectSettings.tsx` already managed the same field. Both were visible on the same page, using different interaction patterns, and out of sync until page reload. See the retained incident lesson in this rule.
 
 ### Required Steps When Adding UI Controls
 

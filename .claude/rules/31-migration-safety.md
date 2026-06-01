@@ -2,7 +2,7 @@
 
 ## This Rule Exists Because of a Production Data Loss Incident
 
-On 2026-04-25, migration 0047 dropped and recreated the `projects` table to make a column nullable. The `triggers`, `tasks`, `agent_profiles`, `deployment_credentials`, and other tables had `ON DELETE CASCADE` referencing `projects`. The DROP TABLE cascaded and wiped all data from every child table in production. See `docs/notes/2026-04-25-migration-cascade-data-loss-postmortem.md`.
+On 2026-04-25, migration 0047 dropped and recreated the `projects` table to make a column nullable. The `triggers`, `tasks`, `agent_profiles`, `deployment_credentials`, and other tables had `ON DELETE CASCADE` referencing `projects`. The DROP TABLE cascaded and wiped all data from every child table in production. See the retained incident lesson in this rule.
 
 ## Hard Rule: NEVER DROP TABLE on a FK Parent
 

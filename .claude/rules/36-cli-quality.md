@@ -1,7 +1,7 @@
 ---
 paths:
   - "packages/cli/**"
-  - "docs/cli.md"
+  - "packages/cli"
   - ".github/workflows/ci.yml"
   - "sonar-project.properties"
 ---

@@ -87,7 +87,7 @@ To set the default:
 The agent selection follows this precedence:
 1. Explicit override on execution
 2. Project default agent
-3. Platform default (`claude-code`)
+3. Platform default from `DEFAULT_TASK_AGENT_TYPE` (`opencode` in the checked-in Worker config)
 
 ## Workspace Profiles
 

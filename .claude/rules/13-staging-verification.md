@@ -187,7 +187,7 @@ Match the verification to what the PR actually changes:
   or `WebSocket.onmessage`). A server can emit perfectly valid SSE that the
   browser parses and then silently drops because nothing is listening for the
   specific event name. See
-  `docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`.
+  the retained incident lesson in this rule.
 
 These are baseline regression checks. They do NOT verify that the specific fix or feature works on the live environment.
 

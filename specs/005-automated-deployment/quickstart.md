@@ -1,4 +1,6 @@
-# Quickstart: Self-Hosting Simple Agent Manager
+# Spec Validation Quickstart: Automated Deployment
+
+> Spec validation artifact only. This is not the canonical self-hosting guide; use `apps/www/src/content/docs/docs/guides/self-hosting.md` for public self-hosting documentation.
 
 **Feature**: 005-automated-deployment | **Deployment Time**: ~10 minutes
 

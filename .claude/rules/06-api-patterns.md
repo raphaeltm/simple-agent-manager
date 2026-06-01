@@ -64,7 +64,7 @@ app.route('/', crudRoutes);
 app.route('/', lifecycleRoutes);
 ```
 
-See `docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md` for the production incident this caused.
+See the retained incident lesson in this rule for the production incident this caused.
 
 **VM agent callback routes are the most common victim of this pattern.** Any route called by the VM agent with a callback JWT Bearer token MUST be in its own file and mounted BEFORE `projectsRoutes` in `index.ts`. See `.claude/rules/34-vm-agent-callback-auth.md` for the full rule and the list of currently extracted routes.
 
