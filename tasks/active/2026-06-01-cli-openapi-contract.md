@@ -42,8 +42,8 @@ This task implements the first robust slice of generated OpenAPI support for the
   - [x] activity `eventType`, `payload`, `createdAt`
   - [x] chat/session detail with `messages`
 - [x] Run relevant API typecheck/tests.
-- [ ] Run broader quality gates required by `/do`.
-- [ ] Use specialist review skills before PR.
+- [x] Run broader quality gates required by `/do`.
+- [x] Use specialist review skills before PR.
 - [ ] Open a draft/open PR with `DO NOT MERGE` and stop without merging.
 
 ## Acceptance Criteria
