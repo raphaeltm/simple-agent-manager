@@ -46,6 +46,7 @@ const MOCK_SESSION = {
 };
 
 const TOOL_CONTENT = [{ type: 'content', content: { type: 'text', text: 'focused test output' } }];
+const TOOL_BUTTON_NAME = new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 const MOCK_MESSAGES = [
   {
@@ -167,25 +168,35 @@ async function setupMocks(page: Page) {
   return { toolContentRequests };
 }
 
+async function assertPersistedToolCallLazyLoads(
+  page: Page,
+  toolContentRequests: string[],
+  screenshotName: string
+) {
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+
+  await expect(page.getByText(TOOL_TITLE)).toBeVisible();
+  await expect(page.getByText('execute')).toBeVisible();
+  await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
+  await expect(page.getByText('128 B')).toBeVisible();
+
+  const toolButton = page.getByRole('button', { name: TOOL_BUTTON_NAME });
+  await expect(toolButton).toHaveAttribute('aria-expanded', 'false');
+  await toolButton.click();
+
+  await expect(page.getByText('focused test output')).toBeVisible();
+  expect(toolContentRequests).toEqual([
+    expect.stringContaining('/messages/msg-tool-done/tool-content'),
+  ]);
+
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+}
+
 test.describe('Project Chat Persisted Tool Calls — Mobile', () => {
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
     const { toolContentRequests } = await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(page.getByText(TOOL_TITLE)).toBeVisible();
-    await expect(page.getByText('execute')).toBeVisible();
-    await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
-    await expect(page.getByText('128 B')).toBeVisible();
-    await expect(page.getByRole('button', { name: new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })).toHaveAttribute('aria-expanded', 'false');
-
-    await page.getByRole('button', { name: new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).click();
-
-    await expect(page.getByText('focused test output')).toBeVisible();
-    expect(toolContentRequests).toHaveLength(1);
-    expect(toolContentRequests[0]).toContain('/messages/msg-tool-done/tool-content');
-
-    await screenshot(page, 'project-chat-tool-call-persisted-mobile');
-    await assertNoOverflow(page);
+    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-mobile');
   });
 });
 
@@ -194,21 +205,6 @@ test.describe('Project Chat Persisted Tool Calls — Desktop', () => {
 
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
     const { toolContentRequests } = await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(page.getByText(TOOL_TITLE)).toBeVisible();
-    await expect(page.getByText('execute')).toBeVisible();
-    await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
-    await expect(page.getByText('128 B')).toBeVisible();
-    await expect(page.getByRole('button', { name: new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })).toHaveAttribute('aria-expanded', 'false');
-
-    await page.getByRole('button', { name: new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).click();
-
-    await expect(page.getByText('focused test output')).toBeVisible();
-    expect(toolContentRequests).toHaveLength(1);
-    expect(toolContentRequests[0]).toContain('/messages/msg-tool-done/tool-content');
-
-    await screenshot(page, 'project-chat-tool-call-persisted-desktop');
-    await assertNoOverflow(page);
+    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-desktop');
   });
 });

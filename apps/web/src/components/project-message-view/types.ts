@@ -54,9 +54,14 @@ function buildToolContentPointer(
 ): ToolContentPointer {
   const fallbackHasContent = !isPlaceholderContent(msg.content) && msg.content.trim().length > 0;
   const hasStructuredContent = Array.isArray(structuredContent) && structuredContent.length > 0;
+  const estimatedSize = hasStructuredContent
+    ? estimateContentSize(structuredContent)
+    : fallbackHasContent
+      ? msg.content.length
+      : undefined;
   return {
     messageId: msg.id,
-    contentSize: contentSize ?? (hasStructuredContent ? estimateContentSize(structuredContent) : fallbackHasContent ? msg.content.length : undefined),
+    contentSize: contentSize ?? estimatedSize,
     hasStoredContent: hasStructuredContent || fallbackHasContent || (contentSize !== undefined && contentSize > 0),
   };
 }

@@ -25,6 +25,19 @@ function msg(overrides: Partial<ChatMessageResponse> & { role: string; content: 
   };
 }
 
+function toolMsg(
+  overrides: Partial<ChatMessageResponse> & {
+    content: string;
+    toolMetadata: NonNullable<ChatMessageResponse['toolMetadata']>;
+  }
+): ChatMessageResponse {
+  return msg({
+    role: 'tool',
+    ...overrides,
+    toolMetadata: overrides.toolMetadata as unknown as null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Empty input
 // ---------------------------------------------------------------------------
@@ -358,8 +371,8 @@ describe('chatMessagesToConversationItems', () => {
     const meta1 = { toolCallId: 'tc-compact-merge', title: 'Search files', kind: 'search', status: 'in_progress' };
     const meta2 = { toolCallId: 'tc-compact-merge', status: 'completed', contentSize: 1234 };
     const input = [
-      msg({ id: 'tool-start', role: 'tool', content: '(tool call)', toolMetadata: meta1 as unknown as null }),
-      msg({ id: 'tool-result', role: 'tool', content: '(tool update)', toolMetadata: meta2 as unknown as null }),
+      toolMsg({ id: 'tool-start', content: '(tool call)', toolMetadata: meta1 }),
+      toolMsg({ id: 'tool-result', content: '(tool update)', toolMetadata: meta2 }),
     ];
     const items = chatMessagesToConversationItems(input);
 
@@ -581,8 +594,8 @@ describe('chatMessagesToConversationItems', () => {
     const meta1 = { toolCallId: 'tc-content-update', kind: 'read', status: 'in_progress', content: initialContent };
     const meta2 = { toolCallId: 'tc-content-update', kind: 'read', status: 'completed', content: updatedContent };
     const input = [
-      msg({ id: 'initial-content-message', role: 'tool', content: 'initial output', toolMetadata: meta1 as unknown as null }),
-      msg({ id: 'updated-content-message', role: 'tool', content: 'final output', toolMetadata: meta2 as unknown as null }),
+      toolMsg({ id: 'initial-content-message', content: 'initial output', toolMetadata: meta1 }),
+      toolMsg({ id: 'updated-content-message', content: 'final output', toolMetadata: meta2 }),
     ];
     const items = chatMessagesToConversationItems(input);
 
