@@ -6,7 +6,7 @@
  */
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import { checkQuotaForUser } from '../../src/services/compute-quotas';
@@ -120,6 +120,7 @@ function seedQuotaOverride(userId: string, limit: number): void {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   sqlite?.close();
   sqlite = null;
 });
@@ -127,10 +128,12 @@ afterEach(() => {
 describe('node uptime compute billing vertical slice', () => {
   it('summarizes current-user usage from node rows with node fields and legacy aliases', async () => {
     const db = createDb();
-    const userId = `node-usage-user-${Date.now()}`;
-    const nowMs = Date.now();
     const { start } = getCurrentPeriodBounds();
     const periodStartMs = new Date(start).getTime();
+    const nowMs = periodStartMs + 8 * MS_PER_HOUR;
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
+    const userId = `node-usage-user-${Date.now()}`;
     seedUser(userId);
 
     seedNode({
@@ -189,8 +192,11 @@ describe('node uptime compute billing vertical slice', () => {
 
   it('enforces quotas from platform node uptime while excluding BYOC uptime', async () => {
     const db = createDb();
+    const { start } = getCurrentPeriodBounds();
+    const nowMs = new Date(start).getTime() + 8 * MS_PER_HOUR;
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
     const userId = `node-quota-user-${Date.now()}`;
-    const nowMs = Date.now();
     seedUser(userId);
     seedQuotaOverride(userId, 3.5);
 
