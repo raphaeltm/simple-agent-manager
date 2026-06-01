@@ -1,0 +1,142 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+---
+
+<Base
+  title="Cost Transparency — SAM Enterprise"
+  description="Pay cloud providers directly at your negotiated rate. Built-in usage dashboards, token budgets, and cost caps for full financial visibility."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Cost Transparency</span>
+        <h1 class="detail-title animate-on-scroll">
+          Pay your cloud provider.<br />
+          <span class="gradient-text">See every token.</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          No opaque bundles. Compute costs go to your cloud provider at your negotiated rate.
+          LLM costs go through your API key agreements. SAM gives you dashboards to track it all.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Direct Cloud Pricing</h2>
+          <p>
+            VMs are provisioned in your cloud account. You pay Hetzner, Scaleway, or GCP directly.
+            No markup, no middleman. Your existing volume discounts and enterprise agreements apply.
+          </p>
+          <p>
+            The SAM control plane runs on Cloudflare Workers, which has a generous free tier.
+            For most teams, the control plane cost is effectively zero.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>LLM Usage Dashboards</h2>
+          <p>
+            SAM tracks AI usage through Cloudflare AI Gateway, giving you per-user, per-model,
+            per-day breakdowns of token consumption. Engineering managers see exactly who is
+            using what and how much it costs.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Budget Controls</h2>
+          <p>
+            Set daily token budgets and monthly cost caps per user. When a limit is reached,
+            the platform enforces it. No surprise bills, no "we'll deal with it later" overruns.
+          </p>
+          <div class="detail-table-wrap">
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>Control</th>
+                  <th>Scope</th>
+                  <th>Enforcement</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Daily token budget</td>
+                  <td>Per user</td>
+                  <td>Hard limit, resets daily</td>
+                </tr>
+                <tr>
+                  <td>Monthly cost cap</td>
+                  <td>Per user</td>
+                  <td>Hard limit, resets monthly</td>
+                </tr>
+                <tr>
+                  <td>Admin quota ceiling</td>
+                  <td>Per user (admin-set)</td>
+                  <td>Max budget a user can self-assign</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Admin Cost Dashboard</h2>
+          <p>
+            A dedicated admin dashboard aggregates LLM costs and compute costs with projections.
+            Finance teams can model actual costs per project, per team, or per agent type
+            without parsing cloud provider invoices.
+          </p>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/open-source/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Open Source
+          </a>
+          <a href="/enterprise/scale/" class="detail-nav-link">
+            Scale
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
+  .detail-hero-content { max-width: 720px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
+  .back-link:hover { color: var(--color-fg-muted); }
+  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
+  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
+  .detail-content { max-width: 720px; }
+  .detail-block { margin-bottom: 48px; }
+  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
+  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
+  .detail-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--glass-border); margin-top: 16px; }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  .detail-table th { padding: 12px 16px; text-align: left; background: var(--color-bg-surface); font-weight: 600; font-size: 0.8125rem; color: var(--color-fg-muted); border-bottom: 1px solid var(--glass-border); }
+  .detail-table td { padding: 10px 16px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-fg-muted); }
+  .detail-table tbody tr:last-child td { border-bottom: none; }
+  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
+  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>

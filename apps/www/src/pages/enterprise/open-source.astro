@@ -1,0 +1,114 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+---
+
+<Base
+  title="Open Source & Auditable — SAM Enterprise"
+  description="AGPL-3.0 licensed. Full source available for security audits. No black boxes, no vendor trust required."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Open Source & Auditable</span>
+        <h1 class="detail-title animate-on-scroll">
+          Read every line.<br />
+          <span class="gradient-text">No black boxes.</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          SAM is fully open source under AGPL-3.0. Your security team can audit the control plane,
+          the VM agent, the credential handling, and the deployment pipeline. No vendor trust required.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Full Source Visibility</h2>
+          <p>
+            Every component is in the public repository: the Cloudflare Worker API, the React control plane,
+            the Go VM agent, the cloud-init templates, the deployment scripts. There is no closed-source
+            companion, no proprietary backend, no "enterprise edition" with hidden code.
+          </p>
+          <p>
+            Security teams can trace exactly how credentials are encrypted, how tokens are issued,
+            how VMs are provisioned, and how agent sessions are isolated.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>AGPL-3.0 License</h2>
+          <p>
+            The AGPL ensures that modifications to the platform remain open. If you self-host and modify SAM,
+            your changes stay visible. This creates a trust guarantee that no proprietary fork can silently
+            change the security model.
+          </p>
+          <p>
+            For organizations that need commercial licensing terms, reach out. But for most enterprise
+            use cases, the AGPL is a feature, not a limitation.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>No Vendor Trust Required</h2>
+          <p>
+            When you use a proprietary agent platform, you trust their claims about security, isolation, and data handling.
+            When you use SAM, you verify. The encryption implementation, the VM isolation model, the credential storage
+            are all auditable. Every architectural decision is documented in ADRs.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Fork If You Need To</h2>
+          <p>
+            If SAM's roadmap diverges from your needs, you can fork. Your deployment, your modifications,
+            your timeline. You're never held hostage by a vendor's priorities, pricing changes, or product pivots.
+          </p>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/agent-agnostic/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Agent Agnostic
+          </a>
+          <a href="/enterprise/cost-control/" class="detail-nav-link">
+            Cost Transparency
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
+  .detail-hero-content { max-width: 720px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
+  .back-link:hover { color: var(--color-fg-muted); }
+  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
+  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
+  .detail-content { max-width: 720px; }
+  .detail-block { margin-bottom: 48px; }
+  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
+  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
+  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
+  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>
