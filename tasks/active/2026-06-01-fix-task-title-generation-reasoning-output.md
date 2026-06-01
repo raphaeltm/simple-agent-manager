@@ -6,7 +6,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 
 ## Research Findings
 
-- `packages/shared/src/constants/ai-services.ts` sets `DEFAULT_TASK_TITLE_MODEL` to `@cf/google/gemma-4-26b-a4b-it`.
+- `packages/shared/src/constants/ai-services.ts` sets `DEFAULT_TASK_TITLE_MODEL`; this task changes it from `@cf/google/gemma-4-26b-a4b-it` to `@cf/zai-org/glm-4.7-flash`.
 - `apps/api/src/services/task-title.ts` builds title-generation requests and falls back to `truncateTitle()` when `fetchWorkersAIChatCompletion()` returns null.
 - `apps/api/src/services/ai-proxy-shared.ts` sends OpenAI-compatible Workers AI chat completions through the shared Cloudflare AI Gateway and only extracts `choices[0].message.content`.
 - Production AI Gateway logs for `metadata.source = task-title` showed recent calls using `@cf/google/gemma-4-26b-a4b-it` returned HTTP 200, so this is not a model availability, rate-limit, or timeout problem.
@@ -16,12 +16,12 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 
 ## Checklist
 
-- [ ] Change task-title default model to `@cf/zai-org/glm-4.7-flash`.
-- [ ] Add a reusable way for utility Workers AI chat calls to pass reasoning controls.
-- [ ] Send thinking-disabled controls for task-title generation.
-- [ ] Update unit tests for the default model and outgoing gateway payload.
-- [ ] Update current configuration references for `TASK_TITLE_MODEL`.
-- [ ] Run targeted tests and repository quality checks.
+- [x] Change task-title default model to `@cf/zai-org/glm-4.7-flash`.
+- [x] Add a reusable way for utility Workers AI chat calls to pass reasoning controls.
+- [x] Send thinking-disabled controls for task-title generation.
+- [x] Update unit tests for the default model and outgoing gateway payload.
+- [x] Update current configuration references for `TASK_TITLE_MODEL`.
+- [x] Run targeted tests and repository quality checks.
 - [ ] Deploy to staging through GitHub Actions and verify the changed behavior.
 - [ ] Open a PR, wait for green CI, merge, and verify production deployment.
 

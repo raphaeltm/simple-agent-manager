@@ -170,16 +170,20 @@ export interface WorkersAIChatMessage {
   content: string;
 }
 
+export interface WorkersAIChatCompletionOptions {
+  modelId: string;
+  maxTokens: number;
+  timeoutMs: number;
+  messages: WorkersAIChatMessage[];
+  metadata: Record<string, unknown>;
+  responseLabel: string;
+  reasoningEffort?: string | null;
+  chatTemplateKwargs?: Record<string, unknown>;
+}
+
 export async function fetchWorkersAIChatCompletion(
   env: Env,
-  options: {
-    modelId: string;
-    maxTokens: number;
-    timeoutMs: number;
-    messages: WorkersAIChatMessage[];
-    metadata: Record<string, unknown>;
-    responseLabel: string;
-  }
+  options: WorkersAIChatCompletionOptions
 ): Promise<string | null> {
   const response = await fetch(buildWorkersAIGatewayUrl(env), {
     method: 'POST',
@@ -193,6 +197,8 @@ export async function fetchWorkersAIChatCompletion(
       model: options.modelId,
       max_tokens: options.maxTokens,
       messages: options.messages,
+      ...(options.reasoningEffort !== undefined ? { reasoning_effort: options.reasoningEffort } : {}),
+      ...(options.chatTemplateKwargs ? { chat_template_kwargs: options.chatTemplateKwargs } : {}),
     }),
   });
 
