@@ -37,6 +37,7 @@ export {
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
+export type { HetznerProviderRuntimeOptions } from './hetzner';
 export { SCALEWAY_LOCATIONS,ScalewayProvider } from './scaleway';
 
 /**
@@ -53,8 +54,10 @@ export function createProvider(config: ProviderConfig): Provider {
         config.placementFallbackEnabled,
         config.capacityRetryInitialDelayMs,
         config.capacityRetryMaxDelayMs,
-        config.capacityRetryMaxAttempts,
-        config.logger,
+        {
+          capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
+          logger: config.logger,
+        },
       );
     case 'scaleway':
       return new ScalewayProvider(

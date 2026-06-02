@@ -6,16 +6,16 @@ import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
 import { fetchCall, jsonBody, testIpv4 } from './test-helpers';
 
+function mockLogger(): ProviderLogger {
+  return {
+    warn: vi.fn(),
+    info: vi.fn(),
+  };
+}
+
 describe('HetznerProvider', () => {
   let provider: HetznerProvider;
   const originalFetch = globalThis.fetch;
-
-  function mockLogger(): ProviderLogger {
-    return {
-      warn: vi.fn(),
-      info: vi.fn(),
-    };
-  }
 
   beforeEach(() => {
     provider = new HetznerProvider('test-token', 'fsn1');
@@ -311,8 +311,7 @@ describe('HetznerProvider', () => {
         true,
         undefined,
         undefined,
-        undefined,
-        logger,
+        { logger },
       );
       const mockFetch = vi.fn()
         .mockResolvedValueOnce(
@@ -534,13 +533,6 @@ describe('HetznerProvider capacity retry', () => {
   };
 
   const originalFetch = globalThis.fetch;
-
-  function mockLogger(): ProviderLogger {
-    return {
-      warn: vi.fn(),
-      info: vi.fn(),
-    };
-  }
 
   /** Create a mock 422 capacity error response */
   function capacityErrorResponse(msg = 'Server type cx33 unavailable in fsn1') {
@@ -777,7 +769,10 @@ describe('HetznerProvider capacity retry', () => {
   it('should NOT log a warn on the final exhaustion attempt', async () => {
     vi.useFakeTimers();
     const logger = mockLogger();
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 2, logger);
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 2,
+      logger,
+    });
     mockAlwaysCapacityError('no capacity for this server type');
 
     const promise = provider.createVM(vmConfig).catch((e) => e);
@@ -798,7 +793,10 @@ describe('HetznerProvider capacity retry', () => {
   it('should log capacity retry attempts with context', async () => {
     vi.useFakeTimers();
     const logger = mockLogger();
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3, logger);
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 3,
+      logger,
+    });
     const mockFetch = vi.fn()
       .mockResolvedValueOnce(capacityErrorResponse())
       .mockResolvedValueOnce(successResponse());

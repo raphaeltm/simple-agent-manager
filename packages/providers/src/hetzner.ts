@@ -28,6 +28,11 @@ export const DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS = 15_000;
 export const DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS = 120_000;
 export const DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS = 5;
 
+export interface HetznerProviderRuntimeOptions {
+  capacityRetryMaxAttempts?: number;
+  logger?: ProviderLogger;
+}
+
 /**
  * Known Hetzner 422 error message patterns that indicate transient capacity issues
  * rather than permanent configuration errors. Only 422s matching one of these
@@ -98,9 +103,15 @@ export class HetznerProvider implements Provider {
     placementFallbackEnabled?: boolean,
     capacityRetryInitialDelayMs?: number,
     capacityRetryMaxDelayMs?: number,
-    capacityRetryMaxAttempts?: number,
-    logger?: ProviderLogger,
+    capacityRetryMaxAttemptsOrOptions?: number | HetznerProviderRuntimeOptions,
   ) {
+    const runtimeOptions = typeof capacityRetryMaxAttemptsOrOptions === 'object'
+      ? capacityRetryMaxAttemptsOrOptions
+      : undefined;
+    const capacityRetryMaxAttempts = typeof capacityRetryMaxAttemptsOrOptions === 'number'
+      ? capacityRetryMaxAttemptsOrOptions
+      : runtimeOptions?.capacityRetryMaxAttempts;
+
     this.apiToken = apiToken;
     this.datacenter = datacenter || DEFAULT_HETZNER_DATACENTER;
     this.defaultLocation = this.datacenter;
@@ -112,7 +123,7 @@ export class HetznerProvider implements Provider {
       capacityRetryMaxDelayMs ?? DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS;
     this.capacityRetryMaxAttempts =
       capacityRetryMaxAttempts ?? DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS;
-    this.logger = logger ?? noopProviderLogger;
+    this.logger = runtimeOptions?.logger ?? noopProviderLogger;
   }
 
   async createVM(config: VMConfig): Promise<VMInstance> {
