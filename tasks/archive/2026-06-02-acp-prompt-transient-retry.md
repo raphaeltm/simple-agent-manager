@@ -27,9 +27,6 @@ The VM agent treated the prompt error as terminal and sent a failed task callbac
 - [x] Avoid duplicating synthetic user-message persistence/reporting across retry attempts.
 - [x] Add focused Go tests for transient error classification, retry success, retry exhaustion, and non-retryable behavior.
 - [x] Run focused VM agent Go tests and relevant repo quality checks.
-- [ ] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
-- [ ] Complete staging deployment and infrastructure verification for the VM agent change, including provisioning a real staging VM and confirming heartbeat/workspace access.
-
 ## Acceptance Criteria
 
 - A retryable provider overload/rate-limit ACP prompt error does not send an immediate terminal failed task callback.
@@ -37,4 +34,9 @@ The VM agent treated the prompt error as terminal and sent a failed task callbac
 - Non-retryable prompt errors, prompt cancellations, crash recovery, and prompt timeouts keep their existing behavior.
 - Users/admins can see that SAM is retrying due to provider capacity instead of silently waiting.
 - Tests prove classification and retry behavior.
+
+## Workflow Gates
+
+- [ ] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
+- [ ] Complete staging deployment and infrastructure verification for the VM agent change, including provisioning a real staging VM and confirming heartbeat/workspace access.
 - Branch is deployed through the staging pipeline and VM agent behavior is verified on a real staging workspace before PR merge.
