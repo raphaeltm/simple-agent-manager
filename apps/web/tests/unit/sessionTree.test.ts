@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionResponse } from '../../src/lib/api';
-import { isRetryOrFork } from '../../src/pages/project-chat/lineageUtils';
+import { getSessionSourceContext, isRetryOrFork } from '../../src/pages/project-chat/lineageUtils';
 import {
   buildSessionTree,
   type SessionTreeNode,
@@ -198,6 +198,34 @@ describe('buildSessionTree — retry/fork flattening', () => {
     const r2 = findNode(roots, 'sR2')!;
     expect(r1.lineageText).toBe('↩ attempt 2');
     expect(r2.lineageText).toBe('↩ attempt 3');
+  });
+
+  it('builds source context for user-triggered derived sessions', () => {
+    const { tasks, sessions } = makeRetryFixture([
+      { taskId: 'tF', sessionId: 'sF', startedAt: 2000 },
+    ]);
+
+    const context = getSessionSourceContext('tF', tasks, sessions);
+
+    expect(context).toEqual({
+      lineageText: '⑂ from Original',
+      parentTaskId: 'tP',
+      parentSessionId: 'sP',
+      parentTitle: 'Original',
+    });
+  });
+
+  it('does not build source context for agent-dispatched subtasks', () => {
+    const tasks = new Map<string, TaskInfo>([
+      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
+      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', triggeredBy: 'mcp', dispatchDepth: 1 })],
+    ]);
+    const sessions = [
+      makeSession({ id: 'sP', taskId: 'tP', topic: 'Parent' }),
+      makeSession({ id: 'sC', taskId: 'tC', topic: 'Child' }),
+    ];
+
+    expect(getSessionSourceContext('tC', tasks, sessions)).toBeUndefined();
   });
 });
 

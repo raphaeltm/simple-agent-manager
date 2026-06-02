@@ -10,6 +10,7 @@ import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, getPortAccessUrl, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
+import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
@@ -224,6 +225,7 @@ export function SessionHeader({
   onRetry,
   onFork,
   lineageText,
+  sourceContext,
   hasContentBelow = false,
 }: {
   projectId: string;
@@ -242,6 +244,8 @@ export function SessionHeader({
   onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
   lineageText?: string;
+  /** Parent/source details for forked or retried sessions. */
+  sourceContext?: SessionSourceContext;
   /** When true, suppress bottom rounding and glow (content follows below). */
   hasContentBelow?: boolean;
 }) {
@@ -583,6 +587,38 @@ export function SessionHeader({
                     All Runs
                   </Link>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {sourceContext && (
+            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
+              <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
+                <GitFork size={10} />
+                Source
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-fg-muted min-w-0">
+                {sourceContext.parentSessionId ? (
+                  <Link
+                    to={`/projects/${projectId}/chat/${sourceContext.parentSessionId}`}
+                    className="min-w-0 max-w-full no-underline hover:underline"
+                    style={{ color: 'var(--sam-color-accent-primary)' }}
+                    title={sourceContext.parentTitle}
+                  >
+                    <span className="block truncate max-w-[min(30rem,100%)]">
+                      {sourceContext.parentTitle}
+                    </span>
+                  </Link>
+                ) : (
+                  <span className="min-w-0 max-w-full truncate text-fg-primary" title={sourceContext.parentTitle}>
+                    {sourceContext.parentTitle}
+                  </span>
+                )}
+                <span className="text-[10px] text-fg-muted">{sourceContext.lineageText}</span>
+                <CopyableId label="Parent task" value={sourceContext.parentTaskId} icon={<Tag size={9} />} />
+                {sourceContext.parentSessionId && (
+                  <CopyableId label="Parent session" value={sourceContext.parentSessionId} icon={<Hash size={9} />} />
+                )}
               </div>
             </div>
           )}

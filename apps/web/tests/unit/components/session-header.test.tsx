@@ -408,6 +408,34 @@ describe('SessionHeader', () => {
     expect(screen.getByTitle(/ACP: acp-session-42/)).toBeInTheDocument();
   });
 
+  it('shows source context for forked or retried sessions when expanded', () => {
+    renderHeader({
+      sourceContext: {
+        lineageText: '⑂ from Parent session',
+        parentTaskId: 'parent-task-123',
+        parentSessionId: 'parent-session-456',
+        parentTitle: 'Parent session with useful context',
+      },
+    });
+
+    expect(screen.queryByText('Source')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Show session details'));
+
+    expect(screen.getByText('Source')).toBeInTheDocument();
+    expect(screen.getByText('Parent session with useful context')).toBeInTheDocument();
+    expect(screen.getByText('⑂ from Parent session')).toBeInTheDocument();
+    expect(screen.getByTitle(/Parent task: parent-task-123/)).toBeInTheDocument();
+    expect(screen.getByTitle(/Parent session: parent-session-456/)).toBeInTheDocument();
+  });
+
+  it('does not show source context for ordinary sessions', () => {
+    renderHeader();
+    fireEvent.click(screen.getByLabelText('Show session details'));
+    expect(screen.queryByText('Source')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/Parent task:/)).not.toBeInTheDocument();
+  });
+
   it('copies value to clipboard and shows checkmark when CopyableId is clicked', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

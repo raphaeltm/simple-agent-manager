@@ -117,15 +117,38 @@ function makeSession(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function makeTask(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'task-1',
+    projectId: 'proj-agent-1',
+    title: 'Implement feature X',
+    description: 'Implement feature X',
+    status: 'in_progress',
+    priority: 0,
+    parentTaskId: null,
+    blocked: false,
+    triggeredBy: 'user',
+    dispatchDepth: 0,
+    taskMode: 'task',
+    createdAt: new Date(NOW - 600000).toISOString(),
+    updatedAt: new Date(NOW - 30000).toISOString(),
+    ...overrides,
+  };
+}
+
 async function setupApiMocks(
   page: Page,
   opts: {
     ports?: Array<Record<string, unknown>>;
     session?: Record<string, unknown>;
+    sessions?: Array<Record<string, unknown>>;
+    tasks?: Array<Record<string, unknown>>;
     workspace?: Record<string, unknown>;
   } = {}
 ) {
   const session = opts.session ?? makeSession();
+  const sessions = opts.sessions ?? [session];
+  const tasks = opts.tasks ?? [makeTask()];
   const workspace = makeWorkspace(opts.workspace);
   const ports = opts.ports ?? [];
 
@@ -170,14 +193,14 @@ async function setupApiMocks(
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
       if (subPath === '/sessions') {
-        return respond(200, { sessions: [session], total: 1 });
+        return respond(200, { sessions, total: sessions.length });
       }
       // Session detail
       if (subPath.match(/\/sessions\/[^/]+$/) && !subPath.includes('/messages')) {
         return respond(200, { session, messages: [], hasMore: false });
       }
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) return respond(200, { messages: [], hasMore: false });
-      if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
+      if (subPath === '/tasks') return respond(200, { tasks, nextCursor: null });
       if (subPath.match(/\/tasks\//)) return respond(200, { id: 'task-1', status: 'in_progress' });
       if (subPath === '/agents') return respond(200, { agents: [] });
       if (subPath === '/agent-profiles') return respond(200, { items: [] });
@@ -312,6 +335,48 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await screenshot(page, 'session-header-long-profile-hint-mobile');
     await assertNoOverflow(page);
   });
+
+  test('fork source context wraps without overflow', async ({ page }) => {
+    const parentSession = makeSession({
+      id: 'parent-session-with-a-long-id-1234567890',
+      taskId: 'parent-task-with-a-long-id-1234567890',
+      topic:
+        'Parent session title with a very long description, unicode Ω, and escaped-looking text <script>alert(1)</script> that must stay readable',
+      startedAt: NOW - 900000,
+    });
+    const childSession = makeSession({
+      id: 'chat-session-1',
+      taskId: 'task-1',
+      topic: 'Forked follow-up session',
+    });
+
+    await setupApiMocks(page, {
+      session: childSession,
+      sessions: [parentSession, childSession],
+      tasks: [
+        makeTask({
+          id: 'parent-task-with-a-long-id-1234567890',
+          title: 'Parent task title fallback',
+          parentTaskId: null,
+        }),
+        makeTask({
+          id: 'task-1',
+          title: 'Forked follow-up session',
+          parentTaskId: 'parent-task-with-a-long-id-1234567890',
+        }),
+      ],
+    });
+
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+    await screenshot(page, 'session-header-source-context-mobile');
+
+    await expect(page.getByText('Source')).toBeVisible();
+    await expect(page.getByRole('link', { name: /Parent session title with a very long description/ })).toBeVisible();
+    await expect(page.getByTitle(/Parent task:/)).toBeVisible();
+    await expect(page.getByTitle(/Parent session:/)).toBeVisible();
+    await assertNoOverflow(page);
+  });
 });
 
 test.describe('SessionHeader Agent Info — Desktop', () => {
@@ -324,6 +389,37 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
     await screenshot(page, 'session-header-agent-info-desktop');
 
     await expect(page.getByText('Claude Code')).toBeVisible();
+    await assertNoOverflow(page);
+  });
+
+  test('fork source context displays on desktop', async ({ page }) => {
+    const parentSession = makeSession({
+      id: 'parent-session-1',
+      taskId: 'parent-task-1',
+      topic: 'Parent implementation session',
+      startedAt: NOW - 900000,
+    });
+    const childSession = makeSession({
+      id: 'chat-session-1',
+      taskId: 'task-1',
+      topic: 'Forked implementation session',
+    });
+
+    await setupApiMocks(page, {
+      session: childSession,
+      sessions: [parentSession, childSession],
+      tasks: [
+        makeTask({ id: 'parent-task-1', title: 'Parent implementation task' }),
+        makeTask({ id: 'task-1', title: 'Forked implementation task', parentTaskId: 'parent-task-1' }),
+      ],
+    });
+
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+    await screenshot(page, 'session-header-source-context-desktop');
+
+    await expect(page.getByText('Source')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Parent implementation session' })).toBeVisible();
     await assertNoOverflow(page);
   });
 });

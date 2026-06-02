@@ -16,20 +16,20 @@ The previous session prototyped a cleaner way to show where a forked or retried 
 
 ## Implementation Checklist
 
-- [ ] Add a typed source context object for selected fork/retry sessions.
-- [ ] Pass source context from the project chat page into `ProjectMessageView` and `SessionHeader`.
-- [ ] Render source parent title, task ID, and session ID in the expanded header panel near action controls.
-- [ ] Keep the closed header compact, with only the existing lineage subtitle.
-- [ ] Add/update unit tests for source context rendering and absent-state behavior.
-- [ ] Run local typecheck/lint/test validation for touched web files.
-- [ ] Run Playwright visual audit on mobile and desktop.
+- [x] Add a typed source context object for selected fork/retry sessions.
+- [x] Pass source context from the project chat page into `ProjectMessageView` and `SessionHeader`.
+- [x] Render source parent title, task ID, and session ID in the expanded header panel near action controls.
+- [x] Keep the closed header compact, with only the existing lineage subtitle.
+- [x] Add/update unit tests for source context rendering and absent-state behavior.
+- [x] Run local typecheck/lint/test validation for touched web files.
+- [x] Run Playwright visual audit on mobile and desktop.
 
 ## Acceptance Criteria
 
-- [ ] Forked/retried selected sessions show a Source area in the expanded session header.
-- [ ] The Source area shows a human-readable parent title when available.
-- [ ] The Source area exposes copyable parent task and parent session IDs.
-- [ ] Non-fork/non-retry sessions do not show the Source area.
-- [ ] The collapsed header remains compact and does not add verbose parent metadata.
-- [ ] The layout works without horizontal overflow on mobile and desktop.
-- [ ] Existing retry/fork/new chat flows keep working.
+- [x] Forked/retried selected sessions show a Source area in the expanded session header.
+- [x] The Source area shows a human-readable parent title when available.
+- [x] The Source area exposes copyable parent task and parent session IDs.
+- [x] Non-fork/non-retry sessions do not show the Source area.
+- [x] The collapsed header remains compact and does not add verbose parent metadata.
+- [x] The layout works without horizontal overflow on mobile and desktop.
+- [x] Existing retry/fork/new chat flows keep working.
