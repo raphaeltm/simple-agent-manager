@@ -2411,7 +2411,7 @@ func TestEnsureDevcontainerReadyNoConfigUsesLightweightDefault(t *testing.T) {
 func TestEnsureDevcontainerReadyNoConfigLightweightStartupHonorsBuildTimeout(t *testing.T) {
 	mockBinDir := t.TempDir()
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
-	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {
 		t.Fatalf("failed to write mock devcontainer command: %v", err)
 	}
 	origPath := os.Getenv("PATH")
