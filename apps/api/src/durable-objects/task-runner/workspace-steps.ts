@@ -229,12 +229,7 @@ async function ensureBranchExistsOnRemote(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
 ): Promise<void> {
-  // Look up the project's default branch to compare
-  const projectRow = await rc.env.DATABASE.prepare(
-    `SELECT default_branch FROM projects WHERE id = ?`
-  ).bind(state.projectId).first<{ default_branch: string }>();
-
-  const defaultBranch = projectRow?.default_branch || 'main';
+  const defaultBranch = state.config.defaultBranch || 'main';
 
   // If cloning the default branch, no need to check — it always exists
   if (state.config.branch === defaultBranch) {

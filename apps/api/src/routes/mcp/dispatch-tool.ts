@@ -573,6 +573,7 @@ export async function handleDispatchTask(
       vmSize: resolvedVmSize,
       vmLocation: resolvedVmLocation,
       branch: checkoutBranch,
+      defaultBranch: project.defaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,

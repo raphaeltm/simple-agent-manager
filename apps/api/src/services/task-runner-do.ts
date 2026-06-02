@@ -43,6 +43,7 @@ export async function startTaskRunnerDO(
     vmSize: VMSize;
     vmLocation: VMLocation;
     branch: string;
+    defaultBranch?: string;
     preferredNodeId?: string | null;
     userName?: string | null;
     userEmail?: string | null;
@@ -103,6 +104,7 @@ export async function startTaskRunnerDO(
       vmSize: input.vmSize,
       vmLocation: input.vmLocation,
       branch: input.branch,
+      defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,
       userName: input.userName ?? null,
       userEmail: input.userEmail ?? null,

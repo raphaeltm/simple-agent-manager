@@ -627,17 +627,24 @@ export async function ensureBranchExists(
     },
   );
 
-  if (createResp.ok || createResp.status === 422) {
-    // 422 = branch was created between our check and create (race condition) — that's fine
+  if (createResp.ok) {
     log.info('github.ensure_branch.created', {
       owner, repo, branchName, fromBranch: defaultBranch, sha,
     });
     return true;
   }
 
+  if (createResp.status === 422) {
+    // Race condition — another caller created the branch between our check and create
+    log.info('github.ensure_branch.race_already_exists', { owner, repo, branchName });
+    return true;
+  }
+
+  const errorText = await createResp.text().catch(() => '');
   log.warn('github.ensure_branch.create_failed', {
     owner, repo, branchName,
     status: createResp.status,
+    message: errorText.slice(0, 200),
   });
   return false;
 }

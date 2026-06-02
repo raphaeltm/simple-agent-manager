@@ -231,6 +231,7 @@ export async function retrySubtask(
       vmSize: resolvedVmSize,
       vmLocation: resolvedVmLocation,
       branch: original.projectDefaultBranch,
+      defaultBranch: original.projectDefaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,

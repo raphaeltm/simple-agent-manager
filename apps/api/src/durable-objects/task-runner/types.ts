@@ -46,6 +46,8 @@ export interface TaskRunConfig {
   repository: string;
   installationId: string;
   outputBranch: string | null;
+  /** Project's default branch (e.g. 'main'). Used to skip branch-exists check when cloning the default branch. */
+  defaultBranch: string;
   projectDefaultVmSize: VMSize | null;
   /** Chat session ID created at task submit time (TDF-6: single session per task) */
   chatSessionId: string | null;

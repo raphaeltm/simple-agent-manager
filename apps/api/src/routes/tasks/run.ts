@@ -247,6 +247,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       vmSize,
       vmLocation,
       branch,
+      defaultBranch: project.defaultBranch,
       preferredNodeId: body.nodeId,
       userName: auth.user.name,
       userEmail: auth.user.email,

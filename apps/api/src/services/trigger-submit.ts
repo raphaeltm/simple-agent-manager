@@ -266,6 +266,7 @@ export async function submitTriggeredTask(
       vmSize,
       vmLocation,
       branch,
+      defaultBranch: project.defaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
