@@ -1,4 +1,7 @@
-# CLI OpenAPI Contract
+---
+title: CLI OpenAPI Contract
+description: The CLI-facing REST API contract and how to regenerate it.
+---
 
 The CLI-facing REST API contract is defined in `apps/api/src/openapi/sam-cli.ts` and checked in as `apps/api/openapi/sam-cli.openapi.json`.
 
