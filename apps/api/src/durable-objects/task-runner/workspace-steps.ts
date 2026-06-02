@@ -225,7 +225,7 @@ async function setOutputBranch(
  * The clone will fail with a clear error from the VM agent if the branch
  * truly doesn't exist.
  */
-async function ensureBranchExistsOnRemote(
+export async function ensureBranchExistsOnRemote(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
 ): Promise<void> {

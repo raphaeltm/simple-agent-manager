@@ -56,6 +56,7 @@ function buildStartInput(taskId: string): StartTaskInput {
       vmSize: 'medium',
       vmLocation: 'nbg1',
       branch: 'main',
+      defaultBranch: 'main',
       preferredNodeId: null,
       userName: 'Test User',
       userEmail: 'test@test.com',
