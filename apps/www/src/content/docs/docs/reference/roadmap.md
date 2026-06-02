@@ -34,21 +34,30 @@ Browser-based terminal access to running workspaces:
 
 Planned follow-up work:
 
-- Workspace logs and debugging.
 - Better error UX for build failures.
 
-## Planned: Enhanced UX
+## Complete: Enhanced UX
 
 Reliability and product experience improvements:
 
 - Deeper file and terminal workflow polish.
-- Retry support for failed workspace builds.
 - Custom devcontainer support.
+- Workspace logs and debugging.
+- File browsing, upload, and download.
+- Conversation forking.
+- Voice input and text-to-speech playback.
+- In-app notifications.
+- Usage visibility for compute and SAM-managed AI.
+
+## Planned: Additional Workspace Capabilities
+
+Future workspace expansion:
+
+- Retry support for failed workspace builds.
 - Multiple repository sources.
 - Workspace templates.
 - SSH access to workspaces.
 - Persistent storage.
-- Cost estimation display.
 - Configurable subdomains.
 - VM-side TLS through Caddy for direct workspace access.
 
