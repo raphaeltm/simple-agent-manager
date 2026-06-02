@@ -32,6 +32,8 @@ const (
 	volumePrefix = "sam-ws-"
 
 	buildErrorLogFilename = ".devcontainer-build-error.log"
+	devcontainerDirname   = ".devcontainer"
+	devcontainerFilename  = "devcontainer.json"
 
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
@@ -1174,7 +1176,7 @@ func devcontainerUpArgs(cfg *config.Config, overrideConfigPath, devcontainerConf
 }
 
 func namedDevcontainerConfigPath(workspaceDir, devcontainerConfigName string) string {
-	return filepath.Join(workspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
+	return filepath.Join(workspaceDir, devcontainerDirname, devcontainerConfigName, devcontainerFilename)
 }
 
 type devcontainerReadConfigurationResult struct {
@@ -1349,7 +1351,7 @@ func runReadConfiguration(ctx context.Context, workspaceDir, devcontainerConfigN
 		"--include-merged-configuration",
 	}
 	if devcontainerConfigName != "" {
-		configPath := filepath.Join(workspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
+		configPath := namedDevcontainerConfigPath(workspaceDir, devcontainerConfigName)
 		args = append(args, "--config", configPath)
 	}
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
@@ -1895,7 +1897,7 @@ func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credH
 // When present, we skip --additional-features to avoid conflicts with the repo's own setup.
 func hasDevcontainerConfig(workspaceDir string) bool {
 	candidates := []string{
-		filepath.Join(workspaceDir, ".devcontainer", "devcontainer.json"),
+		filepath.Join(workspaceDir, devcontainerDirname, devcontainerFilename),
 		filepath.Join(workspaceDir, ".devcontainer.json"),
 	}
 	for _, path := range candidates {
@@ -1905,12 +1907,12 @@ func hasDevcontainerConfig(workspaceDir string) bool {
 		}
 	}
 	// Check for named subdirectory configs (.devcontainer/*/devcontainer.json)
-	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	devcontainerDir := filepath.Join(workspaceDir, devcontainerDirname)
 	entries, err := os.ReadDir(devcontainerDir)
 	if err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
-				subConfig := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
+				subConfig := filepath.Join(devcontainerDir, entry.Name(), devcontainerFilename)
 				if _, statErr := os.Stat(subConfig); statErr == nil {
 					slog.Info("Found named devcontainer config", "path", subConfig)
 					return true
