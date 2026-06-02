@@ -47,7 +47,8 @@ const MOCK_PROJECT = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 
-const MOCK_WORKSPACE = {
+function makeWorkspace(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
   id: 'ws-1',
   nodeId: 'node-1',
   projectId: 'proj-agent-1',
@@ -60,11 +61,14 @@ const MOCK_WORKSPACE = {
   vmLocation: 'fsn1',
   workspaceProfile: 'full',
   vmIp: '10.0.0.1',
+  url: 'https://ws-ws-1.workspaces.example.com',
   lastActivityAt: new Date(NOW - 30000).toISOString(),
   errorMessage: null,
   createdAt: new Date(NOW - 600000).toISOString(),
   updatedAt: new Date(NOW - 30000).toISOString(),
-};
+    ...overrides,
+  };
+}
 
 const MOCK_NODE = {
   id: 'node-1',
@@ -115,17 +119,26 @@ function makeSession(overrides: Partial<Record<string, unknown>> = {}) {
 
 async function setupApiMocks(
   page: Page,
-  opts: { session?: Record<string, unknown> } = {}
+  opts: {
+    ports?: Array<Record<string, unknown>>;
+    session?: Record<string, unknown>;
+    workspace?: Record<string, unknown>;
+  } = {}
 ) {
   const session = opts.session ?? makeSession();
+  const workspace = makeWorkspace(opts.workspace);
+  const ports = opts.ports ?? [];
 
+  await page.route('**/workspaces/ws-1/ports**', (route: Route) => respondJson(route, { ports }));
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const respond = (status: number, body: unknown) => respondJson(route, body, status);
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/terminal/token') {
+      return respond(200, { token: 'terminal-token', expiresAt: new Date(NOW + 600000).toISOString() });
+    }
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
@@ -143,8 +156,13 @@ async function setupApiMocks(
     if (path === '/api/agents') return respond(200, { agents: [] });
 
     // Workspace and node routes
-    if (path === '/api/workspaces/ws-1') return respond(200, MOCK_WORKSPACE);
-    if (path.startsWith('/api/workspaces/ws-1/ports')) return respond(200, { ports: [] });
+    if (path === '/api/workspaces/ws-1') return respond(200, workspace);
+    if (path === '/api/workspaces/ws-1/ports-public') {
+      const body = route.request().postDataJSON() as { enabled?: boolean };
+      workspace.portsPublicEnabled = Boolean(body.enabled);
+      return respond(200, workspace);
+    }
+    if (path.startsWith('/api/workspaces/ws-1/ports')) return respond(200, { ports });
     if (path === '/api/nodes/node-1') return respond(200, MOCK_NODE);
 
     // Project routes
@@ -172,6 +190,10 @@ async function setupApiMocks(
     if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     return respond(200, {});
   });
+}
+
+function respondJson(route: Route, body: unknown, status = 200) {
+  return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
 async function screenshot(page: Page, name: string) {
@@ -204,8 +226,7 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await screenshot(page, 'session-header-agent-claude-code-mobile');
 
     // Verify agent info is visible in the expanded details panel
-    const detailsPanel = page.locator('.bg-inset');
-    await expect(detailsPanel.getByText('Claude Code')).toBeVisible();
+    await expect(page.getByText('Claude Code')).toBeVisible();
     await assertNoOverflow(page);
   });
 
@@ -231,10 +252,9 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await expandHeader(page);
     await screenshot(page, 'session-header-agent-codex-conversation-mobile');
 
-    const detailsPanel = page.locator('.bg-inset');
-    await expect(detailsPanel.getByText('OpenAI Codex')).toBeVisible();
-    await expect(detailsPanel.getByText('Conversation')).toBeVisible();
-    await expect(detailsPanel.getByText('codex-fast')).toBeVisible();
+    await expect(page.getByText('OpenAI Codex')).toBeVisible();
+    await expect(page.getByText('Conversation')).toBeVisible();
+    await expect(page.getByText('codex-fast')).toBeVisible();
     await assertNoOverflow(page);
   });
 
@@ -303,8 +323,51 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
     await expandHeader(page);
     await screenshot(page, 'session-header-agent-info-desktop');
 
-    const detailsPanel = page.locator('.bg-inset');
-    await expect(detailsPanel.getByText('Claude Code')).toBeVisible();
+    await expect(page.getByText('Claude Code')).toBeVisible();
+    await assertNoOverflow(page);
+  });
+});
+
+test.describe('SessionHeader Public Ports', () => {
+  const ports = [
+    {
+      port: 5173,
+      address: '127.0.0.1',
+      label: 'Vite',
+      url: 'https://ws-ws-1--5173.workspaces.example.com',
+      detectedAt: new Date(NOW - 1000).toISOString(),
+    },
+    {
+      port: 3000,
+      address: '127.0.0.1',
+      label: 'Next.js preview server with a long descriptive label',
+      url: 'https://ws-ws-1--3000.workspaces.example.com',
+      detectedAt: new Date(NOW - 2000).toISOString(),
+    },
+  ];
+
+  test('mobile switch toggles without overflow', async ({ page }) => {
+    await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: false } });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+
+    const toggle = page.getByRole('switch', { name: 'Enable public forwarded ports' });
+    await expect(toggle).toBeVisible();
+    await expect(page.getByText('Forwarded port URLs require a SAM access token.')).toBeVisible();
+    await toggle.click();
+    await expect(page.getByRole('switch', { name: 'Disable public forwarded ports' })).toBeVisible();
+    await expect(page.getByText('Forwarded port URLs are open to anyone with the link.')).toBeVisible();
+
+    await screenshot(page, 'session-header-public-ports-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('desktop switch shows enabled state without overflow', async ({ page }) => {
+    await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: true } });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+
+    await expect(page.getByRole('switch', { name: 'Disable public forwarded ports' })).toBeVisible();
+    await expect(page.getByText('Forwarded port URLs are open to anyone with the link.')).toBeVisible();
+    await screenshot(page, 'session-header-public-ports-desktop');
     await assertNoOverflow(page);
   });
 });
