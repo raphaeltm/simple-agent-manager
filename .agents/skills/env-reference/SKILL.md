@@ -22,7 +22,7 @@ The reference covers:
   - Git operations (timeouts, worktree limits)
   - File operations (timeouts, max entries)
   - Error reporting (flush interval, batch size)
-  - ACP settings (buffer sizes, ping/pong, prompt timeout, idle suspend)
+  - ACP settings (buffer sizes, ping/pong, prompt timeout, prompt retries, idle suspend)
   - Events (max retained)
   - System info (Docker timeout, cache TTL)
 

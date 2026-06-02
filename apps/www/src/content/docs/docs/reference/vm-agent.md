@@ -102,6 +102,9 @@ Environment variables set by the cloud-init template:
 | `CALLBACK_TOKEN` | — | JWT for authenticating callbacks |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | Output format: `json` or `text` |
+| `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
 
 ### Log Retrieval Settings

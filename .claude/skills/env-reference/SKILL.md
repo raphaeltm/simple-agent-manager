@@ -181,6 +181,9 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 - `ACP_PROMPT_TIMEOUT` — Max ACP prompt runtime for workspace sessions; 0 = no timeout (default: 0)
 - `ACP_TASK_PROMPT_TIMEOUT` — Max ACP prompt runtime for task-driven sessions (default: 6h)
 - `ACP_PROMPT_CANCEL_GRACE_PERIOD` — Grace wait after cancel before force-stop (default: 5s)
+- `ACP_PROMPT_RETRY_MAX_RETRIES` — Max transient provider prompt retries after the initial attempt (default: 2)
+- `ACP_PROMPT_RETRY_INITIAL_BACKOFF` — Initial backoff before retrying transient provider prompt errors (default: 15s)
+- `ACP_PROMPT_RETRY_MAX_BACKOFF` — Max exponential backoff for transient provider prompt retries (default: 2m)
 - `ACP_IDLE_SUSPEND_TIMEOUT` — Idle timeout before auto-suspending agent session (default: 30m)
 - `ACP_NOTIF_SERIALIZE_TIMEOUT` — Max wait for previous session/update processing before delivering next (default: 5s)
 
