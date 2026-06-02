@@ -1,48 +1,25 @@
-import type {
-  AgentType,
-  Repository,
-  SaveAgentCredentialRequest,
-} from '@simple-agent-manager/shared';
+import type { Repository } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input } from '@simple-agent-manager/ui';
 import { ArrowRight, Check, ChevronDown, Loader2 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import {
-  createCredential,
   getGitHubInstallUrl,
   listGitHubInstallations,
   listRepositories,
-  saveAgentCredential,
-  validateAgentCredential,
-  validateCredential,
 } from '../../../lib/api';
 import { createProject } from '../../../lib/api/projects';
 import type { GeneratedStep, StepId } from './path-generator';
+import { ProjectSelector } from './ProjectSelector';
+import { executeStep, INITIAL_FORM, type StepFormState } from './step-actions';
 
 interface StepExecutionProps {
   steps: GeneratedStep[];
   tags: string[];
   onComplete: () => void;
 }
-
-/** Per-step inline form state */
-interface StepFormState {
-  apiKey: string;
-  selectedAgent: AgentType | null;
-  hetznerToken: string;
-  selectedRepoUrl: string;
-  selectedRepoName: string;
-}
-
-const INITIAL_FORM: StepFormState = {
-  apiKey: '',
-  selectedAgent: null,
-  hetznerToken: '',
-  selectedRepoUrl: '',
-  selectedRepoName: '',
-};
 
 export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
   const navigate = useNavigate();
@@ -58,10 +35,11 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
   const step = steps[currentStepIndex];
   const isLast = currentStepIndex >= steps.length - 1;
   const progress = steps.length > 0 ? (completedSteps.length / steps.length) * 100 : 0;
-  const stepId = step?.id ?? ('ai-apikey' as StepId);
 
   const markStepDone = useCallback(() => {
-    setCompletedSteps((prev) => [...prev, stepId]);
+    const id = step?.id;
+    if (!id) return;
+    setCompletedSteps((prev) => [...prev, id]);
     setError(null);
     setExpandedDetails(false);
     if (isLast) {
@@ -69,21 +47,22 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
     } else {
       setCurrentStepIndex((i) => i + 1);
     }
-  }, [stepId, isLast, onComplete]);
+  }, [step?.id, isLast, onComplete]);
 
   const handleAction = useCallback(async () => {
+    if (!step) return;
     setLoading(true);
     setError(null);
 
     try {
-      await executeStep(stepId, form);
+      await executeStep(step.id, form);
       markStepDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
-  }, [stepId, form, markStepDone]);
+  }, [step, form, markStepDone]);
 
   const handleSkip = useCallback(() => {
     markStepDone();
@@ -109,13 +88,17 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
     setLoading(true);
     setError(null);
     try {
-      // Find the selected repo to get its installationId and githubRepoId
       const selectedRepo = repos.find((r) => r.fullName === form.selectedRepoName);
+      if (!selectedRepo) {
+        setError('Selected repository not found. Please refresh and try again.');
+        setLoading(false);
+        return;
+      }
       const project = await createProject({
         name: form.selectedRepoName.split('/').pop() || form.selectedRepoName,
         repository: form.selectedRepoUrl,
-        installationId: selectedRepo?.installationId,
-        githubRepoId: selectedRepo?.id,
+        installationId: selectedRepo.installationId,
+        githubRepoId: selectedRepo.id,
       });
       markStepDone();
       setTimeout(() => navigate(`/projects/${project.id}`), 500);
@@ -137,12 +120,13 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
       const result = await listRepositories(installations[0]!.id);
       setRepos(result.repositories);
     } catch {
-      // Non-critical — user may not have GitHub set up yet
       setRepos([]);
     } finally {
       setReposLoading(false);
     }
   }, []);
+
+  if (!step) return null;
 
   return (
     <div className="max-w-md mx-auto">
@@ -162,7 +146,6 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
             style={{ width: `${progress}%` }}
           />
         </div>
-        {/* Step pills */}
         <div className="flex gap-1 mt-2">
           {steps.map((s, i) => (
             <div
@@ -180,70 +163,65 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
       </div>
 
       {/* Current step card */}
-      {step && (
-        <Card className="p-6 mb-4">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
-              {currentStepIndex + 1}
-            </div>
-            <h3 className="text-lg font-semibold text-fg-primary">{step.title}</h3>
+      <Card className="p-6 mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
+            {currentStepIndex + 1}
           </div>
-          <p className="text-sm text-fg-muted mb-4 ml-9">{step.description}</p>
+          <h3 className="text-lg font-semibold text-fg-primary">{step.title}</h3>
+        </div>
+        <p className="text-sm text-fg-muted mb-4 ml-9">{step.description}</p>
 
-          {/* Error */}
-          {error && (
-            <div className="ml-9 mb-4">
-              <Alert variant="error" onDismiss={() => setError(null)}>
-                {error}
-              </Alert>
-            </div>
-          )}
+        {error && (
+          <div className="ml-9 mb-4">
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
+          </div>
+        )}
 
-          {/* Step-specific form content */}
-          <div className="ml-9">
-            <StepForm
-              stepId={step.id}
-              tags={tags}
-              form={form}
-              setForm={setForm}
-              loading={loading}
-              repos={repos}
-              reposLoading={reposLoading}
-              onLoadRepos={loadRepos}
-              onAction={handleAction}
-              onGitHubInstall={handleGitHubInstall}
-              onCreateProject={handleCreateProject}
-              onSkip={step.isOptional ? handleSkip : undefined}
-              actionLabel={step.actionLabel}
+        <div className="ml-9">
+          <StepForm
+            stepId={step.id}
+            tags={tags}
+            form={form}
+            setForm={setForm}
+            loading={loading}
+            repos={repos}
+            reposLoading={reposLoading}
+            onLoadRepos={loadRepos}
+            onAction={handleAction}
+            onGitHubInstall={handleGitHubInstall}
+            onCreateProject={handleCreateProject}
+            onSkip={step.isOptional ? handleSkip : undefined}
+            actionLabel={step.actionLabel}
+          />
+        </div>
+
+        <div className="ml-9 mt-4">
+          <button
+            type="button"
+            onClick={() => setExpandedDetails(!expandedDetails)}
+            className="flex items-center gap-1 text-xs text-fg-muted/50 hover:text-fg-muted transition-colors bg-transparent border-none cursor-pointer p-0"
+          >
+            <ChevronDown
+              size={12}
+              className={`transition-transform ${expandedDetails ? 'rotate-180' : ''}`}
             />
-          </div>
-
-          {/* Expandable details */}
-          <div className="ml-9 mt-4">
-            <button
-              type="button"
-              onClick={() => setExpandedDetails(!expandedDetails)}
-              className="flex items-center gap-1 text-xs text-fg-muted/50 hover:text-fg-muted transition-colors bg-transparent border-none cursor-pointer p-0"
-            >
-              <ChevronDown
-                size={12}
-                className={`transition-transform ${expandedDetails ? 'rotate-180' : ''}`}
-              />
-              {expandedDetails ? 'Hide' : 'Show'} details
-            </button>
-            {expandedDetails && (
-              <ul className="mt-2 flex flex-col gap-1.5">
-                {step.details.map((detail, i) => (
-                  <li key={i} className="text-xs text-fg-muted flex items-start gap-2">
-                    <Check size={10} className="text-accent/50 mt-0.5 shrink-0" />
-                    {detail}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </Card>
-      )}
+            {expandedDetails ? 'Hide' : 'Show'} details
+          </button>
+          {expandedDetails && (
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {step.details.map((detail, i) => (
+                <li key={i} className="text-xs text-fg-muted flex items-start gap-2">
+                  <Check size={10} className="text-accent/50 mt-0.5 shrink-0" />
+                  {detail}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Card>
 
       {/* Upcoming steps */}
       {!isLast && (
@@ -302,6 +280,21 @@ function StepForm({
   onSkip,
   actionLabel,
 }: StepFormProps) {
+  // Auto-select default agent for API key step
+  const didAutoSelect = useRef(false);
+  useEffect(() => {
+    if (stepId !== 'ai-apikey' || didAutoSelect.current) return;
+    const isAnthropic = tags.includes('anthropic-key') || tags.includes('has-claude');
+    const agents = AGENT_CATALOG.filter((a) =>
+      isAnthropic ? a.provider === 'anthropic' : a.provider === 'openai'
+    );
+    const defaultAgent = agents[0];
+    if (!form.selectedAgent && defaultAgent) {
+      didAutoSelect.current = true;
+      setForm((prev) => ({ ...prev, selectedAgent: defaultAgent.id }));
+    }
+  }, [stepId, tags, form.selectedAgent, setForm]);
+
   switch (stepId) {
     case 'ai-apikey': {
       const isAnthropic = tags.includes('anthropic-key') || tags.includes('has-claude');
@@ -310,18 +303,12 @@ function StepForm({
       );
       const defaultAgent = agents[0];
 
-      // Auto-select agent if not already selected
-      if (!form.selectedAgent && defaultAgent) {
-        // Use setTimeout to avoid setState during render
-        setTimeout(() => setForm((prev) => ({ ...prev, selectedAgent: defaultAgent.id })), 0);
-      }
-
       return (
         <>
           {agents.length > 1 && (
             <div className="mb-3">
               <label className="block text-xs font-medium text-fg-muted mb-1">Agent</label>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 {agents.map((agent) => (
                   <button
                     key={agent.id}
@@ -372,9 +359,10 @@ function StepForm({
       return (
         <>
           <p className="text-xs text-fg-muted mb-3">
-            You'll be redirected to Anthropic to approve access. Your existing subscription covers the cost.
+            Connect your Claude subscription in Settings after completing setup.
+            Your existing plan covers all costs.
           </p>
-          <ActionButton onClick={onAction} loading={loading} label={actionLabel} />
+          <ActionButton onClick={onAction} loading={loading} label="Continue" />
         </>
       );
 
@@ -384,7 +372,7 @@ function StepForm({
           <p className="text-xs text-fg-muted mb-3">
             SAM provides AI through Cloudflare. You can set budget limits in Settings after setup.
           </p>
-          <ActionButton onClick={onAction} loading={loading} label={actionLabel} />
+          <ActionButton onClick={onAction} loading={loading} label="Continue" />
           {onSkip && (
             <button
               type="button"
@@ -495,170 +483,4 @@ function ActionButton({
       )}
     </Button>
   );
-}
-
-function ProjectSelector({
-  repos,
-  reposLoading,
-  onLoadRepos,
-  form,
-  setForm,
-  loading,
-  onCreateProject,
-  tags,
-}: {
-  repos: Repository[];
-  reposLoading: boolean;
-  onLoadRepos: () => void;
-  form: StepFormState;
-  setForm: React.Dispatch<React.SetStateAction<StepFormState>>;
-  loading: boolean;
-  onCreateProject: () => void;
-  tags: string[];
-}) {
-  const [loaded, setLoaded] = useState(false);
-
-  const handleLoad = () => {
-    if (!loaded) {
-      setLoaded(true);
-      onLoadRepos();
-    }
-  };
-
-  // Auto-load on mount
-  if (!loaded) {
-    handleLoad();
-  }
-
-  if (tags.includes('use-template')) {
-    return (
-      <div>
-        <p className="text-xs text-fg-muted mb-3">
-          After setup, you can create a project from a template on the Projects page.
-        </p>
-        <ActionButton onClick={onCreateProject} loading={loading} label="Go to Projects" />
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      {reposLoading ? (
-        <div className="flex items-center gap-2 text-sm text-fg-muted py-3">
-          <Loader2 size={14} className="animate-spin" /> Loading your repositories...
-        </div>
-      ) : repos.length === 0 ? (
-        <div className="text-sm text-fg-muted py-3">
-          <p className="mb-2">No repositories found. Make sure you've installed the GitHub App and granted repo access.</p>
-          <Button variant="secondary" size="sm" onClick={onLoadRepos}>
-            Refresh
-          </Button>
-        </div>
-      ) : (
-        <div className="mb-3">
-          <select
-            value={form.selectedRepoName}
-            onChange={(e) => {
-              const repo = repos.find((r) => r.fullName === e.target.value);
-              setForm((prev) => ({
-                ...prev,
-                selectedRepoUrl: repo ? `https://github.com/${repo.fullName}.git` : '',
-                selectedRepoName: repo?.fullName ?? '',
-              }));
-            }}
-            className="w-full p-2 rounded-md border border-border-default bg-surface text-fg-primary text-sm"
-          >
-            <option value="">Select a repository...</option>
-            {repos.map((repo) => (
-              <option key={repo.id} value={repo.fullName}>
-                {repo.fullName}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      {repos.length > 0 && (
-        <ActionButton
-          onClick={onCreateProject}
-          loading={loading}
-          disabled={!form.selectedRepoUrl}
-          label="Create Project"
-        />
-      )}
-    </div>
-  );
-}
-
-/* ─── Step action execution ─── */
-
-async function executeStep(
-  stepId: StepId,
-  form: StepFormState
-): Promise<void> {
-  switch (stepId) {
-    case 'ai-apikey': {
-      if (!form.selectedAgent || !form.apiKey.trim()) {
-        throw new Error('Please enter an API key');
-      }
-      const request: SaveAgentCredentialRequest = {
-        agentType: form.selectedAgent,
-        credentialKind: 'api-key',
-        credential: form.apiKey.trim(),
-      };
-      // Validate first
-      const validation = await validateAgentCredential(request);
-      if (validation.valid === false) {
-        throw new Error(validation.message ??'Invalid API key');
-      }
-      // Save
-      await saveAgentCredential(request);
-      return;
-    }
-
-    case 'ai-oauth': {
-      // For OAuth, we just mark it as done for now — OAuth setup happens in Settings
-      // This is a "we'll redirect you" step
-      return;
-    }
-
-    case 'ai-sam': {
-      // SAM billing doesn't require setup — just acknowledge
-      return;
-    }
-
-    case 'cloud-hetzner': {
-      if (!form.hetznerToken.trim()) {
-        throw new Error('Please enter your Hetzner API token');
-      }
-      // Validate
-      const validation = await validateCredential({
-        provider: 'hetzner',
-        token: form.hetznerToken.trim(),
-      });
-      if (validation.valid === false) {
-        throw new Error(validation.message ??'Invalid Hetzner token');
-      }
-      // Save
-      await createCredential({
-        provider: 'hetzner',
-        token: form.hetznerToken.trim(),
-      });
-      return;
-    }
-
-    case 'cloud-sam': {
-      // No action needed — SAM handles infrastructure
-      return;
-    }
-
-    case 'github': {
-      // GitHub install is handled by redirect, not by this function
-      return;
-    }
-
-    case 'project': {
-      // Project creation is handled separately
-      return;
-    }
-  }
 }

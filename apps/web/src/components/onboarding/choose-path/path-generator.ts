@@ -27,8 +27,8 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       id: 'ai-oauth',
       title: 'Connect your Claude subscription',
       description:
-        "We'll connect your Claude Pro/Max subscription via OAuth. No API key needed — no extra cost.",
-      actionLabel: 'Connect Claude Account',
+        'After setup, connect your Claude Pro/Max plan in Settings. No API key needed — no extra cost.',
+      actionLabel: 'Continue',
       timeEstimate: '30 seconds',
       details: [
         "You'll be redirected to Anthropic to approve access",
@@ -60,7 +60,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       title: 'SAM-managed AI billing',
       description:
         'No setup needed! SAM handles AI billing through Cloudflare. Set a daily budget and monthly cap.',
-      actionLabel: 'Set Budget',
+      actionLabel: 'Continue',
       timeEstimate: '30 seconds',
       details: [
         'SAM provides AI access through Cloudflare AI Gateway',

@@ -86,7 +86,7 @@ export function ChoosePathWizard() {
         if (hasGitHub) existingTags.push('existing-github');
 
         if (existingTags.length > 0) {
-          setTags((prev) => [...prev, ...existingTags]);
+          setTags((prev) => [...new Set([...prev, ...existingTags])]);
         }
       } catch {
         // Non-critical
@@ -104,20 +104,22 @@ export function ChoosePathWizard() {
 
   const handleAnswer = useCallback(
     (option: PathOption) => {
-      const newAnswers = { ...answers, [currentQuestionId]: option.id };
-      const newTags = [...tags, ...option.tags];
-      setAnswers(newAnswers);
-      setTags(newTags);
+      setAnswers((prev) => ({ ...prev, [currentQuestionId]: option.id }));
+      setTags((prev) => {
+        const newTags = [...prev, ...option.tags];
+        if (!option.next) {
+          const steps = generatePath(newTags);
+          setGeneratedSteps(steps);
+          setPhase('path-preview');
+        }
+        return newTags;
+      });
 
       if (option.next) {
         setCurrentQuestionId(option.next);
-      } else {
-        const steps = generatePath(newTags);
-        setGeneratedSteps(steps);
-        setPhase('path-preview');
       }
     },
-    [answers, currentQuestionId, tags]
+    [currentQuestionId]
   );
 
   const handleReset = useCallback(() => {
@@ -146,7 +148,7 @@ export function ChoosePathWizard() {
     setAnswers(newAnswers);
 
     if (lastOption) {
-      setTags(tags.filter((t) => !lastOption.tags.includes(t)));
+      setTags((prev) => prev.filter((t) => !lastOption.tags.includes(t)));
     }
     setCurrentQuestionId(lastAnsweredId);
   }, [answers, questionHistory, tags]);
