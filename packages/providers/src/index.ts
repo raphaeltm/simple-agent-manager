@@ -29,6 +29,7 @@ export { getTimeoutMs,providerFetch } from './provider-fetch';
 // Re-export providers
 export type { GcpTokenProvider } from './gcp';
 export { DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GCP_LOCATIONS,GcpProvider } from './gcp';
+export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
   DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
@@ -37,7 +38,6 @@ export {
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
-export type { HetznerProviderRuntimeOptions } from './hetzner';
 export { SCALEWAY_LOCATIONS,ScalewayProvider } from './scaleway';
 
 /**

@@ -140,6 +140,46 @@ describe('ScalewayProvider', () => {
       labels: { node: 'node-123', managed: 'simple-agent-manager' },
     };
 
+    const createResponse = () => new Response(JSON.stringify({
+      server: createMockScalewayServer({
+        id: 'created-server-id',
+        state: 'stopped',
+        public_ip: null,
+        public_ips: [],
+      }),
+    }), { status: 201 });
+
+    const imageResponse = () => new Response(
+      JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }),
+      { status: 200 },
+    );
+
+    const jsonErrorResponse = (message: string, status: number) => new Response(
+      JSON.stringify({ message }),
+      { status },
+    );
+
+    function mockCreateFailure(
+      failedStep: 'cloud-init' | 'poweron',
+      cleanupResponse = new Response(JSON.stringify({ task: {} }), { status: 202 }),
+    ) {
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(imageResponse())
+        .mockResolvedValueOnce(createResponse());
+
+      if (failedStep === 'cloud-init') {
+        mockFetch.mockResolvedValueOnce(jsonErrorResponse('cloud-init rejected', 500));
+      } else {
+        mockFetch
+          .mockResolvedValueOnce(new Response(null, { status: 204 }))
+          .mockResolvedValueOnce(jsonErrorResponse('poweron failed', 500));
+      }
+
+      mockFetch.mockResolvedValueOnce(cleanupResponse);
+      globalThis.fetch = mockFetch;
+      return mockFetch;
+    }
+
     it('should perform three-step creation: create server, set cloud-init, poweron', async () => {
       const mockFetch = createScalewayFetchMock();
       globalThis.fetch = mockFetch;
@@ -263,25 +303,7 @@ describe('ScalewayProvider', () => {
     });
 
     it('should clean up the created server when cloud-init upload fails', async () => {
-      const mockFetch = vi.fn()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }), { status: 200 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            server: createMockScalewayServer({
-              id: 'created-server-id',
-              state: 'stopped',
-              public_ip: null,
-              public_ips: [],
-            }),
-          }), { status: 201 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ message: 'cloud-init rejected' }), { status: 500 }),
-        )
-        .mockResolvedValueOnce(new Response(JSON.stringify({ task: {} }), { status: 202 }));
-      globalThis.fetch = mockFetch;
+      const mockFetch = mockCreateFailure('cloud-init');
 
       const err = await provider.createVM(vmConfig).catch((error) => error);
 
@@ -294,26 +316,7 @@ describe('ScalewayProvider', () => {
     });
 
     it('should clean up the created server when poweron fails', async () => {
-      const mockFetch = vi.fn()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }), { status: 200 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            server: createMockScalewayServer({
-              id: 'created-server-id',
-              state: 'stopped',
-              public_ip: null,
-              public_ips: [],
-            }),
-          }), { status: 201 }),
-        )
-        .mockResolvedValueOnce(new Response(null, { status: 204 }))
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ message: 'poweron failed' }), { status: 500 }),
-        )
-        .mockResolvedValueOnce(new Response(JSON.stringify({ task: {} }), { status: 202 }));
-      globalThis.fetch = mockFetch;
+      const mockFetch = mockCreateFailure('poweron');
 
       const err = await provider.createVM(vmConfig).catch((error) => error);
 
@@ -326,27 +329,7 @@ describe('ScalewayProvider', () => {
     });
 
     it('should keep cleanup failure inspectable without suppressing the cloud-init failure', async () => {
-      const mockFetch = vi.fn()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }), { status: 200 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            server: createMockScalewayServer({
-              id: 'created-server-id',
-              state: 'stopped',
-              public_ip: null,
-              public_ips: [],
-            }),
-          }), { status: 201 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ message: 'cloud-init rejected' }), { status: 500 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ message: 'cleanup failed' }), { status: 503 }),
-        );
-      globalThis.fetch = mockFetch;
+      mockCreateFailure('cloud-init', jsonErrorResponse('cleanup failed', 503));
 
       const err = await provider.createVM(vmConfig).catch((error) => error);
 
@@ -372,27 +355,7 @@ describe('ScalewayProvider', () => {
     });
 
     it('should tolerate 404 while cleaning up a failed create', async () => {
-      const mockFetch = vi.fn()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }), { status: 200 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            server: createMockScalewayServer({
-              id: 'created-server-id',
-              state: 'stopped',
-              public_ip: null,
-              public_ips: [],
-            }),
-          }), { status: 201 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ message: 'cloud-init rejected' }), { status: 500 }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ message: 'already gone' }), { status: 404 }),
-        );
-      globalThis.fetch = mockFetch;
+      const mockFetch = mockCreateFailure('cloud-init', jsonErrorResponse('already gone', 404));
 
       const err = await provider.createVM(vmConfig).catch((error) => error);
 
