@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import {
   devcontainerConfigRoutes,
+  discoverGitHubDevcontainerConfigs,
   parseDevcontainerConfigs,
 } from '../../../src/routes/projects/devcontainer-configs';
 
@@ -132,6 +133,68 @@ describe('parseDevcontainerConfigs', () => {
     expect(result.configs).toEqual([
       { name: 'short', path: '.devcontainer/short/devcontainer.json' },
     ]);
+  });
+});
+
+describe('discoverGitHubDevcontainerConfigs', () => {
+  it('returns no configs when the repo has no devcontainer files', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        tree: [{ path: 'src/main.ts', type: 'blob' }],
+        truncated: false,
+      }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await discoverGitHubDevcontainerConfigs('owner', 'repo', 'main', 'ghs_test');
+
+    expect(result).toEqual({
+      defaultConfigExists: false,
+      configs: [],
+      truncated: false,
+    });
+  });
+
+  it('returns discovered default and named configs from the GitHub tree', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        tree: MIXED_DEVCONTAINER_TREE,
+        truncated: false,
+      }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await discoverGitHubDevcontainerConfigs('owner', 'repo', 'main', 'ghs_test');
+
+    expect(result).toEqual({
+      defaultConfigExists: true,
+      configs: EXPECTED_NODE_PYTHON_CONFIGS,
+      truncated: false,
+    });
+  });
+
+  it('falls back to contents API when the recursive tree is truncated', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([
+          { name: 'python', type: 'dir' },
+          { name: 'notes.md', type: 'file' },
+        ]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await discoverGitHubDevcontainerConfigs('owner', 'repo', 'main', 'ghs_test');
+
+    expect(result).toEqual({
+      defaultConfigExists: false,
+      configs: [{ name: 'python', path: '.devcontainer/python/devcontainer.json' }],
+      truncated: true,
+    });
   });
 });
 

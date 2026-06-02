@@ -73,6 +73,7 @@ export const MessageBatchSchema = v.object({
 // Workspace lifecycle schemas
 export const WorkspaceStatusUpdateSchema = v.object({
   status: v.optional(v.string()),
+  workspaceProfile: v.optional(v.picklist(['full', 'lightweight'])),
 });
 
 export const WorkspaceErrorSchema = v.object({
