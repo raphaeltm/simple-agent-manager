@@ -2327,13 +2327,7 @@ exit 0
 
 func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	// Mock devcontainer CLI that always succeeds
-	mockBinDir := t.TempDir()
-	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
-	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("failed to write mock devcontainer command: %v", err)
-	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", mockBinDir+":"+origPath)
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
 
 	workspaceDir := t.TempDir()
 	// Create a repo devcontainer config
@@ -2362,23 +2356,9 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 }
 
 func TestEnsureDevcontainerReadyNoConfigUsesLightweightDefault(t *testing.T) {
-	mockBinDir := t.TempDir()
-	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
-	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("failed to write mock devcontainer command: %v", err)
-	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", mockBinDir+":"+origPath)
-
 	configPath := filepath.Join(t.TempDir(), "default-devcontainer.json")
-	cfg := &config.Config{
-		WorkspaceDir:                  t.TempDir(),
-		ContainerMode:                 true,
-		ContainerLabelKey:             "devcontainer.local_folder",
-		ContainerLabelValue:           "/workspace/ws-no-config",
-		DefaultDevcontainerConfigPath: configPath,
-		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
-	}
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-no-config", configPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -2409,23 +2389,9 @@ func TestEnsureDevcontainerReadyNoConfigUsesLightweightDefault(t *testing.T) {
 }
 
 func TestEnsureDevcontainerReadyNoConfigLightweightStartupHonorsBuildTimeout(t *testing.T) {
-	mockBinDir := t.TempDir()
-	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
-	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {
-		t.Fatalf("failed to write mock devcontainer command: %v", err)
-	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", mockBinDir+":"+origPath)
-
-	cfg := &config.Config{
-		WorkspaceDir:                  t.TempDir(),
-		ContainerMode:                 true,
-		ContainerLabelKey:             "devcontainer.local_folder",
-		ContainerLabelValue:           "/workspace/ws-no-config-timeout",
-		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
-		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
-		DevcontainerBuildTimeout:      100 * time.Millisecond,
-	}
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexec sleep 5\n")
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-no-config-timeout", filepath.Join(t.TempDir(), "default-devcontainer.json"))
+	cfg.DevcontainerBuildTimeout = 100 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -2441,14 +2407,7 @@ func TestEnsureDevcontainerReadyNoConfigLightweightStartupHonorsBuildTimeout(t *
 }
 
 func TestEnsureDevcontainerReadyExplicitMissingNamedConfigDoesNotFallback(t *testing.T) {
-	cfg := &config.Config{
-		WorkspaceDir:                  t.TempDir(),
-		ContainerMode:                 true,
-		ContainerLabelKey:             "devcontainer.local_folder",
-		ContainerLabelValue:           "/workspace/ws-missing-named-config",
-		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
-		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
-	}
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-missing-named-config", filepath.Join(t.TempDir(), "default-devcontainer.json"))
 
 	usedFallback, err := ensureDevcontainerReady(context.Background(), cfg, "", "", "python", "")
 	if err == nil {
@@ -2462,6 +2421,30 @@ func TestEnsureDevcontainerReadyExplicitMissingNamedConfigDoesNotFallback(t *tes
 	}
 	if _, statErr := os.Stat(cfg.DefaultDevcontainerConfigPath); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no fallback config to be written, stat err: %v", statErr)
+	}
+}
+
+func installMockDevcontainerCommand(t *testing.T, script string) {
+	t.Helper()
+
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	if err := os.WriteFile(mockDevcontainer, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+}
+
+func newNoConfigDevcontainerReadyConfig(t *testing.T, labelValue, configPath string) *config.Config {
+	t.Helper()
+
+	return &config.Config{
+		WorkspaceDir:                  t.TempDir(),
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           labelValue,
+		DefaultDevcontainerConfigPath: configPath,
+		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
 	}
 }
 
