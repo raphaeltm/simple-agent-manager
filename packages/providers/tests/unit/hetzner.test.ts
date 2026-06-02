@@ -821,7 +821,7 @@ describe('HetznerProvider capacity retry', () => {
         maxAttempts: 3,
         serverType: 'cx33',
         location: 'fsn1',
-        error: 'hetzner API error (422): Server type cx33 unavailable in fsn1',
+        statusCode: 422,
       },
     ]);
   });

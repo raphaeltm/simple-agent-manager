@@ -146,7 +146,7 @@ export class HetznerProvider implements Provider {
             maxAttempts: this.capacityRetryMaxAttempts,
             serverType: sizeConfig.type,
             location: config.location || this.datacenter,
-            error: err.message,
+            statusCode: err.statusCode,
           });
 
           await new Promise((resolve) => setTimeout(resolve, delay));

@@ -51,7 +51,7 @@ Add focused regression tests that fail if a provider create flow does not clean 
 - [x] Add Scaleway tests for cloud-init failure cleanup, poweron failure cleanup, cleanup failure visibility, and unchanged success behavior.
 - [x] Replace Hetzner raw `console.*` usage with an injectable no-op-by-default logger.
 - [x] Update Hetzner tests to assert logging through the injected logger rather than global console spies.
-- [ ] Run provider package tests and available typecheck/build/lint checks.
+- [x] Run provider package tests and available typecheck/build/lint checks.
 - [ ] Run specialist validation for task completion, tests, security/secrets, and constitution compliance.
 
 ## Acceptance Criteria
