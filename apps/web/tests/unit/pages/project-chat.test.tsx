@@ -229,6 +229,13 @@ async function openProfileWizardFromGate() {
   fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
 }
 
+async function expectCreateProfileGate(placeholder = 'Create a profile to start chatting...') {
+  await waitFor(() => {
+    expect(screen.getByText('Create a profile to start')).toBeInTheDocument();
+  });
+  expect(screen.getByPlaceholderText(placeholder)).toBeDisabled();
+}
+
 function chooseAgent(agentName: RegExp) {
   fireEvent.click(screen.getByRole('button', { name: agentName }));
   fireEvent.click(screen.getByRole('button', { name: /Next/i }));
@@ -242,6 +249,28 @@ function chooseWorkType(workType: RegExp) {
 function chooseVmSize(size: RegExp = /Medium/i) {
   fireEvent.click(screen.getByRole('button', { name: size }));
   fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+}
+
+async function createProfileFromWizard({
+  defaultName,
+  profileName,
+  expectedPayload,
+}: {
+  defaultName: string;
+  profileName: string;
+  expectedPayload: Record<string, unknown>;
+}) {
+  const nameInput = screen.getByLabelText('Profile name');
+  expect(nameInput).toHaveValue(defaultName);
+  fireEvent.change(nameInput, { target: { value: profileName } });
+  fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+
+  await waitFor(() => {
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ name: profileName, ...expectedPayload })
+    );
+  });
 }
 
 async function openWizardVmStep(agentName = /Claude Code/i, workType = /Chat and explore/i) {
@@ -688,11 +717,8 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByText('Create a profile to start')).toBeInTheDocument();
-    });
+    await expectCreateProfileGate();
     expect(screen.queryByText(/Using/)).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
 
@@ -716,19 +742,15 @@ describe('ProjectChat profile setup wizard', () => {
     chooseWorkType(/Build and open PRs/i);
     chooseVmSize(/Medium/i);
 
-    const nameInput = screen.getByLabelText('Profile name');
-    expect(nameInput).toHaveValue('Claude Code Tasks');
-    fireEvent.change(nameInput, { target: { value: 'Claude Builder' } });
-    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
-
-    await waitFor(() => {
-      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        name: 'Claude Builder',
+    await createProfileFromWizard({
+      defaultName: 'Claude Code Tasks',
+      profileName: 'Claude Builder',
+      expectedPayload: {
         agentType: 'claude-code',
         vmSizeOverride: 'medium',
         workspaceProfile: 'full',
         taskMode: 'task',
-      }));
+      },
     });
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
@@ -748,29 +770,22 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByText('Create a profile to start')).toBeInTheDocument();
-    });
-    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
+    await expectCreateProfileGate();
 
     fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
     chooseAgent(/OpenAI Codex/i);
     chooseWorkType(/Build and open PRs/i);
     chooseVmSize(/Large/i);
 
-    const nameInput = screen.getByLabelText('Profile name');
-    expect(nameInput).toHaveValue('OpenAI Codex Tasks');
-    fireEvent.change(nameInput, { target: { value: 'Codex Builder' } });
-    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
-
-    await waitFor(() => {
-      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        name: 'Codex Builder',
+    await createProfileFromWizard({
+      defaultName: 'OpenAI Codex Tasks',
+      profileName: 'Codex Builder',
+      expectedPayload: {
         agentType: 'openai-codex',
         vmSizeOverride: 'large',
         workspaceProfile: 'full',
         taskMode: 'task',
-      }));
+      },
     });
   });
 
@@ -807,9 +822,7 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByText('Add an agent to start chatting')).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText('Add an agent to start chatting')).toBeInTheDocument());
     expect(screen.getByPlaceholderText('Add an agent in Settings to start chatting...')).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /Settings > Agents/i }));
