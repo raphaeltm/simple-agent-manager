@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+
 import { expect, type Page, type Route } from '@playwright/test';
 
 interface MockUserOptions {
@@ -37,8 +39,10 @@ export async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = `${process.cwd()}/.codex/tmp/playwright-screenshots`;
+  mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
+    path: `${screenshotDir}/${name}${suffix}.png`,
     fullPage: true,
   });
 }
