@@ -1,7 +1,7 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentProfile, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Check, ChevronRight, MessageSquare, Monitor, Plus, Settings, Wrench, Zap } from 'lucide-react';
+import { Check, ChevronRight, MessageSquare, Monitor, Plus, Settings, Wrench } from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -165,9 +165,8 @@ export function ChatInput({
   const activeCatalog = selectProviderCatalog(providerCatalogs, projectDefaultProvider);
   const providerContext = formatProviderCatalogContext(activeCatalog, projectDefaultLocation ?? activeCatalog?.defaultLocation ?? null);
   const skipAgentStep = agents.length === 1;
-  const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length > 1;
+  const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length >= 1;
   const noAgents = agents.length === 0;
-  const singleAgentDefault = agentProfiles.length === 0 && agents.length === 1 && !profileWizard.open;
   const inputDisabled = noAgents || needsProfileBeforeSubmit || profileWizard.open;
   const composerPlaceholder = getComposerPlaceholder({
     noAgents,
@@ -231,10 +230,6 @@ export function ChatInput({
       )}
 
       {noAgents && <NoAgentsNotice projectId={projectId} />}
-
-      {singleAgentDefault && agents[0] && (
-        <DefaultProfileBanner agent={agents[0]} onCustomize={onOpenProfileWizard} />
-      )}
 
       {agentProfiles.length > 0 && !profileWizard.open && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent profiles">
@@ -475,24 +470,6 @@ function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
         className="min-h-[44px] rounded-md border border-border-default bg-page px-3 py-2 text-sm text-fg-primary hover:border-accent/60"
       >
         Settings &gt; Agents
-      </button>
-    </div>
-  );
-}
-
-function DefaultProfileBanner({ agent, onCustomize }: Readonly<{ agent: AgentInfo; onCustomize: () => void }>) {
-  return (
-    <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/20 bg-accent/5 px-3 py-2 text-xs text-fg-muted">
-      <Zap size={14} className="shrink-0 text-accent" />
-      <span className="min-w-0 flex-1">
-        Using <strong className="text-fg-primary">{agent.name}</strong> with default settings.
-      </span>
-      <button
-        type="button"
-        onClick={onCustomize}
-        className="min-h-[44px] rounded-md border border-transparent px-2 text-xs font-medium text-accent hover:border-accent/40"
-      >
-        Customize
       </button>
     </div>
   );

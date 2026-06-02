@@ -16,54 +16,7 @@ import { errors } from '../middleware/error';
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 /** Env vars used by agent profile service */
-type ProfileEnv = Pick<Env,
-  | 'DEFAULT_TASK_AGENT_TYPE'
-  | 'BUILTIN_PROFILE_SONNET_MODEL'
-  | 'BUILTIN_PROFILE_OPUS_MODEL'
->;
-
-const DEFAULT_SONNET_MODEL = 'claude-sonnet-4-5-20250929';
-const DEFAULT_OPUS_MODEL = 'claude-opus-4-6';
-
-/** Built-in profile definitions seeded on first access. Models are configurable via env vars. */
-function getBuiltinProfiles(env: ProfileEnv) {
-  const sonnetModel = env.BUILTIN_PROFILE_SONNET_MODEL || DEFAULT_SONNET_MODEL;
-  const opusModel = env.BUILTIN_PROFILE_OPUS_MODEL || DEFAULT_OPUS_MODEL;
-
-  return [
-    {
-      name: 'default',
-      description: 'General-purpose coding agent',
-      agentType: 'claude-code',
-      model: sonnetModel,
-      permissionMode: 'acceptEdits',
-    },
-    {
-      name: 'planner',
-      description: 'Task decomposition and architecture planning',
-      agentType: 'claude-code',
-      model: opusModel,
-      permissionMode: 'plan',
-      systemPromptAppend: 'Decompose tasks. Do not write code directly.',
-    },
-    {
-      name: 'implementer',
-      description: 'Feature implementation with tests',
-      agentType: 'claude-code',
-      model: sonnetModel,
-      permissionMode: 'acceptEdits',
-      systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
-    },
-    {
-      name: 'reviewer',
-      description: 'Code review for correctness, security, and style',
-      agentType: 'claude-code',
-      model: opusModel,
-      permissionMode: 'plan',
-      systemPromptAppend: 'Review code for correctness, security, and style.',
-    },
-  ];
-}
+type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
 /** Convert a DB row to an API response */
 function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
@@ -92,65 +45,14 @@ function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
 }
 
 /**
- * Seed built-in profiles for a project if they don't already exist.
- * Built-in profiles have is_builtin = 1 and are owned by the project owner.
- */
-export async function seedBuiltinProfiles(
-  db: Db,
-  projectId: string,
-  userId: string,
-  env: ProfileEnv
-): Promise<void> {
-  // Check if any built-in profiles already exist for this project.
-  // If ANY exist, skip all seeding — built-ins are a one-time seed per project.
-  // This allows users to rename or delete individual built-ins without
-  // triggering re-creation. If all built-ins are deleted, they will be
-  // re-seeded on next access.
-  const existing = await db
-    .select({ id: schema.agentProfiles.id })
-    .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.isBuiltin, 1)
-      )
-    );
-
-  if (existing.length > 0) {
-    return;
-  }
-
-  const builtinProfiles = getBuiltinProfiles(env);
-
-  for (const profile of builtinProfiles) {
-    await db.insert(schema.agentProfiles).values({
-      id: ulid(),
-      projectId,
-      userId,
-      name: profile.name,
-      description: profile.description,
-      agentType: profile.agentType,
-      model: profile.model,
-      permissionMode: profile.permissionMode,
-      systemPromptAppend: 'systemPromptAppend' in profile ? profile.systemPromptAppend : null,
-      isBuiltin: 1,
-    });
-  }
-}
-
-/**
  * List all profiles for a project (project-scoped + global).
- * Seeds built-in profiles on first access if none exist.
  */
 export async function listProfiles(
   db: Db,
   projectId: string,
   userId: string,
-  env: ProfileEnv
+  _env: ProfileEnv
 ): Promise<AgentProfile[]> {
-  // Seed built-in profiles on first access
-  await seedBuiltinProfiles(db, projectId, userId, env);
-
   const rows = await db
     .select()
     .from(schema.agentProfiles)
@@ -404,9 +306,6 @@ export async function resolveAgentProfile(
       taskMode: null,
     };
   }
-
-  // Seed built-in profiles to ensure they're available for resolution
-  await seedBuiltinProfiles(db, projectId, userId, env);
 
   // Try by ID first
   const byId = await db

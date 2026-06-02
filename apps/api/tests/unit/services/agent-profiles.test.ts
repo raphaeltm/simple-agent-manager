@@ -151,10 +151,6 @@ describe('Agent Profile Service', () => {
         permissionMode: 'plan',
       });
 
-      // seedBuiltinProfiles: existing built-in profiles (all 4 present)
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // byId query
       db._pushResult([profile]);
 
@@ -171,10 +167,6 @@ describe('Agent Profile Service', () => {
     it('resolves profile by name when ID match not found', async () => {
       const db = createMockDB();
 
-      // seedBuiltinProfiles
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // byId — not found
       db._pushResult([]);
       // byName in project — found
@@ -198,10 +190,6 @@ describe('Agent Profile Service', () => {
     it('falls back to valid agent type when no profile matches', async () => {
       const db = createMockDB();
 
-      // seedBuiltinProfiles
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // byId — not found
       db._pushResult([]);
       // byName project — not found
@@ -220,10 +208,6 @@ describe('Agent Profile Service', () => {
     it('falls back to DEFAULT_TASK_AGENT_TYPE when hint is not a valid agent type', async () => {
       const db = createMockDB();
 
-      // seedBuiltinProfiles
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // byId — not found
       db._pushResult([]);
       // byName project — not found
@@ -252,10 +236,6 @@ describe('Agent Profile Service', () => {
         vmSizeOverride: 'cx22',
       });
 
-      // seedBuiltinProfiles
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // byId — found
       db._pushResult([profile]);
 
@@ -292,10 +272,6 @@ describe('Agent Profile Service', () => {
         vmSizeOverride: 'cx32',
       });
 
-      // seedBuiltinProfiles
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // byId — found
       db._pushResult([profile]);
 
@@ -357,12 +333,8 @@ describe('Agent Profile Service', () => {
   });
 
   describe('listProfiles', () => {
-    it('seeds built-in profiles and returns all profiles for a project', async () => {
+    it('returns all existing profiles for a project without seeding built-ins', async () => {
       const db = createMockDB();
-      // seedBuiltinProfiles: all 4 already exist
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       // listProfiles query (select + from + where + orderBy)
       db._pushResult([
         makeProfileRow({ id: 'p1', name: 'default' }),
@@ -376,13 +348,43 @@ describe('Agent Profile Service', () => {
       expect(result[1].id).toBe('p2');
       // isBuiltin should be converted from integer to boolean
       expect(result[0].isBuiltin).toBe(true);
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list for a fresh project', async () => {
+      const db = createMockDB();
+      db._pushResult([]);
+
+      const result = await agentProfileService.listProfiles(db, 'project-1', 'user-1', env);
+
+      expect(result).toEqual([]);
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('does not re-create built-ins after all profiles are deleted', async () => {
+      const db = createMockDB();
+      db._pushResult([]);
+
+      await agentProfileService.deleteProfile(
+        (() => {
+          const deleteDb = createMockDB();
+          deleteDb._pushResult([makeProfileRow({ id: 'profile-1', isBuiltin: 1 })]);
+          deleteDb._pushResult([]);
+          return deleteDb;
+        })(),
+        'project-1',
+        'profile-1',
+        'user-1'
+      );
+
+      const result = await agentProfileService.listProfiles(db, 'project-1', 'user-1', env);
+
+      expect(result).toEqual([]);
+      expect(db.insert).not.toHaveBeenCalled();
     });
 
     it('converts isBuiltin from integer 0 to boolean false', async () => {
       const db = createMockDB();
-      db._pushResult([
-        { id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' },
-      ]);
       db._pushResult([
         makeProfileRow({ id: 'p1', isBuiltin: 0 }),
       ]);
@@ -586,38 +588,4 @@ describe('Agent Profile Service', () => {
     });
   });
 
-  describe('seedBuiltinProfiles', () => {
-    it('seeds 4 built-in profiles when none exist', async () => {
-      const db = createMockDB();
-      // No existing built-in profiles
-      db._pushResult([]);
-
-      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
-
-      // Should have called insert 4 times (default, planner, implementer, reviewer)
-      expect(db.insert).toHaveBeenCalledTimes(4);
-    });
-
-    it('skips all seeding when any built-in profile exists', async () => {
-      const db = createMockDB();
-      // One built-in profile already exists — seeding is a one-time event
-      db._pushResult([{ id: 'existing-1' }]);
-
-      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
-
-      // Should not insert anything — seeding already happened for this project
-      expect(db.insert).not.toHaveBeenCalled();
-    });
-
-    it('does nothing when all built-in profiles exist', async () => {
-      const db = createMockDB();
-      db._pushResult([
-        { id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' },
-      ]);
-
-      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
-
-      expect(db.insert).not.toHaveBeenCalled();
-    });
-  });
 });

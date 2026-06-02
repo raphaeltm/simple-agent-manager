@@ -538,39 +538,18 @@ export function useProjectChatState() {
     }
   }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
 
-  const ensureDefaultProfileForSingleAgent = useCallback(async () => {
-    if (selectedProfileId) return selectedProfileId;
-    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
-    if (configuredAgents.length !== 1) return null;
-
-    const agent = configuredAgents[0];
-    if (!agent) return null;
-    const profile = await createProfile({
-      name: `${agent.name} Default`,
-      description: 'Default conversation profile',
-      agentType: agent.id,
-      permissionMode: 'bypassPermissions',
-      vmSizeOverride: 'medium',
-      workspaceProfile: 'lightweight',
-      taskMode: 'conversation',
-    });
-    return profile.id;
-  }, [agentProfiles, configuredAgents, createProfile, selectedProfileId]);
-
   const resolveProfileIdForSubmit = useCallback(async () => {
     if (selectedProfileId) return selectedProfileId;
     if (configuredAgents.length === 0) {
       setSubmitError('Add an agent in Settings before starting a chat.');
       return null;
     }
-
-    const profileId = await ensureDefaultProfileForSingleAgent();
-    if (profileId) return profileId;
+    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
 
     openProfileWizard();
     setSubmitError('Create a profile before sending your first message.');
     return null;
-  }, [configuredAgents.length, ensureDefaultProfileForSingleAgent, openProfileWizard, selectedProfileId]);
+  }, [agentProfiles, configuredAgents.length, openProfileWizard, selectedProfileId]);
 
   const handleSubmit = async () => {
     const trimmed = message.trim();

@@ -17,19 +17,19 @@ Related ready idea: `01KSQE75WVZQM7R3VC6N87HX4Z` (`Profile setup wizard for proj
 
 ## Checklist
 
-- [ ] Stop normal backend profile listing from seeding built-in profiles.
-- [ ] Remove or retire built-in seed helpers that are no longer used.
-- [ ] Update API unit tests so fresh projects list zero profiles.
-- [ ] Add API test coverage proving deleting all profiles does not re-create built-ins.
-- [ ] Remove silent single-agent default profile creation from project chat state.
-- [ ] Make submit open the profile wizard and return `null` whenever configured agents exist but profiles do not.
-- [ ] Preserve cloud credential and file-upload validation behavior.
-- [ ] Ensure wizard-created profiles are added, selected, and usable on later submit.
-- [ ] Stop rendering `DefaultProfileBanner`.
-- [ ] Use `NoProfilesGate` for any no-profile project with at least one configured agent.
-- [ ] Keep one-agent wizard setup short by skipping agent selection.
-- [ ] Update project chat unit tests for no agents, one agent/no profiles, multiple agents/no profiles, existing profiles, deletion to no profiles, duplicate names, provider catalog fallback, cloud credentials, long names, and active follow-up inputs where relevant.
-- [ ] Run targeted API and web unit tests.
+- [x] Stop normal backend profile listing from seeding built-in profiles.
+- [x] Remove or retire built-in seed helpers that are no longer used.
+- [x] Update API unit tests so fresh projects list zero profiles.
+- [x] Add API test coverage proving deleting all profiles does not re-create built-ins.
+- [x] Remove silent single-agent default profile creation from project chat state.
+- [x] Make submit open the profile wizard and return `null` whenever configured agents exist but profiles do not.
+- [x] Preserve cloud credential and file-upload validation behavior.
+- [x] Ensure wizard-created profiles are added, selected, and usable on later submit.
+- [x] Stop rendering `DefaultProfileBanner`.
+- [x] Use `NoProfilesGate` for any no-profile project with at least one configured agent.
+- [x] Keep one-agent wizard setup short by skipping agent selection.
+- [x] Update project chat unit tests for no agents, one agent/no profiles, multiple agents/no profiles, existing profiles, deletion to no profiles, duplicate names, provider catalog fallback, cloud credentials, long names, and active follow-up inputs where relevant.
+- [x] Run targeted API and web unit tests.
 - [ ] Run screenshot-backed Playwright UI audit at 375x667 and 1280x800.
 - [ ] Run required quality checks.
 - [ ] Complete specialist review and staging verification before PR merge.

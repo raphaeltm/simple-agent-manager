@@ -256,7 +256,7 @@ describe('ProjectChat new chat button', () => {
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
-    mocks.listAgentProfiles.mockResolvedValue([]);
+    mocks.listAgentProfiles.mockResolvedValue([makeAgentProfile()]);
     mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
     mocks.summarizeSession.mockResolvedValue({
@@ -411,18 +411,12 @@ describe('ProjectChat new chat button', () => {
     fireEvent.change(textarea, { target: { value: 'Build a todo app' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // Should submit the task with the default agent type, default workspace profile, and navigate to the new session
+    // Should submit the task with the selected explicit profile and navigate to the new session.
     await waitFor(() => {
-      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        agentType: 'claude-code',
-        permissionMode: 'bypassPermissions',
-        vmSizeOverride: 'medium',
-        workspaceProfile: 'lightweight',
-        taskMode: 'conversation',
-      }));
+      expect(mocks.createAgentProfile).not.toHaveBeenCalled();
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
         message: 'Build a todo app',
-        agentProfileId: 'created-profile',
+        agentProfileId: 'prof-1',
       }));
     });
 
@@ -466,7 +460,7 @@ describe('ProjectChat new chat button', () => {
     });
     expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Branch: sam/fix-login-bug')).toBeInTheDocument();
-    expect(screen.getByText(/Using/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
@@ -531,7 +525,7 @@ describe('ProjectChat new chat button', () => {
     });
     expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeInTheDocument();
-    expect(screen.getByText(/Using/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     await waitFor(() => {
@@ -617,7 +611,7 @@ describe('ProjectChat voice input', () => {
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
-    mocks.listAgentProfiles.mockResolvedValue([]);
+    mocks.listAgentProfiles.mockResolvedValue([makeAgentProfile()]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -689,14 +683,52 @@ describe('ProjectChat profile setup wizard', () => {
     });
   });
 
-  it('shows the default banner and auto-creates a profile for a single agent', async () => {
+  it('gates a single agent behind the setup wizard instead of auto-creating a profile', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
 
     renderProjectChat();
 
     await waitFor(() => {
-      expect(screen.getByText(/Using/)).toBeInTheDocument();
-      expect(screen.getByText(/Claude Code/)).toBeInTheDocument();
+      expect(screen.getByText('Create a profile to start')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Using/)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('What kind of work?')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
+    expect(mocks.submitTask).not.toHaveBeenCalled();
+  });
+
+  it('creates a single-agent profile through the shortened wizard and submits on the next send', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+
+    renderProjectChat();
+
+    await openProfileWizardFromGate();
+    expect(screen.getByText('What kind of work?')).toBeInTheDocument();
+    expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
+
+    chooseWorkType(/Build and open PRs/i);
+    chooseVmSize(/Medium/i);
+
+    const nameInput = screen.getByLabelText('Profile name');
+    expect(nameInput).toHaveValue('Claude Code Tasks');
+    fireEvent.change(nameInput, { target: { value: 'Claude Builder' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+
+    await waitFor(() => {
+      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
+        name: 'Claude Builder',
+        agentType: 'claude-code',
+        vmSizeOverride: 'medium',
+        workspaceProfile: 'full',
+        taskMode: 'task',
+      }));
     });
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
@@ -704,14 +736,6 @@ describe('ProjectChat profile setup wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.createAgentProfile).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        name: 'Claude Code Default',
-        agentType: 'claude-code',
-        permissionMode: 'bypassPermissions',
-        vmSizeOverride: 'medium',
-        workspaceProfile: 'lightweight',
-        taskMode: 'conversation',
-      }));
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
         message: 'Build a profile-first chat',
         agentProfileId: 'created-profile',
