@@ -2371,20 +2371,12 @@ func TestEnsureDevcontainerReadyNoConfigUsesLightweightDefault(t *testing.T) {
 		t.Fatal("expected usedFallback=false for no-config lightweight default startup")
 	}
 
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("failed to read generated default config: %v", err)
-	}
-
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("generated config is not valid JSON: %v\nContent:\n%s", err, string(data))
-	}
+	parsed, configJSON := readGeneratedDevcontainerConfig(t, configPath)
 	if _, hasFeatures := parsed["features"]; hasFeatures {
-		t.Fatalf("expected no-config default startup to omit devcontainer Features, got:\n%s", string(data))
+		t.Fatalf("expected no-config default startup to omit devcontainer Features, got:\n%s", configJSON)
 	}
 	if updateRemoteUserUID, ok := parsed["updateRemoteUserUID"].(bool); !ok || updateRemoteUserUID {
-		t.Fatalf("expected no-config default startup to disable updateRemoteUserUID, got:\n%s", string(data))
+		t.Fatalf("expected no-config default startup to disable updateRemoteUserUID, got:\n%s", configJSON)
 	}
 }
 
@@ -2446,6 +2438,21 @@ func newNoConfigDevcontainerReadyConfig(t *testing.T, labelValue, configPath str
 		DefaultDevcontainerConfigPath: configPath,
 		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
 	}
+}
+
+func readGeneratedDevcontainerConfig(t *testing.T, configPath string) (map[string]interface{}, string) {
+	t.Helper()
+
+	rawConfig, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("failed to read generated default config: %v", readErr)
+	}
+	configJSON := string(rawConfig)
+	parsed := make(map[string]interface{})
+	if decodeErr := json.Unmarshal(rawConfig, &parsed); decodeErr != nil {
+		t.Fatalf("generated config is not valid JSON: %v\nContent:\n%s", decodeErr, configJSON)
+	}
+	return parsed, configJSON
 }
 
 // --- Credential helper host-side tests ---

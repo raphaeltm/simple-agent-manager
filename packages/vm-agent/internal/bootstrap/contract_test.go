@@ -93,7 +93,7 @@ func TestReadyCallbackRecoveryStatus(t *testing.T) {
 		CallbackToken:   "token",
 	}
 
-	err := markWorkspaceReady(context.Background(), cfg, "recovery", "")
+	err := markWorkspaceReadyWithoutProfile(context.Background(), cfg, "recovery")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestReadyCallbackDefaultsToRunning(t *testing.T) {
 	}
 
 	// Empty status should default to "running"
-	err := markWorkspaceReady(context.Background(), cfg, "", "")
+	err := markWorkspaceReadyWithoutProfile(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestReadyCallbackNon2xxReturnsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	err := markWorkspaceReady(ctx, cfg, "running", "")
+	err := markWorkspaceReadyWithoutProfile(ctx, cfg, "running")
 	if err == nil {
 		t.Fatal("expected error for non-2xx response")
 	}
@@ -176,7 +176,7 @@ func TestReadyCallbackURLConstruction(t *testing.T) {
 		CallbackToken:   "token",
 	}
 
-	err := markWorkspaceReady(context.Background(), cfg, "running", "")
+	err := markWorkspaceReadyWithoutProfile(context.Background(), cfg, "running")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestMarkWorkspaceReadyFailureWrapsAsCallbackError(t *testing.T) {
 	}
 
 	// markWorkspaceReady returns a plain error — verify it can be wrapped
-	err := markWorkspaceReady(ctx, cfg, "running", "")
+	err := markWorkspaceReadyWithoutProfile(ctx, cfg, "running")
 	if err == nil {
 		t.Fatal("expected error from markWorkspaceReady")
 	}
@@ -283,7 +283,7 @@ func TestMarkWorkspaceReadyFailureWrapsAsCallbackErrorRecovery(t *testing.T) {
 		CallbackToken:   "test-token",
 	}
 
-	err := markWorkspaceReady(ctx, cfg, "recovery", "")
+	err := markWorkspaceReadyWithoutProfile(ctx, cfg, "recovery")
 	if err == nil {
 		t.Fatal("expected error from markWorkspaceReady")
 	}
@@ -292,4 +292,8 @@ func TestMarkWorkspaceReadyFailureWrapsAsCallbackErrorRecovery(t *testing.T) {
 	if cbErr.Status != "recovery" {
 		t.Errorf("expected status 'recovery', got %q", cbErr.Status)
 	}
+}
+
+func markWorkspaceReadyWithoutProfile(ctx context.Context, cfg *config.Config, status string) error {
+	return markWorkspaceReady(ctx, cfg, status, "")
 }
