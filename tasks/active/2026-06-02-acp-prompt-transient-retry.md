@@ -20,13 +20,13 @@ The VM agent treated the prompt error as terminal and sent a failed task callbac
 
 ## Checklist
 
-- [ ] Add env-backed VM agent config for bounded ACP prompt retry attempts and backoff.
-- [ ] Classify transient provider prompt errors including HTTP 529, `overloaded_error`, rate limit, HTTP 429, HTTP 503, and temporarily unavailable style failures.
-- [ ] Retry `SessionHost` ACP prompt calls before `finishPromptWithError`/`OnPromptComplete`, preserving cancellation, crash recovery, and timeout behavior.
-- [ ] Emit UI-visible workspace/lifecycle events for retry attempts with attempt count, max attempts, delay, and redacted error text.
-- [ ] Avoid duplicating synthetic user-message persistence/reporting across retry attempts.
-- [ ] Add focused Go tests for transient error classification, retry success, retry exhaustion, and non-retryable behavior.
-- [ ] Run focused VM agent Go tests and relevant repo quality checks.
+- [x] Add env-backed VM agent config for bounded ACP prompt retry attempts and backoff.
+- [x] Classify transient provider prompt errors including HTTP 529, `overloaded_error`, rate limit, HTTP 429, HTTP 503, and temporarily unavailable style failures.
+- [x] Retry `SessionHost` ACP prompt calls before `finishPromptWithError`/`OnPromptComplete`, preserving cancellation, crash recovery, and timeout behavior.
+- [x] Emit UI-visible workspace/lifecycle events for retry attempts with attempt count, max attempts, delay, and redacted error text.
+- [x] Avoid duplicating synthetic user-message persistence/reporting across retry attempts.
+- [x] Add focused Go tests for transient error classification, retry success, retry exhaustion, and non-retryable behavior.
+- [x] Run focused VM agent Go tests and relevant repo quality checks.
 - [ ] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
 - [ ] Complete staging deployment and infrastructure verification for the VM agent change, including provisioning a real staging VM and confirming heartbeat/workspace access.
 
@@ -38,4 +38,3 @@ The VM agent treated the prompt error as terminal and sent a failed task callbac
 - Users/admins can see that SAM is retrying due to provider capacity instead of silently waiting.
 - Tests prove classification and retry behavior.
 - Branch is deployed through the staging pipeline and VM agent behavior is verified on a real staging workspace before PR merge.
-
