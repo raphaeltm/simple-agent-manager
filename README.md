@@ -20,7 +20,7 @@
 
 ## What You Get
 
-**Project chat that executes code.** Link a GitHub repo, describe a task in natural language, and SAM handles the rest — provisioning a VM, cloning your repo into a devcontainer, starting [Claude Code](https://www.anthropic.com/claude-code), and streaming output back to the chat. When the agent finishes, it pushes to a branch and opens a PR.
+**Project chat that executes code.** Link a GitHub repo, describe a task in natural language, and SAM handles the rest — provisioning a VM, cloning your repo into a devcontainer, starting [Claude Code](https://www.anthropic.com/claude-code), and streaming output back to the chat.
 
 **Chat history that outlives workspaces.** Conversations persist at the project level. Stop a workspace, spin up a new one weeks later, and your full history is still there.
 
@@ -41,7 +41,7 @@ You: "Add rate limiting to the /api/upload endpoint"
       3. Starts Claude Code with your task description
       4. Streams agent output back to project chat
          |
-    Agent pushes branch + opens PR when done
+    Agent streams results back as it works
 ```
 
 ## Architecture
