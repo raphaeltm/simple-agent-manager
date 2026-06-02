@@ -15,7 +15,8 @@
     "@astrojs/sitemap": "3.7.3",
     "@astrojs/starlight": "0.37.7",
     "astro": "5.17.3",
-    "mermaid": "11.14.0"
+    "mermaid": "11.14.0",
+    "rehype-mermaid": "^3.0.0"
   },
   "devDependencies": {
     "esbuild": "0.28.0",
