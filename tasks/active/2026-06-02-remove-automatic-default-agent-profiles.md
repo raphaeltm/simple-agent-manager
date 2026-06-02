@@ -30,7 +30,7 @@ Related ready idea: `01KSQE75WVZQM7R3VC6N87HX4Z` (`Profile setup wizard for proj
 - [x] Keep one-agent wizard setup short by skipping agent selection.
 - [x] Update project chat unit tests for no agents, one agent/no profiles, multiple agents/no profiles, existing profiles, deletion to no profiles, duplicate names, provider catalog fallback, cloud credentials, long names, and active follow-up inputs where relevant.
 - [x] Run targeted API and web unit tests.
-- [ ] Run screenshot-backed Playwright UI audit at 375x667 and 1280x800.
+- [x] Run screenshot-backed Playwright UI audit at 375x667 and 1280x800.
 - [ ] Run required quality checks.
 - [ ] Complete specialist review and staging verification before PR merge.
 

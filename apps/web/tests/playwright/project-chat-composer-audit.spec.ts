@@ -2,7 +2,7 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, getProjectSuffix, makeMockUser, screenshot } from './audit-helpers';
 
-type AuditMode = 'new' | 'active' | 'provisioning' | 'wizard' | 'single-default';
+type AuditMode = 'new' | 'active' | 'provisioning' | 'wizard' | 'single-wizard' | 'no-agents' | 'duplicate';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
@@ -60,6 +60,28 @@ const AGENT_PROFILES = [
     name: 'Open Code',
     description: 'Profile with a multi-word name and a longer description for wrapping.',
     agentType: 'opencode',
+    model: null,
+    permissionMode: null,
+    systemPromptAppend: null,
+    maxTurns: null,
+    timeoutMinutes: null,
+    vmSizeOverride: null,
+    provider: null,
+    vmLocation: null,
+    workspaceProfile: null,
+    devcontainerConfigName: null,
+    taskMode: null,
+    isBuiltin: false,
+    createdAt: '2026-05-18T00:00:00Z',
+    updatedAt: '2026-05-18T00:00:00Z',
+  },
+  {
+    id: 'profile-long-name',
+    projectId: MOCK_PROJECT.id,
+    userId: 'user-test-1',
+    name: 'Long reusable profile name with unicode π and escaped <script> content that must truncate',
+    description: 'A deliberately long profile name for mobile wrapping and truncation checks.',
+    agentType: 'claude-code',
     model: null,
     permissionMode: null,
     systemPromptAppend: null,
@@ -197,12 +219,15 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
       ]);
     if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') {
+      if (mode === 'no-agents') {
+        return respond(200, { agents: [] });
+      }
       return respond(200, {
-        agents: mode === 'single-default'
-          ? [{ id: 'openai-codex', name: 'OpenAI Codex', description: 'Focused implementation agent', configured: true, supportsAcp: true }]
+        agents: mode === 'single-wizard'
+          ? [{ id: 'openai-codex', name: 'OpenAI Codex With A Long Friendly Name', description: 'Focused implementation agent with a long description that should wrap cleanly on mobile', configured: true, supportsAcp: true }]
           : [
               { id: 'openai-codex', name: 'OpenAI Codex', description: 'Focused implementation agent', configured: true, supportsAcp: true },
-              { id: 'claude-code', name: 'Claude Code', description: 'General coding agent', configured: true, supportsAcp: true },
+              { id: 'claude-code', name: 'Claude Code With A Long Friendly Name And Special <characters>', description: 'General coding agent with a long description that should wrap cleanly on mobile', configured: true, supportsAcp: true },
             ],
       });
     }
@@ -222,7 +247,7 @@ async function setupApiMocks(page: Page, mode: AuditMode) {
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
       if (subPath === '/agent-profiles') {
-        return respond(200, { items: mode === 'wizard' || mode === 'single-default' ? [] : AGENT_PROFILES });
+        return respond(200, { items: mode === 'wizard' || mode === 'single-wizard' || mode === 'no-agents' ? [] : AGENT_PROFILES });
       }
       if (subPath.match(/^\/agent-profiles\/[^/]+\/runtime\/env-vars/)) {
         return respond(200, { envVars: [] });
@@ -331,19 +356,38 @@ test.describe('Project chat composer audit', () => {
       `project-chat-composer-new-mention-${getProjectSuffix(testInfo.project.name)}`
     );
   });
-  test('single-agent no-profile state shows default banner with active composer', async ({
+  test('no-agent state keeps settings prompt and disabled composer', async ({
     page,
   }, testInfo) => {
-    await openMockedChat(page, 'single-default');
+    await openMockedChat(page, 'no-agents');
 
-    await expect(page.getByText(/Using/)).toBeVisible();
-    await expect(page.getByText(/OpenAI Codex/)).toBeVisible();
-    const textarea = page.locator('textarea[role="combobox"]');
-    await expect(textarea).toBeEnabled();
-    await textarea.fill('Quick question with long wrapping text '.repeat(8));
+    await expect(page.getByText('Add an agent to start chatting')).toBeVisible();
+    await expect(page.locator('textarea[role="combobox"]')).toBeDisabled();
     await captureComposerAudit(
       page,
-      `project-chat-profile-default-${getProjectSuffix(testInfo.project.name)}`
+      `project-chat-no-agents-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
+  test('single-agent no-profile state gates composer and opens shortened wizard', async ({
+    page,
+  }, testInfo) => {
+    await openMockedChat(page, 'single-wizard');
+
+    await expect(page.getByText('Create a profile to start')).toBeVisible();
+    await expect(page.getByText(/Choose an agent and default runtime settings/)).toBeVisible();
+    await expect(page.locator('textarea[role="combobox"]')).toBeDisabled();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-gate-single-${getProjectSuffix(testInfo.project.name)}`
+    );
+
+    await page.getByRole('button', { name: /Create profile/i }).click();
+    await expect(page.getByText('What kind of work?')).toBeVisible();
+    await expect(page.getByText('Which agent?')).toHaveCount(0);
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-wizard-single-work-type-${getProjectSuffix(testInfo.project.name)}`
     );
   });
 
@@ -364,6 +408,36 @@ test.describe('Project chat composer audit', () => {
     await captureComposerAudit(
       page,
       `project-chat-profile-wizard-agent-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
+  test('existing profiles handle long names and duplicate profile-name errors', async ({
+    page,
+  }, testInfo) => {
+    await openMockedChat(page, 'duplicate');
+
+    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Long reusable profile name/ })).toBeVisible();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-existing-long-names-${getProjectSuffix(testInfo.project.name)}`
+    );
+
+    const newButtons = page.getByRole('button', { name: /New/i });
+    await newButtons.last().click();
+    await page.getByRole('button', { name: /OpenAI Codex/i }).click();
+    await page.getByRole('button', { name: /Next/i }).click();
+    await page.getByRole('button', { name: /Chat and explore/i }).click();
+    await page.getByRole('button', { name: /Next/i }).click();
+    await page.getByRole('button', { name: /Medium/i }).click();
+    await page.getByRole('button', { name: /Next/i }).click();
+    await page.getByLabel('Profile name').fill('Codex');
+    await page.getByRole('button', { name: /Create profile/i }).click();
+
+    await expect(page.getByText('Profile "Codex" already exists')).toBeVisible();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-duplicate-error-${getProjectSuffix(testInfo.project.name)}`
     );
   });
 
