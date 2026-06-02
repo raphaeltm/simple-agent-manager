@@ -2,16 +2,14 @@
  * Choose-Your-Path Onboarding Wizard
  *
  * Replaces the old tab-based onboarding with a question-driven flow:
- * 1. Questions → user picks their AI subscription, cloud, GitHub status
- * 2. Path Preview → personalized setup plan based on answers
- * 3. Step Execution → real API calls for each setup step
- * 4. Completion → success screen with next-steps guidance
- *
- * Inspired by TurboTax's question-driven flow and Vercel's guided import.
+ * 1. Questions -> user picks their AI subscription, cloud, GitHub status
+ * 2. Path Preview -> personalized setup plan based on answers
+ * 3. Step Execution -> real API calls for each setup step
+ * 4. Completion -> success screen with next-steps guidance
  */
-import { Card } from '@simple-agent-manager/ui';
+import { Card, SkeletonCard } from '@simple-agent-manager/ui';
 import { ArrowLeft } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   getTrialStatus,
@@ -29,6 +27,13 @@ import { StepExecution } from './StepExecution';
 
 type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
 
+const PHASE_LABELS: Record<Phase, string> = {
+  questions: '',
+  'path-preview': 'Your personalized setup plan is ready',
+  executing: 'Setting up your account',
+  complete: 'Setup complete!',
+};
+
 function getStorageKey(userId: string): string {
   return `sam-onboarding-wizard-dismissed-${userId}`;
 }
@@ -39,7 +44,6 @@ export function ChoosePathWizard() {
 
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState<boolean | null>(null);
-  const [setupComplete, setSetupComplete] = useState(false);
 
   const [phase, setPhase] = useState<Phase>('questions');
   const [currentQuestionId, setCurrentQuestionId] = useState('ai-subscription');
@@ -74,7 +78,6 @@ export function ChoosePathWizard() {
 
         // If fully set up, auto-dismiss
         if (hasAgent && hasCloud && hasGitHub) {
-          setSetupComplete(true);
           setDismissed(true);
           if (userId) localStorage.setItem(getStorageKey(userId), 'true');
         }
@@ -126,7 +129,6 @@ export function ChoosePathWizard() {
     setPhase('questions');
     setCurrentQuestionId('ai-subscription');
     setAnswers({});
-    // Keep existing-* tags, clear user answers
     setTags((prev) => prev.filter((t) => t.startsWith('existing-')));
     setGeneratedSteps([]);
   }, []);
@@ -151,20 +153,40 @@ export function ChoosePathWizard() {
       setTags((prev) => prev.filter((t) => !lastOption.tags.includes(t)));
     }
     setCurrentQuestionId(lastAnsweredId);
-  }, [answers, questionHistory, tags]);
+  }, [answers, questionHistory]);
 
   const handleExecutionComplete = useCallback(() => {
     setPhase('complete');
     if (userId) localStorage.setItem(getStorageKey(userId), 'true');
   }, [userId]);
 
-  // Don't render while loading or if dismissed
-  if (loading || dismissed === null || dismissed || setupComplete) return null;
+  // Filter out auto-handled steps for execution
+  const executableSteps = useMemo(
+    () => generatedSteps.filter((s) => !s.isOptional),
+    [generatedSteps]
+  );
+
+  // Show skeleton during initial load
+  if (loading || dismissed === null) {
+    return (
+      <div className="mb-6">
+        <SkeletonCard lines={2} />
+      </div>
+    );
+  }
+
+  if (dismissed) return null;
 
   const currentQuestion = QUESTIONS.find((q) => q.id === currentQuestionId);
+  const phaseLabel = PHASE_LABELS[phase];
 
   return (
-    <div data-testid="onboarding-wizard" aria-label="Account setup" className="mb-6">
+    <div data-testid="onboarding-wizard" role="region" aria-label="Account setup" className="mb-6">
+      {/* Screen reader announcement for phase transitions */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {phaseLabel}
+      </div>
+
       <Card className="p-0 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-surface">
@@ -174,19 +196,19 @@ export function ChoosePathWizard() {
             </div>
             <span className="text-sm font-semibold text-fg-primary">Setup</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {canGoBack && (
               <button
                 type="button"
                 onClick={handleBack}
-                className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px]"
               >
                 <ArrowLeft size={12} /> Back
               </button>
             )}
             {phase === 'questions' && (
               <span className="text-xs text-fg-muted/50">
-                Q{Object.keys(answers).length + 1} of ~{QUESTIONS.length}
+                Q{Object.keys(answers).length + 1}
               </span>
             )}
             {phase === 'path-preview' && (
@@ -198,7 +220,7 @@ export function ChoosePathWizard() {
             <button
               type="button"
               onClick={handleDismiss}
-              className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0"
+              className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px] px-1"
             >
               Skip setup
             </button>
@@ -217,14 +239,13 @@ export function ChoosePathWizard() {
           {phase === 'path-preview' && (
             <PathPreview
               steps={generatedSteps}
-              tags={tags.filter((t) => !t.startsWith('existing-'))}
               onStart={() => setPhase('executing')}
               onReset={handleReset}
             />
           )}
           {phase === 'executing' && (
             <StepExecution
-              steps={generatedSteps}
+              steps={executableSteps}
               tags={tags}
               onComplete={handleExecutionComplete}
             />

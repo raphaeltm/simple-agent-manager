@@ -140,7 +140,14 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
             {Math.round(progress)}% complete
           </span>
         </div>
-        <div className="w-full h-1.5 bg-accent/10 rounded-full overflow-hidden">
+        <div
+          role="progressbar"
+          aria-valuenow={Math.round(progress)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`Setup progress: step ${currentStepIndex + 1} of ${steps.length}`}
+          className="w-full h-1.5 bg-accent/10 rounded-full overflow-hidden"
+        >
           <div
             className="h-full bg-accent rounded-full transition-all duration-500"
             style={{ width: `${progress}%` }}
@@ -327,12 +334,16 @@ function StepForm({
             </div>
           )}
           <div className="mb-3">
+            <label htmlFor="onboarding-api-key" className="block text-xs font-medium text-fg-muted mb-1">
+              {isAnthropic ? 'Anthropic' : 'OpenAI'} API key
+            </label>
             <Input
+              id="onboarding-api-key"
               type="password"
               autoComplete="off"
               value={form.apiKey}
               onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-              placeholder={`Paste your ${isAnthropic ? 'Anthropic' : 'OpenAI'} API key`}
+              placeholder={`sk-...`}
             />
             {defaultAgent && (
               <a
@@ -389,12 +400,16 @@ function StepForm({
       return (
         <>
           <div className="mb-3">
+            <label htmlFor="onboarding-hetzner-token" className="block text-xs font-medium text-fg-muted mb-1">
+              Hetzner API token
+            </label>
             <Input
+              id="onboarding-hetzner-token"
               type="password"
               autoComplete="off"
               value={form.hetznerToken}
               onChange={(e) => setForm((prev) => ({ ...prev, hetznerToken: e.target.value }))}
-              placeholder="Paste your Hetzner API token"
+              placeholder="Paste your token"
             />
             <a
               href="https://console.hetzner.cloud/projects"

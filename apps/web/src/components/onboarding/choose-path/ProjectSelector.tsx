@@ -1,5 +1,5 @@
 import type { Repository } from '@simple-agent-manager/shared';
-import { Button } from '@simple-agent-manager/ui';
+import { Button, Select } from '@simple-agent-manager/ui';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -71,7 +71,11 @@ export function ProjectSelector({
         </div>
       ) : (
         <div className="mb-3">
-          <select
+          <label htmlFor="onboarding-repo-select" className="block text-xs font-medium text-fg-muted mb-1">
+            Repository
+          </label>
+          <Select
+            id="onboarding-repo-select"
             value={form.selectedRepoName}
             onChange={(e) => {
               const repo = repos.find((r) => r.fullName === e.target.value);
@@ -81,7 +85,6 @@ export function ProjectSelector({
                 selectedRepoName: repo?.fullName ?? '',
               }));
             }}
-            className="w-full p-2 rounded-md border border-border-default bg-surface text-fg-primary text-sm"
           >
             <option value="">Select a repository...</option>
             {repos.map((repo) => (
@@ -89,7 +92,7 @@ export function ProjectSelector({
                 {repo.fullName}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       )}
       {repos.length > 0 && (

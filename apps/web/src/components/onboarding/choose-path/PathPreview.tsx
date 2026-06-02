@@ -6,14 +6,14 @@ import { getTimeEstimate } from './path-generator';
 
 interface PathPreviewProps {
   steps: GeneratedStep[];
-  tags: string[];
   onStart: () => void;
   onReset: () => void;
 }
 
-export function PathPreview({ steps, tags, onStart, onReset }: PathPreviewProps) {
+export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
   const timeEstimate = getTimeEstimate(steps);
   const requiredSteps = steps.filter((s) => !s.isOptional);
+  let stepNumber = 0;
 
   return (
     <div className="max-w-md mx-auto">
@@ -22,7 +22,7 @@ export function PathPreview({ steps, tags, onStart, onReset }: PathPreviewProps)
         <div className="w-16 h-16 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
           <Sparkles size={28} className="text-accent" />
         </div>
-        <h2 className="sam-type-page-title text-fg-primary mb-2">Your personalized setup</h2>
+        <h2 className="sam-type-section-heading text-fg-primary mb-2">Your personalized setup</h2>
         <p className="sam-type-body text-fg-muted mb-1">
           Based on your answers, here's what you need to do:
         </p>
@@ -31,7 +31,7 @@ export function PathPreview({ steps, tags, onStart, onReset }: PathPreviewProps)
             <Clock size={12} /> {timeEstimate}
           </span>
           <span>|</span>
-          <span>{requiredSteps.length} steps</span>
+          <span>{requiredSteps.length} step{requiredSteps.length !== 1 ? 's' : ''}</span>
           {steps.length > requiredSteps.length && (
             <>
               <span>|</span>
@@ -43,36 +43,39 @@ export function PathPreview({ steps, tags, onStart, onReset }: PathPreviewProps)
 
       {/* Step list */}
       <div className="flex flex-col gap-3 mb-8">
-        {steps.map((step, i) => (
-          <Card
-            key={step.id}
-            className={`p-4 ${step.isOptional ? 'opacity-60' : ''}`}
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                  step.isOptional
-                    ? 'bg-success/10 text-success'
-                    : 'bg-accent/20 text-accent'
-                }`}
-              >
-                {step.isOptional ? <Check size={12} /> : i + 1}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="font-medium text-fg-primary text-sm">{step.title}</span>
-                  <span className="text-[10px] text-fg-muted/40">{step.timeEstimate}</span>
-                  {step.isOptional && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success">
-                      Done
-                    </span>
-                  )}
+        {steps.map((step) => {
+          if (!step.isOptional) stepNumber++;
+          return (
+            <Card
+              key={step.id}
+              className={`p-4 ${step.isOptional ? 'opacity-60' : ''}`}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    step.isOptional
+                      ? 'bg-success/10 text-success'
+                      : 'bg-accent/20 text-accent'
+                  }`}
+                >
+                  {step.isOptional ? <Check size={12} /> : stepNumber}
                 </div>
-                <p className="text-xs text-fg-muted">{step.description}</p>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-medium text-fg-primary text-sm">{step.title}</span>
+                    <span className="text-[10px] text-fg-muted/40">{step.timeEstimate}</span>
+                    {step.isOptional && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success">
+                        Handled
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-fg-muted">{step.description}</p>
+                </div>
               </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
 
       {/* Actions */}
@@ -87,21 +90,6 @@ export function PathPreview({ steps, tags, onStart, onReset }: PathPreviewProps)
         >
           <RotateCcw size={14} /> Change my answers
         </button>
-      </div>
-
-      {/* Tags summary */}
-      <div className="mt-8 text-center">
-        <p className="text-[10px] text-fg-muted/30 mb-1">Your profile:</p>
-        <div className="flex flex-wrap gap-1 justify-center">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-accent/5 text-fg-muted/40"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
       </div>
     </div>
   );

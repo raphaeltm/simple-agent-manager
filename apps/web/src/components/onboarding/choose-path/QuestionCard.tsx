@@ -11,16 +11,18 @@ interface QuestionCardProps {
 export function QuestionCard({ question, selectedId, onSelect }: QuestionCardProps) {
   return (
     <div className="max-w-md mx-auto">
-      <h2 className="sam-type-page-title text-fg-primary mb-1">{question.question}</h2>
+      <h2 className="sam-type-section-heading text-fg-primary mb-1">{question.question}</h2>
       <p className="sam-type-body text-fg-muted mb-6">{question.description}</p>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3" role="radiogroup" aria-label={question.question}>
         {question.options.map((option) => {
           const isSelected = selectedId === option.id;
           return (
             <button
               key={option.id}
               type="button"
+              role="radio"
+              aria-checked={isSelected}
               onClick={() => onSelect(option)}
               className={`w-full text-left p-4 rounded-lg border transition-all cursor-pointer group bg-surface ${
                 isSelected

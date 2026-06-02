@@ -171,5 +171,6 @@ export function getTimeEstimate(steps: GeneratedStep[]): string {
     }
   }
   const minutes = Math.ceil(totalSeconds / 60);
+  if (minutes === 0) return '< 1 min';
   return `~${minutes} min${minutes !== 1 ? 's' : ''}`;
 }
