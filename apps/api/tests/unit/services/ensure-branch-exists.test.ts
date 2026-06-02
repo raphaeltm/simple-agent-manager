@@ -37,8 +37,8 @@ vi.mock('../../../src/lib/runtime-validation', () => ({
   expectJsonRecord: vi.fn().mockImplementation((val: unknown) => val),
 }));
 
-import { ensureBranchExists } from '../../../src/services/github-app';
 import type { Env } from '../../../src/env';
+import { ensureBranchExists } from '../../../src/services/github-app';
 
 const mockEnv = {
   GITHUB_APP_ID: 'test-app-id',
