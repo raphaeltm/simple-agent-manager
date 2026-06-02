@@ -87,6 +87,9 @@ func FormatRelativeTime(timestamp string) string {
 	return RelativeTime(time.Since(t))
 }
 
+// FormatAnyTimestamp handles the mixed timestamp formats used by the API:
+// some fields send RFC3339 strings, others send Unix milliseconds as JSON numbers.
+// encoding/json always decodes JSON numbers into float64 when the target is any.
 func FormatAnyTimestamp(value any) string {
 	switch v := value.(type) {
 	case nil:
@@ -95,16 +98,6 @@ func FormatAnyTimestamp(value any) string {
 		return FormatRelativeTime(v)
 	case float64:
 		return FormatUnixTimestamp(v)
-	case int:
-		return FormatUnixTimestamp(float64(v))
-	case int64:
-		return FormatUnixTimestamp(float64(v))
-	case json.Number:
-		number, err := v.Float64()
-		if err != nil {
-			return v.String()
-		}
-		return FormatUnixTimestamp(number)
 	default:
 		return fmt.Sprint(v)
 	}

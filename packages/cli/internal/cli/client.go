@@ -151,7 +151,7 @@ func (c APIClient) ListLibraryFiles(ctx context.Context, projectID string, recur
 	var response LibraryListResponse
 	path := projectAPIPath(projectID, "library")
 	if recursive {
-		path += "?recursive=true"
+		path += "?" + url.Values{"recursive": {"true"}}.Encode()
 	}
 	err := c.request(ctx, http.MethodGet, path, nil, &response)
 	return response, err

@@ -543,9 +543,11 @@ func TestStatusJSONOutputUsesCurrentContracts(t *testing.T) {
 	if _, ok := value["project"].(map[string]any); !ok {
 		t.Fatalf("project missing from %#v", value)
 	}
-	if _, ok := value["sessions"].(map[string]any); !ok {
-		t.Fatalf("sessions missing from %#v", value)
+	sessionsObj, ok := value["sessions"].(map[string]any)
+	if !ok {
+		t.Fatalf("sessions is not an object in %#v", value)
 	}
+	assertArrayField(t, sessionsObj, "sessions")
 }
 
 func TestProjectScopedCommandWithoutProjectFails(t *testing.T) {
