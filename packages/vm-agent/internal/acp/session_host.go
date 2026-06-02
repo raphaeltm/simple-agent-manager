@@ -34,6 +34,14 @@ const (
 	// force-stopping an unresponsive agent process.
 	DefaultPromptCancelGracePeriod = 5 * time.Second
 
+	// DefaultPromptRetryInitialDelay is the first delay before retrying a
+	// transient provider prompt error when no explicit delay is configured.
+	DefaultPromptRetryInitialDelay = 15 * time.Second
+
+	// DefaultPromptRetryMaxDelay caps retry backoff for transient provider
+	// prompt errors when no explicit cap is configured.
+	DefaultPromptRetryMaxDelay = 2 * time.Minute
+
 	// DefaultACPInitTimeout is the safety-net timeout for ACP phase operations
 	// when InitTimeoutMs is not configured. Matches the default for ACP_INIT_TIMEOUT_MS.
 	DefaultACPInitTimeout = 30 * time.Second

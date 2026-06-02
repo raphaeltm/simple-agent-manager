@@ -765,6 +765,29 @@ func TestGetEnvDurationWarnsOnBadValue(t *testing.T) {
 	}
 }
 
+func TestLoadACPPromptRetryConfig(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ID", "node-123")
+	t.Setenv("ACP_PROMPT_RETRY_MAX_RETRIES", "4")
+	t.Setenv("ACP_PROMPT_RETRY_INITIAL_BACKOFF", "3s")
+	t.Setenv("ACP_PROMPT_RETRY_MAX_BACKOFF", "45s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.ACPPromptRetryMaxRetries != 4 {
+		t.Fatalf("ACPPromptRetryMaxRetries = %d, want 4", cfg.ACPPromptRetryMaxRetries)
+	}
+	if cfg.ACPPromptRetryInitial != 3*time.Second {
+		t.Fatalf("ACPPromptRetryInitial = %v, want 3s", cfg.ACPPromptRetryInitial)
+	}
+	if cfg.ACPPromptRetryMax != 45*time.Second {
+		t.Fatalf("ACPPromptRetryMax = %v, want 45s", cfg.ACPPromptRetryMax)
+	}
+}
+
 // --- NewControlPlaneClient tests ---
 
 func TestNewControlPlaneClientTimeout(t *testing.T) {

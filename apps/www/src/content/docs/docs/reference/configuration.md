@@ -115,6 +115,9 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `ACP_PING_INTERVAL`           | `30s`   | WebSocket keepalive ping interval  |
 | `ACP_PONG_TIMEOUT`            | `10s`   | Pong response timeout              |
 | `ACP_TASK_PROMPT_TIMEOUT`     | `6h`    | Task execution prompt timeout      |
+| `ACP_PROMPT_RETRY_MAX_RETRIES` | `2`     | Max transient provider prompt retries after the initial attempt |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m`    | Max exponential backoff for transient provider prompt retries |
 | `ACP_IDLE_SUSPEND_TIMEOUT`    | `30m`   | Idle session auto-suspend timeout  |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s`    | Notification serialization timeout |
 

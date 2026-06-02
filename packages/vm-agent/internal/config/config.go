@@ -107,6 +107,9 @@ type Config struct {
 	ACPPromptTimeout         time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
 	ACPTaskPromptTimeout     time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
 	ACPPromptCancelGrace     time.Duration // Wait after cancel before force-stop fallback (default: 5s)
+	ACPPromptRetryMaxRetries int           // Retryable transient provider prompt errors after initial attempt (default: 2)
+	ACPPromptRetryInitial    time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
+	ACPPromptRetryMax        time.Duration // Max backoff for transient provider prompt retries (default: 2m)
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
@@ -314,6 +317,9 @@ func Load() (*Config, error) {
 		ACPPromptTimeout:         getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
 		ACPTaskPromptTimeout:     getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
 		ACPPromptCancelGrace:     getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
+		ACPPromptRetryMaxRetries: getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
+		ACPPromptRetryInitial:    getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
+		ACPPromptRetryMax:        getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
 		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
