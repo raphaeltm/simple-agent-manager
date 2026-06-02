@@ -195,6 +195,8 @@ export interface AgentProfile {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy: GitHubCliPolicy | null;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -217,6 +219,8 @@ export interface CreateAgentProfileRequest {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy?: GitHubCliPolicy | null;
 }
 
 /** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
@@ -236,6 +240,8 @@ export interface UpdateAgentProfileRequest {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy?: GitHubCliPolicy | null;
 }
 
 /** Resolved agent profile for task execution */
@@ -255,4 +261,49 @@ export interface ResolvedAgentProfile {
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy: GitHubCliPolicy | null;
 }
+
+// =============================================================================
+// SAM Platform Policy — GitHub CLI
+// =============================================================================
+
+export type GitHubCliPolicyMode = 'inherit' | 'custom';
+export type GitHubCliPermissionLevel = 'none' | 'read' | 'write';
+export type GitHubCliContentsPermissionLevel = 'read' | 'write';
+
+export interface GitHubCliPolicyPermissions {
+  /** Required for clone/fetch/push. Kept at read/write because disabling contents breaks workspace boot. */
+  contents: GitHubCliContentsPermissionLevel;
+  pullRequests: GitHubCliPermissionLevel;
+  issues: GitHubCliPermissionLevel;
+  actions: GitHubCliPermissionLevel;
+  packages: GitHubCliPermissionLevel;
+}
+
+export interface GitHubCliPolicy {
+  mode: GitHubCliPolicyMode;
+  repositoryScope: 'project';
+  permissions: GitHubCliPolicyPermissions;
+}
+
+export const GITHUB_CLI_POLICY_PERMISSION_KEYS = [
+  'contents',
+  'pullRequests',
+  'issues',
+  'actions',
+  'packages',
+] as const;
+
+export const DEFAULT_GITHUB_CLI_POLICY: GitHubCliPolicy = {
+  mode: 'inherit',
+  repositoryScope: 'project',
+  permissions: {
+    contents: 'write',
+    pullRequests: 'write',
+    issues: 'write',
+    actions: 'none',
+    packages: 'write',
+  },
+};

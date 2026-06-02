@@ -78,12 +78,7 @@ export type {
   WorkspaceStatus,
 } from './workspace';
 // Provider Catalog
-export type {
-  LocationInfo,
-  ProviderCatalog,
-  ProviderCatalogResponse,
-  SizeInfo,
-} from './provider';
+export type { LocationInfo, ProviderCatalog, ProviderCatalogResponse, SizeInfo } from './provider';
 
 // Project
 export type {
@@ -103,10 +98,7 @@ export type {
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
 } from './project';
-export {
-  ARTIFACTS_DEFAULTS,
-  VALID_REPO_PROVIDERS,
-} from './project';
+export { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from './project';
 
 // Task
 export type {
@@ -202,11 +194,7 @@ export {
 } from './session';
 
 // Activity
-export type {
-  ActivityActorType,
-  ActivityEvent,
-  ActivityEventType,
-} from './activity';
+export type { ActivityActorType, ActivityEvent, ActivityEventType } from './activity';
 
 // Notification
 export type {
@@ -221,11 +209,7 @@ export type {
   NotificationWsMessage,
   UpdateNotificationPreferenceRequest,
 } from './notification';
-export {
-  NOTIFICATION_CHANNELS,
-  NOTIFICATION_TYPES,
-  NOTIFICATION_URGENCIES,
-} from './notification';
+export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
 
 // Admin Observability
 export type {
@@ -253,6 +237,11 @@ export type {
   AgentSettings,
   AgentSettingsResponse,
   CreateAgentProfileRequest,
+  GitHubCliContentsPermissionLevel,
+  GitHubCliPermissionLevel,
+  GitHubCliPolicy,
+  GitHubCliPolicyMode,
+  GitHubCliPolicyPermissions,
   OpenCodeProvider,
   OpenCodeProviderMeta,
   ResolvedAgentProfile,
@@ -260,6 +249,8 @@ export type {
   UpdateAgentProfileRequest,
 } from './agent-settings';
 export {
+  DEFAULT_GITHUB_CLI_POLICY,
+  GITHUB_CLI_POLICY_PERMISSION_KEYS,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
   VALID_AGENT_PROVIDER_MODES,
@@ -442,10 +433,7 @@ export type {
   TaskEventNotification,
   TaskEventType,
 } from './orchestrator';
-export {
-  DECISION_ACTIONS,
-  OVERRIDABLE_SCHEDULER_STATES,
-} from './orchestrator';
+export { DECISION_ACTIONS, OVERRIDABLE_SCHEDULER_STATES } from './orchestrator';
 
 // Project Policy (Phase 4: Policy Propagation)
 export type {

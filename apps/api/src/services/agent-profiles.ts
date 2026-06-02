@@ -1,6 +1,7 @@
 import type {
   AgentProfile,
   CreateAgentProfileRequest,
+  GitHubCliPolicy,
   ResolvedAgentProfile,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
@@ -17,6 +18,30 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 /** Env vars used by agent profile service */
 type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
+
+function parseGitHubCliPolicy(raw: string | null): GitHubCliPolicy | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as GitHubCliPolicy;
+    if (
+      parsed &&
+      (parsed.mode === 'inherit' || parsed.mode === 'custom') &&
+      parsed.repositoryScope === 'project' &&
+      parsed.permissions &&
+      (parsed.permissions.contents === 'read' || parsed.permissions.contents === 'write')
+    ) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): string | null {
+  if (!policy || policy.mode === 'inherit') return null;
+  return JSON.stringify(policy);
+}
 
 /** Convert a DB row to an API response */
 function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
@@ -38,6 +63,7 @@ function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
     workspaceProfile: row.workspaceProfile,
     devcontainerConfigName: row.devcontainerConfigName,
     taskMode: row.taskMode,
+    githubCliPolicy: parseGitHubCliPolicy(row.githubCliPolicy),
     isBuiltin: row.isBuiltin === 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -59,10 +85,7 @@ export async function listProfiles(
     .where(
       or(
         eq(schema.agentProfiles.projectId, projectId),
-        and(
-          isNull(schema.agentProfiles.projectId),
-          eq(schema.agentProfiles.userId, userId)
-        )
+        and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
       )
     )
     .orderBy(schema.agentProfiles.name);
@@ -85,10 +108,7 @@ export async function getProfile(
         eq(schema.agentProfiles.id, profileId),
         or(
           eq(schema.agentProfiles.projectId, projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
+          and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
         )
       )
     )
@@ -123,12 +143,7 @@ export async function createProfile(
   const existing = await db
     .select({ id: schema.agentProfiles.id })
     .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.name, name)
-      )
-    )
+    .where(and(eq(schema.agentProfiles.projectId, projectId), eq(schema.agentProfiles.name, name)))
     .limit(1);
 
   if (existing.length > 0) {
@@ -154,6 +169,7 @@ export async function createProfile(
     workspaceProfile: body.workspaceProfile ?? null,
     devcontainerConfigName: body.devcontainerConfigName ?? null,
     taskMode: body.taskMode ?? null,
+    githubCliPolicy: serializeGitHubCliPolicy(body.githubCliPolicy),
     isBuiltin: 0,
   });
 
@@ -187,10 +203,7 @@ export async function updateProfile(
         .select({ id: schema.agentProfiles.id })
         .from(schema.agentProfiles)
         .where(
-          and(
-            eq(schema.agentProfiles.projectId, projectId),
-            eq(schema.agentProfiles.name, name)
-          )
+          and(eq(schema.agentProfiles.projectId, projectId), eq(schema.agentProfiles.name, name))
         )
         .limit(1);
 
@@ -216,17 +229,17 @@ export async function updateProfile(
   if (body.provider !== undefined) updates.provider = body.provider;
   if (body.vmLocation !== undefined) updates.vmLocation = body.vmLocation;
   if (body.workspaceProfile !== undefined) updates.workspaceProfile = body.workspaceProfile;
-  if (body.devcontainerConfigName !== undefined) updates.devcontainerConfigName = body.devcontainerConfigName;
+  if (body.devcontainerConfigName !== undefined)
+    updates.devcontainerConfigName = body.devcontainerConfigName;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
+  if (body.githubCliPolicy !== undefined)
+    updates.githubCliPolicy = serializeGitHubCliPolicy(body.githubCliPolicy);
 
   await db
     .update(schema.agentProfiles)
     .set(updates)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     );
 
   return getProfile(db, projectId, profileId, userId);
@@ -245,10 +258,7 @@ export async function deleteProfile(
   await db
     .delete(schema.agentProfiles)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     );
 }
 
@@ -284,6 +294,7 @@ export async function resolveAgentProfile(
       workspaceProfile: p.workspaceProfile,
       devcontainerConfigName: p.devcontainerConfigName,
       taskMode: p.taskMode,
+      githubCliPolicy: parseGitHubCliPolicy(p.githubCliPolicy),
     };
   }
 
@@ -304,6 +315,7 @@ export async function resolveAgentProfile(
       workspaceProfile: null,
       devcontainerConfigName: null,
       taskMode: null,
+      githubCliPolicy: null,
     };
   }
 
@@ -316,10 +328,7 @@ export async function resolveAgentProfile(
         eq(schema.agentProfiles.id, profileNameOrId),
         or(
           eq(schema.agentProfiles.projectId, projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
+          and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
         )
       )
     )
@@ -382,5 +391,6 @@ export async function resolveAgentProfile(
     workspaceProfile: null,
     devcontainerConfigName: null,
     taskMode: null,
+    githubCliPolicy: null,
   };
 }

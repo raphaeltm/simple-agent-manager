@@ -144,8 +144,7 @@ function convertPkcs1ToPkcs8(pem: string): string {
   // PKCS#8 header for RSA: SEQUENCE { AlgorithmIdentifier { OID rsaEncryption, NULL }, OCTET STRING { pkcs1Der } }
   // The RSA AlgorithmIdentifier is the fixed bytes: 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00
   const algId = new Uint8Array([
-    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
-    0x01, 0x05, 0x00,
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ]);
 
   // Build the OCTET STRING wrapping the PKCS#1 key
@@ -223,11 +222,27 @@ export async function generateAppJWT(env: Env): Promise<string> {
 export async function getInstallationToken(
   installationId: string,
   env: Env,
-  extraPermissions?: Record<string, string>,
+  options?:
+    | Record<string, string>
+    | {
+        permissions?: Record<string, string>;
+        repositoryIds?: number[];
+        repositories?: string[];
+      }
 ): Promise<{ token: string; expiresAt: string }> {
   const jwt = await generateAppJWT(env);
 
-  const body = extraPermissions ? JSON.stringify({ permissions: extraPermissions }) : undefined;
+  const body = options
+    ? JSON.stringify(
+        'permissions' in options || 'repositoryIds' in options || 'repositories' in options
+          ? {
+              ...(options.permissions ? { permissions: options.permissions } : {}),
+              ...(options.repositoryIds ? { repository_ids: options.repositoryIds } : {}),
+              ...(options.repositories ? { repositories: options.repositories } : {}),
+            }
+          : { permissions: options }
+      )
+    : undefined;
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
@@ -245,10 +260,16 @@ export async function getInstallationToken(
   );
 
   if (!response.ok) {
-    throw new Error(await readGitHubError(response, `Failed to get installation token: ${response.status}`));
+    throw new Error(
+      await readGitHubError(response, `Failed to get installation token: ${response.status}`)
+    );
   }
 
-  const data = await readResponseJson(response, installationTokenSchema, 'github.installation_token');
+  const data = await readResponseJson(
+    response,
+    installationTokenSchema,
+    'github.installation_token'
+  );
   return {
     token: data.token,
     expiresAt: data.expires_at,
@@ -265,7 +286,8 @@ export async function getInstallationRepositories(
 ): Promise<Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }>> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const allRepos: Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }> = [];
+  const allRepos: Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }> =
+    [];
   let page = 1;
   const perPage = 100; // GitHub's max per_page value
   let hasMore = true;
@@ -284,10 +306,16 @@ export async function getInstallationRepositories(
     );
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to get repositories: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to get repositories: ${response.status}`)
+      );
     }
 
-    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.installation_repositories');
+    const data = await readResponseJson(
+      response,
+      installationRepositoriesSchema,
+      'github.installation_repositories'
+    );
 
     const repos = data.repositories.map((repo) => ({
       id: repo.id,
@@ -304,7 +332,10 @@ export async function getInstallationRepositories(
 
     // Safety limit to prevent infinite loops (10,000 repos max)
     if (allRepos.length >= 10000) {
-      log.warn('github_app.repo_safety_limit_reached', { installationId, repoCount: allRepos.length });
+      log.warn('github_app.repo_safety_limit_reached', {
+        installationId,
+        repoCount: allRepos.length,
+      });
       break;
     }
   }
@@ -349,10 +380,16 @@ export async function getUserAccessibleInstallations(
         ok: false,
         installationCount: 0,
       });
-      throw new Error(await readGitHubError(response, `Failed to get user installations: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to get user installations: ${response.status}`)
+      );
     }
 
-    const data = await readResponseJson(response, userInstallationsSchema, 'github.user_installations');
+    const data = await readResponseJson(
+      response,
+      userInstallationsSchema,
+      'github.user_installations'
+    );
 
     log.info('github.user_accessible_installations.response', {
       flow: diagnostics?.flow,
@@ -364,10 +401,12 @@ export async function getUserAccessibleInstallations(
       installationCount: data.installations.length,
     });
 
-    allInstallations.push(...data.installations.map((installation) => ({
-      id: installation.id,
-      account: installation.account,
-    })));
+    allInstallations.push(
+      ...data.installations.map((installation) => ({
+        id: installation.id,
+        account: installation.account,
+      }))
+    );
 
     hasMore = data.installations.length === perPage;
     page++;
@@ -408,11 +447,11 @@ export async function getAuthenticatedUserOrganizations(
         ok: false,
         organizationCount: 0,
       });
-      const error = await response.json().catch(() => ({})) as { message?: string };
+      const error = (await response.json().catch(() => ({}))) as { message?: string };
       throw new Error(error.message || `Failed to get user organizations: ${response.status}`);
     }
 
-    const data = await response.json() as Array<{ login: string }>;
+    const data = (await response.json()) as Array<{ login: string }>;
 
     log.info('github.user_organizations.response', {
       flow: diagnostics.flow,
@@ -471,7 +510,7 @@ export async function verifyUserInstallationAccess(
     return false;
   }
 
-  const error = await response.json().catch(() => ({})) as { message?: string };
+  const error = (await response.json().catch(() => ({}))) as { message?: string };
   throw new Error(error.message || `Failed to verify user installation access: ${response.status}`);
 }
 
@@ -499,7 +538,8 @@ export async function getRepositoryBranches(
 ): Promise<Array<{ name: string }>> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const maxBranches = parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
+  const maxBranches =
+    parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
   const allBranches: Array<{ name: string }> = [];
   let page = 1;
   const perPage = 100;
@@ -519,7 +559,9 @@ export async function getRepositoryBranches(
     );
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to list branches: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to list branches: ${response.status}`)
+      );
     }
 
     const data = await readResponseJson(response, v.array(branchSchema), 'github.branches');
@@ -529,7 +571,12 @@ export async function getRepositoryBranches(
     page++;
 
     if (allBranches.length >= maxBranches) {
-      log.warn('github_app.branch_safety_limit_reached', { owner, repo, branchCount: allBranches.length, maxBranches });
+      log.warn('github_app.branch_safety_limit_reached', {
+        owner,
+        repo,
+        branchCount: allBranches.length,
+        maxBranches,
+      });
       break;
     }
   }
@@ -666,15 +713,13 @@ export async function verifyWebhookSignature(
     ['sign']
   );
 
-  const signatureBuffer = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    encoder.encode(payload)
-  );
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
 
-  const expectedSignature = 'sha256=' + Array.from(new Uint8Array(signatureBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  const expectedSignature =
+    'sha256=' +
+    Array.from(new Uint8Array(signatureBuffer))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
 
   return signature === expectedSignature;
 }

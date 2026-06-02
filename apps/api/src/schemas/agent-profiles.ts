@@ -1,5 +1,20 @@
 import * as v from 'valibot';
 
+const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
+const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
+
+const GitHubCliPolicySchema = v.object({
+  mode: v.picklist(['inherit', 'custom']),
+  repositoryScope: v.picklist(['project']),
+  permissions: v.object({
+    contents: GitHubCliContentsPermissionLevelSchema,
+    pullRequests: GitHubCliPermissionLevelSchema,
+    issues: GitHubCliPermissionLevelSchema,
+    actions: GitHubCliPermissionLevelSchema,
+    packages: GitHubCliPermissionLevelSchema,
+  }),
+});
+
 export const CreateAgentProfileSchema = v.object({
   name: v.string(),
   description: v.optional(v.nullable(v.string())),
@@ -15,6 +30,7 @@ export const CreateAgentProfileSchema = v.object({
   workspaceProfile: v.optional(v.nullable(v.string())),
   devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
+  githubCliPolicy: v.optional(v.nullable(GitHubCliPolicySchema)),
 });
 
 export const UpdateAgentProfileSchema = v.object({
@@ -32,6 +48,7 @@ export const UpdateAgentProfileSchema = v.object({
   workspaceProfile: v.optional(v.nullable(v.string())),
   devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
+  githubCliPolicy: v.optional(v.nullable(GitHubCliPolicySchema)),
 });
 
 export const SetProjectDefaultProfileSchema = v.object({

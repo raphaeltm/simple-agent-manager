@@ -93,7 +93,9 @@ function makeProfileRow(overrides: Record<string, unknown> = {}) {
     provider: null,
     vmLocation: null,
     workspaceProfile: null,
+    devcontainerConfigName: null,
     taskMode: null,
+    githubCliPolicy: null,
     isBuiltin: 1,
     createdAt: NOW,
     updatedAt: NOW,
@@ -110,11 +112,14 @@ describe('Agent Profile Service', () => {
   });
 
   describe('resolveAgentProfile', () => {
-
     it('returns platform defaults when profileNameOrId is null', async () => {
       const db = createMockDB();
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', null, 'user-1', env
+        db,
+        'project-1',
+        null,
+        'user-1',
+        env
       );
 
       expect(result.profileId).toBeNull();
@@ -125,7 +130,11 @@ describe('Agent Profile Service', () => {
     it('returns platform defaults when profileNameOrId is empty string', async () => {
       const db = createMockDB();
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', '', 'user-1', env
+        db,
+        'project-1',
+        '',
+        'user-1',
+        env
       );
 
       expect(result.profileId).toBeNull();
@@ -135,7 +144,10 @@ describe('Agent Profile Service', () => {
     it('uses DEFAULT_TASK_AGENT_TYPE env var as fallback', async () => {
       const db = createMockDB();
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', null, 'user-1',
+        db,
+        'project-1',
+        null,
+        'user-1',
         { DEFAULT_TASK_AGENT_TYPE: 'openai-codex' }
       );
 
@@ -155,7 +167,11 @@ describe('Agent Profile Service', () => {
       db._pushResult([profile]);
 
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', 'profile-abc', 'user-1', env
+        db,
+        'project-1',
+        'profile-abc',
+        'user-1',
+        env
       );
 
       expect(result.profileId).toBe('profile-abc');
@@ -180,7 +196,11 @@ describe('Agent Profile Service', () => {
       ]);
 
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', 'reviewer', 'user-1', env
+        db,
+        'project-1',
+        'reviewer',
+        'user-1',
+        env
       );
 
       expect(result.profileName).toBe('reviewer');
@@ -198,7 +218,11 @@ describe('Agent Profile Service', () => {
       db._pushResult([]);
 
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', 'google-gemini', 'user-1', env
+        db,
+        'project-1',
+        'google-gemini',
+        'user-1',
+        env
       );
 
       expect(result.profileId).toBeNull();
@@ -216,7 +240,10 @@ describe('Agent Profile Service', () => {
       db._pushResult([]);
 
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', 'nonexistent-profile', 'user-1',
+        db,
+        'project-1',
+        'nonexistent-profile',
+        'user-1',
         { DEFAULT_TASK_AGENT_TYPE: 'openai-codex' }
       );
 
@@ -240,7 +267,11 @@ describe('Agent Profile Service', () => {
       db._pushResult([profile]);
 
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', 'full-profile', 'user-1', env
+        db,
+        'project-1',
+        'full-profile',
+        'user-1',
+        env
       );
 
       expect(result).toEqual({
@@ -256,11 +287,13 @@ describe('Agent Profile Service', () => {
         provider: null,
         vmLocation: null,
         workspaceProfile: null,
+        devcontainerConfigName: null,
         taskMode: null,
+        githubCliPolicy: null,
       });
     });
 
-    it('propagates extended fields (provider, vmLocation, workspaceProfile, taskMode)', async () => {
+    it('propagates extended fields (provider, vmLocation, workspaceProfile, taskMode, githubCliPolicy)', async () => {
       const db = createMockDB();
       const profile = makeProfileRow({
         id: 'extended-profile',
@@ -270,13 +303,28 @@ describe('Agent Profile Service', () => {
         workspaceProfile: 'lightweight',
         taskMode: 'conversation',
         vmSizeOverride: 'cx32',
+        githubCliPolicy: JSON.stringify({
+          mode: 'custom',
+          repositoryScope: 'project',
+          permissions: {
+            contents: 'write',
+            pullRequests: 'write',
+            issues: 'none',
+            actions: 'read',
+            packages: 'none',
+          },
+        }),
       });
 
       // byId — found
       db._pushResult([profile]);
 
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', 'extended-profile', 'user-1', env
+        db,
+        'project-1',
+        'extended-profile',
+        'user-1',
+        env
       );
 
       expect(result.provider).toBe('hetzner');
@@ -284,18 +332,25 @@ describe('Agent Profile Service', () => {
       expect(result.workspaceProfile).toBe('lightweight');
       expect(result.taskMode).toBe('conversation');
       expect(result.vmSizeOverride).toBe('cx32');
+      expect(result.githubCliPolicy?.permissions.issues).toBe('none');
+      expect(result.githubCliPolicy?.permissions.actions).toBe('read');
     });
 
     it('returns null for extended fields when not set on profile', async () => {
       const db = createMockDB();
       const result = await agentProfileService.resolveAgentProfile(
-        db, 'project-1', null, 'user-1', env
+        db,
+        'project-1',
+        null,
+        'user-1',
+        env
       );
 
       expect(result.provider).toBeNull();
       expect(result.vmLocation).toBeNull();
       expect(result.workspaceProfile).toBeNull();
       expect(result.taskMode).toBeNull();
+      expect(result.githubCliPolicy).toBeNull();
     });
   });
 
@@ -303,19 +358,31 @@ describe('Agent Profile Service', () => {
     it('rejects empty name', async () => {
       const db = createMockDB();
       await expect(
-        agentProfileService.createProfile(db, 'project-1', 'user-1', {
-          name: '   ',
-        }, env)
+        agentProfileService.createProfile(
+          db,
+          'project-1',
+          'user-1',
+          {
+            name: '   ',
+          },
+          env
+        )
       ).rejects.toThrow('name is required');
     });
 
     it('rejects invalid agent type', async () => {
       const db = createMockDB();
       await expect(
-        agentProfileService.createProfile(db, 'project-1', 'user-1', {
-          name: 'test',
-          agentType: 'invalid-type',
-        }, env)
+        agentProfileService.createProfile(
+          db,
+          'project-1',
+          'user-1',
+          {
+            name: 'test',
+            agentType: 'invalid-type',
+          },
+          env
+        )
       ).rejects.toThrow('Invalid agent type');
     });
 
@@ -325,9 +392,15 @@ describe('Agent Profile Service', () => {
       db._pushResult([{ id: 'existing' }]);
 
       await expect(
-        agentProfileService.createProfile(db, 'project-1', 'user-1', {
-          name: 'default',
-        }, env)
+        agentProfileService.createProfile(
+          db,
+          'project-1',
+          'user-1',
+          {
+            name: 'default',
+          },
+          env
+        )
       ).rejects.toThrow('already exists');
     });
   });
@@ -385,9 +458,7 @@ describe('Agent Profile Service', () => {
 
     it('converts isBuiltin from integer 0 to boolean false', async () => {
       const db = createMockDB();
-      db._pushResult([
-        makeProfileRow({ id: 'p1', isBuiltin: 0 }),
-      ]);
+      db._pushResult([makeProfileRow({ id: 'p1', isBuiltin: 0 })]);
 
       const result = await agentProfileService.listProfiles(db, 'project-1', 'user-1', env);
 
@@ -427,10 +498,15 @@ describe('Agent Profile Service', () => {
       // update().set().where() consumes a result from queue
       db._pushResult([]);
       // getProfile (return updated) — select + from + where + limit
-      db._pushResult([makeProfileRow({ id: 'profile-1', name: 'custom', isBuiltin: 0, model: 'claude-opus-4-6' })]);
+      db._pushResult([
+        makeProfileRow({ id: 'profile-1', name: 'custom', isBuiltin: 0, model: 'claude-opus-4-6' }),
+      ]);
 
       const result = await agentProfileService.updateProfile(
-        db, 'project-1', 'profile-1', 'user-1',
+        db,
+        'project-1',
+        'profile-1',
+        'user-1',
         { model: 'claude-opus-4-6' }
       );
 
@@ -443,19 +519,29 @@ describe('Agent Profile Service', () => {
       const existingRow = makeProfileRow({ id: 'profile-1', name: 'custom', isBuiltin: 0 });
       db._pushResult([existingRow]);
       db._pushResult([]);
-      db._pushResult([makeProfileRow({
-        id: 'profile-1',
-        name: 'custom',
-        isBuiltin: 0,
-        provider: 'scaleway',
-        vmLocation: 'nl-ams-1',
-        workspaceProfile: 'lightweight',
-        taskMode: 'conversation',
-      })]);
+      db._pushResult([
+        makeProfileRow({
+          id: 'profile-1',
+          name: 'custom',
+          isBuiltin: 0,
+          provider: 'scaleway',
+          vmLocation: 'nl-ams-1',
+          workspaceProfile: 'lightweight',
+          taskMode: 'conversation',
+        }),
+      ]);
 
       const result = await agentProfileService.updateProfile(
-        db, 'project-1', 'profile-1', 'user-1',
-        { provider: 'scaleway', vmLocation: 'nl-ams-1', workspaceProfile: 'lightweight', taskMode: 'conversation' }
+        db,
+        'project-1',
+        'profile-1',
+        'user-1',
+        {
+          provider: 'scaleway',
+          vmLocation: 'nl-ams-1',
+          workspaceProfile: 'lightweight',
+          taskMode: 'conversation',
+        }
       );
 
       expect(result.provider).toBe('scaleway');
@@ -476,7 +562,10 @@ describe('Agent Profile Service', () => {
       db._pushResult([makeProfileRow({ id: 'profile-1', isBuiltin: 1, model: 'claude-opus-4-6' })]);
 
       const result = await agentProfileService.updateProfile(
-        db, 'project-1', 'profile-1', 'user-1',
+        db,
+        'project-1',
+        'profile-1',
+        'user-1',
         { model: 'claude-opus-4-6' }
       );
       expect(result.model).toBe('claude-opus-4-6');
@@ -489,10 +578,9 @@ describe('Agent Profile Service', () => {
       db._pushResult([existingRow]);
 
       await expect(
-        agentProfileService.updateProfile(
-          db, 'project-1', 'profile-1', 'user-1',
-          { agentType: 'invalid-type' }
-        )
+        agentProfileService.updateProfile(db, 'project-1', 'profile-1', 'user-1', {
+          agentType: 'invalid-type',
+        })
       ).rejects.toThrow('Invalid agent type');
     });
 
@@ -502,10 +590,7 @@ describe('Agent Profile Service', () => {
       db._pushResult([existingRow]);
 
       await expect(
-        agentProfileService.updateProfile(
-          db, 'project-1', 'profile-1', 'user-1',
-          { name: '   ' }
-        )
+        agentProfileService.updateProfile(db, 'project-1', 'profile-1', 'user-1', { name: '   ' })
       ).rejects.toThrow('name cannot be empty');
     });
 
@@ -518,10 +603,9 @@ describe('Agent Profile Service', () => {
       db._pushResult([{ id: 'other-profile' }]);
 
       await expect(
-        agentProfileService.updateProfile(
-          db, 'project-1', 'profile-1', 'user-1',
-          { name: 'taken-name' }
-        )
+        agentProfileService.updateProfile(db, 'project-1', 'profile-1', 'user-1', {
+          name: 'taken-name',
+        })
       ).rejects.toThrow('already exists');
     });
   });
@@ -568,15 +652,19 @@ describe('Agent Profile Service', () => {
       db._pushResult([]);
       // insert (void)
       // getProfile after insert — returns the created row
-      db._pushResult([makeProfileRow({
-        id: 'mock-ulid-1',
-        name: 'my-custom',
-        isBuiltin: 0,
-        agentType: 'claude-code',
-      })]);
+      db._pushResult([
+        makeProfileRow({
+          id: 'mock-ulid-1',
+          name: 'my-custom',
+          isBuiltin: 0,
+          agentType: 'claude-code',
+        }),
+      ]);
 
       const result = await agentProfileService.createProfile(
-        db, 'project-1', 'user-1',
+        db,
+        'project-1',
+        'user-1',
         { name: 'my-custom' },
         env
       );
@@ -587,5 +675,4 @@ describe('Agent Profile Service', () => {
       expect(db.insert).toHaveBeenCalledTimes(1);
     });
   });
-
 });

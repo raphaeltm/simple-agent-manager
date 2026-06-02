@@ -32,6 +32,10 @@ import {
 import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken } from '../../services/github-app';
+import {
+  GitHubCliPolicyError,
+  resolveWorkspaceGitHubTokenOptions,
+} from '../../services/github-cli-policy';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
@@ -639,8 +643,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Look up workspace → project to determine repo provider
   const workspaceRows = await db
     .select({
+      id: schema.workspaces.id,
       installationId: schema.workspaces.installationId,
       projectId: schema.workspaces.projectId,
+      userId: schema.workspaces.userId,
     })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
@@ -654,11 +660,13 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Look up the project to check repoProvider
   let repoProvider = 'github';
   let artifactsRepoId: string | null = null;
+  let githubRepoId: number | null = null;
   if (workspace.projectId) {
     const projectRows = await db
       .select({
         repoProvider: schema.projects.repoProvider,
         artifactsRepoId: schema.projects.artifactsRepoId,
+        githubRepoId: schema.projects.githubRepoId,
       })
       .from(schema.projects)
       .where(eq(schema.projects.id, workspace.projectId))
@@ -668,6 +676,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (project) {
       repoProvider = project.repoProvider || 'github';
       artifactsRepoId = project.artifactsRepoId;
+      githubRepoId = project.githubRepoId;
     }
   }
 
@@ -715,9 +724,27 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     throw errors.notFound('GitHub installation');
   }
 
-  // Request packages:write when devcontainer caching is enabled so the
-  // VM agent can push cache images to GHCR on behalf of this installation.
-  const token = await getInstallationToken(getExternalInstallationId(installation), c.env);
+  let tokenOptions = null;
+  try {
+    tokenOptions = workspace.projectId
+      ? await resolveWorkspaceGitHubTokenOptions(db, {
+          workspaceId: workspace.id,
+          projectId: workspace.projectId,
+          userId: workspace.userId,
+          githubRepoId,
+        })
+      : null;
+  } catch (err) {
+    if (err instanceof GitHubCliPolicyError) {
+      throw errors.forbidden('GitHub CLI policy prevents token minting');
+    }
+    throw err;
+  }
+  const token = await getInstallationToken(
+    getExternalInstallationId(installation),
+    c.env,
+    tokenOptions ?? undefined
+  );
   return c.json({ token: token.token, expiresAt: token.expiresAt });
 });
 

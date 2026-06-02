@@ -45,7 +45,15 @@
 
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
@@ -368,7 +376,10 @@ export const projectRuntimeEnvVars = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(table.projectId, table.envKey),
+    projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(
+      table.projectId,
+      table.envKey
+    ),
     userProjectIdx: index('idx_project_runtime_env_user_project').on(table.userId, table.projectId),
   })
 );
@@ -403,7 +414,10 @@ export const projectRuntimeFiles = sqliteTable(
       table.projectId,
       table.filePath
     ),
-    userProjectIdx: index('idx_project_runtime_files_user_project').on(table.userId, table.projectId),
+    userProjectIdx: index('idx_project_runtime_files_user_project').on(
+      table.userId,
+      table.projectId
+    ),
   })
 );
 
@@ -608,7 +622,10 @@ export const taskStatusEvents = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    taskCreatedAtIdx: index('idx_task_status_events_task_created_at').on(table.taskId, table.createdAt),
+    taskCreatedAtIdx: index('idx_task_status_events_task_created_at').on(
+      table.taskId,
+      table.createdAt
+    ),
   })
 );
 
@@ -686,7 +703,9 @@ export const workspaces = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** Soft FK to ProjectData DO session (not a D1 table). Null until a chat session binds to this workspace. */
     chatSessionId: text('chat_session_id'),
-    portsPublicEnabled: integer('ports_public_enabled', { mode: 'boolean' }).notNull().default(false),
+    portsPublicEnabled: integer('ports_public_enabled', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     errorMessage: text('error_message'),
     dispatchedAt: text('dispatched_at'),
     /** JSON snapshot of ResourceRequirements for audit. */
@@ -837,6 +856,8 @@ export const agentProfiles = sqliteTable(
     /** Devcontainer config name override. null = inherit from project/platform defaults. */
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode'),
+    /** JSON GitHubCliPolicy. null = inherit full installation token behavior. */
+    githubCliPolicy: text('github_cli_policy'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
       .notNull()
@@ -852,8 +873,10 @@ export const agentProfiles = sqliteTable(
     // Drizzle ORM does not support partial/conditional indexes, so only the
     // project-scoped index is represented here. Global-profile uniqueness is
     // enforced by the raw SQL migration only.
-    projectNameUnique: uniqueIndex('idx_agent_profiles_project_name')
-      .on(table.projectId, table.name),
+    projectNameUnique: uniqueIndex('idx_agent_profiles_project_name').on(
+      table.projectId,
+      table.name
+    ),
     projectIdIdx: index('idx_agent_profiles_project_id').on(table.projectId),
     userIdIdx: index('idx_agent_profiles_user_id').on(table.userId),
   })
@@ -892,7 +915,10 @@ export const profileRuntimeEnvVars = sqliteTable(
     valueIv: text('value_iv'),
   },
   (table) => ({
-    profileKeyUnique: uniqueIndex('idx_profile_runtime_env_profile_key').on(table.profileId, table.envKey),
+    profileKeyUnique: uniqueIndex('idx_profile_runtime_env_profile_key').on(
+      table.profileId,
+      table.envKey
+    ),
     userProfileIdx: index('idx_profile_runtime_env_user_profile').on(table.userId, table.profileId),
   })
 );
@@ -914,7 +940,10 @@ export const profileRuntimeFiles = sqliteTable(
       table.profileId,
       table.filePath
     ),
-    userProfileIdx: index('idx_profile_runtime_files_user_profile').on(table.userId, table.profileId),
+    userProfileIdx: index('idx_profile_runtime_files_user_profile').on(
+      table.userId,
+      table.profileId
+    ),
   })
 );
 
@@ -1222,15 +1251,26 @@ export const projectFiles = sqliteTable(
     r2Key: text('r2_key').notNull(),
     extractedTextPreview: text('extracted_text_preview'),
     directory: text('directory').notNull().default('/'),
-    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
-    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
   },
   (table) => ({
     projectIdx: index('idx_project_files_project_id').on(table.projectId),
     projectStatusIdx: index('idx_project_files_project_status').on(table.projectId, table.status),
-    projectSourceIdx: index('idx_project_files_project_source').on(table.projectId, table.uploadSource),
+    projectSourceIdx: index('idx_project_files_project_source').on(
+      table.projectId,
+      table.uploadSource
+    ),
     projectMimeIdx: index('idx_project_files_project_mime').on(table.projectId, table.mimeType),
-    projectDirFilenameUniq: uniqueIndex('idx_project_files_project_dir_filename').on(table.projectId, table.directory, table.filename),
+    projectDirFilenameUniq: uniqueIndex('idx_project_files_project_dir_filename').on(
+      table.projectId,
+      table.directory,
+      table.filename
+    ),
     projectDirIdx: index('idx_project_files_project_dir').on(table.projectId, table.directory),
   })
 );
@@ -1473,13 +1513,12 @@ export const computeUsage = sqliteTable(
     startedAt: text('started_at').notNull(),
     /** ISO-8601 timestamp. Null while workspace is still running (open-ended usage record). */
     endedAt: text('ended_at'),
-    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
   },
   (table) => ({
-    userPeriodIdx: index('idx_compute_usage_user_period').on(
-      table.userId,
-      table.startedAt
-    ),
+    userPeriodIdx: index('idx_compute_usage_user_period').on(table.userId, table.startedAt),
     workspaceIdx: index('idx_compute_usage_workspace').on(table.workspaceId),
   })
 );
@@ -1496,7 +1535,9 @@ export const defaultQuotas = sqliteTable('default_quotas', {
   id: text('id').primaryKey(),
   /** Null = unlimited. Applies to all users who don't have a per-user override in userQuotas. */
   monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
-  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
   /** Admin who last updated. Bare FK — no onDelete to preserve audit trail. */
   updatedBy: text('updated_by')
     .notNull()
@@ -1514,7 +1555,9 @@ export const userQuotas = sqliteTable('user_quotas', {
     .references(() => users.id, { onDelete: 'cascade' }), // Cascade — quota meaningless without the user
   /** Null = unlimited (overrides any default limit). */
   monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
-  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
   /** Admin who last updated. Bare FK — no onDelete to preserve audit trail. */
   updatedBy: text('updated_by')
     .notNull()
@@ -1542,14 +1585,8 @@ export const trialWaitlist = sqliteTable(
     notifiedAt: integer('notified_at'), // epoch ms, nullable
   },
   (table) => ({
-    emailResetIdx: uniqueIndex('idx_trial_waitlist_email_reset').on(
-      table.email,
-      table.resetDate
-    ),
-    resetNotifyIdx: index('idx_trial_waitlist_reset_notify').on(
-      table.resetDate,
-      table.notifiedAt
-    ),
+    emailResetIdx: uniqueIndex('idx_trial_waitlist_email_reset').on(table.email, table.resetDate),
+    resetNotifyIdx: index('idx_trial_waitlist_reset_notify').on(table.resetDate, table.notifiedAt),
   })
 );
 
@@ -1594,18 +1631,9 @@ export const trials = sqliteTable(
     errorMessage: text('error_message'),
   },
   (table) => ({
-    fingerprintIdx: index('idx_trials_fingerprint').on(
-      table.fingerprint,
-      table.createdAt
-    ),
-    statusExpiryIdx: index('idx_trials_status_expiry').on(
-      table.status,
-      table.expiresAt
-    ),
-    monthKeyStatusIdx: index('idx_trials_month_key_status').on(
-      table.monthKey,
-      table.status
-    ),
+    fingerprintIdx: index('idx_trials_fingerprint').on(table.fingerprint, table.createdAt),
+    statusExpiryIdx: index('idx_trials_status_expiry').on(table.status, table.expiresAt),
+    monthKeyStatusIdx: index('idx_trials_month_key_status').on(table.monthKey, table.status),
   })
 );
 
@@ -1643,10 +1671,7 @@ export const sessionSummaries = sqliteTable(
       table.status,
       table.updatedAt
     ),
-    projectIdx: index('idx_session_summaries_project').on(
-      table.projectId,
-      table.updatedAt
-    ),
+    projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
   })
 );
 

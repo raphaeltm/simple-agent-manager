@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Outlet,Route, Routes } from 'react-router';
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider } from './components/AuthProvider';
@@ -32,6 +32,7 @@ import { Node } from './pages/Node';
 import { Nodes } from './pages/Nodes';
 import { Project } from './pages/Project';
 import { ProjectChat } from './pages/project-chat';
+import { PlatformPolicyPrototype } from './pages/platform-policy-prototype';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
@@ -75,103 +76,104 @@ function ProtectedLayout() {
 export default function App() {
   return (
     <ErrorBoundary>
-    <AuthProvider>
-    <ToastProvider>
-      <GlobalAudioProvider>
-      <BrowserRouter>
-        <PageViewTracker />
-        <Routes>
-          {/* Public routes */}
-          <Route path="/" element={<Landing />} />
-          <Route path="/try" element={<Try />} />
-          <Route path="/try/cap-exceeded" element={<TryCapExceeded />} />
-          <Route path="/try/waitlist/thanks" element={<TryWaitlistThanks />} />
-          <Route path="/try/:trialId" element={<TryDiscovery />} />
-          {/* SAM prototype — public, no auth */}
-          <Route path="/sam" element={<SamPrototype />} />
-          <Route path="/device" element={<DeviceAuth />} />
-{/* Harness for Playwright audits — mounts trial components with mock data */}
-          <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
-          {/* Protected routes with AppShell (persistent navigation) */}
-          <Route element={<ProtectedLayout />}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/chats" element={<Chats />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/projects/new" element={<ProjectCreate />} />
+      <AuthProvider>
+        <ToastProvider>
+          <GlobalAudioProvider>
+            <BrowserRouter>
+              <PageViewTracker />
+              <Routes>
+                {/* Public routes */}
+                <Route path="/" element={<Landing />} />
+                <Route path="/try" element={<Try />} />
+                <Route path="/try/cap-exceeded" element={<TryCapExceeded />} />
+                <Route path="/try/waitlist/thanks" element={<TryWaitlistThanks />} />
+                <Route path="/try/:trialId" element={<TryDiscovery />} />
+                {/* SAM prototype — public, no auth */}
+                <Route path="/sam" element={<SamPrototype />} />
+                <Route path="/prototype/platform-policy" element={<PlatformPolicyPrototype />} />
+                <Route path="/device" element={<DeviceAuth />} />
+                {/* Harness for Playwright audits — mounts trial components with mock data */}
+                <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
+                {/* Protected routes with AppShell (persistent navigation) */}
+                <Route element={<ProtectedLayout />}>
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/chats" element={<Chats />} />
+                  <Route path="/projects" element={<Projects />} />
+                  <Route path="/projects/new" element={<ProjectCreate />} />
 
-            {/* Project detail — shell with sub-routes */}
-            <Route path="/projects/:id" element={<Project />}>
-              <Route index element={<Navigate to="chat" replace />} />
-              <Route path="chat" element={<ProjectChat />} />
-              <Route path="chat/:sessionId" element={<ProjectChat />} />
-              <Route path="agent" element={<ProjectAgentChat />} />
-              <Route path="library" element={<ProjectLibrary />} />
-              <Route path="ideas" element={<IdeasPage />} />
-              <Route path="agent-context" element={<AgentContextPage />} />
-              <Route path="knowledge" element={<Navigate to="../agent-context" replace />} />
-              <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
-              <Route path="tasks" element={<Navigate to="../ideas" replace />} />
-              <Route path="tasks/:taskId" element={<TaskDetail />} />
-              <Route path="settings" element={<ProjectSettings />} />
-              <Route path="activity" element={<ProjectActivity />} />
-              <Route path="notifications" element={<ProjectNotifications />} />
-              <Route path="triggers" element={<ProjectTriggers />} />
-              <Route path="triggers/:triggerId" element={<ProjectTriggerDetail />} />
-              <Route path="profiles" element={<ProjectProfiles />} />
-            </Route>
+                  {/* Project detail — shell with sub-routes */}
+                  <Route path="/projects/:id" element={<Project />}>
+                    <Route index element={<Navigate to="chat" replace />} />
+                    <Route path="chat" element={<ProjectChat />} />
+                    <Route path="chat/:sessionId" element={<ProjectChat />} />
+                    <Route path="agent" element={<ProjectAgentChat />} />
+                    <Route path="library" element={<ProjectLibrary />} />
+                    <Route path="ideas" element={<IdeasPage />} />
+                    <Route path="agent-context" element={<AgentContextPage />} />
+                    <Route path="knowledge" element={<Navigate to="../agent-context" replace />} />
+                    <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
+                    <Route path="tasks" element={<Navigate to="../ideas" replace />} />
+                    <Route path="tasks/:taskId" element={<TaskDetail />} />
+                    <Route path="settings" element={<ProjectSettings />} />
+                    <Route path="activity" element={<ProjectActivity />} />
+                    <Route path="notifications" element={<ProjectNotifications />} />
+                    <Route path="triggers" element={<ProjectTriggers />} />
+                    <Route path="triggers/:triggerId" element={<ProjectTriggerDetail />} />
+                    <Route path="profiles" element={<ProjectProfiles />} />
+                  </Route>
 
-            <Route path="/nodes" element={<Nodes />} />
-            <Route path="/nodes/:id" element={<Node />} />
-            <Route path="/workspaces" element={<Workspaces />} />
-            <Route path="/workspaces/new" element={<CreateWorkspace />} />
-            <Route path="/settings" element={<Settings />}>
-              <Route index element={<Navigate to="cloud-provider" replace />} />
-              <Route path="cloud-provider" element={<SettingsCloudProvider />} />
-              <Route path="github" element={<SettingsGitHub />} />
-              <Route path="agents" element={<SettingsAgents />} />
-              <Route path="agent-keys" element={<Navigate to="../agents" replace />} />
-              <Route path="agent-config" element={<Navigate to="../agents" replace />} />
-              <Route path="notifications" element={<SettingsNotifications />} />
-              <Route path="usage" element={<SettingsComputeUsage />} />
-              <Route path="api-tokens" element={<SettingsApiTokens />} />
-            </Route>
-            <Route path="/account-map" element={<AccountMap />} />
-            <Route path="/tools" element={<Tools />} />
-            <Route path="/tools/cli" element={<ToolsCli />} />
-            <Route path="/ui-standards" element={<UiStandards />} />
-            <Route path="/admin" element={<Admin />}>
-              <Route index element={<Navigate to="users" replace />} />
-              <Route path="users" element={<AdminUsers />} />
-              <Route path="credentials" element={<AdminPlatformCredentials />} />
-              <Route path="ai-proxy" element={<AdminAIProxy />} />
-              <Route path="costs" element={<AdminCosts />} />
-              <Route path="usage" element={<AdminComputeUsage />} />
-              <Route path="quotas" element={<AdminComputeQuotas />} />
-              <Route path="errors" element={<AdminErrors />} />
-              <Route path="overview" element={<AdminOverview />} />
-              <Route path="logs" element={<AdminLogs />} />
-              <Route path="stream" element={<AdminStream />} />
-              <Route path="analytics" element={<AdminAnalytics />} />
-            </Route>
-          </Route>
+                  <Route path="/nodes" element={<Nodes />} />
+                  <Route path="/nodes/:id" element={<Node />} />
+                  <Route path="/workspaces" element={<Workspaces />} />
+                  <Route path="/workspaces/new" element={<CreateWorkspace />} />
+                  <Route path="/settings" element={<Settings />}>
+                    <Route index element={<Navigate to="cloud-provider" replace />} />
+                    <Route path="cloud-provider" element={<SettingsCloudProvider />} />
+                    <Route path="github" element={<SettingsGitHub />} />
+                    <Route path="agents" element={<SettingsAgents />} />
+                    <Route path="agent-keys" element={<Navigate to="../agents" replace />} />
+                    <Route path="agent-config" element={<Navigate to="../agents" replace />} />
+                    <Route path="notifications" element={<SettingsNotifications />} />
+                    <Route path="usage" element={<SettingsComputeUsage />} />
+                    <Route path="api-tokens" element={<SettingsApiTokens />} />
+                  </Route>
+                  <Route path="/account-map" element={<AccountMap />} />
+                  <Route path="/tools" element={<Tools />} />
+                  <Route path="/tools/cli" element={<ToolsCli />} />
+                  <Route path="/ui-standards" element={<UiStandards />} />
+                  <Route path="/admin" element={<Admin />}>
+                    <Route index element={<Navigate to="users" replace />} />
+                    <Route path="users" element={<AdminUsers />} />
+                    <Route path="credentials" element={<AdminPlatformCredentials />} />
+                    <Route path="ai-proxy" element={<AdminAIProxy />} />
+                    <Route path="costs" element={<AdminCosts />} />
+                    <Route path="usage" element={<AdminComputeUsage />} />
+                    <Route path="quotas" element={<AdminComputeQuotas />} />
+                    <Route path="errors" element={<AdminErrors />} />
+                    <Route path="overview" element={<AdminOverview />} />
+                    <Route path="logs" element={<AdminLogs />} />
+                    <Route path="stream" element={<AdminStream />} />
+                    <Route path="analytics" element={<AdminAnalytics />} />
+                  </Route>
+                </Route>
 
-          {/* Workspace — NO AppShell (full-width terminal) */}
-          <Route
-            path="/workspaces/:id"
-            element={
-              <ProtectedRoute>
-                <Workspace />
-              </ProtectedRoute>
-            }
-          />
+                {/* Workspace — NO AppShell (full-width terminal) */}
+                <Route
+                  path="/workspaces/:id"
+                  element={
+                    <ProtectedRoute>
+                      <Workspace />
+                    </ProtectedRoute>
+                  }
+                />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-      </GlobalAudioProvider>
-    </ToastProvider>
-    </AuthProvider>
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </BrowserRouter>
+          </GlobalAudioProvider>
+        </ToastProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
