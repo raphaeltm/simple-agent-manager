@@ -40,7 +40,7 @@ External-resource lifecycle hygiene and observability boundary drift: mocks veri
 
 ### Process Fix
 
-Add focused regression tests that fail if a provider create flow does not clean up after post-allocation failure, and keep provider logs behind injectable no-op-by-default boundaries.
+Add focused regression tests that fail if a provider create flow does not clean up after post-allocation failure, keep provider logs behind injectable no-op-by-default boundaries, and update `.claude/rules/02-quality-gates.md` with a post-allocation cleanup test requirement.
 
 ## Implementation Checklist
 

@@ -95,6 +95,10 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 
 When a workflow deletes state, metadata, lock files, Pulumi stacks, or other recovery handles after deleting external resources, the state-deletion step MUST be gated on an explicit successful cleanup output from the preceding deletion step. Do not gate state deletion only on setup or discovery success. A failed external cleanup must leave state intact so the next run can retry or reconcile resources safely.
 
+### Post-Allocation Cleanup Tests
+
+When a workflow allocates a paid or externally visible resource before later setup steps complete, regression tests MUST cover cleanup after each post-allocation failure. The tests must assert the cleanup request targets the allocated resource directly, preserves the original failure as the primary error, tolerates already-deleted resources when the provider contract allows it, and exposes cleanup failures through structured diagnostics without leaking secrets.
+
 ### Evaluating Test Realism
 
 Before finalizing tests, ask:
