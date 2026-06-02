@@ -164,6 +164,7 @@ async function createAndProvisionWorkspace(
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
+  await ensureBranchExistsOnRemote(state, rc);
   await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId);
   await rc.env.DATABASE.prepare(
     `UPDATE workspaces SET dispatched_at = ? WHERE id = ?`
@@ -213,6 +214,75 @@ async function setOutputBranch(
   await rc.env.DATABASE.prepare(
     `UPDATE tasks SET output_branch = ?, updated_at = ? WHERE id = ?`
   ).bind(outputBranch, now, state.taskId).run();
+}
+
+/**
+ * Ensure the checkout branch exists on the remote before cloning.
+ * If the branch differs from the project's default branch and doesn't exist,
+ * create it from the default branch via the GitHub API.
+ *
+ * Best-effort: failures are logged but do not block workspace creation.
+ * The clone will fail with a clear error from the VM agent if the branch
+ * truly doesn't exist.
+ */
+async function ensureBranchExistsOnRemote(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+): Promise<void> {
+  // Look up the project's default branch to compare
+  const projectRow = await rc.env.DATABASE.prepare(
+    `SELECT default_branch FROM projects WHERE id = ?`
+  ).bind(state.projectId).first<{ default_branch: string }>();
+
+  const defaultBranch = projectRow?.default_branch || 'main';
+
+  // If cloning the default branch, no need to check — it always exists
+  if (state.config.branch === defaultBranch) {
+    return;
+  }
+
+  // Parse owner/repo from repository string (format: "owner/repo")
+  const repoParts = state.config.repository.split('/');
+  if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
+    log.warn('task_runner_do.ensure_branch.invalid_repository', {
+      taskId: state.taskId,
+      repository: state.config.repository,
+    });
+    return;
+  }
+
+  const [owner, repo] = repoParts;
+
+  try {
+    const { ensureBranchExists } = await import('../../services/github-app');
+    const created = await ensureBranchExists(
+      state.config.installationId,
+      owner,
+      repo,
+      state.config.branch,
+      defaultBranch,
+      rc.env,
+    );
+
+    if (created) {
+      log.info('task_runner_do.ensure_branch.ok', {
+        taskId: state.taskId,
+        branch: state.config.branch,
+      });
+    } else {
+      log.warn('task_runner_do.ensure_branch.failed', {
+        taskId: state.taskId,
+        branch: state.config.branch,
+        defaultBranch,
+      });
+    }
+  } catch (err) {
+    log.warn('task_runner_do.ensure_branch.error', {
+      taskId: state.taskId,
+      branch: state.config.branch,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function createWorkspaceOnVmAgent(
