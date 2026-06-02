@@ -73,12 +73,32 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
     setError(null);
     try {
       const { url } = await getGitHubInstallUrl();
-      window.location.href = url;
+      window.open(url, '_blank', 'noopener');
+
+      // Poll for GitHub App installation completion
+      const poll = setInterval(async () => {
+        try {
+          const installations = await listGitHubInstallations();
+          if (installations.length > 0) {
+            clearInterval(poll);
+            setLoading(false);
+            markStepDone();
+          }
+        } catch {
+          // Keep polling on failure
+        }
+      }, 3000);
+
+      // Stop polling after 5 minutes
+      setTimeout(() => {
+        clearInterval(poll);
+        setLoading(false);
+      }, 300_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to get install URL');
       setLoading(false);
     }
-  }, []);
+  }, [markStepDone]);
 
   const handleCreateProject = useCallback(async () => {
     if (!form.selectedRepoUrl || !form.selectedRepoName) {
@@ -447,7 +467,14 @@ function StepForm({
 
     case 'github':
       return (
-        <ActionButton onClick={onGitHubInstall} loading={loading} label={actionLabel} />
+        <>
+          <ActionButton onClick={onGitHubInstall} loading={loading} label={actionLabel} />
+          {loading && (
+            <p className="text-xs text-fg-muted mt-2">
+              Complete the installation in the new tab. This will update automatically.
+            </p>
+          )}
+        </>
       );
 
     case 'project':

@@ -250,7 +250,7 @@ export function ChoosePathWizard() {
               onComplete={handleExecutionComplete}
             />
           )}
-          {phase === 'complete' && <CompletionScreen />}
+          {phase === 'complete' && <CompletionScreen onDismiss={handleDismiss} />}
         </div>
       </Card>
     </div>

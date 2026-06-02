@@ -1,8 +1,12 @@
 import { Button, Card } from '@simple-agent-manager/ui';
-import { Check, Sparkles } from 'lucide-react';
+import { Check, Sparkles, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
-export function CompletionScreen() {
+interface CompletionScreenProps {
+  onDismiss: () => void;
+}
+
+export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
   const navigate = useNavigate();
 
   return (
@@ -49,14 +53,26 @@ export function CompletionScreen() {
         </div>
       </Card>
 
-      <Button
-        variant="primary"
-        size="lg"
-        onClick={() => navigate('/projects')}
-        className="w-full max-w-xs"
-      >
-        <Sparkles size={14} /> Go to my projects
-      </Button>
+      <div className="flex flex-col items-center gap-3">
+        <Button
+          variant="primary"
+          size="lg"
+          onClick={() => {
+            onDismiss();
+            navigate('/projects');
+          }}
+          className="w-full max-w-xs"
+        >
+          <Sparkles size={14} /> Go to my projects
+        </Button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px]"
+        >
+          <X size={12} /> Dismiss
+        </button>
+      </div>
       <p className="text-[10px] text-fg-muted/30 mt-3">
         You can change any setting in Settings anytime
       </p>
