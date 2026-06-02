@@ -14,6 +14,7 @@ interface ProjectSelectorProps {
   setForm: React.Dispatch<React.SetStateAction<StepFormState>>;
   loading: boolean;
   onCreateProject: () => void;
+  onSkip?: () => void;
   tags: string[];
 }
 
@@ -25,6 +26,7 @@ export function ProjectSelector({
   setForm,
   loading,
   onCreateProject,
+  onSkip,
   tags,
 }: ProjectSelectorProps) {
   const navigate = useNavigate();
@@ -47,7 +49,10 @@ export function ProjectSelector({
         <Button
           variant="primary"
           size="md"
-          onClick={() => navigate('/projects')}
+          onClick={() => {
+            onSkip?.();
+            navigate('/projects');
+          }}
           disabled={loading}
         >
           Go to Projects <ArrowRight size={14} />

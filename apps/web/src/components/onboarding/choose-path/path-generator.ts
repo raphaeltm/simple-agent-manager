@@ -31,12 +31,12 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       actionLabel: 'Continue',
       timeEstimate: '30 seconds',
       details: [
-        "You'll be redirected to Anthropic to approve access",
+        'Connect in Settings → Agent Settings after setup',
         'SAM uses your existing subscription quota',
         'No additional billing — covered by your plan',
         'You can disconnect anytime from Settings',
       ],
-      isOptional: false,
+      isOptional: tags.includes('existing-agent'),
     });
   } else if (tags.includes('user-api-key')) {
     steps.push({
@@ -52,7 +52,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
         'Typical cost: ~$0.01-1.50 per task',
         'You can set spending alerts in Settings',
       ],
-      isOptional: false,
+      isOptional: tags.includes('existing-agent'),
     });
   } else if (tags.includes('sam-billing')) {
     steps.push({
@@ -68,7 +68,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
         'Monthly cost cap ensures you never overspend',
         'You can switch to your own API key anytime',
       ],
-      isOptional: false,
+      isOptional: tags.includes('existing-agent'),
     });
   }
 
@@ -87,7 +87,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
         'VMs are destroyed when tasks complete',
         'You choose the region and VM size',
       ],
-      isOptional: false,
+      isOptional: tags.includes('existing-cloud'),
     });
   } else {
     steps.push({
@@ -121,7 +121,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       'Agents never push directly to main',
       'Change repo access anytime from GitHub settings',
     ],
-    isOptional: false,
+    isOptional: tags.includes('existing-github'),
   });
 
   // First project

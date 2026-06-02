@@ -68,6 +68,17 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
     markStepDone();
   }, [markStepDone]);
 
+  const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const githubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup GitHub poll and timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (githubPollRef.current) clearInterval(githubPollRef.current);
+      if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
+    };
+  }, []);
+
   const handleGitHubInstall = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -81,6 +92,11 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
           const installations = await listGitHubInstallations();
           if (installations.length > 0) {
             clearInterval(poll);
+            githubPollRef.current = null;
+            if (githubTimeoutRef.current) {
+              clearTimeout(githubTimeoutRef.current);
+              githubTimeoutRef.current = null;
+            }
             setLoading(false);
             markStepDone();
           }
@@ -88,10 +104,13 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
           // Keep polling on failure
         }
       }, 3000);
+      githubPollRef.current = poll;
 
       // Stop polling after 5 minutes
-      setTimeout(() => {
+      githubTimeoutRef.current = setTimeout(() => {
         clearInterval(poll);
+        githubPollRef.current = null;
+        githubTimeoutRef.current = null;
         setLoading(false);
       }, 300_000);
     } catch (err) {
@@ -487,6 +506,7 @@ function StepForm({
           setForm={setForm}
           loading={loading}
           onCreateProject={onCreateProject}
+          onSkip={onSkip}
           tags={tags}
         />
       );

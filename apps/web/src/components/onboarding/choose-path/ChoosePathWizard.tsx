@@ -107,22 +107,19 @@ export function ChoosePathWizard() {
 
   const handleAnswer = useCallback(
     (option: PathOption) => {
+      const newTags = [...tags, ...option.tags];
       setAnswers((prev) => ({ ...prev, [currentQuestionId]: option.id }));
-      setTags((prev) => {
-        const newTags = [...prev, ...option.tags];
-        if (!option.next) {
-          const steps = generatePath(newTags);
-          setGeneratedSteps(steps);
-          setPhase('path-preview');
-        }
-        return newTags;
-      });
+      setTags(newTags);
 
       if (option.next) {
         setCurrentQuestionId(option.next);
+      } else {
+        const steps = generatePath(newTags);
+        setGeneratedSteps(steps);
+        setPhase('path-preview');
       }
     },
-    [currentQuestionId]
+    [currentQuestionId, tags]
   );
 
   const handleReset = useCallback(() => {
@@ -178,13 +175,16 @@ export function ChoosePathWizard() {
   if (dismissed) return null;
 
   const currentQuestion = QUESTIONS.find((q) => q.id === currentQuestionId);
-  const phaseLabel = PHASE_LABELS[phase];
+  const liveAnnouncement =
+    phase === 'questions'
+      ? currentQuestion?.question ?? ''
+      : PHASE_LABELS[phase];
 
   return (
     <div data-testid="onboarding-wizard" role="region" aria-label="Account setup" className="mb-6">
       {/* Screen reader announcement for phase transitions */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {phaseLabel}
+        {liveAnnouncement}
       </div>
 
       <Card className="p-0 overflow-hidden">
