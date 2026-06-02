@@ -32,7 +32,7 @@ Related ready idea: `01KSQE75WVZQM7R3VC6N87HX4Z` (`Profile setup wizard for proj
 - [x] Run targeted API and web unit tests.
 - [x] Run screenshot-backed Playwright UI audit at 375x667 and 1280x800.
 - [x] Run required quality checks.
-- [ ] Complete specialist review and staging verification before PR merge.
+- [x] Complete specialist review and staging verification before PR merge.
 
 ## Acceptance Criteria
 
