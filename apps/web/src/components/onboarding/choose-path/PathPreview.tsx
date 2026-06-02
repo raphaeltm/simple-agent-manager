@@ -24,7 +24,7 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
         </div>
         <h2 className="sam-type-section-heading text-fg-primary mb-2">Your personalized setup</h2>
         <p className="sam-type-body text-fg-muted mb-1">
-          Based on your answers, here's what you need to do:
+          Based on your answers, here&apos;s what you need to do:
         </p>
         <div className="flex items-center justify-center gap-3 text-xs text-fg-muted/60 mt-2">
           <span className="flex items-center gap-1">

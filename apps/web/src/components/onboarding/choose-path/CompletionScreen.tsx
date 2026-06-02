@@ -15,7 +15,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
         <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-4">
           <Check size={36} className="text-success" />
         </div>
-        <h2 className="sam-type-page-title text-fg-primary mb-2">You're all set!</h2>
+        <h2 className="sam-type-page-title text-fg-primary mb-2">You&apos;re all set!</h2>
         <p className="text-fg-muted max-w-sm mx-auto">
           Your account is configured and ready to go. Start a chat in your project to begin.
         </p>
@@ -23,7 +23,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
 
       <Card className="p-5 text-left mb-6">
         <p className="text-xs text-fg-muted/50 uppercase tracking-wide font-medium mb-3">
-          What's next
+          What&apos;s next
         </p>
         <div className="flex flex-col gap-3">
           {[

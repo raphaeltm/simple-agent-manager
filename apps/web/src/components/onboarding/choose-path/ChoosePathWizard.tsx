@@ -19,10 +19,10 @@ import {
 } from '../../../lib/api';
 import { useAuth } from '../../AuthProvider';
 import { CompletionScreen } from './CompletionScreen';
-import { generatePath, type GeneratedStep } from './path-generator';
+import { type GeneratedStep,generatePath } from './path-generator';
 import { PathPreview } from './PathPreview';
 import { QuestionCard } from './QuestionCard';
-import { QUESTIONS, type PathOption } from './questions';
+import { type PathOption,QUESTIONS } from './questions';
 import { StepExecution } from './StepExecution';
 
 type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
