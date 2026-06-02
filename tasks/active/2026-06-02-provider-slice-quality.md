@@ -44,13 +44,13 @@ Add focused regression tests that fail if a provider create flow does not clean 
 
 ## Implementation Checklist
 
-- [ ] Inspect Scaleway create/delete lifecycle and ProviderError serialization.
-- [ ] Add a small Scaleway cleanup helper that deletes or terminates a known zone/server id and tolerates 404.
-- [ ] Use the helper after cloud-init upload failure and poweron failure while preserving the original failure as the primary error.
-- [ ] Represent cleanup failure diagnostics in a safe, deterministic ProviderError shape.
-- [ ] Add Scaleway tests for cloud-init failure cleanup, poweron failure cleanup, cleanup failure visibility, and unchanged success behavior.
-- [ ] Replace Hetzner raw `console.*` usage with an injectable no-op-by-default logger.
-- [ ] Update Hetzner tests to assert logging through the injected logger rather than global console spies.
+- [x] Inspect Scaleway create/delete lifecycle and ProviderError serialization.
+- [x] Add a small Scaleway cleanup helper that deletes or terminates a known zone/server id and tolerates 404.
+- [x] Use the helper after cloud-init upload failure and poweron failure while preserving the original failure as the primary error.
+- [x] Represent cleanup failure diagnostics in a safe, deterministic ProviderError shape.
+- [x] Add Scaleway tests for cloud-init failure cleanup, poweron failure cleanup, cleanup failure visibility, and unchanged success behavior.
+- [x] Replace Hetzner raw `console.*` usage with an injectable no-op-by-default logger.
+- [x] Update Hetzner tests to assert logging through the injected logger rather than global console spies.
 - [ ] Run provider package tests and available typecheck/build/lint checks.
 - [ ] Run specialist validation for task completion, tests, security/secrets, and constitution compliance.
 

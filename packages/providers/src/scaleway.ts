@@ -5,7 +5,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import type { LocationMeta, Provider, ProviderErrorContext, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 import {
   parseProviderJson,
@@ -133,22 +133,30 @@ export class ScalewayProvider implements Provider {
     );
     const serverId = createData.server.id;
 
-    // Step 2: Set cloud-init user data
-    await providerFetch(
-      this.name,
-      `${SCALEWAY_INSTANCE_API_URL}/${location}/servers/${serverId}/user_data/cloud-init`,
-      {
-        method: 'PATCH',
-        headers: {
-          'X-Auth-Token': this.secretKey,
-          'Content-Type': 'text/plain',
+    try {
+      // Step 2: Set cloud-init user data
+      await providerFetch(
+        this.name,
+        `${SCALEWAY_INSTANCE_API_URL}/${location}/servers/${serverId}/user_data/cloud-init`,
+        {
+          method: 'PATCH',
+          headers: {
+            'X-Auth-Token': this.secretKey,
+            'Content-Type': 'text/plain',
+          },
+          body: config.userData,
         },
-        body: config.userData,
-      },
-    );
+      );
+    } catch (err) {
+      throw await this.withCreatedServerCleanupContext(err, location, serverId, 'cloud-init-upload');
+    }
 
-    // Step 3: Power on
-    await this.performAction(location, serverId, 'poweron');
+    try {
+      // Step 3: Power on
+      await this.performAction(location, serverId, 'poweron');
+    } catch (err) {
+      throw await this.withCreatedServerCleanupContext(err, location, serverId, 'poweron');
+    }
 
     // Return immediately — IP will be empty at this point.
     // Scaleway allocates IPs asynchronously after boot.
@@ -161,10 +169,14 @@ export class ScalewayProvider implements Provider {
     const server = await this.findServerInAnyZone(id);
     if (!server) return;
 
+    await this.cleanupKnownServer(server.zone, id);
+  }
+
+  private async cleanupKnownServer(zone: string, serverId: string): Promise<void> {
     try {
       // Scaleway cannot delete running servers — try terminate action first
       // which handles poweroff + delete in one step
-      await this.performAction(server.zone, id, 'terminate');
+      await this.performAction(zone, serverId, 'terminate');
     } catch (err) {
       if (err instanceof ProviderError && err.statusCode === 404) {
         return; // Idempotent: already deleted
@@ -174,7 +186,7 @@ export class ScalewayProvider implements Provider {
         try {
           await providerFetch(
             this.name,
-            `${SCALEWAY_INSTANCE_API_URL}/${server.zone}/servers/${id}`,
+            `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers/${serverId}`,
             {
               method: 'DELETE',
               headers: { 'X-Auth-Token': this.secretKey },
@@ -190,6 +202,67 @@ export class ScalewayProvider implements Provider {
       }
       throw err;
     }
+  }
+
+  private async withCreatedServerCleanupContext(
+    original: unknown,
+    zone: string,
+    serverId: string,
+    failedStep: 'cloud-init-upload' | 'poweron',
+  ): Promise<Error> {
+    try {
+      await this.cleanupKnownServer(zone, serverId);
+      return this.normalizeCreateFailure(original);
+    } catch (cleanupErr) {
+      const originalError = this.normalizeCreateFailure(original);
+      return new ProviderError(
+        this.name,
+        originalError instanceof ProviderError ? originalError.statusCode : undefined,
+        originalError.message,
+        {
+          cause: originalError,
+          context: {
+            failedStep,
+            cleanup: this.cleanupContext(zone, serverId, cleanupErr),
+          },
+        },
+      );
+    }
+  }
+
+  private cleanupContext(zone: string, serverId: string, cleanupErr: unknown): ProviderErrorContext {
+    return {
+      operation: 'cleanup-created-server',
+      provider: this.name,
+      zone,
+      serverId,
+      error: this.errorContext(cleanupErr),
+    };
+  }
+
+  private errorContext(err: unknown): ProviderErrorContext {
+    if (err instanceof ProviderError) {
+      return {
+        name: err.name,
+        provider: err.providerName,
+        statusCode: err.statusCode,
+        message: err.message,
+      };
+    }
+    if (err instanceof Error) {
+      return {
+        name: err.name,
+        message: err.message,
+      };
+    }
+    return {
+      message: String(err),
+    };
+  }
+
+  private normalizeCreateFailure(err: unknown): Error {
+    if (err instanceof Error) return err;
+    return new ProviderError(this.name, undefined, `Scaleway createVM failed: ${String(err)}`);
   }
 
   async getVM(id: string): Promise<VMInstance | null> {

@@ -2,8 +2,8 @@ import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
-import { ProviderError } from './types';
+import type { LocationMeta, Provider, ProviderLogger, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import { noopProviderLogger, ProviderError } from './types';
 import {
   type HetznerServerPayload,
   parseProviderJson,
@@ -89,6 +89,7 @@ export class HetznerProvider implements Provider {
   private readonly capacityRetryInitialDelayMs: number;
   private readonly capacityRetryMaxDelayMs: number;
   private readonly capacityRetryMaxAttempts: number;
+  private readonly logger: ProviderLogger;
 
   constructor(
     apiToken: string,
@@ -98,6 +99,7 @@ export class HetznerProvider implements Provider {
     capacityRetryInitialDelayMs?: number,
     capacityRetryMaxDelayMs?: number,
     capacityRetryMaxAttempts?: number,
+    logger?: ProviderLogger,
   ) {
     this.apiToken = apiToken;
     this.datacenter = datacenter || DEFAULT_HETZNER_DATACENTER;
@@ -110,6 +112,7 @@ export class HetznerProvider implements Provider {
       capacityRetryMaxDelayMs ?? DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS;
     this.capacityRetryMaxAttempts =
       capacityRetryMaxAttempts ?? DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS;
+    this.logger = logger ?? noopProviderLogger;
   }
 
   async createVM(config: VMConfig): Promise<VMInstance> {
@@ -137,13 +140,14 @@ export class HetznerProvider implements Provider {
             );
           }
 
-          console.warn(
-            `hetzner: transient capacity error, retrying in ${delay}ms ` +
-              `(attempt ${capacityAttempt + 1}/${this.capacityRetryMaxAttempts}, ` +
-              `server_type=${sizeConfig.type}, ` +
-              `location=${config.location || this.datacenter}, ` +
-              `error=${err.message})`,
-          );
+          this.logger.warn('hetzner transient capacity error; retrying createVM', {
+            delayMs: delay,
+            attempt: capacityAttempt + 1,
+            maxAttempts: this.capacityRetryMaxAttempts,
+            serverType: sizeConfig.type,
+            location: config.location || this.datacenter,
+            error: err.message,
+          });
 
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
@@ -187,9 +191,10 @@ export class HetznerProvider implements Provider {
     let lastError: ProviderError | undefined;
     for (const attempt of attemptsToTry) {
       if (lastError && attempt.delayMs > 0) {
-        console.warn(
-          `hetzner: retrying ${attempt.location} after ${attempt.delayMs}ms`,
-        );
+        this.logger.warn('hetzner retrying primary placement after delay', {
+          location: attempt.location,
+          delayMs: attempt.delayMs,
+        });
         await new Promise((resolve) => setTimeout(resolve, attempt.delayMs));
       }
 
@@ -216,16 +221,18 @@ export class HetznerProvider implements Provider {
           'createVM',
         );
         if (attempt.location !== primaryLocation) {
-          console.log(
-            `hetzner: placement failed in ${primaryLocation}, succeeded in ${attempt.location}`,
-          );
+          this.logger.info('hetzner placement fallback succeeded', {
+            primaryLocation,
+            selectedLocation: attempt.location,
+          });
         }
         return this.mapServerToVMInstance(data.server);
       } catch (err) {
         if (err instanceof ProviderError && err.statusCode === 412) {
-          console.warn(
-            `hetzner: placement failed in ${attempt.location} (412)`,
-          );
+          this.logger.warn('hetzner placement attempt failed', {
+            location: attempt.location,
+            statusCode: err.statusCode,
+          });
           lastError = err;
           continue;
         }

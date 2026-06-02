@@ -11,6 +11,10 @@ export type {
   LocationMeta,
   Provider,
   ProviderConfig,
+  ProviderErrorContext,
+  ProviderErrorContextValue,
+  ProviderLogContext,
+  ProviderLogger,
   ScalewayProviderConfig,
   SizeConfig,
   VMConfig,
@@ -50,6 +54,7 @@ export function createProvider(config: ProviderConfig): Provider {
         config.capacityRetryInitialDelayMs,
         config.capacityRetryMaxDelayMs,
         config.capacityRetryMaxAttempts,
+        config.logger,
       );
     case 'scaleway':
       return new ScalewayProvider(

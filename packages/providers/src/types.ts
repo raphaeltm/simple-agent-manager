@@ -135,6 +135,8 @@ export interface HetznerProviderConfig {
   provider: 'hetzner';
   apiToken: string;
   datacenter?: string;
+  /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
   /** Delay in ms before retrying same location on 412 (default: 3000) */
   placementRetryDelayMs?: number;
   /** Whether to try other locations after primary fails (default: true) */
@@ -171,6 +173,33 @@ export interface GcpProviderConfig {
   agentPorts?: readonly string[];
 }
 
+export type ProviderErrorContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ProviderErrorContext
+  | ProviderErrorContextValue[];
+
+export interface ProviderErrorContext {
+  [key: string]: ProviderErrorContextValue;
+}
+
+export interface ProviderLogContext {
+  [key: string]: string | number | boolean | null | undefined;
+}
+
+export interface ProviderLogger {
+  warn(message: string, context?: ProviderLogContext): void;
+  info(message: string, context?: ProviderLogContext): void;
+}
+
+export const noopProviderLogger: ProviderLogger = {
+  warn: () => {},
+  info: () => {},
+};
+
 /**
  * Normalized error for all provider operations.
  * Wraps HTTP errors, timeouts, and domain-specific failures with provider context.
@@ -184,11 +213,14 @@ export class ProviderError extends Error {
     /** HTTP status code (if from API call) */
     public readonly statusCode: number | undefined,
     message: string,
-    /** Original error */
-    options?: { cause?: Error },
+    /** Original error and safe structured diagnostics */
+    options?: { cause?: Error; context?: ProviderErrorContext },
   ) {
     super(message, options);
+    this.context = options?.context;
   }
+
+  readonly context: ProviderErrorContext | undefined;
 
   /** Make Error properties visible to JSON.stringify */
   toJSON(): Record<string, unknown> {
@@ -198,6 +230,7 @@ export class ProviderError extends Error {
       provider: this.providerName,
       statusCode: this.statusCode,
       cause: this.cause instanceof Error ? this.cause.message : this.cause,
+      context: this.context,
     };
   }
 }
