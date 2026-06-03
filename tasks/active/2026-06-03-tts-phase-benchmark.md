@@ -22,17 +22,17 @@ This is a throwaway measurement harness. It must not be merged to `main` or reac
 
 ## Checklist
 
-- [ ] Create `apps/api/src/routes/tts-benchmark.ts` with a superadmin-gated `POST /` route.
-- [ ] Add the built-in markdown-heavy fixture sized for roughly seven 1800-character chunks.
-- [ ] Implement four benchmark variants over configurable iterations:
-  - [ ] `baseline-full`: LLM cleanup, sequential chunks, concat, store, delete.
-  - [ ] `parallel-chunks`: LLM cleanup, parallel chunks, concat/store if successful, capture errors without crashing.
-  - [ ] `no-cleanup`: regex markdown strip, sequential chunks, concat, store, delete.
-  - [ ] `summary`: LLM summary, sequential chunks, concat, store, delete.
-- [ ] Log `tts_benchmark.phase` events for corroboration in staging tail logs.
-- [ ] Mount the route at `POST /api/admin/tts-benchmark` in `apps/api/src/index.ts`.
-- [ ] Add behavioral route tests for non-superadmin 403 and superadmin reachability.
-- [ ] Run local API validation for the changed slice.
+- [x] Create `apps/api/src/routes/tts-benchmark.ts` with a superadmin-gated `POST /` route.
+- [x] Add the built-in markdown-heavy fixture sized for roughly seven 1800-character chunks.
+- [x] Implement four benchmark variants over configurable iterations:
+  - [x] `baseline-full`: LLM cleanup, sequential chunks, concat, store, delete.
+  - [x] `parallel-chunks`: LLM cleanup, parallel chunks, concat/store if successful, capture errors without crashing.
+  - [x] `no-cleanup`: regex markdown strip, sequential chunks, concat, store, delete.
+  - [x] `summary`: LLM summary, sequential chunks, concat, store, delete.
+- [x] Log `tts_benchmark.phase` events for corroboration in staging tail logs.
+- [x] Mount the route at `POST /api/admin/tts-benchmark` in `apps/api/src/index.ts`.
+- [x] Add behavioral route tests for non-superadmin 403 and superadmin reachability.
+- [x] Run local API validation for the changed slice.
 - [ ] Verify the primary staging test user is a superadmin via Cloudflare D1 query.
 - [ ] Deploy the branch to staging through `deploy-staging.yml` and wait for green.
 - [ ] Authenticate with `SAM_PLAYWRIGHT_PRIMARY_USER` and run `{ "iterations": 3 }` against staging.
