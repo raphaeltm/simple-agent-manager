@@ -32,7 +32,6 @@ import { Node } from './pages/Node';
 import { Nodes } from './pages/Nodes';
 import { Project } from './pages/Project';
 import { ProjectChat } from './pages/project-chat';
-import { PlatformPolicyPrototype } from './pages/platform-policy-prototype';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
@@ -90,7 +89,6 @@ export default function App() {
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
-                <Route path="/prototype/platform-policy" element={<PlatformPolicyPrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
