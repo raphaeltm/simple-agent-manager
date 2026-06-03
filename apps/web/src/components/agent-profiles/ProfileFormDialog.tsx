@@ -85,7 +85,7 @@ const GITHUB_PERMISSION_ROWS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
-// Collapsible Section
+// Reusable form primitives
 // ---------------------------------------------------------------------------
 
 interface SectionProps {
@@ -122,6 +122,36 @@ function Section({ title, summary, defaultOpen = false, children }: SectionProps
       </button>
       {open && <div className="pb-3 grid gap-3">{children}</div>}
     </div>
+  );
+}
+
+const SELECT_CLASSES = 'w-full rounded-md text-fg-primary py-2.5 px-3 min-h-11';
+
+interface SelectFieldProps {
+  label: ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly { readonly value: string; readonly label: string }[];
+  disabled?: boolean;
+}
+
+function SelectField({ label, value, onChange, options, disabled }: SelectFieldProps) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-sm text-fg-muted">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={SELECT_CLASSES}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -311,8 +341,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     }
   };
 
-  const selectClasses = 'w-full rounded-md text-fg-primary py-2.5 px-3 min-h-11';
-
   const updateGitHubPermission = (
     key: keyof GitHubCliPolicy['permissions'],
     value: GitHubCliPermissionLevel
@@ -380,24 +408,13 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           summary={agentSettingsSummary(agentType, model, permissionMode, timeoutMinutes)}
         >
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Agent Type</span>
-              <select
-                value={agentType}
-                onChange={(e) => {
-                  setAgentType(e.target.value);
-                  setModel('');
-                }}
-                disabled={saving}
-                className={selectClasses}
-              >
-                {AGENT_CATALOG.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="Agent Type"
+              value={agentType}
+              onChange={(v) => { setAgentType(v); setModel(''); }}
+              options={AGENT_CATALOG.map((a) => ({ value: a.id, label: a.name }))}
+              disabled={saving}
+            />
 
             <div className="grid gap-1.5">
               <label htmlFor="profile-model" className="text-sm text-fg-muted">
@@ -413,21 +430,13 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               />
             </div>
 
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Permission Mode</span>
-              <select
-                value={permissionMode}
-                onChange={(e) => setPermissionMode(e.target.value)}
-                disabled={saving}
-                className={selectClasses}
-              >
-                {PERMISSION_MODES.map((pm) => (
-                  <option key={pm.value} value={pm.value}>
-                    {pm.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="Permission Mode"
+              value={permissionMode}
+              onChange={setPermissionMode}
+              options={PERMISSION_MODES}
+              disabled={saving}
+            />
 
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Timeout (minutes)</span>
@@ -447,25 +456,22 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           summary={policySummary(githubCliPolicy)}
         >
           <div className="grid gap-3">
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">GitHub CLI access</span>
-              <select
-                value={githubCliPolicy.mode}
-                onChange={(e) => {
-                  const mode = e.target.value as GitHubCliPolicy['mode'];
-                  setGithubCliPolicy((current) => ({
-                    ...(current ?? DEFAULT_GITHUB_CLI_POLICY),
-                    mode,
-                    repositoryScope: 'project',
-                  }));
-                }}
-                disabled={saving}
-                className={selectClasses}
-              >
-                <option value="inherit">Inherit GitHub App installation permissions</option>
-                <option value="custom">Restrict token minted for this profile</option>
-              </select>
-            </label>
+            <SelectField
+              label="GitHub CLI access"
+              value={githubCliPolicy.mode}
+              onChange={(mode) =>
+                setGithubCliPolicy((current) => ({
+                  ...(current ?? DEFAULT_GITHUB_CLI_POLICY),
+                  mode: mode as GitHubCliPolicy['mode'],
+                  repositoryScope: 'project',
+                }))
+              }
+              options={[
+                { value: 'inherit', label: 'Inherit GitHub App installation permissions' },
+                { value: 'custom', label: 'Restrict token minted for this profile' },
+              ]}
+              disabled={saving}
+            />
 
             {githubCliPolicy.mode === 'custom' && (
               <fieldset className="grid gap-2 rounded-md border border-border-default p-3">
@@ -488,7 +494,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                         updateGitHubPermission(row.key, e.target.value as GitHubCliPermissionLevel)
                       }
                       disabled={saving}
-                      className={selectClasses}
+                      className={SELECT_CLASSES}
                     >
                       {row.options.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -536,45 +542,26 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode)}
         >
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">
-                VM Size
-                {providerContext && <span className="font-normal ml-1">({providerContext})</span>}
-              </span>
-              <select
-                value={vmSizeOverride}
-                onChange={(e) => setVmSizeOverride(e.target.value)}
-                disabled={saving}
-                className={selectClasses}
-              >
-                {VM_SIZES.map((vs) => (
-                  <option key={vs.value} value={vs.value}>
-                    {vs.value
-                      ? formatVmSizeOption(
-                          vs.value as VMSize,
-                          activeCatalog?.sizes[vs.value as VMSize] ?? null
-                        )
-                      : vs.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label={<>VM Size{providerContext && <span className="font-normal ml-1">({providerContext})</span>}</>}
+              value={vmSizeOverride}
+              onChange={setVmSizeOverride}
+              options={VM_SIZES.map((vs) => ({
+                value: vs.value,
+                label: vs.value
+                  ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null)
+                  : vs.label,
+              }))}
+              disabled={saving}
+            />
 
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Workspace Profile</span>
-              <select
-                value={workspaceProfile}
-                onChange={(e) => setWorkspaceProfile(e.target.value)}
-                disabled={saving}
-                className={selectClasses}
-              >
-                {WORKSPACE_PROFILES.map((wp) => (
-                  <option key={wp.value} value={wp.value}>
-                    {wp.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="Workspace Profile"
+              value={workspaceProfile}
+              onChange={setWorkspaceProfile}
+              options={WORKSPACE_PROFILES}
+              disabled={saving}
+            />
 
             {workspaceProfile !== 'lightweight' && (
               <label className="grid gap-1.5">
@@ -588,21 +575,13 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </label>
             )}
 
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Task Mode</span>
-              <select
-                value={taskMode}
-                onChange={(e) => setTaskMode(e.target.value)}
-                disabled={saving}
-                className={selectClasses}
-              >
-                {TASK_MODES.map((tm) => (
-                  <option key={tm.value} value={tm.value}>
-                    {tm.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="Task Mode"
+              value={taskMode}
+              onChange={setTaskMode}
+              options={TASK_MODES}
+              disabled={saving}
+            />
           </div>
         </Section>
 
