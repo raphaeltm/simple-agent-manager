@@ -7,27 +7,52 @@ import {
   toInstallationTokenOptions,
 } from '../../../src/services/github-cli-policy';
 
+function makePolicy(overrides: Partial<GitHubCliPolicy> = {}): GitHubCliPolicy {
+  return {
+    mode: 'custom',
+    repositoryScope: 'project',
+    permissions: {
+      contents: 'write',
+      pullRequests: 'write',
+      issues: 'none',
+      actions: 'none',
+      packages: 'none',
+    },
+    ...overrides,
+  };
+}
+
+function makeFakeDb(...queryResults: unknown[][]) {
+  const rows = [...queryResults];
+  return {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: () => rows.shift() ?? [],
+          }),
+          limit: () => rows.shift() ?? [],
+        }),
+      }),
+    }),
+  };
+}
+
+const DEFAULT_INPUT = {
+  workspaceId: 'workspace-1',
+  projectId: 'project-1',
+  userId: 'user-1',
+  githubRepoId: 12345,
+} as const;
+
 describe('GitHub CLI policy token options', () => {
   it('keeps inherited profiles on the existing full-installation token path', () => {
-    const policy: GitHubCliPolicy = {
-      mode: 'inherit',
-      repositoryScope: 'project',
-      permissions: {
-        contents: 'write',
-        pullRequests: 'write',
-        issues: 'write',
-        actions: 'none',
-        packages: 'write',
-      },
-    };
-
+    const policy = makePolicy({ mode: 'inherit' });
     expect(toInstallationTokenOptions(policy, 123)).toBeNull();
   });
 
   it('converts custom profile policy into repository-scoped GitHub permissions', () => {
-    const policy: GitHubCliPolicy = {
-      mode: 'custom',
-      repositoryScope: 'project',
+    const policy = makePolicy({
       permissions: {
         contents: 'write',
         pullRequests: 'write',
@@ -35,7 +60,7 @@ describe('GitHub CLI policy token options', () => {
         actions: 'read',
         packages: 'none',
       },
-    };
+    });
 
     expect(toInstallationTokenOptions(policy, 987654)).toEqual({
       repositoryIds: [987654],
@@ -48,9 +73,7 @@ describe('GitHub CLI policy token options', () => {
   });
 
   it('fails closed when project-scoped custom policy cannot resolve a GitHub repo id', () => {
-    const policy: GitHubCliPolicy = {
-      mode: 'custom',
-      repositoryScope: 'project',
+    const policy = makePolicy({
       permissions: {
         contents: 'read',
         pullRequests: 'none',
@@ -58,15 +81,13 @@ describe('GitHub CLI policy token options', () => {
         actions: 'none',
         packages: 'write',
       },
-    };
+    });
 
     expect(() => toInstallationTokenOptions(policy, null)).toThrow(GitHubCliPolicyError);
   });
 
   it('resolves task-linked profile policy into token options for a workspace', async () => {
-    const policy: GitHubCliPolicy = {
-      mode: 'custom',
-      repositoryScope: 'project',
+    const policy = makePolicy({
       permissions: {
         contents: 'read',
         pullRequests: 'write',
@@ -74,31 +95,14 @@ describe('GitHub CLI policy token options', () => {
         actions: 'none',
         packages: 'none',
       },
-    };
-    const rows = [
+    });
+    const db = makeFakeDb(
       [{ profileId: 'profile-release' }],
-      [{ githubCliPolicy: JSON.stringify(policy) }],
-    ];
-    const db = {
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            orderBy: () => ({
-              limit: () => rows.shift() ?? [],
-            }),
-            limit: () => rows.shift() ?? [],
-          }),
-        }),
-      }),
-    };
+      [{ githubCliPolicy: JSON.stringify(policy) }]
+    );
 
     await expect(
-      resolveWorkspaceGitHubTokenOptions(db as never, {
-        workspaceId: 'workspace-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        githubRepoId: 12345,
-      })
+      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
     ).resolves.toEqual({
       repositoryIds: [12345],
       permissions: {
@@ -109,27 +113,13 @@ describe('GitHub CLI policy token options', () => {
   });
 
   it('fails closed when a task-linked profile stores invalid policy JSON', async () => {
-    const rows = [[{ profileId: 'profile-release' }], [{ githubCliPolicy: '{invalid' }]];
-    const db = {
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            orderBy: () => ({
-              limit: () => rows.shift() ?? [],
-            }),
-            limit: () => rows.shift() ?? [],
-          }),
-        }),
-      }),
-    };
+    const db = makeFakeDb(
+      [{ profileId: 'profile-release' }],
+      [{ githubCliPolicy: '{invalid' }]
+    );
 
     await expect(
-      resolveWorkspaceGitHubTokenOptions(db as never, {
-        workspaceId: 'workspace-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        githubRepoId: 12345,
-      })
+      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
     ).rejects.toThrow(GitHubCliPolicyError);
   });
 });
