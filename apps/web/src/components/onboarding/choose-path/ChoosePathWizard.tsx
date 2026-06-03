@@ -19,10 +19,10 @@ import {
 } from '../../../lib/api';
 import { useAuth } from '../../AuthProvider';
 import { CompletionScreen } from './CompletionScreen';
-import { type GeneratedStep,generatePath } from './path-generator';
+import { type GeneratedStep, generatePath } from './path-generator';
 import { PathPreview } from './PathPreview';
 import { QuestionCard } from './QuestionCard';
-import { type PathOption,QUESTIONS } from './questions';
+import { type PathOption, QUESTIONS } from './questions';
 import { StepExecution } from './StepExecution';
 
 type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
@@ -57,6 +57,11 @@ export function ChoosePathWizard() {
   // Ref keeps latest tags accessible in callbacks without stale closures
   const tagsRef = useRef(tags);
   tagsRef.current = tags;
+
+  const focusContent = useCallback(
+    () => requestAnimationFrame(() => contentRef.current?.focus()),
+    []
+  );
 
   // Check existing setup status (async data fetch — genuine useEffect)
   useEffect(() => {
@@ -124,7 +129,7 @@ export function ChoosePathWizard() {
       } else {
         setGeneratedSteps(generatePath(newTags));
         setPhase('path-preview');
-        requestAnimationFrame(() => contentRef.current?.focus());
+        focusContent();
       }
     },
     [currentQuestionId]
@@ -143,9 +148,9 @@ export function ChoosePathWizard() {
   const canGoBack = questionHistory.length > 0 && phase === 'questions';
 
   const handleBack = useCallback(() => {
-    if (questionHistory.length === 0) return;
-    const lastAnsweredId = questionHistory[questionHistory.length - 1] as string;
-    const lastAnswer = answers[lastAnsweredId] as string | undefined;
+    const lastAnsweredId = questionHistory.at(-1);
+    if (!lastAnsweredId) return;
+    const lastAnswer = answers[lastAnsweredId];
     const lastOption = QUESTIONS.find((q) => q.id === lastAnsweredId)?.options.find(
       (o) => o.id === lastAnswer
     );
@@ -163,7 +168,7 @@ export function ChoosePathWizard() {
   const handleExecutionComplete = useCallback(() => {
     setPhase('complete');
     if (userId) localStorage.setItem(getStorageKey(userId), 'true');
-    requestAnimationFrame(() => contentRef.current?.focus());
+    focusContent();
   }, [userId]);
 
   // Filter out auto-handled steps for execution
@@ -250,7 +255,7 @@ export function ChoosePathWizard() {
               steps={generatedSteps}
               onStart={() => {
                 setPhase('executing');
-                requestAnimationFrame(() => contentRef.current?.focus());
+                focusContent();
               }}
               onReset={handleReset}
             />

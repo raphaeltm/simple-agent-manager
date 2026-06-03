@@ -1,13 +1,40 @@
 import { Button, Card } from '@simple-agent-manager/ui';
 import { Check, Sparkles, X } from 'lucide-react';
+import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
+
+/* ─── Constants ─── */
+
+const NEXT_STEPS = [
+  {
+    title: 'Start a chat in your project',
+    desc: 'Describe what you want built and the agent will start working',
+  },
+  {
+    title: 'Watch the agent work',
+    desc: 'See real-time progress as it edits files, runs tests, and creates PRs',
+  },
+  {
+    title: 'Review and merge',
+    desc: 'Check the PR, request changes, or merge it to your main branch',
+  },
+] as const;
+
+/* ─── Props ─── */
 
 interface CompletionScreenProps {
   onDismiss: () => void;
 }
 
+/* ─── Component ─── */
+
 export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
   const navigate = useNavigate();
+
+  const handleGoToProjects = useCallback(() => {
+    onDismiss();
+    navigate('/projects');
+  }, [onDismiss, navigate]);
 
   return (
     <div className="max-w-md mx-auto text-center">
@@ -26,23 +53,10 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
           What&apos;s next
         </p>
         <ol className="flex flex-col gap-3 list-none p-0 m-0">
-          {[
-            {
-              title: 'Start a chat in your project',
-              desc: 'Describe what you want built and the agent will start working',
-            },
-            {
-              title: 'Watch the agent work',
-              desc: 'See real-time progress as it edits files, runs tests, and creates PRs',
-            },
-            {
-              title: 'Review and merge',
-              desc: 'Check the PR, request changes, or merge it to your main branch',
-            },
-          ].map((item, i) => (
-            <li key={i} className="flex items-start gap-3">
+          {NEXT_STEPS.map((item) => (
+            <li key={item.title} className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-accent/10 flex items-center justify-center text-xs text-accent font-bold shrink-0">
-                {i + 1}
+                {NEXT_STEPS.indexOf(item) + 1}
               </div>
               <div>
                 <p className="text-sm font-medium text-fg-primary">{item.title}</p>
@@ -57,10 +71,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
         <Button
           variant="primary"
           size="lg"
-          onClick={() => {
-            onDismiss();
-            navigate('/projects');
-          }}
+          onClick={handleGoToProjects}
           className="w-full max-w-xs"
         >
           <Sparkles size={14} /> Go to my projects

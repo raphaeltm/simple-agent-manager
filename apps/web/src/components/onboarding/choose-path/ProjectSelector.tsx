@@ -87,11 +87,15 @@ export function ProjectSelector({
             disabled={loading}
             onChange={(e) => {
               const repo = repos.find((r) => r.fullName === e.target.value);
-              setForm((prev) => ({
-                ...prev,
-                selectedRepoUrl: repo ? `https://github.com/${repo.fullName}.git` : '',
-                selectedRepoName: repo?.fullName ?? '',
-              }));
+              if (repo) {
+                const repoUrl = `https://github.com/${repo.fullName}.git`;
+                // Validate constructed URL to prevent malformed fullName from breaking clone
+                const parsed = new URL(repoUrl);
+                if (parsed.hostname !== 'github.com') return;
+                setForm((prev) => ({ ...prev, selectedRepoUrl: repoUrl, selectedRepoName: repo.fullName }));
+              } else {
+                setForm((prev) => ({ ...prev, selectedRepoUrl: '', selectedRepoName: '' }));
+              }
             }}
           >
             <option value="">Select a repository...</option>

@@ -13,7 +13,13 @@ interface PathPreviewProps {
 export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
   const timeEstimate = getTimeEstimate(steps);
   const requiredSteps = steps.filter((s) => !s.isOptional);
-  let stepNumber = 0;
+
+  // Pre-compute display numbers so we avoid mutating state inside .map()
+  const stepNumbers = new Map<string, number>();
+  let counter = 0;
+  for (const s of steps) {
+    if (!s.isOptional) stepNumbers.set(s.id, ++counter);
+  }
 
   return (
     <div className="max-w-md mx-auto">
@@ -43,9 +49,7 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
 
       {/* Step list */}
       <div className="flex flex-col gap-3 mb-8">
-        {steps.map((step) => {
-          if (!step.isOptional) stepNumber++;
-          return (
+        {steps.map((step) => (
             <Card
               key={step.id}
               className={`p-4 ${step.isOptional ? 'opacity-60' : ''}`}
@@ -58,7 +62,7 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
                       : 'bg-accent/20 text-accent'
                   }`}
                 >
-                  {step.isOptional ? <Check size={12} /> : stepNumber}
+                  {step.isOptional ? <Check size={12} /> : stepNumbers.get(step.id)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
@@ -74,8 +78,7 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
                 </div>
               </div>
             </Card>
-          );
-        })}
+        ))}
       </div>
 
       {/* Actions */}
