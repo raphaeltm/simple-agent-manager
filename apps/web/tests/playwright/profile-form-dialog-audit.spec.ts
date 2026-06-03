@@ -195,37 +195,41 @@ async function screenshotDialog(page: Page, baseName: string) {
   await screenshot(page, `${baseName}-bottom`);
 }
 
+async function openDialog(
+  page: Page,
+  opts: { trigger: string; waitFor: string; screenshotBase: string },
+) {
+  await setupApiMocks(page);
+  await page.goto('/projects/proj-test-1/profiles');
+  await page.waitForSelector('text=Production Implementer');
+  await page.click(opts.trigger);
+  await page.waitForSelector(`text=${opts.waitFor}`);
+  await screenshotDialog(page, opts.screenshotBase);
+  await assertNoOverflow(page);
+}
+
 test.describe('Profile Form Dialog', () => {
   test('create mode — click New Profile to open empty form', async ({ page }) => {
-    await setupApiMocks(page);
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Production Implementer');
-
-    await page.click('button:has-text("New Profile")');
-    await page.waitForSelector('text=Create Agent Profile');
-    await screenshotDialog(page, 'profile-form-create');
-    await assertNoOverflow(page);
+    await openDialog(page, {
+      trigger: 'button:has-text("New Profile")',
+      waitFor: 'Create Agent Profile',
+      screenshotBase: 'profile-form-create',
+    });
   });
 
   test('edit mode — fully loaded profile with custom GitHub CLI policy', async ({ page }) => {
-    await setupApiMocks(page);
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Production Implementer');
-
-    await page.click('button[aria-label="Edit Production Implementer"]');
-    await page.waitForSelector('text=Edit Profile');
-    await screenshotDialog(page, 'profile-form-edit-custom');
-    await assertNoOverflow(page);
+    await openDialog(page, {
+      trigger: 'button[aria-label="Edit Production Implementer"]',
+      waitFor: 'Edit Profile',
+      screenshotBase: 'profile-form-edit-custom',
+    });
   });
 
   test('edit mode — profile with inherited GitHub policy', async ({ page }) => {
-    await setupApiMocks(page);
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Inherit Profile');
-
-    await page.click('button[aria-label="Edit Inherit Profile"]');
-    await page.waitForSelector('text=Edit Profile');
-    await screenshotDialog(page, 'profile-form-edit-inherit');
-    await assertNoOverflow(page);
+    await openDialog(page, {
+      trigger: 'button[aria-label="Edit Inherit Profile"]',
+      waitFor: 'Edit Profile',
+      screenshotBase: 'profile-form-edit-inherit',
+    });
   });
 });

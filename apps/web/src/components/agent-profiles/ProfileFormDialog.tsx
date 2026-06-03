@@ -181,32 +181,35 @@ function agentSettingsSummary(
   return parts.join(' · ');
 }
 
+function permTag(label: string, level: GitHubCliPermissionLevel): string | null {
+  if (level === 'none') return null;
+  return `${label}:${level === 'write' ? 'rw' : 'r'}`;
+}
+
 function policySummary(policy: GitHubCliPolicy): string {
   if (policy.mode === 'inherit') return 'Inherit installation permissions';
-  const perms = policy.permissions;
-  const tags: string[] = [];
-  if (perms.contents === 'write') tags.push('code:rw');
-  else tags.push('code:r');
-  if (perms.pullRequests !== 'none') tags.push(`PRs:${perms.pullRequests === 'write' ? 'rw' : 'r'}`);
-  if (perms.issues !== 'none') tags.push(`issues:${perms.issues === 'write' ? 'rw' : 'r'}`);
-  if (perms.actions !== 'none') tags.push(`actions:${perms.actions === 'write' ? 'rw' : 'r'}`);
-  if (perms.packages !== 'none') tags.push(`pkg:${perms.packages === 'write' ? 'rw' : 'r'}`);
+  const p = policy.permissions;
+  const tags = [
+    permTag('code', p.contents),
+    permTag('PRs', p.pullRequests),
+    permTag('issues', p.issues),
+    permTag('actions', p.actions),
+    permTag('pkg', p.packages),
+  ].filter(Boolean);
   return `Custom: ${tags.join(', ')}`;
 }
 
+function joinOrDefault(parts: (string | false | null | undefined)[], sep = ', '): string {
+  const filtered = parts.filter(Boolean) as string[];
+  return filtered.length ? filtered.join(sep) : 'Defaults';
+}
+
 function executionSummary(maxTurns: string, systemPromptAppend: string): string {
-  const parts: string[] = [];
-  if (maxTurns) parts.push(`${maxTurns} turns`);
-  if (systemPromptAppend.trim()) parts.push('custom prompt');
-  return parts.length ? parts.join(', ') : 'Defaults';
+  return joinOrDefault([maxTurns && `${maxTurns} turns`, systemPromptAppend.trim() && 'custom prompt']);
 }
 
 function infraSummary(vmSize: string, workspaceProfile: string, taskMode: string): string {
-  const parts: string[] = [];
-  if (vmSize) parts.push(`${vmSize} VM`);
-  if (workspaceProfile) parts.push(workspaceProfile);
-  if (taskMode) parts.push(taskMode);
-  return parts.length ? parts.join(' · ') : 'Defaults';
+  return joinOrDefault([vmSize && `${vmSize} VM`, workspaceProfile, taskMode], ' · ');
 }
 
 // ---------------------------------------------------------------------------
