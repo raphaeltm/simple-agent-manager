@@ -9,7 +9,7 @@
  */
 import { Card, SkeletonCard } from '@simple-agent-manager/ui';
 import { ArrowLeft } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   getTrialStatus,
@@ -50,6 +50,7 @@ export function ChoosePathWizard() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [tags, setTags] = useState<string[]>([]);
   const [generatedSteps, setGeneratedSteps] = useState<GeneratedStep[]>([]);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // Check dismissal state
   useEffect(() => {
@@ -62,12 +63,17 @@ export function ChoosePathWizard() {
   useEffect(() => {
     async function checkStatus() {
       try {
-        const [credentials, installations, agentCreds, trialStatus] = await Promise.all([
+        const [credResult, installResult, agentResult, trialResult] = await Promise.allSettled([
           listCredentials(),
           listGitHubInstallations(),
           listAgentCredentials(),
-          getTrialStatus().catch(() => null),
+          getTrialStatus(),
         ]);
+
+        const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
+        const installations = installResult.status === 'fulfilled' ? installResult.value : [];
+        const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
+        const trialStatus = trialResult.status === 'fulfilled' ? trialResult.value : null;
 
         const hasCloud = credentials.some(
           (c) => c.provider === 'hetzner' || c.provider === 'scaleway'
@@ -157,6 +163,13 @@ export function ChoosePathWizard() {
     if (userId) localStorage.setItem(getStorageKey(userId), 'true');
   }, [userId]);
 
+  // Move focus to content area on phase transitions
+  useEffect(() => {
+    if (phase !== 'questions') {
+      contentRef.current?.focus();
+    }
+  }, [phase]);
+
   // Filter out auto-handled steps for execution
   const executableSteps = useMemo(
     () => generatedSteps.filter((s) => !s.isOptional),
@@ -191,7 +204,7 @@ export function ChoosePathWizard() {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-surface">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-accent/20 flex items-center justify-center text-accent text-xs font-bold">
+            <div aria-hidden="true" className="w-6 h-6 rounded-md bg-accent/20 flex items-center justify-center text-accent text-xs font-bold">
               S
             </div>
             <span className="text-sm font-semibold text-fg-primary">Setup</span>
@@ -207,15 +220,15 @@ export function ChoosePathWizard() {
               </button>
             )}
             {phase === 'questions' && (
-              <span className="text-xs text-fg-muted/50">
+              <span className="text-xs text-fg-muted">
                 Q{Object.keys(answers).length + 1}
               </span>
             )}
             {phase === 'path-preview' && (
-              <span className="text-xs text-fg-muted/50">Your plan</span>
+              <span className="text-xs text-fg-muted">Your plan</span>
             )}
             {phase === 'executing' && (
-              <span className="text-xs text-fg-muted/50">Setting up...</span>
+              <span className="text-xs text-fg-muted">Setting up...</span>
             )}
             <button
               type="button"
@@ -228,7 +241,7 @@ export function ChoosePathWizard() {
         </div>
 
         {/* Content */}
-        <div className="p-4 py-6">
+        <div ref={contentRef} tabIndex={-1} className="p-4 py-6 outline-none">
           {phase === 'questions' && currentQuestion && (
             <QuestionCard
               question={currentQuestion}
@@ -248,6 +261,7 @@ export function ChoosePathWizard() {
               steps={executableSteps}
               tags={tags}
               onComplete={handleExecutionComplete}
+              onDismiss={handleDismiss}
             />
           )}
           {phase === 'complete' && <CompletionScreen onDismiss={handleDismiss} />}

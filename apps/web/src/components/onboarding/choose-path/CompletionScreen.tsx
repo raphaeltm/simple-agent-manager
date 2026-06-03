@@ -22,7 +22,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
       </div>
 
       <Card className="p-5 text-left mb-6">
-        <p className="text-xs text-fg-muted/50 uppercase tracking-wide font-medium mb-3">
+        <p className="text-xs text-fg-muted uppercase tracking-wide font-medium mb-3">
           What&apos;s next
         </p>
         <div className="flex flex-col gap-3">
@@ -73,7 +73,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
           <X size={12} /> Dismiss
         </button>
       </div>
-      <p className="text-[10px] text-fg-muted/30 mt-3">
+      <p className="text-xs text-fg-muted mt-3">
         You can change any setting in Settings anytime
       </p>
     </div>

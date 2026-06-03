@@ -26,7 +26,7 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
         <p className="sam-type-body text-fg-muted mb-1">
           Based on your answers, here&apos;s what you need to do:
         </p>
-        <div className="flex items-center justify-center gap-3 text-xs text-fg-muted/60 mt-2">
+        <div className="flex items-center justify-center gap-3 text-xs text-fg-muted mt-2">
           <span className="flex items-center gap-1">
             <Clock size={12} /> {timeEstimate}
           </span>
@@ -63,9 +63,9 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="font-medium text-fg-primary text-sm">{step.title}</span>
-                    <span className="text-[10px] text-fg-muted/40">{step.timeEstimate}</span>
+                    <span className="text-xs text-fg-muted">{step.timeEstimate}</span>
                     {step.isOptional && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-success/10 text-success">
                         Handled
                       </span>
                     )}

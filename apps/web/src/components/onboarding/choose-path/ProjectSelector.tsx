@@ -15,6 +15,7 @@ interface ProjectSelectorProps {
   loading: boolean;
   onCreateProject: () => void;
   onSkip?: () => void;
+  onDismiss: () => void;
   tags: string[];
 }
 
@@ -27,6 +28,7 @@ export function ProjectSelector({
   loading,
   onCreateProject,
   onSkip,
+  onDismiss,
   tags,
 }: ProjectSelectorProps) {
   const navigate = useNavigate();
@@ -50,7 +52,7 @@ export function ProjectSelector({
           variant="primary"
           size="md"
           onClick={() => {
-            onSkip?.();
+            onDismiss();
             navigate('/projects');
           }}
           disabled={loading}
@@ -82,6 +84,7 @@ export function ProjectSelector({
           <Select
             id="onboarding-repo-select"
             value={form.selectedRepoName}
+            disabled={loading}
             onChange={(e) => {
               const repo = repos.find((r) => r.fullName === e.target.value);
               setForm((prev) => ({

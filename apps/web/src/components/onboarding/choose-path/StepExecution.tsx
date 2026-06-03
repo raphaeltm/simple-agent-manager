@@ -19,9 +19,10 @@ interface StepExecutionProps {
   steps: GeneratedStep[];
   tags: string[];
   onComplete: () => void;
+  onDismiss: () => void;
 }
 
-export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
+export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecutionProps) {
   const navigate = useNavigate();
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
@@ -35,6 +36,7 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
   const step = steps[currentStepIndex];
   const isLast = currentStepIndex >= steps.length - 1;
   const progress = steps.length > 0 ? (completedSteps.length / steps.length) * 100 : 0;
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const markStepDone = useCallback(() => {
     const id = step?.id;
@@ -71,6 +73,13 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
   const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const githubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Move focus to step heading when step changes
+  useEffect(() => {
+    if (currentStepIndex > 0) {
+      stepHeadingRef.current?.focus();
+    }
+  }, [currentStepIndex]);
+
   // Cleanup GitHub poll and timeout on unmount
   useEffect(() => {
     return () => {
@@ -83,6 +92,10 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
     setLoading(true);
     setError(null);
     try {
+      // Clear any existing poll before starting a new one (prevents leak on double-click)
+      if (githubPollRef.current) clearInterval(githubPollRef.current);
+      if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
+
       const { url } = await getGitHubInstallUrl();
       window.open(url, '_blank', 'noopener');
 
@@ -106,12 +119,13 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
       }, 3000);
       githubPollRef.current = poll;
 
-      // Stop polling after 5 minutes
+      // Stop polling after 5 minutes and show retry prompt
       githubTimeoutRef.current = setTimeout(() => {
         clearInterval(poll);
         githubPollRef.current = null;
         githubTimeoutRef.current = null;
         setLoading(false);
+        setError('Installation not detected. If you completed the installation, click the button to try again.');
       }, 300_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to get install URL');
@@ -139,14 +153,16 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
         installationId: selectedRepo.installationId,
         githubRepoId: selectedRepo.id,
       });
-      markStepDone();
-      setTimeout(() => navigate(`/projects/${project.id}`), 500);
+      // Dismiss the wizard (sets localStorage) and navigate directly to the project.
+      // Skip the CompletionScreen — the user already has a project to go to.
+      onDismiss();
+      navigate(`/projects/${project.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
       setLoading(false);
     }
-  }, [form.selectedRepoUrl, form.selectedRepoName, repos, markStepDone, navigate]);
+  }, [form.selectedRepoUrl, form.selectedRepoName, repos, onDismiss, navigate]);
 
   const loadRepos = useCallback(async () => {
     setReposLoading(true);
@@ -172,10 +188,10 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
       {/* Progress header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-fg-muted/60">
+          <span className="text-xs text-fg-muted">
             Step {currentStepIndex + 1} of {steps.length}
           </span>
-          <span className="text-xs text-fg-muted/60">
+          <span className="text-xs text-fg-muted">
             {Math.round(progress)}% complete
           </span>
         </div>
@@ -214,7 +230,7 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
           <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
             {currentStepIndex + 1}
           </div>
-          <h3 className="text-lg font-semibold text-fg-primary">{step.title}</h3>
+          <h3 ref={stepHeadingRef} tabIndex={-1} className="text-lg font-semibold text-fg-primary outline-none">{step.title}</h3>
         </div>
         <p className="text-sm text-fg-muted mb-4 ml-9">{step.description}</p>
 
@@ -248,7 +264,7 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
           <button
             type="button"
             onClick={() => setExpandedDetails(!expandedDetails)}
-            className="flex items-center gap-1 text-xs text-fg-muted/50 hover:text-fg-muted transition-colors bg-transparent border-none cursor-pointer p-0"
+            className="flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-2 px-0 min-h-[44px]"
           >
             <ChevronDown
               size={12}
@@ -272,19 +288,19 @@ export function StepExecution({ steps, tags, onComplete }: StepExecutionProps) {
       {/* Upcoming steps */}
       {!isLast && (
         <div className="flex flex-col gap-1.5">
-          <p className="text-[10px] text-fg-muted/30 uppercase tracking-wide font-medium">
+          <p className="text-xs text-fg-muted uppercase tracking-wide font-medium">
             Coming up
           </p>
           {steps.slice(currentStepIndex + 1).map((s, i) => (
             <div
               key={s.id}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-fg-muted/40"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-fg-muted"
             >
-              <div className="w-5 h-5 rounded-full bg-accent/5 flex items-center justify-center text-[10px]">
+              <div className="w-5 h-5 rounded-full bg-accent/5 flex items-center justify-center text-xs">
                 {currentStepIndex + 2 + i}
               </div>
               <span>{s.title}</span>
-              <span className="ml-auto text-[10px]">{s.timeEstimate}</span>
+              <span className="ml-auto text-xs text-fg-muted">{s.timeEstimate}</span>
             </div>
           ))}
         </div>
@@ -360,7 +376,7 @@ function StepForm({
                     key={agent.id}
                     type="button"
                     onClick={() => setForm((prev) => ({ ...prev, selectedAgent: agent.id }))}
-                    className={`px-3 py-1.5 rounded text-xs border cursor-pointer transition-colors ${
+                    className={`px-3 py-2.5 rounded text-xs border cursor-pointer transition-colors min-h-[44px] ${
                       form.selectedAgent === agent.id
                         ? 'border-accent bg-accent/10 text-fg-primary'
                         : 'border-border-default bg-surface text-fg-muted hover:border-fg-muted'
@@ -507,6 +523,7 @@ function StepForm({
           loading={loading}
           onCreateProject={onCreateProject}
           onSkip={onSkip}
+          onDismiss={onDismiss}
           tags={tags}
         />
       );
