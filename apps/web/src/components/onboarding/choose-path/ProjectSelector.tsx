@@ -1,7 +1,7 @@
 import type { Repository } from '@simple-agent-manager/shared';
 import { Button, Select } from '@simple-agent-manager/ui';
 import { ArrowRight, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 
 import type { StepFormState } from './step-actions';
@@ -30,15 +30,17 @@ export function ProjectSelector({
   tags,
 }: ProjectSelectorProps) {
   const navigate = useNavigate();
-  const [loaded, setLoaded] = useState(false);
-
-  // Auto-load repos on mount
-  useEffect(() => {
-    if (!loaded) {
-      setLoaded(true);
-      onLoadRepos();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only
+  const loadedRef = useRef(false);
+  // Trigger repo loading once when the selector mounts via ref callback
+  const containerRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (el && !loadedRef.current) {
+        loadedRef.current = true;
+        onLoadRepos();
+      }
+    },
+    [onLoadRepos]
+  );
 
   if (tags.includes('use-template')) {
     return (
@@ -62,7 +64,7 @@ export function ProjectSelector({
   }
 
   return (
-    <div>
+    <div ref={containerRef}>
       {reposLoading ? (
         <div className="flex items-center gap-2 text-sm text-fg-muted py-3">
           <Loader2 size={14} className="animate-spin" /> Loading your repositories...

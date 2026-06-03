@@ -43,7 +43,10 @@ export function ChoosePathWizard() {
   const userId = user?.id;
 
   const [loading, setLoading] = useState(true);
-  const [dismissed, setDismissed] = useState<boolean | null>(null);
+  const [dismissed, setDismissed] = useState<boolean | null>(() => {
+    if (!userId) return null;
+    return localStorage.getItem(getStorageKey(userId)) === 'true';
+  });
 
   const [phase, setPhase] = useState<Phase>('questions');
   const [currentQuestionId, setCurrentQuestionId] = useState('ai-subscription');
@@ -51,16 +54,13 @@ export function ChoosePathWizard() {
   const [tags, setTags] = useState<string[]>([]);
   const [generatedSteps, setGeneratedSteps] = useState<GeneratedStep[]>([]);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Ref keeps latest tags accessible in callbacks without stale closures
+  const tagsRef = useRef(tags);
+  tagsRef.current = tags;
 
-  // Check dismissal state
+  // Check existing setup status (async data fetch — genuine useEffect)
   useEffect(() => {
-    if (!userId) return;
-    const stored = localStorage.getItem(getStorageKey(userId));
-    setDismissed(stored === 'true');
-  }, [userId]);
-
-  // Check existing setup status
-  useEffect(() => {
+    const controller = new AbortController();
     async function checkStatus() {
       try {
         const [credResult, installResult, agentResult, trialResult] = await Promise.allSettled([
@@ -69,6 +69,7 @@ export function ChoosePathWizard() {
           listAgentCredentials(),
           getTrialStatus(),
         ]);
+        if (controller.signal.aborted) return;
 
         const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
@@ -100,10 +101,11 @@ export function ChoosePathWizard() {
       } catch {
         // Non-critical
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
     checkStatus();
+    return () => controller.abort();
   }, [userId]);
 
   const handleDismiss = useCallback(() => {
@@ -114,18 +116,15 @@ export function ChoosePathWizard() {
   const handleAnswer = useCallback(
     (option: PathOption) => {
       setAnswers((prev) => ({ ...prev, [currentQuestionId]: option.id }));
-      setTags((prev) => {
-        const newTags = [...prev, ...option.tags];
-        if (!option.next) {
-          const steps = generatePath(newTags);
-          setGeneratedSteps(steps);
-          setPhase('path-preview');
-        }
-        return newTags;
-      });
+      const newTags = [...tagsRef.current, ...option.tags];
+      setTags(newTags);
 
       if (option.next) {
         setCurrentQuestionId(option.next);
+      } else {
+        setGeneratedSteps(generatePath(newTags));
+        setPhase('path-preview');
+        requestAnimationFrame(() => contentRef.current?.focus());
       }
     },
     [currentQuestionId]
@@ -164,14 +163,8 @@ export function ChoosePathWizard() {
   const handleExecutionComplete = useCallback(() => {
     setPhase('complete');
     if (userId) localStorage.setItem(getStorageKey(userId), 'true');
+    requestAnimationFrame(() => contentRef.current?.focus());
   }, [userId]);
-
-  // Move focus to content area on phase transitions
-  useEffect(() => {
-    if (phase !== 'questions') {
-      contentRef.current?.focus();
-    }
-  }, [phase]);
 
   // Filter out auto-handled steps for execution
   const executableSteps = useMemo(
@@ -255,7 +248,10 @@ export function ChoosePathWizard() {
           {phase === 'path-preview' && (
             <PathPreview
               steps={generatedSteps}
-              onStart={() => setPhase('executing')}
+              onStart={() => {
+                setPhase('executing');
+                requestAnimationFrame(() => contentRef.current?.focus());
+              }}
               onReset={handleReset}
             />
           )}

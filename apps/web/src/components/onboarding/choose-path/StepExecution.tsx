@@ -29,14 +29,32 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
   const [expandedDetails, setExpandedDetails] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<StepFormState>(INITIAL_FORM);
+  const [form, setForm] = useState<StepFormState>(() => {
+    const base = { ...INITIAL_FORM };
+    const aiStep = steps.find((s) => s.id === 'ai-apikey');
+    if (aiStep) {
+      const isAnthropic = tags.includes('anthropic-key') || tags.includes('has-claude');
+      const agents = AGENT_CATALOG.filter((a) =>
+        isAnthropic ? a.provider === 'anthropic' : a.provider === 'openai'
+      );
+      if (agents[0]) base.selectedAgent = agents[0].id;
+    }
+    return base;
+  });
   const [repos, setRepos] = useState<Repository[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
 
   const step = steps[currentStepIndex];
   const isLast = currentStepIndex >= steps.length - 1;
   const progress = steps.length > 0 ? (completedSteps.length / steps.length) * 100 : 0;
-  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+  const abortRef = useRef(new AbortController());
+
+  // Focus step heading on mount and when step changes via ref callback
+  // React re-invokes the callback when currentStepIndex changes (new function identity)
+  const stepHeadingRef = useCallback(
+    (el: HTMLHeadingElement | null) => el?.focus(),
+    [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps -- intentional: re-focus on step change
+  );
 
   const markStepDone = useCallback(() => {
     const id = step?.id;
@@ -58,11 +76,13 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
 
     try {
       await executeStep(step.id, form);
+      if (abortRef.current.signal.aborted) return;
       markStepDone();
     } catch (err) {
+      if (abortRef.current.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
-      setLoading(false);
+      if (!abortRef.current.signal.aborted) setLoading(false);
     }
   }, [step, form, markStepDone]);
 
@@ -73,14 +93,10 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
   const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const githubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Move focus to step heading when step changes or on initial mount
-  useEffect(() => {
-    stepHeadingRef.current?.focus();
-  }, [currentStepIndex]);
-
-  // Cleanup GitHub poll and timeout on unmount
+  // Cleanup on unmount: abort in-flight requests and clear timers
   useEffect(() => {
     return () => {
+      abortRef.current.abort();
       if (githubPollRef.current) clearInterval(githubPollRef.current);
       if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
     };
@@ -95,6 +111,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
       if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
 
       const { url } = await getGitHubInstallUrl();
+      if (abortRef.current.signal.aborted) return;
       window.open(url, '_blank', 'noopener');
 
       // Poll for GitHub App installation completion
@@ -151,14 +168,16 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
         installationId: selectedRepo.installationId,
         githubRepoId: selectedRepo.id,
       });
+      if (abortRef.current.signal.aborted) return;
       // Dismiss the wizard (sets localStorage) and navigate directly to the project.
       // Skip the CompletionScreen — the user already has a project to go to.
       onDismiss();
       navigate(`/projects/${project.id}`);
     } catch (err) {
+      if (abortRef.current.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
-      setLoading(false);
+      if (!abortRef.current.signal.aborted) setLoading(false);
     }
   }, [form.selectedRepoUrl, form.selectedRepoName, repos, onDismiss, navigate]);
 
@@ -166,16 +185,20 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
     setReposLoading(true);
     try {
       const installations = await listGitHubInstallations();
+      if (abortRef.current.signal.aborted) return;
       if (installations.length === 0) {
         setRepos([]);
         return;
       }
-      const result = await listRepositories(installations[0]!.id);
-      setRepos(result.repositories);
+      const allRepos = await Promise.all(
+        installations.map((inst) => listRepositories(inst.id).then((r) => r.repositories))
+      );
+      if (abortRef.current.signal.aborted) return;
+      setRepos(allRepos.flat());
     } catch {
-      setRepos([]);
+      if (!abortRef.current.signal.aborted) setRepos([]);
     } finally {
-      setReposLoading(false);
+      if (!abortRef.current.signal.aborted) setReposLoading(false);
     }
   }, []);
 
@@ -345,21 +368,6 @@ function StepForm({
   onDismiss,
   actionLabel,
 }: StepFormProps) {
-  // Auto-select default agent for API key step
-  const didAutoSelect = useRef(false);
-  useEffect(() => {
-    if (stepId !== 'ai-apikey' || didAutoSelect.current) return;
-    const isAnthropic = tags.includes('anthropic-key') || tags.includes('has-claude');
-    const agents = AGENT_CATALOG.filter((a) =>
-      isAnthropic ? a.provider === 'anthropic' : a.provider === 'openai'
-    );
-    const defaultAgent = agents[0];
-    if (!form.selectedAgent && defaultAgent) {
-      didAutoSelect.current = true;
-      setForm((prev) => ({ ...prev, selectedAgent: defaultAgent.id }));
-    }
-  }, [stepId, tags, form.selectedAgent, setForm]);
-
   switch (stepId) {
     case 'ai-apikey': {
       const isAnthropic = tags.includes('anthropic-key') || tags.includes('has-claude');

@@ -103,7 +103,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
         'Switch to your own Hetzner account later for savings',
         'Data isolated per-user — no shared VMs',
       ],
-      isOptional: true,
+      isOptional: tags.includes('existing-cloud'),
     });
   }
 
@@ -163,6 +163,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
 export function getTimeEstimate(steps: GeneratedStep[]): string {
   let totalSeconds = 0;
   for (const step of steps) {
+    if (step.isOptional) continue;
     const match = step.timeEstimate.match(/(\d+)/);
     if (match?.[1]) {
       const num = parseInt(match[1], 10);
