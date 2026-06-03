@@ -22,7 +22,7 @@ Project chat session headers and related task-display surfaces can show a raw ag
 - [x] Add regression coverage for chat task embeds resolving a valid profile ID to the profile name.
 - [x] Add regression coverage for chat task embeds falling back to the raw hint when no profile matches.
 - [x] Add guard coverage that the workspace `agentProfileHint` used by GitHub CLI policy/task-runner startup remains the profile ID.
-- [ ] Run targeted tests and the required quality suite.
+- [x] Run targeted tests and the required quality suite.
 - [ ] Verify on staging by creating a task through project chat and confirming the session header details show the profile name, not a ULID.
 
 ## Acceptance Criteria

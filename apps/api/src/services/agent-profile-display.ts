@@ -5,6 +5,16 @@ import * as schema from '../db/schema';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
+const D1_INARRAY_BATCH_SIZE = 80;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export async function resolveTaskAgentProfileHint(
   db: Db,
   input: {
@@ -41,19 +51,23 @@ export async function resolveTaskAgentProfileHints(
   }
 
   try {
-    const rows = await db
-      .select({
-        id: schema.agentProfiles.id,
-        name: schema.agentProfiles.name,
-      })
-      .from(schema.agentProfiles)
-      .where(
-        and(
-          inArray(schema.agentProfiles.id, uniqueHints),
-          eq(schema.agentProfiles.userId, input.userId),
-          or(eq(schema.agentProfiles.projectId, input.projectId), isNull(schema.agentProfiles.projectId))
-        )
-      );
+    const rows: Array<{ id: string; name: string }> = [];
+    for (const hintBatch of chunk(uniqueHints, D1_INARRAY_BATCH_SIZE)) {
+      const batchRows = await db
+        .select({
+          id: schema.agentProfiles.id,
+          name: schema.agentProfiles.name,
+        })
+        .from(schema.agentProfiles)
+        .where(
+          and(
+            inArray(schema.agentProfiles.id, hintBatch),
+            eq(schema.agentProfiles.userId, input.userId),
+            or(eq(schema.agentProfiles.projectId, input.projectId), isNull(schema.agentProfiles.projectId))
+          )
+        );
+      rows.push(...batchRows);
+    }
 
     return new Map(rows.map((row) => [row.id, row.name]));
   } catch {
