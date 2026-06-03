@@ -298,7 +298,7 @@ export function SessionHeader({
             style={{ color: 'var(--sam-color-fg-muted)' }}
             title={lineageText}
           >
-            {lineageText}
+            {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
           </span>
         )}
 
