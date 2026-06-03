@@ -14,7 +14,7 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, type ReactNode, useEffect, useState } from 'react';
 
 import { getProject, getProviderCatalog } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
@@ -83,6 +83,105 @@ const GITHUB_PERMISSION_ROWS = [
   { key: 'actions', label: 'Actions', options: GITHUB_PERMISSION_OPTIONS },
   { key: 'packages', label: 'Packages', options: GITHUB_PERMISSION_OPTIONS },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Collapsible Section
+// ---------------------------------------------------------------------------
+
+interface SectionProps {
+  title: string;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}
+
+function Section({ title, summary, defaultOpen = false, children }: SectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border-t border-border-default">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 py-3 text-left"
+        aria-expanded={open}
+      >
+        <svg
+          className={`h-4 w-4 shrink-0 text-fg-muted transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+          viewBox="0 0 16 16"
+          fill="currentColor"
+        >
+          <path d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.5 3.5a.75.75 0 0 1 0 1.06l-3.5 3.5a.75.75 0 0 1-1.06-1.06L9.44 8 6.22 4.78a.75.75 0 0 1 0-1.06Z" />
+        </svg>
+        <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">{title}</span>
+        {!open && summary && (
+          <span className="ml-auto text-xs text-fg-muted truncate max-w-[60%] text-right">
+            {summary}
+          </span>
+        )}
+      </button>
+      {open && <div className="pb-3 grid gap-3">{children}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Summary helpers
+// ---------------------------------------------------------------------------
+
+function agentSettingsSummary(
+  agentType: string,
+  model: string,
+  permissionMode: string,
+  timeoutMinutes: string,
+): string {
+  const parts: string[] = [];
+  const agentName = AGENT_CATALOG.find((a) => a.id === agentType)?.name ?? agentType;
+  parts.push(agentName);
+  if (model) {
+    const short = model.length > 24 ? model.slice(0, 22) + '...' : model;
+    parts.push(short);
+  }
+  if (permissionMode) {
+    parts.push(
+      (AGENT_PERMISSION_MODE_LABELS as Record<string, string>)[permissionMode] ?? permissionMode,
+    );
+  }
+  if (timeoutMinutes) parts.push(`${timeoutMinutes}m`);
+  return parts.join(' · ');
+}
+
+function policySummary(policy: GitHubCliPolicy): string {
+  if (policy.mode === 'inherit') return 'Inherit installation permissions';
+  const perms = policy.permissions;
+  const tags: string[] = [];
+  if (perms.contents === 'write') tags.push('code:rw');
+  else tags.push('code:r');
+  if (perms.pullRequests !== 'none') tags.push(`PRs:${perms.pullRequests === 'write' ? 'rw' : 'r'}`);
+  if (perms.issues !== 'none') tags.push(`issues:${perms.issues === 'write' ? 'rw' : 'r'}`);
+  if (perms.actions !== 'none') tags.push(`actions:${perms.actions === 'write' ? 'rw' : 'r'}`);
+  if (perms.packages !== 'none') tags.push(`pkg:${perms.packages === 'write' ? 'rw' : 'r'}`);
+  return `Custom: ${tags.join(', ')}`;
+}
+
+function executionSummary(maxTurns: string, systemPromptAppend: string): string {
+  const parts: string[] = [];
+  if (maxTurns) parts.push(`${maxTurns} turns`);
+  if (systemPromptAppend.trim()) parts.push('custom prompt');
+  return parts.length ? parts.join(', ') : 'Defaults';
+}
+
+function infraSummary(vmSize: string, workspaceProfile: string, taskMode: string): string {
+  const parts: string[] = [];
+  if (vmSize) parts.push(`${vmSize} VM`);
+  if (workspaceProfile) parts.push(workspaceProfile);
+  if (taskMode) parts.push(taskMode);
+  return parts.length ? parts.join(' · ') : 'Defaults';
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 
 export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   isOpen,
@@ -248,8 +347,8 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           </div>
         )}
 
+        {/* Name & Description — always visible */}
         <div className="grid gap-3">
-          {/* Name */}
           <label className="grid gap-1.5">
             <span className="text-sm text-fg-muted">
               Name <span className="text-danger">*</span>
@@ -262,7 +361,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             />
           </label>
 
-          {/* Description */}
           <label className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Description</span>
             <Input
@@ -272,16 +370,16 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               disabled={saving}
             />
           </label>
+        </div>
 
-          {/* Agent settings section */}
-          <div className="border-t border-border-default pt-3 mt-1">
-            <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
-              Agent Settings
-            </span>
-          </div>
+        {/* --- Accordion sections --- */}
 
+        <Section
+          title="Agent Settings"
+          defaultOpen
+          summary={agentSettingsSummary(agentType, model, permissionMode, timeoutMinutes)}
+        >
           <div className="grid gap-3 sm:grid-cols-2">
-            {/* Agent Type */}
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Agent Type</span>
               <select
@@ -301,7 +399,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </select>
             </label>
 
-            {/* Model */}
             <div className="grid gap-1.5">
               <label htmlFor="profile-model" className="text-sm text-fg-muted">
                 Model
@@ -316,7 +413,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               />
             </div>
 
-            {/* Permission Mode */}
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Permission Mode</span>
               <select
@@ -333,7 +429,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </select>
             </label>
 
-            {/* Timeout */}
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Timeout (minutes)</span>
               <Input
@@ -345,14 +440,12 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               />
             </label>
           </div>
+        </Section>
 
-          {/* SAM platform policy section */}
-          <div className="border-t border-border-default pt-3 mt-1">
-            <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
-              SAM Platform Policy
-            </span>
-          </div>
-
+        <Section
+          title="Platform Policy"
+          summary={policySummary(githubCliPolicy)}
+        >
           <div className="grid gap-3">
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">GitHub CLI access</span>
@@ -408,8 +501,12 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </fieldset>
             )}
           </div>
+        </Section>
 
-          {/* Max Turns */}
+        <Section
+          title="Execution"
+          summary={executionSummary(maxTurns, systemPromptAppend)}
+        >
           <label className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Max Turns</span>
             <Input
@@ -421,7 +518,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             />
           </label>
 
-          {/* System Prompt Append */}
           <label className="grid gap-1.5">
             <span className="text-sm text-fg-muted">System Prompt (append)</span>
             <textarea
@@ -433,16 +529,13 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               className="w-full rounded-md text-fg-primary py-2.5 px-3 resize-y"
             />
           </label>
+        </Section>
 
-          {/* Infrastructure section */}
-          <div className="border-t border-border-default pt-3 mt-1">
-            <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
-              Infrastructure
-            </span>
-          </div>
-
+        <Section
+          title="Infrastructure"
+          summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode)}
+        >
           <div className="grid gap-3 sm:grid-cols-2">
-            {/* VM Size */}
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">
                 VM Size
@@ -467,7 +560,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </select>
             </label>
 
-            {/* Workspace Profile */}
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Workspace Profile</span>
               <select
@@ -484,7 +576,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </select>
             </label>
 
-            {/* Devcontainer Config Name */}
             {workspaceProfile !== 'lightweight' && (
               <label className="grid gap-1.5">
                 <span className="text-sm text-fg-muted">Devcontainer Config</span>
@@ -497,7 +588,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </label>
             )}
 
-            {/* Task Mode */}
             <label className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Task Mode</span>
               <select
@@ -514,25 +604,17 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               </select>
             </label>
           </div>
-        </div>
+        </Section>
 
         {/* Runtime Environment (edit mode only) */}
         {isEdit && profile && (
-          <>
-            <div className="border-t border-border-default pt-3 mt-3">
-              <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
-                Runtime Environment
-              </span>
-              <p className="m-0 mt-1 text-xs text-fg-muted">
-                Env vars and files injected into workspaces using this profile.
-              </p>
-            </div>
+          <Section title="Runtime Environment" summary="Env vars and files">
             <ProfileRuntimeSection projectId={projectId} profileId={profile.id} />
-          </>
+          </Section>
         )}
 
         {/* Actions */}
-        <div className="flex gap-2 mt-6 justify-end">
+        <div className="flex gap-2 mt-4 pt-3 border-t border-border-default justify-end">
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
