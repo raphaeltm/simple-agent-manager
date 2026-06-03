@@ -25,7 +25,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
         <p className="text-xs text-fg-muted uppercase tracking-wide font-medium mb-3">
           What&apos;s next
         </p>
-        <div className="flex flex-col gap-3">
+        <ol className="flex flex-col gap-3 list-none p-0 m-0">
           {[
             {
               title: 'Start a chat in your project',
@@ -40,7 +40,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
               desc: 'Check the PR, request changes, or merge it to your main branch',
             },
           ].map((item, i) => (
-            <div key={i} className="flex items-start gap-3">
+            <li key={i} className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-accent/10 flex items-center justify-center text-xs text-accent font-bold shrink-0">
                 {i + 1}
               </div>
@@ -48,9 +48,9 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
                 <p className="text-sm font-medium text-fg-primary">{item.title}</p>
                 <p className="text-xs text-fg-muted">{item.desc}</p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
       </Card>
 
       <div className="flex flex-col items-center gap-3">

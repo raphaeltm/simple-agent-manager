@@ -30,11 +30,11 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
           <span className="flex items-center gap-1">
             <Clock size={12} /> {timeEstimate}
           </span>
-          <span>|</span>
+          <span aria-hidden="true">|</span>
           <span>{requiredSteps.length} step{requiredSteps.length !== 1 ? 's' : ''}</span>
           {steps.length > requiredSteps.length && (
             <>
-              <span>|</span>
+              <span aria-hidden="true">|</span>
               <span>{steps.length - requiredSteps.length} already handled</span>
             </>
           )}
@@ -86,7 +86,7 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
         <button
           type="button"
           onClick={onReset}
-          className="inline-flex items-center gap-2 text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer"
+          className="inline-flex items-center gap-2 text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px]"
         >
           <RotateCcw size={14} /> Change my answers
         </button>

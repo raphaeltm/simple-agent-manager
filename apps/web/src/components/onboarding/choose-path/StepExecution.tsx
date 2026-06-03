@@ -73,11 +73,9 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
   const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const githubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Move focus to step heading when step changes
+  // Move focus to step heading when step changes or on initial mount
   useEffect(() => {
-    if (currentStepIndex > 0) {
-      stepHeadingRef.current?.focus();
-    }
+    stepHeadingRef.current?.focus();
   }, [currentStepIndex]);
 
   // Cleanup GitHub poll and timeout on unmount
@@ -256,6 +254,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
             onGitHubInstall={handleGitHubInstall}
             onCreateProject={handleCreateProject}
             onSkip={step.isOptional ? handleSkip : undefined}
+            onDismiss={onDismiss}
             actionLabel={step.actionLabel}
           />
         </div>
@@ -264,10 +263,12 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
           <button
             type="button"
             onClick={() => setExpandedDetails(!expandedDetails)}
+            aria-expanded={expandedDetails}
             className="flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-2 px-0 min-h-[44px]"
           >
             <ChevronDown
               size={12}
+              aria-hidden="true"
               className={`transition-transform ${expandedDetails ? 'rotate-180' : ''}`}
             />
             {expandedDetails ? 'Hide' : 'Show'} details
@@ -324,6 +325,7 @@ interface StepFormProps {
   onGitHubInstall: () => void;
   onCreateProject: () => void;
   onSkip?: () => void;
+  onDismiss: () => void;
   actionLabel: string;
 }
 
@@ -340,6 +342,7 @@ function StepForm({
   onGitHubInstall,
   onCreateProject,
   onSkip,
+  onDismiss,
   actionLabel,
 }: StepFormProps) {
   // Auto-select default agent for API key step
@@ -375,6 +378,7 @@ function StepForm({
                   <button
                     key={agent.id}
                     type="button"
+                    aria-pressed={form.selectedAgent === agent.id}
                     onClick={() => setForm((prev) => ({ ...prev, selectedAgent: agent.id }))}
                     className={`px-3 py-2.5 rounded text-xs border cursor-pointer transition-colors min-h-[44px] ${
                       form.selectedAgent === agent.id
@@ -522,7 +526,6 @@ function StepForm({
           setForm={setForm}
           loading={loading}
           onCreateProject={onCreateProject}
-          onSkip={onSkip}
           onDismiss={onDismiss}
           tags={tags}
         />

@@ -14,7 +14,7 @@ export function QuestionCard({ question, selectedId, onSelect }: QuestionCardPro
       <h2 className="sam-type-section-heading text-fg-primary mb-1">{question.question}</h2>
       <p className="sam-type-body text-fg-muted mb-6">{question.description}</p>
 
-      <div className="flex flex-col gap-3" role="list" aria-label={question.question}>
+      <div className="flex flex-col gap-3" role="group" aria-label={question.question}>
         {question.options.map((option) => {
           const isSelected = selectedId === option.id;
           return (

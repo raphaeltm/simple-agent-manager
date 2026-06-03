@@ -14,7 +14,6 @@ interface ProjectSelectorProps {
   setForm: React.Dispatch<React.SetStateAction<StepFormState>>;
   loading: boolean;
   onCreateProject: () => void;
-  onSkip?: () => void;
   onDismiss: () => void;
   tags: string[];
 }
@@ -27,7 +26,6 @@ export function ProjectSelector({
   setForm,
   loading,
   onCreateProject,
-  onSkip,
   onDismiss,
   tags,
 }: ProjectSelectorProps) {

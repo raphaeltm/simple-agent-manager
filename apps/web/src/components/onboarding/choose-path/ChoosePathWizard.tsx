@@ -113,19 +113,22 @@ export function ChoosePathWizard() {
 
   const handleAnswer = useCallback(
     (option: PathOption) => {
-      const newTags = [...tags, ...option.tags];
       setAnswers((prev) => ({ ...prev, [currentQuestionId]: option.id }));
-      setTags(newTags);
+      setTags((prev) => {
+        const newTags = [...prev, ...option.tags];
+        if (!option.next) {
+          const steps = generatePath(newTags);
+          setGeneratedSteps(steps);
+          setPhase('path-preview');
+        }
+        return newTags;
+      });
 
       if (option.next) {
         setCurrentQuestionId(option.next);
-      } else {
-        const steps = generatePath(newTags);
-        setGeneratedSteps(steps);
-        setPhase('path-preview');
       }
     },
-    [currentQuestionId, tags]
+    [currentQuestionId]
   );
 
   const handleReset = useCallback(() => {
@@ -216,7 +219,7 @@ export function ChoosePathWizard() {
                 onClick={handleBack}
                 className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px]"
               >
-                <ArrowLeft size={12} /> Back
+                <ArrowLeft size={12} aria-hidden="true" /> Back
               </button>
             )}
             {phase === 'questions' && (
