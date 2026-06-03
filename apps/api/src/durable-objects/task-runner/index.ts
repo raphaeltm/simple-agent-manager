@@ -10,7 +10,7 @@
  *
  * Step flow:
  *   node_selection → [node_provisioning → node_agent_ready] → workspace_creation
- *   → workspace_ready → agent_session → running
+ *   → workspace_dispatch → workspace_ready → agent_session → running
  *
  * Each step handler:
  *   1. Reads persisted state
@@ -32,6 +32,9 @@ import {
   DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS,
   DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS,
   DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
+  DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
+  DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
+  DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
@@ -44,7 +47,12 @@ import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { failTask } from './state-machine';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
-import { handleAttachmentTransfer, handleWorkspaceCreation, handleWorkspaceReady } from './workspace-steps';
+import {
+  handleAttachmentTransfer,
+  handleWorkspaceCreation,
+  handleWorkspaceDispatch,
+  handleWorkspaceReady,
+} from './workspace-steps';
 
 // Re-export public types for consumers
 export type { StartTaskInput, TaskRunnerState } from './types';
@@ -96,6 +104,11 @@ export class TaskRunner extends DurableObject<Env> {
       provisioningStartedAt: null,
       agentReadyStartedAt: null,
       workspaceReadyStartedAt: null,
+      workspaceDispatchStartedAt: null,
+      workspaceDispatchAttempts: 0,
+      workspaceDispatchLastAttemptAt: null,
+      workspaceDispatchLastError: null,
+      workspaceDispatchAckedAt: null,
       lastD1Step: null,
       completed: false,
     };
@@ -178,6 +191,9 @@ export class TaskRunner extends DurableObject<Env> {
         case 'workspace_creation':
           await handleWorkspaceCreation(state, rc);
           break;
+        case 'workspace_dispatch':
+          await handleWorkspaceDispatch(state, rc);
+          break;
         case 'workspace_ready':
           await handleWorkspaceReady(state, rc);
           break;
@@ -250,6 +266,9 @@ export class TaskRunner extends DurableObject<Env> {
       },
       getAgentPollIntervalMs: () => this.getAgentPollIntervalMs(),
       getAgentReadyTimeoutMs: () => this.getAgentReadyTimeoutMs(),
+      getWorkspaceDispatchTimeoutMs: () => this.getWorkspaceDispatchTimeoutMs(),
+      getWorkspaceDispatchBaseDelayMs: () => this.getWorkspaceDispatchBaseDelayMs(),
+      getWorkspaceDispatchMaxDelayMs: () => this.getWorkspaceDispatchMaxDelayMs(),
       getWorkspaceReadyTimeoutMs: () => this.getWorkspaceReadyTimeoutMs(),
       getWorkspaceReadyPollIntervalMs: () => this.getWorkspaceReadyPollIntervalMs(),
       getProvisionPollIntervalMs: () => this.getProvisionPollIntervalMs(),
@@ -286,6 +305,11 @@ export class TaskRunner extends DurableObject<Env> {
     raw.provisioningStartedAt ??= null;
     raw.agentReadyStartedAt ??= null;
     raw.workspaceReadyStartedAt ??= null;
+    raw.workspaceDispatchStartedAt ??= null;
+    raw.workspaceDispatchAttempts ??= 0;
+    raw.workspaceDispatchLastAttemptAt ??= null;
+    raw.workspaceDispatchLastError ??= null;
+    raw.workspaceDispatchAckedAt ??= null;
     raw.lastD1Step ??= null;
     return raw;
   }
@@ -326,6 +350,27 @@ export class TaskRunner extends DurableObject<Env> {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
       DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
+    );
+  }
+
+  private getWorkspaceDispatchTimeoutMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
+    );
+  }
+
+  private getWorkspaceDispatchBaseDelayMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
+    );
+  }
+
+  private getWorkspaceDispatchMaxDelayMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
     );
   }
 

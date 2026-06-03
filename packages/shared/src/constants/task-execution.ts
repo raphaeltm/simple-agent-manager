@@ -69,6 +69,15 @@ export const DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS = 900_000; // 15 minutes
 /** Default timeout (ms) for workspace-ready callback. Override via TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+/** Default timeout (ms) for VM-agent workspace dispatch acknowledgement. Override via TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Default base delay (ms) for workspace dispatch retry backoff. Override via TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS = 30_000; // 30 seconds
+
+/** Default max delay (ms) for workspace dispatch retry backoff. Override via TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS = 120_000; // 2 minutes
+
 /**
  * Default poll interval (ms) for checking workspace status in D1 during the
  * workspace_ready step. The primary advancement mechanism is the VM agent

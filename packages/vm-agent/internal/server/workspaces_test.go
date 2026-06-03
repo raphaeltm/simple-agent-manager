@@ -105,7 +105,7 @@ func TestCreateWorkspaceDuplicateProvisioningReturnsIdempotentAccepted(t *testin
 	waitForProvisioningInactive(t, s, "ws-race")
 }
 
-func TestCreateWorkspaceCanProvisionAgainAfterCompletion(t *testing.T) {
+func TestCreateWorkspaceReplayAfterCompletionDoesNotProvisionAgain(t *testing.T) {
 	originalPrepare := prepareWorkspaceForRuntime
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
@@ -128,11 +128,28 @@ func TestCreateWorkspaceCanProvisionAgainAfterCompletion(t *testing.T) {
 	waitForProvisioningInactive(t, s, "ws-repeat")
 
 	second := postCreateWorkspace(t, s, token, "ws-repeat")
-	if second.Code != http.StatusAccepted {
-		t.Fatalf("expected second create status 202, got %d", second.Code)
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected second create status 200, got %d", second.Code)
 	}
-	waitForProvisioningCalls(t, &prepareCalls, 2)
-	waitForProvisioningInactive(t, s, "ws-repeat")
+	if got := atomic.LoadInt32(&prepareCalls); got != 1 {
+		t.Fatalf("expected replay not to start provisioning again, got %d calls", got)
+	}
+}
+
+func TestCreateWorkspaceReplayConflictReturnsConflict(t *testing.T) {
+	controlPlane := newWorkspaceCreateControlPlane(t)
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-conflict")
+	s.upsertWorkspaceRuntime("ws-conflict", "owner/repo", "main", "running", "callback-token")
+
+	rec := postCreateWorkspaceWithRepository(t, s, token, "ws-conflict", "other/repo")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected conflict status 409, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "workspace_conflict") {
+		t.Fatalf("expected workspace_conflict response, got %s", rec.Body.String())
+	}
 }
 
 func newWorkspaceCreateControlPlane(t *testing.T) *httptest.Server {
@@ -236,7 +253,12 @@ func signWorkspaceCreateNodeToken(t *testing.T, key *rsa.PrivateKey, nodeID, wor
 
 func postCreateWorkspace(t *testing.T, s *Server, token, workspaceID string) *httptest.ResponseRecorder {
 	t.Helper()
-	body := []byte(`{"workspaceId":"` + workspaceID + `","repository":"owner/repo","branch":"main","callbackToken":"callback-token"}`)
+	return postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+}
+
+func postCreateWorkspaceWithRepository(t *testing.T, s *Server, token, workspaceID, repository string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := []byte(`{"workspaceId":"` + workspaceID + `","repository":"` + repository + `","branch":"main","callbackToken":"callback-token"}`)
 	req := httptest.NewRequest(http.MethodPost, "/workspaces", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-SAM-Node-Id", "node-1")

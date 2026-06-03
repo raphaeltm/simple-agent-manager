@@ -11,7 +11,7 @@ const TaskStatusSchema = v.picklist([
 ]);
 const TaskExecutionStepSchema = v.picklist([
   'node_selection', 'node_provisioning', 'node_agent_ready', 'workspace_creation',
-  'workspace_ready', 'attachment_transfer', 'agent_session', 'running', 'awaiting_followup',
+  'workspace_dispatch', 'workspace_ready', 'attachment_transfer', 'agent_session', 'running', 'awaiting_followup',
 ]);
 
 const GitPushResultSchema = v.object({

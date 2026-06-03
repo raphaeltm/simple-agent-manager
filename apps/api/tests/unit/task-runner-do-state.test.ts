@@ -57,7 +57,15 @@ describe('TaskRunner DO state schema', () => {
 
   it('tracks timeout boundaries', () => {
     expect(doSource).toContain('agentReadyStartedAt: number | null');
+    expect(doSource).toContain('workspaceDispatchStartedAt: number | null');
     expect(doSource).toContain('workspaceReadyStartedAt: number | null');
+  });
+
+  it('tracks workspace dispatch retry metadata', () => {
+    expect(doSource).toContain('workspaceDispatchAttempts: number');
+    expect(doSource).toContain('workspaceDispatchLastAttemptAt: number | null');
+    expect(doSource).toContain('workspaceDispatchLastError: string | null');
+    expect(doSource).toContain('workspaceDispatchAckedAt: number | null');
   });
 
   it('has terminal completion flag', () => {
@@ -111,6 +119,7 @@ describe('TaskRunner DO alarm dispatch', () => {
       'node_provisioning',
       'node_agent_ready',
       'workspace_creation',
+      'workspace_dispatch',
       'workspace_ready',
       'agent_session',
     ];

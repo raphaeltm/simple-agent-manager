@@ -112,6 +112,16 @@ export interface TaskRunnerState {
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
   workspaceReadyStartedAt: number | null;
+  /** Set when we started trying to dispatch workspace creation to the VM agent */
+  workspaceDispatchStartedAt: number | null;
+  /** Number of VM-agent workspace dispatch attempts made by the dispatch step */
+  workspaceDispatchAttempts: number;
+  /** Last VM-agent workspace dispatch attempt time */
+  workspaceDispatchLastAttemptAt: number | null;
+  /** Last VM-agent workspace dispatch error, for admin/debug visibility */
+  workspaceDispatchLastError: string | null;
+  /** Set after VM-agent workspace dispatch acknowledgement is durably recorded */
+  workspaceDispatchAckedAt: number | null;
   /** Last D1 execution step written — idempotent guard to skip redundant D1 writes */
   lastD1Step: TaskExecutionStep | null;
   /** Terminal — DO has completed or failed, no more alarms */
@@ -138,6 +148,9 @@ export interface TaskRunnerContext {
   /** Get configurable timeout/interval values */
   getAgentPollIntervalMs: () => number;
   getAgentReadyTimeoutMs: () => number;
+  getWorkspaceDispatchTimeoutMs: () => number;
+  getWorkspaceDispatchBaseDelayMs: () => number;
+  getWorkspaceDispatchMaxDelayMs: () => number;
   getWorkspaceReadyTimeoutMs: () => number;
   getWorkspaceReadyPollIntervalMs: () => number;
   getProvisionPollIntervalMs: () => number;
