@@ -2,7 +2,7 @@ import type { Repository } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import { Alert, Card } from '@simple-agent-manager/ui';
 import { Check, ChevronDown } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import {
@@ -67,12 +67,14 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
     [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Abort in-flight requests and clear timers on unmount
-  useEffect(() => () => {
-    abortRef.current.abort();
-    abortRef.current = new AbortController(); // Reset for potential re-mount
-    if (githubPollRef.current) clearInterval(githubPollRef.current);
-    if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
+  // Cleanup ref callback — abort in-flight requests and clear timers when root element unmounts
+  const cleanupRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) {
+      abortRef.current.abort();
+      abortRef.current = new AbortController();
+      if (githubPollRef.current) clearInterval(githubPollRef.current);
+      if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
+    }
   }, []);
 
   /* ─── Step lifecycle ─── */
@@ -217,7 +219,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
   if (!step) return null;
 
   return (
-    <div className="max-w-md mx-auto">
+    <div ref={cleanupRef} className="max-w-md mx-auto">
       <ProgressHeader
         steps={steps}
         currentStepIndex={currentStepIndex}
