@@ -120,7 +120,7 @@ function Section({ title, summary, defaultOpen = false, children }: SectionProps
           </span>
         )}
       </button>
-      {open && <div className="pb-3 grid gap-3">{children}</div>}
+      <div className={open ? 'pb-3 grid gap-3' : 'hidden'}>{children}</div>
     </div>
   );
 }
