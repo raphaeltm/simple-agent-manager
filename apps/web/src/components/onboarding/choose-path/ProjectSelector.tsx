@@ -2,7 +2,6 @@ import type { Repository } from '@simple-agent-manager/shared';
 import { Button, Select } from '@simple-agent-manager/ui';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router';
 
 import type { StepFormState } from './step-actions';
 
@@ -14,8 +13,6 @@ interface ProjectSelectorProps {
   setForm: React.Dispatch<React.SetStateAction<StepFormState>>;
   loading: boolean;
   onCreateProject: () => void;
-  onDismiss: () => void;
-  tags: string[];
 }
 
 export function ProjectSelector({
@@ -26,10 +23,7 @@ export function ProjectSelector({
   setForm,
   loading,
   onCreateProject,
-  onDismiss,
-  tags,
 }: ProjectSelectorProps) {
-  const navigate = useNavigate();
   const loadedRef = useRef(false);
   // Trigger repo loading once when the selector mounts via ref callback
   const containerRef = useCallback(
@@ -41,27 +35,6 @@ export function ProjectSelector({
     },
     [onLoadRepos]
   );
-
-  if (tags.includes('use-template')) {
-    return (
-      <div>
-        <p className="text-xs text-fg-muted mb-3">
-          After setup, you can create a project from a template on the Projects page.
-        </p>
-        <Button
-          variant="primary"
-          size="md"
-          onClick={() => {
-            onDismiss();
-            navigate('/projects');
-          }}
-          disabled={loading}
-        >
-          Go to Projects <ArrowRight size={14} />
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <div ref={containerRef}>

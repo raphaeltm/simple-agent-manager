@@ -170,7 +170,7 @@ describe('QUESTIONS graph validation', () => {
 
     // Every path includes a github tag
     for (const path of allPaths) {
-      const hasGithub = path.includes('has-repo') || path.includes('use-template');
+      const hasGithub = path.includes('has-repo') || path.includes('no-repo');
       expect(hasGithub, `path [${path.join(', ')}] has no github tag`).toBe(true);
     }
   });

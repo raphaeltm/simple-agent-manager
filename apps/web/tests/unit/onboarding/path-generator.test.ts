@@ -17,8 +17,8 @@ describe('generatePath', () => {
     expect(ids(steps)).toEqual(['ai-oauth', 'cloud-hetzner', 'github', 'project']);
   });
 
-  it('claude-pro + no-cloud + template → [ai-oauth, cloud-sam, github, project]', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'sam-infra', 'use-template']);
+  it('claude-pro + no-cloud + no-repo → [ai-oauth, cloud-sam, github, project]', () => {
+    const steps = generatePath(['oauth', 'has-claude', 'sam-infra', 'no-repo']);
     expect(ids(steps)).toEqual(['ai-oauth', 'cloud-sam', 'github', 'project']);
   });
 
@@ -36,8 +36,8 @@ describe('generatePath', () => {
     expect(ids(steps)).toEqual(['ai-apikey', 'cloud-sam', 'github', 'project']);
   });
 
-  it('sam-billing + no-cloud + template → [ai-sam, cloud-sam, github, project]', () => {
-    const steps = generatePath(['no-ai', 'sam-billing', 'no-cloud', 'sam-infra', 'use-template']);
+  it('sam-billing + no-cloud + no-repo → [ai-sam, cloud-sam, github, project]', () => {
+    const steps = generatePath(['no-ai', 'sam-billing', 'no-cloud', 'sam-infra', 'no-repo']);
     expect(ids(steps)).toEqual(['ai-sam', 'cloud-sam', 'github', 'project']);
   });
 
@@ -46,16 +46,16 @@ describe('generatePath', () => {
     expect(ids(steps)).toEqual(['ai-sam', 'cloud-hetzner', 'github', 'project']);
   });
 
-  it('api-key + openai + hetzner + template → [ai-apikey, cloud-hetzner, github, project]', () => {
+  it('api-key + openai + hetzner + no-repo → [ai-apikey, cloud-hetzner, github, project]', () => {
     const steps = generatePath([
-      'has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'has-hetzner', 'byoc', 'use-template',
+      'has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'has-hetzner', 'byoc', 'no-repo',
     ]);
     expect(ids(steps)).toEqual(['ai-apikey', 'cloud-hetzner', 'github', 'project']);
   });
 
-  it('api-key + anthropic + no-cloud + template → [ai-apikey, cloud-sam, github, project]', () => {
+  it('api-key + anthropic + no-cloud + no-repo → [ai-apikey, cloud-sam, github, project]', () => {
     const steps = generatePath([
-      'has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'no-cloud', 'sam-infra', 'use-template',
+      'has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'no-cloud', 'sam-infra', 'no-repo',
     ]);
     expect(ids(steps)).toEqual(['ai-apikey', 'cloud-sam', 'github', 'project']);
   });
@@ -109,7 +109,7 @@ describe('generatePath', () => {
 
   it('project step is never isOptional', () => {
     const stepsRepo = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo']);
-    const stepsTemplate = generatePath(['oauth', 'has-claude', 'sam-infra', 'use-template']);
+    const stepsTemplate = generatePath(['oauth', 'has-claude', 'sam-infra', 'no-repo']);
     expect(stepsRepo.find((s) => s.id === 'project')?.isOptional).toBe(false);
     expect(stepsTemplate.find((s) => s.id === 'project')?.isOptional).toBe(false);
   });
@@ -122,10 +122,10 @@ describe('generatePath', () => {
     expect(proj?.actionLabel).toBe('Choose Repository');
   });
 
-  it('use-template (no has-repo) produces project step with "Choose Template" actionLabel', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'sam-infra', 'use-template']);
+  it('no-repo produces project step with "Choose Repository" actionLabel', () => {
+    const steps = generatePath(['oauth', 'has-claude', 'sam-infra', 'no-repo']);
     const proj = steps.find((s) => s.id === 'project');
-    expect(proj?.actionLabel).toBe('Choose Template');
+    expect(proj?.actionLabel).toBe('Choose Repository');
   });
 
   // ── Always has exactly one project step ──
@@ -133,7 +133,7 @@ describe('generatePath', () => {
   it('always includes exactly one project step', () => {
     const tags = [
       ['oauth', 'has-claude', 'byoc', 'has-repo'],
-      ['sam-billing', 'sam-infra', 'use-template'],
+      ['sam-billing', 'sam-infra', 'no-repo'],
       ['user-api-key', 'byoc', 'has-repo'],
       [],
     ];
@@ -147,7 +147,7 @@ describe('generatePath', () => {
 
 describe('getTimeEstimate', () => {
   it('returns "< 1 min" for zero-duration steps', () => {
-    const steps = generatePath(['sam-billing', 'sam-infra', 'use-template']);
+    const steps = generatePath(['sam-billing', 'sam-infra', 'no-repo']);
     // cloud-sam is 0 seconds, but ai-sam=30s, github=30s, project=30s → 90s → 2 mins
     // Actually only cloud-sam is 0, rest have time
     const estimate = getTimeEstimate(steps);

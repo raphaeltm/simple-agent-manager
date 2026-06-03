@@ -191,8 +191,6 @@ export function StepForm({
           setForm={setForm}
           loading={loading}
           onCreateProject={onCreateProject}
-          onDismiss={onDismiss}
-          tags={tags}
         />
       );
 

@@ -145,13 +145,14 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       id: 'project',
       title: 'Create your first project',
       description:
-        "We'll create a starter project. You can import your own repos later.",
-      actionLabel: 'Choose Template',
+        'Pick any repo from your GitHub account, or fork an open-source project to get started.',
+      actionLabel: 'Choose Repository',
       timeEstimate: '30 seconds',
       details: [
-        'Choose from starter templates',
-        'Great for learning how SAM works',
-        'Switch to a real repo anytime',
+        'Pick any repo you have access to',
+        'Try forking github.com/raphaeltm/simple-agent-manager to experiment',
+        'SAM clones it when creating workspaces',
+        'You can add more projects later',
       ],
       isOptional: false,
     });
