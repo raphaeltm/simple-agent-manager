@@ -49,6 +49,7 @@ Add regression tests at the read boundary and a policy-path guard test so future
 
 ## References
 
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1197
 - `packages/shared/src/types/session.ts`
 - `apps/api/src/routes/chat.ts`
 - `apps/api/src/lib/mappers.ts`
