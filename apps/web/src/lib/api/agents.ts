@@ -152,7 +152,7 @@ export async function listAgentProfiles(
   projectId: string,
 ): Promise<AgentProfile[]> {
   const res = await request<{ items: AgentProfile[] }>(`/api/projects/${projectId}/agent-profiles`);
-  return res.items;
+  return res.items ?? [];
 }
 
 export async function createAgentProfile(
