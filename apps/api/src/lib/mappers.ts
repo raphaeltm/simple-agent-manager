@@ -139,7 +139,11 @@ export function toProjectSummaryResponse(
   };
 }
 
-export function toTaskResponse(task: schema.Task, blocked = false): Task {
+export function toTaskResponse(
+  task: schema.Task,
+  blocked = false,
+  displayAgentProfileHint = task.agentProfileHint
+): Task {
   return {
     id: task.id,
     projectId: task.projectId,
@@ -153,7 +157,7 @@ export function toTaskResponse(task: schema.Task, blocked = false): Task {
     priority: task.priority,
     taskMode: (task.taskMode as TaskMode) || 'task',
     dispatchDepth: task.dispatchDepth,
-    agentProfileHint: task.agentProfileHint,
+    agentProfileHint: displayAgentProfileHint,
     blocked,
     triggeredBy: task.triggeredBy ?? 'user',
     triggerId: task.triggerId ?? null,

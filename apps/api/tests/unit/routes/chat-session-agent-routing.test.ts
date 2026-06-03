@@ -14,6 +14,22 @@ const mocks = vi.hoisted(() => ({
   userRole: 'user',
 }));
 
+function makeTaskQuery(rows: unknown[]) {
+  return {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+    orderBy: vi.fn(),
+  };
+}
+
+function makeProfileQuery(rows: unknown[]) {
+  return {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockResolvedValue(rows),
+  };
+}
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
@@ -380,10 +396,9 @@ describe('chatRoutes agent session routing', () => {
     expect(body.session.agentType).toBeNull();
   });
 
-  it('returns taskMode and agentProfileHint in task embed when task has them', async () => {
+  it('resolves a task embed agentProfileHint profile ID to the profile name', async () => {
     mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
 
-    // Mock D1 task query to return a task with taskMode and agentProfileHint
     const taskRow = {
       id: 'task-1',
       status: 'in_progress',
@@ -394,19 +409,15 @@ describe('chatRoutes agent session routing', () => {
       outputSummary: null,
       finalizedAt: null,
       taskMode: 'conversation',
-      agentProfileHint: 'fast-profile',
+      agentProfileHint: 'profile-fast-001',
     };
 
-    // The route calls db.select().from(tasks).where(...).limit(1)
-    // The mock chain: select() -> { from -> where -> limit }
-    const queryBuilder = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([taskRow]),
-      orderBy: orderBySpy,
-    };
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(makeTaskQuery([taskRow]))
+      .mockReturnValueOnce(makeProfileQuery([{ id: 'profile-fast-001', name: 'Fast Profile' }]));
     mocks.drizzle.mockReturnValue({
-      select: vi.fn().mockReturnValue(queryBuilder),
+      select,
     });
 
     mocks.getSession.mockResolvedValue({
@@ -431,6 +442,52 @@ describe('chatRoutes agent session routing', () => {
     const body = await response.json();
     expect(body.session.task).toBeDefined();
     expect(body.session.task.taskMode).toBe('conversation');
-    expect(body.session.task.agentProfileHint).toBe('fast-profile');
+    expect(body.session.task.agentProfileHint).toBe('Fast Profile');
+  });
+
+  it('falls back to the raw task embed agentProfileHint when no profile matches', async () => {
+    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    const taskRow = {
+      id: 'task-1',
+      status: 'in_progress',
+      executionStep: 'agent_session',
+      errorMessage: null,
+      outputBranch: 'sam/feature-x',
+      outputPrUrl: null,
+      outputSummary: null,
+      finalizedAt: null,
+      taskMode: 'task',
+      agentProfileHint: 'Legacy Free Text Profile',
+    };
+
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(makeTaskQuery([taskRow]))
+      .mockReturnValueOnce(makeProfileQuery([]));
+    mocks.drizzle.mockReturnValue({ select });
+
+    mocks.getSession.mockResolvedValue({
+      id: 'chat-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      topic: 'Test task embed',
+      status: 'active',
+      messageCount: 1,
+      startedAt: 1,
+      endedAt: null,
+      createdAt: 1,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.session.task).toBeDefined();
+    expect(body.session.task.agentProfileHint).toBe('Legacy Free Text Profile');
   });
 });

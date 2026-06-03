@@ -56,6 +56,7 @@ function makeStartInput(taskId: string) {
     opencodeProvider: null,
     opencodeBaseUrl: null,
     systemPromptAppend: 'Always run tests before committing.',
+    agentProfileHint: 'profile-release-001',
     attachments: [
       { id: 'att-001', filename: 'spec.md', r2Key: 'attachments/att-001', contentType: 'text/markdown', sizeBytes: 1024 },
     ],
@@ -115,6 +116,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.model).toBe('claude-sonnet-4-20250514');
     expect(config.permissionMode).toBe('auto-edit');
     expect(config.systemPromptAppend).toBe('Always run tests before committing.');
+    expect(config.agentProfileHint).toBe('profile-release-001');
     expect(config.attachments).toHaveLength(1);
     expect(config.attachments![0]!.id).toBe('att-001');
     expect(config.attachments![0]!.filename).toBe('spec.md');

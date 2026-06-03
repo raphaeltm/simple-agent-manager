@@ -22,6 +22,7 @@ import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { CreateChatSessionSchema, LinkTaskToChatSchema, parseOptionalBody, SendChatMessageSchema } from '../schemas';
+import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
@@ -270,6 +271,12 @@ chatRoutes.get('/:sessionId', async (c) => {
         .limit(1);
 
       if (taskRow) {
+        const agentProfileHint = await resolveTaskAgentProfileHint(db, {
+          hint: taskRow.agentProfileHint,
+          projectId,
+          userId,
+        });
+
         task = {
           id: taskRow.id,
           status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
@@ -280,7 +287,7 @@ chatRoutes.get('/:sessionId', async (c) => {
           outputSummary: taskRow.outputSummary ?? null,
           finalizedAt: taskRow.finalizedAt ?? null,
           taskMode: isTaskMode(taskRow.taskMode) ? taskRow.taskMode : null,
-          agentProfileHint: taskRow.agentProfileHint ?? null,
+          agentProfileHint,
         };
       }
     } catch {

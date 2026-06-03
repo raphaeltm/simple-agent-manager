@@ -36,6 +36,7 @@ import {
   UpdateTaskSchema,
   UpdateTaskStatusSchema,
 } from '../../schemas';
+import { resolveTaskAgentProfileHint, resolveTaskAgentProfileHints } from '../../services/agent-profile-display';
 import { cronToHumanReadable } from '../../services/cron-utils';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
@@ -193,9 +194,20 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const tasks = hasNextPage ? rows.slice(0, limit) : rows;
   const taskIds = tasks.map((task) => task.id);
   const blockedSet = await computeBlockedSet(db, taskIds);
+  const displayProfileHints = await resolveTaskAgentProfileHints(db, {
+    hints: tasks.map((task) => task.agentProfileHint),
+    projectId,
+    userId,
+  });
 
   const response: ListTasksResponse = {
-    tasks: tasks.map((task) => toTaskResponse(task, blockedSet.has(task.id))),
+    tasks: tasks.map((task) =>
+      toTaskResponse(
+        task,
+        blockedSet.has(task.id),
+        task.agentProfileHint ? (displayProfileHints.get(task.agentProfileHint) ?? task.agentProfileHint) : null
+      )
+    ),
     nextCursor: hasNextPage ? (tasks[tasks.length - 1]?.id ?? null) : null,
   };
 
@@ -212,6 +224,11 @@ crudRoutes.get('/:taskId', requireAuth(), requireApproved(), async (c) => {
   const task = await requireOwnedTask(db, projectId, taskId, userId);
   const dependencies = await getTaskDependencies(db, task.id);
   const blocked = await computeBlockedForTask(db, task.id);
+  const displayProfileHint = await resolveTaskAgentProfileHint(db, {
+    hint: task.agentProfileHint,
+    projectId,
+    userId,
+  });
 
   // Enrich with trigger info when task was trigger-spawned
   let trigger: TaskTriggerInfo | undefined;
@@ -263,7 +280,7 @@ crudRoutes.get('/:taskId', requireAuth(), requireApproved(), async (c) => {
   }
 
   const response: TaskDetailResponse = {
-    ...toTaskResponse(task, blocked),
+    ...toTaskResponse(task, blocked, displayProfileHint),
     dependencies: dependencies.map(toDependencyResponse),
     blocked,
     trigger,
