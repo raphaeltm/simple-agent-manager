@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
 import { chatRoutes } from '../../../src/routes/chat';
 
 const mocks = vi.hoisted(() => ({
@@ -171,7 +170,7 @@ describe('chatRoutes agent session routing', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1',
       { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {} as D1Database },
     );
 
     expect(response.status).toBe(200);

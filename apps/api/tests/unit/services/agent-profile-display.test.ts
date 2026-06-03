@@ -18,7 +18,7 @@ describe('agent profile display resolution', () => {
     const db = { select };
     const hints = Array.from({ length: 81 }, (_, index) => `profile-${String(index).padStart(3, '0')}`);
 
-    const resolved = await resolveTaskAgentProfileHints(db as never, {
+    const resolved = await resolveTaskAgentProfileHints(db, {
       hints,
       projectId: 'proj-1',
       userId: 'user-1',
