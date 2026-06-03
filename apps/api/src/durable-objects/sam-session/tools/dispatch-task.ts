@@ -366,6 +366,7 @@ export async function dispatchTask(
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: resolvedProfile?.profileId ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

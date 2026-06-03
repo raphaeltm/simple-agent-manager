@@ -28,9 +28,6 @@ function makeFakeDb(...queryResults: unknown[][]) {
     select: () => ({
       from: () => ({
         where: () => ({
-          orderBy: () => ({
-            limit: () => rows.shift() ?? [],
-          }),
           limit: () => rows.shift() ?? [],
         }),
       }),
@@ -40,7 +37,6 @@ function makeFakeDb(...queryResults: unknown[][]) {
 
 const DEFAULT_INPUT = {
   workspaceId: 'workspace-1',
-  projectId: 'project-1',
   userId: 'user-1',
   githubRepoId: 12345,
 } as const;
@@ -86,7 +82,7 @@ describe('GitHub CLI policy token options', () => {
     expect(() => toInstallationTokenOptions(policy, null)).toThrow(GitHubCliPolicyError);
   });
 
-  it('resolves task-linked profile policy into token options for a workspace', async () => {
+  it('resolves workspace-linked profile policy into token options', async () => {
     const policy = makePolicy({
       permissions: {
         contents: 'read',
@@ -97,7 +93,7 @@ describe('GitHub CLI policy token options', () => {
       },
     });
     const db = makeFakeDb(
-      [{ profileId: 'profile-release' }],
+      [{ agentProfileHint: 'profile-release', projectId: 'project-1' }],
       [{ githubCliPolicy: JSON.stringify(policy) }]
     );
 
@@ -112,9 +108,19 @@ describe('GitHub CLI policy token options', () => {
     });
   });
 
-  it('fails closed when a task-linked profile stores invalid policy JSON', async () => {
+  it('returns null when workspace has no profile hint', async () => {
     const db = makeFakeDb(
-      [{ profileId: 'profile-release' }],
+      [{ agentProfileHint: null, projectId: 'project-1' }]
+    );
+
+    await expect(
+      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
+    ).resolves.toBeNull();
+  });
+
+  it('fails closed when a workspace-linked profile stores invalid policy JSON', async () => {
+    const db = makeFakeDb(
+      [{ agentProfileHint: 'profile-release', projectId: 'project-1' }],
       [{ githubCliPolicy: '{invalid' }]
     );
 

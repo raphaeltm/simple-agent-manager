@@ -1,5 +1,5 @@
 import type { GitHubCliPermissionLevel, GitHubCliPolicy } from '@simple-agent-manager/shared';
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -14,7 +14,6 @@ export interface GitHubInstallationTokenOptions {
 
 interface WorkspacePolicyInput {
   workspaceId: string;
-  projectId: string;
   userId: string;
   githubRepoId: number | null;
 }
@@ -93,21 +92,20 @@ export async function resolveWorkspaceGitHubTokenOptions(
   db: Db,
   input: WorkspacePolicyInput
 ): Promise<GitHubInstallationTokenOptions | null> {
-  const taskRows = await db
-    .select({ profileId: schema.tasks.agentProfileHint })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.workspaceId, input.workspaceId),
-        eq(schema.tasks.projectId, input.projectId),
-        eq(schema.tasks.userId, input.userId)
-      )
-    )
-    .orderBy(desc(schema.tasks.createdAt))
+  // Read the profile hint directly from the workspace record.
+  // This avoids the D1 tasks table FK constraint issue for DO-only projects.
+  const wsRows = await db
+    .select({
+      agentProfileHint: schema.workspaces.agentProfileHint,
+      projectId: schema.workspaces.projectId,
+    })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, input.workspaceId))
     .limit(1);
 
-  const profileId = taskRows[0]?.profileId;
-  if (!profileId) return null;
+  const profileId = wsRows[0]?.agentProfileHint;
+  const projectId = wsRows[0]?.projectId;
+  if (!profileId || !projectId) return null;
 
   const profileRows = await db
     .select({ githubCliPolicy: schema.agentProfiles.githubCliPolicy })
@@ -117,7 +115,7 @@ export async function resolveWorkspaceGitHubTokenOptions(
         eq(schema.agentProfiles.id, profileId),
         eq(schema.agentProfiles.userId, input.userId),
         or(
-          eq(schema.agentProfiles.projectId, input.projectId),
+          eq(schema.agentProfiles.projectId, projectId),
           isNull(schema.agentProfiles.projectId)
         )
       )

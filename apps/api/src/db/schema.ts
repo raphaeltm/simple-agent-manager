@@ -708,6 +708,8 @@ export const workspaces = sqliteTable(
       .default(false),
     errorMessage: text('error_message'),
     dispatchedAt: text('dispatched_at'),
+    /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
+    agentProfileHint: text('agent_profile_hint'),
     /** JSON snapshot of ResourceRequirements for audit. */
     resourceRequirementsJson: text('resource_requirements_json'),
     /** JSON snapshot of ResolvedResourceReservation for audit. */

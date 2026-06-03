@@ -282,6 +282,7 @@ export class TaskRunner extends DurableObject<Env> {
     // Normalize fields added after initial schema version (backward compat
     // for DOs started before deployment of the field).
     raw.config.systemPromptAppend ??= null;
+    raw.config.agentProfileHint ??= null;
     raw.provisioningStartedAt ??= null;
     raw.agentReadyStartedAt ??= null;
     raw.workspaceReadyStartedAt ??= null;

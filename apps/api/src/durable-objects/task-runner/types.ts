@@ -72,6 +72,8 @@ export interface TaskRunConfig {
   opencodeBaseUrl: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;
+  /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
+  agentProfileHint: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */

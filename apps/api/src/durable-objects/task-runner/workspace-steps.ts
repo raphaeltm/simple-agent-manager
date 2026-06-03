@@ -151,6 +151,7 @@ async function createAndProvisionWorkspace(
     vmLocation: state.config.vmLocation,
     workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: state.config.devcontainerConfigName ?? null,
+    agentProfileHint: state.config.agentProfileHint ?? null,
     createdAt: now,
     updatedAt: now,
   });

@@ -726,14 +726,11 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
   let tokenOptions = null;
   try {
-    tokenOptions = workspace.projectId
-      ? await resolveWorkspaceGitHubTokenOptions(db, {
+    tokenOptions = await resolveWorkspaceGitHubTokenOptions(db, {
           workspaceId: workspace.id,
-          projectId: workspace.projectId,
           userId: workspace.userId,
           githubRepoId,
-        })
-      : null;
+        });
   } catch (err) {
     if (err instanceof GitHubCliPolicyError) {
       throw errors.forbidden('GitHub CLI policy prevents token minting');
