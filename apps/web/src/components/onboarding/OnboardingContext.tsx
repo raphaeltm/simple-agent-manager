@@ -76,7 +76,12 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         const isComplete = (hasAgent || trialAvailable) && (hasCloud || trialAvailable) && hasGitHub;
         setSetupComplete(isComplete);
 
-        if (isComplete) {
+        // ?onboarding URL param forces the overlay open (for testing / re-running)
+        const forceOpen = new URLSearchParams(window.location.search).has('onboarding');
+
+        if (forceOpen) {
+          setOverlayOpen(true);
+        } else if (isComplete) {
           setDismissed(true);
           if (userId) localStorage.setItem(getStorageKey(userId), 'true');
         } else if (!localStorage.getItem(getStorageKey(userId ?? ''))) {
@@ -97,10 +102,9 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   const openOnboarding = useCallback(() => {
     setOverlayOpen(true);
-    // Clear dismissed so it opens fresh
-    if (userId) localStorage.removeItem(getStorageKey(userId));
     setDismissed(false);
-  }, [userId]);
+    // Don't clear localStorage — just force it open for this session
+  }, []);
 
   const dismissOnboarding = useCallback(() => {
     setOverlayOpen(false);
@@ -108,7 +112,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     if (userId) localStorage.setItem(getStorageKey(userId), 'true');
   }, [userId]);
 
-  const showOverlay = overlayOpen && !dismissed && !setupComplete && !loading;
+  // Show overlay when: explicitly opened OR auto-opened on first visit (not dismissed, not complete)
+  const showOverlay = overlayOpen && !dismissed && !loading;
 
   return (
     <OnboardingContext.Provider
