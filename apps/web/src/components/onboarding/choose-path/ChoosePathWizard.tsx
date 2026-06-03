@@ -103,8 +103,14 @@ export function ChoosePathWizard() {
         if (existingTags.length > 0) {
           setTags((prev) => [...new Set([...prev, ...existingTags])]);
         }
+
+        // Explicitly mark as not dismissed so the wizard renders
+        if (!hasAgent || !hasCloud || !hasGitHub) {
+          setDismissed(false);
+        }
       } catch {
-        // Non-critical
+        // Non-critical — show the wizard on fetch failure
+        setDismissed(false);
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
