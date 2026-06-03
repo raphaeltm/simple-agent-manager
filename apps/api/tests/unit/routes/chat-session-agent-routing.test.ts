@@ -155,6 +155,54 @@ describe('chatRoutes agent session routing', () => {
     app.route('/api/projects/:projectId/sessions', chatRoutes);
   });
 
+  async function requestTaskEmbed(input: {
+    taskMode: 'task' | 'conversation';
+    storedHint: string;
+    profileRows: Array<{ id: string; name: string }>;
+  }) {
+    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.drizzle.mockReturnValue({
+      select: vi
+        .fn()
+        .mockReturnValueOnce(makeTaskQuery([{
+          id: 'task-1',
+          status: 'in_progress',
+          executionStep: 'agent_session',
+          errorMessage: null,
+          outputBranch: 'sam/feature-x',
+          outputPrUrl: null,
+          outputSummary: null,
+          finalizedAt: null,
+          taskMode: input.taskMode,
+          agentProfileHint: input.storedHint,
+        }]))
+        .mockReturnValueOnce(makeProfileQuery(input.profileRows)),
+    });
+
+    mocks.getSession.mockResolvedValue({
+      id: 'chat-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      topic: 'Test task embed',
+      status: 'active',
+      messageCount: 1,
+      startedAt: 1,
+      endedAt: null,
+      createdAt: 1,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.session.task).toBeDefined();
+    return body.session.task;
+  }
+
   it('resolves agentSessionId from the ACP session linked to the chat session', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [
@@ -396,97 +444,23 @@ describe('chatRoutes agent session routing', () => {
   });
 
   it('resolves a task embed agentProfileHint profile ID to the profile name', async () => {
-    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
-
-    const taskRow = {
-      id: 'task-1',
-      status: 'in_progress',
-      executionStep: 'agent_session',
-      errorMessage: null,
-      outputBranch: 'sam/feature-x',
-      outputPrUrl: null,
-      outputSummary: null,
-      finalizedAt: null,
+    const task = await requestTaskEmbed({
       taskMode: 'conversation',
-      agentProfileHint: 'profile-fast-001',
-    };
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce(makeTaskQuery([taskRow]))
-      .mockReturnValueOnce(makeProfileQuery([{ id: 'profile-fast-001', name: 'Fast Profile' }]));
-    mocks.drizzle.mockReturnValue({
-      select,
+      storedHint: 'profile-fast-001',
+      profileRows: [{ id: 'profile-fast-001', name: 'Fast Profile' }],
     });
 
-    mocks.getSession.mockResolvedValue({
-      id: 'chat-1',
-      workspaceId: 'ws-1',
-      taskId: 'task-1',
-      topic: 'Test task embed',
-      status: 'active',
-      messageCount: 1,
-      startedAt: 1,
-      endedAt: null,
-      createdAt: 1,
-    });
-
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.session.task).toBeDefined();
-    expect(body.session.task.taskMode).toBe('conversation');
-    expect(body.session.task.agentProfileHint).toBe('Fast Profile');
+    expect(task.taskMode).toBe('conversation');
+    expect(task.agentProfileHint).toBe('Fast Profile');
   });
 
   it('falls back to the raw task embed agentProfileHint when no profile matches', async () => {
-    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
-
-    const taskRow = {
-      id: 'task-1',
-      status: 'in_progress',
-      executionStep: 'agent_session',
-      errorMessage: null,
-      outputBranch: 'sam/feature-x',
-      outputPrUrl: null,
-      outputSummary: null,
-      finalizedAt: null,
+    const task = await requestTaskEmbed({
       taskMode: 'task',
-      agentProfileHint: 'Legacy Free Text Profile',
-    };
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce(makeTaskQuery([taskRow]))
-      .mockReturnValueOnce(makeProfileQuery([]));
-    mocks.drizzle.mockReturnValue({ select });
-
-    mocks.getSession.mockResolvedValue({
-      id: 'chat-1',
-      workspaceId: 'ws-1',
-      taskId: 'task-1',
-      topic: 'Test task embed',
-      status: 'active',
-      messageCount: 1,
-      startedAt: 1,
-      endedAt: null,
-      createdAt: 1,
+      storedHint: 'Legacy Free Text Profile',
+      profileRows: [],
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.session.task).toBeDefined();
-    expect(body.session.task.agentProfileHint).toBe('Legacy Free Text Profile');
+    expect(task.agentProfileHint).toBe('Legacy Free Text Profile');
   });
 });
