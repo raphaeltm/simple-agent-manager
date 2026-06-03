@@ -13,6 +13,7 @@ import {
   Lightbulb,
   Map,
   MessageSquare,
+  PlayCircle,
   Monitor,
   Server,
   Settings,
@@ -25,6 +26,7 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
 import { useAuth } from './AuthProvider';
+import { useOnboarding } from './onboarding';
 
 export interface NavItem {
   label: string;
@@ -96,6 +98,7 @@ interface NavSidebarProps {
 export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection }: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
+  const { needsOnboarding, openOnboarding } = useOnboarding();
   const [infraOpen, setInfraOpen] = useState(false);
 
   const projectId = extractProjectId(location.pathname);
@@ -225,6 +228,19 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
               )}
             </div>
 
+            {/* Onboarding resume — shown when setup is incomplete */}
+            {needsOnboarding && (
+              <div className={SECTION_DIVIDER}>
+                <button
+                  onClick={openOnboarding}
+                  className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[rgba(34,197,94,0.06)] hover:bg-[rgba(34,197,94,0.12)]`}
+                >
+                  <PlayCircle size={18} />
+                  Complete Setup
+                </button>
+              </div>
+            )}
+
             {/* Project list — in global panel within project context */}
             {projectListSection}
           </nav>
@@ -291,6 +307,19 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
           </div>
         )}
       </div>
+
+      {/* Onboarding resume — shown when setup is incomplete */}
+      {needsOnboarding && (
+        <div className={SECTION_DIVIDER}>
+          <button
+            onClick={openOnboarding}
+            className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[rgba(34,197,94,0.06)] hover:bg-[rgba(34,197,94,0.12)]`}
+          >
+            <PlayCircle size={18} />
+            Complete Setup
+          </button>
+        </div>
+      )}
 
       {/* Project list — in standalone global nav */}
       {projectListSection}

@@ -1,14 +1,10 @@
 /**
- * Choose-Your-Path Onboarding Wizard
+ * Choose-Your-Path Onboarding Wizard — Full-Screen Overlay
  *
- * Replaces the old tab-based onboarding with a question-driven flow:
- * 1. Questions -> user picks their AI subscription, cloud, GitHub status
- * 2. Path Preview -> personalized setup plan based on answers
- * 3. Step Execution -> real API calls for each setup step
- * 4. Completion -> success screen with next-steps guidance
+ * Renders as a fixed overlay with a green-glow vignette background.
+ * The standard app UI is hidden behind it. Users dismiss via X button.
  */
-import { Card, SkeletonCard } from '@simple-agent-manager/ui';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -17,7 +13,7 @@ import {
   listCredentials,
   listGitHubInstallations,
 } from '../../../lib/api';
-import { useAuth } from '../../AuthProvider';
+import { useOnboarding } from '../OnboardingContext';
 import { CompletionScreen } from './CompletionScreen';
 import { type GeneratedStep, generatePath } from './path-generator';
 import { PathPreview } from './PathPreview';
@@ -27,26 +23,8 @@ import { StepExecution } from './StepExecution';
 
 type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
 
-const PHASE_LABELS: Record<Phase, string> = {
-  questions: '',
-  'path-preview': 'Your personalized setup plan is ready',
-  executing: 'Setting up your account',
-  complete: 'Setup complete!',
-};
-
-function getStorageKey(userId: string): string {
-  return `sam-onboarding-wizard-dismissed-${userId}`;
-}
-
 export function ChoosePathWizard() {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  const [loading, setLoading] = useState(true);
-  const [dismissed, setDismissed] = useState<boolean | null>(() => {
-    if (!userId) return null;
-    return localStorage.getItem(getStorageKey(userId)) === 'true';
-  });
+  const { showOverlay, dismissOnboarding } = useOnboarding();
 
   const [phase, setPhase] = useState<Phase>('questions');
   const [currentQuestionId, setCurrentQuestionId] = useState('ai-subscription');
@@ -54,7 +32,6 @@ export function ChoosePathWizard() {
   const [tags, setTags] = useState<string[]>([]);
   const [generatedSteps, setGeneratedSteps] = useState<GeneratedStep[]>([]);
   const contentRef = useRef<HTMLDivElement>(null);
-  // Ref keeps latest tags accessible in callbacks without stale closures
   const tagsRef = useRef(tags);
   tagsRef.current = tags;
 
@@ -63,10 +40,10 @@ export function ChoosePathWizard() {
     []
   );
 
-  // Check existing setup status (async data fetch — genuine useEffect)
+  // Pre-populate tags from existing setup state
   useEffect(() => {
     const controller = new AbortController();
-    async function checkStatus() {
+    async function checkExisting() {
       try {
         const [credResult, installResult, agentResult, trialResult] = await Promise.allSettled([
           listCredentials(),
@@ -81,20 +58,11 @@ export function ChoosePathWizard() {
         const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
         const trialStatus = trialResult.status === 'fulfilled' ? trialResult.value : null;
 
-        const hasCloud = credentials.some(
-          (c) => c.provider === 'hetzner' || c.provider === 'scaleway'
-        );
+        const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
         const trialAvailable = trialStatus?.available ?? false;
 
-        // If fully set up, auto-dismiss
-        if (hasAgent && hasCloud && hasGitHub) {
-          setDismissed(true);
-          if (userId) localStorage.setItem(getStorageKey(userId), 'true');
-        }
-
-        // Pre-populate tags based on existing setup so the path skips completed steps
         const existingTags: string[] = [];
         if (hasAgent || trialAvailable) existingTags.push('existing-agent');
         if (hasCloud || trialAvailable) existingTags.push('existing-cloud');
@@ -103,26 +71,13 @@ export function ChoosePathWizard() {
         if (existingTags.length > 0) {
           setTags((prev) => [...new Set([...prev, ...existingTags])]);
         }
-
-        // Explicitly mark as not dismissed so the wizard renders
-        if (!hasAgent || !hasCloud || !hasGitHub) {
-          setDismissed(false);
-        }
       } catch {
-        // Non-critical — show the wizard on fetch failure
-        setDismissed(false);
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        // Non-critical
       }
     }
-    checkStatus();
+    checkExisting();
     return () => controller.abort();
-  }, [userId]);
-
-  const handleDismiss = useCallback(() => {
-    if (userId) localStorage.setItem(getStorageKey(userId), 'true');
-    setDismissed(true);
-  }, [userId]);
+  }, []);
 
   const handleAnswer = useCallback(
     (option: PathOption) => {
@@ -138,7 +93,7 @@ export function ChoosePathWizard() {
         focusContent();
       }
     },
-    [currentQuestionId]
+    [currentQuestionId, focusContent]
   );
 
   const handleReset = useCallback(() => {
@@ -149,7 +104,6 @@ export function ChoosePathWizard() {
     setGeneratedSteps([]);
   }, []);
 
-  // Back navigation in questions
   const questionHistory = Object.keys(answers);
   const canGoBack = questionHistory.length > 0 && phase === 'questions';
 
@@ -173,82 +127,73 @@ export function ChoosePathWizard() {
 
   const handleExecutionComplete = useCallback(() => {
     setPhase('complete');
-    if (userId) localStorage.setItem(getStorageKey(userId), 'true');
     focusContent();
-  }, [userId]);
+  }, [focusContent]);
 
-  // Filter out auto-handled steps for execution
   const executableSteps = useMemo(
     () => generatedSteps.filter((s) => !s.isOptional),
     [generatedSteps]
   );
 
-  // Show skeleton during initial load
-  if (loading || dismissed === null) {
-    return (
-      <div className="mb-6">
-        <SkeletonCard lines={2} />
-      </div>
-    );
-  }
-
-  if (dismissed) return null;
+  if (!showOverlay) return null;
 
   const currentQuestion = QUESTIONS.find((q) => q.id === currentQuestionId);
-  const liveAnnouncement =
-    phase === 'questions'
-      ? currentQuestion?.question ?? ''
-      : PHASE_LABELS[phase];
 
   return (
-    <div data-testid="onboarding-wizard" role="region" aria-label="Account setup" className="mb-6">
-      {/* Screen reader announcement for phase transitions */}
+    <div
+      data-testid="onboarding-wizard"
+      role="dialog"
+      aria-label="Account setup"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{
+        background: `
+          radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.12) 0%, rgba(34, 197, 94, 0.04) 40%, transparent 70%),
+          radial-gradient(ellipse 100% 100% at 50% 50%, rgba(10, 14, 10, 0.0) 30%, rgba(0, 0, 0, 0.7) 100%),
+          var(--bg-app, #0a0e0a)
+        `,
+      }}
+    >
+      {/* Screen reader announcement */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {liveAnnouncement}
+        {phase === 'questions' ? currentQuestion?.question ?? '' : ''}
       </div>
 
-      <Card className="p-0 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-surface">
-          <div className="flex items-center gap-2">
-            <div aria-hidden="true" className="w-6 h-6 rounded-md bg-accent/20 flex items-center justify-center text-accent text-xs font-bold">
-              S
-            </div>
-            <span className="text-sm font-semibold text-fg-primary">Setup</span>
-          </div>
-          <div className="flex items-center gap-3">
-            {canGoBack && (
-              <button
-                type="button"
-                onClick={handleBack}
-                className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px]"
-              >
-                <ArrowLeft size={12} aria-hidden="true" /> Back
-              </button>
-            )}
-            {phase === 'questions' && (
-              <span className="text-xs text-fg-muted">
-                Q{Object.keys(answers).length + 1}
-              </span>
-            )}
-            {phase === 'path-preview' && (
-              <span className="text-xs text-fg-muted">Your plan</span>
-            )}
-            {phase === 'executing' && (
-              <span className="text-xs text-fg-muted">Setting up...</span>
-            )}
+      {/* Top bar — X dismiss + back nav */}
+      <div className="flex items-center justify-between px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-3">
+          {canGoBack && (
             <button
               type="button"
-              onClick={handleDismiss}
-              className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px] px-1"
+              onClick={handleBack}
+              className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px] transition-colors"
             >
-              Skip setup
+              <ArrowLeft size={16} /> Back
             </button>
-          </div>
+          )}
+          {phase === 'questions' && (
+            <span className="text-xs text-fg-muted/60">
+              Q{Object.keys(answers).length + 1} of {QUESTIONS.length}
+            </span>
+          )}
         </div>
+        <button
+          type="button"
+          onClick={dismissOnboarding}
+          aria-label="Exit setup"
+          className="inline-flex items-center justify-center w-10 h-10 rounded-full text-fg-muted hover:text-fg-primary hover:bg-white/5 bg-transparent border-none cursor-pointer transition-colors"
+        >
+          <X size={20} />
+        </button>
+      </div>
 
-        {/* Content */}
-        <div ref={contentRef} tabIndex={-1} className="p-4 py-6 outline-none">
+      {/* Scrollable content area — centered */}
+      <div
+        ref={contentRef}
+        tabIndex={-1}
+        className="flex-1 overflow-y-auto overflow-x-hidden outline-none px-4 pb-8 sm:px-6"
+      >
+        <div className="max-w-lg mx-auto pt-4 sm:pt-12">
           {phase === 'questions' && currentQuestion && (
             <QuestionCard
               question={currentQuestion}
@@ -271,12 +216,12 @@ export function ChoosePathWizard() {
               steps={executableSteps}
               tags={tags}
               onComplete={handleExecutionComplete}
-              onDismiss={handleDismiss}
+              onDismiss={dismissOnboarding}
             />
           )}
-          {phase === 'complete' && <CompletionScreen onDismiss={handleDismiss} />}
+          {phase === 'complete' && <CompletionScreen onDismiss={dismissOnboarding} />}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

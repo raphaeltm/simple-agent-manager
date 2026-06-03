@@ -22,7 +22,6 @@ interface StepFormProps {
   onGitHubInstall: () => void;
   onCreateProject: () => void;
   onSkip?: () => void;
-  onDismiss: () => void;
   actionLabel: string;
 }
 
@@ -41,7 +40,6 @@ export function StepForm({
   onGitHubInstall,
   onCreateProject,
   onSkip,
-  onDismiss,
   actionLabel,
 }: StepFormProps) {
   switch (stepId) {

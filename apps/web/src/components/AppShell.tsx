@@ -13,6 +13,8 @@ import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { extractProjectId, GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { NotificationCenter } from './NotificationCenter';
+import { OnboardingProvider } from './onboarding';
+import { ChoosePathWizard } from './onboarding/choose-path/ChoosePathWizard';
 import { RecentChatsDropdown } from './RecentChatsDropdown';
 import { SidebarProjectList } from './SidebarProjectList';
 
@@ -167,6 +169,8 @@ export function AppShell({ children }: AppShellProps) {
   if (isMobile) {
     return (
       <AppShellContext.Provider value={shellContext}>
+      <OnboardingProvider>
+      <ChoosePathWizard />
       <div className="flex flex-col h-screen">
         <header className="relative z-30 flex items-center justify-between px-4 py-2 glass-chrome glass-panel-container glass-composited border-x-0 border-t-0 after:content-[''] after:absolute after:bottom-0 after:left-[10%] after:right-[10%] after:h-0.5 after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.3)_0%,transparent_70%)] after:blur-[1px] after:pointer-events-none">
           {/* Title on the left */}
@@ -221,12 +225,15 @@ export function AppShell({ children }: AppShellProps) {
           <GlobalCommandPalette onClose={commandPalette.close} />
         )}
       </div>
+      </OnboardingProvider>
       </AppShellContext.Provider>
     );
   }
 
   return (
     <AppShellContext.Provider value={shellContext}>
+    <OnboardingProvider>
+    <ChoosePathWizard />
     <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
       <aside className="glass-panel-container glass-composited flex flex-col glass-chrome border-y-0 border-l-0 overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
@@ -287,6 +294,7 @@ export function AppShell({ children }: AppShellProps) {
         <GlobalCommandPalette onClose={commandPalette.close} />
       )}
     </div>
+    </OnboardingProvider>
     </AppShellContext.Provider>
   );
 }

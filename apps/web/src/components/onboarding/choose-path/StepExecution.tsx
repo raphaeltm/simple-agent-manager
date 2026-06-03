@@ -258,7 +258,6 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
             onGitHubInstall={handleGitHubInstall}
             onCreateProject={handleCreateProject}
             onSkip={step.isOptional ? handleSkip : undefined}
-            onDismiss={onDismiss}
             actionLabel={step.actionLabel}
           />
         </div>
