@@ -62,6 +62,21 @@ import {
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
+async function toDisplayTaskResponse(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  task: schema.Task,
+  projectId: string,
+  userId: string,
+  blocked = false
+) {
+  const displayProfileHint = await resolveTaskAgentProfileHint(db, {
+    hint: task.agentProfileHint,
+    projectId,
+    userId,
+  });
+  return toTaskResponse(task, blocked, displayProfileHint);
+}
+
 // Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
 // The callback route has been extracted to callback.ts (mounted before projectsRoutes).
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md.
@@ -130,7 +145,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateTaskS
     throw errors.internal('Failed to load created task');
   }
 
-  return c.json(toTaskResponse(task, false), 201);
+  return c.json(await toDisplayTaskResponse(db, task, projectId, userId), 201);
 });
 
 crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
@@ -368,7 +383,7 @@ crudRoutes.patch('/:taskId', requireAuth(), requireApproved(), jsonValidator(Upd
   }
 
   const blocked = await computeBlockedForTask(db, updatedTask.id);
-  return c.json(toTaskResponse(updatedTask, blocked));
+  return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId, blocked));
 });
 
 crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
@@ -462,7 +477,7 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
   }
 
   const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
-  return c.json(toTaskResponse(updatedTask, nextBlocked));
+  return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId, nextBlocked));
 });
 
 // NOTE: The task callback route (POST /:taskId/status/callback) has been
@@ -631,7 +646,7 @@ crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValid
     throw errors.notFound('Task');
   }
 
-  return c.json(toTaskResponse(updatedTask, false));
+  return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId));
 });
 
 crudRoutes.get('/:taskId/events', requireAuth(), requireApproved(), async (c) => {
