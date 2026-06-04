@@ -43,10 +43,20 @@ function capacityError(size: string): ProviderError {
   });
 }
 
+/** Sentinel returned by a `firstResolver` to defer to the default SELECT handling. */
+const FALLTHROUGH = Symbol('fallthrough');
+
 interface DbMockOptions {
   nodeCount?: number;
   /** Status returned by the post-provision verification SELECT, keyed by node id. */
   nodeStatusById?: Record<string, { status: string; error_message: string | null }>;
+  /**
+   * Optional override for `.first()` results. Return a row (or null) to handle a
+   * query, or FALLTHROUGH to use the default COUNT/status handling. Lets the
+   * crash-recovery tests express only their differing SELECT branches without
+   * re-declaring the whole prepare/bind/first/run mock.
+   */
+  firstResolver?: (sql: string, bound: unknown[]) => unknown;
 }
 
 function createDbMock(opts: DbMockOptions) {
@@ -60,6 +70,10 @@ function createDbMock(opts: DbMockOptions) {
           return this;
         },
         first() {
+          if (opts.firstResolver) {
+            const resolved = opts.firstResolver(sql, bound);
+            if (resolved !== FALLTHROUGH) return Promise.resolve(resolved);
+          }
           if (sql.includes('SELECT COUNT(*) as c FROM nodes')) {
             return Promise.resolve({ c: opts.nodeCount ?? 0 });
           }
@@ -79,6 +93,11 @@ function createDbMock(opts: DbMockOptions) {
     },
   };
   return { DATABASE, runCalls };
+}
+
+/** Locate the UPDATE that persists the provisioned (downgraded) size, if any. */
+function findDowngradeWrite(runCalls: Array<{ sql: string; args: unknown[] }>) {
+  return runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'));
 }
 
 function createContext(
@@ -386,37 +405,20 @@ describe('TaskRunner size-fallback descent', () => {
     // Simulate a prior attempt that provisioned node-medium (a downgrade from
     // the requested large) but crashed before persisting nodeId to DO storage.
     // The task row still records the node via auto_provisioned_node_id.
-    const runCalls: Array<{ sql: string; args: unknown[] }> = [];
-    const DATABASE = {
-      prepare(sql: string) {
-        let bound: unknown[] = [];
-        return {
-          bind(...args: unknown[]) {
-            bound = args;
-            return this;
-          },
-          first() {
-            if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
-              return Promise.resolve({ auto_provisioned_node_id: 'node-medium' });
-            }
-            if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
-              return Promise.resolve({ id: 'node-medium', status: 'running', vm_size: 'medium' });
-            }
-            if (sql.includes('SELECT id, status, error_message FROM nodes')) {
-              return Promise.resolve({ id: 'node-medium', status: 'running', error_message: null });
-            }
-            if (sql.includes('SELECT COUNT(*) as c FROM nodes')) {
-              return Promise.resolve({ c: 0 });
-            }
-            return Promise.resolve(null);
-          },
-          run() {
-            runCalls.push({ sql, args: bound });
-            return Promise.resolve({ success: true });
-          },
-        };
+    const { DATABASE, runCalls } = createDbMock({
+      firstResolver(sql) {
+        if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
+          return { auto_provisioned_node_id: 'node-medium' };
+        }
+        if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
+          return { id: 'node-medium', status: 'running', vm_size: 'medium' };
+        }
+        if (sql.includes('SELECT id, status, error_message FROM nodes')) {
+          return { id: 'node-medium', status: 'running', error_message: null };
+        }
+        return FALLTHROUGH;
       },
-    } as unknown as ReturnType<typeof createDbMock>['DATABASE'];
+    });
     const rc = createContext(DATABASE);
     const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
 
@@ -433,10 +435,7 @@ describe('TaskRunner size-fallback descent', () => {
     // resumes from the adopted node rather than re-running recovery.
     expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
     // The downgrade is re-recorded in case the crash pre-empted the original write.
-    const downgradeWrite = runCalls.find((c) =>
-      c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?')
-    );
-    expect(downgradeWrite?.args[0]).toBe('medium');
+    expect(findDowngradeWrite(runCalls)?.args[0]).toBe('medium');
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
   });
 
@@ -444,37 +443,17 @@ describe('TaskRunner size-fallback descent', () => {
     // auto_provisioned_node_id points to a node that was deleted after a capacity
     // failure — the row is gone, so recovery must fall through to fresh provisioning.
     provisionNode.mockResolvedValue(undefined);
-    const runCalls: Array<{ sql: string; args: unknown[] }> = [];
-    const DATABASE = {
-      prepare(sql: string) {
-        let bound: unknown[] = [];
-        return {
-          bind(...args: unknown[]) {
-            bound = args;
-            return this;
-          },
-          first() {
-            if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
-              return Promise.resolve({ auto_provisioned_node_id: 'node-deleted' });
-            }
-            if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
-              return Promise.resolve(null); // deleted row
-            }
-            if (sql.includes('SELECT status, error_message FROM nodes')) {
-              return Promise.resolve({ status: 'running', error_message: null });
-            }
-            if (sql.includes('SELECT COUNT(*) as c FROM nodes')) {
-              return Promise.resolve({ c: 0 });
-            }
-            return Promise.resolve(null);
-          },
-          run() {
-            runCalls.push({ sql, args: bound });
-            return Promise.resolve({ success: true });
-          },
-        };
+    const { DATABASE } = createDbMock({
+      firstResolver(sql) {
+        if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
+          return { auto_provisioned_node_id: 'node-deleted' };
+        }
+        if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
+          return null; // deleted row
+        }
+        return FALLTHROUGH;
       },
-    } as unknown as ReturnType<typeof createDbMock>['DATABASE'];
+    });
     const rc = createContext(DATABASE);
     const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
 
