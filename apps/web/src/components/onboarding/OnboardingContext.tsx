@@ -36,6 +36,16 @@ function getStorageKey(userId: string): string {
   return `sam-onboarding-wizard-dismissed-${userId}`;
 }
 
+/**
+ * Whether the current URL forces the onboarding overlay open (`?onboarding`).
+ * Read synchronously so the overlay can render on the first paint instead of
+ * waiting on the background credential-status fetch.
+ */
+function isOnboardingForced(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).has('onboarding');
+}
+
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id;
@@ -43,10 +53,15 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [setupComplete, setSetupComplete] = useState(false);
   const [dismissed, setDismissed] = useState<boolean>(() => {
+    // ?onboarding forces the overlay open, overriding a persisted dismissal
+    // (without clearing the stored flag — see openOnboarding / checkStatus).
+    if (isOnboardingForced()) return false;
     if (!userId) return false;
     return localStorage.getItem(getStorageKey(userId)) === 'true';
   });
-  const [overlayOpen, setOverlayOpen] = useState(false);
+  // Open synchronously when forced so the overlay paints immediately rather
+  // than waiting on the background credential-status fetch.
+  const [overlayOpen, setOverlayOpen] = useState<boolean>(() => isOnboardingForced());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -78,10 +93,9 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
         // ?onboarding URL param forces the overlay open (for testing / re-running).
         // Reset the dismissed flag so users who previously dismissed can always
-        // re-view onboarding on demand.
-        const forceOpen = new URLSearchParams(window.location.search).has('onboarding');
-
-        if (forceOpen) {
+        // re-view onboarding on demand. (The overlay is already open synchronously
+        // from initial state in this case; this keeps it open after the fetch.)
+        if (isOnboardingForced()) {
           setOverlayOpen(true);
           setDismissed(false);
         } else if (isComplete) {
@@ -115,8 +129,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     if (userId) localStorage.setItem(getStorageKey(userId), 'true');
   }, [userId]);
 
-  // Show overlay when: explicitly opened OR auto-opened on first visit (not dismissed, not complete)
-  const showOverlay = overlayOpen && !dismissed && !loading;
+  // Show overlay when explicitly opened (forced via ?onboarding, the "Complete
+  // Setup" button, or auto-shown on first visit) and not dismissed. Crucially
+  // this is NOT gated on `loading`: the overlay's visibility must not wait on
+  // the background credential-status fetch (which can take several seconds).
+  const showOverlay = overlayOpen && !dismissed;
 
   return (
     <OnboardingContext.Provider
