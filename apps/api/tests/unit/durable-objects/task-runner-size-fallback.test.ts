@@ -429,6 +429,9 @@ describe('TaskRunner size-fallback descent', () => {
     expect(state.stepResults.autoProvisioned).toBe(true);
     expect(state.stepResults.provisionedVmSize).toBe('medium');
     expect(state.config.vmSize).toBe('medium');
+    // The hydrated state must be persisted to DO storage so a subsequent crash
+    // resumes from the adopted node rather than re-running recovery.
+    expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
     // The downgrade is re-recorded in case the crash pre-empted the original write.
     const downgradeWrite = runCalls.find((c) =>
       c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?')

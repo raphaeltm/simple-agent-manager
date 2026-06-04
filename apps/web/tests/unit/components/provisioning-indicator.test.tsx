@@ -164,6 +164,16 @@ describe('ProvisioningIndicator', () => {
       expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
     });
 
+    it('does not surface a downgrade when the task has completed', () => {
+      const state = makeState({
+        status: 'completed',
+        requestedVmSize: 'large',
+        provisionedVmSize: 'medium',
+      });
+      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
+      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
+    });
+
     it('does not surface a downgrade when the task has been cancelled', () => {
       const state = makeState({
         status: 'cancelled',
