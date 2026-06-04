@@ -44,12 +44,21 @@ export async function providerFetch(
 
     if (!response.ok) {
       let errorMessage: string;
+      let providerCode: string | undefined;
       try {
         const body = await response.text();
         // Try parsing as JSON for structured error messages
         try {
           const json = expectObject(JSON.parse(body), 'provider', 'error_response');
           const error = json.error ? expectObject(json.error, 'provider', 'error_response.error') : null;
+          // Extract structured error code from the provider response
+          providerCode =
+            (typeof error?.code === 'string' ? error.code : undefined) ||
+            (typeof json.type === 'string' ? json.type : undefined) ||
+            (typeof json.code === 'string' ? json.code : undefined) ||
+            (typeof error?.status === 'string' ? error.status : undefined) ||
+            (typeof json.status === 'string' && isNaN(Number(json.status)) ? json.status : undefined) ||
+            undefined;
           errorMessage =
             (typeof error?.message === 'string' ? error.message : undefined) ||
             (typeof json.message === 'string' ? json.message : undefined) ||
@@ -65,6 +74,7 @@ export async function providerFetch(
         providerName,
         response.status,
         `${providerName} API error (${response.status}): ${errorMessage}`,
+        { providerCode },
       );
     }
 

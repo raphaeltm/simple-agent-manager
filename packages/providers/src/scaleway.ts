@@ -5,7 +5,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, ProviderErrorContext, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import type { LocationMeta, Provider, ProviderErrorCategory, ProviderErrorContext, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 import {
   parseProviderJson,
@@ -16,6 +16,59 @@ import {
 } from './validation';
 
 const SCALEWAY_INSTANCE_API_URL = 'https://api.scaleway.com/instance/v1/zones';
+
+/**
+ * Classify a Scaleway API error into a normalized ProviderErrorCategory.
+ *
+ * Scaleway error responses use `{ message, type }` where `type` is the structured signal.
+ * The `providerCode` in ProviderError corresponds to the `type` field.
+ *
+ * Scaleway error types (from API docs):
+ * - transient → transient_capacity (503 with transient type)
+ * - not_found → invalid_config
+ * - invalid_request_error → invalid_config
+ * - quota_exceeded → quota_exceeded
+ * - permission_denied → auth_error
+ * - denied → auth_error
+ *
+ * HTTP status heuristics:
+ * - 503 without recognized type → transient_capacity
+ * - 429 → rate_limited
+ * - 401/403 → auth_error
+ */
+export function classifyScalewayError(
+  statusCode: number | undefined,
+  providerCode: string | undefined,
+  message: string,
+): ProviderErrorCategory {
+  if (providerCode) {
+    switch (providerCode) {
+      case 'transient':
+        return 'transient_capacity';
+      case 'quota_exceeded':
+        return 'quota_exceeded';
+      case 'invalid_request_error':
+      case 'not_found':
+        return 'invalid_config';
+      case 'permission_denied':
+      case 'denied':
+        return 'auth_error';
+    }
+  }
+
+  if (statusCode === 401 || statusCode === 403) return 'auth_error';
+  if (statusCode === 429) return 'rate_limited';
+  if (statusCode === 503) return 'transient_capacity';
+
+  // Message-based fallback for capacity-related errors
+  if (statusCode === 400 || statusCode === 409) {
+    if (/insufficient capacity|no available|resource.*unavailable/i.test(message)) {
+      return 'transient_capacity';
+    }
+  }
+
+  return 'unknown';
+}
 
 export const SCALEWAY_LOCATIONS = [
   'fr-par-1', 'fr-par-2', 'fr-par-3',

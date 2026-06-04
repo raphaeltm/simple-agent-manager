@@ -2,7 +2,7 @@ import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, ProviderLogger, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import type { LocationMeta, Provider, ProviderErrorCategory, ProviderLogger, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { noopProviderLogger, ProviderError } from './types';
 import {
   type HetznerServerPayload,
@@ -26,17 +26,18 @@ const HETZNER_LOCATION_META: Record<string, LocationMeta> = {
 export const DEFAULT_PLACEMENT_RETRY_DELAY_MS = 3_000;
 export const DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS = 15_000;
 export const DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS = 120_000;
-export const DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS = 5;
+export const DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS = 10;
+export const DEFAULT_CAPACITY_RETRY_BUDGET_MS = 300_000;
 
 export interface HetznerProviderRuntimeOptions {
   capacityRetryMaxAttempts?: number;
+  capacityRetryBudgetMs?: number;
   logger?: ProviderLogger;
 }
 
 /**
- * Known Hetzner 422 error message patterns that indicate transient capacity issues
- * rather than permanent configuration errors. Only 422s matching one of these
- * patterns are retried; all other 422s are treated as permanent failures.
+ * Fallback message patterns for transient capacity detection when the structured
+ * `error.code` is unavailable. Secondary heuristic only — prefer `providerCode`.
  */
 const TRANSIENT_CAPACITY_PATTERNS: RegExp[] = [
   /unavailable/i,
@@ -45,15 +46,77 @@ const TRANSIENT_CAPACITY_PATTERNS: RegExp[] = [
   /not enough resources/i,
   /resource[s]?\s+(?:temporarily\s+)?unavailable/i,
   /could not (?:find|allocate)/i,
+  /unsupported location for server type/i,
 ];
 
 /**
- * Determine whether a 422 ProviderError represents a transient capacity issue.
- * Conservative: only matches known capacity-related error messages.
+ * Classify a Hetzner API error into a normalized ProviderErrorCategory.
+ *
+ * Primary signal: structured `error.code` from the JSON response.
+ * Fallback: message regex patterns for cases where the code is missing.
+ *
+ * Hetzner error codes (from API docs):
+ * - resource_unavailable → transient_capacity
+ * - uniqueness_error → invalid_config
+ * - invalid_input → invalid_config
+ * - forbidden → auth_error
+ * - unauthorized → auth_error
+ * - rate_limit_exceeded → rate_limited
+ * - conflict → invalid_config
+ * - server_limit_exceeded → quota_exceeded
+ * - placement_error → invalid_config (handled separately as 412)
+ */
+export function classifyHetznerError(
+  statusCode: number | undefined,
+  providerCode: string | undefined,
+  message: string,
+): ProviderErrorCategory {
+  // Primary signal: structured error code
+  if (providerCode) {
+    switch (providerCode) {
+      case 'resource_unavailable':
+        return 'transient_capacity';
+      case 'server_limit_exceeded':
+        return 'quota_exceeded';
+      case 'uniqueness_error':
+      case 'invalid_input':
+      case 'conflict':
+      case 'placement_error':
+        return 'invalid_config';
+      case 'forbidden':
+      case 'unauthorized':
+        return 'auth_error';
+      case 'rate_limit_exceeded':
+        return 'rate_limited';
+    }
+  }
+
+  // HTTP status code heuristics
+  if (statusCode === 401 || statusCode === 403) return 'auth_error';
+  if (statusCode === 429) return 'rate_limited';
+
+  // Fallback: message pattern matching for 422 without a recognized code
+  if (statusCode === 422) {
+    if (TRANSIENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(message))) {
+      return 'transient_capacity';
+    }
+  }
+
+  return 'unknown';
+}
+
+/**
+ * Determine whether a ProviderError represents a transient capacity issue.
+ * Uses the normalized `category` field as primary signal, with fallback
+ * classification for errors that don't have a category set.
  */
 export function isTransientCapacityError(err: ProviderError): boolean {
-  if (err.statusCode !== 422) return false;
-  return TRANSIENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(err.message));
+  if (err.category === 'transient_capacity') return true;
+  // Fallback classification for errors without a pre-set category
+  if (err.statusCode === 422 && err.category === 'unknown') {
+    return classifyHetznerError(err.statusCode, err.providerCode, err.message) === 'transient_capacity';
+  }
+  return false;
 }
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
@@ -94,6 +157,7 @@ export class HetznerProvider implements Provider {
   private readonly capacityRetryInitialDelayMs: number;
   private readonly capacityRetryMaxDelayMs: number;
   private readonly capacityRetryMaxAttempts: number;
+  private readonly capacityRetryBudgetMs: number;
   private readonly logger: ProviderLogger;
 
   constructor(
@@ -123,6 +187,8 @@ export class HetznerProvider implements Provider {
       capacityRetryMaxDelayMs ?? DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS;
     this.capacityRetryMaxAttempts =
       capacityRetryMaxAttempts ?? DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS;
+    this.capacityRetryBudgetMs =
+      runtimeOptions?.capacityRetryBudgetMs ?? DEFAULT_CAPACITY_RETRY_BUDGET_MS;
     this.logger = runtimeOptions?.logger ?? noopProviderLogger;
   }
 
@@ -132,22 +198,27 @@ export class HetznerProvider implements Provider {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
     }
 
+    const deadline = Date.now() + this.capacityRetryBudgetMs;
+    let lastCapacityError: ProviderError | undefined;
+
     for (let capacityAttempt = 0; capacityAttempt < this.capacityRetryMaxAttempts; capacityAttempt++) {
       try {
         return await this.attemptCreateWithPlacementFallback(config, sizeConfig);
       } catch (err) {
         if (err instanceof ProviderError && isTransientCapacityError(err)) {
+          lastCapacityError = err;
           const delay = this.computeCapacityRetryDelay(capacityAttempt);
           const isLastAttempt = capacityAttempt >= this.capacityRetryMaxAttempts - 1;
+          const wouldExceedBudget = Date.now() + delay > deadline;
 
-          if (isLastAttempt) {
+          if (isLastAttempt || wouldExceedBudget) {
             throw new ProviderError(
               this.name,
               422,
               `Capacity exhausted after ${capacityAttempt + 1} attempts for ` +
                 `server type ${sizeConfig.type} in ${config.location || this.datacenter}: ` +
                 err.message,
-              { cause: err },
+              { cause: err, category: 'transient_capacity' },
             );
           }
 
@@ -155,9 +226,11 @@ export class HetznerProvider implements Provider {
             delayMs: delay,
             attempt: capacityAttempt + 1,
             maxAttempts: this.capacityRetryMaxAttempts,
+            budgetRemainingMs: Math.max(0, deadline - Date.now()),
             serverType: sizeConfig.type,
             location: config.location || this.datacenter,
             statusCode: err.statusCode,
+            providerCode: err.providerCode,
           });
 
           await new Promise((resolve) => setTimeout(resolve, delay));
@@ -168,7 +241,9 @@ export class HetznerProvider implements Provider {
     }
 
     // Unreachable, but TypeScript needs it
-    throw new ProviderError(this.name, undefined, 'Capacity retry loop exited unexpectedly');
+    throw new ProviderError(this.name, undefined, 'Capacity retry loop exited unexpectedly', {
+      cause: lastCapacityError,
+    });
   }
 
   /**

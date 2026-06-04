@@ -813,14 +813,14 @@ describe('HetznerProvider capacity retry', () => {
     expect(capacityWarnCalls).toHaveLength(1);
     expect(capacityWarnCalls[0]).toEqual([
       'hetzner transient capacity error; retrying createVM',
-      {
+      expect.objectContaining({
         delayMs: 100,
         attempt: 1,
         maxAttempts: 3,
         serverType: 'cx33',
         location: 'fsn1',
         statusCode: 422,
-      },
+      }),
     ]);
   });
 });

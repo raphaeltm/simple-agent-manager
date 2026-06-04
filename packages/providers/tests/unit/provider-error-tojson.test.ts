@@ -12,6 +12,8 @@ describe('ProviderError.toJSON', () => {
       message: 'Server not found',
       provider: 'hetzner',
       statusCode: 404,
+      providerCode: undefined,
+      category: 'unknown',
       cause: undefined,
       context: undefined,
     });

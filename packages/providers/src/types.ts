@@ -145,8 +145,10 @@ export interface HetznerProviderConfig {
   capacityRetryInitialDelayMs?: number;
   /** Maximum delay in ms per capacity retry wait (default: 120000) */
   capacityRetryMaxDelayMs?: number;
-  /** Maximum number of capacity retry attempts before giving up (default: 5) */
+  /** Maximum number of capacity retry attempts before giving up (default: 10) */
   capacityRetryMaxAttempts?: number;
+  /** Total time budget in ms for capacity retries (default: 300000 = 5 min) */
+  capacityRetryBudgetMs?: number;
 }
 
 export interface ScalewayProviderConfig {
@@ -172,6 +174,19 @@ export interface GcpProviderConfig {
   /** TCP ports allowed by the GCP VPC firewall rule for VM agent ingress. */
   agentPorts?: readonly string[];
 }
+
+/**
+ * Normalized error categories for provider operations.
+ * Each provider maps its own native error codes/signals to these categories.
+ * The retry engine consumes only the normalized category.
+ */
+export type ProviderErrorCategory =
+  | 'transient_capacity'
+  | 'quota_exceeded'
+  | 'invalid_config'
+  | 'rate_limited'
+  | 'auth_error'
+  | 'unknown';
 
 export type ProviderErrorContextValue =
   | string
@@ -214,13 +229,28 @@ export class ProviderError extends Error {
     public readonly statusCode: number | undefined,
     message: string,
     /** Original error and safe structured diagnostics */
-    options?: { cause?: Error; context?: ProviderErrorContext },
+    options?: {
+      cause?: Error;
+      context?: ProviderErrorContext;
+      /** Raw error code from the provider API (e.g., Hetzner's "resource_unavailable") */
+      providerCode?: string;
+      /** Normalized error category for retry decisions */
+      category?: ProviderErrorCategory;
+    },
   ) {
     super(message, options);
     this.context = options?.context;
+    this.providerCode = options?.providerCode;
+    this.category = options?.category ?? 'unknown';
   }
 
   readonly context: ProviderErrorContext | undefined;
+
+  /** Raw error code from the provider API response */
+  readonly providerCode: string | undefined;
+
+  /** Normalized error category for provider-agnostic retry decisions */
+  readonly category: ProviderErrorCategory;
 
   /** Make Error properties visible to JSON.stringify */
   toJSON(): Record<string, unknown> {
@@ -229,6 +259,8 @@ export class ProviderError extends Error {
       message: this.message,
       provider: this.providerName,
       statusCode: this.statusCode,
+      providerCode: this.providerCode,
+      category: this.category,
       cause: this.cause instanceof Error ? this.cause.message : this.cause,
       context: this.context,
     };

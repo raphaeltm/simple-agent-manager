@@ -2,7 +2,7 @@ import type { VMSize } from '@simple-agent-manager/shared';
 
 import { CLOUDFLARE_IPV4_RANGES } from './cloudflare-ranges';
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta,Provider, SizeConfig, VMConfig, VMInstance } from './types';
+import type { LocationMeta, Provider, ProviderErrorCategory, SizeConfig, VMConfig, VMInstance } from './types';
 import { ProviderError } from './types';
 import {
   type GcpInstancePayload,
@@ -15,6 +15,63 @@ import {
 } from './validation';
 
 const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
+
+/**
+ * Classify a GCP API error into a normalized ProviderErrorCategory.
+ *
+ * GCP error responses use `{ error: { code, status, errors: [...] } }` where
+ * `status` is the structured signal (e.g., "RESOURCE_EXHAUSTED", "UNAVAILABLE").
+ * The `providerCode` in ProviderError corresponds to the `error.status` field.
+ *
+ * GCP error statuses (from API docs):
+ * - RESOURCE_EXHAUSTED → quota_exceeded (429)
+ * - UNAVAILABLE → transient_capacity (503)
+ * - ZONE_RESOURCE_POOL_EXHAUSTED → transient_capacity
+ * - ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS → transient_capacity
+ * - QUOTA_EXCEEDED → quota_exceeded
+ * - PERMISSION_DENIED → auth_error
+ * - UNAUTHENTICATED → auth_error
+ * - INVALID_ARGUMENT → invalid_config
+ * - NOT_FOUND → invalid_config
+ * - ALREADY_EXISTS → invalid_config
+ * - RATE_LIMIT_EXCEEDED → rate_limited
+ */
+export function classifyGcpError(
+  statusCode: number | undefined,
+  providerCode: string | undefined,
+  message: string,
+): ProviderErrorCategory {
+  if (providerCode) {
+    switch (providerCode) {
+      case 'UNAVAILABLE':
+      case 'ZONE_RESOURCE_POOL_EXHAUSTED':
+      case 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS':
+        return 'transient_capacity';
+      case 'RESOURCE_EXHAUSTED':
+      case 'QUOTA_EXCEEDED':
+        return 'quota_exceeded';
+      case 'PERMISSION_DENIED':
+      case 'UNAUTHENTICATED':
+        return 'auth_error';
+      case 'INVALID_ARGUMENT':
+      case 'NOT_FOUND':
+      case 'ALREADY_EXISTS':
+        return 'invalid_config';
+      case 'RATE_LIMIT_EXCEEDED':
+        return 'rate_limited';
+    }
+  }
+
+  if (statusCode === 401 || statusCode === 403) return 'auth_error';
+  if (statusCode === 429) return 'rate_limited';
+  if (statusCode === 503) return 'transient_capacity';
+
+  // Message-based fallback (order matters: check zone-specific before general)
+  if (/zone.*resource.*pool.*exhausted/i.test(message)) return 'transient_capacity';
+  if (/resource.*exhausted|quota/i.test(message)) return 'quota_exceeded';
+
+  return 'unknown';
+}
 
 /** Firewall rule name and config for SAM VM agent inbound access */
 const SAM_FIREWALL_RULE_NAME = 'sam-allow-agent';
