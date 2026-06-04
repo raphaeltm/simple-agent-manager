@@ -40,11 +40,14 @@ export function ChoosePathWizard() {
     []
   );
 
-  // H2: move focus into the dialog when it opens so keyboard/screen-reader
-  // users start inside the overlay rather than behind it.
+  // H2: move focus into the dialog when it opens — and again on every step
+  // change — so keyboard/screen-reader users start inside the overlay and stay
+  // there. Clicking an option unmounts the focused button; without re-focusing
+  // the content region, focus falls back to <body> and the Escape-close and
+  // Tab focus-trap (handleKeyDown) stop firing for the rest of the wizard.
   useEffect(() => {
     if (showOverlay) focusContent();
-  }, [showOverlay, focusContent]);
+  }, [showOverlay, phase, currentQuestionId, focusContent]);
 
   // H1 + H3: Escape closes the dialog; Tab is trapped within the overlay so
   // focus cannot escape to the hidden app UI behind it (WCAG 2.1.2 / 2.4.3).
