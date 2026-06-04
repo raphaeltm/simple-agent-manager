@@ -208,6 +208,29 @@ describe('TaskRunner size-fallback descent', () => {
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
   });
 
+  it('descends from a project-default medium to small when medium is exhausted', async () => {
+    provisionNode.mockImplementation(async (id: string) => {
+      if (id === 'node-medium') throw capacityError('medium');
+      // node-small succeeds
+    });
+    const { DATABASE, runCalls } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'medium', vmSizeSource: 'project' });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(provisionNode).toHaveBeenCalledTimes(2);
+    expect(state.stepResults.nodeId).toBe('node-small');
+    expect(state.stepResults.provisionedVmSize).toBe('small');
+    expect(state.config.vmSize).toBe('small');
+    const downgradeWrite = runCalls.find((c) =>
+      c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?')
+    );
+    expect(downgradeWrite).toBeDefined();
+    expect(downgradeWrite?.args[0]).toBe('small');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+  });
+
   it('does NOT record a downgrade when the first (requested) size succeeds', async () => {
     provisionNode.mockResolvedValue(undefined);
     const { DATABASE, runCalls } = createDbMock({});
@@ -277,6 +300,29 @@ describe('TaskRunner size-fallback descent', () => {
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
+  it('fails fast on a quota-exhausted provider error without descending', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw new ProviderError('hetzner', 429, 'Server limit exceeded', {
+        providerCode: 'server_limit_exceeded',
+        category: 'quota_exceeded',
+      });
+    });
+    const { DATABASE, runCalls } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'Server limit exceeded',
+      permanent: true,
+    });
+    // quota_exceeded is NOT transient capacity — descent must not happen.
+    expect(provisionNode).toHaveBeenCalledTimes(1);
+    expect(
+      runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
+    ).toBeUndefined();
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 

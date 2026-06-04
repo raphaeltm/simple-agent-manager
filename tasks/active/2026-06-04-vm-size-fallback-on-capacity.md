@@ -89,27 +89,27 @@ at line ~240 but never surfaces the category up). This must change:
 ## Implementation Checklist
 
 ### 1. Shared helper — fallback chain
-- [ ] Add `vmSizeFallbackChain(start: VMSize): VMSize[]` to
+- [x] Add `vmSizeFallbackChain(start: VMSize): VMSize[]` to
   `packages/shared/src/constants/vm-sizes.ts`. Returns the descending slice of
   `['large', 'medium', 'small']` starting at `start` down to `small`
   (e.g. `'medium'` → `['medium', 'small']`; `'small'` → `['small']`;
   `'large'` → `['large','medium','small']`).
-- [ ] Unit test the helper for all three starting sizes.
+- [x] Unit test the helper for all three starting sizes.
 
 ### 2. provisionNode re-throws typed capacity error
-- [ ] In `apps/api/src/services/nodes.ts`, change `provisionNode`'s catch so that
+- [x] In `apps/api/src/services/nodes.ts`, change `provisionNode`'s catch so that
   when the failure is a `ProviderError`, it re-throws an error that preserves
   `category` and `providerCode` (re-throw the `ProviderError` itself, or wrap in a
   small typed error the DO can read).
-- [ ] On a `transient_capacity` failure, delete the failed node record before
+- [x] On a `transient_capacity` failure, delete the failed node record before
   throwing (decision #1) — no orphaned `error` rows.
-- [ ] Preserve current behavior for non-capacity failures except that the error is
+- [x] Preserve current behavior for non-capacity failures except that the error is
   now propagated to the caller (the DO) instead of silently returning a
   `status:'error'` node. Confirm no other caller of `provisionNode` regresses
   (grep callers).
 
 ### 3. Descent loop in the DO
-- [ ] In `apps/api/src/durable-objects/task-runner/node-steps.ts`
+- [x] In `apps/api/src/durable-objects/task-runner/node-steps.ts`
   `handleNodeProvisioning` (~L206), compute:
   ```ts
   const fallbackAllowed =
@@ -119,7 +119,7 @@ at line ~240 but never surfaces the category up). This must change:
     ? vmSizeFallbackChain(state.config.vmSize)
     : [state.config.vmSize];
   ```
-- [ ] Loop over `chain`: for each `size`, `createNodeRecord({ vmSize: size, ... })`
+- [x] Loop over `chain`: for each `size`, `createNodeRecord({ vmSize: size, ... })`
   then `provisionNode(...)`.
   - On success: update `state.config.vmSize` to the size that succeeded, record
     which size was provisioned (for surfacing), advance to the next step.
@@ -134,59 +134,59 @@ at line ~240 but never surfaces the category up). This must change:
     `rate_limited`, `unknown`): **fail fast** — do not descend.
 
 ### 4. Config knob (Constitution Principle XI)
-- [ ] Add `CAPACITY_SIZE_FALLBACK_ENABLED` env knob (default **true**). Wire through
+- [x] Add `CAPACITY_SIZE_FALLBACK_ENABLED` env knob (default **true**). Wire through
   the DO config the same way other knobs are. Document in env-reference.
 
 ### 5. Surface the downgrade in the UI (decision #4)
-- [ ] Persist the provisioned size when it differs from the requested/default size.
+- [x] Persist the provisioned size when it differs from the requested/default size.
   The polled task status object (`apps/web/src/lib/api/sessions.ts`, the task
   shape with `executionStep` / `errorMessage` / `outputBranch`) should gain a
   field such as `provisionedVmSize` (and/or `requestedVmSize`) returned by the
   task status endpoint.
-- [ ] Thread it into `ProvisioningState`
+- [x] Thread it into `ProvisioningState`
   (`apps/web/src/pages/project-chat/types.ts`) and populate it in
   `useProjectChatState.ts` where the other task fields are mapped (~L406, ~L447).
-- [ ] In `ProvisioningIndicator.tsx`, render an annotation when
+- [x] In `ProvisioningIndicator.tsx`, render an annotation when
   `provisionedVmSize` is smaller than the requested/default size, e.g.
   *"No medium machines were available — provisioned a small node instead."*
   Style consistent with the existing caption rows; works at 375px and 1280px.
 
 ## Acceptance Criteria
 
-- [ ] Default-derived size (`vmSizeSource` = `project`/`platform`): a
+- [x] Default-derived size (`vmSizeSource` = `project`/`platform`): a
   `transient_capacity` failure at the default size auto-provisions the next-smaller
   size; descends to `small`; only fails if every size is capacity-exhausted.
-- [ ] Explicit size (`vmSizeSource` = `task`/`trigger`/`agent-profile`/`explicit`):
+- [x] Explicit size (`vmSizeSource` = `task`/`trigger`/`agent-profile`/`explicit`):
   capacity exhaustion fails immediately with *"There were no `<size>` machines
   available"* — NO downgrade attempted.
-- [ ] Non-capacity provider errors (`invalid_config`, `quota_exceeded`,
+- [x] Non-capacity provider errors (`invalid_config`, `quota_exceeded`,
   `auth_error`, etc.) fail fast with no descent, regardless of `vmSizeSource`.
-- [ ] Failed-size node records are deleted, not left as `status:'error'`.
-- [ ] `createVM`'s in-place retry budget per size/location is exhausted before any
+- [x] Failed-size node records are deleted, not left as `status:'error'`.
+- [x] `createVM`'s in-place retry budget per size/location is exhausted before any
   size drop (composition, not replacement).
-- [ ] Existing/warm node selection (`node-selector.ts`) is unchanged — this logic
+- [x] Existing/warm node selection (`node-selector.ts`) is unchanged — this logic
   only runs when provisioning a brand-new node.
-- [ ] When a smaller node is provisioned, the provisioning panel at the top of
+- [x] When a smaller node is provisioned, the provisioning panel at the top of
   project chat shows a clear annotation of the actual size provisioned.
-- [ ] `CAPACITY_SIZE_FALLBACK_ENABLED=false` restores single-attempt behavior.
+- [x] `CAPACITY_SIZE_FALLBACK_ENABLED=false` restores single-attempt behavior.
 
 ## Tests (vertical-slice per rule 35; capability per rule 10)
 
-- [ ] `vmSizeFallbackChain` unit tests (all three starting sizes).
-- [ ] DO slice: project-default `medium`, `createVM` throws `transient_capacity`
+- [x] `vmSizeFallbackChain` unit tests (all three starting sizes).
+- [x] DO slice: project-default `medium`, `createVM` throws `transient_capacity`
   for medium then succeeds for small → node provisioned at `small`,
   `state.config.vmSize` updated, `size_fallback` event recorded, provisionedVmSize
   surfaced.
-- [ ] DO slice: explicit `agent-profile` `large`, `transient_capacity` → task fails
+- [x] DO slice: explicit `agent-profile` `large`, `transient_capacity` → task fails
   with the explicit message, no second `createVM` call, no smaller record created.
-- [ ] DO slice: `invalid_config` at the default size → fail fast, no descent.
-- [ ] DO slice: `quota_exceeded` → fail fast, no descent.
-- [ ] DO slice: project-default `large`, all of `large/medium/small` throw
+- [x] DO slice: `invalid_config` at the default size → fail fast, no descent.
+- [x] DO slice: `quota_exceeded` → fail fast, no descent.
+- [x] DO slice: project-default `large`, all of `large/medium/small` throw
   `transient_capacity` → terminal "exhausted all sizes" error; assert each failed
   record was deleted.
-- [ ] `provisionNode` re-throw: capacity failure propagates `category` to caller
+- [x] `provisionNode` re-throw: capacity failure propagates `category` to caller
   and deletes the failed node row; non-capacity failure still propagates.
-- [ ] Surfacing: task status response includes the provisioned size when downgraded;
+- [x] Surfacing: task status response includes the provisioned size when downgraded;
   `ProvisioningIndicator` renders the annotation (behavioral render test, mobile +
   desktop overflow assertion per rule 17).
 
