@@ -202,56 +202,34 @@ beforeEach(() => {
 });
 
 describe('TaskRunner size-fallback descent', () => {
-  it('descends to the next-smaller size on transient capacity and records the downgrade', async () => {
-    provisionNode.mockImplementation(async (id: string) => {
-      if (id === 'node-large') throw capacityError('large');
-      // node-medium succeeds
-    });
-    const { DATABASE, runCalls } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
+  it.each([
+    { start: 'large', exhausted: 'node-large', expected: 'medium' },
+    { start: 'medium', exhausted: 'node-medium', expected: 'small' },
+  ])(
+    'descends from a project-default $start to $expected on transient capacity and records the downgrade',
+    async ({ start, exhausted, expected }) => {
+      provisionNode.mockImplementation(async (id: string) => {
+        if (id === exhausted) throw capacityError(start);
+        // next-smaller size succeeds
+      });
+      const { DATABASE, runCalls } = createDbMock({});
+      const rc = createContext(DATABASE);
+      const state = createState({ vmSize: start, vmSizeSource: 'project' });
 
-    await handleNodeProvisioning(state, rc);
+      await handleNodeProvisioning(state, rc);
 
-    // A fresh node row is created per size attempt (create-then-try per iteration).
-    expect(createNodeRecord).toHaveBeenCalledTimes(2);
-    expect(provisionNode).toHaveBeenCalledTimes(2);
-    expect(state.stepResults.nodeId).toBe('node-medium');
-    expect(state.stepResults.autoProvisioned).toBe(true);
-    expect(state.stepResults.provisionedVmSize).toBe('medium');
-    expect(state.config.vmSize).toBe('medium');
-    // provisioned_vm_size persisted to the task for UI surfacing
-    const downgradeWrite = runCalls.find((c) =>
-      c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?')
-    );
-    expect(downgradeWrite).toBeDefined();
-    expect(downgradeWrite?.args[0]).toBe('medium');
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
-  });
-
-  it('descends from a project-default medium to small when medium is exhausted', async () => {
-    provisionNode.mockImplementation(async (id: string) => {
-      if (id === 'node-medium') throw capacityError('medium');
-      // node-small succeeds
-    });
-    const { DATABASE, runCalls } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({ vmSize: 'medium', vmSizeSource: 'project' });
-
-    await handleNodeProvisioning(state, rc);
-
-    expect(createNodeRecord).toHaveBeenCalledTimes(2);
-    expect(provisionNode).toHaveBeenCalledTimes(2);
-    expect(state.stepResults.nodeId).toBe('node-small');
-    expect(state.stepResults.provisionedVmSize).toBe('small');
-    expect(state.config.vmSize).toBe('small');
-    const downgradeWrite = runCalls.find((c) =>
-      c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?')
-    );
-    expect(downgradeWrite).toBeDefined();
-    expect(downgradeWrite?.args[0]).toBe('small');
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
-  });
+      // A fresh node row is created per size attempt (create-then-try per iteration).
+      expect(createNodeRecord).toHaveBeenCalledTimes(2);
+      expect(provisionNode).toHaveBeenCalledTimes(2);
+      expect(state.stepResults.nodeId).toBe(`node-${expected}`);
+      expect(state.stepResults.autoProvisioned).toBe(true);
+      expect(state.stepResults.provisionedVmSize).toBe(expected);
+      expect(state.config.vmSize).toBe(expected);
+      // provisioned_vm_size persisted to the task for UI surfacing
+      expect(findDowngradeWrite(runCalls)?.args[0]).toBe(expected);
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    }
+  );
 
   it('does NOT record a downgrade when the first (requested) size succeeds', async () => {
     provisionNode.mockResolvedValue(undefined);
@@ -264,9 +242,7 @@ describe('TaskRunner size-fallback descent', () => {
     expect(provisionNode).toHaveBeenCalledTimes(1);
     expect(state.stepResults.provisionedVmSize).toBe('large');
     expect(state.config.vmSize).toBe('large');
-    expect(
-      runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
-    ).toBeUndefined();
+    expect(findDowngradeWrite(runCalls)).toBeUndefined();
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
   });
 
@@ -284,9 +260,7 @@ describe('TaskRunner size-fallback descent', () => {
     });
     // Only the requested size attempted — no descent.
     expect(provisionNode).toHaveBeenCalledTimes(1);
-    expect(
-      runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
-    ).toBeUndefined();
+    expect(findDowngradeWrite(runCalls)).toBeUndefined();
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 
@@ -305,84 +279,75 @@ describe('TaskRunner size-fallback descent', () => {
         permanent: true,
       });
       expect(provisionNode).toHaveBeenCalledTimes(1);
-      expect(
-        runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
-      ).toBeUndefined();
+      expect(findDowngradeWrite(runCalls)).toBeUndefined();
       expect(rc.advanceToStep).not.toHaveBeenCalled();
     }
   );
 
-  it('reports the medium-start chain in the terminal message when all sizes are exhausted', async () => {
-    provisionNode.mockImplementation(async () => {
-      throw capacityError('any');
-    });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({ vmSize: 'medium', vmSizeSource: 'project' });
-
-    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+  it.each([
+    {
+      start: 'medium',
+      source: 'project',
       message: 'No capacity for any available VM size (tried medium, small).',
-      permanent: true,
-    });
-    expect(provisionNode).toHaveBeenCalledTimes(2);
-    expect(rc.advanceToStep).not.toHaveBeenCalled();
-  });
-
-  it('fails terminally when every size in the chain is capacity-exhausted', async () => {
-    provisionNode.mockImplementation(async () => {
-      throw capacityError('any');
-    });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({ vmSize: 'large', vmSizeSource: 'platform' });
-
-    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      attempts: 2,
+    },
+    {
+      start: 'large',
+      source: 'platform',
       message: 'No capacity for any available VM size (tried large, medium, small).',
-      permanent: true,
-    });
-    expect(provisionNode).toHaveBeenCalledTimes(3);
-    expect(rc.advanceToStep).not.toHaveBeenCalled();
-  });
+      attempts: 3,
+    },
+  ])(
+    'fails terminally with the full chain when every size from $start is capacity-exhausted',
+    async ({ start, source, message, attempts }) => {
+      provisionNode.mockImplementation(async () => {
+        throw capacityError('any');
+      });
+      const { DATABASE } = createDbMock({});
+      const rc = createContext(DATABASE);
+      const state = createState({ vmSize: start, vmSizeSource: source });
 
-  it('fails fast on a non-capacity provider error without descending', async () => {
-    provisionNode.mockImplementation(async () => {
-      throw new ProviderError('hetzner', 400, 'Bad VM config', {
+      await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+        message,
+        permanent: true,
+      });
+      expect(provisionNode).toHaveBeenCalledTimes(attempts);
+      expect(rc.advanceToStep).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    {
+      label: 'non-capacity',
+      error: new ProviderError('hetzner', 400, 'Bad VM config', {
         providerCode: 'invalid_input',
         category: 'invalid_config',
-      });
-    });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
-
-    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      }),
       message: 'Bad VM config',
-      permanent: true,
-    });
-    expect(provisionNode).toHaveBeenCalledTimes(1);
-    expect(rc.advanceToStep).not.toHaveBeenCalled();
-  });
-
-  it('fails fast on a quota-exhausted provider error without descending', async () => {
-    provisionNode.mockImplementation(async () => {
-      throw new ProviderError('hetzner', 429, 'Server limit exceeded', {
+    },
+    {
+      // quota_exceeded is NOT transient capacity — descent must not happen.
+      label: 'quota-exhausted',
+      error: new ProviderError('hetzner', 429, 'Server limit exceeded', {
         providerCode: 'server_limit_exceeded',
         category: 'quota_exceeded',
-      });
+      }),
+      message: 'Server limit exceeded',
+    },
+  ])('fails fast on a $label provider error without descending', async ({ error, message }) => {
+    provisionNode.mockImplementation(async () => {
+      throw error;
     });
     const { DATABASE, runCalls } = createDbMock({});
     const rc = createContext(DATABASE);
     const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'Server limit exceeded',
+      message,
       permanent: true,
     });
-    // quota_exceeded is NOT transient capacity — descent must not happen.
     expect(provisionNode).toHaveBeenCalledTimes(1);
-    expect(
-      runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
-    ).toBeUndefined();
+    expect(findDowngradeWrite(runCalls)).toBeUndefined();
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 

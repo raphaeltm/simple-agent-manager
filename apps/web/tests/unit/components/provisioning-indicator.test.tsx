@@ -153,36 +153,19 @@ describe('ProvisioningIndicator', () => {
       expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
     });
 
-    it('does not surface a downgrade when the task has failed', () => {
-      const state = makeState({
-        status: 'failed',
-        requestedVmSize: 'large',
-        provisionedVmSize: 'medium',
-        errorMessage: 'Setup failed',
-      });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
-    });
-
-    it('does not surface a downgrade when the task has completed', () => {
-      const state = makeState({
-        status: 'completed',
-        requestedVmSize: 'large',
-        provisionedVmSize: 'medium',
-      });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
-    });
-
-    it('does not surface a downgrade when the task has been cancelled', () => {
-      const state = makeState({
-        status: 'cancelled',
-        requestedVmSize: 'large',
-        provisionedVmSize: 'medium',
-      });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
-    });
+    it.each(['failed', 'completed', 'cancelled'] as const)(
+      'does not surface a downgrade when the task status is %s',
+      (status) => {
+        const state = makeState({
+          status,
+          requestedVmSize: 'large',
+          provisionedVmSize: 'medium',
+          errorMessage: status === 'failed' ? 'Setup failed' : null,
+        });
+        render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
+        expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
+      }
+    );
 
     it('announces the downgrade to assistive technology via role="status"', () => {
       const state = makeState({ requestedVmSize: 'large', provisionedVmSize: 'medium' });

@@ -110,59 +110,61 @@ function makeTaskDetail(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-async function setupApiMocks(page: Page, taskDetail: Record<string, unknown>) {
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) => respondJson(route, body, status);
-
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/terminal/token') {
-      return respond(200, { token: 'terminal-token', expiresAt: new Date(NOW + 600000).toISOString() });
-    }
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
-    if (path.startsWith('/api/credentials')) return respond(200, []);
-    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/github/installations')) return respond(200, []);
-    if (path.startsWith('/api/trial-status')) {
-      return respond(200, {
-        available: false,
-        agentType: null,
-        hasInfraCredential: false,
-        hasAgentCredential: false,
-        dailyTokenBudget: null,
-        dailyTokenUsage: null,
-      });
-    }
-    if (path === '/api/agents') return respond(200, { agents: [] });
-
-    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (projectMatch) {
-      const subPath = projectMatch[2] || '';
-      if (subPath === '/sessions') {
-        return respond(200, { sessions: [MOCK_SESSION], total: 1 });
-      }
-      if (subPath.match(/\/sessions\/[^/]+$/) && !subPath.includes('/messages')) {
-        return respond(200, { session: MOCK_SESSION, messages: [], hasMore: false });
-      }
-      if (subPath.match(/\/sessions\/[^/]+\/messages/)) return respond(200, { messages: [], hasMore: false });
-      if (subPath === '/tasks') return respond(200, { tasks: [taskDetail], nextCursor: null });
-      if (subPath.match(/\/tasks\//)) return respond(200, taskDetail);
-      if (subPath === '/agents') return respond(200, { agents: [] });
-      if (subPath === '/agent-profiles') return respond(200, { items: [] });
-      if (subPath === '/cached-commands') return respond(200, { items: [] });
-      if (subPath === '/triggers') return respond(200, { items: [] });
-      if (subPath === '/knowledge') return respond(200, { entities: [], total: 0 });
-      return respond(200, MOCK_PROJECT);
-    }
-
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    return respond(200, {});
-  });
-}
-
 function respondJson(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+}
+
+const TRIAL_STATUS = {
+  available: false,
+  agentType: null,
+  hasInfraCredential: false,
+  hasAgentCredential: false,
+  dailyTokenBudget: null,
+  dailyTokenUsage: null,
+};
+
+// Resolve a project-scoped sub-path to its mock payload. Returns undefined to
+// fall through to the bare-project response.
+function resolveProjectSubPath(subPath: string, taskDetail: Record<string, unknown>): unknown {
+  if (subPath === '/sessions') return { sessions: [MOCK_SESSION], total: 1 };
+  if (subPath.match(/\/sessions\/[^/]+$/) && !subPath.includes('/messages')) {
+    return { session: MOCK_SESSION, messages: [], hasMore: false };
+  }
+  if (subPath.match(/\/sessions\/[^/]+\/messages/)) return { messages: [], hasMore: false };
+  if (subPath === '/tasks') return { tasks: [taskDetail], nextCursor: null };
+  if (subPath.match(/\/tasks\//)) return taskDetail;
+  if (subPath === '/agent-profiles' || subPath === '/cached-commands' || subPath === '/triggers') {
+    return { items: [] };
+  }
+  if (subPath === '/agents') return { agents: [] };
+  if (subPath === '/knowledge') return { entities: [], total: 0 };
+  return undefined;
+}
+
+function resolveApiResponse(path: string, taskDetail: Record<string, unknown>): unknown {
+  if (path.includes('/api/auth/')) return MOCK_USER;
+  if (path === '/api/terminal/token') {
+    return { token: 'terminal-token', expiresAt: new Date(NOW + 600000).toISOString() };
+  }
+  if (path.startsWith('/api/notifications')) return { notifications: [], unreadCount: 0 };
+  if (path.startsWith('/api/credentials') || path.startsWith('/api/github/installations')) return [];
+  if (path.startsWith('/api/provider-catalog')) return { catalogs: [] };
+  if (path.startsWith('/api/trial-status')) return TRIAL_STATUS;
+  if (path === '/api/agents') return { agents: [] };
+
+  const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+  if (projectMatch) {
+    return resolveProjectSubPath(projectMatch[2] || '', taskDetail) ?? MOCK_PROJECT;
+  }
+  if (path === '/api/projects') return { projects: [MOCK_PROJECT], nextCursor: null };
+  return {};
+}
+
+async function setupApiMocks(page: Page, taskDetail: Record<string, unknown>) {
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    return respondJson(route, resolveApiResponse(path, taskDetail));
+  });
 }
 
 async function screenshot(page: Page, name: string) {
@@ -180,27 +182,35 @@ async function assertNoOverflow(page: Page) {
   expect(overflow).toBe(false);
 }
 
+// Drive the project chat into a non-terminal provisioning state with a recorded
+// downgrade, assert the annotation renders, screenshot it, and assert no overflow.
+async function auditDowngrade(
+  page: Page,
+  opts: { overrides: Record<string, unknown>; expectedText: string; screenshotName: string }
+) {
+  await setupApiMocks(page, makeTaskDetail(opts.overrides));
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  await expect(page.getByText(opts.expectedText)).toBeVisible({ timeout: 10000 });
+  await screenshot(page, opts.screenshotName);
+  await assertNoOverflow(page);
+}
+
+const KNOWN_SIZE = {
+  overrides: { requestedVmSize: 'large', provisionedVmSize: 'medium' },
+  expectedText: 'No large machines were available — provisioned a medium node instead.',
+};
+const UNKNOWN_SIZE = {
+  overrides: { requestedVmSize: null, provisionedVmSize: 'medium' },
+  expectedText: 'Provisioned a medium node (a larger size was unavailable).',
+};
+
 test.describe('ProvisioningIndicator size-fallback downgrade — Mobile', () => {
   test('surfaces known-size downgrade annotation', async ({ page }) => {
-    await setupApiMocks(page, makeTaskDetail({ requestedVmSize: 'large', provisionedVmSize: 'medium' }));
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(
-      page.getByText('No large machines were available — provisioned a medium node instead.')
-    ).toBeVisible({ timeout: 10000 });
-    await screenshot(page, 'provisioning-downgrade-known-size-mobile');
-    await assertNoOverflow(page);
+    await auditDowngrade(page, { ...KNOWN_SIZE, screenshotName: 'provisioning-downgrade-known-size-mobile' });
   });
 
   test('surfaces unknown-requested-size downgrade annotation', async ({ page }) => {
-    await setupApiMocks(page, makeTaskDetail({ requestedVmSize: null, provisionedVmSize: 'medium' }));
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(
-      page.getByText('Provisioned a medium node (a larger size was unavailable).')
-    ).toBeVisible({ timeout: 10000 });
-    await screenshot(page, 'provisioning-downgrade-unknown-size-mobile');
-    await assertNoOverflow(page);
+    await auditDowngrade(page, { ...UNKNOWN_SIZE, screenshotName: 'provisioning-downgrade-unknown-size-mobile' });
   });
 });
 
@@ -208,13 +218,6 @@ test.describe('ProvisioningIndicator size-fallback downgrade — Desktop', () =>
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('surfaces known-size downgrade annotation', async ({ page }) => {
-    await setupApiMocks(page, makeTaskDetail({ requestedVmSize: 'large', provisionedVmSize: 'medium' }));
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(
-      page.getByText('No large machines were available — provisioned a medium node instead.')
-    ).toBeVisible({ timeout: 10000 });
-    await screenshot(page, 'provisioning-downgrade-known-size-desktop');
-    await assertNoOverflow(page);
+    await auditDowngrade(page, { ...KNOWN_SIZE, screenshotName: 'provisioning-downgrade-known-size-desktop' });
   });
 });
