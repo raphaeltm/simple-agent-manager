@@ -8,7 +8,6 @@ import { ArrowLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  getTrialStatus,
   listAgentCredentials,
   listCredentials,
   listGitHubInstallations,
@@ -45,27 +44,27 @@ export function ChoosePathWizard() {
     const controller = new AbortController();
     async function checkExisting() {
       try {
-        const [credResult, installResult, agentResult, trialResult] = await Promise.allSettled([
+        const [credResult, installResult, agentResult] = await Promise.allSettled([
           listCredentials(),
           listGitHubInstallations(),
           listAgentCredentials(),
-          getTrialStatus(),
         ]);
         if (controller.signal.aborted) return;
 
         const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
         const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
-        const trialStatus = trialResult.status === 'fulfilled' ? trialResult.value : null;
 
         const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
-        const trialAvailable = trialStatus?.available ?? false;
 
+        // Pre-mark a step as already-done only when the user has configured their
+        // OWN credential. Platform availability (SAM-managed AI / infra) is a choice
+        // the user still makes inside the flow — it must not skip the question.
         const existingTags: string[] = [];
-        if (hasAgent || trialAvailable) existingTags.push('existing-agent');
-        if (hasCloud || trialAvailable) existingTags.push('existing-cloud');
+        if (hasAgent) existingTags.push('existing-agent');
+        if (hasCloud) existingTags.push('existing-cloud');
         if (hasGitHub) existingTags.push('existing-github');
 
         if (existingTags.length > 0) {

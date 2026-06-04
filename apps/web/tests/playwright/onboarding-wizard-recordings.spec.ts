@@ -116,8 +116,6 @@ interface Scenario {
   hasApiKey: boolean;
   /** Whether step execution includes Hetzner token entry */
   hasHetzner: boolean;
-  /** Whether the project step uses "template" flow (Go to Projects) vs repo selector */
-  usesTemplate: boolean;
 }
 
 const SCENARIOS: Scenario[] = [
@@ -132,20 +130,18 @@ const SCENARIOS: Scenario[] = [
     ],
     hasApiKey: false,
     hasHetzner: true,
-    usesTemplate: false,
   },
   {
-    name: '2. Claude Pro + SAM Infra + Template',
-    slug: '02-claude-pro-sam-infra-template',
-    persona: 'Subscription user: has Claude Pro, lets SAM handle infra, uses starter template',
+    name: '2. Claude Pro + SAM Infra + Pick Repo Later',
+    slug: '02-claude-pro-sam-infra-pick-later',
+    persona: 'Subscription user: has Claude Pro, lets SAM handle infra, picks a repo after connecting',
     answers: [
       ['ai-subscription', 'claude-pro'],
       ['cloud-account', 'no-cloud'],
-      ['github-ready', 'template'],
+      ['github-ready', 'no-repo'],
     ],
     hasApiKey: false,
     hasHetzner: false,
-    usesTemplate: true,
   },
   {
     name: '3. Anthropic API Key + Hetzner + Own Repo',
@@ -159,7 +155,6 @@ const SCENARIOS: Scenario[] = [
     ],
     hasApiKey: true,
     hasHetzner: true,
-    usesTemplate: false,
   },
   {
     name: '4. OpenAI API Key + SAM Infra + Own Repo',
@@ -173,20 +168,18 @@ const SCENARIOS: Scenario[] = [
     ],
     hasApiKey: true,
     hasHetzner: false,
-    usesTemplate: false,
   },
   {
-    name: '5. Complete Beginner (SAM Everything + Template)',
-    slug: '05-beginner-sam-everything-template',
-    persona: 'Complete beginner: no AI subscription, no cloud, uses template project',
+    name: '5. Complete Beginner (SAM Everything + Pick Repo Later)',
+    slug: '05-beginner-sam-everything-pick-later',
+    persona: 'Complete beginner: no AI subscription, no cloud, picks a repo after connecting',
     answers: [
       ['ai-subscription', 'nothing'],
       ['cloud-account', 'no-cloud'],
-      ['github-ready', 'template'],
+      ['github-ready', 'no-repo'],
     ],
     hasApiKey: false,
     hasHetzner: false,
-    usesTemplate: true,
   },
   {
     name: '6. No AI + Hetzner + Own Repo',
@@ -199,21 +192,19 @@ const SCENARIOS: Scenario[] = [
     ],
     hasApiKey: false,
     hasHetzner: true,
-    usesTemplate: false,
   },
   {
-    name: '7. OpenAI API Key + Hetzner + Template',
-    slug: '07-openai-key-hetzner-template',
-    persona: 'OpenAI dev with own cloud: OpenAI API key, Hetzner, starter template',
+    name: '7. OpenAI API Key + Hetzner + Pick Repo Later',
+    slug: '07-openai-key-hetzner-pick-later',
+    persona: 'OpenAI dev with own cloud: OpenAI API key, Hetzner, picks a repo after connecting',
     answers: [
       ['ai-subscription', 'api-key'],
       ['which-api-key', 'openai'],
       ['cloud-account', 'hetzner'],
-      ['github-ready', 'template'],
+      ['github-ready', 'no-repo'],
     ],
     hasApiKey: true,
     hasHetzner: true,
-    usesTemplate: true,
   },
 ];
 
@@ -323,7 +314,7 @@ async function setupApiMocks(page: Page, options: {
  */
 async function clickOption(page: Page, label: string) {
   const wizard = page.locator('[data-testid="onboarding-wizard"]');
-  await wizard.getByRole('radio', { name: label }).click();
+  await wizard.getByRole('button', { name: label }).click();
 }
 
 /**
@@ -420,25 +411,14 @@ async function runScenario(page: Page, scenario: Scenario) {
     await page.waitForTimeout(8000);
   }
 
-  // Handle Project step
-  if (scenario.usesTemplate) {
-    // Template — "Go to Projects" button
-    const goBtn = wizard.getByRole('button', { name: /Go to Projects/ });
-    if (await goBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await page.waitForTimeout(600);
-      await goBtn.click();
-      await page.waitForTimeout(1000);
-    }
-  } else {
-    // Repo selector — wait for repos to load, select one, create project
+  // Handle Project step — repo selector: wait for repos to load, select one, create project
+  await page.waitForTimeout(1500);
+  const repoSelect = wizard.locator('#onboarding-repo-select');
+  if (await repoSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await repoSelect.selectOption('acme-corp/web-app');
+    await page.waitForTimeout(600);
+    await wizard.getByRole('button', { name: /Create Project/ }).click();
     await page.waitForTimeout(1500);
-    const repoSelect = wizard.locator('#onboarding-repo-select');
-    if (await repoSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await repoSelect.selectOption('acme-corp/web-app');
-      await page.waitForTimeout(600);
-      await wizard.getByRole('button', { name: /Create Project/ }).click();
-      await page.waitForTimeout(1500);
-    }
   }
 
   // Phase 4: Completion screen
@@ -458,13 +438,13 @@ function getOptionLabel(optionId: string): string {
   const labels: Record<string, string> = {
     'claude-pro': 'Claude Pro or Max subscription',
     'api-key': 'I have an API key',
-    'nothing': "I don't have anything yet",
+    'nothing': 'Use SAM-managed AI credits',
     'anthropic': 'Anthropic (Claude)',
     'openai': 'OpenAI',
     'hetzner': 'I have Hetzner',
-    'no-cloud': "I don't have a cloud account",
+    'no-cloud': 'Use SAM-managed infrastructure',
     'yes': 'Yes, I have a repo',
-    'template': "I'll use a template",
+    'no-repo': "Not yet, I'll pick one after connecting",
   };
   return labels[optionId] ?? optionId;
 }

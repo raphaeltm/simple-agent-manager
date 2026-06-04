@@ -57,15 +57,15 @@ export function generatePath(tags: string[]): GeneratedStep[] {
   } else if (tags.includes('sam-billing')) {
     steps.push({
       id: 'ai-sam',
-      title: 'SAM-managed AI billing',
+      title: 'Use SAM-managed AI credits',
       description:
-        'No setup needed! SAM handles AI billing through Cloudflare. Set a daily budget and monthly cap.',
+        'Route your AI usage through SAM — free monthly credits, works with any agent. No key or setup needed.',
       actionLabel: 'Continue',
       timeEstimate: '30 seconds',
       details: [
-        'SAM provides AI access through Cloudflare AI Gateway',
-        'Default: 100K tokens/day budget',
-        'Monthly cost cap ensures you never overspend',
+        'Free monthly credits included, regardless of which agent you use',
+        'Works with Claude Code, Codex, and OpenCode alike',
+        'Daily token budget and monthly cap keep spend predictable',
         'You can switch to your own API key anytime',
       ],
       isOptional: tags.includes('existing-agent'),

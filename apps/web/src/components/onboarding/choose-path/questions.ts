@@ -48,8 +48,9 @@ export const QUESTIONS: PathQuestion[] = [
       },
       {
         id: 'nothing',
-        label: "I don't have anything yet",
-        description: "No worries — SAM can handle billing for you",
+        label: 'Use SAM-managed AI credits',
+        description:
+          'Route AI usage through SAM — free monthly credits, works with any agent. Switch to your own key anytime.',
         icon: '\u{2728}',
         next: 'cloud-account',
         tags: ['no-ai', 'sam-billing'],
@@ -96,8 +97,8 @@ export const QUESTIONS: PathQuestion[] = [
       },
       {
         id: 'no-cloud',
-        label: "I don't have a cloud account",
-        description: 'No problem — SAM provides infrastructure for you',
+        label: 'Use SAM-managed infrastructure',
+        description: 'Let SAM provision and manage VMs for you — bring your own Hetzner account anytime.',
         icon: '\u{1F680}',
         next: 'github-ready',
         tags: ['no-cloud', 'sam-infra'],

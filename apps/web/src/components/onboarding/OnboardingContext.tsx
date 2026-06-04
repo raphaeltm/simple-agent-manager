@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 import {
-  getTrialStatus,
   listAgentCredentials,
   listCredentials,
   listGitHubInstallations,
@@ -53,34 +52,38 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     async function checkStatus() {
       try {
-        const [credResult, installResult, agentResult, trialResult] = await Promise.allSettled([
+        const [credResult, installResult, agentResult] = await Promise.allSettled([
           listCredentials(),
           listGitHubInstallations(),
           listAgentCredentials(),
-          getTrialStatus(),
         ]);
         if (controller.signal.aborted) return;
 
         const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
         const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
-        const trialStatus = trialResult.status === 'fulfilled' ? trialResult.value : null;
 
         const hasCloud = credentials.some(
           (c) => c.provider === 'hetzner' || c.provider === 'scaleway'
         );
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
-        const trialAvailable = trialStatus?.available ?? false;
 
-        const isComplete = (hasAgent || trialAvailable) && (hasCloud || trialAvailable) && hasGitHub;
+        // Onboarding is "complete" only when the user has configured their OWN
+        // agent, cloud, and GitHub. Platform availability (SAM-managed AI tokens /
+        // SAM-managed infrastructure) must NOT auto-complete onboarding — choosing
+        // to route through SAM is itself a decision the user makes inside onboarding.
+        const isComplete = hasAgent && hasCloud && hasGitHub;
         setSetupComplete(isComplete);
 
-        // ?onboarding URL param forces the overlay open (for testing / re-running)
+        // ?onboarding URL param forces the overlay open (for testing / re-running).
+        // Reset the dismissed flag so users who previously dismissed can always
+        // re-view onboarding on demand.
         const forceOpen = new URLSearchParams(window.location.search).has('onboarding');
 
         if (forceOpen) {
           setOverlayOpen(true);
+          setDismissed(false);
         } else if (isComplete) {
           setDismissed(true);
           if (userId) localStorage.setItem(getStorageKey(userId), 'true');
