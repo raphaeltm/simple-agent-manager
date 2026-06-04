@@ -93,6 +93,7 @@ export class TaskRunner extends DurableObject<Env> {
         agentSessionId: null,
         agentStarted: false,
         mcpToken: null,
+        provisionedVmSize: null,
       },
       config: input.config,
       retryCount: 0,

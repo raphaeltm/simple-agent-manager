@@ -547,6 +547,8 @@ export const tasks = sqliteTable(
     requestedVmSize: text('requested_vm_size'),
     /** Where the VM size came from (e.g. 'task', 'agent-profile', 'project', 'platform'). */
     requestedVmSizeSource: text('requested_vm_size_source'),
+    /** VM size actually provisioned. Differs from requestedVmSize only when size-fallback descended on capacity exhaustion. Null until an auto-provisioned node succeeds at a smaller size. */
+    provisionedVmSize: text('provisioned_vm_size'),
     /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
     resourceRequirementsJson: text('resource_requirements_json'),
     /** Which level of the precedence chain provided the resource requirements. */

@@ -31,6 +31,9 @@ export interface StepResults {
   agentStarted: boolean;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
+  /** VM size actually provisioned for an auto-provisioned node. May be smaller
+   *  than the requested size when size-fallback descended on capacity exhaustion. */
+  provisionedVmSize: VMSize | null;
 }
 
 export interface TaskRunConfig {
