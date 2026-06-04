@@ -16,16 +16,16 @@ The Pulumi infrastructure resource tests under `infra/__tests__/` mostly assert 
 
 ## Checklist
 
-- [ ] Improve `infra/__tests__/setup.ts` with deterministic helpers to inspect Pulumi `newResource` registrations, options, and output values without logging secrets.
-- [ ] Harden DNS tests for API/wildcard CNAME records, Pages subdomain target, VM route exclusion pattern with no `scriptName`, and exported hostnames.
-- [ ] Harden D1 tests for database names, account ID wiring, observability naming, and `ignoreChanges: ["readReplication"]`.
-- [ ] Harden KV tests for session namespace title and account ID wiring.
-- [ ] Harden R2 tests for bucket name, account ID wiring, and default location.
-- [ ] Add security resource tests for RandomId byte lengths, RSA key settings, protect flags, and secret outputs.
-- [ ] Add Origin CA tests for RSA private key, CSR hostnames, cert hostnames/request type/validity/protection, and secret outputs.
-- [ ] Keep production changes minimal; if tests reveal actual defects, fix them directly and note the reason.
-- [ ] Run `pnpm --dir infra test`.
-- [ ] Run `pnpm --dir infra typecheck`.
+- [x] Improve `infra/__tests__/setup.ts` with deterministic helpers to inspect Pulumi `newResource` registrations, options, and output values without logging secrets.
+- [x] Harden DNS tests for API/wildcard CNAME records, Pages subdomain target, VM route exclusion pattern with no `scriptName`, and exported hostnames.
+- [x] Harden D1 tests for database names, account ID wiring, observability naming, and `ignoreChanges: ["readReplication"]`.
+- [x] Harden KV tests for session namespace title and account ID wiring.
+- [x] Harden R2 tests for bucket name, account ID wiring, and default location.
+- [x] Add security resource tests for RandomId byte lengths, RSA key settings, protect flags, and secret outputs.
+- [x] Add Origin CA tests for RSA private key, CSR hostnames, cert hostnames/request type/validity/protection, and secret outputs.
+- [x] Keep production changes minimal; if tests reveal actual defects, fix them directly and note the reason.
+- [x] Run `pnpm --dir infra test`.
+- [x] Run `pnpm --dir infra typecheck`.
 - [ ] Run repository-level quality checks required by the `/do` workflow for this scope.
 - [ ] Run final read-only `$cloudflare-specialist` review and address any findings.
 - [ ] Open a PR whose description states this is infrastructure test hardening, not a functional resource change unless functional fixes are discovered.

@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import "./setup";
+import { findRegisteredResource, getOutputValue } from "./setup";
 
 describe("KV Namespace Resource", () => {
   let kvModule: typeof import("../resources/kv");
+  let configModule: typeof import("../resources/config");
 
   beforeAll(async () => {
     kvModule = await import("../resources/kv");
+    configModule = await import("../resources/config");
   });
 
   it("should create a KV namespace resource", async () => {
@@ -21,12 +23,19 @@ describe("KV Namespace Resource", () => {
   });
 
   it("should use sessions suffix in naming", async () => {
-    const name = await new Promise<string>((resolve) => {
-      kvModule.kvNamespaceName.apply((n) => {
-        resolve(n);
-        return n;
-      });
-    });
+    const name = await getOutputValue(kvModule.kvNamespaceName);
     expect(name).toMatch(/-sessions$/);
+  });
+
+  it("registers the sessions namespace with account wiring", () => {
+    const namespace = findRegisteredResource(
+      `${configModule.prefix}-kv`,
+      "cloudflare:index/workersKvNamespace:WorkersKvNamespace"
+    );
+
+    expect(namespace.inputs).toMatchObject({
+      accountId: "test-account-id-00000000000000000000",
+      title: `${configModule.prefix}-${configModule.stack}-sessions`,
+    });
   });
 });
