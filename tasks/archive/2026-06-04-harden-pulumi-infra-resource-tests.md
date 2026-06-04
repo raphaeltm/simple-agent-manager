@@ -28,8 +28,8 @@ The Pulumi infrastructure resource tests under `infra/__tests__/` mostly assert 
 - [x] Run `pnpm --dir infra typecheck`.
 - [x] Run repository-level quality checks required by the `/do` workflow for this scope.
 - [x] Run final read-only `$cloudflare-specialist` review and address any findings.
-- [ ] Open a PR whose description states this is infrastructure test hardening, not a functional resource change unless functional fixes are discovered.
-- [ ] Complete required staging/infrastructure verification or document any credential/configuration blocker without merging.
+- [x] Open a PR whose description states this is infrastructure test hardening, not a functional resource change unless functional fixes are discovered.
+- [x] Complete required staging/infrastructure verification or document any credential/configuration blocker without merging.
 
 ## Acceptance Criteria
 
