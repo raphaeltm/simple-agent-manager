@@ -164,6 +164,26 @@ describe('ProvisioningIndicator', () => {
       expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
     });
 
+    it('does not surface a downgrade when the task has been cancelled', () => {
+      const state = makeState({
+        status: 'cancelled',
+        requestedVmSize: 'large',
+        provisionedVmSize: 'medium',
+      });
+      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
+      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
+    });
+
+    it('announces the downgrade to assistive technology via role="status"', () => {
+      const state = makeState({ requestedVmSize: 'large', provisionedVmSize: 'medium' });
+      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
+      const annotation = screen.getByText(
+        'No large machines were available — provisioned a medium node instead.',
+      );
+      expect(annotation).toHaveAttribute('role', 'status');
+      expect(annotation).toHaveAttribute('aria-live', 'polite');
+    });
+
     it('uses the unknown-requested-size copy when no requested size is recorded', () => {
       const state = makeState({ requestedVmSize: null, provisionedVmSize: 'medium' });
       render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);

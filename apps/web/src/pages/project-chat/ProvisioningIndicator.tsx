@@ -136,8 +136,12 @@ export function ProvisioningIndicator({
 
       {state.provisionedVmSize &&
         state.provisionedVmSize !== state.requestedVmSize &&
-        !isFailed && (
-          <div className="sam-type-caption text-fg-muted mt-2 p-2 px-3 bg-surface rounded-sm border border-[rgba(234,179,8,0.25)] break-words">
+        !isTerminal(state.status) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="sam-type-caption text-fg-muted mt-2 p-2 px-3 bg-surface rounded-sm border border-[rgba(234,179,8,0.25)] break-words"
+          >
             {state.requestedVmSize
               ? `No ${state.requestedVmSize} machines were available — provisioned a ${state.provisionedVmSize} node instead.`
               : `Provisioned a ${state.provisionedVmSize} node (a larger size was unavailable).`}

@@ -194,6 +194,8 @@ describe('TaskRunner size-fallback descent', () => {
 
     await handleNodeProvisioning(state, rc);
 
+    // A fresh node row is created per size attempt (create-then-try per iteration).
+    expect(createNodeRecord).toHaveBeenCalledTimes(2);
     expect(provisionNode).toHaveBeenCalledTimes(2);
     expect(state.stepResults.nodeId).toBe('node-medium');
     expect(state.stepResults.autoProvisioned).toBe(true);
@@ -219,6 +221,7 @@ describe('TaskRunner size-fallback descent', () => {
 
     await handleNodeProvisioning(state, rc);
 
+    expect(createNodeRecord).toHaveBeenCalledTimes(2);
     expect(provisionNode).toHaveBeenCalledTimes(2);
     expect(state.stepResults.nodeId).toBe('node-small');
     expect(state.stepResults.provisionedVmSize).toBe('small');
@@ -265,6 +268,44 @@ describe('TaskRunner size-fallback descent', () => {
     expect(
       runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
     ).toBeUndefined();
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
+  it.each(['trigger', 'agent-profile'])(
+    'never downgrades a %s-sourced size — fails with a clear message',
+    async (source) => {
+      provisionNode.mockImplementation(async () => {
+        throw capacityError('large');
+      });
+      const { DATABASE, runCalls } = createDbMock({});
+      const rc = createContext(DATABASE);
+      const state = createState({ vmSize: 'large', vmSizeSource: source });
+
+      await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+        message: 'There were no large machines available.',
+        permanent: true,
+      });
+      expect(provisionNode).toHaveBeenCalledTimes(1);
+      expect(
+        runCalls.find((c) => c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?'))
+      ).toBeUndefined();
+      expect(rc.advanceToStep).not.toHaveBeenCalled();
+    }
+  );
+
+  it('reports the medium-start chain in the terminal message when all sizes are exhausted', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw capacityError('any');
+    });
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'medium', vmSizeSource: 'project' });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'No capacity for any available VM size (tried medium, small).',
+      permanent: true,
+    });
+    expect(provisionNode).toHaveBeenCalledTimes(2);
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 
@@ -339,6 +380,107 @@ describe('TaskRunner size-fallback descent', () => {
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers an already-provisioned node after a crash instead of creating a duplicate', async () => {
+    // Simulate a prior attempt that provisioned node-medium (a downgrade from
+    // the requested large) but crashed before persisting nodeId to DO storage.
+    // The task row still records the node via auto_provisioned_node_id.
+    const runCalls: Array<{ sql: string; args: unknown[] }> = [];
+    const DATABASE = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        return {
+          bind(...args: unknown[]) {
+            bound = args;
+            return this;
+          },
+          first() {
+            if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
+              return Promise.resolve({ auto_provisioned_node_id: 'node-medium' });
+            }
+            if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
+              return Promise.resolve({ id: 'node-medium', status: 'running', vm_size: 'medium' });
+            }
+            if (sql.includes('SELECT id, status, error_message FROM nodes')) {
+              return Promise.resolve({ id: 'node-medium', status: 'running', error_message: null });
+            }
+            if (sql.includes('SELECT COUNT(*) as c FROM nodes')) {
+              return Promise.resolve({ c: 0 });
+            }
+            return Promise.resolve(null);
+          },
+          run() {
+            runCalls.push({ sql, args: bound });
+            return Promise.resolve({ success: true });
+          },
+        };
+      },
+    } as unknown as ReturnType<typeof createDbMock>['DATABASE'];
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
+
+    await handleNodeProvisioning(state, rc);
+
+    // No duplicate node created — the existing one was adopted.
+    expect(createNodeRecord).not.toHaveBeenCalled();
+    expect(provisionNode).not.toHaveBeenCalled();
+    expect(state.stepResults.nodeId).toBe('node-medium');
+    expect(state.stepResults.autoProvisioned).toBe(true);
+    expect(state.stepResults.provisionedVmSize).toBe('medium');
+    expect(state.config.vmSize).toBe('medium');
+    // The downgrade is re-recorded in case the crash pre-empted the original write.
+    const downgradeWrite = runCalls.find((c) =>
+      c.sql.includes('UPDATE tasks SET provisioned_vm_size = ?')
+    );
+    expect(downgradeWrite?.args[0]).toBe('medium');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+  });
+
+  it('does not adopt a capacity-deleted node row on recovery and (re)provisions', async () => {
+    // auto_provisioned_node_id points to a node that was deleted after a capacity
+    // failure — the row is gone, so recovery must fall through to fresh provisioning.
+    provisionNode.mockResolvedValue(undefined);
+    const runCalls: Array<{ sql: string; args: unknown[] }> = [];
+    const DATABASE = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        return {
+          bind(...args: unknown[]) {
+            bound = args;
+            return this;
+          },
+          first() {
+            if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
+              return Promise.resolve({ auto_provisioned_node_id: 'node-deleted' });
+            }
+            if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
+              return Promise.resolve(null); // deleted row
+            }
+            if (sql.includes('SELECT status, error_message FROM nodes')) {
+              return Promise.resolve({ status: 'running', error_message: null });
+            }
+            if (sql.includes('SELECT COUNT(*) as c FROM nodes')) {
+              return Promise.resolve({ c: 0 });
+            }
+            return Promise.resolve(null);
+          },
+          run() {
+            runCalls.push({ sql, args: bound });
+            return Promise.resolve({ success: true });
+          },
+        };
+      },
+    } as unknown as ReturnType<typeof createDbMock>['DATABASE'];
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(createNodeRecord).toHaveBeenCalledTimes(1);
+    expect(provisionNode).toHaveBeenCalledTimes(1);
+    expect(state.stepResults.nodeId).toBe('node-large');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
   });
 
   it('fails fast on quota exhaustion before any node is created', async () => {

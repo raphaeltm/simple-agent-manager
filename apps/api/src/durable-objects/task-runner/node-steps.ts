@@ -111,7 +111,59 @@ export async function handleNodeProvisioning(
     await rc.ctx.storage.put('state', state);
   }
 
-  // If we already created the node (retry scenario), check its status
+  // Self-healing recovery: a prior attempt may have provisioned a node in D1
+  // (and in the cloud) but crashed before persisting nodeId to DO storage. The
+  // task row records the node via auto_provisioned_node_id, which is written
+  // BEFORE provisionNode (so it survives the crash window between provision
+  // success and the storage.put below). Adopt that node instead of creating a
+  // duplicate (orphan). Capacity-failed nodes are deleted from D1, so a
+  // missing/dead row means the attempt failed and we should (re)provision below.
+  if (!state.stepResults.nodeId) {
+    const taskRow = await rc.env.DATABASE.prepare(
+      `SELECT auto_provisioned_node_id FROM tasks WHERE id = ?`
+    )
+      .bind(state.taskId)
+      .first<{ auto_provisioned_node_id: string | null }>();
+    const recoveredNodeId = taskRow?.auto_provisioned_node_id ?? null;
+    if (recoveredNodeId) {
+      const existing = await rc.env.DATABASE.prepare(
+        `SELECT id, status, vm_size FROM nodes WHERE id = ?`
+      )
+        .bind(recoveredNodeId)
+        .first<{ id: string; status: string; vm_size: string }>();
+      if (
+        existing &&
+        (existing.status === 'running' ||
+          existing.status === 'creating' ||
+          existing.status === 'recovery')
+      ) {
+        const recoveredSize = existing.vm_size as VMSize;
+        const requestedBeforeRecovery = state.config.vmSize;
+        state.stepResults.nodeId = existing.id;
+        state.stepResults.autoProvisioned = true;
+        state.stepResults.provisionedVmSize = recoveredSize;
+        state.config.vmSize = recoveredSize;
+        await rc.ctx.storage.put('state', state);
+        log.info('task_runner_do.node_provisioning.recovered', {
+          taskId: state.taskId,
+          nodeId: existing.id,
+          recoveredVmSize: recoveredSize,
+          requestedVmSize: requestedBeforeRecovery,
+        });
+        if (recoveredSize !== requestedBeforeRecovery) {
+          // Re-record the downgrade in case the crash happened before it was
+          // persisted on the original success path.
+          await rc.env.DATABASE.prepare(
+            `UPDATE tasks SET provisioned_vm_size = ?, updated_at = ? WHERE id = ?`
+          )
+            .bind(recoveredSize, new Date().toISOString(), state.taskId)
+            .run();
+        }
+      }
+    }
+  }
+
+  // If we already created the node (retry scenario, or recovery above), check its status
   if (state.stepResults.nodeId) {
     // Check timeout before polling
     const timeoutMs = rc.getProvisionTimeoutMs();
