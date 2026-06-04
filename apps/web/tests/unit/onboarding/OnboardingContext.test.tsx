@@ -43,6 +43,14 @@ function renderProvider() {
   );
 }
 
+// Configure the user's OWN cloud + GitHub creds, with the agent credential
+// active or inactive. `hasAgent` requires an active agent credential.
+function mockOwnSetup({ agentActive }: { agentActive: boolean }) {
+  mocks.listAgentCredentials.mockResolvedValue({ credentials: [{ isActive: agentActive }] });
+  mocks.listCredentials.mockResolvedValue([{ provider: 'hetzner' }]);
+  mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+}
+
 const STORAGE_KEY = 'sam-onboarding-wizard-dismissed-user_123';
 
 function setUrl(search: string) {
@@ -76,9 +84,7 @@ describe('OnboardingProvider', () => {
   });
 
   it('auto-dismisses when the user has their own agent + cloud + GitHub', async () => {
-    mocks.listAgentCredentials.mockResolvedValue({ credentials: [{ isActive: true }] });
-    mocks.listCredentials.mockResolvedValue([{ provider: 'hetzner' }]);
-    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+    mockOwnSetup({ agentActive: true });
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
     expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
@@ -89,9 +95,7 @@ describe('OnboardingProvider', () => {
     // An inactive agent credential does NOT count as the user having configured
     // their own agent (hasAgent requires isActive). Cloud + GitHub are present,
     // so this isolates the agent branch: onboarding must still appear.
-    mocks.listAgentCredentials.mockResolvedValue({ credentials: [{ isActive: false }] });
-    mocks.listCredentials.mockResolvedValue([{ provider: 'hetzner' }]);
-    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+    mockOwnSetup({ agentActive: false });
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
     expect(screen.getByTestId('overlay')).toHaveTextContent('open');
@@ -119,9 +123,7 @@ describe('OnboardingProvider', () => {
   });
 
   it('re-opens via ?onboarding even when setup is complete', async () => {
-    mocks.listAgentCredentials.mockResolvedValue({ credentials: [{ isActive: true }] });
-    mocks.listCredentials.mockResolvedValue([{ provider: 'hetzner' }]);
-    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+    mockOwnSetup({ agentActive: true });
     setUrl('/?onboarding');
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
