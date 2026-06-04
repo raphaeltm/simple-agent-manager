@@ -62,16 +62,18 @@ Decouple overlay *visibility* from the *status fetch*:
 
 ## Implementation checklist
 
-- [ ] Add a synchronous `?onboarding` URL helper in `OnboardingContext.tsx`.
-- [ ] Initialize `overlayOpen` from the helper.
-- [ ] Initialize `dismissed` to `false` when forced.
-- [ ] Change `showOverlay` to `overlayOpen && !dismissed` (remove `!loading`).
-- [ ] Keep `checkStatus()` background-only (setupComplete / auto-show / auto-dismiss).
-- [ ] Add a regression test: with `?onboarding` and a *pending* status fetch,
+- [x] Add a synchronous `?onboarding` URL helper in `OnboardingContext.tsx`.
+- [x] Initialize `overlayOpen` from the helper.
+- [x] Initialize `dismissed` to `false` when forced.
+- [x] Change `showOverlay` to `overlayOpen && !dismissed` (remove `!loading`).
+- [x] Keep `checkStatus()` background-only (setupComplete / auto-show / auto-dismiss).
+- [x] Add a regression test: with `?onboarding` and a *pending* status fetch,
       the overlay is `open` while `loading` is still `loading` (proves the
       decoupling; would fail against the old `!loading` gate).
-- [ ] Confirm all 7 existing OnboardingContext tests still pass.
-- [ ] Playwright visual audit of the overlay (mobile 375 + desktop 1280).
+- [x] Add a no-flash test: without `?onboarding` and a *pending* fetch, the
+      overlay is `closed` on first paint (guards the already-complete path).
+- [x] Confirm all existing OnboardingContext tests still pass (now 9 total).
+- [x] Playwright visual audit of the overlay (mobile 375 + desktop 1280).
 
 ## Acceptance criteria
 
@@ -80,7 +82,7 @@ Decouple overlay *visibility* from the *status fetch*:
 - The "Complete Setup" nav button still only appears once setup is known
   incomplete (no false flash).
 - Already-complete users do not see a flash of the overlay.
-- No regression in the 7 existing OnboardingContext tests.
+- No regression in the existing OnboardingContext tests (9 total, up from 7).
 
 ## References
 
