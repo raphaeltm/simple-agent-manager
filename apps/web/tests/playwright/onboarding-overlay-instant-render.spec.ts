@@ -17,38 +17,16 @@
  *     --project="iPhone SE (375x667)" --project="Desktop (1280x800)"
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { assertNoOverflow, jsonResponse, makeMockUser, screenshot } from './audit-helpers';
 
-const SCREENSHOTS_DIR = path.resolve(
-  __dirname,
-  '../../../../.codex/tmp/playwright-screenshots'
-);
-
-const MOCK_USER = {
-  user: {
-    id: 'user-demo-1',
-    email: 'demo@example.com',
-    name: 'Demo User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-demo-1',
-    userId: 'user-demo-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'demo@example.com',
+  name: 'Demo User',
+  role: 'superadmin',
+  sessionId: 'session-demo-1',
+  userId: 'user-demo-1',
+});
 
 /**
  * Mock the API so the dashboard renders, but make the three credential-status
@@ -58,38 +36,30 @@ const MOCK_USER = {
  */
 async function setupSlowStatusMocks(page: Page) {
   await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const p = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const p = new URL(route.request().url()).pathname;
+    const isGet = route.request().method() === 'GET';
 
-    if (p.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (p.includes('/api/auth/')) return jsonResponse(route, 200, MOCK_USER);
 
     // The three credential-status endpoints the overlay used to wait on — hang.
     if (p === '/api/github/installations') return; // never fulfilled
-    if (p === '/api/credentials' && route.request().method() === 'GET') return; // hang
-    if (p === '/api/credentials/agent' && route.request().method() === 'GET') return; // hang
+    if (p === '/api/credentials' && isGet) return; // hang
+    if (p === '/api/credentials/agent' && isGet) return; // hang
 
     // Dashboard data — respond so the shell paints normally.
-    if (p === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (p.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
-    if (p === '/api/agents') return respond(200, []);
-    if (p === '/api/trial-status') return respond(200, { available: false });
-    if (p === '/api/projects' && route.request().method() === 'GET') return respond(200, { projects: [] });
-    if (p.startsWith('/api/workspaces')) return respond(200, []);
+    if (p === '/api/dashboard/active-tasks') return jsonResponse(route, 200, { tasks: [] });
+    if (p.startsWith('/api/notifications'))
+      return jsonResponse(route, 200, { notifications: [], unreadCount: 0 });
+    if (p === '/api/agents') return jsonResponse(route, 200, []);
+    if (p === '/api/trial-status') return jsonResponse(route, 200, { available: false });
+    if (p === '/api/projects' && isGet) return jsonResponse(route, 200, { projects: [] });
+    if (p.startsWith('/api/workspaces')) return jsonResponse(route, 200, []);
 
-    return respond(200, {});
+    return jsonResponse(route, 200, {});
   });
 }
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
-}
-
-test('?onboarding overlay renders instantly despite a hung status fetch', async ({ page }, testInfo) => {
+test('?onboarding overlay renders instantly despite a hung status fetch', async ({ page }) => {
   await setupSlowStatusMocks(page);
 
   await page.goto('/dashboard?onboarding');
@@ -101,10 +71,5 @@ test('?onboarding overlay renders instantly despite a hung status fetch', async 
 
   await assertNoOverflow(page);
 
-  const viewport = testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile';
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: path.join(SCREENSHOTS_DIR, `onboarding-overlay-instant-${viewport}.png`),
-    fullPage: true,
-  });
+  await screenshot(page, 'onboarding-overlay-instant');
 });

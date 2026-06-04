@@ -57,6 +57,14 @@ function setUrl(search: string) {
   window.history.replaceState({}, '', search);
 }
 
+// Leave all three status fetches pending so first-paint state can be asserted
+// synchronously, before `loading` ever clears.
+function hangStatusFetches() {
+  mocks.listCredentials.mockReturnValue(new Promise(() => {}));
+  mocks.listGitHubInstallations.mockReturnValue(new Promise(() => {}));
+  mocks.listAgentCredentials.mockReturnValue(new Promise(() => {}));
+}
+
 describe('OnboardingProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -135,9 +143,7 @@ describe('OnboardingProvider', () => {
     // appeared after listCredentials/listGitHubInstallations/listAgentCredentials
     // all settled (~5-6s). Keep the fetch pending and assert the overlay is
     // already open on the first paint while `loading` is still in progress.
-    mocks.listCredentials.mockReturnValue(new Promise(() => {}));
-    mocks.listGitHubInstallations.mockReturnValue(new Promise(() => {}));
-    mocks.listAgentCredentials.mockReturnValue(new Promise(() => {}));
+    hangStatusFetches();
     setUrl('/?onboarding');
     renderProvider();
     // No `await` — assert synchronously on the initial render.
@@ -150,9 +156,7 @@ describe('OnboardingProvider', () => {
     // false, so the overlay must be closed on the very first paint — before the
     // status fetch resolves. This holds for already-complete users too, since
     // the auto-show signal only ever fires from the background fetch.
-    mocks.listCredentials.mockReturnValue(new Promise(() => {}));
-    mocks.listGitHubInstallations.mockReturnValue(new Promise(() => {}));
-    mocks.listAgentCredentials.mockReturnValue(new Promise(() => {}));
+    hangStatusFetches();
     setUrl('/');
     renderProvider();
     // No `await` — assert synchronously on the initial render.
