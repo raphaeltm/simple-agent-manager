@@ -5,6 +5,7 @@ import {
   DEFAULT_VM_SIZE_VCPUS,
   getVcpuCount,
   PROVIDER_VM_SIZE_VCPUS,
+  vmSizeFallbackChain,
 } from '../../src/constants';
 
 describe('VM Size vCPU Constants', () => {
@@ -105,6 +106,20 @@ describe('VM Size vCPU Constants', () => {
 
     it('treats unknown requested sizes as no minimum requirement', () => {
       expect(canSatisfyVmSize('small', 'xlarge')).toBe(true);
+    });
+  });
+
+  describe('vmSizeFallbackChain', () => {
+    it('returns the full descending chain starting from large', () => {
+      expect(vmSizeFallbackChain('large')).toEqual(['large', 'medium', 'small']);
+    });
+
+    it('returns medium then small starting from medium', () => {
+      expect(vmSizeFallbackChain('medium')).toEqual(['medium', 'small']);
+    });
+
+    it('returns only small starting from small', () => {
+      expect(vmSizeFallbackChain('small')).toEqual(['small']);
     });
   });
 });
