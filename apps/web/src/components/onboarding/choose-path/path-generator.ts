@@ -19,123 +19,132 @@ export interface GeneratedStep {
 }
 
 /**
+ * Constructs one step's static copy. Positional arguments keep each entry on a
+ * single call so the wizard's copy table reads as data, not eight repeated
+ * object literals.
+ */
+function step(
+  id: StepId,
+  title: string,
+  description: string,
+  actionLabel: string,
+  timeEstimate: string,
+  details: string[]
+): Omit<GeneratedStep, 'isOptional'> {
+  return { id, title, description, actionLabel, timeEstimate, details };
+}
+
+/**
  * Static copy for every step the wizard can produce. `generatePath` selects
  * which entries to emit based on the user's tags, then stamps `isOptional`.
  * Keyed by an internal slug so the two `project` variants can coexist; the
  * public `id` is carried on each entry.
  */
 const STEP_CONTENT: Record<string, Omit<GeneratedStep, 'isOptional'>> = {
-  'ai-oauth': {
-    id: 'ai-oauth',
-    title: 'Connect your Claude subscription',
-    description:
-      'After setup, connect your Claude Pro/Max plan in Settings. No API key needed — no extra cost.',
-    actionLabel: 'Continue',
-    timeEstimate: '30 seconds',
-    details: [
+  'ai-oauth': step(
+    'ai-oauth',
+    'Connect your Claude subscription',
+    'After setup, connect your Claude Pro/Max plan in Settings. No API key needed — no extra cost.',
+    'Continue',
+    '30 seconds',
+    [
       'Connect in Settings → Agent Settings after setup',
       'SAM uses your existing subscription quota',
       'No additional billing — covered by your plan',
       'You can disconnect anytime from Settings',
-    ],
-  },
-  'ai-apikey': {
-    id: 'ai-apikey',
-    title: 'Enter your API key',
-    description:
-      'Paste your API key and SAM encrypts it securely. You pay per-token directly to the provider.',
-    actionLabel: 'Save API Key',
-    timeEstimate: '1 minute',
-    details: [
+    ]
+  ),
+  'ai-apikey': step(
+    'ai-apikey',
+    'Enter your API key',
+    'Paste your API key and SAM encrypts it securely. You pay per-token directly to the provider.',
+    'Save API Key',
+    '1 minute',
+    [
       'Your key is encrypted and stored securely',
       'SAM never shares your key with third parties',
       'You pay the provider directly for token usage',
       'You can set spending alerts in Settings',
-    ],
-  },
-  'ai-sam': {
-    id: 'ai-sam',
-    title: 'Use SAM-managed AI',
-    description:
-      'Route your AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
-    actionLabel: 'Continue',
-    timeEstimate: '30 seconds',
-    details: [
+    ]
+  ),
+  'ai-sam': step(
+    'ai-sam',
+    'Use SAM-managed AI',
+    'Route your AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
+    'Continue',
+    '30 seconds',
+    [
       'No API key to manage — SAM handles AI access for you',
       'Works with Claude Code, Codex, and OpenCode alike',
       'Daily token budget and monthly cap keep spend predictable',
       'You can switch to your own API key anytime',
-    ],
-  },
-  'cloud-hetzner': {
-    id: 'cloud-hetzner',
-    title: 'Connect your Hetzner account',
-    description:
-      'Paste your Hetzner API token. SAM creates and destroys VMs automatically for each task.',
-    actionLabel: 'Enter Hetzner Token',
-    timeEstimate: '1 minute',
-    details: [
+    ]
+  ),
+  'cloud-hetzner': step(
+    'cloud-hetzner',
+    'Connect your Hetzner account',
+    'Paste your Hetzner API token. SAM creates and destroys VMs automatically for each task.',
+    'Enter Hetzner Token',
+    '1 minute',
+    [
       'Generate a token at console.hetzner.cloud',
       'SAM creates right-sized VMs for workspaces',
       'VMs are destroyed when tasks complete',
       'You choose the region and VM size',
-    ],
-  },
-  'cloud-sam': {
-    id: 'cloud-sam',
-    title: 'Infrastructure handled by SAM',
-    description:
-      'No setup needed! SAM provides cloud infrastructure. You can bring your own account later for more control.',
-    actionLabel: 'Continue',
-    timeEstimate: 'Instant',
-    details: [
+    ]
+  ),
+  'cloud-sam': step(
+    'cloud-sam',
+    'Infrastructure handled by SAM',
+    'No setup needed! SAM provides cloud infrastructure. You can bring your own account later for more control.',
+    'Continue',
+    'Instant',
+    [
       'SAM manages VMs in European data centers',
       'Infrastructure cost included in per-task billing',
       'Switch to your own Hetzner account later for savings',
       'Data isolated per-user — no shared VMs',
-    ],
-  },
-  github: {
-    id: 'github',
-    title: 'Install SAM GitHub App',
-    description:
-      'Give SAM access to your repos so agents can clone code and open PRs. You choose which repos.',
-    actionLabel: 'Install GitHub App',
-    timeEstimate: '30 seconds',
-    details: [
+    ]
+  ),
+  github: step(
+    'github',
+    'Install SAM GitHub App',
+    'Give SAM access to your repos so agents can clone code and open PRs. You choose which repos.',
+    'Install GitHub App',
+    '30 seconds',
+    [
       'You choose which repos SAM can access',
       'Agents create branches and open PRs on your behalf',
       'Agents never push directly to main',
       'Change repo access anytime from GitHub settings',
-    ],
-  },
-  'project-has-repo': {
-    id: 'project',
-    title: 'Create your first project',
-    description: 'Select one of your GitHub repos to create your first SAM project.',
-    actionLabel: 'Choose Repository',
-    timeEstimate: '30 seconds',
-    details: [
+    ]
+  ),
+  'project-has-repo': step(
+    'project',
+    'Create your first project',
+    'Select one of your GitHub repos to create your first SAM project.',
+    'Choose Repository',
+    '30 seconds',
+    [
       'Pick a repo from your connected GitHub account',
       'SAM clones it when creating workspaces',
       'Default branch detected automatically',
       'Add more projects later',
-    ],
-  },
-  'project-no-repo': {
-    id: 'project',
-    title: 'Create your first project',
-    description:
-      'Pick any repo from your GitHub account, or fork an open-source project to get started.',
-    actionLabel: 'Choose Repository',
-    timeEstimate: '30 seconds',
-    details: [
+    ]
+  ),
+  'project-no-repo': step(
+    'project',
+    'Create your first project',
+    'Pick any repo from your GitHub account, or fork an open-source project to get started.',
+    'Choose Repository',
+    '30 seconds',
+    [
       'Pick any repo you have access to',
       'Try forking github.com/raphaeltm/simple-agent-manager to experiment',
       'SAM clones it when creating workspaces',
       'You can add more projects later',
-    ],
-  },
+    ]
+  ),
 };
 
 export function generatePath(tags: string[]): GeneratedStep[] {

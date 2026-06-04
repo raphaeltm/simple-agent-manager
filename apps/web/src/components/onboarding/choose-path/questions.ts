@@ -23,6 +23,22 @@ export interface PathOption {
   tags: string[];
 }
 
+/**
+ * Constructs one answer option. Positional arguments keep each option on a
+ * single call so the question table reads as data, not repeated object
+ * literals.
+ */
+function opt(
+  id: string,
+  label: string,
+  description: string,
+  icon: string,
+  next: string | null,
+  tags: string[]
+): PathOption {
+  return { id, label, description, icon, next, tags };
+}
+
 export const QUESTIONS: PathQuestion[] = [
   {
     id: 'ai-subscription',
@@ -30,31 +46,30 @@ export const QUESTIONS: PathQuestion[] = [
     description:
       'SAM uses AI agents like Claude Code to write code. Pick how you want to pay for AI usage.',
     options: [
-      {
-        id: 'claude-pro',
-        label: 'Claude Pro or Max subscription',
-        description: 'Use your existing Anthropic subscription — no extra AI cost',
-        icon: 'C',
-        next: 'cloud-account',
-        tags: ['has-claude', 'oauth'],
-      },
-      {
-        id: 'api-key',
-        label: 'I have an API key',
-        description: 'Anthropic or OpenAI API key for direct pay-per-token usage',
-        icon: '\u{1F511}',
-        next: 'which-api-key',
-        tags: ['has-api-key', 'user-api-key'],
-      },
-      {
-        id: 'nothing',
-        label: 'Use SAM-managed AI',
-        description:
-          'Route AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
-        icon: '\u{2728}',
-        next: 'cloud-account',
-        tags: ['no-ai', 'sam-billing'],
-      },
+      opt(
+        'claude-pro',
+        'Claude Pro or Max subscription',
+        'Use your existing Anthropic subscription — no extra AI cost',
+        'C',
+        'cloud-account',
+        ['has-claude', 'oauth']
+      ),
+      opt(
+        'api-key',
+        'I have an API key',
+        'Anthropic or OpenAI API key for direct pay-per-token usage',
+        '\u{1F511}',
+        'which-api-key',
+        ['has-api-key', 'user-api-key']
+      ),
+      opt(
+        'nothing',
+        'Use SAM-managed AI',
+        'Route AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
+        '\u{2728}',
+        'cloud-account',
+        ['no-ai', 'sam-billing']
+      ),
     ],
   },
   {
@@ -63,22 +78,11 @@ export const QUESTIONS: PathQuestion[] = [
     description:
       'With your own API key, you pay per-token directly to the provider.',
     options: [
-      {
-        id: 'anthropic',
-        label: 'Anthropic (Claude)',
-        description: 'For Claude Code agent',
-        icon: 'C',
-        next: 'cloud-account',
-        tags: ['has-claude', 'anthropic-key'],
-      },
-      {
-        id: 'openai',
-        label: 'OpenAI',
-        description: 'For Codex agent',
-        icon: 'O',
-        next: 'cloud-account',
-        tags: ['has-openai', 'openai-key'],
-      },
+      opt('anthropic', 'Anthropic (Claude)', 'For Claude Code agent', 'C', 'cloud-account', [
+        'has-claude',
+        'anthropic-key',
+      ]),
+      opt('openai', 'OpenAI', 'For Codex agent', 'O', 'cloud-account', ['has-openai', 'openai-key']),
     ],
   },
   {
@@ -87,22 +91,22 @@ export const QUESTIONS: PathQuestion[] = [
     description:
       'AI agents need a real computer to run on. SAM creates temporary VMs for each task.',
     options: [
-      {
-        id: 'hetzner',
-        label: 'I have Hetzner',
-        description: 'Most cost-effective — you pay Hetzner directly for usage',
-        icon: 'H',
-        next: 'github-ready',
-        tags: ['has-hetzner', 'byoc'],
-      },
-      {
-        id: 'no-cloud',
-        label: 'Use SAM-managed infrastructure',
-        description: 'Let SAM provision and manage VMs for you — bring your own Hetzner account anytime.',
-        icon: '\u{1F680}',
-        next: 'github-ready',
-        tags: ['no-cloud', 'sam-infra'],
-      },
+      opt(
+        'hetzner',
+        'I have Hetzner',
+        'Most cost-effective — you pay Hetzner directly for usage',
+        'H',
+        'github-ready',
+        ['has-hetzner', 'byoc']
+      ),
+      opt(
+        'no-cloud',
+        'Use SAM-managed infrastructure',
+        'Let SAM provision and manage VMs for you — bring your own Hetzner account anytime.',
+        '\u{1F680}',
+        'github-ready',
+        ['no-cloud', 'sam-infra']
+      ),
     ],
   },
   {
@@ -111,22 +115,22 @@ export const QUESTIONS: PathQuestion[] = [
     description:
       "SAM agents work on real code. You'll connect GitHub so they can clone repos and open PRs.",
     options: [
-      {
-        id: 'yes',
-        label: 'Yes, I have a repo',
-        description: 'I have a project I want to work on',
-        icon: '\u{1F4C2}',
-        next: null,
-        tags: ['has-repo'],
-      },
-      {
-        id: 'no-repo',
-        label: "Not yet, I'll pick one after connecting",
-        description: 'Connect GitHub first, then choose or fork a repo',
-        icon: '\u{1F517}',
-        next: null,
-        tags: ['no-repo'],
-      },
+      opt(
+        'yes',
+        'Yes, I have a repo',
+        'I have a project I want to work on',
+        '\u{1F4C2}',
+        null,
+        ['has-repo']
+      ),
+      opt(
+        'no-repo',
+        "Not yet, I'll pick one after connecting",
+        'Connect GitHub first, then choose or fork a repo',
+        '\u{1F517}',
+        null,
+        ['no-repo']
+      ),
     ],
   },
 ];
