@@ -87,6 +87,24 @@ describe('generatePath', () => {
     expect(aiStep?.isOptional).toBe(true);
   });
 
+  it('existing-agent tag marks ai-sam step as isOptional', () => {
+    const steps = generatePath(['no-ai', 'sam-billing', 'sam-infra', 'no-repo', 'existing-agent']);
+    const aiStep = steps.find((s) => s.id === 'ai-sam');
+    expect(aiStep?.isOptional).toBe(true);
+  });
+
+  it('ai-sam step is NOT optional without existing-agent tag', () => {
+    const steps = generatePath(['no-ai', 'sam-billing', 'sam-infra', 'no-repo']);
+    const aiStep = steps.find((s) => s.id === 'ai-sam');
+    expect(aiStep?.isOptional).toBe(false);
+  });
+
+  it('existing-agent tag marks ai-apikey step as isOptional', () => {
+    const steps = generatePath(['user-api-key', 'has-claude', 'byoc', 'has-repo', 'existing-agent']);
+    const aiStep = steps.find((s) => s.id === 'ai-apikey');
+    expect(aiStep?.isOptional).toBe(true);
+  });
+
   it('existing-cloud tag marks cloud-hetzner step as isOptional', () => {
     const steps = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo', 'existing-cloud']);
     const cloudStep = steps.find((s) => s.id === 'cloud-hetzner');
@@ -148,8 +166,8 @@ describe('generatePath', () => {
 describe('getTimeEstimate', () => {
   it('returns "< 1 min" for zero-duration steps', () => {
     const steps = generatePath(['sam-billing', 'sam-infra', 'no-repo']);
-    // cloud-sam is 0 seconds, but ai-sam=30s, github=30s, project=30s → 90s → 2 mins
-    // Actually only cloud-sam is 0, rest have time
+    // cloud-sam is "Instant" (no countable time), but ai-sam=30s, github=30s,
+    // project=30s → 90s → 2 mins. Only cloud-sam contributes nothing.
     const estimate = getTimeEstimate(steps);
     expect(estimate).toMatch(/~\d+ min/);
   });

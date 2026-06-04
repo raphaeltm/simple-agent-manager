@@ -49,7 +49,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       details: [
         'Your key is encrypted and stored securely',
         'SAM never shares your key with third parties',
-        'Typical cost: ~$0.01-1.50 per task',
+        'You pay the provider directly for token usage',
         'You can set spending alerts in Settings',
       ],
       isOptional: tags.includes('existing-agent'),
@@ -57,13 +57,13 @@ export function generatePath(tags: string[]): GeneratedStep[] {
   } else if (tags.includes('sam-billing')) {
     steps.push({
       id: 'ai-sam',
-      title: 'Use SAM-managed AI credits',
+      title: 'Use SAM-managed AI',
       description:
-        'Route your AI usage through SAM — free monthly credits, works with any agent. No key or setup needed.',
+        'Route your AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
       actionLabel: 'Continue',
       timeEstimate: '30 seconds',
       details: [
-        'Free monthly credits included, regardless of which agent you use',
+        'No API key to manage — SAM handles AI access for you',
         'Works with Claude Code, Codex, and OpenCode alike',
         'Daily token budget and monthly cap keep spend predictable',
         'You can switch to your own API key anytime',
@@ -83,7 +83,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       timeEstimate: '1 minute',
       details: [
         'Generate a token at console.hetzner.cloud',
-        'SAM creates small VMs (~$5/mo) for workspaces',
+        'SAM creates right-sized VMs for workspaces',
         'VMs are destroyed when tasks complete',
         'You choose the region and VM size',
       ],
@@ -96,7 +96,7 @@ export function generatePath(tags: string[]): GeneratedStep[] {
       description:
         'No setup needed! SAM provides cloud infrastructure. You can bring your own account later for more control.',
       actionLabel: 'Continue',
-      timeEstimate: '0 seconds',
+      timeEstimate: 'Instant',
       details: [
         'SAM manages VMs in European data centers',
         'Infrastructure cost included in per-task billing',

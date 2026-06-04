@@ -318,6 +318,17 @@ async function clickOption(page: Page, label: string) {
 }
 
 /**
+ * Assert the wizard does not produce horizontal overflow at the current
+ * viewport — protects against long copy/labels breaking the mobile layout.
+ */
+async function assertNoOverflow(page: Page) {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth
+  );
+  expect(overflow).toBe(false);
+}
+
+/**
  * Run through the full wizard flow for a given scenario while recording.
  */
 async function runScenario(page: Page, scenario: Scenario) {
@@ -329,6 +340,7 @@ async function runScenario(page: Page, scenario: Scenario) {
   await page.waitForTimeout(800);
 
   const wizard = page.locator('[data-testid="onboarding-wizard"]');
+  await assertNoOverflow(page);
 
   // Phase 1: Answer questions
   for (const [, optionId] of scenario.answers) {
@@ -340,6 +352,7 @@ async function runScenario(page: Page, scenario: Scenario) {
 
   // Phase 2: Path Preview — pause to show the plan
   await expect(wizard.getByRole('heading', { name: 'Your personalized setup' })).toBeVisible({ timeout: 5000 });
+  await assertNoOverflow(page);
   await page.waitForTimeout(1500);
 
   // Click "Start setup"
@@ -438,7 +451,7 @@ function getOptionLabel(optionId: string): string {
   const labels: Record<string, string> = {
     'claude-pro': 'Claude Pro or Max subscription',
     'api-key': 'I have an API key',
-    'nothing': 'Use SAM-managed AI credits',
+    'nothing': 'Use SAM-managed AI',
     'anthropic': 'Anthropic (Claude)',
     'openai': 'OpenAI',
     'hetzner': 'I have Hetzner',

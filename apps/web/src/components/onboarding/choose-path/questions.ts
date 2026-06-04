@@ -48,9 +48,9 @@ export const QUESTIONS: PathQuestion[] = [
       },
       {
         id: 'nothing',
-        label: 'Use SAM-managed AI credits',
+        label: 'Use SAM-managed AI',
         description:
-          'Route AI usage through SAM — free monthly credits, works with any agent. Switch to your own key anytime.',
+          'Route AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
         icon: '\u{2728}',
         next: 'cloud-account',
         tags: ['no-ai', 'sam-billing'],
@@ -90,7 +90,7 @@ export const QUESTIONS: PathQuestion[] = [
       {
         id: 'hetzner',
         label: 'I have Hetzner',
-        description: 'Most cost-effective: ~$5-20/mo for typical use',
+        description: 'Most cost-effective — you pay Hetzner directly for usage',
         icon: 'H',
         next: 'github-ready',
         tags: ['has-hetzner', 'byoc'],

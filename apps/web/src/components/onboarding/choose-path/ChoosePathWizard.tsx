@@ -30,6 +30,7 @@ export function ChoosePathWizard() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [tags, setTags] = useState<string[]>([]);
   const [generatedSteps, setGeneratedSteps] = useState<GeneratedStep[]>([]);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const tagsRef = useRef(tags);
   tagsRef.current = tags;
@@ -37,6 +38,47 @@ export function ChoosePathWizard() {
   const focusContent = useCallback(
     () => requestAnimationFrame(() => contentRef.current?.focus()),
     []
+  );
+
+  // H2: move focus into the dialog when it opens so keyboard/screen-reader
+  // users start inside the overlay rather than behind it.
+  useEffect(() => {
+    if (showOverlay) focusContent();
+  }, [showOverlay, focusContent]);
+
+  // H1 + H3: Escape closes the dialog; Tab is trapped within the overlay so
+  // focus cannot escape to the hidden app UI behind it (WCAG 2.1.2 / 2.4.3).
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dismissOnboarding();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null);
+      if (focusable.length === 0) return;
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+
+      if (e.shiftKey) {
+        if (active === first || active === contentRef.current) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    [dismissOnboarding]
   );
 
   // Pre-populate tags from existing setup state
@@ -140,6 +182,8 @@ export function ChoosePathWizard() {
 
   return (
     <div
+      ref={dialogRef}
+      onKeyDown={handleKeyDown}
       data-testid="onboarding-wizard"
       role="dialog"
       aria-label="Account setup"
@@ -172,7 +216,7 @@ export function ChoosePathWizard() {
           )}
           {phase === 'questions' && (
             <span className="text-xs text-fg-muted/60">
-              Q{Object.keys(answers).length + 1} of {QUESTIONS.length}
+              Question {Object.keys(answers).length + 1}
             </span>
           )}
         </div>
@@ -180,7 +224,7 @@ export function ChoosePathWizard() {
           type="button"
           onClick={dismissOnboarding}
           aria-label="Exit setup"
-          className="inline-flex items-center justify-center w-10 h-10 rounded-full text-fg-muted hover:text-fg-primary hover:bg-white/5 bg-transparent border-none cursor-pointer transition-colors"
+          className="inline-flex items-center justify-center w-11 h-11 rounded-full text-fg-muted hover:text-fg-primary hover:bg-white/5 bg-transparent border-none cursor-pointer transition-colors"
         >
           <X size={20} />
         </button>

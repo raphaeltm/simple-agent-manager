@@ -85,6 +85,20 @@ describe('OnboardingProvider', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
   });
 
+  it('keeps the overlay open when the only agent credential is inactive', async () => {
+    // An inactive agent credential does NOT count as the user having configured
+    // their own agent (hasAgent requires isActive). Cloud + GitHub are present,
+    // so this isolates the agent branch: onboarding must still appear.
+    mocks.listAgentCredentials.mockResolvedValue({ credentials: [{ isActive: false }] });
+    mocks.listCredentials.mockResolvedValue([{ provider: 'hetzner' }]);
+    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    // The user never dismissed, so no flag should have been written.
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
   it('does not auto-open when the user previously dismissed', async () => {
     localStorage.setItem(STORAGE_KEY, 'true');
     renderProvider();
@@ -98,6 +112,10 @@ describe('OnboardingProvider', () => {
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
     expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    // ?onboarding resets in-memory `dismissed` so the overlay re-shows, but it
+    // MUST NOT clear the persisted dismissal flag — re-navigating without the
+    // param keeps the overlay closed.
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
   });
 
   it('re-opens via ?onboarding even when setup is complete', async () => {
