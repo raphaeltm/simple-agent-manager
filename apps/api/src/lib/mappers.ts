@@ -164,6 +164,7 @@ export function toTaskResponse(
     triggerExecutionId: task.triggerExecutionId ?? null,
     requestedVmSize: task.requestedVmSize ?? null,
     requestedVmSizeSource: (task.requestedVmSizeSource as Task['requestedVmSizeSource']) ?? null,
+    provisionedVmSize: task.provisionedVmSize ?? null,
     resourceRequirementsJson: task.resourceRequirementsJson ?? null,
     resourceRequirementsSource: (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
     resolvedReservationJson: task.resolvedReservationJson ?? null,

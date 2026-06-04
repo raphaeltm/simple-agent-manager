@@ -403,7 +403,7 @@ export function useProjectChatState() {
         const task = await getProjectTask(projectId, provisioning.taskId);
         setProvisioning((prev) => {
           if (!prev) return null;
-          const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null };
+          const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null, requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize, provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize };
           if (task.workspaceId && !prev.workspaceId) next.workspaceId = task.workspaceId;
           return next;
         });
@@ -448,6 +448,8 @@ export function useProjectChatState() {
             errorMessage: task.errorMessage ?? null,
             startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
             workspaceId: task.workspaceId ?? null, workspaceUrl: null,
+            requestedVmSize: task.requestedVmSize ?? null,
+            provisionedVmSize: task.provisionedVmSize ?? null,
           });
         }
       } catch { /* Best-effort */ }
@@ -588,6 +590,7 @@ export function useProjectChatState() {
         branchName: result.branchName, status: 'queued',
         executionStep: null, errorMessage: null,
         startedAt: Date.now(), workspaceId: null, workspaceUrl: null,
+        requestedVmSize: null, provisionedVmSize: null,
       });
       if (executeIdeaIdRef.current) {
         const ideaId = executeIdeaIdRef.current;

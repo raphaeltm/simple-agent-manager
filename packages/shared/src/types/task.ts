@@ -104,6 +104,9 @@ export interface Task {
   requestedVmSize: string | null;
   /** Where the VM size came from in the precedence chain. */
   requestedVmSizeSource: ResourceRequirementsSource | 'explicit' | null;
+  /** VM size actually provisioned. Differs from requestedVmSize only when
+   *  size-fallback descended on transient capacity exhaustion. Null otherwise. */
+  provisionedVmSize: string | null;
   /** JSON snapshot of the resolved ResourceRequirements. */
   resourceRequirementsJson: string | null;
   /** Which precedence level provided the resource requirements. */
