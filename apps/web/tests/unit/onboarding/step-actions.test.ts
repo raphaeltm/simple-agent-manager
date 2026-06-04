@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { executeStep, INITIAL_FORM, type StepFormState } from '../../../src/components/onboarding/choose-path/step-actions';
 

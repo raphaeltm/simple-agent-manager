@@ -7,9 +7,9 @@
  * Run with:
  *   npx playwright test onboarding-wizard-recordings --project="iPhone SE (375x667)" --project="Desktop (1280x800)"
  */
-import { test, expect, type Page, type Route } from '@playwright/test';
-import path from 'path';
+import { expect, type Page, type Route,test } from '@playwright/test';
 import fs from 'fs';
+import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -331,7 +331,7 @@ async function runScenario(page: Page, scenario: Scenario) {
   const wizard = page.locator('[data-testid="onboarding-wizard"]');
 
   // Phase 1: Answer questions
-  for (const [_questionId, optionId] of scenario.answers) {
+  for (const [, optionId] of scenario.answers) {
     // Find the button matching the option ID — use the option label mapping
     const optionLabel = getOptionLabel(optionId);
     await clickOption(page, optionLabel);

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type GeneratedStep,
   generatePath,
   getTimeEstimate,
-  type GeneratedStep,
 } from '../../../src/components/onboarding/choose-path/path-generator';
 
 describe('generatePath', () => {

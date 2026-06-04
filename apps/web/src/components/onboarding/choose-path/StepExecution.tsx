@@ -12,8 +12,8 @@ import {
 } from '../../../lib/api';
 import { createProject } from '../../../lib/api/projects';
 import type { GeneratedStep } from './path-generator';
-import { StepForm } from './StepForm';
 import { executeStep, INITIAL_FORM, type StepFormState } from './step-actions';
+import { StepForm } from './StepForm';
 
 /* ─── Constants ─── */
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { QUESTIONS, type PathQuestion, type PathOption } from '../../../src/components/onboarding/choose-path/questions';
+import { type PathQuestion, QUESTIONS } from '../../../src/components/onboarding/choose-path/questions';
 
 describe('QUESTIONS graph validation', () => {
   const questionMap = new Map<string, PathQuestion>(
