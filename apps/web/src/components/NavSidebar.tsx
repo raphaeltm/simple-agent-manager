@@ -104,6 +104,58 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
 
+  // Collapsible Infrastructure section — identical in the project-context global
+  // panel and the standalone global sidebar. Extracted so the markup lives once.
+  const infraSection = (
+    <div className={SECTION_DIVIDER}>
+      <button
+        onClick={() => setInfraOpen(!infraOpen)}
+        className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
+        aria-expanded={infraOpen}
+        aria-controls="infra-nav-panel"
+      >
+        {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        Infrastructure
+      </button>
+      {infraOpen && (
+        <div id="infra-nav-panel" className="flex flex-col gap-1">
+          {[
+            { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+            { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
+          ].map((item) => {
+            const active = isActive(item.path, location.pathname);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                aria-current={active ? 'page' : undefined}
+                className={`${NAV_ITEM_BASE} ml-2 ${
+                  active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // Onboarding resume — shown in both nav layouts when setup is incomplete.
+  const onboardingResume = needsOnboarding && (
+    <div className={SECTION_DIVIDER}>
+      <button
+        onClick={openOnboarding}
+        className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[rgba(34,197,94,0.06)] hover:bg-[rgba(34,197,94,0.12)]`}
+      >
+        <PlayCircle size={18} />
+        Complete Setup
+      </button>
+    </div>
+  );
+
   // When inside a project, we can toggle between project nav and global nav
   if (insideProject && projectId) {
     const globalItems = isSuperadmin
@@ -193,53 +245,9 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
               );
             })}
 
-            <div className={SECTION_DIVIDER}>
-              <button
-                onClick={() => setInfraOpen(!infraOpen)}
-                className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
-                aria-expanded={infraOpen}
-                aria-controls="infra-nav-panel"
-              >
-                {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                Infrastructure
-              </button>
-              {infraOpen && (
-                <div id="infra-nav-panel" className="flex flex-col gap-1">
-                  {[
-                    { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-                    { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-                  ].map((item) => {
-                    const active = isActive(item.path, location.pathname);
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        aria-current={active ? 'page' : undefined}
-                        className={`${NAV_ITEM_BASE} ml-2 ${
-                          active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                        }`}
-                      >
-                        {item.icon}
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            {infraSection}
 
-            {/* Onboarding resume — shown when setup is incomplete */}
-            {needsOnboarding && (
-              <div className={SECTION_DIVIDER}>
-                <button
-                  onClick={openOnboarding}
-                  className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[rgba(34,197,94,0.06)] hover:bg-[rgba(34,197,94,0.12)]`}
-                >
-                  <PlayCircle size={18} />
-                  Complete Setup
-                </button>
-              </div>
-            )}
+            {onboardingResume}
 
             {/* Project list — in global panel within project context */}
             {projectListSection}
@@ -273,53 +281,9 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
         );
       })}
 
-      <div className={SECTION_DIVIDER}>
-        <button
-          onClick={() => setInfraOpen(!infraOpen)}
-          className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
-          aria-expanded={infraOpen}
-          aria-controls="infra-nav-panel"
-        >
-          {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          Infrastructure
-        </button>
-        {infraOpen && (
-          <div id="infra-nav-panel" className="flex flex-col gap-1">
-            {[
-              { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-              { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-            ].map((item) => {
-              const active = isActive(item.path, location.pathname);
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  aria-current={active ? 'page' : undefined}
-                  className={`${NAV_ITEM_BASE} ml-2 ${
-                    active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                  }`}
-                >
-                  {item.icon}
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {infraSection}
 
-      {/* Onboarding resume — shown when setup is incomplete */}
-      {needsOnboarding && (
-        <div className={SECTION_DIVIDER}>
-          <button
-            onClick={openOnboarding}
-            className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[rgba(34,197,94,0.06)] hover:bg-[rgba(34,197,94,0.12)]`}
-          >
-            <PlayCircle size={18} />
-            Complete Setup
-          </button>
-        </div>
-      )}
+      {onboardingResume}
 
       {/* Project list — in standalone global nav */}
       {projectListSection}
