@@ -5,6 +5,7 @@
  * plus node selection helper functions (warm pool, capacity finding, health).
  */
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
+import type { VMSize } from '@simple-agent-manager/shared';
 import {
   canSatisfyVmSize,
   DEFAULT_MAX_WORKSPACES_PER_NODE,
@@ -12,7 +13,6 @@ import {
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
   vmSizeFallbackChain,
 } from '@simple-agent-manager/shared';
-import type { VMSize } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import type { NodeLifecycle } from '../node-lifecycle';

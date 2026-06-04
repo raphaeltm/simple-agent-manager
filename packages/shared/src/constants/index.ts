@@ -6,8 +6,8 @@ export {
   DEFAULT_VM_SIZE_VCPUS,
   getVcpuCount,
   PROVIDER_VM_SIZE_VCPUS,
-  vmSizeFallbackChain,
   VM_SIZE_LABELS,
+  vmSizeFallbackChain,
 } from './vm-sizes';
 
 // Providers & Locations
