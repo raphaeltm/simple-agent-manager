@@ -11,53 +11,19 @@ describe('generatePath', () => {
   const ids = (steps: GeneratedStep[]) => steps.map((s) => s.id);
 
   // ── AI step branching ──
-
-  it('claude-pro + hetzner + repo → [ai-oauth, cloud-hetzner, github, project]', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo']);
-    expect(ids(steps)).toEqual(['ai-oauth', 'cloud-hetzner', 'github', 'project']);
-  });
-
-  it('claude-pro + no-cloud + no-repo → [ai-oauth, cloud-sam, github, project]', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'sam-infra', 'no-repo']);
-    expect(ids(steps)).toEqual(['ai-oauth', 'cloud-sam', 'github', 'project']);
-  });
-
-  it('api-key + anthropic + hetzner + repo → [ai-apikey, cloud-hetzner, github, project]', () => {
-    const steps = generatePath([
-      'has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'has-hetzner', 'byoc', 'has-repo',
-    ]);
-    expect(ids(steps)).toEqual(['ai-apikey', 'cloud-hetzner', 'github', 'project']);
-  });
-
-  it('api-key + openai + no-cloud + repo → [ai-apikey, cloud-sam, github, project]', () => {
-    const steps = generatePath([
-      'has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'no-cloud', 'sam-infra', 'has-repo',
-    ]);
-    expect(ids(steps)).toEqual(['ai-apikey', 'cloud-sam', 'github', 'project']);
-  });
-
-  it('sam-billing + no-cloud + no-repo → [ai-sam, cloud-sam, github, project]', () => {
-    const steps = generatePath(['no-ai', 'sam-billing', 'no-cloud', 'sam-infra', 'no-repo']);
-    expect(ids(steps)).toEqual(['ai-sam', 'cloud-sam', 'github', 'project']);
-  });
-
-  it('sam-billing + hetzner + repo → [ai-sam, cloud-hetzner, github, project]', () => {
-    const steps = generatePath(['no-ai', 'sam-billing', 'has-hetzner', 'byoc', 'has-repo']);
-    expect(ids(steps)).toEqual(['ai-sam', 'cloud-hetzner', 'github', 'project']);
-  });
-
-  it('api-key + openai + hetzner + no-repo → [ai-apikey, cloud-hetzner, github, project]', () => {
-    const steps = generatePath([
-      'has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'has-hetzner', 'byoc', 'no-repo',
-    ]);
-    expect(ids(steps)).toEqual(['ai-apikey', 'cloud-hetzner', 'github', 'project']);
-  });
-
-  it('api-key + anthropic + no-cloud + no-repo → [ai-apikey, cloud-sam, github, project]', () => {
-    const steps = generatePath([
-      'has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'no-cloud', 'sam-infra', 'no-repo',
-    ]);
-    expect(ids(steps)).toEqual(['ai-apikey', 'cloud-sam', 'github', 'project']);
+  // Each case is (label, input tags, expected step ids). Parametrized so the
+  // branch matrix reads as a table rather than eight near-identical blocks.
+  it.each([
+    ['claude-pro + hetzner + repo', ['oauth', 'has-claude', 'byoc', 'has-repo'], ['ai-oauth', 'cloud-hetzner', 'github', 'project']],
+    ['claude-pro + no-cloud + no-repo', ['oauth', 'has-claude', 'sam-infra', 'no-repo'], ['ai-oauth', 'cloud-sam', 'github', 'project']],
+    ['api-key + anthropic + hetzner + repo', ['has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'has-hetzner', 'byoc', 'has-repo'], ['ai-apikey', 'cloud-hetzner', 'github', 'project']],
+    ['api-key + openai + no-cloud + repo', ['has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'no-cloud', 'sam-infra', 'has-repo'], ['ai-apikey', 'cloud-sam', 'github', 'project']],
+    ['sam-billing + no-cloud + no-repo', ['no-ai', 'sam-billing', 'no-cloud', 'sam-infra', 'no-repo'], ['ai-sam', 'cloud-sam', 'github', 'project']],
+    ['sam-billing + hetzner + repo', ['no-ai', 'sam-billing', 'has-hetzner', 'byoc', 'has-repo'], ['ai-sam', 'cloud-hetzner', 'github', 'project']],
+    ['api-key + openai + hetzner + no-repo', ['has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'has-hetzner', 'byoc', 'no-repo'], ['ai-apikey', 'cloud-hetzner', 'github', 'project']],
+    ['api-key + anthropic + no-cloud + no-repo', ['has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'no-cloud', 'sam-infra', 'no-repo'], ['ai-apikey', 'cloud-sam', 'github', 'project']],
+  ])('%s → %j', (_label, tags, expected) => {
+    expect(ids(generatePath(tags))).toEqual(expected);
   });
 
   // ── Edge cases: no AI step produced ──
