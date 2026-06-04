@@ -58,9 +58,10 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Feature Flags
 
-| Variable           | Default   | Description                                                          |
-| ------------------ | --------- | -------------------------------------------------------------------- |
-| `REQUIRE_APPROVAL` | _(unset)_ | Require admin approval for new users. First user becomes superadmin. |
+| Variable                          | Default   | Description                                                                                                                                |
+| --------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REQUIRE_APPROVAL`                | _(unset)_ | Require admin approval for new users. First user becomes superadmin.                                                                        |
+| `CAPACITY_SIZE_FALLBACK_ENABLED`  | `true`    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
 
 ## AI Idea Title Generation
 
