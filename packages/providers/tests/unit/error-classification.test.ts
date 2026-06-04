@@ -178,6 +178,10 @@ describe('classifyScalewayError', () => {
     expect(classifyScalewayError(500, undefined, 'internal error')).toBe('unknown');
   });
 
+  it('not_found type → invalid_config', () => {
+    expect(classifyScalewayError(404, 'not_found', 'resource not found')).toBe('invalid_config');
+  });
+
   it('message fallback for capacity-related 400', () => {
     expect(classifyScalewayError(400, undefined, 'insufficient capacity in zone')).toBe('transient_capacity');
   });

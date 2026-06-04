@@ -30,7 +30,7 @@ function capacityErrorResponse(code = 'resource_unavailable', msg = 'unsupported
 function successResponse() {
   return new Response(
     JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-    { status: 200 },
+    { status: 201 },
   );
 }
 

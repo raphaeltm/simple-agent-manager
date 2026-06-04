@@ -206,6 +206,7 @@ export interface Env {
   HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
+  HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
