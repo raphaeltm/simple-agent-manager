@@ -2,7 +2,12 @@
 // User
 // =============================================================================
 export type UserRole = 'superadmin' | 'admin' | 'user';
-export type UserStatus = 'active' | 'pending' | 'suspended';
+// 'system' is the status of internal sentinel users (e.g. system_anonymous_trials,
+// seeded by migration 0043). It is never settable via the API (the `status`
+// additionalField is input:false) — only migrations write it. It is part of the
+// union so middleware and admin tooling can recognize and exclude internal rows
+// rather than silently coercing the value.
+export type UserStatus = 'active' | 'pending' | 'suspended' | 'system';
 
 export interface User {
   id: string;

@@ -13,6 +13,44 @@ import { getBetterAuthSecret } from './lib/secrets';
 
 const log = createModuleLogger('auth');
 
+/**
+ * Atomic, race-free login-time superadmin self-heal.
+ *
+ * Promotes the logging-in user to superadmin/active IFF they are the only real
+ * (non-internal) user on the deployment AND no superadmin exists — i.e. a fresh or
+ * sentinel-orphaned fork. Every guard lives in the WHERE clause so the statement is
+ * a single atomic UPDATE with no read-modify-write race; concurrent logins of the
+ * same user are idempotent (the second is a no-op).
+ *
+ * Numbered params: ?1 = current user id (referenced twice), ?2 = sentinel id.
+ * Guards: (a) skip already-superadmin rows; (d) never auto-elevate a suspended
+ * account; status!='system' never mutates the sentinel; (b) the current user is the
+ * only non-internal user; (c) no non-system superadmin exists anywhere.
+ *
+ * Drizzle cannot express the correlated-subquery WHERE, so this is issued via the
+ * raw D1 binding (prepare/bind/run) — the same mechanism used by
+ * services/scheduler-state-sync.ts and services/github-trigger-handler.ts.
+ */
+const LOGIN_SELF_HEAL_SQL = `
+UPDATE users
+SET role = 'superadmin', status = 'active'
+WHERE id = ?1
+  AND role != 'superadmin'
+  AND status != 'system'
+  AND status != 'suspended'
+  AND (
+    SELECT COUNT(*) FROM users u2
+    WHERE u2.id != ?1
+      AND u2.status != 'system'
+      AND u2.id != ?2
+  ) = 0
+  AND (
+    SELECT COUNT(*) FROM users u3
+    WHERE u3.role = 'superadmin'
+      AND u3.status != 'system'
+  ) = 0
+`;
+
 interface GitHubEmailResponse {
   email: string;
   primary: boolean;
@@ -84,6 +122,8 @@ export function selectPrimaryGitHubEmail(
  */
 export function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
+  // Sentinel id is env-overridable; fall back to the shared constant.
+  const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -221,7 +261,7 @@ export function createAuth(env: Env) {
             const existing = await hookDb
               .select({ id: schema.users.id })
               .from(schema.users)
-              .where(ne(schema.users.id, TRIAL_ANONYMOUS_USER_ID))
+              .where(ne(schema.users.id, sentinelId))
               .limit(1)
               .all();
 
@@ -235,6 +275,38 @@ export function createAuth(env: Env) {
             return {
               data: { ...user, role: 'user', status: 'pending' },
             };
+          },
+        },
+      },
+      session: {
+        create: {
+          // Login-time superadmin self-heal. Fires on OAuth (GitHub) login only —
+          // token-login and device-flow create sessions via internalAdapter.createSession
+          // and bypass this hook; the data migration covers those paths and the known
+          // orphaned victim. Promotes the sole real user to superadmin/active on a
+          // sentinel-orphaned or fresh deployment (see LOGIN_SELF_HEAL_SQL).
+          //
+          // The try/catch is LOAD-BEARING: better-auth awaits session.create.after
+          // hooks before returning the login response, so an uncaught throw would
+          // surface as a 500 and break login. Swallow + log so login always succeeds.
+          after: async (session) => {
+            const userId = session.userId;
+            if (!userId) {
+              return;
+            }
+            try {
+              const result = await env.DATABASE.prepare(LOGIN_SELF_HEAL_SQL)
+                .bind(userId, sentinelId)
+                .run();
+              if (result.meta.changes > 0) {
+                log.info('login_self_heal.promoted', { userId });
+              }
+            } catch (err) {
+              log.error('login_self_heal.failed', {
+                userId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           },
         },
       },
