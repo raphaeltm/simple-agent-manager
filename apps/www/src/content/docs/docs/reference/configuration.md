@@ -200,6 +200,13 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `SESSION_IDLE_TIMEOUT_MINUTES` | `60`     | Idle session timeout               |
 | `DO_SUMMARY_SYNC_DEBOUNCE_MS`  | `5000`   | Debounce for DO-to-D1 summary sync |
 
+## Durable Object Retry
+
+| Variable                 | Default | Description                                                               |
+| ------------------------ | ------- | ------------------------------------------------------------------------- |
+| `DO_RETRY_MAX_ATTEMPTS`  | `3`     | Max attempts for transient Durable Object RPC reset/overload errors       |
+| `DO_RETRY_BASE_DELAY_MS` | `50`    | Base retry delay in milliseconds for transient Durable Object RPC failures |
+
 ## Runtime Config Limits
 
 | Variable                                   | Default  | Description                 |
