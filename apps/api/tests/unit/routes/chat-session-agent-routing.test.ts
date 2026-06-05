@@ -324,8 +324,27 @@ describe('chatRoutes agent session routing', () => {
     );
   });
 
+  it('does not record a load failure when ProjectData retries internally and returns session detail', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        OBSERVABILITY_DATABASE: {} as D1Database,
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.persistError).not.toHaveBeenCalled();
+  });
+
   it('returns a structured diagnostic response when session lookup fails', async () => {
-    const loadError = new Error('Durable Object session lookup failed');
+    const loadError = new Error('Durable Object reset because its code was updated.');
     mocks.getSession.mockRejectedValue(loadError);
 
     const response = await app.request(
@@ -352,7 +371,7 @@ describe('chatRoutes agent session routing', () => {
         source: 'api',
         level: 'error',
         message: 'chat.session_detail_load_failed',
-        stack: expect.stringContaining('Durable Object session lookup failed'),
+        stack: expect.stringContaining('Durable Object reset because its code was updated.'),
         userId: 'user-1',
         userAgent: 'vitest',
         context: expect.objectContaining({
@@ -363,7 +382,7 @@ describe('chatRoutes agent session routing', () => {
           sessionId: 'chat-1',
           userId: 'user-1',
           errorName: 'Error',
-          errorMessage: 'Durable Object session lookup failed',
+          errorMessage: 'Durable Object reset because its code was updated.',
         }),
       }),
     );

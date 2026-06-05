@@ -5,6 +5,8 @@
  * importing the DO class (which depends on `cloudflare:workers`).
  */
 
+import { isTransientDurableObjectError } from '../../services/durable-object-retry';
+
 export function parseEnvInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = parseInt(value, 10);
@@ -35,6 +37,10 @@ export function isTransientError(err: unknown): boolean {
   }
 
   const msg = err.message.toLowerCase();
+
+  if (isTransientDurableObjectError(err)) {
+    return true;
+  }
 
   // Network / timeout errors — always transient
   if (msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout') || msg.includes('econnrefused') || msg.includes('enotfound')) {

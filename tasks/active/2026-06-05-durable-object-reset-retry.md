@@ -26,16 +26,16 @@ The VM agent already classifies this exact string as transient for ACP heartbeat
 
 ## Checklist
 
-- [ ] Add a TypeScript Durable Object transient classifier with explicit coverage for `Durable Object reset because its code was updated` and related reset/overload conditions.
-- [ ] Add unit tests for the classifier, including the exact string and case variants.
-- [ ] Add env-backed retry configuration to `Env` for `DO_RETRY_MAX_ATTEMPTS` and `DO_RETRY_BASE_DELAY_MS`.
-- [ ] Add a bounded ProjectData DO RPC retry helper that retries `getStub()`/`ensureProjectId()` and the target RPC when the classifier says the error is transient.
-- [ ] Apply the retry helper to `getSession()`, `getMessages()`, `linkSessionToWorkspace()`, `createAcpSession()`, and `transitionAcpSession()`.
-- [ ] Wire the classifier into `task-runner/helpers.ts:isTransientError()` before the default-true fallback.
-- [ ] Add regression tests for `isTransientError()` explicitly matching the DO reset string.
-- [ ] Add a behavioral route/service test where `getSession()` or `getMessages()` throws a DO-reset error on the first call, succeeds on retry, returns a successful chat session detail response, and does not record `chat.session_detail_load_failed`.
-- [ ] Add a retry-exhaustion test proving the error still surfaces and chat session load failure recording occurs only after retries are exhausted.
-- [ ] Run focused tests, then full quality gates.
+- [x] Add a TypeScript Durable Object transient classifier with explicit coverage for `Durable Object reset because its code was updated` and related reset/overload conditions.
+- [x] Add unit tests for the classifier, including the exact string and case variants.
+- [x] Add env-backed retry configuration to `Env` for `DO_RETRY_MAX_ATTEMPTS` and `DO_RETRY_BASE_DELAY_MS`.
+- [x] Add a bounded ProjectData DO RPC retry helper that retries `getStub()`/`ensureProjectId()` and the target RPC when the classifier says the error is transient.
+- [x] Apply the retry helper to `getSession()`, `getMessages()`, `linkSessionToWorkspace()`, `createAcpSession()`, and `transitionAcpSession()`.
+- [x] Wire the classifier into `task-runner/helpers.ts:isTransientError()` before the default-true fallback.
+- [x] Add regression tests for `isTransientError()` explicitly matching the DO reset string.
+- [x] Add a behavioral route/service test where `getSession()` or `getMessages()` throws a DO-reset error on the first call, succeeds on retry, returns a successful chat session detail response, and does not record `chat.session_detail_load_failed`.
+- [x] Add a retry-exhaustion test proving the error still surfaces and chat session load failure recording occurs only after retries are exhausted.
+- [x] Run focused tests, then full quality gates. Focused retry/classifier/chat route tests passed: 4 files, 47 tests; API typecheck passed; API lint passed with existing warnings.
 - [ ] Run specialist review: `$task-completion-validator`, `$cloudflare-specialist`, `$constitution-validator`, `$test-engineer`, and `$env-validator`.
 - [ ] Deploy the branch to staging via `deploy-staging.yml`, open a chat session immediately during/after deploy, and confirm no new `chat.session_detail_load_failed` observability event for that action.
 - [ ] Create PR, wait for CI, merge when green and staging verification passes, then monitor production deploy.
