@@ -190,6 +190,19 @@ describe('login-time superadmin self-heal (session.create.after)', () => {
     const sql = prepare.mock.calls[0][0] as string;
     expect(sql).toContain('UPDATE users');
     expect(sql).toContain("role = 'superadmin'");
+    // The guard set is load-bearing — without every clause the UPDATE would
+    // over-promote. Assert each guard is present so a future edit cannot silently
+    // drop one (substring checks here complement the real-D1 workers integration
+    // tests that execute the statement against actual rows).
+    expect(sql).toContain('WHERE id = ?1'); // only ever the signing-in user
+    expect(sql).toContain("role != 'superadmin'"); // idempotent
+    expect(sql).toContain("status != 'system'"); // never touch the sentinel
+    expect(sql).toContain("status != 'suspended'"); // never auto-elevate a suspended user
+    // Exactly-one-real-user guard: count other non-system, non-sentinel users.
+    expect(sql).toContain('u2.status != ');
+    expect(sql).toContain('u2.id != ?2');
+    // No-existing-superadmin guard.
+    expect(sql).toContain("u3.role = 'superadmin'");
     // ?1 = current user id (referenced twice), ?2 = sentinel id.
     expect(bind).toHaveBeenCalledWith('github-user-1', TRIAL_ANONYMOUS_USER_ID);
     expect(run).toHaveBeenCalledOnce();
@@ -208,11 +221,20 @@ describe('login-time superadmin self-heal (session.create.after)', () => {
     expect(bind).toHaveBeenCalledWith('github-user-1', 'custom_sentinel');
   });
 
-  it('does nothing (no query) when the session has no userId', async () => {
+  it('does nothing (no query) when the session userId is null', async () => {
     const { db, prepare } = makeSelfHealDb();
     const hook = await getSessionAfterHook({ ...fakeEnv(), DATABASE: db });
 
     await hook({ userId: null });
+
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('does nothing (no query) when the session userId is undefined', async () => {
+    const { db, prepare } = makeSelfHealDb();
+    const hook = await getSessionAfterHook({ ...fakeEnv(), DATABASE: db });
+
+    await hook({ userId: undefined });
 
     expect(prepare).not.toHaveBeenCalled();
   });

@@ -148,7 +148,7 @@ The first genuine human to sign in to a fresh deployment becomes the **superadmi
 Fresh deployments are seeded with an internal sentinel user (`system_anonymous_trials`, `status='system'`, created by a database migration) used for anonymous trials. This sentinel is **not** a real user and never counts toward "is this the first human" checks. Two mechanisms guarantee the first real human is promoted regardless of the sentinel:
 
 - **Deploy-time backfill** (migration): when a deployment has exactly one non-system human and no superadmin yet, that human is promoted to `superadmin`/`active` when migrations run. This also covers accounts created via token-login or device-flow.
-- **Login-time self-heal** (OAuth only): on each GitHub OAuth login, if the signing-in user is the only non-system human and no superadmin exists, they are promoted in a single atomic, idempotent write. A failure here never blocks login.
+- **Login-time self-heal** (all sign-in paths): on every session creation — GitHub OAuth, token-login, and device-flow — if the signing-in user is the only non-system human and no superadmin exists, they are promoted in a single atomic, idempotent write. A failure here never blocks login.
 
 Both mechanisms share the same guards and are strictly no-ops in any other state — they never promote a second user, never touch an existing superadmin, and never auto-promote a `suspended` or `system` account. On managed/multi-user deployments nothing changes.
 
@@ -156,7 +156,7 @@ Notes:
 
 - **Promotion happens regardless of `REQUIRE_APPROVAL`.** Even with open registration, the first human owns the deployment.
 - **First-login race:** if two brand-new users sign in at the exact same moment, the atomic guard ensures at most one becomes superadmin; the other remains a normal user.
-- **Cookie-cache staleness:** the session role is cached for up to 5 minutes. If you were promoted mid-session (e.g. the login-time self-heal fired on a session you already held), the new admin access becomes visible after the cache expires or, faster, after you **log out and log back in**.
+- **Cookie-cache staleness:** the session role is cached for up to 5 minutes. If you were promoted mid-session (e.g. the login-time self-heal fired on a session you already held), the cached session still shows your old `user` role. **Log out and log back in** to pick up superadmin access immediately; otherwise you must wait for the cache to expire (up to 5 minutes). If the admin dashboard is still not visible after re-logging in, the promotion did not occur — recheck the guard conditions above.
 
 ### Overriding the sentinel id (optional)
 

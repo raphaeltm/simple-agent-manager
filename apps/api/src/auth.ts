@@ -280,11 +280,14 @@ export function createAuth(env: Env) {
       },
       session: {
         create: {
-          // Login-time superadmin self-heal. Fires on OAuth (GitHub) login only —
-          // token-login and device-flow create sessions via internalAdapter.createSession
-          // and bypass this hook; the data migration covers those paths and the known
-          // orphaned victim. Promotes the sole real user to superadmin/active on a
-          // sentinel-orphaned or fresh deployment (see LOGIN_SELF_HEAL_SQL).
+          // Login-time superadmin self-heal. Fires on EVERY session creation —
+          // OAuth (GitHub), token-login, and device-flow all route through
+          // internalAdapter.createSession -> createWithHooks, which runs this
+          // session.create.after hook. Promotes the sole real user to
+          // superadmin/active on a sentinel-orphaned or fresh deployment (see
+          // LOGIN_SELF_HEAL_SQL). The data migration is the deploy-time guarantee:
+          // it heals the known orphaned victim at migration time regardless of
+          // whether that user ever signs in again.
           //
           // The try/catch is LOAD-BEARING: better-auth awaits session.create.after
           // hooks before returning the login response, so an uncaught throw would

@@ -19,6 +19,19 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createAuth } from '../../src/auth';
 import migrationSql from '../../src/db/migrations/0062_login_time_superadmin_self_heal.sql?raw';
 
+/**
+ * Miniflare's D1 `exec()` splits its input on newlines and runs each line as a
+ * separate statement. The migration is a single multi-line UPDATE preceded by a
+ * 28-line `--` comment block. Naively collapsing newlines to spaces would fold
+ * those `--` comments onto the same line as the UPDATE, turning the entire
+ * statement into one trailing line-comment that never executes. Strip the
+ * comment lines first, THEN join, so a single comment-free statement reaches D1.
+ */
+const MIGRATION_UPDATE_SQL = migrationSql
+  .split('\n')
+  .filter((line) => !line.trim().startsWith('--'))
+  .join(' ');
+
 interface UserRow {
   id: string;
   role: string;
@@ -99,7 +112,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
   it('promotes the sole real user when only the sentinel co-exists', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
 
-    await env.DATABASE.exec(migrationSql.replaceAll('\n', ' '));
+    await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
     // Sentinel is never touched.
@@ -110,7 +123,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
     await insertUser('real-2', { role: 'user', status: 'active' });
 
-    await env.DATABASE.exec(migrationSql.replaceAll('\n', ' '));
+    await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
     expect(await getUser('real-1')).toMatchObject({ role: 'user' });
     expect(await getUser('real-2')).toMatchObject({ role: 'user' });
@@ -119,7 +132,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
   it('does nothing when a non-system superadmin already exists', async () => {
     await insertUser('admin-1', { role: 'superadmin', status: 'active' });
 
-    await env.DATABASE.exec(migrationSql.replaceAll('\n', ' '));
+    await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
     // The would-be victim count is 1 real user, but a superadmin exists -> no-op.
     expect(await getUser('admin-1')).toMatchObject({ role: 'superadmin' });
@@ -128,7 +141,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
   it('never auto-elevates a suspended sole user', async () => {
     await insertUser('real-1', { role: 'user', status: 'suspended' });
 
-    await env.DATABASE.exec(migrationSql.replaceAll('\n', ' '));
+    await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
     expect(await getUser('real-1')).toMatchObject({ role: 'user', status: 'suspended' });
   });
@@ -136,9 +149,21 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
   it('promotes a sole pending user (edge case 10)', async () => {
     await insertUser('real-1', { role: 'user', status: 'pending' });
 
-    await env.DATABASE.exec(migrationSql.replaceAll('\n', ' '));
+    await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+  });
+
+  it('is a no-op on a sentinel-only deployment (no real users to promote)', async () => {
+    // Only the system sentinel exists (the resetUsers baseline). The migration must
+    // not promote it — there is no real human to heal.
+    await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
+
+    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    const superadmins = await env.DATABASE.prepare(
+      `SELECT COUNT(*) AS n FROM users WHERE role = 'superadmin'`,
+    ).first<{ n: number }>();
+    expect(superadmins?.n).toBe(0);
   });
 });
 
