@@ -98,6 +98,26 @@ const jsonBody = (schema: SchemaObject | ReferenceObject) => ({
   content: json(schema),
 });
 
+// Factory for authenticated GET path items. Collapses the repeated
+// `get: { ... security: bearerSecurity ... }` boilerplate shared by every
+// read endpoint into a single shape so the contract stays DRY.
+const getOp = (
+  operationId: string,
+  summary: string,
+  tags: string[],
+  responses: OperationObject['responses'],
+  parameters?: OperationObject['parameters'],
+): Partial<Record<'get' | 'post', OperationObject>> => ({
+  get: {
+    operationId,
+    summary,
+    tags,
+    security: bearerSecurity,
+    ...(parameters ? { parameters } : {}),
+    responses,
+  },
+});
+
 const projectId = pathParam('projectId', 'Project ID.');
 const sessionId = pathParam('sessionId', 'Chat session ID.');
 const taskId = pathParam('taskId', 'Task ID.');
@@ -180,59 +200,47 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         },
       },
     },
-    '/api/projects': {
-      get: {
-        operationId: 'listProjects',
-        summary: 'List projects visible to the authenticated user.',
-        tags: ['Projects'],
-        security: bearerSecurity,
-        parameters: [
-          queryParam('limit', integerSchema(), 'Maximum number of projects to return.'),
-          queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-        ],
-        responses: { '200': ok(ref('ListProjectsResponse')) },
-      },
-    },
-    '/api/projects/{projectId}': {
-      get: {
-        operationId: 'getProject',
-        summary: 'Get project details.',
-        tags: ['Projects'],
-        security: bearerSecurity,
-        parameters: [projectId],
-        responses: { '200': ok(ref('ProjectDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      },
-    },
-    '/api/projects/{projectId}/sessions': {
-      get: {
-        operationId: 'listProjectSessions',
-        summary: 'List chat sessions for a project.',
-        tags: ['Sessions'],
-        security: bearerSecurity,
-        parameters: [
-          projectId,
-          queryParam('status', stringSchema(), 'Optional session status filter.'),
-          queryParam('limit', integerSchema(), 'Maximum number of sessions to return.'),
-          queryParam('offset', integerSchema(), 'Offset for session pagination.'),
-        ],
-        responses: { '200': ok(ref('ListSessionsResponse')) },
-      },
-    },
-    '/api/projects/{projectId}/sessions/{sessionId}': {
-      get: {
-        operationId: 'getProjectSession',
-        summary: 'Get a chat session with messages.',
-        tags: ['Sessions'],
-        security: bearerSecurity,
-        parameters: [
-          projectId,
-          sessionId,
-          queryParam('limit', integerSchema(), 'Maximum number of messages to return.'),
-          queryParam('before', integerSchema(), 'Message pagination cursor.'),
-        ],
-        responses: { '200': ok(ref('SessionDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      },
-    },
+    '/api/projects': getOp(
+      'listProjects',
+      'List projects visible to the authenticated user.',
+      ['Projects'],
+      { '200': ok(ref('ListProjectsResponse')) },
+      [
+        queryParam('limit', integerSchema(), 'Maximum number of projects to return.'),
+        queryParam('cursor', stringSchema(), 'Pagination cursor.'),
+      ],
+    ),
+    '/api/projects/{projectId}': getOp(
+      'getProject',
+      'Get project details.',
+      ['Projects'],
+      { '200': ok(ref('ProjectDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
+      [projectId],
+    ),
+    '/api/projects/{projectId}/sessions': getOp(
+      'listProjectSessions',
+      'List chat sessions for a project.',
+      ['Sessions'],
+      { '200': ok(ref('ListSessionsResponse')) },
+      [
+        projectId,
+        queryParam('status', stringSchema(), 'Optional session status filter.'),
+        queryParam('limit', integerSchema(), 'Maximum number of sessions to return.'),
+        queryParam('offset', integerSchema(), 'Offset for session pagination.'),
+      ],
+    ),
+    '/api/projects/{projectId}/sessions/{sessionId}': getOp(
+      'getProjectSession',
+      'Get a chat session with messages.',
+      ['Sessions'],
+      { '200': ok(ref('SessionDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
+      [
+        projectId,
+        sessionId,
+        queryParam('limit', integerSchema(), 'Maximum number of messages to return.'),
+        queryParam('before', integerSchema(), 'Message pagination cursor.'),
+      ],
+    ),
     '/api/projects/{projectId}/tasks/submit': {
       post: {
         operationId: 'submitProjectTask',
@@ -244,139 +252,103 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         responses: { '202': ok(ref('SubmitTaskResponse'), 'Accepted') },
       },
     },
-    '/api/projects/{projectId}/tasks': {
-      get: {
-        operationId: 'listProjectTasks',
-        summary: 'List project tasks. The CLI currently uses status=draft for ideas.',
-        tags: ['Tasks'],
-        security: bearerSecurity,
-        parameters: [
-          projectId,
-          queryParam('status', stringSchema('Task status filter.'), 'Task status filter.'),
-          queryParam('limit', integerSchema(), 'Maximum number of tasks to return.'),
-          queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-        ],
-        responses: { '200': ok(ref('ListTasksResponse')) },
-      },
-    },
-    '/api/projects/{projectId}/tasks/{taskId}': {
-      get: {
-        operationId: 'getProjectTask',
-        summary: 'Get project task details.',
-        tags: ['Tasks'],
-        security: bearerSecurity,
-        parameters: [projectId, taskId],
-        responses: { '200': ok(ref('TaskDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      },
-    },
-    '/api/projects/{projectId}/library': {
-      get: {
-        operationId: 'listProjectLibraryFiles',
-        summary: 'List files in the project library.',
-        tags: ['Library'],
-        security: bearerSecurity,
-        parameters: [
-          projectId,
-          queryParam('tag', stringSchema(), 'Tag filter.'),
-          queryParam('uploadSource', stringSchema(), 'Upload source filter.'),
-          queryParam('limit', integerSchema(), 'Maximum number of files to return.'),
-          queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-        ],
-        responses: { '200': ok(ref('ListFilesResponse')) },
-      },
-    },
-    '/api/projects/{projectId}/knowledge': {
-      get: {
-        operationId: 'listProjectKnowledge',
-        summary: 'List project knowledge graph entities.',
-        tags: ['Knowledge'],
-        security: bearerSecurity,
-        parameters: [projectId, queryParam('limit', integerSchema(), 'Maximum number of entities to return.')],
-        responses: { '200': ok(ref('ListKnowledgeEntitiesResponse')) },
-      },
-    },
-    '/api/notifications': {
-      get: {
-        operationId: 'listNotifications',
-        summary: 'List user notifications.',
-        tags: ['Notifications'],
-        security: bearerSecurity,
-        parameters: [
-          queryParam('limit', integerSchema(), 'Maximum number of notifications to return.'),
-          queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-        ],
-        responses: { '200': ok(ref('ListNotificationsResponse')) },
-      },
-    },
-    '/api/projects/{projectId}/triggers': {
-      get: {
-        operationId: 'listProjectTriggers',
-        summary: 'List project triggers.',
-        tags: ['Triggers'],
-        security: bearerSecurity,
-        parameters: [projectId],
-        responses: { '200': ok(ref('ListTriggersResponse')) },
-      },
-    },
-    '/api/projects/{projectId}/agent-profiles': {
-      get: {
-        operationId: 'listProjectAgentProfiles',
-        summary: 'List project and builtin agent profiles.',
-        tags: ['Agent profiles'],
-        security: bearerSecurity,
-        parameters: [projectId],
-        responses: { '200': ok(ref('ListAgentProfilesResponse')) },
-      },
-    },
-    '/api/projects/{projectId}/activity': {
-      get: {
-        operationId: 'listProjectActivity',
-        summary: 'List project activity events.',
-        tags: ['Activity'],
-        security: bearerSecurity,
-        parameters: [projectId, queryParam('limit', integerSchema(), 'Maximum number of events to return.')],
-        responses: { '200': ok(ref('ListActivityEventsResponse')) },
-      },
-    },
-    '/api/nodes': {
-      get: {
-        operationId: 'listNodes',
-        summary: 'List infrastructure nodes for the authenticated user.',
-        tags: ['Nodes'],
-        security: bearerSecurity,
-        responses: { '200': ok(arrayOf(ref('Node'))) },
-      },
-    },
-    '/api/workspaces/{id}': {
-      get: {
-        operationId: 'getWorkspace',
-        summary: 'Get workspace details.',
-        tags: ['Workspaces'],
-        security: bearerSecurity,
-        parameters: [workspaceId],
-        responses: { '200': ok(ref('WorkspaceResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      },
-    },
-    '/api/workspaces/{id}/ports': {
-      get: {
-        operationId: 'listWorkspacePorts',
-        summary: 'List detected ports for a workspace.',
-        tags: ['Workspaces'],
-        security: bearerSecurity,
-        parameters: [workspaceId],
-        responses: { '200': ok(ref('PortsResponse')) },
-      },
-    },
-    '/api/workspaces/{id}/port-access': {
-      get: {
-        operationId: 'createWorkspacePortAccess',
-        summary: 'Create an access token and URL for a workspace port.',
-        tags: ['Workspaces'],
-        security: bearerSecurity,
-        parameters: [workspaceId, queryParam('port', integerSchema(), 'Workspace port number.')],
-        responses: { '200': ok(ref('PortAccessResponse')) },
-      },
-    },
+    '/api/projects/{projectId}/tasks': getOp(
+      'listProjectTasks',
+      'List project tasks. The CLI currently uses status=draft for ideas.',
+      ['Tasks'],
+      { '200': ok(ref('ListTasksResponse')) },
+      [
+        projectId,
+        queryParam('status', stringSchema('Task status filter.'), 'Task status filter.'),
+        queryParam('limit', integerSchema(), 'Maximum number of tasks to return.'),
+        queryParam('cursor', stringSchema(), 'Pagination cursor.'),
+      ],
+    ),
+    '/api/projects/{projectId}/tasks/{taskId}': getOp(
+      'getProjectTask',
+      'Get project task details.',
+      ['Tasks'],
+      { '200': ok(ref('TaskDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
+      [projectId, taskId],
+    ),
+    '/api/projects/{projectId}/library': getOp(
+      'listProjectLibraryFiles',
+      'List files in the project library.',
+      ['Library'],
+      { '200': ok(ref('ListFilesResponse')) },
+      [
+        projectId,
+        queryParam('tag', stringSchema(), 'Tag filter.'),
+        queryParam('uploadSource', stringSchema(), 'Upload source filter.'),
+        queryParam('limit', integerSchema(), 'Maximum number of files to return.'),
+        queryParam('cursor', stringSchema(), 'Pagination cursor.'),
+      ],
+    ),
+    '/api/projects/{projectId}/knowledge': getOp(
+      'listProjectKnowledge',
+      'List project knowledge graph entities.',
+      ['Knowledge'],
+      { '200': ok(ref('ListKnowledgeEntitiesResponse')) },
+      [projectId, queryParam('limit', integerSchema(), 'Maximum number of entities to return.')],
+    ),
+    '/api/notifications': getOp(
+      'listNotifications',
+      'List user notifications.',
+      ['Notifications'],
+      { '200': ok(ref('ListNotificationsResponse')) },
+      [
+        queryParam('limit', integerSchema(), 'Maximum number of notifications to return.'),
+        queryParam('cursor', stringSchema(), 'Pagination cursor.'),
+      ],
+    ),
+    '/api/projects/{projectId}/triggers': getOp(
+      'listProjectTriggers',
+      'List project triggers.',
+      ['Triggers'],
+      { '200': ok(ref('ListTriggersResponse')) },
+      [projectId],
+    ),
+    '/api/projects/{projectId}/agent-profiles': getOp(
+      'listProjectAgentProfiles',
+      'List project and builtin agent profiles.',
+      ['Agent profiles'],
+      { '200': ok(ref('ListAgentProfilesResponse')) },
+      [projectId],
+    ),
+    '/api/projects/{projectId}/activity': getOp(
+      'listProjectActivity',
+      'List project activity events.',
+      ['Activity'],
+      { '200': ok(ref('ListActivityEventsResponse')) },
+      [projectId, queryParam('limit', integerSchema(), 'Maximum number of events to return.')],
+    ),
+    '/api/nodes': getOp(
+      'listNodes',
+      'List infrastructure nodes for the authenticated user.',
+      ['Nodes'],
+      { '200': ok(arrayOf(ref('Node'))) },
+    ),
+    '/api/workspaces/{id}': getOp(
+      'getWorkspace',
+      'Get workspace details.',
+      ['Workspaces'],
+      { '200': ok(ref('WorkspaceResponse')), '404': ok(ref('ApiError'), 'Not found') },
+      [workspaceId],
+    ),
+    '/api/workspaces/{id}/ports': getOp(
+      'listWorkspacePorts',
+      'List detected ports for a workspace.',
+      ['Workspaces'],
+      { '200': ok(ref('PortsResponse')) },
+      [workspaceId],
+    ),
+    '/api/workspaces/{id}/port-access': getOp(
+      'createWorkspacePortAccess',
+      'Create an access token and URL for a workspace port.',
+      ['Workspaces'],
+      { '200': ok(ref('PortAccessResponse')) },
+      [workspaceId, queryParam('port', integerSchema(), 'Workspace port number.')],
+    ),
   },
   components: {
     securitySchemes: {
