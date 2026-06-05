@@ -93,6 +93,10 @@ export interface Task {
   taskMode: TaskMode;
   dispatchDepth: number;
   agentProfileHint: string | null;
+  /** Resolved skill applied to this task, if any. */
+  skillId: string | null;
+  /** Raw skill name/id the submitter requested (pre-resolution). */
+  skillHint: string | null;
   blocked?: boolean;
   /** What created this task: 'user' (manual), 'cron' (scheduled trigger), 'webhook', 'mcp'. */
   triggeredBy: string;
