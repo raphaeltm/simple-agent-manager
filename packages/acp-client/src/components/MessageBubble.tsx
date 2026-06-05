@@ -138,7 +138,7 @@ function makeCodeComponent(inlineClassName: string): NonNullable<Components['cod
     if (match) {
       return (
         <div className="my-2">
-          <HighlightedCode code={code} language={match[1]} />
+          <HighlightedCode code={code} language={match[1] ?? ''} />
         </div>
       );
     }
