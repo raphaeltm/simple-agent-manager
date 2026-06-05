@@ -420,7 +420,7 @@
 
   function buildGhScript(data, repo) {
     var lines = [];
-    var r = repo ? ' --repo ' + repo : '';
+    var r = repo ? ' --repo ' + shellQuote(repo) : '';
     data.vars.forEach(function (row) {
       var v = row.value && row.value.length > 0 ? row.value : (row.fallback || '');
       if (!v) return;
@@ -479,7 +479,7 @@
     var deployLink = document.getElementById('sh-deploy-workflow');
     var deployNote = document.getElementById('sh-deploy-workflow-note');
     if (deployLink) {
-      if (/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+      if (/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(repo)) {
         deployLink.href = 'https://github.com/' + repo + '/actions/workflows/deploy.yml';
         if (deployNote) deployNote.textContent = 'Links straight to your fork — click "Run workflow", pick the main branch, and go.';
       } else {
@@ -537,13 +537,20 @@
     stepItems.forEach(function (item) {
       var num = parseInt(item.getAttribute('data-num'), 10);
       var btn = item.querySelector('[data-goto]');
-      item.classList.toggle('is-current', num === state.step);
+      var isActive = num === state.step;
+      item.classList.toggle('is-current', isActive);
       // Done = visited and moved past (anything below the furthest point we reached, except the current step).
       item.classList.toggle('is-done', num !== state.step && num < state.furthest);
-      if (btn) btn.disabled = num > state.furthest;
+      if (btn) {
+        btn.disabled = num > state.furthest;
+        btn.setAttribute('aria-current', isActive ? 'step' : 'false');
+      }
     });
 
-    if (progressLabel) progressLabel.textContent = 'Step ' + state.step + ' of ' + LAST;
+    if (progressLabel) {
+      progressLabel.hidden = state.step === 0;
+      progressLabel.textContent = 'Step ' + state.step + ' of ' + LAST;
+    }
     if (progressFill) progressFill.style.width = Math.round((state.step / LAST) * 100) + '%';
 
     if (backBtn) backBtn.hidden = state.step === 0;
@@ -571,6 +578,14 @@
     if (state.step > state.furthest) state.furthest = state.step;
     saveState();
     render();
+    // Move focus to the new step's heading so screen-reader and keyboard users
+    // get announced context on each transition (only on user navigation).
+    var id = STEP_IDS[state.step];
+    var heading = panels[id] && panels[id].querySelector('.sh-h1, .sh-h2');
+    if (heading) {
+      heading.setAttribute('tabindex', '-1');
+      try { heading.focus(); } catch (e) { /* noop */ }
+    }
   }
 
   function next() {

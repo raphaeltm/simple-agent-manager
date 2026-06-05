@@ -53,7 +53,7 @@ const cfOptionalPermissions = [
           <img src="/images/sam-head.png" alt="" class="sh-rail-mascot" width="36" height="36" />
           <div>
             <div class="sh-rail-title">Self-host SAM</div>
-            <div class="sh-rail-sub" id="sh-progress-label">Step 0 of 8</div>
+            <div class="sh-rail-sub" id="sh-progress-label" aria-live="polite" hidden>Step 0 of 8</div>
           </div>
         </div>
         <ol class="sh-steps">
@@ -228,13 +228,15 @@ const cfOptionalPermissions = [
             </summary>
             <div class="sh-optional-perms-body">
               <p>Skip these unless you specifically want the feature they enable. Add them to the same token if you do.</p>
-              {cfOptionalPermissions.map((p) => (
-                <div class="sh-perm-row sh-perm-row-optional" role="row">
-                  <span role="cell" data-perm-type={p.type}>{p.type}</span>
-                  <span role="cell">{p.resource}<span class="sh-perm-note">{p.note}</span></span>
-                  <span role="cell"><span class={`sh-access sh-access-${p.access.toLowerCase()}`}>{p.access}</span></span>
-                </div>
-              ))}
+              <div role="table" aria-label="Optional Cloudflare token permissions">
+                {cfOptionalPermissions.map((p) => (
+                  <div class="sh-perm-row sh-perm-row-optional" role="row">
+                    <span role="cell" data-perm-type={p.type}>{p.type}</span>
+                    <span role="cell">{p.resource}<span class="sh-perm-note">{p.note}</span></span>
+                    <span role="cell"><span class={`sh-access sh-access-${p.access.toLowerCase()}`}>{p.access}</span></span>
+                  </div>
+                ))}
+              </div>
             </div>
           </details>
           <div class="sh-callout sh-callout-info">
@@ -385,6 +387,7 @@ const cfOptionalPermissions = [
               <textarea id="sh-private-key" rows="5" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;…&#10;-----END RSA PRIVATE KEY-----" spellcheck="false" data-secret></textarea>
               <span class="sh-hint">We base64-encode this locally for <code>GH_APP_PRIVATE_KEY</code>.</span>
             </div>
+            <p class="sh-microcopy">The Client Secret and Private Key are never persisted to your browser storage — they live only in this tab until you close it.</p>
           </div>
         </article>
 
@@ -934,8 +937,10 @@ const cfOptionalPermissions = [
   .sh-btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    padding: 11px 22px;
+    padding: 13px 22px;
+    min-height: 48px;
     font-size: 0.92rem;
     font-weight: 500;
     font-family: var(--font-body);
@@ -945,6 +950,7 @@ const cfOptionalPermissions = [
     transition: all 0.18s;
     text-decoration: none;
   }
+  .sh-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   .sh-btn-primary {
     background: var(--color-accent);
     color: #fff;
@@ -983,8 +989,10 @@ const cfOptionalPermissions = [
     gap: 6px 16px;
     margin: 0;
   }
-  .sh-derived dt { color: var(--color-fg-muted); font-size: 0.85rem; }
-  .sh-derived dd {
+  /* Global: the GitHub App preview dt/dd are created at runtime by JS and never
+     receive Astro's scope attribute, so these rules must not be scoped. */
+  :global(.sh-derived dt) { color: var(--color-fg-muted); font-size: 0.85rem; }
+  :global(.sh-derived dd) {
     margin: 0;
     font-family: var(--font-mono);
     font-size: 0.82rem;
@@ -1122,10 +1130,15 @@ const cfOptionalPermissions = [
     color: var(--color-fg-muted);
     cursor: pointer;
     padding: 5px 7px;
+    min-width: 44px;
+    min-height: 44px;
     display: inline-flex;
+    align-items: center;
+    justify-content: center;
     transition: color 0.15s, border-color 0.15s;
   }
   .sh-copy-btn:hover, .sh-copy-btn.is-copied { color: var(--color-accent); border-color: var(--color-accent); }
+  .sh-copy-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
   /* Secrets output rows */
   .sh-subhead {
@@ -1174,7 +1187,9 @@ const cfOptionalPermissions = [
   :global(.sh-secret-act) {
     display: flex;
     align-items: center;
+    justify-content: center;
     padding: 0 10px;
+    min-height: 44px;
     background: transparent;
     border: none;
     border-left: 1px solid var(--color-border);
@@ -1184,6 +1199,7 @@ const cfOptionalPermissions = [
     flex-shrink: 0;
   }
   :global(.sh-secret-act:hover), :global(.sh-secret-act.is-copied) { color: var(--color-accent); }
+  :global(.sh-secret-act:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
   :global(.sh-secret-act:disabled) { opacity: 0.4; cursor: not-allowed; }
   :global(.sh-secret-act svg) { width: 15px; height: 15px; }
   /* Action cluster (reveal + copy) on the right edge of a secret row. */
