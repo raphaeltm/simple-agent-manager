@@ -1,0 +1,154 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "SAM Home" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e6]: SAM
+      - navigation "Main navigation" [ref=e7]:
+        - link "Features" [ref=e8] [cursor=pointer]:
+          - /url: /#features
+        - link "How It Works" [ref=e9] [cursor=pointer]:
+          - /url: /#how-it-works
+        - link "Comparison" [ref=e10] [cursor=pointer]:
+          - /url: /#comparison
+        - link "Enterprise" [ref=e11] [cursor=pointer]:
+          - /url: /enterprise/
+        - link "Integrations" [ref=e12] [cursor=pointer]:
+          - /url: /integrations/
+        - link "Docs" [ref=e13] [cursor=pointer]:
+          - /url: /docs/
+        - link "Blog" [ref=e14] [cursor=pointer]:
+          - /url: /blog/
+      - generic [ref=e15]:
+        - link "GitHub repository" [ref=e16] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+          - img [ref=e17]
+        - link "Get Started" [ref=e19] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+  - main [ref=e20]:
+    - generic [ref=e22]:
+      - text: Integrations
+      - heading "Pick your agent. Pick your cloud." [level=1] [ref=e23]:
+        - text: Pick your agent.
+        - text: Pick your cloud.
+      - paragraph [ref=e24]: SAM works with the best AI coding agents and cloud providers. Bring your own API keys, bring your own infrastructure — run agents your way.
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - heading "AI Coding Agents" [level=2] [ref=e28]
+        - paragraph [ref=e29]: Run any coding agent on your infrastructure
+      - generic [ref=e30]:
+        - link "Claude Code logo Claude Code AI Coding Agents Run Claude Code agents in parallel on your infrastructure" [ref=e31] [cursor=pointer]:
+          - /url: /integrations/claude-code/
+          - img "Claude Code logo" [ref=e33]
+          - generic [ref=e34]:
+            - heading "Claude Code" [level=3] [ref=e35]
+            - text: AI Coding Agents
+            - paragraph [ref=e36]: Run Claude Code agents in parallel on your infrastructure
+          - img [ref=e38]
+        - link "OpenAI Codex logo OpenAI Codex AI Coding Agents Run OpenAI Codex agents in cloud workspaces" [ref=e40] [cursor=pointer]:
+          - /url: /integrations/codex/
+          - img "OpenAI Codex logo" [ref=e42]
+          - generic [ref=e43]:
+            - heading "OpenAI Codex" [level=3] [ref=e44]
+            - text: AI Coding Agents
+            - paragraph [ref=e45]: Run OpenAI Codex agents in cloud workspaces
+          - img [ref=e47]
+        - link "Gemini CLI logo Gemini CLI AI Coding Agents Run Google Gemini CLI agents on your cloud VMs" [ref=e49] [cursor=pointer]:
+          - /url: /integrations/gemini-cli/
+          - img "Gemini CLI logo" [ref=e51]
+          - generic [ref=e52]:
+            - heading "Gemini CLI" [level=3] [ref=e53]
+            - text: AI Coding Agents
+            - paragraph [ref=e54]: Run Google Gemini CLI agents on your cloud VMs
+          - img [ref=e56]
+        - link "Mistral Vibe logo Mistral Vibe AI Coding Agents Run Mistral Vibe coding agents at scale" [ref=e58] [cursor=pointer]:
+          - /url: /integrations/mistral-vibe/
+          - img "Mistral Vibe logo" [ref=e60]
+          - generic [ref=e61]:
+            - heading "Mistral Vibe" [level=3] [ref=e62]
+            - text: AI Coding Agents
+            - paragraph [ref=e63]: Run Mistral Vibe coding agents at scale
+          - img [ref=e65]
+        - link "OpenCode logo OpenCode AI Coding Agents Run OpenCode agents with any inference provider" [ref=e67] [cursor=pointer]:
+          - /url: /integrations/opencode/
+          - img "OpenCode logo" [ref=e69]
+          - generic [ref=e70]:
+            - heading "OpenCode" [level=3] [ref=e71]
+            - text: AI Coding Agents
+            - paragraph [ref=e72]: Run OpenCode agents with any inference provider
+          - img [ref=e74]
+    - generic [ref=e77]:
+      - generic [ref=e78]:
+        - heading "Cloud Providers" [level=2] [ref=e79]
+        - paragraph [ref=e80]: Bring your own cloud — your VMs, your data
+      - generic [ref=e81]:
+        - link "Hetzner Cloud logo Hetzner Cloud Cloud Providers Run coding agents on affordable Hetzner Cloud VMs" [ref=e82] [cursor=pointer]:
+          - /url: /integrations/hetzner/
+          - img "Hetzner Cloud logo" [ref=e84]
+          - generic [ref=e85]:
+            - heading "Hetzner Cloud" [level=3] [ref=e86]
+            - text: Cloud Providers
+            - paragraph [ref=e87]: Run coding agents on affordable Hetzner Cloud VMs
+          - img [ref=e89]
+        - link "Scaleway logo Scaleway Cloud Providers Run coding agents on Scaleway cloud infrastructure" [ref=e91] [cursor=pointer]:
+          - /url: /integrations/scaleway/
+          - img "Scaleway logo" [ref=e93]
+          - generic [ref=e94]:
+            - heading "Scaleway" [level=3] [ref=e95]
+            - text: Cloud Providers
+            - paragraph [ref=e96]: Run coding agents on Scaleway cloud infrastructure
+          - img [ref=e98]
+        - link "Google Cloud Platform logo Google Cloud Platform Cloud Providers Run coding agents on Google Cloud infrastructure" [ref=e100] [cursor=pointer]:
+          - /url: /integrations/gcp/
+          - img "Google Cloud Platform logo" [ref=e102]
+          - generic [ref=e103]:
+            - heading "Google Cloud Platform" [level=3] [ref=e104]
+            - text: Cloud Providers
+            - paragraph [ref=e105]: Run coding agents on Google Cloud infrastructure
+          - img [ref=e107]
+    - generic [ref=e110]:
+      - generic [ref=e111]:
+        - heading "AI Models" [level=2] [ref=e112]
+        - paragraph [ref=e113]: Use the best model for every task
+      - generic [ref=e114]:
+        - link "Cloudflare Workers AI logo Cloudflare Workers AI AI Models Free AI inference built into the platform" [ref=e115] [cursor=pointer]:
+          - /url: /integrations/cloudflare-workers-ai/
+          - img "Cloudflare Workers AI logo" [ref=e117]
+          - generic [ref=e118]:
+            - heading "Cloudflare Workers AI" [level=3] [ref=e119]
+            - text: AI Models
+            - paragraph [ref=e120]: Free AI inference built into the platform
+          - img [ref=e122]
+        - link "GitHub logo GitHub AI Models Deep GitHub integration for repository management" [ref=e124] [cursor=pointer]:
+          - /url: /integrations/github/
+          - img "GitHub logo" [ref=e126]
+          - generic [ref=e127]:
+            - heading "GitHub" [level=3] [ref=e128]
+            - text: AI Models
+            - paragraph [ref=e129]: Deep GitHub integration for repository management
+          - img [ref=e131]
+    - generic [ref=e135]:
+      - heading "Ready to run agents on your infrastructure?" [level=2] [ref=e136]
+      - paragraph [ref=e137]: Pick any agent, pick any cloud. SAM handles the rest.
+      - generic [ref=e138]:
+        - link "Get Started" [ref=e139] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+          - text: Get Started
+          - img [ref=e140]
+        - link "Read the Docs" [ref=e142] [cursor=pointer]:
+          - /url: /docs/
+    - generic [ref=e144]:
+      - generic [ref=e145]:
+        - img [ref=e146]
+        - generic [ref=e147]: Simple Agent Manager
+      - generic [ref=e148]:
+        - link "Home" [ref=e149] [cursor=pointer]:
+          - /url: /
+        - link "Blog" [ref=e150] [cursor=pointer]:
+          - /url: /blog/
+        - link "Integrations" [ref=e151] [cursor=pointer]:
+          - /url: /integrations/
+        - link "GitHub" [ref=e152] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+      - paragraph [ref=e153]: © 2026 Simple Agent Manager. Open source under AGPL-3.0.

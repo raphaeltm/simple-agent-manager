@@ -1,0 +1,481 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "SAM Home" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e6]: SAM
+      - navigation "Main navigation" [ref=e7]:
+        - link "Features" [ref=e8] [cursor=pointer]:
+          - /url: /#features
+        - link "How It Works" [ref=e9] [cursor=pointer]:
+          - /url: /#how-it-works
+        - link "Comparison" [ref=e10] [cursor=pointer]:
+          - /url: /#comparison
+        - link "Enterprise" [ref=e11] [cursor=pointer]:
+          - /url: /enterprise/
+        - link "Integrations" [ref=e12] [cursor=pointer]:
+          - /url: /integrations/
+        - link "Docs" [ref=e13] [cursor=pointer]:
+          - /url: /docs/
+        - link "Blog" [ref=e14] [cursor=pointer]:
+          - /url: /blog/
+      - generic [ref=e15]:
+        - link "GitHub repository" [ref=e16] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+          - img [ref=e17]
+        - link "Get Started" [ref=e19] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - generic:
+        - img
+      - generic [ref=e22]:
+        - generic [ref=e23]: Open Source & Self-Hosted
+        - heading "The open-source platform for multi-agent workflows" [level=1] [ref=e25]:
+          - text: The open-source platform for
+          - text: multi-agent workflows
+        - paragraph [ref=e26]: Every agent runs in its own isolated container on your cloud. Run 5 or 500 in parallel — SAM handles provisioning, scheduling, and cleanup.
+        - generic [ref=e27]:
+          - link "Get Started" [ref=e28] [cursor=pointer]:
+            - /url: https://app.simple-agent-manager.org
+            - text: Get Started
+            - img [ref=e29]
+          - link "View on GitHub" [ref=e31] [cursor=pointer]:
+            - /url: https://github.com/raphaeltm/simple-agent-manager
+            - img [ref=e32]
+            - text: View on GitHub
+        - img "SAM project chat showing an agent working on a task — tool calls, code execution, and real-time progress" [ref=e36]
+    - generic [ref=e39]:
+      - generic [ref=e40]: Supports
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - img [ref=e43]
+          - generic [ref=e47]: Claude Code
+        - generic [ref=e48]: +
+        - generic [ref=e49]:
+          - img [ref=e50]
+          - generic [ref=e53]: OpenAI Codex
+        - generic [ref=e54]: +
+        - generic [ref=e55]:
+          - img [ref=e56]
+          - generic [ref=e59]: Gemini CLI
+        - generic [ref=e60]: +
+        - generic [ref=e61]:
+          - img [ref=e62]
+          - generic [ref=e65]: Mistral Vibe
+        - generic [ref=e66]: +
+        - generic [ref=e67]:
+          - img [ref=e68]
+          - generic [ref=e71]: OpenCode
+        - generic [ref=e72]: +
+        - generic [ref=e73]:
+          - img [ref=e74]
+          - generic [ref=e77]: Amp
+      - generic [ref=e78]:
+        - generic [ref=e79]: AGPL-3.0 Licensed
+        - generic [ref=e80]: Self-Hosted
+        - generic [ref=e81]: BYOC
+    - separator [ref=e82]
+    - generic [ref=e83]:
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - text: Chat-First Development
+          - heading "Describe what you want. Watch it happen." [level=2] [ref=e87]:
+            - text: Describe what you want.
+            - text: Watch it happen.
+          - paragraph [ref=e88]: Talk to your agents like teammates. Pick the right model for the job, attach files, and watch them write code, run tests, and open PRs — all from a single chat.
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - generic [ref=e91]:
+              - heading "Multiple agents, one interface" [level=3] [ref=e92]
+              - paragraph [ref=e93]: Switch between Claude Code, Codex, Gemini CLI, Amp, and more — each configured with their own API key or OAuth token. Choose the right agent for the task without leaving the chat.
+              - link "Explore Chat-First Development" [ref=e94] [cursor=pointer]:
+                - /url: /features/chat/
+                - text: Explore Chat-First Development
+                - img [ref=e95]
+            - link "Multiple agents, one interface" [ref=e97] [cursor=pointer]:
+              - /url: /features/chat/
+              - generic [ref=e98]:
+                - img "Project chat with agent selector bar showing Brainstormer, Codex 5.5 Chat, Opus 4.6 Chat, Picky CTO, and more profiles" [ref=e100]
+                - generic [ref=e101]: Agent profiles listed at the bottom of the chat — click to switch
+          - generic [ref=e102]:
+            - generic [ref=e103]:
+              - heading "Real-time visibility into agent work" [level=3] [ref=e104]
+              - paragraph [ref=e105]: Tool calls, file edits, and shell commands are streamed to your browser as they happen. You can read every step the agent takes and cancel at any time.
+              - link "Explore Chat-First Development" [ref=e106] [cursor=pointer]:
+                - /url: /features/chat/
+                - text: Explore Chat-First Development
+                - img [ref=e107]
+            - link "Real-time visibility into agent work" [ref=e109] [cursor=pointer]:
+              - /url: /features/chat/
+              - generic [ref=e110]:
+                - img "Live chat session showing MCP tool calls, shell commands with output, file edits, and a cancel button" [ref=e112]
+                - generic [ref=e113]: Every MCP tool call, shell command, and file edit — streamed live with the ability to cancel
+      - generic [ref=e115]:
+        - generic [ref=e116]:
+          - text: Full Visibility & Control
+          - heading "See everything. Stay in control." [level=2] [ref=e117]:
+            - text: See everything.
+            - text: Stay in control.
+          - paragraph [ref=e118]: A dashboard for all your agent work. Track active tasks across projects, monitor node health, and get notified when agents need your attention.
+        - generic [ref=e119]:
+          - generic [ref=e120]:
+            - generic [ref=e121]:
+              - heading "Multi-project dashboard" [level=3] [ref=e122]
+              - paragraph [ref=e123]: See active tasks with their status, project, and timing. Below that, a project grid shows workspace counts, session counts, and last activity for each repo.
+              - link "Explore Full Visibility & Control" [ref=e124] [cursor=pointer]:
+                - /url: /features/visibility/
+                - text: Explore Full Visibility & Control
+                - img [ref=e125]
+            - link "Multi-project dashboard" [ref=e127] [cursor=pointer]:
+              - /url: /features/visibility/
+              - generic [ref=e128]:
+                - generic:
+                  - img "Dashboard with In Progress task cards and a Projects grid showing workspace and session counts per repo"
+                - generic [ref=e129]: Active tasks at the top, all projects below — click any card to jump in
+          - generic [ref=e130]:
+            - generic [ref=e131]:
+              - heading "Infrastructure you can see" [level=3] [ref=e132]
+              - paragraph [ref=e133]: Each node card shows its provider, spec, pricing, CPU/memory/disk usage, and the workspaces running on it. Create new nodes or add workspaces from the same page.
+              - link "Explore Full Visibility & Control" [ref=e134] [cursor=pointer]:
+                - /url: /features/visibility/
+                - text: Explore Full Visibility & Control
+                - img [ref=e135]
+            - link "Infrastructure you can see" [ref=e137] [cursor=pointer]:
+              - /url: /features/visibility/
+              - generic [ref=e138]:
+                - generic:
+                  - img "Three Hetzner cx43 nodes showing Running/Healthy status, resource percentages, and their workspace lists"
+                - generic [ref=e139]: Node specs, real-time resource usage, and workspace allocation
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - heading "Never miss a decision point" [level=3] [ref=e142]
+              - paragraph [ref=e143]: Notifications are categorized by type — task completions, errors, progress updates, sessions ended, PRs created, and moments where agents need human input. Filter to focus on what matters.
+              - link "Explore Full Visibility & Control" [ref=e144] [cursor=pointer]:
+                - /url: /features/visibility/
+                - text: Explore Full Visibility & Control
+                - img [ref=e145]
+            - link "Never miss a decision point" [ref=e147] [cursor=pointer]:
+              - /url: /features/visibility/
+              - generic [ref=e148]:
+                - generic:
+                  - 'img "Notification feed with filter tabs: All, Task Complete, Needs Input, Error, Progress, Session Ended, PR Created"'
+                - generic [ref=e149]: Filter by type — Task Complete, Needs Input, Error, Progress, and more
+      - generic [ref=e151]:
+        - generic [ref=e152]:
+          - text: Agents That Learn
+          - heading "Agents that remember your preferences." [level=2] [ref=e153]:
+            - text: Agents that remember
+            - text: your preferences.
+          - paragraph [ref=e154]: Build a project knowledge base that agents receive as context. Set policies that are injected into every session. Review a full log of agent activity.
+        - generic [ref=e155]:
+          - generic [ref=e156]:
+            - generic [ref=e157]:
+              - heading "Persistent project memory" [level=3] [ref=e158]
+              - paragraph [ref=e159]: Store observations about your architecture, conventions, and preferences. Each entry has a confidence score, a source (explicit or inferred), and a confirmation date so you can see what the knowledge base contains.
+              - link "Explore Agents That Learn" [ref=e160] [cursor=pointer]:
+                - /url: /features/agent-context/
+                - text: Explore Agents That Learn
+                - img [ref=e161]
+            - link "Persistent project memory" [ref=e163] [cursor=pointer]:
+              - /url: /features/agent-context/
+              - generic [ref=e164]:
+                - generic:
+                  - img "Memory observations about mobile UX, resource scheduling, and tool authorization, each with 92–95% confidence and confirmation dates"
+                - generic [ref=e165]: Each observation shows confidence, source, and when it was last confirmed
+          - generic [ref=e166]:
+            - generic [ref=e167]:
+              - heading "Project policies" [level=3] [ref=e168]
+              - paragraph [ref=e169]: Define project-level instructions like "use portals for modals" or "CLI packages must meet QA standards." Policies are tagged as preferences or rules and injected into every agent session as context.
+              - link "Explore Agents That Learn" [ref=e170] [cursor=pointer]:
+                - /url: /features/agent-context/
+                - text: Explore Agents That Learn
+                - img [ref=e171]
+            - link "Project policies" [ref=e173] [cursor=pointer]:
+              - /url: /features/agent-context/
+              - generic [ref=e174]:
+                - generic:
+                  - img "Policies page showing preference and rule entries with confidence scores, marked as instruction-only"
+                - generic [ref=e175]: Policies are instruction-only — injected into agent context, not programmatically enforced
+          - generic [ref=e176]:
+            - generic [ref=e177]:
+              - heading "Activity log" [level=3] [ref=e178]
+              - paragraph [ref=e179]: A timestamped feed of every task submission, execution step, session start/stop, and agent completion event. Filter to find specific activity across the project.
+              - link "Explore Agents That Learn" [ref=e180] [cursor=pointer]:
+                - /url: /features/agent-context/
+                - text: Explore Agents That Learn
+                - img [ref=e181]
+            - link "Activity log" [ref=e183] [cursor=pointer]:
+              - /url: /features/agent-context/
+              - generic [ref=e184]:
+                - generic:
+                  - img "Agent actions feed showing task.agent_completed, task.execution_step, session.stopped, and session.started events with timestamps"
+                - generic [ref=e185]: Every event type — task completions, execution steps, session lifecycle changes
+      - generic [ref=e187]:
+        - generic [ref=e188]:
+          - text: Idea to Execution
+          - heading "From idea to agent-ready task." [level=2] [ref=e189]:
+            - text: From idea to
+            - text: agent-ready task.
+          - paragraph [ref=e190]: Capture ideas with a problem statement and plan. Schedule recurring tasks on a weekly or daily cadence. When you are ready, dispatch an agent with one click.
+        - generic [ref=e191]:
+          - generic [ref=e192]:
+            - generic [ref=e193]:
+              - heading "Structured idea capture" [level=3] [ref=e194]
+              - paragraph [ref=e195]: Write down the problem, sketch a plan, and link related chat conversations for context. When you are ready, hit Execute to dispatch an agent that picks up the idea as a task.
+              - link "Explore Idea to Execution" [ref=e196] [cursor=pointer]:
+                - /url: /features/automation/
+                - text: Explore Idea to Execution
+                - img [ref=e197]
+            - link "Structured idea capture" [ref=e199] [cursor=pointer]:
+              - /url: /features/automation/
+              - generic [ref=e200]:
+                - generic:
+                  - img "Idea detail page with problem description, phased plan, green Execute button, and conversations sidebar"
+                - generic [ref=e201]: Each idea has a problem statement, plan, and a button to dispatch an agent
+          - generic [ref=e202]:
+            - generic [ref=e203]:
+              - heading "Recurring triggers" [level=3] [ref=e204]
+              - paragraph [ref=e205]: Schedule agents to run dependency updates, spot checks, audits, or other recurring work on a daily or weekly cadence. Pause, resume, or run manually any time.
+              - link "Explore Idea to Execution" [ref=e206] [cursor=pointer]:
+                - /url: /features/automation/
+                - text: Explore Idea to Execution
+                - img [ref=e207]
+            - link "Recurring triggers" [ref=e209] [cursor=pointer]:
+              - /url: /features/automation/
+              - generic [ref=e210]:
+                - generic:
+                  - img "Four triggers with schedules like \"At 12:00 PM on Tuesday\" and \"At 4:00 AM on Monday, Wed...\" plus Run Now, Pause, Resume, and View History buttons"
+                - generic [ref=e211]: Each trigger shows its schedule, last run, next run, and status — with manual run and pause controls
+      - generic [ref=e213]:
+        - generic [ref=e214]:
+          - text: Your Project, Your Way
+          - heading "Fully configurable. Open source." [level=2] [ref=e215]:
+            - text: Fully configurable.
+            - text: Open source.
+          - paragraph [ref=e216]: Upload reference docs, choose your VM size, and pick a default agent — each project has its own settings for infrastructure and agent configuration.
+        - generic [ref=e217]:
+          - generic [ref=e218]:
+            - generic [ref=e219]:
+              - heading "Project library" [level=3] [ref=e220]
+              - paragraph [ref=e221]: Upload architecture docs, research, and reference material. Files are organized with folders and tags. Agents can access library files as additional context during their work.
+              - link "Explore Your Project, Your Way" [ref=e222] [cursor=pointer]:
+                - /url: /features/configuration/
+                - text: Explore Your Project, Your Way
+                - img [ref=e223]
+            - link "Project library" [ref=e225] [cursor=pointer]:
+              - /url: /features/configuration/
+              - generic [ref=e226]:
+                - generic:
+                  - img "Library showing a research folder with 1 subfolder and 1 tagged markdown file, plus filter, folder, and upload controls"
+                - generic [ref=e227]: Folders, tags, and upload — agents can pull files from the library as context
+          - generic [ref=e228]:
+            - generic [ref=e229]:
+              - heading "Built-in document viewer" [level=3] [ref=e230]
+              - paragraph [ref=e231]: Markdown files render with full formatting, including Mermaid diagrams. Toggle between the rendered view and raw source, or download the file directly.
+              - link "Explore Your Project, Your Way" [ref=e232] [cursor=pointer]:
+                - /url: /features/configuration/
+                - text: Explore Your Project, Your Way
+                - img [ref=e233]
+            - link "Built-in document viewer" [ref=e235] [cursor=pointer]:
+              - /url: /features/configuration/
+              - generic [ref=e236]:
+                - generic:
+                  - img "Document viewer showing a rendered markdown file with a Mermaid architecture flowchart and Rendered/Source/Download buttons"
+                - generic [ref=e237]: Rendered markdown with Mermaid diagram support — view source or download
+          - generic [ref=e238]:
+            - generic [ref=e239]:
+              - heading "Infrastructure and agent defaults" [level=3] [ref=e240]
+              - paragraph [ref=e241]: Choose a default node size (Small, Medium, or Large with specs and pricing shown) and a default agent type for each project. Per-agent credential overrides let you configure API keys at the project level.
+              - link "Explore Your Project, Your Way" [ref=e242] [cursor=pointer]:
+                - /url: /features/configuration/
+                - text: Explore Your Project, Your Way
+                - img [ref=e243]
+            - link "Infrastructure and agent defaults" [ref=e245] [cursor=pointer]:
+              - /url: /features/configuration/
+              - generic [ref=e246]:
+                - generic:
+                  - img "Settings page with three node sizes showing vCPU/RAM/storage/price, six agent types, and per-agent credential configuration"
+                - generic [ref=e247]: Node sizing, agent selection, and per-agent credential overrides — all per project
+    - separator [ref=e248]
+    - generic [ref=e250]:
+      - generic [ref=e251]:
+        - text: How It Works
+        - heading "From zero to coding agents in minutes" [level=2] [ref=e252]
+        - paragraph [ref=e253]: Four steps to coding agents working through your backlog on cloud VMs.
+      - generic [ref=e254]:
+        - generic [ref=e255]:
+          - generic [ref=e257]: "01"
+          - generic [ref=e259]:
+            - heading "Connect Your Cloud" [level=3] [ref=e260]
+            - paragraph [ref=e261]: Add your Hetzner, Scaleway, or GCP credentials. Encrypted per-user.
+        - generic [ref=e262]:
+          - generic [ref=e264]: "02"
+          - generic [ref=e266]:
+            - heading "Create a Project" [level=3] [ref=e267]
+            - paragraph [ref=e268]: Link a GitHub repo. SAM organizes tasks and workspaces per project.
+        - generic [ref=e269]:
+          - generic [ref=e271]: "03"
+          - generic [ref=e273]:
+            - heading "Describe Your Task" [level=3] [ref=e274]
+            - paragraph [ref=e275]: Type what you need. SAM provisions a VM, builds your devcontainer, and runs the agent.
+        - generic [ref=e276]:
+          - generic [ref=e278]: "04"
+          - generic [ref=e279]:
+            - heading "Watch It Build" [level=3] [ref=e280]
+            - paragraph [ref=e281]: Stream agent output in real time. Get notified when the agent needs input or finishes.
+    - separator [ref=e282]
+    - generic [ref=e284]:
+      - generic [ref=e285]:
+        - text: Comparison
+        - heading "How SAM stacks up" [level=2] [ref=e286]
+        - paragraph [ref=e287]: Own your infrastructure. Choose your agent. Pay cloud prices.
+      - table [ref=e289]:
+        - rowgroup [ref=e290]:
+          - row "SAM Managed AI Platforms Devin, Ona Self-Hosted CDEs Coder" [ref=e291]:
+            - columnheader [ref=e292]
+            - columnheader "SAM" [ref=e293]:
+              - generic [ref=e294]:
+                - img [ref=e295]
+                - text: SAM
+            - columnheader "Managed AI Platforms Devin, Ona" [ref=e296]:
+              - generic [ref=e297]:
+                - text: Managed AI Platforms
+                - generic [ref=e298]: Devin, Ona
+            - columnheader "Self-Hosted CDEs Coder" [ref=e299]:
+              - generic [ref=e300]:
+                - text: Self-Hosted CDEs
+                - generic [ref=e301]: Coder
+        - rowgroup [ref=e302]:
+          - row "Your code runs on Your cloud (Hetzner, Scaleway, GCP) Their infrastructure Your infra (AWS, GCP, K8s)" [ref=e303]:
+            - cell "Your code runs on" [ref=e304]
+            - cell "Your cloud (Hetzner, Scaleway, GCP)" [ref=e305]
+            - cell "Their infrastructure" [ref=e306]
+            - cell "Your infra (AWS, GCP, K8s)" [ref=e307]
+          - row "Agent choice Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp Their proprietary agent Varies (Claude, OpenAI)" [ref=e308]:
+            - cell "Agent choice" [ref=e309]
+            - cell "Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp" [ref=e310]
+            - cell "Their proprietary agent" [ref=e311]
+            - cell "Varies (Claude, OpenAI)" [ref=e312]
+          - row "Open source AGPL-3.0 license Proprietary Open-source core" [ref=e313]:
+            - cell "Open source" [ref=e314]
+            - cell "AGPL-3.0 license" [ref=e315]
+            - cell "Proprietary" [ref=e316]
+            - cell "Open-source core" [ref=e317]
+          - row "Control plane Free (Cloudflare Workers) Bundled into pricing You host it (K8s / Docker)" [ref=e318]:
+            - cell "Control plane" [ref=e319]
+            - cell "Free (Cloudflare Workers)" [ref=e320]
+            - cell "Bundled into pricing" [ref=e321]
+            - cell "You host it (K8s / Docker)" [ref=e322]
+          - row "Infrastructure cost ~$4–15/mo (direct to provider) From $20/mo (compute + inference) Your cloud bill + license fees" [ref=e323]:
+            - cell "Infrastructure cost" [ref=e324]
+            - cell "~$4–15/mo (direct to provider)" [ref=e325]
+            - cell "From $20/mo (compute + inference)" [ref=e326]
+            - cell "Your cloud bill + license fees" [ref=e327]
+          - row "Self-hostable Fully — control plane + VMs No Yes — Terraform + K8s required" [ref=e328]:
+            - cell "Self-hostable" [ref=e329]
+            - cell "Fully — control plane + VMs" [ref=e330]
+            - cell "No" [ref=e331]
+            - cell "Yes — Terraform + K8s required" [ref=e332]
+          - row "Setup effort Deploy to Cloudflare + connect cloud Zero config Terraform + cluster management" [ref=e333]:
+            - cell "Setup effort" [ref=e334]
+            - cell "Deploy to Cloudflare + connect cloud" [ref=e335]
+            - cell "Zero config" [ref=e336]
+            - cell "Terraform + cluster management" [ref=e337]
+          - row "Data sovereignty Code runs on your cloud; control plane data in Cloudflare Vendor-managed Full — your infrastructure" [ref=e338]:
+            - cell "Data sovereignty" [ref=e339]
+            - cell "Code runs on your cloud; control plane data in Cloudflare" [ref=e340]
+            - cell "Vendor-managed" [ref=e341]
+            - cell "Full — your infrastructure" [ref=e342]
+      - paragraph [ref=e343]: SAM infrastructure costs are compute only — bring your own API keys for AI providers. Managed platform pricing bundles compute and model inference.
+    - separator [ref=e344]
+    - generic [ref=e346]:
+      - generic [ref=e347]:
+        - text: Roadmap
+        - heading "Built in the open, shipped fast" [level=2] [ref=e348]
+        - paragraph [ref=e349]: Eight phases shipped. More providers and team collaboration coming next.
+      - generic [ref=e350]:
+        - generic [ref=e355]:
+          - generic [ref=e356]:
+            - heading "Core Platform" [level=3] [ref=e357]
+            - generic [ref=e358]: Complete
+          - paragraph [ref=e359]: Workspace management, GitHub OAuth, encrypted credentials, VM provisioning
+        - generic [ref=e364]:
+          - generic [ref=e365]:
+            - heading "Browser Terminal & Agent Chat" [level=3] [ref=e366]
+            - generic [ref=e367]: Complete
+          - paragraph [ref=e368]: WebSocket terminal, structured agent chat via ACP
+        - generic [ref=e373]:
+          - generic [ref=e374]:
+            - heading "Multi-Agent Support" [level=3] [ref=e375]
+            - generic [ref=e376]: Complete
+          - paragraph [ref=e377]: Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp
+        - generic [ref=e382]:
+          - generic [ref=e383]:
+            - heading "Multi-Workspace Nodes" [level=3] [ref=e384]
+            - generic [ref=e385]: Complete
+          - paragraph [ref=e386]: Multiple isolated workspaces per VM
+        - generic [ref=e391]:
+          - generic [ref=e392]:
+            - heading "Project-First Architecture" [level=3] [ref=e393]
+            - generic [ref=e394]: Complete
+          - paragraph [ref=e395]: Projects, persistent chat, activity feeds, task-driven workflows
+        - generic [ref=e400]:
+          - generic [ref=e401]:
+            - heading "Multi-Cloud & More" [level=3] [ref=e402]
+            - generic [ref=e403]: Complete
+          - paragraph [ref=e404]: Scaleway, GCP, notifications, voice input, conversation forking, warm pooling
+        - generic [ref=e409]:
+          - generic [ref=e410]:
+            - heading "Task Orchestration" [level=3] [ref=e411]
+            - generic [ref=e412]: Complete
+          - paragraph [ref=e413]: Missions, agent-to-agent dispatch, task dependencies, durable messaging
+        - generic [ref=e418]:
+          - generic [ref=e419]:
+            - heading "CLI" [level=3] [ref=e420]
+            - generic [ref=e421]: Complete
+          - paragraph [ref=e422]: Auth, task submission, chat prompts, task status, and runner doctor commands
+        - generic [ref=e427]:
+          - generic [ref=e428]:
+            - heading "More Providers" [level=3] [ref=e429]
+            - generic [ref=e430]: Planned
+          - paragraph [ref=e431]: DigitalOcean, Vultr, AWS, and expanded CLI coverage
+        - generic [ref=e435]:
+          - generic [ref=e436]:
+            - heading "Teams & Collaboration" [level=3] [ref=e437]
+            - generic [ref=e438]: Planned
+          - paragraph [ref=e439]: Team workspaces, shared projects, organization management
+    - separator [ref=e440]
+    - generic [ref=e443]:
+      - heading "Ready to run multi-agent workflows at scale?" [level=2] [ref=e444]
+      - paragraph [ref=e445]: Self-host on low-cost Cloudflare Workers. Bring your own cloud. Your agents, your infrastructure.
+      - generic [ref=e446]:
+        - link "Get Started" [ref=e447] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+          - text: Get Started
+          - img [ref=e448]
+        - link "Star on GitHub" [ref=e450] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+    - generic [ref=e452]:
+      - generic [ref=e453]:
+        - img [ref=e454]
+        - generic [ref=e455]: Simple Agent Manager
+      - generic [ref=e456]:
+        - link "Blog" [ref=e457] [cursor=pointer]:
+          - /url: /blog/
+        - link "Integrations" [ref=e458] [cursor=pointer]:
+          - /url: /integrations/
+        - link "GitHub" [ref=e459] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+        - link "Bluesky" [ref=e460] [cursor=pointer]:
+          - /url: https://bsky.app/profile/simple-agent-manager.org
+        - link "X" [ref=e461] [cursor=pointer]:
+          - /url: https://x.com/simpleagentman
+        - link "Self-Hosting Guide" [ref=e462] [cursor=pointer]:
+          - /url: /docs/guides/self-hosting/
+        - link "Contributing" [ref=e463] [cursor=pointer]:
+          - /url: /docs/reference/contributing/
+        - link "AGPL-3.0 License" [ref=e464] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager/blob/main/LICENSE
+      - paragraph [ref=e465]: © 2026 Simple Agent Manager. Open source under AGPL-3.0.

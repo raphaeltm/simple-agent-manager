@@ -1,0 +1,183 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "SAM Home" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e6]: SAM
+      - navigation "Main navigation" [ref=e7]:
+        - link "Features" [ref=e8] [cursor=pointer]:
+          - /url: /#features
+        - link "How It Works" [ref=e9] [cursor=pointer]:
+          - /url: /#how-it-works
+        - link "Comparison" [ref=e10] [cursor=pointer]:
+          - /url: /#comparison
+        - link "Enterprise" [ref=e11] [cursor=pointer]:
+          - /url: /enterprise/
+        - link "Integrations" [ref=e12] [cursor=pointer]:
+          - /url: /integrations/
+        - link "Docs" [ref=e13] [cursor=pointer]:
+          - /url: /docs/
+        - link "Blog" [ref=e14] [cursor=pointer]:
+          - /url: /blog/
+      - generic [ref=e15]:
+        - link "GitHub repository" [ref=e16] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+          - img [ref=e17]
+        - link "Get Started" [ref=e19] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+  - main [ref=e20]:
+    - navigation "Breadcrumb" [ref=e21]:
+      - list [ref=e23]:
+        - listitem [ref=e24]:
+          - link "Home" [ref=e25] [cursor=pointer]:
+            - /url: /
+          - text: /
+        - listitem [ref=e26]:
+          - link "Integrations" [ref=e27] [cursor=pointer]:
+            - /url: /integrations/
+          - text: /
+        - listitem [ref=e28]: Claude Code
+    - generic [ref=e30]:
+      - img "Claude Code logo" [ref=e32]
+      - generic [ref=e33]: AI Coding Agents
+      - heading "Run Claude Code agents in parallel on your infrastructure" [level=1] [ref=e34]
+      - paragraph [ref=e35]: Claude Code by Anthropic is an agentic coding tool that lives in your terminal. With SAM, you can run dozens of Claude Code instances in parallel across cloud VMs — each in its own isolated devcontainer with full access to your repo's toolchain.
+      - generic [ref=e36]:
+        - link "Get Started with Claude Code" [ref=e37] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+          - text: Get Started with Claude Code
+          - img [ref=e38]
+        - link "Claude Code Docs" [ref=e40] [cursor=pointer]:
+          - /url: https://docs.anthropic.com/en/docs/claude-code/overview
+          - img [ref=e41]
+          - text: Claude Code Docs
+      - generic [ref=e45]:
+        - generic [ref=e46]: Claude Opus 4
+        - generic [ref=e47]: Claude Sonnet 4
+        - generic [ref=e48]: Claude Haiku 4.5
+    - generic [ref=e50]:
+      - generic [ref=e51]:
+        - generic [ref=e52]: Features
+        - heading "Why use Claude Code with SAM" [level=2] [ref=e53]
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - heading "Parallel Execution" [level=3] [ref=e57]
+          - paragraph [ref=e58]: Run dozens of Claude Code instances simultaneously, each tackling a different task or feature branch.
+        - generic [ref=e59]:
+          - heading "Dual Auth Support" [level=3] [ref=e61]
+          - paragraph [ref=e62]: Bring your Anthropic API key or use a Claude Max/Pro OAuth subscription — SAM handles both seamlessly.
+        - generic [ref=e63]:
+          - heading "Full Tool Access" [level=3] [ref=e65]
+          - paragraph [ref=e66]: Claude Code gets full Read, Edit, Bash, and other tool access inside the devcontainer, just like running it locally.
+        - generic [ref=e67]:
+          - heading "Automatic PR Creation" [level=3] [ref=e69]
+          - paragraph [ref=e70]: When the agent finishes, SAM pushes changes and opens a pull request on your repo automatically.
+    - separator [ref=e71]
+    - generic [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e75]: How It Works
+        - heading "Get started in four steps" [level=2] [ref=e76]
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - img [ref=e80]
+          - generic [ref=e82]:
+            - generic [ref=e83]: Step 1
+            - heading "Create a Project" [level=3] [ref=e84]
+            - paragraph [ref=e85]: Link your GitHub repository and configure Claude Code as your agent.
+        - generic [ref=e86]:
+          - img [ref=e88]
+          - generic [ref=e91]:
+            - generic [ref=e92]: Step 2
+            - heading "Submit a Task" [level=3] [ref=e93]
+            - paragraph [ref=e94]: Describe what you want built — a feature, bug fix, refactor, or test suite.
+        - generic [ref=e95]:
+          - img [ref=e97]
+          - generic [ref=e99]:
+            - generic [ref=e100]: Step 3
+            - heading "SAM Provisions & Runs" [level=3] [ref=e101]
+            - paragraph [ref=e102]: SAM spins up a cloud VM, builds your devcontainer, and launches Claude Code with your task.
+        - generic [ref=e103]:
+          - img [ref=e105]
+          - generic [ref=e108]:
+            - generic [ref=e109]: Step 4
+            - heading "Review the PR" [level=3] [ref=e110]
+            - paragraph [ref=e111]: Claude Code commits its work, pushes a branch, and opens a pull request for your review.
+    - separator [ref=e112]
+    - generic [ref=e114]:
+      - generic [ref=e115]:
+        - generic [ref=e116]: Use Cases
+        - heading "What you can build" [level=2] [ref=e117]
+      - generic [ref=e118]:
+        - generic [ref=e119]:
+          - img [ref=e121]
+          - heading "Parallelize feature development" [level=3] [ref=e123]
+          - paragraph [ref=e124]: Break a large project into tasks and run an agent on each simultaneously. Ship a week of work in hours.
+        - generic [ref=e125]:
+          - img [ref=e127]
+          - heading "Automate refactoring" [level=3] [ref=e131]
+          - paragraph [ref=e132]: Point Claude Code at a codebase and describe the refactoring pattern. It handles the mechanical work across hundreds of files.
+        - generic [ref=e133]:
+          - img [ref=e135]
+          - heading "Run test generation at scale" [level=3] [ref=e137]
+          - paragraph [ref=e138]: Generate comprehensive test suites for existing code — Claude Code understands your codebase context and writes meaningful tests.
+    - separator [ref=e139]
+    - generic [ref=e141]:
+      - generic [ref=e142]:
+        - generic [ref=e143]: FAQ
+        - heading "Frequently asked questions" [level=2] [ref=e144]
+      - generic [ref=e145]:
+        - group [ref=e146]:
+          - generic "What models does Claude Code use? +" [ref=e147] [cursor=pointer]
+        - group [ref=e148]:
+          - generic "Do I need an Anthropic API key? +" [ref=e149] [cursor=pointer]
+        - group [ref=e150]:
+          - generic "Can I run Claude Code in a devcontainer? +" [ref=e151] [cursor=pointer]
+    - separator [ref=e152]
+    - generic [ref=e154]:
+      - generic [ref=e155]:
+        - generic [ref=e156]: Related
+        - heading "Works great with" [level=2] [ref=e157]
+      - generic [ref=e158]:
+        - link "OpenAI Codex logo OpenAI Codex AI Coding Agents" [ref=e159] [cursor=pointer]:
+          - /url: /integrations/codex/
+          - img "OpenAI Codex logo" [ref=e161]
+          - generic [ref=e162]:
+            - heading "OpenAI Codex" [level=3] [ref=e163]
+            - text: AI Coding Agents
+        - link "Hetzner Cloud logo Hetzner Cloud Cloud Providers" [ref=e164] [cursor=pointer]:
+          - /url: /integrations/hetzner/
+          - img "Hetzner Cloud logo" [ref=e166]
+          - generic [ref=e167]:
+            - heading "Hetzner Cloud" [level=3] [ref=e168]
+            - text: Cloud Providers
+        - link "Scaleway logo Scaleway Cloud Providers" [ref=e169] [cursor=pointer]:
+          - /url: /integrations/scaleway/
+          - img "Scaleway logo" [ref=e171]
+          - generic [ref=e172]:
+            - heading "Scaleway" [level=3] [ref=e173]
+            - text: Cloud Providers
+    - generic [ref=e176]:
+      - heading "Start running Claude Code on your infrastructure" [level=2] [ref=e177]
+      - paragraph [ref=e178]: Self-host on low-cost Cloudflare Workers. Bring your own cloud. Your agents, your code.
+      - generic [ref=e179]:
+        - link "Get Started" [ref=e180] [cursor=pointer]:
+          - /url: https://app.simple-agent-manager.org
+          - text: Get Started
+          - img [ref=e181]
+        - link "All Integrations" [ref=e183] [cursor=pointer]:
+          - /url: /integrations/
+    - generic [ref=e185]:
+      - generic [ref=e186]:
+        - img [ref=e187]
+        - generic [ref=e188]: Simple Agent Manager
+      - generic [ref=e189]:
+        - link "Home" [ref=e190] [cursor=pointer]:
+          - /url: /
+        - link "Blog" [ref=e191] [cursor=pointer]:
+          - /url: /blog/
+        - link "Integrations" [ref=e192] [cursor=pointer]:
+          - /url: /integrations/
+        - link "GitHub" [ref=e193] [cursor=pointer]:
+          - /url: https://github.com/raphaeltm/simple-agent-manager
+      - paragraph [ref=e194]: © 2026 Simple Agent Manager. Open source under AGPL-3.0.
