@@ -341,10 +341,11 @@ test.describe('Project chat composer audit', () => {
     await expect(page.getByText('Run the tests and summarize what fails.')).toBeVisible();
 
     // Skill selector is available in the new-task composer and surfaces resource hints.
-    await expect(page.getByLabel('Skill')).toBeVisible();
-    await page.getByLabel('Skill').selectOption('skill-audit');
+    const skillSelect = page.getByLabel('Skill', { exact: true });
+    await expect(skillSelect).toBeVisible();
+    await skillSelect.selectOption('skill-audit');
     await expect(page.getByText(/8 GB RAM/)).toBeVisible();
-    await page.getByLabel('Skill').selectOption('');
+    await skillSelect.selectOption('');
     await screenshot(
       page,
       `project-chat-composer-new-prompts-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { toTaskResponse } from '../../../src/lib/mappers';
 import type * as schema from '../../../src/db/schema';
+import { toTaskResponse } from '../../../src/lib/mappers';
 
 function makeTaskRow(overrides: Partial<schema.Task> = {}): schema.Task {
   return {
