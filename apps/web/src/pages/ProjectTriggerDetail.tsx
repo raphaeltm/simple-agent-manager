@@ -113,10 +113,10 @@ export function ProjectTriggerDetail() {
         limit: EXECUTIONS_PER_PAGE,
         offset: Number.isFinite(offset) ? offset : 0,
       });
-      if (!cursor) {
-        setExecutions(resp.executions);
-      } else {
+      if (cursor) {
         setExecutions((prev) => [...prev, ...resp.executions]);
+      } else {
+        setExecutions(resp.executions);
       }
       setNextExecutionCursor(resp.nextCursor ?? null);
       setHasMore(Boolean(resp.nextCursor));
@@ -128,8 +128,8 @@ export function ProjectTriggerDetail() {
   }, [projectId, triggerId, toast]);
 
   useEffect(() => {
-    void loadTrigger();
-    void loadExecutions(null);
+    loadTrigger().catch(() => undefined);
+    loadExecutions(null).catch(() => undefined);
   }, [loadTrigger, loadExecutions]);
 
   const handleRunNow = useCallback(async () => {
@@ -137,8 +137,8 @@ export function ProjectTriggerDetail() {
     try {
       await runTrigger(projectId, triggerId);
       toast.success('Trigger fired');
-      void loadTrigger();
-      void loadExecutions(null);
+      loadTrigger().catch(() => undefined);
+      loadExecutions(null).catch(() => undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
     }
@@ -151,7 +151,7 @@ export function ProjectTriggerDetail() {
       const data: UpdateTriggerRequest = { status: newStatus };
       await updateTrigger(projectId, triggerId, data);
       toast.success(newStatus === 'active' ? 'Trigger resumed' : 'Trigger paused');
-      void loadTrigger();
+      loadTrigger().catch(() => undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update trigger');
     }
@@ -205,6 +205,16 @@ export function ProjectTriggerDetail() {
   }
 
   const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
+  const handleLoadMore = () => {
+    loadExecutions(nextExecutionCursor).catch(() => undefined);
+  };
+  const handleExecutionsMutated = () => {
+    loadExecutions(null).catch(() => undefined);
+  };
+  const handleFormSaved = () => {
+    loadTrigger().catch(() => undefined);
+    loadExecutions(null).catch(() => undefined);
+  };
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -334,10 +344,10 @@ export function ProjectTriggerDetail() {
           executions={executions}
           loading={execLoading}
           hasMore={hasMore}
-          onLoadMore={() => void loadExecutions(nextExecutionCursor)}
+          onLoadMore={handleLoadMore}
           projectId={projectId}
           triggerId={triggerId!}
-          onMutated={() => void loadExecutions(null)}
+          onMutated={handleExecutionsMutated}
         />
       </div>
 
@@ -375,7 +385,7 @@ export function ProjectTriggerDetail() {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         editTrigger={trigger}
-        onSaved={() => { void loadTrigger(); void loadExecutions(null); }}
+        onSaved={handleFormSaved}
       />
 
       {/* Delete confirmation */}

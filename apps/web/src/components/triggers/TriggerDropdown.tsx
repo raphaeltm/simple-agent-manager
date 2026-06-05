@@ -26,6 +26,48 @@ interface TriggerDropdownProps {
   onToggle: () => void;
 }
 
+interface TriggerRowProps {
+  trigger: TriggerResponse;
+  projectId: string;
+  onNavigate: (path: string) => void;
+}
+
+const TriggerRow: FC<TriggerRowProps> = ({ trigger, projectId, onNavigate }) => {
+  const isPaused = trigger.status === 'paused';
+  const icon = isPaused ? (
+    <AlertTriangle
+      size={12}
+      className="text-fg-muted shrink-0 mt-0.5"
+      style={{ color: 'var(--sam-color-warning)' }}
+      aria-hidden="true"
+    />
+  ) : (
+    <Clock size={12} className="text-fg-muted shrink-0 mt-0.5" aria-hidden="true" />
+  );
+  const labelClass = isPaused ? 'text-xs font-medium text-fg-muted truncate' : 'text-xs font-medium text-fg-primary truncate';
+  const rowClass = `flex items-start gap-2 w-full px-3 py-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-hover transition-colors ${isPaused ? 'opacity-60 ' : ''}${FOCUS_RING}`;
+  let secondaryText: string | null = null;
+  if (isPaused) {
+    secondaryText = 'Paused';
+  } else if (trigger.nextFireAt) {
+    secondaryText = `Next: ${formatRelativeTime(trigger.nextFireAt)}`;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(`/projects/${projectId}/triggers/${trigger.id}`)}
+      className={rowClass}
+    >
+      {icon}
+      <div className="flex-1 min-w-0">
+        <div className={labelClass}>{trigger.name}</div>
+        {secondaryText && <div className="text-[10px] text-fg-muted">{secondaryText}</div>}
+      </div>
+    </button>
+  );
+};
+
 export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onToggle }) => {
   const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -74,7 +116,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   useEffect(() => {
     if (open) {
       updatePosition();
-      void fetchTriggers();
+      fetchTriggers().catch(() => undefined);
     }
   }, [open, fetchTriggers, updatePosition]);
 
@@ -118,9 +160,55 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
     navigate(path);
   }, [closePopover, navigate]);
 
+  const handleRetry = useCallback(() => {
+    fetchTriggers().catch(() => undefined);
+  }, [fetchTriggers]);
+
   const activeTriggers = triggers.filter((t) => t.status === 'active');
   const pausedTriggers = triggers.filter((t) => t.status === 'paused');
   const popoverId = `trigger-dropdown-${projectId}`;
+  let popoverContent;
+  if (loading) {
+    popoverContent = (
+      <div className="px-3 py-4 text-center text-xs text-fg-muted">
+        Loading...
+      </div>
+    );
+  } else if (loadError) {
+    popoverContent = (
+      <div className="px-3 py-4 text-center">
+        <div className="text-xs text-danger mb-3" role="alert">
+          {loadError}
+        </div>
+        <button
+          type="button"
+          onClick={handleRetry}
+          className={`text-xs text-accent-primary bg-transparent border border-border-default rounded-md px-3 py-1.5 cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  } else if (triggers.length === 0) {
+    popoverContent = (
+      <div className="px-3 py-4 text-center text-xs text-fg-muted">
+        No triggers configured.
+      </div>
+    );
+  } else {
+    popoverContent = (
+      <>
+        {[...activeTriggers, ...pausedTriggers].map((trigger) => (
+          <TriggerRow
+            key={trigger.id}
+            trigger={trigger}
+            projectId={projectId}
+            onNavigate={navigateAndClose}
+          />
+        ))}
+      </>
+    );
+  }
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -130,7 +218,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
         onClick={onToggle}
         title="Automation triggers"
         aria-label="Automation triggers"
-        aria-haspopup="dialog"
+        aria-haspopup="true"
         aria-controls={open ? popoverId : undefined}
         aria-expanded={open}
         className={`shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors ${FOCUS_RING}`}
@@ -139,7 +227,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
       </button>
 
       {open && createPortal(
-        <div
+        <section
           id={popoverId}
           ref={contentRef}
           className="w-72 max-w-[calc(100vw-16px)] rounded-lg glass-surface shadow-lg overflow-hidden"
@@ -149,8 +237,6 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
             top: position.top,
             left: position.left,
           }}
-          role="dialog"
-          aria-modal="false"
           aria-label="Automation triggers"
         >
           {/* Header */}
@@ -162,67 +248,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
 
           {/* Content */}
           <div className="max-h-64 overflow-y-auto">
-            {loading ? (
-              <div className="px-3 py-4 text-center text-xs text-fg-muted">
-                Loading...
-              </div>
-            ) : loadError ? (
-              <div className="px-3 py-4 text-center">
-                <div className="text-xs text-danger mb-3" role="alert">
-                  {loadError}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void fetchTriggers()}
-                  className={`text-xs text-accent-primary bg-transparent border border-border-default rounded-md px-3 py-1.5 cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                >
-                  Retry
-                </button>
-              </div>
-            ) : triggers.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-fg-muted">
-                No triggers configured.
-              </div>
-            ) : (
-              <>
-                {activeTriggers.map((trigger) => (
-                  <button
-                    key={trigger.id}
-                    type="button"
-                    onClick={() => navigateAndClose(`/projects/${projectId}/triggers/${trigger.id}`)}
-                    className={`flex items-start gap-2 w-full px-3 py-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-hover transition-colors ${FOCUS_RING}`}
-                  >
-                    <Clock size={12} className="text-fg-muted shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-fg-primary truncate">
-                        {trigger.name}
-                      </div>
-                      {trigger.nextFireAt && (
-                        <div className="text-[10px] text-fg-muted">
-                          Next: {formatRelativeTime(trigger.nextFireAt)}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-                {pausedTriggers.map((trigger) => (
-                  <button
-                    key={trigger.id}
-                    type="button"
-                    onClick={() => navigateAndClose(`/projects/${projectId}/triggers/${trigger.id}`)}
-                    className={`flex items-start gap-2 w-full px-3 py-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-hover transition-colors opacity-60 ${FOCUS_RING}`}
-                  >
-                    <AlertTriangle size={12} className="text-fg-muted shrink-0 mt-0.5" style={{ color: 'var(--sam-color-warning)' }} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-fg-muted truncate">
-                        {trigger.name}
-                      </div>
-                      <div className="text-[10px] text-fg-muted">Paused</div>
-                    </div>
-                  </button>
-                ))}
-              </>
-            )}
+            {popoverContent}
           </div>
 
           {/* Footer */}
@@ -243,7 +269,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
               Manage
             </button>
           </div>
-        </div>,
+        </section>,
         document.body,
       )}
     </div>

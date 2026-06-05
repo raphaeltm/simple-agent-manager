@@ -74,12 +74,12 @@ function renderDropdown(props: { open?: boolean; onToggle?: () => void } = {}) {
 // ---------------------------------------------------------------------------
 
 describe('TriggerDropdown', () => {
-  const originalInnerWidth = window.innerWidth;
+  const originalInnerWidth = globalThis.innerWidth;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listTriggers.mockResolvedValue({ triggers: [], total: 0 });
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: originalInnerWidth });
   });
 
   it('renders clock button with correct aria-label', () => {
@@ -181,7 +181,7 @@ describe('TriggerDropdown', () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-haspopup', 'true');
   });
 
   it('closes on Escape and returns focus to the trigger button', async () => {
@@ -229,24 +229,25 @@ describe('TriggerDropdown', () => {
   });
 
   it('clamps the popover to the right viewport edge', async () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 320 });
+    const buttonRect = {
+      x: 310,
+      y: 12,
+      width: 20,
+      height: 20,
+      top: 12,
+      right: 330,
+      bottom: 32,
+      left: 310,
+      toJSON: () => ({}),
+    };
     const rectSpy = vi
       .spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect')
-      .mockReturnValue({
-        x: 310,
-        y: 12,
-        width: 20,
-        height: 20,
-        top: 12,
-        right: 330,
-        bottom: 32,
-        left: 310,
-        toJSON: () => ({}),
-      } as DOMRect);
+      .mockReturnValue(buttonRect);
 
     renderDropdown({ open: true });
 
-    const popover = await screen.findByRole('dialog', { name: /automation triggers/i });
+    const popover = await screen.findByRole('region', { name: /automation triggers/i });
     await waitFor(() => {
       expect(popover).toHaveStyle({ left: '24px' });
     });

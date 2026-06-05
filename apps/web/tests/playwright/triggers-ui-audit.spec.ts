@@ -1,30 +1,18 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test,type TestInfo } from '@playwright/test';
+
+import { assertNoOverflow, jsonResponse, makeMockUser } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+  sessionId: 'session-test-1',
+  userId: 'user-test-1',
+});
 
 const MOCK_PROJECT = {
   id: 'proj-test-1',
@@ -249,8 +237,7 @@ async function setupApiMocks(page: Page, options: {
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const respond = (status: number, body: unknown) => jsonResponse(route, status, body);
 
     // Auth
     if (path.includes('/api/auth/')) {
@@ -386,11 +373,28 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
+function requireProject(projectName: string, message: string) {
+  return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
+    test.skip(testInfo.project.name !== projectName, message);
+  };
+}
+
+const mobileOnly = requireProject('iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
+const desktopOnly = requireProject('Desktop (1280x800)', 'desktop audit runs on desktop project only');
+
+async function verifyCleanupFailure(page: Page, screenshotName: string) {
+  await setupApiMocks(page, {
+    triggers: NORMAL_TRIGGERS,
+    triggerDetail: NORMAL_TRIGGERS[0],
+    executions: STUCK_EXECUTIONS,
+    executionCleanupError: true,
+  });
+  await page.goto('/projects/proj-test-1/triggers/trig-1');
+  await page.waitForSelector('text=Daily Code Review');
+  await page.getByRole('button', { name: /clear stuck queued/i }).click();
+  await page.waitForSelector('text=Cleanup unavailable');
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -398,9 +402,7 @@ async function assertNoOverflow(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Triggers List — Mobile', () => {
-  test.beforeEach(({ page: _page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
-  });
+  test.beforeEach(mobileOnly);
 
   test('normal data', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
@@ -449,9 +451,7 @@ test.describe('Triggers List — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Triggers List — Desktop', () => {
-  test.beforeEach(({ page: _page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'desktop audit runs on desktop project only');
-  });
+  test.beforeEach(desktopOnly);
 
   test('normal data', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
@@ -484,9 +484,7 @@ test.describe('Triggers List — Desktop', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Detail — Mobile', () => {
-  test.beforeEach(({ page: _page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
-  });
+  test.beforeEach(mobileOnly);
 
   test('normal data with executions', async ({ page }) => {
     await setupApiMocks(page, {
@@ -513,18 +511,7 @@ test.describe('Trigger Detail — Mobile', () => {
   });
 
   test('cleanup failure feedback', async ({ page }) => {
-    await setupApiMocks(page, {
-      triggers: NORMAL_TRIGGERS,
-      triggerDetail: NORMAL_TRIGGERS[0],
-      executions: STUCK_EXECUTIONS,
-      executionCleanupError: true,
-    });
-    await page.goto('/projects/proj-test-1/triggers/trig-1');
-    await page.waitForSelector('text=Daily Code Review');
-    await page.getByRole('button', { name: /clear stuck queued/i }).click();
-    await page.waitForSelector('text=Cleanup unavailable');
-    await screenshot(page, 'trigger-detail-cleanup-error-mobile');
-    await assertNoOverflow(page);
+    await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-mobile');
   });
 });
 
@@ -533,9 +520,7 @@ test.describe('Trigger Detail — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Detail — Desktop', () => {
-  test.beforeEach(({ page: _page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'desktop audit runs on desktop project only');
-  });
+  test.beforeEach(desktopOnly);
 
   test('normal data with execution history', async ({ page }) => {
     await setupApiMocks(page, {
@@ -550,18 +535,7 @@ test.describe('Trigger Detail — Desktop', () => {
   });
 
   test('cleanup failure feedback', async ({ page }) => {
-    await setupApiMocks(page, {
-      triggers: NORMAL_TRIGGERS,
-      triggerDetail: NORMAL_TRIGGERS[0],
-      executions: STUCK_EXECUTIONS,
-      executionCleanupError: true,
-    });
-    await page.goto('/projects/proj-test-1/triggers/trig-1');
-    await page.waitForSelector('text=Daily Code Review');
-    await page.getByRole('button', { name: /clear stuck queued/i }).click();
-    await page.waitForSelector('text=Cleanup unavailable');
-    await screenshot(page, 'trigger-detail-cleanup-error-desktop');
-    await assertNoOverflow(page);
+    await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-desktop');
   });
 });
 
@@ -570,9 +544,7 @@ test.describe('Trigger Detail — Desktop', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Form — Mobile', () => {
-  test.beforeEach(({ page: _page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
-  });
+  test.beforeEach(mobileOnly);
 
   test('new trigger form renders', async ({ page }) => {
     await setupApiMocks(page, { triggers: [] });
@@ -601,9 +573,7 @@ test.describe('Trigger Form — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Form — Desktop', () => {
-  test.beforeEach(({ page: _page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'desktop audit runs on desktop project only');
-  });
+  test.beforeEach(desktopOnly);
 
   test('new trigger form with all schedule tabs', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
