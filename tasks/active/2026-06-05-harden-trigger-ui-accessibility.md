@@ -53,31 +53,107 @@ This task adds focused behavioral tests for closed modal exposure, popover close
 
 ## Implementation Checklist
 
-- [ ] Update `TriggerForm` so the portal/dialog/form controls are not exposed when closed.
-- [ ] Add/adjust `ProjectTriggers` tests asserting no closed `role=dialog`, no drawer `Name` input, no prompt textarea, and focus return on close where feasible.
-- [ ] Update `TriggerDropdown` to use correct button/popover semantics, Escape close, outside-click close without double toggles, user-visible load failure state, retry, and viewport-clamped fixed positioning.
-- [ ] Add/adjust `TriggerDropdown` tests for Escape close, outside click close, load failure + retry, navigation close behavior, and right-edge/small viewport clamping.
-- [ ] Update `ExecutionHistory` mutation paths to show concise failure feedback, disable destructive controls while cleanup/delete requests are in flight, and keep running executions non-deletable.
-- [ ] Add direct `ExecutionHistory` unit tests for cleanup success/failure, delete success/failure, disabled in-flight states, and running execution non-deletability.
-- [ ] Update `ProjectTriggerDetail` pagination to honor `nextCursor` for `hasMore`, while preserving the existing API request contract unless a real API change is required.
-- [ ] Add trigger detail page tests for exactly-full final page with `nextCursor: null` and multi-page case with `nextCursor` present.
-- [ ] Update the Playwright trigger UI audit for changed desktop/mobile states, including dropdown error/edge positioning or equivalent practical coverage.
-- [ ] Run targeted trigger unit tests.
-- [ ] Run `pnpm --filter @simple-agent-manager/web lint`.
-- [ ] Run `pnpm --filter @simple-agent-manager/web typecheck`.
-- [ ] Run relevant Playwright trigger UI audit on mobile and desktop and capture screenshot evidence.
-- [ ] Use `$ui-ux-specialist` rubric before PR.
+- [x] Update `TriggerForm` so the portal/dialog/form controls are not exposed when closed.
+- [x] Add/adjust `ProjectTriggers` tests asserting no closed `role=dialog`, no drawer `Name` input, no prompt textarea, and focus return on close where feasible.
+- [x] Update `TriggerDropdown` to use correct button/popover semantics, Escape close, outside-click close without double toggles, user-visible load failure state, retry, and viewport-clamped fixed positioning.
+- [x] Add/adjust `TriggerDropdown` tests for Escape close, outside click close, load failure + retry, navigation close behavior, and right-edge/small viewport clamping.
+- [x] Update `ExecutionHistory` mutation paths to show concise failure feedback, disable destructive controls while cleanup/delete requests are in flight, and keep running executions non-deletable.
+- [x] Add direct `ExecutionHistory` unit tests for cleanup success/failure, delete success/failure, disabled in-flight states, and running execution non-deletability.
+- [x] Update `ProjectTriggerDetail` pagination to honor `nextCursor` for `hasMore`, while preserving the existing API request contract unless a real API change is required.
+- [x] Add trigger detail page tests for exactly-full final page with `nextCursor: null` and multi-page case with `nextCursor` present.
+- [x] Update the Playwright trigger UI audit for changed desktop/mobile states, including dropdown error/edge positioning or equivalent practical coverage.
+- [x] Run targeted trigger unit tests.
+- [x] Run `pnpm --filter @simple-agent-manager/web lint`.
+- [x] Run `pnpm --filter @simple-agent-manager/web typecheck`.
+- [x] Run relevant Playwright trigger UI audit on mobile and desktop and capture screenshot evidence.
+- [x] Use `$ui-ux-specialist` rubric before PR.
+
+## UI/UX Validation Report
+
+### Variants Considered
+
+1. Drawer Variant A: unmount the closed drawer portal entirely. This directly removes dialog and controls from the accessibility tree.
+2. Drawer Variant B: keep the drawer mounted for exit animation with `inert`, `aria-hidden`, and tab suppression. This preserves animation but adds more state-sensitive failure modes.
+3. Dropdown Variant: use a simple non-modal popover/list with ordinary buttons and links instead of a composite ARIA menu. The trigger content is navigational and does not need menu arrow-key semantics.
+
+### Selected Direction
+
+- Choice: Drawer Variant A plus simple accessible popover/list for the trigger dropdown.
+- Why: It fixes the exposed hidden modal with the least moving parts, keeps the trigger access pattern consistent with existing compact toolbar controls, and avoids claiming ARIA menu behavior the component does not need.
+
+### Rubric Scores
+
+| Category | Score | Notes |
+| --- | ---: | --- |
+| Visual hierarchy and scanability | 4 | Existing trigger list/detail hierarchy is preserved; mutation errors are visible but compact. |
+| Interaction clarity | 5 | Closed drawer is removed, Escape/outside click close the popover, retry and mutation failures are explicit, and destructive controls disable during requests. |
+| Mobile usability | 4 | Playwright mobile screenshots at `375x667` pass no-overflow checks for list/detail/form states. |
+| Accessibility | 5 | Hidden modal controls are no longer exposed; popup semantics no longer misuse menu roles; error feedback uses `role="alert"` and focus rings remain visible. |
+| System consistency | 4 | Changes reuse existing tokens, glass surfaces, button sizing, and local trigger component patterns without adding a new UI library. |
+
+### Screenshot Evidence
+
+- Mobile: `.codex/tmp/playwright-screenshots/triggers-list-normal-mobile-375x667.png`, `trigger-detail-cleanup-error-mobile-375x667.png`, `trigger-form-github-mobile-375x667.png`.
+- Desktop: `.codex/tmp/playwright-screenshots/triggers-list-normal-desktop-1280x800.png`, `trigger-detail-cleanup-error-desktop-1280x800.png`, `trigger-form-advanced-desktop-1280x800.png`.
+
+### Issues Found/Fixes
+
+- Fixed desktop Playwright audit mock shape for `/api/projects` so the sidebar receives `{ projects, nextCursor }` as the API client expects.
+- Added explicit Playwright mocks for shell endpoints such as recent chats and account map to avoid fallback responses with incorrect shapes.
+- Effect-collision check: no conflicts found. Drawer focus return is guarded by `open`; dropdown close paths share `closePopover`; execution mutation state does not trigger effects that undo user actions.
 
 ## Acceptance Criteria
 
-- [ ] With `ProjectTriggers` rendered without `?edit`, no trigger drawer dialog or hidden drawer form controls are in the accessibility tree.
-- [ ] Closing the trigger drawer removes the dialog/form controls and returns focus to the opening control where practical.
-- [ ] The trigger dropdown closes on Escape and outside click, exposes accessible popup semantics, shows trigger load failure with retry, and stays within small/right-edge viewports.
-- [ ] Execution cleanup/delete successes refresh execution data; failures show visible feedback; mutation controls are disabled while in flight; running executions cannot be deleted from UI.
-- [ ] Trigger detail uses API continuation state so an exactly full final page does not show `Load more`, and a response with continuation does.
-- [ ] Unit tests cover the regressions and changed interactions.
-- [ ] Playwright mobile and desktop trigger audit passes with screenshots and no horizontal overflow.
-- [ ] Web lint and typecheck pass.
+- [x] With `ProjectTriggers` rendered without `?edit`, no trigger drawer dialog or hidden drawer form controls are in the accessibility tree.
+- [x] Closing the trigger drawer removes the dialog/form controls and returns focus to the opening control where practical.
+- [x] The trigger dropdown closes on Escape and outside click, exposes accessible popup semantics, shows trigger load failure with retry, and stays within small/right-edge viewports.
+- [x] Execution cleanup/delete successes refresh execution data; failures show visible feedback; mutation controls are disabled while in flight; running executions cannot be deleted from UI.
+- [x] Trigger detail uses API continuation state so an exactly full final page does not show `Load more`, and a response with continuation does.
+- [x] Unit tests cover the regressions and changed interactions.
+- [x] Playwright mobile and desktop trigger audit passes with screenshots and no horizontal overflow.
+- [x] Web lint and typecheck pass.
+
+## Validation Log
+
+- Targeted unit tests: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/TriggerDropdown.test.tsx tests/unit/components/ExecutionHistory.test.tsx tests/unit/pages/project-triggers.test.tsx tests/unit/pages/project-trigger-detail.test.tsx` (29 tests passed).
+- Lint: `pnpm --filter @simple-agent-manager/web lint` (passed with existing warnings).
+- Typecheck: `pnpm --filter @simple-agent-manager/web typecheck` (passed).
+- Playwright audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/triggers-ui-audit.spec.ts` (17 passed, 34 project-scope skips).
+- Screenshot evidence: `.codex/tmp/playwright-screenshots/` includes trigger list/detail/form mobile and desktop states, including cleanup failure feedback at `375x667` and `1280x800`.
+
+## Specialist Review Evidence
+
+| Reviewer | Status | Evidence |
+| --- | --- | --- |
+| ui-ux-specialist | PASS | Rubric scores all >= 4; mobile/desktop screenshot-backed audit passed; no effect-collision issues found. |
+| test-engineer | PASS | Regression tests cover closed drawer exposure/focus return, dropdown close/error/retry/positioning, execution mutation success/failure/disabled states, running non-deletability, and `nextCursor` pagination. Mocks use full trigger/execution response shapes at the API-client boundary. |
+| task-completion-validator | PASS | Research findings, checklist items, and acceptance criteria are covered by code changes and automated tests/manual Playwright evidence. No unchecked checklist items remain. |
+| constitution-validator | PASS | No hardcoded internal URLs, deployment identifiers, timeouts, or business limits added. New numeric constants are presentational popover geometry or test viewport/data values. |
+
+## Task Completion Validation Report
+
+**Verdict**: PASS
+
+| Check | Status | Issues |
+| --- | --- | --- |
+| A: Research -> Checklist | PASS | All findings have checklist coverage. |
+| B: Checklist -> Diff | PASS | Checked items map to substantive changes in trigger components/pages/tests. |
+| C: Criteria -> Tests | PASS | Acceptance criteria covered by unit tests and Playwright screenshot-backed audit. |
+| D: UI -> Backend | PASS | No new backend-submitted form fields or unpropagated UI inputs added. Existing create/edit trigger payload behavior preserved. |
+| E: Multi-Resource | N/A | No provider/resource selection logic added. |
+| F: Vertical Slice | PASS | UI/API-client boundaries are covered with realistic mocked trigger, execution, project, and shell endpoint response shapes. |
+
+### Uncovered Research Findings
+
+None.
+
+### Uncovered Acceptance Criteria
+
+None.
+
+### UI-to-Backend Data Path Audit
+
+No new backend-submitted user inputs were added. Trigger create/edit GitHub and cron behavior remains routed through the existing `TriggerForm` payload paths.
 
 ## References
 

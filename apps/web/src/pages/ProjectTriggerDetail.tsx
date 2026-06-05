@@ -86,6 +86,7 @@ export function ProjectTriggerDetail() {
   const [loading, setLoading] = useState(true);
   const [execLoading, setExecLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [nextExecutionCursor, setNextExecutionCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -103,20 +104,22 @@ export function ProjectTriggerDetail() {
     }
   }, [projectId, triggerId]);
 
-  const loadExecutions = useCallback(async (offset = 0) => {
+  const loadExecutions = useCallback(async (cursor: string | null = null) => {
     if (!triggerId) return;
+    const offset = cursor ? Number.parseInt(cursor, 10) : 0;
     setExecLoading(true);
     try {
       const resp = await listTriggerExecutions(projectId, triggerId, {
         limit: EXECUTIONS_PER_PAGE,
-        offset,
+        offset: Number.isFinite(offset) ? offset : 0,
       });
-      if (offset === 0) {
+      if (!cursor) {
         setExecutions(resp.executions);
       } else {
         setExecutions((prev) => [...prev, ...resp.executions]);
       }
-      setHasMore(resp.executions.length === EXECUTIONS_PER_PAGE);
+      setNextExecutionCursor(resp.nextCursor ?? null);
+      setHasMore(Boolean(resp.nextCursor));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load executions');
     } finally {
@@ -126,7 +129,7 @@ export function ProjectTriggerDetail() {
 
   useEffect(() => {
     void loadTrigger();
-    void loadExecutions(0);
+    void loadExecutions(null);
   }, [loadTrigger, loadExecutions]);
 
   const handleRunNow = useCallback(async () => {
@@ -135,7 +138,7 @@ export function ProjectTriggerDetail() {
       await runTrigger(projectId, triggerId);
       toast.success('Trigger fired');
       void loadTrigger();
-      void loadExecutions(0);
+      void loadExecutions(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
     }
@@ -331,10 +334,10 @@ export function ProjectTriggerDetail() {
           executions={executions}
           loading={execLoading}
           hasMore={hasMore}
-          onLoadMore={() => void loadExecutions(executions.length)}
+          onLoadMore={() => void loadExecutions(nextExecutionCursor)}
           projectId={projectId}
           triggerId={triggerId!}
-          onMutated={() => void loadExecutions(0)}
+          onMutated={() => void loadExecutions(null)}
         />
       </div>
 
@@ -372,7 +375,7 @@ export function ProjectTriggerDetail() {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         editTrigger={trigger}
-        onSaved={() => { void loadTrigger(); void loadExecutions(0); }}
+        onSaved={() => { void loadTrigger(); void loadExecutions(null); }}
       />
 
       {/* Delete confirmation */}

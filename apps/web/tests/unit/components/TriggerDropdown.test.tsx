@@ -1,5 +1,5 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,9 +74,12 @@ function renderDropdown(props: { open?: boolean; onToggle?: () => void } = {}) {
 // ---------------------------------------------------------------------------
 
 describe('TriggerDropdown', () => {
+  const originalInnerWidth = window.innerWidth;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listTriggers.mockResolvedValue({ triggers: [], total: 0 });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
   });
 
   it('renders clock button with correct aria-label', () => {
@@ -135,7 +138,7 @@ describe('TriggerDropdown', () => {
     });
 
     const { onToggle } = renderDropdown({ open: true });
-    const item = await screen.findByRole('menuitem', { name: /Daily Review/i });
+    const item = await screen.findByRole('button', { name: /Daily Review/i });
     await user.click(item);
 
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/triggers/t-1');
@@ -146,7 +149,7 @@ describe('TriggerDropdown', () => {
     const user = userEvent.setup();
     const { onToggle } = renderDropdown({ open: true });
 
-    const newBtn = await screen.findByRole('menuitem', { name: /New Trigger/i });
+    const newBtn = await screen.findByRole('button', { name: /New Trigger/i });
     await user.click(newBtn);
 
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/triggers');
@@ -157,7 +160,7 @@ describe('TriggerDropdown', () => {
     const user = userEvent.setup();
     const { onToggle } = renderDropdown({ open: true });
 
-    const manageBtn = await screen.findByRole('menuitem', { name: /Manage/i });
+    const manageBtn = await screen.findByRole('button', { name: /Manage/i });
     await user.click(manageBtn);
 
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/triggers');
@@ -178,5 +181,75 @@ describe('TriggerDropdown', () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-haspopup', 'dialog');
+  });
+
+  it('closes on Escape and returns focus to the trigger button', async () => {
+    const user = userEvent.setup();
+    const { onToggle } = renderDropdown({ open: true });
+    const triggerButton = screen.getByRole('button', { name: 'Automation triggers' });
+    triggerButton.focus();
+
+    await user.keyboard('{Escape}');
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(triggerButton).toHaveFocus());
+  });
+
+  it('closes on outside click', async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    render(
+      <MemoryRouter>
+        <button type="button">Outside</button>
+        <TriggerDropdown projectId="proj-1" open={true} onToggle={onToggle} />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Outside' }));
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows load failure state and retries', async () => {
+    const user = userEvent.setup();
+    mocks.listTriggers
+      .mockRejectedValueOnce(new Error('Unable to load triggers'))
+      .mockResolvedValueOnce({ triggers: [], total: 0 });
+
+    renderDropdown({ open: true });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load triggers');
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => {
+      expect(mocks.listTriggers).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('No triggers configured.')).toBeInTheDocument();
+  });
+
+  it('clamps the popover to the right viewport edge', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+    const rectSpy = vi
+      .spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({
+        x: 310,
+        y: 12,
+        width: 20,
+        height: 20,
+        top: 12,
+        right: 330,
+        bottom: 32,
+        left: 310,
+        toJSON: () => ({}),
+      } as DOMRect);
+
+    renderDropdown({ open: true });
+
+    const popover = await screen.findByRole('dialog', { name: /automation triggers/i });
+    await waitFor(() => {
+      expect(popover).toHaveStyle({ left: '24px' });
+    });
+    rectSpy.mockRestore();
   });
 });
