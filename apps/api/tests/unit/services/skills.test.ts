@@ -137,4 +137,50 @@ describe('resolveSkillProfile', () => {
     expect(resolved.vmSizeOverride).toBe('small');
     expect(resolved.systemPromptAppend).toBe('Profile prompt');
   });
+
+  it('applies skill fields over platform defaults when no profile resolves', async () => {
+    const db = createMockDB();
+    // Skill with no default profile and no explicit profile hint: resolveAgentProfile
+    // short-circuits to platform defaults without querying the profiles table.
+    db._pushResult([makeSkill({ defaultProfileId: null })]);
+
+    const resolved = await resolveSkillProfile(
+      db,
+      'project-1',
+      null,
+      'skill-1',
+      'user-1',
+      { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any
+    );
+
+    expect(resolved.skillId).toBe('skill-1');
+    expect(resolved.profileId).toBeNull();
+    // taskMode default of 'task' on the skill row wins over the null platform default.
+    expect(resolved.taskMode).toBe('task');
+    // Skill scalar fields fill in over null platform defaults.
+    expect(resolved.model).toBe('skill-model');
+    expect(resolved.vmSizeOverride).toBe('large');
+    expect(resolved.systemPromptAppend).toBe('Skill prompt');
+    expect(resolved.resourceRequirementsJson).toBe('{"minVcpu":4}');
+  });
+
+  it('falls back to skill-by-name lookup when the id lookup misses', async () => {
+    const db = createMockDB();
+    db._pushResult([]); // by-id lookup misses
+    db._pushResult([makeSkill({ id: 'skill-7', name: 'ship-it', defaultProfileId: null })]); // by-name hit
+
+    const resolved = await resolveSkillProfile(
+      db,
+      'project-1',
+      null,
+      'ship-it',
+      'user-1',
+      { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any
+    );
+
+    expect(resolved.skillId).toBe('skill-7');
+    expect(resolved.skillName).toBe('ship-it');
+    // skillHint preserves the raw lookup value the caller supplied.
+    expect(resolved.skillHint).toBe('ship-it');
+  });
 });
