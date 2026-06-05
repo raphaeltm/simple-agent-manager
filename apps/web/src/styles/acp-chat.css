@@ -467,20 +467,25 @@
 .prose th,
 .prose td {
   padding: 0.4rem 0.625rem;
-  border: 1px solid rgba(34, 197, 94, 0.16);
+  /* 0.45 opacity reaches the WCAG 1.4.11 3:1 non-text contrast threshold for
+     grid lines against the bubble background (0.16 only gave ~1.3:1). */
+  border: 1px solid rgba(34, 197, 94, 0.45);
   text-align: left;
   vertical-align: top;
   min-width: 6rem;
-  max-width: 18rem;
+  /* max-width is ignored in table-layout:auto; wrap long unbroken strings
+     (URLs, paths, tokens) so a single cell can't blow out the scroll width. */
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .prose thead th {
   background: rgba(34, 197, 94, 0.08);
-  border-bottom: 1px solid rgba(34, 197, 94, 0.34);
+  border-bottom: 1px solid rgba(34, 197, 94, 0.55);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .prose tbody tr:nth-child(even) td {
-  background: rgba(34, 197, 94, 0.035);
+  background: rgba(34, 197, 94, 0.08);
 }

@@ -133,6 +133,37 @@ describe('MessageBubble', () => {
         expect(code.closest('pre')).not.toBeNull();
       }
     });
+
+    it('renders a multi-line language-less block as a <pre> for user messages too', () => {
+      // makeCodeComponent is shared between user and agent roles, so the
+      // block/inline classification must behave identically for user messages.
+      const markdown = '```\nuser line one\nuser line two\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="user" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toContain('user line one');
+      expect(pre!.textContent).toContain('user line two');
+      expect(pre!.textContent).toContain('\n');
+    });
+
+    it('renders a single-line language-less fenced block as inline <code>', () => {
+      // Documents the new logic's edge case: a single-line language-less block
+      // has its trailing newline stripped, so `code.includes('\n')` is false and
+      // there is no language match → it renders inline. This is intentional
+      // (single-line snippets read fine inline) and not a regression.
+      const markdown = '```\ngit status\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      expect(container.querySelector('pre')).toBeNull();
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.textContent).toContain('git status');
+    });
   });
 
   describe('inline code styling per role', () => {

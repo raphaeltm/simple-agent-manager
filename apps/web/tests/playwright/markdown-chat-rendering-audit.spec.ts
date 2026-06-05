@@ -73,6 +73,12 @@ const AGENT_MARKDOWN = [
   '     - deeper nested item',
   '3. Third step in the plan',
   '',
+  'Nested bullets:',
+  '',
+  '- top level bullet',
+  '  - second level bullet',
+  '    - third level bullet',
+  '',
   'Checklist:',
   '',
   '- [ ] unchecked task item',
@@ -207,6 +213,19 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
     .evaluate((el) => getComputedStyle(el).listStyleType);
   expect(ulStyle).toBe('disc');
 
+  // Nested unordered markers: second level = circle, third level = square.
+  const nestedUlStyle = await page
+    .locator('.prose ul ul')
+    .first()
+    .evaluate((el) => getComputedStyle(el).listStyleType);
+  expect(nestedUlStyle).toBe('circle');
+
+  const deepUlStyle = await page
+    .locator('.prose ul ul ul')
+    .first()
+    .evaluate((el) => getComputedStyle(el).listStyleType);
+  expect(deepUlStyle).toBe('square');
+
   // Task list has no bullet markers.
   const taskListStyle = await page
     .locator('.prose ul.contains-task-list')
@@ -222,7 +241,11 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
     return { borderColor: cs.borderColor, boxShadow: cs.boxShadow };
   });
   // Green channel dominant in the border (rgb 34, 197, 94 → green > red, green > blue).
-  expect(glow.borderColor).toMatch(/rgba?\(/);
+  const channels = glow.borderColor.match(/(\d+),\s*(\d+),\s*(\d+)/);
+  expect(channels).not.toBeNull();
+  const [r, g, b] = [Number(channels![1]), Number(channels![2]), Number(channels![3])];
+  expect(g).toBeGreaterThan(r);
+  expect(g).toBeGreaterThan(b);
   // A multi-layer box-shadow is present (not "none").
   expect(glow.boxShadow).not.toBe('none');
 
@@ -253,6 +276,11 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
 }
 
 test.describe('Project Chat Markdown Rendering — Mobile', () => {
+  // Pin the mobile viewport so the stored screenshot reflects 375px regardless
+  // of which Playwright project runs this block (otherwise the Desktop project
+  // run overwrites the file with a 1280px capture).
+  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+
   test('lists, tables, and language-less code blocks render correctly', async ({ page }) => {
     await setupMocks(page);
     await assertMarkdownRendering(page, 'markdown-chat-rendering-mobile');
