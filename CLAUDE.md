@@ -231,7 +231,7 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 
 Use the `/changelog` skill for structured queries.
 
-- skills-profile-override-layer: Skills as a first-class profile-override layer (skill → profile → project → platform); additive migration `0058_skills.sql` adds `skills`, `skill_runtime_env_vars`, `skill_runtime_files` and `tasks.skill_id`/`tasks.skill_hint`/`triggers.skill_id`; shared mappers in `profile-fields.ts`/`profile-runtime-assets.ts`; CRUD + runtime routes under `/api/projects/:projectId/skills`; resolution wired through task/trigger/MCP/dispatch + workspace runtime asset injection; Skills UI + chat/task skill selectors in `apps/web`
+- skills-profile-override-layer: Skills as a first-class profile-override layer (skill → profile → project → platform); additive migration `0063_skills.sql` adds `skills`, `skill_runtime_env_vars`, `skill_runtime_files` and `tasks.skill_id`/`tasks.skill_hint`/`triggers.skill_id`; shared mappers in `profile-fields.ts`/`profile-runtime-assets.ts`; CRUD + runtime routes under `/api/projects/:projectId/skills`; resolution wired through task/trigger/MCP/dispatch + workspace runtime asset injection; Skills UI + chat/task skill selectors in `apps/web`
 - explicit-sam-provider-selection: Require explicit opt-in to SAM as AI provider via `providerMode: 'sam'`; three-mode agent auth (user-api-key, oauth, sam); AI proxy auth gate on all endpoints including /models
 - compact-mode-lazy-load-tool-content: Chat compact mode strips tool content from RPC payload (80-90% reduction); lazy-loads on expand
 - harness-track-d-integration-design: SAM-native harness architecture doc; Gemma 4 26B as default Workers AI model
