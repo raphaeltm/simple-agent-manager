@@ -37,8 +37,8 @@ The VM agent already classifies this exact string as transient for ACP heartbeat
 - [x] Add a behavioral route/service test where `getSession()` or `getMessages()` throws a DO-reset error on the first call, succeeds on retry, returns a successful chat session detail response, and does not record `chat.session_detail_load_failed`.
 - [x] Add a retry-exhaustion test proving the error still surfaces and chat session load failure recording occurs only after retries are exhausted.
 - [x] Run focused tests, then full quality gates. Focused retry/classifier/chat route tests passed: 4 files, 47 tests; API typecheck passed; API lint passed with existing warnings; full `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed.
-- [ ] Run specialist review: `$task-completion-validator`, `$cloudflare-specialist`, `$constitution-validator`, `$test-engineer`, and `$env-validator`.
-- [ ] Deploy the branch to staging via `deploy-staging.yml`, open a chat session immediately during/after deploy, and confirm no new `chat.session_detail_load_failed` observability event for that action.
+- [x] Run specialist review: `$task-completion-validator`, `$cloudflare-specialist`, `$constitution-validator`, `$test-engineer`, and `$env-validator`.
+- [x] Deploy the branch to staging via `deploy-staging.yml`, open a chat session immediately during/after deploy, and confirm no new `chat.session_detail_load_failed` observability event for that action. Evidence: staging run `27038038460` passed; authenticated `GET /api/projects/01KJNR9R3TEN3KX1ETE33852R8/sessions/ff93ffb2-2c15-4a5b-8c8a-07de1d30c548?limit=25` returned 200 with 25 messages after deploy; observability D1 count for `chat.session_detail_load_failed` was 0 for the verification window.
 - [ ] Create PR, wait for CI, merge when green and staging verification passes, then monitor production deploy.
 
 ## Acceptance Criteria
