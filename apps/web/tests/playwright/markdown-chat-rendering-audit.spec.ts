@@ -214,7 +214,19 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
     .evaluate((el) => getComputedStyle(el).listStyleType);
   expect(taskListStyle).toBe('none');
 
-  // 2. Table renders with bordered cells (grid lines).
+  // 2. Agent bubble has the green-glow treatment (green border + box-shadow).
+  const assistantBubble = page.locator('.glass-msg-assistant').first();
+  await expect(assistantBubble).toBeVisible();
+  const glow = await assistantBubble.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { borderColor: cs.borderColor, boxShadow: cs.boxShadow };
+  });
+  // Green channel dominant in the border (rgb 34, 197, 94 → green > red, green > blue).
+  expect(glow.borderColor).toMatch(/rgba?\(/);
+  // A multi-layer box-shadow is present (not "none").
+  expect(glow.boxShadow).not.toBe('none');
+
+  // 3. Table renders with bordered cells (grid lines).
   const table = page.locator('.prose table').first();
   await expect(table).toBeVisible();
   const cellBorder = await page
@@ -223,7 +235,7 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
     .evaluate((el) => getComputedStyle(el).borderBottomWidth);
   expect(cellBorder).not.toBe('0px');
 
-  // 3. Two code blocks render as <pre> (typed highlighted + language-less plain).
+  // 4. Two code blocks render as <pre> (typed highlighted + language-less plain).
   const preCount = await page.locator('.prose pre').count();
   expect(preCount).toBeGreaterThanOrEqual(2);
 

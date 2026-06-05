@@ -143,14 +143,18 @@ function makeCodeComponent(inlineClassName: string): NonNullable<Components['cod
       );
     }
     // Language-less block (e.g. command output): preserve line breaks with a
-    // plain dark <pre>; no syntax highlighting or line numbers.
+    // plain dark <pre>; no syntax highlighting or line numbers. Wrapped in a
+    // my-2 div to match the typed-code path's vertical spacing (the <pre>'s own
+    // margin is zeroed by the inline style).
     return (
-      <pre
-        className="my-2 p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
-        style={{ margin: 0, background: '#011627', fontFamily: 'monospace', lineHeight: '1.5' }}
-      >
-        {code}
-      </pre>
+      <div className="my-2">
+        <pre
+          className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
+          style={{ margin: 0, background: '#011627', fontFamily: 'monospace', lineHeight: '1.5' }}
+        >
+          {code}
+        </pre>
+      </div>
     );
   };
   return CodeComponent;
