@@ -119,6 +119,7 @@ This task adds focused behavioral tests for closed modal exposure, popover close
 - Lint: `pnpm --filter @simple-agent-manager/web lint` (passed with existing warnings).
 - Typecheck: `pnpm --filter @simple-agent-manager/web typecheck` (passed).
 - Playwright audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/triggers-ui-audit.spec.ts` (17 passed, 34 project-scope skips).
+- Full coverage: `pnpm test:coverage` (15 tasks successful; web 172 test files / 2210 tests passed).
 - Screenshot evidence: `.codex/tmp/playwright-screenshots/` includes trigger list/detail/form mobile and desktop states, including cleanup failure feedback at `375x667` and `1280x800`.
 
 ## Specialist Review Evidence
