@@ -12,6 +12,7 @@ interface AuthTestUser {
 }
 
 type BeforeCreateHook = (user: AuthTestUser) => Promise<{ data: AuthTestUser }>;
+type SessionAfterHook = (session: { userId?: string | null }) => Promise<void>;
 
 interface BetterAuthOptions {
   account?: { encryptOAuthTokens?: boolean };
@@ -19,6 +20,11 @@ interface BetterAuthOptions {
     user?: {
       create?: {
         before?: BeforeCreateHook;
+      };
+    };
+    session?: {
+      create?: {
+        after?: SessionAfterHook;
       };
     };
   };
@@ -77,6 +83,34 @@ async function getBeforeCreateHook(): Promise<BeforeCreateHook> {
   return hook;
 }
 
+/**
+ * Build a fake D1 binding whose prepare().bind().run() chain records the SQL and
+ * bound parameters, and returns a configurable `meta.changes` (or throws).
+ */
+function makeSelfHealDb(opts?: { changes?: number; throwOnRun?: boolean }) {
+  const run = vi.fn(async () => {
+    if (opts?.throwOnRun) {
+      throw new Error('D1_ERROR: simulated failure');
+    }
+    return { meta: { changes: opts?.changes ?? 0 } };
+  });
+  const bind = vi.fn(() => ({ run }));
+  const prepare = vi.fn(() => ({ bind }));
+  return { db: { prepare }, prepare, bind, run };
+}
+
+async function getSessionAfterHook(env: Record<string, unknown>): Promise<SessionAfterHook> {
+  const { createAuth } = await import('../../src/auth');
+  createAuth(env as never);
+
+  const hook = capturedOptions?.databaseHooks?.session?.create?.after;
+  if (!hook) {
+    throw new Error('BetterAuth session.create.after hook was not registered');
+  }
+
+  return hook;
+}
+
 const newUser: AuthTestUser = {
   id: 'github-user-1',
   email: 'user@example.com',
@@ -129,6 +163,67 @@ describe('BetterAuth configuration', () => {
 
   it('uses the shared trial sentinel user id in tests', () => {
     expect(TRIAL_ANONYMOUS_USER_ID).toBe('system_anonymous_trials');
+  });
+});
+
+describe('login-time superadmin self-heal (session.create.after)', () => {
+  beforeEach(() => {
+    capturedOptions = undefined;
+    mocks.drizzle.mockReset();
+    mocks.drizzle.mockReturnValue({});
+  });
+
+  it('registers a session.create.after hook', async () => {
+    const { db } = makeSelfHealDb();
+    await getSessionAfterHook({ ...fakeEnv(), DATABASE: db });
+    // getSessionAfterHook throws if the hook is missing, so reaching here is the assertion.
+    expect(capturedOptions?.databaseHooks?.session?.create?.after).toBeTypeOf('function');
+  });
+
+  it('runs the guarded UPDATE bound to (userId, sentinelId) on login', async () => {
+    const { db, prepare, bind, run } = makeSelfHealDb({ changes: 1 });
+    const hook = await getSessionAfterHook({ ...fakeEnv(), DATABASE: db });
+
+    await hook({ userId: 'github-user-1' });
+
+    expect(prepare).toHaveBeenCalledOnce();
+    const sql = prepare.mock.calls[0][0] as string;
+    expect(sql).toContain('UPDATE users');
+    expect(sql).toContain("role = 'superadmin'");
+    // ?1 = current user id (referenced twice), ?2 = sentinel id.
+    expect(bind).toHaveBeenCalledWith('github-user-1', TRIAL_ANONYMOUS_USER_ID);
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('honors an env-overridden sentinel id when binding', async () => {
+    const { db, bind } = makeSelfHealDb({ changes: 0 });
+    const hook = await getSessionAfterHook({
+      ...fakeEnv(),
+      DATABASE: db,
+      TRIAL_ANONYMOUS_USER_ID: 'custom_sentinel',
+    });
+
+    await hook({ userId: 'github-user-1' });
+
+    expect(bind).toHaveBeenCalledWith('github-user-1', 'custom_sentinel');
+  });
+
+  it('does nothing (no query) when the session has no userId', async () => {
+    const { db, prepare } = makeSelfHealDb();
+    const hook = await getSessionAfterHook({ ...fakeEnv(), DATABASE: db });
+
+    await hook({ userId: null });
+
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('swallows a D1 failure so login still succeeds (load-bearing try/catch)', async () => {
+    const { db } = makeSelfHealDb({ throwOnRun: true });
+    const hook = await getSessionAfterHook({ ...fakeEnv(), DATABASE: db });
+
+    // Must resolve, not reject — an uncaught throw here would surface as a 500
+    // and break login, since better-auth awaits session.create.after.
+    await expect(hook({ userId: 'github-user-1' })).resolves.toBeUndefined();
   });
 });
 

@@ -141,6 +141,27 @@ curl https://api.yourdomain.com/health
 
 Open `https://app.yourdomain.com` — you should see the login page.
 
+## First Login & Admin Access
+
+The first genuine human to sign in to a fresh deployment becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
+
+Fresh deployments are seeded with an internal sentinel user (`system_anonymous_trials`, `status='system'`, created by a database migration) used for anonymous trials. This sentinel is **not** a real user and never counts toward "is this the first human" checks. Two mechanisms guarantee the first real human is promoted regardless of the sentinel:
+
+- **Deploy-time backfill** (migration): when a deployment has exactly one non-system human and no superadmin yet, that human is promoted to `superadmin`/`active` when migrations run. This also covers accounts created via token-login or device-flow.
+- **Login-time self-heal** (OAuth only): on each GitHub OAuth login, if the signing-in user is the only non-system human and no superadmin exists, they are promoted in a single atomic, idempotent write. A failure here never blocks login.
+
+Both mechanisms share the same guards and are strictly no-ops in any other state — they never promote a second user, never touch an existing superadmin, and never auto-promote a `suspended` or `system` account. On managed/multi-user deployments nothing changes.
+
+Notes:
+
+- **Promotion happens regardless of `REQUIRE_APPROVAL`.** Even with open registration, the first human owns the deployment.
+- **First-login race:** if two brand-new users sign in at the exact same moment, the atomic guard ensures at most one becomes superadmin; the other remains a normal user.
+- **Cookie-cache staleness:** the session role is cached for up to 5 minutes. If you were promoted mid-session (e.g. the login-time self-heal fired on a session you already held), the new admin access becomes visible after the cache expires or, faster, after you **log out and log back in**.
+
+### Overriding the sentinel id (optional)
+
+The sentinel user id defaults to `system_anonymous_trials`. If your deployment uses a different sentinel id, set `TRIAL_ANONYMOUS_USER_ID` to that value so the first-user checks exclude it correctly. Most deployments never need to set this.
+
 ## Teardown
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.

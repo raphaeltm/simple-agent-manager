@@ -60,7 +60,8 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                          | Default   | Description                                                                                                                                |
 | --------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `REQUIRE_APPROVAL`                | _(unset)_ | Require admin approval for new users. First user becomes superadmin.                                                                        |
+| `REQUIRE_APPROVAL`                | _(unset)_ | Require admin approval for new users. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
+| `TRIAL_ANONYMOUS_USER_ID`         | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id. |
 | `CAPACITY_SIZE_FALLBACK_ENABLED`  | `true`    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
 
 ## AI Idea Title Generation
