@@ -1821,6 +1821,9 @@
               "$ref": "#/components/schemas/Notification"
             }
           },
+          "unreadCount": {
+            "type": "integer"
+          },
           "nextCursor": {
             "type": "string",
             "nullable": true
@@ -2089,8 +2092,8 @@
               "$ref": "#/components/schemas/ActivityEvent"
             }
           },
-          "total": {
-            "type": "integer"
+          "hasMore": {
+            "type": "boolean"
           }
         },
         "required": [

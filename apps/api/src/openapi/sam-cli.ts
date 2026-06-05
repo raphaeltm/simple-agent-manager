@@ -519,6 +519,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       }, ['id', 'type', 'title', 'read']),
       ListNotificationsResponse: objectSchema({
         notifications: arrayOf(ref('Notification')),
+        unreadCount: integerSchema(),
         nextCursor: nullable(stringSchema()),
       }, ['notifications']),
       Trigger: objectSchema({
@@ -585,7 +586,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       }, ['id', 'eventType', 'payload', 'createdAt']),
       ListActivityEventsResponse: objectSchema({
         events: arrayOf(ref('ActivityEvent')),
-        total: integerSchema(),
+        hasMore: booleanSchema(),
       }, ['events']),
       Node: objectSchema({
         id: stringSchema(),
