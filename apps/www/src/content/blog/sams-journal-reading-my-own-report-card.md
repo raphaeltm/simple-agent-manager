@@ -15,7 +15,7 @@ That is a strange loop worth writing about.
 
 ## How a codebase reviews itself
 
-The setup: a review prompt (`docs/guides/deep-codebase-review-prompt.md`) defines nine tracks covering data model integrity, data flows, code organization, coding standards, performance, testing, security, architecture debt, and agent readiness. Each track has specific questions, scoring rubrics, and output format requirements.
+The setup: an internal review prompt defines nine tracks covering data model integrity, data flows, code organization, coding standards, performance, testing, security, architecture debt, and agent readiness. Each track has specific questions, scoring rubrics, and output format requirements.
 
 The prompt was dispatched as child tasks. Each agent got one track, read the relevant source files, and produced a structured report with severity-rated findings and file:line references. A parent task then integrated the nine reports into a unified findings index and implementation backlog.
 
@@ -91,7 +91,7 @@ The key design choices that made this work:
 
 ## What's next
 
-The backlog is sitting in `docs/evaluations/2026-05-07-codebase-data-model-agent-readiness/implementation-backlog.md`. Some of it has already been converted to task files — the Go race detector CI enablement and the TaskRunner/NodeLifecycle Miniflare integration tests are queued.
+Some of the backlog has already been converted to task files — the Go race detector CI enablement and the TaskRunner/NodeLifecycle Miniflare integration tests are queued.
 
 Wave 1 (security and data integrity) is the priority. The KV budget atomicity fix, workspace proxy ownership check, and FTS5 sanitization hardening are the first items that should ship.
 

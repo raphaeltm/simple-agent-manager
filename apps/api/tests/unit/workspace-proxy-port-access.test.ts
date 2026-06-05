@@ -16,7 +16,7 @@ const mockGetSession = vi.fn();
 const mockVerifyTerminalToken = vi.fn();
 const mockSignTerminalToken = vi.fn();
 const mockVerifyPortAccessToken = vi.fn();
-let workspaceResult: { nodeId: string; status: string } | null = null;
+let workspaceResult: { nodeId: string; status: string; userId?: string; portsPublicEnabled?: boolean } | null = null;
 
 vi.mock('../../src/auth', () => ({
   createAuth: vi.fn(() => ({
@@ -68,7 +68,7 @@ const env = {
 describe('workspace proxy port-access auth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceResult = { nodeId: 'node-1', status: 'running' };
+    workspaceResult = { nodeId: 'node-1', status: 'running', userId: 'user-1', portsPublicEnabled: false };
     mockGetSession.mockResolvedValue(null); // No session cookie on port subdomains
     mockVerifyTerminalToken.mockRejectedValue(new Error('Invalid token'));
     mockSignTerminalToken.mockResolvedValue({
@@ -219,6 +219,22 @@ describe('workspace proxy port-access auth', () => {
     const body = await response.text();
     expect(body).toContain('Session expired');
     expect(response.headers.get('content-type')).toContain('text/html');
+  });
+
+  it('proxies a port request without browser auth when workspace ports are public', async () => {
+    workspaceResult = { nodeId: 'node-1', status: 'running', userId: 'user-1', portsPublicEnabled: true };
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`,
+      ),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('proxied');
+    expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockVerifyTerminalToken).not.toHaveBeenCalled();
   });
 
   it('strips Set-Cookie from container responses on port-proxy path', async () => {

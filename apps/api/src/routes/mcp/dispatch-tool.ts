@@ -579,6 +579,7 @@ export async function handleDispatchTask(
       vmSize: resolvedVmSize,
       vmLocation: resolvedVmLocation,
       branch: checkoutBranch,
+      defaultBranch: project.defaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
@@ -606,6 +607,7 @@ export async function handleDispatchTask(
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: resolvedProfile?.profileId ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

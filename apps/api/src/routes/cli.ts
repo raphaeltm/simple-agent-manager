@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { samCliOpenApiDocument } from '../openapi/sam-cli';
 import { registerBinaryArtifactRoutes } from './binary-artifacts';
 
 export const cliRoutes = new Hono<{ Bindings: Env }>();
@@ -9,6 +10,10 @@ export const cliRoutes = new Hono<{ Bindings: Env }>();
 const cliVersionSchema = v.object({
   version: v.string(),
   buildDate: v.string(),
+});
+
+cliRoutes.get('/openapi.json', (c) => {
+  return c.json(samCliOpenApiDocument);
 });
 
 registerBinaryArtifactRoutes(cliRoutes, {

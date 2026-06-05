@@ -43,7 +43,7 @@ When adding or modifying a click handler, navigation call, or state setter in a 
 
 ### Why This Rule Exists
 
-The "New Chat" button bug (see `docs/notes/2026-03-01-new-chat-button-postmortem.md`) was caused by a click handler and a `useEffect` both reacting to the same state (`sessionId === undefined`). The handler navigated to a URL without a session ID; the effect saw `sessionId === undefined` and immediately redirected back. The button shipped broken with 529 passing tests because no one traced what effects would fire after the click.
+The "New Chat" button bug (see the retained incident lesson in this rule) was caused by a click handler and a `useEffect` both reacting to the same state (`sessionId === undefined`). The handler navigated to a URL without a session ID; the effect saw `sessionId === undefined` and immediately redirected back. The button shipped broken with 529 passing tests because no one traced what effects would fire after the click.
 
 ### Required Steps
 
@@ -75,7 +75,7 @@ When implementing credential revocation, cleanup, or expiration, you MUST verify
 
 ### Why This Rule Exists
 
-The MCP token revocation bug (see `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md`) was caused by revoking a task-scoped token when the MCP connection that used it was scoped to the entire ACP session. Once revoked, the client had no mechanism to obtain a new token, breaking all subsequent tool calls permanently.
+The MCP token revocation bug (see the retained incident lesson in this rule) was caused by revoking a task-scoped token when the MCP connection that used it was scoped to the entire ACP session. Once revoked, the client had no mechanism to obtain a new token, breaking all subsequent tool calls permanently.
 
 ### Required Steps
 
@@ -93,7 +93,7 @@ When adding or modifying CORS middleware, the origin callback MUST default to **
 
 ### Why This Rule Exists
 
-The CORS origin fallthrough bug (see `docs/notes/2026-03-09-cors-origin-fallthrough-postmortem.md`) allowed any website to make credentialed cross-origin requests because the origin callback returned the requesting origin for all cases, including unknown ones.
+The CORS origin fallthrough bug (see the retained incident lesson in this rule) allowed any website to make credentialed cross-origin requests because the origin callback returned the requesting origin for all cases, including unknown ones.
 
 ### Required Steps
 
@@ -109,7 +109,7 @@ When adding a new UI input element (form field, dropdown, toggle, radio group) t
 
 ### Why This Rule Exists
 
-The Scaleway node creation bug (see `docs/notes/2026-03-14-scaleway-node-creation-failure-postmortem.md`) shipped a fully functional provider dropdown that looked correct — selecting Scaleway showed Scaleway locations and prices — but `handleCreateNode()` never included the selected provider in the API call. The `CreateNodeRequest` type didn't even have a `provider` field. The dropdown was cosmetic: it collected input that was silently discarded.
+The Scaleway node creation bug (see the retained incident lesson in this rule) shipped a fully functional provider dropdown that looked correct — selecting Scaleway showed Scaleway locations and prices — but `handleCreateNode()` never included the selected provider in the API call. The `CreateNodeRequest` type didn't even have a `provider` field. The dropdown was cosmetic: it collected input that was silently discarded.
 
 ### Required Steps
 

@@ -353,7 +353,7 @@ export function useProjectChatState() {
         const task = await getProjectTask(projectId, provisioning.taskId);
         setProvisioning((prev) => {
           if (!prev) return null;
-          const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null };
+          const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null, requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize, provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize };
           if (task.workspaceId && !prev.workspaceId) next.workspaceId = task.workspaceId;
           return next;
         });
@@ -398,6 +398,8 @@ export function useProjectChatState() {
             errorMessage: task.errorMessage ?? null,
             startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
             workspaceId: task.workspaceId ?? null, workspaceUrl: null,
+            requestedVmSize: task.requestedVmSize ?? null,
+            provisionedVmSize: task.provisionedVmSize ?? null,
           });
         }
       } catch { /* Best-effort */ }
@@ -488,39 +490,18 @@ export function useProjectChatState() {
     }
   }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
 
-  const ensureDefaultProfileForSingleAgent = useCallback(async () => {
-    if (selectedProfileId) return selectedProfileId;
-    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
-    if (configuredAgents.length !== 1) return null;
-
-    const agent = configuredAgents[0];
-    if (!agent) return null;
-    const profile = await createProfile({
-      name: `${agent.name} Default`,
-      description: 'Default conversation profile',
-      agentType: agent.id,
-      permissionMode: 'bypassPermissions',
-      vmSizeOverride: 'medium',
-      workspaceProfile: 'lightweight',
-      taskMode: 'conversation',
-    });
-    return profile.id;
-  }, [agentProfiles, configuredAgents, createProfile, selectedProfileId]);
-
   const resolveProfileIdForSubmit = useCallback(async () => {
     if (selectedProfileId) return selectedProfileId;
     if (configuredAgents.length === 0) {
       setSubmitError('Add an agent in Settings before starting a chat.');
       return null;
     }
-
-    const profileId = await ensureDefaultProfileForSingleAgent();
-    if (profileId) return profileId;
+    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
 
     openProfileWizard();
     setSubmitError('Create a profile before sending your first message.');
     return null;
-  }, [configuredAgents.length, ensureDefaultProfileForSingleAgent, openProfileWizard, selectedProfileId]);
+  }, [agentProfiles, configuredAgents.length, openProfileWizard, selectedProfileId]);
 
   const handleSubmit = async () => {
     const trimmed = message.trim();
@@ -560,6 +541,7 @@ export function useProjectChatState() {
         branchName: result.branchName, status: 'queued',
         executionStep: null, errorMessage: null,
         startedAt: Date.now(), workspaceId: null, workspaceUrl: null,
+        requestedVmSize: null, provisionedVmSize: null,
       });
       if (executeIdeaIdRef.current) {
         const ideaId = executeIdeaIdRef.current;

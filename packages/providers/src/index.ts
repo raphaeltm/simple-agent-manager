@@ -11,6 +11,11 @@ export type {
   LocationMeta,
   Provider,
   ProviderConfig,
+  ProviderErrorCategory,
+  ProviderErrorContext,
+  ProviderErrorContextValue,
+  ProviderLogContext,
+  ProviderLogger,
   ScalewayProviderConfig,
   SizeConfig,
   VMConfig,
@@ -22,10 +27,13 @@ export { ProviderError } from './types';
 // Re-export utilities
 export { getTimeoutMs,providerFetch } from './provider-fetch';
 
-// Re-export providers
+// Re-export providers and classification functions
 export type { GcpTokenProvider } from './gcp';
-export { DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GCP_LOCATIONS,GcpProvider } from './gcp';
+export { classifyGcpError, DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GCP_LOCATIONS,GcpProvider } from './gcp';
+export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
+  classifyHetznerError,
+  DEFAULT_CAPACITY_RETRY_BUDGET_MS,
   DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
   DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
   DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
@@ -33,7 +41,7 @@ export {
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
-export { SCALEWAY_LOCATIONS,ScalewayProvider } from './scaleway';
+export { classifyScalewayError, SCALEWAY_LOCATIONS,ScalewayProvider } from './scaleway';
 
 /**
  * Create a provider instance from explicit configuration.
@@ -49,7 +57,11 @@ export function createProvider(config: ProviderConfig): Provider {
         config.placementFallbackEnabled,
         config.capacityRetryInitialDelayMs,
         config.capacityRetryMaxDelayMs,
-        config.capacityRetryMaxAttempts,
+        {
+          capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
+          capacityRetryBudgetMs: config.capacityRetryBudgetMs,
+          logger: config.logger,
+        },
       );
     case 'scaleway':
       return new ScalewayProvider(

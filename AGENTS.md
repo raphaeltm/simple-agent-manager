@@ -91,7 +91,7 @@ Per-project data (chat sessions, messages, activity events) is stored in a `Proj
 - **Migrations**: `apps/api/src/durable-objects/migrations.ts` — append-only, tracked in `migrations` table
 - **WebSocket**: Hibernatable WebSockets for real-time event streaming
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1
-- **ADR**: `docs/adr/004-hybrid-d1-do-storage.md`
+- **Architecture docs**: `apps/www/src/content/docs/docs/architecture/overview.md`
 
 ## CLI Package Quality
 

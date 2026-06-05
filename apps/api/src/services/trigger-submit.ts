@@ -273,6 +273,7 @@ export async function submitTriggeredTask(
       vmSize,
       vmLocation,
       branch,
+      defaultBranch: project.defaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
@@ -293,6 +294,7 @@ export async function submitTriggeredTask(
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: resolvedProfile?.profileId ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

@@ -520,7 +520,7 @@ export function extractSnippet(content: string, query: string): string {
 }
 
 /**
- * Fetch the tool_metadata.content array for a single message.
+ * Fetch the tool_metadata.content array for a single tool message.
  * Used by the lazy-load endpoint to fetch content on demand.
  */
 export function getMessageToolContent(
@@ -530,25 +530,26 @@ export function getMessageToolContent(
 ): unknown[] | null {
   const row = sql
     .exec(
-      'SELECT tool_metadata FROM chat_messages WHERE id = ? AND session_id = ?',
+      'SELECT role, tool_metadata FROM chat_messages WHERE id = ? AND session_id = ?',
       messageId,
       sessionId
     )
     .toArray()[0];
 
   if (!row) return null;
+  if (row.role !== 'tool') return null;
 
   const rawMeta = row.tool_metadata;
-  if (typeof rawMeta !== 'string') return null;
+  if (typeof rawMeta !== 'string') return [];
 
   try {
     const parsed = JSON.parse(rawMeta);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.content)) {
       return parsed.content as unknown[];
     }
-    return null;
+    return [];
   } catch {
-    return null;
+    return [];
   }
 }
 

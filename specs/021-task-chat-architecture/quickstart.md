@@ -1,5 +1,7 @@
 # Quickstart: Task-Driven Chat Architecture & Autonomous Workspace Execution
 
+> Spec validation artifact only. This is not canonical architecture documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Date**: 2026-02-24
 **Spec**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md) | **Data Model**: [data-model.md](./data-model.md)
 

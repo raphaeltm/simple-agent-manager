@@ -43,6 +43,16 @@ const taskRunnerDoServiceSource = readFileSync(
   'utf8'
 );
 
+function getWorkspaceCreationSection(): string {
+  const wsCreationStart = taskRunnerDoSource.indexOf(
+    'export async function handleWorkspaceCreation('
+  );
+  const wsCreationEnd = taskRunnerDoSource.indexOf(
+    'export async function handleWorkspaceDispatch('
+  );
+  return taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+}
+
 // =========================================================================
 // Fix 1: Single session creation — no duplicate sessions per task
 // =========================================================================
@@ -59,27 +69,14 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
   });
 
   it('TaskRunner DO does NOT call createSession in handleWorkspaceCreation', () => {
-    // Extract the handleWorkspaceCreation method
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
 
     expect(wsCreationSection).not.toContain('createSession(');
     expect(wsCreationSection).not.toContain('projectDataService.createSession');
   });
 
   it('TaskRunner DO calls ensureSessionLinked (which calls linkSessionToWorkspace)', () => {
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
 
     // handleWorkspaceCreation delegates to ensureSessionLinked
     expect(wsCreationSection).toContain('ensureSessionLinked');
@@ -190,13 +187,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
     expect(taskRunnerDoSource).toContain('state.stepResults.chatSessionId');
 
     // handleWorkspaceCreation calls ensureSessionLinked
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
     expect(wsCreationSection).toContain('ensureSessionLinked(');
   });
 
@@ -211,17 +202,14 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('handleWorkspaceCreation calls ensureSessionLinked', () => {
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
 
-    // Both fresh creation and crash recovery call ensureSessionLinked
-    const calls = wsCreationSection.split('ensureSessionLinked').length - 1;
-    expect(calls).toBeGreaterThanOrEqual(2); // once in recovery, once in fresh creation
+    // Both fresh creation and crash recovery route through bookkeeping, which
+    // performs the session link before dispatch acknowledgement.
+    const bookkeepingCalls = wsCreationSection.split('ensureWorkspaceBookkeeping').length - 1;
+    expect(bookkeepingCalls).toBeGreaterThanOrEqual(2);
+    expect(taskRunnerDoSource).toContain('async function ensureWorkspaceBookkeeping(');
+    expect(taskRunnerDoSource).toContain('await ensureSessionLinked(state, workspaceId, rc)');
   });
 });
 

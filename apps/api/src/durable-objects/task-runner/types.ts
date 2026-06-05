@@ -31,6 +31,9 @@ export interface StepResults {
   agentStarted: boolean;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
+  /** VM size actually provisioned for an auto-provisioned node. May be smaller
+   *  than the requested size when size-fallback descended on capacity exhaustion. */
+  provisionedVmSize: VMSize | null;
 }
 
 export interface TaskRunConfig {
@@ -46,6 +49,8 @@ export interface TaskRunConfig {
   repository: string;
   installationId: string;
   outputBranch: string | null;
+  /** Project's default branch (e.g. 'main'). Used to skip branch-exists check when cloning the default branch. */
+  defaultBranch: string;
   projectDefaultVmSize: VMSize | null;
   /** Chat session ID created at task submit time (TDF-6: single session per task) */
   chatSessionId: string | null;
@@ -70,6 +75,8 @@ export interface TaskRunConfig {
   opencodeBaseUrl: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;
+  /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
+  agentProfileHint: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */
@@ -108,6 +115,16 @@ export interface TaskRunnerState {
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
   workspaceReadyStartedAt: number | null;
+  /** Set when we started trying to dispatch workspace creation to the VM agent */
+  workspaceDispatchStartedAt: number | null;
+  /** Number of VM-agent workspace dispatch attempts made by the dispatch step */
+  workspaceDispatchAttempts: number;
+  /** Last VM-agent workspace dispatch attempt time */
+  workspaceDispatchLastAttemptAt: number | null;
+  /** Last VM-agent workspace dispatch error, for admin/debug visibility */
+  workspaceDispatchLastError: string | null;
+  /** Set after VM-agent workspace dispatch acknowledgement is durably recorded */
+  workspaceDispatchAckedAt: number | null;
   /** Last D1 execution step written — idempotent guard to skip redundant D1 writes */
   lastD1Step: TaskExecutionStep | null;
   /** Terminal — DO has completed or failed, no more alarms */
@@ -134,6 +151,9 @@ export interface TaskRunnerContext {
   /** Get configurable timeout/interval values */
   getAgentPollIntervalMs: () => number;
   getAgentReadyTimeoutMs: () => number;
+  getWorkspaceDispatchTimeoutMs: () => number;
+  getWorkspaceDispatchBaseDelayMs: () => number;
+  getWorkspaceDispatchMaxDelayMs: () => number;
   getWorkspaceReadyTimeoutMs: () => number;
   getWorkspaceReadyPollIntervalMs: () => number;
   getProvisionPollIntervalMs: () => number;

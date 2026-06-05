@@ -63,11 +63,11 @@ deliverable, not an afterthought.
 **Rules:**
 
 - Public APIs MUST have complete reference documentation with examples
-- Every user journey has a corresponding guide in `/docs/guides/`
-- Architecture decisions are recorded in `/docs/adr/` (Architecture Decision Records)
-- All code comments reference relevant documentation: `// See docs/guides/idle-detection.md`
-- README.md provides <5 minute quickstart for new users
-- CHANGELOG.md follows Keep a Changelog format
+- Every public user journey has a corresponding guide in `apps/www/src/content/docs/docs/guides/`
+- Public architecture documentation is recorded in `apps/www/src/content/docs/docs/architecture/`
+- Code comments reference relevant public docs, specs, or task records using current paths
+- Public quickstart content lives in `apps/www/src/content/docs/docs/quickstart.md`
+- Product change history lives in public docs/blog content or task/spec records, not a root changelog
 
 **Rationale:** Good documentation reduces support burden, accelerates contributor onboarding, and
 demonstrates project maturity.
@@ -166,7 +166,7 @@ code are clearly separated.
   - `apps/` - Deployable applications (UI, API, workers)
   - `packages/` - Shared, reusable libraries (providers, cloud-init, shared types)
   - `scripts/` - VM-side scripts and tooling
-  - `docs/` - Documentation
+  - `apps/www/src/content/docs/docs/` - Public documentation
   - `specs/` - Feature specifications
 - Dependencies flow inward: apps → packages, never packages → apps
 - No circular dependencies between packages
@@ -242,12 +242,12 @@ scratch to their own infrastructure accounts.
   the current state. Fresh installs run the full migration chain. There is no separate "initial schema"
   to maintain — migrations are the single source of truth for database structure.
 - **Self-hosting docs updated in the same PR**: When adding infrastructure requirements (new bindings,
-  new secrets, new services), update `docs/guides/self-hosting.md` in the same change. Do not defer.
+  new secrets, new services), update `apps/www/src/content/docs/docs/guides/self-hosting.md` in the same change. Do not defer.
 - **Minimal external dependencies at deploy time**: The deployment should not depend on specific CI
   providers, specific DNS providers beyond Cloudflare, or any service that the self-hoster cannot
   substitute. GitHub Actions workflows are conveniences, not requirements.
-- **Architecture Decision Records for infrastructure changes**: When introducing new infrastructure
-  components (e.g., Durable Objects, new storage layers), document the decision in `docs/adr/` with
+- **Architecture documentation for infrastructure changes**: When introducing new infrastructure
+  components (e.g., Durable Objects, new storage layers), document the decision in `apps/www/src/content/docs/docs/architecture/` with
   the self-hosting implications explicitly addressed.
 
 **Validation Checklist (for architectural changes):**
@@ -319,10 +319,10 @@ simple-agent-manager/
 │       └── Makefile         # Build commands
 ├── scripts/
 │   └── vm/                  # VM-side scripts (idle-check, setup)
-├── docs/
-│   ├── guides/              # User guides
-│   ├── adr/                 # Architecture Decision Records
-│   └── api/                 # API reference
+├── apps/www/src/content/docs/docs/
+│   ├── guides/              # Public user guides
+│   ├── architecture/        # Public architecture docs
+│   └── reference/           # API/configuration/reference docs
 ├── specs/                   # Feature specifications
 ├── .github/
 │   ├── workflows/           # CI/CD pipelines

@@ -3,122 +3,135 @@
 </p>
 
 <p align="center">
-  <strong>Describe what you want built. SAM provisions a cloud workspace, runs an AI coding agent, and streams the results back to you.</strong>
+  <strong>Run AI coding agents in parallel on your own cloud.</strong>
 </p>
 
 <p align="center">
-  <a href="#quick-deploy">Quick Deploy</a> •
-  <a href="docs/guides/self-hosting.md">Self-Hosting Guide</a> •
-  <a href="docs/architecture/walkthrough.md">Architecture</a> •
-  <a href="CONTRIBUTING.md">Contributing</a>
+  Every agent gets its own isolated container on a VM billed to <em>your</em> cloud account — full Linux, Docker + git, reachable in the browser. Run 5 or 500 at once.
+</p>
+
+<p align="center">
+  <a href="https://app.simple-agent-manager.org">Try it</a> &bull;
+  <a href="https://github.com/raphaeltm/simple-agent-manager">Star on GitHub</a> &bull;
+  <a href="https://simple-agent-manager.org/docs/">Documentation</a> &bull;
+  <a href="https://simple-agent-manager.org/docs/guides/self-hosting/">Self-Hosting Guide</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3%2B-blue?style=flat-square" alt="License" /></a>
 </p>
 
+<p align="center">
+  <img src="assets/images/sam-screenshot-byoc.webp" alt="SAM nodes and workspaces dashboard" width="760" />
+</p>
+
 ---
 
 ## What You Get
 
-**Project chat that executes code.** Link a GitHub repo, describe a task in natural language, and SAM handles the rest — provisioning a VM, cloning your repo into a devcontainer, starting [Claude Code](https://www.anthropic.com/claude-code), and streaming output back to the chat. When the agent finishes, it pushes to a branch and opens a PR.
+**Agents in parallel, each in a real environment.** Every agent runs in its own isolated Docker container on a VM you own — full Linux, Docker, and git, reachable from any browser. Run a handful or hundreds at once, each in a clean workspace.
 
-**Chat history that outlives workspaces.** Conversations persist at the project level. Stop a workspace, spin up a new one weeks later, and your full history is still there.
+**Bring your own cloud.** VMs are provisioned in your own Hetzner, Scaleway, or GCP account and billed directly to you. SAM never stores your cloud provider credentials as platform env vars — they're encrypted per-user. Your agents, your infra, your data.
 
-**Your infrastructure, your costs.** Self-hosted on Cloudflare (free tier) + Hetzner Cloud VMs. A workspace costs ~$0.007–0.03/hr compared to $0.18–0.36/hr on GitHub Codespaces.
+**Bring your own agent.** Six harnesses work today: [Claude Code](https://www.anthropic.com/claude-code), Codex, Gemini, Mistral, OpenCode, and Amp. Use your own API key, your OAuth/subscription token, or the platform proxy.
+
+**Chat-first, and it outlives workspaces.** Link a GitHub repo, describe a task in natural language, and watch every tool call stream back. Conversations persist at the project level — stop a workspace, spin up a new one weeks later, and your full history is still there.
+
+**Serverless control plane.** Self-hosted on Cloudflare ($5/mo Workers Paid plan) — the control plane provisions, schedules, and tears down workspaces with nothing to babysit. A workspace costs ~$0.007–0.03/hr compared to $0.18–0.36/hr on GitHub Codespaces.
+
+<p align="center">
+  <img src="assets/images/sam-screenshot-chat.webp" alt="SAM live agent session with tool stream" width="760" />
+</p>
 
 ## How It Works
 
 ```
 You: "Add rate limiting to the /api/upload endpoint"
-         ↓
+         |
     Project Chat (app.{domain})
-         ↓
+         |
     Cloudflare Worker API
-         ↓
-    TaskRunner — alarm-driven orchestrator that:
-      1. Claims a warm node or provisions a new Hetzner VM
+         |
+    TaskRunner -- alarm-driven orchestrator that:
+      1. Claims a warm node or provisions a new VM in your cloud
       2. Creates a Docker workspace with your repo
-      3. Starts Claude Code with your task description
+      3. Starts your chosen agent with the task description
       4. Streams agent output back to project chat
-         ↓
-    Agent pushes branch + opens PR when done
+         |
+    Agent streams results back as it works
 ```
 
-### Architecture
+## Architecture
 
 | Layer | What | How |
 |-------|------|-----|
 | **Control plane** | API, auth, orchestration | Cloudflare Workers + D1 + KV + R2 |
 | **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project) |
-| **Compute** | Workspaces running Claude Code | Hetzner VMs with a Go agent managing Docker containers, WebSocket terminal, and auth |
+| **Compute** | Workspaces running coding agents | VMs in your own cloud (Hetzner, Scaleway, or GCP) with a Go agent managing Docker containers, WebSocket terminal, and auth |
 | **Warm pool** | Fast workspace starts | Completed VMs stay warm for 30 min for instant reuse |
 
 The control plane is serverless — no servers to manage, no databases to back up. Compute scales to zero when you're not using it.
 
-For the full architecture with Mermaid diagrams, see the **[Architecture Walkthrough](docs/architecture/walkthrough.md)**.
+### Repository Structure
+
+```
+apps/
+  api/          Cloudflare Worker API (Hono)
+  web/          Control plane UI (React + Vite)
+  www/          Marketing site, blog & docs (Astro + Starlight)
+packages/
+  shared/       Shared types and utilities
+  providers/    Cloud provider abstraction (Hetzner, Scaleway, GCP)
+  cloud-init/   Cloud-init template generator
+  vm-agent/     Go VM agent (PTY, WebSocket, MCP tool endpoints)
+  ui/           Design system tokens and shared UI components
+  terminal/     Shared terminal component
+```
+
+For the full architecture with diagrams, see the **[Architecture Overview](https://simple-agent-manager.org/docs/architecture/overview/)**.
 
 ## Quick Deploy
 
-SAM deploys automatically via GitHub Actions. Fork, configure, push.
+SAM deploys automatically via GitHub Actions. Fork, configure, push. For the complete setup guide with detailed steps and troubleshooting, see the **[Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/)**.
 
 ### Prerequisites
 
-- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (free tier works)
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (Workers Paid plan, $5/mo)
 - A domain with nameservers pointing to Cloudflare
-- A [GitHub App](docs/guides/self-hosting.md#github-setup) for OAuth + repo access
+- A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#github-setup) for OAuth + repo access
 
 ### Steps
 
-**1. Fork this repository**
+1. **Fork this repository**
+2. **Create a GitHub Environment** named `production` in your fork's Settings > Environments
+3. **Add the required secrets** (Cloudflare API token, GitHub App credentials, etc. — see the [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) for the full list)
+4. **Push to `main`** — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health
 
-**2. Create a GitHub Environment** named `production` in your fork's Settings → Environments
-
-**3. Add environment variables:**
-
-| Variable | Example |
-|----------|---------|
-| `BASE_DOMAIN` | `example.com` |
-
-**4. Add environment secrets:**
-
-| Secret | Description |
-|--------|-------------|
-| `CF_API_TOKEN` | Cloudflare API token ([required permissions](docs/guides/self-hosting.md#step-4-create-api-token-with-required-permissions)) |
-| `CF_ACCOUNT_ID` | Cloudflare account ID |
-| `CF_ZONE_ID` | Cloudflare zone ID |
-| `R2_ACCESS_KEY_ID` | R2 API token access key |
-| `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
-| `PULUMI_CONFIG_PASSPHRASE` | `openssl rand -base64 32` |
-| `GH_CLIENT_ID` | GitHub App client ID |
-| `GH_CLIENT_SECRET` | GitHub App client secret |
-| `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64) |
-| `GH_APP_SLUG` | GitHub App URL slug |
-
-> Security keys (JWT, encryption) are generated automatically on first deploy.
-
-**5. Push to `main`** — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health.
-
-Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own Hetzner API token to create workspaces.
-
-For detailed setup, troubleshooting, and manual deployment: **[Self-Hosting Guide](docs/guides/self-hosting.md)**.
+Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, or GCP) to create workspaces.
 
 ## Development
 
 ```bash
 pnpm install        # Install dependencies
-pnpm dev            # Start dev servers (API + Web)
+pnpm build          # Build all packages
 pnpm test           # Run tests
 pnpm typecheck      # Type check
-pnpm build          # Build all packages
+pnpm lint           # Lint
+pnpm format         # Format
 ```
 
-> Local dev has limitations (no real OAuth, DNS, or VMs). For full testing, deploy to staging. See [Local Development Guide](docs/guides/local-development.md).
+Build packages in dependency order: `shared` > `providers` > `cloud-init` > `api` / `web`.
 
-## Contributing
+For local development details, see the **[Local Development Guide](https://simple-agent-manager.org/docs/guides/local-development/)**.
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## Documentation
+
+Full documentation is available at **[simple-agent-manager.org/docs](https://simple-agent-manager.org/docs/)**:
+
+- [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) — deploy your own instance
+- [Architecture Overview](https://simple-agent-manager.org/docs/architecture/overview/) — how the system works
+- [Security Model](https://simple-agent-manager.org/docs/architecture/security/) — BYOC, encryption, credentials
+- [Local Development](https://simple-agent-manager.org/docs/guides/local-development/) — contributing and development setup
 
 ## License
 

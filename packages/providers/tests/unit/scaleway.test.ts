@@ -140,6 +140,46 @@ describe('ScalewayProvider', () => {
       labels: { node: 'node-123', managed: 'simple-agent-manager' },
     };
 
+    const createResponse = () => new Response(JSON.stringify({
+      server: createMockScalewayServer({
+        id: 'created-server-id',
+        state: 'stopped',
+        public_ip: null,
+        public_ips: [],
+      }),
+    }), { status: 201 });
+
+    const imageResponse = () => new Response(
+      JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }),
+      { status: 200 },
+    );
+
+    const jsonErrorResponse = (message: string, status: number) => new Response(
+      JSON.stringify({ message }),
+      { status },
+    );
+
+    function mockCreateFailure(
+      failedStep: 'cloud-init' | 'poweron',
+      cleanupResponse = new Response(JSON.stringify({ task: {} }), { status: 202 }),
+    ) {
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(imageResponse())
+        .mockResolvedValueOnce(createResponse());
+
+      if (failedStep === 'cloud-init') {
+        mockFetch.mockResolvedValueOnce(jsonErrorResponse('cloud-init rejected', 500));
+      } else {
+        mockFetch
+          .mockResolvedValueOnce(new Response(null, { status: 204 }))
+          .mockResolvedValueOnce(jsonErrorResponse('poweron failed', 500));
+      }
+
+      mockFetch.mockResolvedValueOnce(cleanupResponse);
+      globalThis.fetch = mockFetch;
+      return mockFetch;
+    }
+
     it('should perform three-step creation: create server, set cloud-init, poweron', async () => {
       const mockFetch = createScalewayFetchMock();
       globalThis.fetch = mockFetch;
@@ -260,6 +300,69 @@ describe('ScalewayProvider', () => {
       );
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+    });
+
+    it('should clean up the created server when cloud-init upload fails', async () => {
+      const mockFetch = mockCreateFailure('cloud-init');
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('cloud-init rejected');
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+      const cleanupCall = fetchCall(mockFetch, 3);
+      expect(cleanupCall.url).toContain('/zones/fr-par-1/servers/created-server-id/action');
+      expect(jsonBody(cleanupCall.init)).toEqual({ action: 'terminate' });
+    });
+
+    it('should clean up the created server when poweron fails', async () => {
+      const mockFetch = mockCreateFailure('poweron');
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('poweron failed');
+      expect(mockFetch).toHaveBeenCalledTimes(5);
+      const cleanupCall = fetchCall(mockFetch, 4);
+      expect(cleanupCall.url).toContain('/zones/fr-par-1/servers/created-server-id/action');
+      expect(jsonBody(cleanupCall.init)).toEqual({ action: 'terminate' });
+    });
+
+    it('should keep cleanup failure inspectable without suppressing the cloud-init failure', async () => {
+      mockCreateFailure('cloud-init', jsonErrorResponse('cleanup failed', 503));
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('cloud-init rejected');
+      expect(err.cause).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).context).toEqual({
+        failedStep: 'cloud-init-upload',
+        cleanup: {
+          operation: 'cleanup-created-server',
+          provider: 'scaleway',
+          zone: 'fr-par-1',
+          serverId: 'created-server-id',
+          error: {
+            name: 'ProviderError',
+            provider: 'scaleway',
+            statusCode: 503,
+            message: 'scaleway API error (503): cleanup failed',
+          },
+        },
+      });
+      expect((err as ProviderError).toJSON().context).toEqual((err as ProviderError).context);
+    });
+
+    it('should tolerate 404 while cleaning up a failed create', async () => {
+      const mockFetch = mockCreateFailure('cloud-init', jsonErrorResponse('already gone', 404));
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('cloud-init rejected');
+      expect((err as ProviderError).context).toBeUndefined();
+      expect(mockFetch).toHaveBeenCalledTimes(4);
     });
 
   });

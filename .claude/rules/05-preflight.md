@@ -2,7 +2,7 @@
 
 Before writing ANY code, agents MUST complete preflight behavior checks.
 
-This policy is defined in `docs/guides/agent-preflight-behavior.md` and enforced through PR evidence checks in CI.
+This policy is enforced through PR evidence checks in CI.
 
 ## Mandatory Preflight Steps (Before Code Edits)
 

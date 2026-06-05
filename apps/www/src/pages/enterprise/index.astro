@@ -1,0 +1,566 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+
+const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
+const appUrl = `https://app.${baseDomain}`;
+
+const pillars = [
+  {
+    slug: 'compliance',
+    icon: 'shield',
+    label: 'Compliance & Control',
+    headline: 'Your compute, your Cloudflare account, your credentials',
+    description: 'Agents run on VMs in your cloud account. Self-hosters deploy the entire control plane to their own Cloudflare account. Credentials are encrypted per-user and never leave your boundary.',
+  },
+  {
+    slug: 'agent-agnostic',
+    icon: 'swap',
+    label: 'Agent Agnostic',
+    headline: 'Switch agents and LLM providers without switching platforms',
+    description: 'Claude Code, Codex, Gemini CLI, Amp, Mistral Vibe, OpenCode. Your teams pick what works for them. Bring your own API keys or use existing enterprise agreements.',
+  },
+  {
+    slug: 'open-source',
+    icon: 'code',
+    label: 'Open Source & Auditable',
+    headline: 'Read every line. Fork if you need to. No black boxes.',
+    description: 'AGPL-3.0 licensed. Full source available. Security teams can audit the control plane, the VM agent, the credential handling. No vendor trust required.',
+  },
+  {
+    slug: 'cost-control',
+    icon: 'chart',
+    label: 'Cost Transparency',
+    headline: 'Pay your cloud provider directly at your negotiated rate',
+    description: 'No opaque bundled pricing. Built-in usage dashboards, daily token budgets, and monthly cost caps give finance and engineering managers full visibility.',
+  },
+  {
+    slug: 'scale',
+    icon: 'grid',
+    label: 'Scale to Hundreds of Agents',
+    headline: 'Run 5 or 500 agents in parallel. SAM handles the rest.',
+    description: 'Warm node pooling for fast spinup. Automatic provisioning, scheduling, and cleanup. Every agent gets its own isolated container. Users never share VMs.',
+  },
+  {
+    slug: 'security',
+    icon: 'lock',
+    label: 'Security Isolation',
+    headline: 'One user per VM. One agent per workspace. Hard boundaries.',
+    description: 'No multi-tenant VM sharing. OS-level firewalls baked into every node. Short-lived VMs destroyed after idle timeout. Zero persistent attack surface.',
+  },
+  {
+    slug: 'governance',
+    icon: 'settings',
+    label: 'Governance & Observability',
+    headline: 'Platform policies, agent profiles, full audit trails',
+    description: 'Control what agents can do with platform policies. Standardize configurations with agent profiles. Track every session, tool call, and cost across your organization.',
+  },
+];
+---
+
+<Base
+  title="SAM for Enterprise — Secure Agent Infrastructure on Your Cloud"
+  description="Run AI coding agents at enterprise scale with full control. Your cloud, your credentials, your choice of agent. Open source, self-hostable, and built for compliance."
+>
+  <Header />
+  <main>
+    <!-- Hero -->
+    <section class="ent-hero">
+      <div class="ent-hero-glow" aria-hidden="true"></div>
+      <div class="container ent-hero-content">
+        <span class="section-label animate-on-scroll">Enterprise</span>
+        <h1 class="ent-hero-title animate-on-scroll">
+          Agent infrastructure<br />
+          <span class="gradient-text">you actually control</span>
+        </h1>
+        <p class="ent-hero-subtitle animate-on-scroll">
+          Your cloud. Your credentials. Your choice of agent.
+          SAM gives engineering teams the power of parallel AI agents
+          without giving up sovereignty over their infrastructure or data.
+        </p>
+        <div class="ent-hero-actions animate-on-scroll">
+          <a href={appUrl} class="btn-ent btn-ent-primary">
+            Get Started
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </a>
+          <a href="/docs/guides/self-hosting/" class="btn-ent btn-ent-secondary">
+            Self-Hosting Guide
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- Pain Points -->
+    <section class="section">
+      <div class="container">
+        <div class="pain-header animate-on-scroll">
+          <span class="section-label">The Problem</span>
+          <h2 class="section-title">Enterprise teams hit the same walls</h2>
+        </div>
+        <div class="pain-grid">
+          <div class="pain-card animate-on-scroll">
+            <div class="pain-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <h3>Compliance blocks adoption</h3>
+            <p>Security teams reject managed agent platforms because code runs on infrastructure the enterprise doesn't control or audit.</p>
+          </div>
+          <div class="pain-card animate-on-scroll">
+            <div class="pain-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
+            </div>
+            <h3>Vendor lock-in traps</h3>
+            <p>Choosing one agent platform means your entire team is locked into one LLM provider, one agent, and one vendor's pricing.</p>
+          </div>
+          <div class="pain-card animate-on-scroll">
+            <div class="pain-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <h3>Opaque costs</h3>
+            <p>Bundled pricing hides what you're paying for compute vs inference. Finance can't model costs. Engineering can't optimize.</p>
+          </div>
+          <div class="pain-card animate-on-scroll">
+            <div class="pain-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <h3>DIY is a full-time job</h3>
+            <p>Building your own agent infrastructure means managing VMs, containers, scheduling, cleanup, and observability from scratch.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- Value Props -->
+    <section class="section">
+      <div class="container">
+        <div class="pillars-header animate-on-scroll">
+          <span class="section-label">Why SAM</span>
+          <h2 class="section-title">Built for teams that need control and speed</h2>
+          <p class="section-subtitle">
+            Every pillar of SAM's architecture is designed for enterprise requirements
+            without the enterprise overhead.
+          </p>
+        </div>
+
+        <div class="pillars-list">
+          {pillars.map((pillar, i) => (
+            <a href={`/enterprise/${pillar.slug}/`} class="pillar-card animate-on-scroll">
+              <div class="pillar-number">{String(i + 1).padStart(2, '0')}</div>
+              <div class="pillar-body">
+                <span class="pillar-label">{pillar.label}</span>
+                <h3 class="pillar-headline">{pillar.headline}</h3>
+                <p class="pillar-desc">{pillar.description}</p>
+              </div>
+              <div class="pillar-arrow">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- Enterprise Comparison -->
+    <section class="section">
+      <div class="container">
+        <div class="comp-header animate-on-scroll">
+          <span class="section-label">Comparison</span>
+          <h2 class="section-title">SAM vs the alternatives</h2>
+          <p class="section-subtitle">
+            For teams that need more than a hosted sandbox.
+          </p>
+        </div>
+
+        <div class="comp-table-wrap animate-on-scroll">
+          <table class="comp-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th class="col-sam">SAM</th>
+                <th>Managed Platforms</th>
+                <th>DIY / Internal</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-label">Agent runs on</td>
+                <td class="col-sam">Your cloud account</td>
+                <td>Vendor infrastructure</td>
+                <td>Your infra (K8s, AWS)</td>
+              </tr>
+              <tr>
+                <td class="row-label">Agent choice</td>
+                <td class="col-sam">Any (Claude, Codex, Gemini, Amp...)</td>
+                <td>Vendor's agent only</td>
+                <td>Whatever you build</td>
+              </tr>
+              <tr>
+                <td class="row-label">LLM provider</td>
+                <td class="col-sam">BYO key / existing agreements</td>
+                <td>Bundled into pricing</td>
+                <td>BYO key</td>
+              </tr>
+              <tr>
+                <td class="row-label">Control plane</td>
+                <td class="col-sam">Self-hostable (Cloudflare Workers)</td>
+                <td>Vendor-managed</td>
+                <td>You build &amp; maintain it</td>
+              </tr>
+              <tr>
+                <td class="row-label">Source code</td>
+                <td class="col-sam">Open source (AGPL-3.0)</td>
+                <td>Proprietary</td>
+                <td>Your code</td>
+              </tr>
+              <tr>
+                <td class="row-label">Security audit</td>
+                <td class="col-sam">Full source available</td>
+                <td>Trust vendor</td>
+                <td>Your responsibility</td>
+              </tr>
+              <tr>
+                <td class="row-label">Cost model</td>
+                <td class="col-sam">Direct cloud pricing</td>
+                <td>Opaque bundled</td>
+                <td>Cloud bill + eng time</td>
+              </tr>
+              <tr>
+                <td class="row-label">Setup effort</td>
+                <td class="col-sam">Deploy to CF + connect cloud</td>
+                <td>Zero config</td>
+                <td>Months of eng work</td>
+              </tr>
+              <tr>
+                <td class="row-label">VM isolation</td>
+                <td class="col-sam">One user per VM, OS firewalls</td>
+                <td>Shared infrastructure</td>
+                <td>Depends on your setup</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  /* --- Hero --- */
+  .ent-hero {
+    position: relative;
+    padding: 160px 0 80px;
+    overflow: hidden;
+  }
+
+  @media (min-width: 768px) {
+    .ent-hero {
+      padding: 180px 0 100px;
+    }
+  }
+
+  .ent-hero-glow {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    height: 500px;
+    background: radial-gradient(ellipse, rgba(22, 163, 74, 0.12) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .ent-hero-content {
+    text-align: center;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .ent-hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--color-fg-primary);
+    margin-bottom: 24px;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .ent-hero-subtitle {
+    font-size: 1.125rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    max-width: 600px;
+    margin: 0 auto 32px;
+  }
+
+  .ent-hero-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .btn-ent {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    padding: 14px 28px;
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+  }
+
+  .btn-ent-primary {
+    background: var(--color-accent);
+    color: white;
+    box-shadow: 0 0 20px rgba(22, 163, 74, 0.3);
+  }
+
+  .btn-ent-primary:hover {
+    background: var(--color-accent-hover);
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 0 30px rgba(22, 163, 74, 0.4);
+  }
+
+  .btn-ent-secondary {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    color: var(--color-fg-primary);
+    border: 1px solid var(--glass-border);
+  }
+
+  .btn-ent-secondary:hover {
+    color: var(--color-fg-primary);
+    border-color: var(--glass-border-hover);
+  }
+
+  /* --- Pain Points --- */
+  .pain-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .pain-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  @media (min-width: 640px) {
+    .pain-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .pain-card {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+  }
+
+  .pain-icon {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    background: rgba(22, 163, 74, 0.1);
+    color: var(--color-accent);
+    margin-bottom: 16px;
+  }
+
+  .pain-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .pain-card p {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+  }
+
+  /* --- Pillars --- */
+  .pillars-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .pillars-header .section-subtitle {
+    margin: 0 auto;
+  }
+
+  .pillars-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pillar-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    text-decoration: none;
+    transition: border-color 0.2s, background 0.2s;
+  }
+
+  .pillar-card:hover {
+    border-color: var(--glass-border-hover);
+    background: var(--color-bg-surface-hover);
+  }
+
+  .pillar-number {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-accent);
+    min-width: 28px;
+    padding-top: 2px;
+  }
+
+  .pillar-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pillar-label {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 6px;
+  }
+
+  .pillar-headline {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+    line-height: 1.3;
+  }
+
+  .pillar-desc {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+  }
+
+  .pillar-arrow {
+    color: var(--color-fg-dim);
+    flex-shrink: 0;
+    padding-top: 4px;
+    transition: color 0.2s, transform 0.2s;
+  }
+
+  .pillar-card:hover .pillar-arrow {
+    color: var(--color-accent);
+    transform: translateX(4px);
+  }
+
+  /* --- Comparison --- */
+  .comp-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .comp-header .section-subtitle {
+    margin: 0 auto;
+  }
+
+  .comp-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+  }
+
+  .comp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    min-width: 640px;
+  }
+
+  .comp-table thead {
+    background: var(--color-bg-surface);
+  }
+
+  .comp-table th {
+    padding: 14px 20px;
+    text-align: left;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .comp-table th.col-sam {
+    color: var(--color-accent);
+  }
+
+  .comp-table td {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--color-border-subtle);
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+  }
+
+  .comp-table td.col-sam {
+    color: var(--color-fg-primary);
+    font-weight: 500;
+  }
+
+  .comp-table td.row-label {
+    font-weight: 500;
+    color: var(--color-fg-primary);
+    white-space: nowrap;
+  }
+
+  .comp-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .comp-table tbody tr:hover {
+    background: var(--glass-bg-subtle);
+  }
+</style>

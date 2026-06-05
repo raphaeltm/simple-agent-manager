@@ -1,5 +1,7 @@
 # Quickstart: Multi-Workspace Nodes
 
+> Spec validation artifact only. This is not canonical user documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Feature**: `/workspaces/hierarchy-planning/specs/014-multi-workspace-nodes/spec.md`  
 **Created**: February 10, 2026
 

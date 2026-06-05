@@ -42,6 +42,7 @@ export const TASK_EXECUTION_STEPS = [
   'node_provisioning',
   'node_agent_ready',
   'workspace_creation',
+  'workspace_dispatch',
   'workspace_ready',
   'attachment_transfer',
   'agent_session',
@@ -61,6 +62,7 @@ export const EXECUTION_STEP_LABELS: Record<TaskExecutionStep, string> = {
   node_provisioning: 'Setting up a new server...',
   node_agent_ready: 'Waiting for server to start...',
   workspace_creation: 'Creating workspace...',
+  workspace_dispatch: 'Starting workspace on server...',
   workspace_ready: 'Setting up development environment...',
   attachment_transfer: 'Uploading attachments to workspace...',
   agent_session: 'Starting AI agent...',
@@ -102,6 +104,9 @@ export interface Task {
   requestedVmSize: string | null;
   /** Where the VM size came from in the precedence chain. */
   requestedVmSizeSource: ResourceRequirementsSource | 'explicit' | null;
+  /** VM size actually provisioned. Differs from requestedVmSize only when
+   *  size-fallback descended on transient capacity exhaustion. Null otherwise. */
+  provisionedVmSize: string | null;
   /** JSON snapshot of the resolved ResourceRequirements. */
   resourceRequirementsJson: string | null;
   /** Which precedence level provided the resource requirements. */

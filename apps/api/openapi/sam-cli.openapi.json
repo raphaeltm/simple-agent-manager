@@ -1,0 +1,2263 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SAM CLI REST API",
+    "version": "0.1.0",
+    "description": "Generated contract for the REST API surface consumed by the SAM Go CLI."
+  },
+  "paths": {
+    "/api/auth/token-login": {
+      "post": {
+        "operationId": "exchangeApiToken",
+        "summary": "Exchange a SAM API token for a session cookie.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenLoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/device/code": {
+      "post": {
+        "operationId": "createDeviceCode",
+        "summary": "Create a device authorization code for CLI login.",
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCodeResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/device/token": {
+      "post": {
+        "operationId": "exchangeDeviceCode",
+        "summary": "Poll a device authorization code for a session cookie.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenLoginResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Expired device code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Authorization pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "summary": "List projects visible to the authenticated user.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of projects to return."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pagination cursor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListProjectsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}": {
+      "get": {
+        "operationId": "getProject",
+        "summary": "Get project details.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions": {
+      "get": {
+        "operationId": "listProjectSessions",
+        "summary": "List chat sessions for a project.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional session status filter."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of sessions to return."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Offset for session pagination."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSessionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}": {
+      "get": {
+        "operationId": "getProjectSession",
+        "summary": "Get a chat session with messages.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Chat session ID."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of messages to return."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Message pagination cursor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/tasks/submit": {
+      "post": {
+        "operationId": "submitProjectTask",
+        "summary": "Submit a task for agent execution.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitTaskResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/tasks": {
+      "get": {
+        "operationId": "listProjectTasks",
+        "summary": "List project tasks. The CLI currently uses status=draft for ideas.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Task status filter."
+            },
+            "description": "Task status filter."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of tasks to return."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pagination cursor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTasksResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/tasks/{taskId}": {
+      "get": {
+        "operationId": "getProjectTask",
+        "summary": "Get project task details.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Task ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/library": {
+      "get": {
+        "operationId": "listProjectLibraryFiles",
+        "summary": "List files in the project library.",
+        "tags": [
+          "Library"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Tag filter."
+          },
+          {
+            "name": "uploadSource",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Upload source filter."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of files to return."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pagination cursor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListFilesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/knowledge": {
+      "get": {
+        "operationId": "listProjectKnowledge",
+        "summary": "List project knowledge graph entities.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of entities to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListKnowledgeEntitiesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "summary": "List user notifications.",
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of notifications to return."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pagination cursor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListNotificationsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/triggers": {
+      "get": {
+        "operationId": "listProjectTriggers",
+        "summary": "List project triggers.",
+        "tags": [
+          "Triggers"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTriggersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/agent-profiles": {
+      "get": {
+        "operationId": "listProjectAgentProfiles",
+        "summary": "List project and builtin agent profiles.",
+        "tags": [
+          "Agent profiles"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAgentProfilesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/activity": {
+      "get": {
+        "operationId": "listProjectActivity",
+        "summary": "List project activity events.",
+        "tags": [
+          "Activity"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project ID."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Maximum number of events to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListActivityEventsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/nodes": {
+      "get": {
+        "operationId": "listNodes",
+        "summary": "List infrastructure nodes for the authenticated user.",
+        "tags": [
+          "Nodes"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Node"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{id}": {
+      "get": {
+        "operationId": "getWorkspace",
+        "summary": "Get workspace details.",
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{id}/ports": {
+      "get": {
+        "operationId": "listWorkspacePorts",
+        "summary": "List detected ports for a workspace.",
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace ID."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{id}/port-access": {
+      "get": {
+        "operationId": "createWorkspacePortAccess",
+        "summary": "Create an access token and URL for a workspace port.",
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace ID."
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Workspace port number."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortAccessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Cookie"
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "AuthUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "TokenLoginRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceTokenRequest": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deviceCode"
+        ],
+        "additionalProperties": false
+      },
+      "TokenLoginResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUser"
+          },
+          "sessionCookie": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "sessionCookie"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceCodeResponse": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string"
+          },
+          "userCode": {
+            "type": "string"
+          },
+          "verificationUri": {
+            "type": "string"
+          },
+          "verificationUriComplete": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer"
+          },
+          "interval": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deviceCode",
+          "userCode",
+          "verificationUri",
+          "verificationUriComplete",
+          "expiresIn",
+          "interval"
+        ],
+        "additionalProperties": false
+      },
+      "Project": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "repoProvider": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "activeSessionCount": {
+            "type": "integer"
+          },
+          "activeWorkspaceCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "ListProjectsResponse": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "additionalProperties": false
+      },
+      "ProjectDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "repoProvider": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "activeSessionCount": {
+            "type": "integer"
+          },
+          "activeWorkspaceCount": {
+            "type": "integer"
+          },
+          "recentSessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatSession"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "ChatSession": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string",
+            "nullable": true
+          },
+          "topic": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastMessageAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "messageCount": {
+            "type": "integer"
+          },
+          "taskId": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentSessionId": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentType": {
+            "type": "string",
+            "nullable": true
+          },
+          "task": {
+            "$ref": "#/components/schemas/ChatSessionTask",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "ChatSessionTask": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "executionStep": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputPrUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputSummary": {
+            "type": "string",
+            "nullable": true
+          },
+          "finalizedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "taskMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentProfileHint": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "ListSessionsResponse": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatSession"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "additionalProperties": false
+      },
+      "SessionDetailResponse": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/ChatSession"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
+            "nullable": true
+          }
+        },
+        "required": [
+          "session",
+          "messages",
+          "hasMore"
+        ],
+        "additionalProperties": false
+      },
+      "SubmitTaskRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "agentType": {
+            "type": "string"
+          },
+          "agentProfile": {
+            "type": "string"
+          },
+          "contextSummary": {
+            "type": "string"
+          },
+          "parentTaskId": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "vmLocation": {
+            "type": "string"
+          },
+          "vmSize": {
+            "type": "string"
+          },
+          "taskMode": {
+            "type": "string"
+          },
+          "devcontainerConfigName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "SubmitTaskResponse": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "branchName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "executionStep": {
+            "type": "string",
+            "nullable": true
+          },
+          "taskMode": {
+            "type": "string"
+          },
+          "outputBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputPrUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputSummary": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "finalizedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "ListTasksResponse": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "additionalProperties": false
+      },
+      "TaskDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "executionStep": {
+            "type": "string",
+            "nullable": true
+          },
+          "taskMode": {
+            "type": "string"
+          },
+          "outputBranch": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputPrUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "outputSummary": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "finalizedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": true
+            }
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "ProjectFileTag": {
+        "type": "object",
+        "properties": {
+          "fileId": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "tagSource": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileId",
+          "tag",
+          "tagSource"
+        ],
+        "additionalProperties": false
+      },
+      "ProjectFile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "uploadedBy": {
+            "type": "string"
+          },
+          "uploadSource": {
+            "type": "string"
+          },
+          "uploadSessionId": {
+            "type": "string",
+            "nullable": true
+          },
+          "uploadTaskId": {
+            "type": "string",
+            "nullable": true
+          },
+          "replacedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "replacedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "extractedTextPreview": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectFileTag"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "filename",
+          "sizeBytes",
+          "uploadSource",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ListFilesResponse": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectFile"
+            }
+          },
+          "cursor": {
+            "type": "string",
+            "nullable": true
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "files",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "KnowledgeEntity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "entityType": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "observationCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "entityType",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ListKnowledgeEntitiesResponse": {
+        "type": "object",
+        "properties": {
+          "entities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeEntity"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entities",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "Notification": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "title",
+          "read"
+        ],
+        "additionalProperties": false
+      },
+      "ListNotificationsResponse": {
+        "type": "object",
+        "properties": {
+          "notifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            }
+          },
+          "unreadCount": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "notifications"
+        ],
+        "additionalProperties": false
+      },
+      "Trigger": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "sourceType": {
+            "type": "string"
+          },
+          "cronExpression": {
+            "type": "string",
+            "nullable": true
+          },
+          "cronTimezone": {
+            "type": "string"
+          },
+          "skipIfRunning": {
+            "type": "boolean"
+          },
+          "promptTemplate": {
+            "type": "string"
+          },
+          "agentProfileId": {
+            "type": "string",
+            "nullable": true
+          },
+          "taskMode": {
+            "type": "string"
+          },
+          "vmSizeOverride": {
+            "type": "string",
+            "nullable": true
+          },
+          "maxConcurrent": {
+            "type": "integer"
+          },
+          "lastTriggeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "triggerCount": {
+            "type": "integer"
+          },
+          "nextFireAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cronHumanReadable": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sourceType",
+          "cronExpression",
+          "nextFireAt"
+        ],
+        "additionalProperties": false
+      },
+      "ListTriggersResponse": {
+        "type": "object",
+        "properties": {
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trigger"
+            }
+          }
+        },
+        "required": [
+          "triggers"
+        ],
+        "additionalProperties": false
+      },
+      "AgentProfile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "userId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentType": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissionMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "systemPromptAppend": {
+            "type": "string",
+            "nullable": true
+          },
+          "maxTurns": {
+            "type": "integer",
+            "nullable": true
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "vmSizeOverride": {
+            "type": "string",
+            "nullable": true
+          },
+          "provider": {
+            "type": "string",
+            "nullable": true
+          },
+          "vmLocation": {
+            "type": "string",
+            "nullable": true
+          },
+          "workspaceProfile": {
+            "type": "string",
+            "nullable": true
+          },
+          "devcontainerConfigName": {
+            "type": "string",
+            "nullable": true
+          },
+          "taskMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isBuiltin": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "agentType"
+        ],
+        "additionalProperties": false
+      },
+      "ListAgentProfilesResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentProfile"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "ActivityEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "actorType": {
+            "type": "string"
+          },
+          "actorId": {
+            "type": "string",
+            "nullable": true
+          },
+          "workspaceId": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "nullable": true
+          },
+          "taskId": {
+            "type": "string",
+            "nullable": true
+          },
+          "payload": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "payload",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ListActivityEventsResponse": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "additionalProperties": false
+      },
+      "Node": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "healthStatus": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "vmSize": {
+            "type": "string"
+          },
+          "ipAddress": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "workspaceCount": {
+            "type": "integer"
+          },
+          "lastHeartbeatAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "DetectedPort": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "detectedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "PortsResponse": {
+        "type": "object",
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DetectedPort"
+            }
+          }
+        },
+        "required": [
+          "ports"
+        ],
+        "additionalProperties": false
+      },
+      "PortAccessResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "token",
+          "url",
+          "port"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

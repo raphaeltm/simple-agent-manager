@@ -23,7 +23,7 @@ When writing a task file's research/findings section, every finding that identif
 1. **A checklist item** in the Implementation Checklist section that addresses it
 2. **An explicit deferral** with a backlog task reference (e.g., "Deferred to `tasks/backlog/2026-03-14-fix-xyz.md`")
 
-Findings that exist only in the Research section without a corresponding checklist item or deferral **will be forgotten during implementation**. This is not a theoretical risk — it has caused production bugs. See `docs/notes/2026-03-14-scaleway-node-creation-failure-postmortem.md`.
+Findings that exist only in the Research section without a corresponding checklist item or deferral **will be forgotten during implementation**. This is not a theoretical risk — it has caused production bugs. See the retained incident lesson in this rule.
 
 ## Task Completion Validation (Mandatory Before Archive)
 

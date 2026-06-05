@@ -43,6 +43,7 @@ export async function startTaskRunnerDO(
     vmSize: VMSize;
     vmLocation: VMLocation;
     branch: string;
+    defaultBranch?: string;
     preferredNodeId?: string | null;
     userName?: string | null;
     userEmail?: string | null;
@@ -75,6 +76,8 @@ export async function startTaskRunnerDO(
     opencodeBaseUrl?: string | null;
     /** System prompt text to append to the initial prompt (from agent profile). */
     systemPromptAppend?: string | null;
+    /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
+    agentProfileHint?: string | null;
     /** File attachments uploaded to R2 before task submission. */
     attachments?: TaskAttachment[] | null;
     /** Per-project scaling overrides. */
@@ -103,6 +106,7 @@ export async function startTaskRunnerDO(
       vmSize: input.vmSize,
       vmLocation: input.vmLocation,
       branch: input.branch,
+      defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,
       userName: input.userName ?? null,
       userEmail: input.userEmail ?? null,
@@ -124,6 +128,7 @@ export async function startTaskRunnerDO(
       opencodeProvider: input.opencodeProvider ?? null,
       opencodeBaseUrl: input.opencodeBaseUrl ?? null,
       systemPromptAppend: input.systemPromptAppend ?? null,
+      agentProfileHint: input.agentProfileHint ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,

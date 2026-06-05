@@ -1,0 +1,1458 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+
+const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
+const repoUrl = 'https://github.com/raphaeltm/simple-agent-manager';
+
+// Steps mirror the canonical self-hosting guide 1:1.
+// Source of truth: apps/www/src/content/docs/docs/guides/self-hosting.mdx
+const steps = [
+  { id: 'welcome', num: 0, label: 'Welcome', short: 'Start' },
+  { id: 'domain', num: 1, label: 'Your domain', short: 'Domain' },
+  { id: 'fork', num: 2, label: 'Fork the repo', short: 'Fork' },
+  { id: 'cf-token', num: 3, label: 'Cloudflare API token', short: 'CF token' },
+  { id: 'github-app', num: 4, label: 'Create GitHub App', short: 'GitHub App' },
+  { id: 'r2-token', num: 5, label: 'R2 API token', short: 'R2 token' },
+  { id: 'passphrase', num: 6, label: 'Pulumi passphrase', short: 'Passphrase' },
+  { id: 'github-env', num: 7, label: 'Configure environment', short: 'Environment' },
+  { id: 'deploy', num: 8, label: 'Deploy & verify', short: 'Deploy' },
+];
+
+// Cloudflare API token permission matrix — exact values from the guide.
+const cfPermissions = [
+  { type: 'Account', resource: 'Cloudflare Workers: D1', access: 'Edit' },
+  { type: 'Account', resource: 'Workers KV Storage', access: 'Edit' },
+  { type: 'Account', resource: 'Workers R2 Storage', access: 'Edit' },
+  { type: 'Account', resource: 'Workers Scripts', access: 'Edit' },
+  { type: 'Account', resource: 'Workers Observability', access: 'Read' },
+  { type: 'Account', resource: 'Cloudflare Pages', access: 'Edit' },
+  { type: 'Account', resource: 'AI Gateway', access: 'Edit' },
+  { type: 'Zone', resource: 'DNS', access: 'Edit' },
+  { type: 'Zone', resource: 'Workers Routes', access: 'Edit' },
+  { type: 'Zone', resource: 'SSL and Certificates', access: 'Edit' },
+  { type: 'Zone', resource: 'Zone', access: 'Read' },
+];
+
+// Optional / experimental permissions — only needed for opt-in features.
+const cfOptionalPermissions = [
+  { type: 'Account', resource: 'Containers', access: 'Edit', note: 'Experimental Cloudflare-native runtime' },
+];
+---
+
+<Base
+  title="Self-Host SAM — Guided Setup"
+  description="A guided, step-by-step walkthrough to deploy your own Simple Agent Manager instance to Cloudflare. Generates your config and secrets right in the browser — nothing is ever sent anywhere."
+>
+  <Header />
+  <main class="sh" data-repo-url={repoUrl}>
+    <div class="sh-shell">
+      <!-- Progress rail -->
+      <aside class="sh-rail" aria-label="Setup progress">
+        <div class="sh-rail-head">
+          <img src="/images/sam-head.png" alt="" class="sh-rail-mascot" width="36" height="36" />
+          <div>
+            <div class="sh-rail-title">Self-host SAM</div>
+            <div class="sh-rail-sub" id="sh-progress-label" aria-live="polite" hidden>Step 0 of 8</div>
+          </div>
+        </div>
+        <ol class="sh-steps">
+          {steps.map((s) => (
+            <li class="sh-step-item" data-step-nav={s.id} data-num={s.num}>
+              <button type="button" class="sh-step-btn" data-goto={s.id}>
+                <span class="sh-step-dot">
+                  <span class="sh-step-num">{s.num === 0 ? '' : s.num}</span>
+                  <svg class="sh-step-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                </span>
+                <span class="sh-step-label">{s.label}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        <button type="button" class="sh-reset" id="sh-reset">Reset progress</button>
+      </aside>
+
+      <!-- Panels -->
+      <section class="sh-stage">
+        <div class="sh-progressbar" aria-hidden="true"><span id="sh-progressbar-fill"></span></div>
+
+        <!-- 0. Welcome -->
+        <article class="sh-panel" data-panel="welcome">
+          <span class="sh-eyebrow">Guided setup</span>
+          <h1 class="sh-h1">Deploy your own <span class="sh-grad">SAM</span> instance</h1>
+          <p class="sh-lead">
+            This walkthrough takes you from zero to a fully deployed Simple Agent Manager
+            on your own Cloudflare account. We'll generate your config and secrets right here
+            in your browser — <strong>nothing is ever sent anywhere</strong>.
+          </p>
+          <div class="sh-prereqs">
+            <div class="sh-prereq">
+              <h3>Cloudflare account</h3>
+              <p>Workers Paid plan ($5/mo) for Durable Objects, plus Analytics Engine enabled (free).</p>
+            </div>
+            <div class="sh-prereq">
+              <h3>GitHub account</h3>
+              <p>Free tier. Used for authentication and the GitHub Actions deploy pipeline.</p>
+            </div>
+            <div class="sh-prereq">
+              <h3>A domain on Cloudflare</h3>
+              <p>Any registrar. Use a top-level domain (e.g. <code>example.com</code>), not a subdomain.</p>
+            </div>
+          </div>
+          <div class="sh-callout sh-callout-info">
+            <strong>You don't need a cloud provider account to start.</strong> SAM is bring-your-own-cloud —
+            you (and your users) add Hetzner, Scaleway, or GCP credentials later through the Settings UI.
+          </div>
+        </article>
+
+        <!-- 1. Domain -->
+        <article class="sh-panel" data-panel="domain" hidden>
+          <span class="sh-eyebrow">Step 1</span>
+          <h2 class="sh-h2">Your domain</h2>
+          <p class="sh-lead">
+            Enter the domain you'll use for SAM. This becomes your <code>BASE_DOMAIN</code> and powers
+            every URL and secret we generate from here on.
+          </p>
+          <div class="sh-field">
+            <label for="sh-domain">Base domain</label>
+            <input type="text" id="sh-domain" placeholder="example.com" autocomplete="off" spellcheck="false" />
+            <span class="sh-hint" id="sh-domain-error" hidden>Enter a valid top-level domain, e.g. <code>example.com</code>.</span>
+          </div>
+          <div class="sh-field">
+            <label for="sh-prefix">Resource prefix <span class="sh-opt">(optional)</span></label>
+            <input type="text" id="sh-prefix" placeholder="sam" autocomplete="off" spellcheck="false" />
+            <span class="sh-hint">Prefixes your Cloudflare resource names. Defaults to <code>sam</code> if left blank.</span>
+          </div>
+          <div class="sh-callout sh-callout-warn">
+            <strong>Use a top-level domain.</strong> Cloudflare's free Universal SSL covers <code>*.example.com</code>
+            but not nested wildcards like <code>*.sam.example.com</code>. The root domain itself isn't used —
+            only <code>api.</code>, <code>app.</code>, and <code>*.</code> subdomains are created.
+          </div>
+          <div class="sh-derived" id="sh-domain-derived" hidden>
+            <h4>We'll use these URLs</h4>
+            <dl>
+              <dt>App</dt><dd data-derived="app"></dd>
+              <dt>API</dt><dd data-derived="api"></dd>
+              <dt>Workspaces</dt><dd data-derived="ws"></dd>
+            </dl>
+          </div>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>Why a top-level domain?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                SAM hands every part of your deployment its own hostname — <code>app.</code> for the
+                dashboard, <code>api.</code> for the control plane, and a throwaway <code>ws-…</code>
+                subdomain for each running agent. Cloudflare's free wildcard certificate covers
+                <code>*.example.com</code>, so a top-level domain gets all of them secured automatically.
+              </p>
+              <p>
+                Point SAM at a nested subdomain like <code>sam.example.com</code> instead and that
+                wildcard no longer applies — every workspace you spin up would come up without HTTPS.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <!-- 2. Fork -->
+        <article class="sh-panel" data-panel="fork" hidden>
+          <span class="sh-eyebrow">Step 2</span>
+          <h2 class="sh-h2">Fork the repository</h2>
+          <p class="sh-lead">
+            SAM deploys from your own fork. Pushing to <code>main</code> triggers the GitHub Actions
+            pipeline that provisions everything via Pulumi.
+          </p>
+          <a class="sh-btn sh-btn-primary" id="sh-fork-link" href={`${repoUrl}/fork`} target="_blank" rel="noopener noreferrer">
+            Fork simple-agent-manager on GitHub
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          </a>
+          <div class="sh-callout sh-callout-info">
+            Keep the fork under the account or organization where you want the deploy to run. You'll
+            configure its <code>production</code> environment in Step 7.
+          </div>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>Why fork instead of using a hosted service?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                There's no hosted SAM to sign up for — your fork <strong>is</strong> your deployment.
+                Pushing to <code>main</code> is what triggers the GitHub Actions pipeline that
+                provisions and ships everything onto your own Cloudflare account. You own the code,
+                the infrastructure, and the data end to end.
+              </p>
+              <p>
+                Forking (rather than cloning) keeps the link to upstream, so you can pull in new SAM
+                releases on your own schedule instead of being upgraded out from under you.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <!-- 3. Cloudflare API token -->
+        <article class="sh-panel" data-panel="cf-token" hidden>
+          <span class="sh-eyebrow">Step 3</span>
+          <h2 class="sh-h2">Create a Cloudflare API token</h2>
+          <p class="sh-lead">
+            In the Cloudflare dashboard, go to <strong>My Profile → API Tokens → Create Custom Token</strong>
+            and grant exactly these permissions:
+          </p>
+          <a class="sh-btn sh-btn-primary" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">
+            Open Cloudflare API Tokens
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          </a>
+          <div class="sh-perm-table" role="table" aria-label="Required Cloudflare token permissions">
+            <div class="sh-perm-row sh-perm-head" role="row">
+              <span role="columnheader">Type</span>
+              <span role="columnheader">Resource</span>
+              <span role="columnheader">Access</span>
+            </div>
+            {cfPermissions.map((p) => (
+              <div class="sh-perm-row" role="row">
+                <span role="cell" data-perm-type={p.type}>{p.type}</span>
+                <span role="cell">{p.resource}</span>
+                <span role="cell"><span class={`sh-access sh-access-${p.access.toLowerCase()}`}>{p.access}</span></span>
+              </div>
+            ))}
+          </div>
+          <details class="sh-optional-perms">
+            <summary>
+              <span class="sh-optional-badge">Optional</span>
+              Experimental permissions — only if you opt in
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-optional-perms-body">
+              <p>Skip these unless you specifically want the feature they enable. Add them to the same token if you do.</p>
+              <div role="table" aria-label="Optional Cloudflare token permissions">
+                {cfOptionalPermissions.map((p) => (
+                  <div class="sh-perm-row sh-perm-row-optional" role="row">
+                    <span role="cell" data-perm-type={p.type}>{p.type}</span>
+                    <span role="cell">{p.resource}<span class="sh-perm-note">{p.note}</span></span>
+                    <span role="cell"><span class={`sh-access sh-access-${p.access.toLowerCase()}`}>{p.access}</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </details>
+          <div class="sh-callout sh-callout-info">
+            Set <strong>Zone Resources</strong> to your domain and <strong>Account Resources</strong> to your account.
+            Also enable <strong>Analytics Engine</strong> (free): Workers &amp; Pages → Analytics Engine → Enable.
+          </div>
+          <p class="sh-lead">Paste the generated values so we can assemble your final secrets in Step 7:</p>
+          <div class="sh-field">
+            <label for="sh-cf-token">CF_API_TOKEN <span class="sh-hint-inline">(shown once after creation)</span></label>
+            <input type="password" id="sh-cf-token" placeholder="Paste token" autocomplete="off" spellcheck="false" data-secret />
+          </div>
+          <div class="sh-field-row">
+            <div class="sh-field">
+              <label for="sh-cf-account">CF_ACCOUNT_ID <span class="sh-hint-inline">(32-char hex)</span></label>
+              <input type="text" id="sh-cf-account" placeholder="abc123…" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="sh-field">
+              <label for="sh-cf-zone">CF_ZONE_ID <span class="sh-hint-inline">(32-char hex)</span></label>
+              <input type="text" id="sh-cf-zone" placeholder="def456…" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+          <p class="sh-microcopy">Token and secret fields are never persisted to your browser storage — they live only in this tab until you close it.</p>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>What does each permission actually do?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>This one token lets your deploy pipeline build the whole stack on Cloudflare. Each permission maps to a concrete piece of your instance:</p>
+              <ul class="sh-why-map">
+                <li><b>D1 · KV · R2 · Workers Scripts</b> Your control plane — the database, login sessions, file &amp; attachment storage, and the API + app Workers themselves.</li>
+                <li><b>Cloudflare Pages</b> Hosts the web dashboard your team logs into.</li>
+                <li><b>DNS · Workers Routes</b> Auto-creates the <code>api.</code>, <code>app.</code>, and per-workspace <code>ws-…</code> hostnames and points each at the right Worker.</li>
+                <li><b>SSL and Certificates</b> Issues the Origin CA certificate so Cloudflare trusts the agent VMs you provision.</li>
+                <li><b>AI Gateway</b> Only used if you turn on SAM-managed AI — it meters and routes your agents' LLM traffic. Skip it entirely if everyone brings their own API keys.</li>
+                <li><b>Containers</b> Optional — an experimental Cloudflare-native runtime for lightweight agent workloads. Most agents run in your own BYOC clouds, so you can skip this unless you want to try the experimental runtime.</li>
+                <li><b>Workers Observability (read-only)</b> Powers the in-app logs and error views so you can debug your own instance.</li>
+                <li><b>Zone (read-only)</b> Lets Pulumi look up your domain. It never changes zone settings.</li>
+              </ul>
+              <p style="margin-top:12px;">
+                <strong>Analytics Engine</strong> (enabled separately, free) feeds SAM's own usage and
+                cost dashboards — useful when you're running a team and want to see what your agents
+                spend. For a solo instance it's entirely optional.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <!-- 4. GitHub App -->
+        <article class="sh-panel" data-panel="github-app" hidden>
+          <span class="sh-eyebrow">Step 4</span>
+          <h2 class="sh-h2">Create your GitHub App</h2>
+          <p class="sh-lead">
+            We'll pre-fill every setting using your domain. Click through to GitHub, paste the one
+            webhook secret we generate, and create the app.
+          </p>
+
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>Why your own GitHub App — and how agent permissions work</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                This GitHub App is <strong>yours</strong> — it's how SAM logs you in and how your
+                agents reach your code. Whenever an agent runs, SAM mints a short-lived token from
+                this App, so <strong>the App's permissions are the hard ceiling on what any agent can
+                ever do</strong>.
+              </p>
+              <p>
+                You can dial an individual agent <strong>down</strong> later in the SAM UI, but never
+                <strong>up</strong> past what the App grants. So enable everything you might want an
+                agent to do here, then restrict per-agent as needed. If there's a scope you never want
+                an agent to touch, leave it off the App entirely.
+              </p>
+            </div>
+          </details>
+
+          <div class="sh-callout sh-callout-warn">
+            On the GitHub form, leave <strong>"Request user authorization (OAuth) during installation"</strong>
+            <strong>unchecked</strong>. Checking it disables the Setup URL and breaks post-install redirects.
+          </div>
+
+          <div class="sh-field">
+            <label for="sh-app-name">App name <span class="sh-opt">(optional)</span></label>
+            <input type="text" id="sh-app-name" placeholder="SAM" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="sh-field">
+            <label>Account type</label>
+            <div class="sh-radio-group">
+              <label class="sh-radio"><input type="radio" name="sh-account-type" value="personal" checked /> <span>Personal account</span></label>
+              <label class="sh-radio"><input type="radio" name="sh-account-type" value="org" /> <span>GitHub Organization</span></label>
+            </div>
+          </div>
+          <div class="sh-field" id="sh-org-field" hidden>
+            <label for="sh-org">Organization name</label>
+            <input type="text" id="sh-org" placeholder="my-org" autocomplete="off" spellcheck="false" />
+            <span class="sh-hint">Exactly as it appears in the URL.</span>
+          </div>
+
+          <button type="button" class="sh-btn sh-btn-primary" id="sh-app-generate">Generate setup link</button>
+
+          <div class="sh-app-result" id="sh-app-result" hidden>
+            <div class="sh-derived">
+              <h4>Pre-filled settings</h4>
+              <dl id="sh-app-preview"></dl>
+            </div>
+            <div class="sh-secret-box">
+              <h4>Webhook secret</h4>
+              <p>GitHub can't pre-fill this. Copy it into the <strong>Webhook secret</strong> field on the form:</p>
+              <div class="sh-copy-field">
+                <code id="sh-webhook-secret"></code>
+                <button type="button" class="sh-copy-btn" data-copy-target="sh-webhook-secret" aria-label="Copy webhook secret">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <a class="sh-btn sh-btn-primary" id="sh-app-link" href="#" target="_blank" rel="noopener noreferrer">
+              Create GitHub App on GitHub
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+            </a>
+
+            <h4 class="sh-subhead">After creating the app, enter its credentials</h4>
+            <div class="sh-field-row">
+              <div class="sh-field">
+                <label for="sh-app-id">App ID</label>
+                <input type="text" id="sh-app-id" placeholder="123456" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="sh-field">
+                <label for="sh-client-id">Client ID</label>
+                <input type="text" id="sh-client-id" placeholder="Iv1.abc123…" autocomplete="off" spellcheck="false" />
+              </div>
+            </div>
+            <div class="sh-field-row">
+              <div class="sh-field">
+                <label for="sh-client-secret">Client Secret</label>
+                <input type="password" id="sh-client-secret" placeholder="Generate a new client secret" autocomplete="off" spellcheck="false" data-secret />
+              </div>
+              <div class="sh-field">
+                <label for="sh-app-slug">App Slug <span class="sh-hint-inline">(from github.com/apps/<b>slug</b>)</span></label>
+                <input type="text" id="sh-app-slug" placeholder="sam" autocomplete="off" spellcheck="false" />
+              </div>
+            </div>
+            <div class="sh-field">
+              <label for="sh-private-key">Private Key <span class="sh-hint-inline">(paste the downloaded .pem)</span></label>
+              <textarea id="sh-private-key" rows="5" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;…&#10;-----END RSA PRIVATE KEY-----" spellcheck="false" data-secret></textarea>
+              <span class="sh-hint">We base64-encode this locally for <code>GH_APP_PRIVATE_KEY</code>.</span>
+            </div>
+            <p class="sh-microcopy">The Client Secret and Private Key are never persisted to your browser storage — they live only in this tab until you close it.</p>
+          </div>
+        </article>
+
+        <!-- 5. R2 token -->
+        <article class="sh-panel" data-panel="r2-token" hidden>
+          <span class="sh-eyebrow">Step 5</span>
+          <h2 class="sh-h2">Create an R2 API token</h2>
+          <p class="sh-lead">
+            Separate from your main token, this one stores Pulumi state. In the Cloudflare dashboard:
+            <strong>R2 → Manage R2 API Tokens → Create</strong> with <strong>Object Read &amp; Write</strong> permissions.
+          </p>
+          <a class="sh-btn sh-btn-primary" href="https://dash.cloudflare.com/?to=/:account/r2/api-tokens" target="_blank" rel="noopener noreferrer">
+            Open R2 API Tokens
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          </a>
+          <div class="sh-field">
+            <label for="sh-r2-key">R2_ACCESS_KEY_ID</label>
+            <input type="text" id="sh-r2-key" placeholder="Access Key ID" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="sh-field">
+            <label for="sh-r2-secret">R2_SECRET_ACCESS_KEY</label>
+            <input type="password" id="sh-r2-secret" placeholder="Secret Access Key" autocomplete="off" spellcheck="false" data-secret />
+          </div>
+          <p class="sh-microcopy">These feed Pulumi's remote state backend. Like all secrets here, they stay in this tab only.</p>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>Why a second, separate token?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                Pulumi records the state of your infrastructure — what exists, resource IDs, and
+                encrypted secrets — in an R2 bucket so every deploy is repeatable and survives a fresh
+                machine or CI runner.
+              </p>
+              <p>
+                This token is deliberately narrower than your main Cloudflare one: object read &amp;
+                write on that single state bucket is all it ever needs, so it's safe to scope tightly.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <!-- 6. Pulumi passphrase -->
+        <article class="sh-panel" data-panel="passphrase" hidden>
+          <span class="sh-eyebrow">Step 6</span>
+          <h2 class="sh-h2">Generate a Pulumi passphrase</h2>
+          <p class="sh-lead">
+            Pulumi encrypts your stack secrets with this passphrase. <strong>Save it</strong> — you'll need
+            the exact same value for every future deployment.
+          </p>
+          <div class="sh-secret-box">
+            <h4>PULUMI_CONFIG_PASSPHRASE</h4>
+            <div class="sh-copy-field">
+              <code id="sh-passphrase"></code>
+              <button type="button" class="sh-copy-btn" data-copy-target="sh-passphrase" aria-label="Copy passphrase">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <button type="button" class="sh-btn sh-btn-ghost" id="sh-passphrase-regen">Regenerate</button>
+          </div>
+          <details class="sh-details">
+            <summary>Prefer to generate it yourself?</summary>
+            <p>Run this in your terminal and use that value instead:</p>
+            <div class="sh-copy-field sh-copy-field-block">
+              <code id="sh-openssl">openssl rand -base64 32</code>
+              <button type="button" class="sh-copy-btn" data-copy-target="sh-openssl" aria-label="Copy command">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+          </details>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>Why a passphrase, and why save it?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                Your Pulumi state holds secrets, so Pulumi encrypts them with this passphrase before
+                writing to R2 — anyone who reads the bucket still can't decrypt them.
+              </p>
+              <p>
+                There's no reset. Lose it and you can't update or tear down your stack, so save it in
+                your password manager now. Every future deploy must reuse the exact same value.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <!-- 7. GitHub Environment -->
+        <article class="sh-panel" data-panel="github-env" hidden>
+          <span class="sh-eyebrow">Step 7</span>
+          <h2 class="sh-h2">Configure the production environment</h2>
+          <p class="sh-lead">
+            In your fork: <strong>Settings → Environments → New environment → <code>production</code></strong>.
+            Add the variables and secrets below. We've filled in everything you entered.
+          </p>
+
+          <h4 class="sh-subhead">Environment variables</h4>
+          <div class="sh-secrets" id="sh-vars-output"></div>
+
+          <h4 class="sh-subhead">Environment secrets</h4>
+          <div class="sh-secrets" id="sh-secrets-output"></div>
+
+          <details class="sh-details sh-gh-cli">
+            <summary>Faster: set everything with the GitHub CLI</summary>
+            <p>
+              Already have <a href="https://cli.github.com/" target="_blank" rel="noopener noreferrer">GitHub CLI</a>
+              installed and authenticated? Drop in your fork's repo and run one command to set every variable
+              and secret on the <code>production</code> environment at once.
+            </p>
+            <div class="sh-field">
+              <label for="sh-repo">Your fork (owner/repo)</label>
+              <input type="text" id="sh-repo" placeholder="my-org/simple-agent-manager" autocomplete="off" autocapitalize="off" spellcheck="false" />
+            </div>
+            <p class="sh-gh-cli-note" id="sh-gh-cli-repo-note">
+              Add your repo above and the command will target it directly. Without it, run the command from
+              inside a clone of your fork.
+            </p>
+            <div class="sh-gh-cli-box" id="sh-gh-cli-output" data-revealed="false" data-script="">
+              <div class="sh-gh-cli-actions">
+                <button type="button" class="sh-secret-act" id="sh-gh-cli-reveal" aria-label="Reveal command values" aria-pressed="false"></button>
+                <button type="button" class="sh-secret-act" id="sh-gh-cli-copy" aria-label="Copy command"></button>
+              </div>
+              <pre><code></code></pre>
+            </div>
+            <p class="sh-gh-cli-note">
+              The command includes your secret values in plain text — run it in a trusted terminal and clear
+              your shell history afterward if you're cautious.
+            </p>
+          </details>
+
+          <div class="sh-callout sh-callout-info">
+            Security keys (<code>ENCRYPTION_KEY</code>, <code>JWT_*</code>), Origin CA credentials, and
+            <code>TRIAL_CLAIM_TOKEN_SECRET</code> are generated automatically by Pulumi — no manual setup.
+            <code>GH_*</code> secrets are mapped to <code>GITHUB_*</code> Worker secrets at deploy time.
+          </div>
+
+          <details class="sh-details">
+            <summary>Optional: Google OAuth (for GCP provider support)</summary>
+            <p>Only needed if your users will deploy VMs on GCP. Add <code>GOOGLE_CLIENT_ID</code> and
+            <code>GOOGLE_CLIENT_SECRET</code> as environment secrets.</p>
+          </details>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>Why a GitHub Environment?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                Your deploy pipeline reads its config from a named GitHub Environment rather than plain
+                repo secrets. That keeps your deploy credentials in one place you can lock down later
+                with required reviewers or branch protections — handy once more than one person can
+                push.
+              </p>
+              <p>
+                <strong>Variables</strong> are non-sensitive config (your domain, account IDs).
+                <strong>Secrets</strong> are credentials GitHub encrypts and never shows you again
+                after saving — so keep your own copy of anything you generated here.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <!-- 8. Deploy & verify -->
+        <article class="sh-panel" data-panel="deploy" hidden>
+          <span class="sh-eyebrow">Step 8</span>
+          <h2 class="sh-h2">Deploy &amp; verify</h2>
+          <p class="sh-lead">
+            No commit needed — just run the <strong>Deploy Production</strong> workflow in your fork.
+            Open it, click <strong>Run workflow</strong>, and choose the <code>main</code> branch. Pulumi
+            provisions D1, KV, R2, and DNS, deploys the Worker and web UI, runs migrations, and builds
+            the VM agent.
+          </p>
+          <a id="sh-deploy-workflow" class="sh-btn sh-btn-primary" href="https://github.com/" target="_blank" rel="noopener noreferrer">
+            Open the Deploy workflow
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          </a>
+          <p class="sh-microcopy" id="sh-deploy-workflow-note">Add your fork in Step 7 and this button links straight to its Run-workflow screen.</p>
+          <h4 class="sh-subhead">Verify the API is healthy</h4>
+          <div class="sh-copy-field sh-copy-field-block">
+            <code id="sh-health-cmd"></code>
+            <button type="button" class="sh-copy-btn" data-copy-target="sh-health-cmd" aria-label="Copy health check">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+          <p class="sh-lead">
+            Then open <a id="sh-app-open" href="#" target="_blank" rel="noopener noreferrer"></a> — you should see the login page.
+          </p>
+          <details class="sh-why">
+            <summary>
+              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>What happens when you deploy?</span>
+              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div class="sh-why-body">
+              <p>
+                One push runs the whole pipeline: Pulumi provisions D1, KV, R2, and DNS, deploys the
+                Worker and dashboard, runs database migrations, and builds the VM agent your
+                workspaces boot from.
+              </p>
+              <p>
+                Re-running it later is safe — Pulumi compares your config to what's already live and
+                only applies what changed, so routine deploys are fast and won't touch untouched
+                resources.
+              </p>
+            </div>
+          </details>
+          <div class="sh-done">
+            <img src="/images/sam-head.png" alt="" width="48" height="48" />
+            <div>
+              <h3>That's it — you're self-hosting SAM.</h3>
+              <p>Once your deploy finishes, log in to your own dashboard and create your first workspace.</p>
+              <a id="sh-app-login" class="sh-btn sh-btn-primary sh-done-cta" href="#" target="_blank" rel="noopener noreferrer">
+                Open your SAM login
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+              </a>
+              <p class="sh-done-help">Hit a snag? The <a href="/docs/guides/self-hosting/#troubleshooting">troubleshooting reference</a>
+              covers Origin CA errors, Analytics Engine, Durable Objects plan errors, DNS conflicts, and more.</p>
+            </div>
+          </div>
+        </article>
+
+        <!-- Footer nav -->
+        <nav class="sh-nav" aria-label="Step navigation">
+          <button type="button" class="sh-btn sh-btn-ghost" id="sh-back" hidden>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+            Back
+          </button>
+          <a class="sh-nav-help" href="/docs/guides/self-hosting/">Full reference &amp; troubleshooting</a>
+          <button type="button" class="sh-btn sh-btn-primary" id="sh-next">
+            <span id="sh-next-label">Get started</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </nav>
+      </section>
+    </div>
+  </main>
+
+  <script is:inline src="/scripts/self-host-wizard.js"></script>
+</Base>
+
+<style>
+  .sh {
+    min-height: calc(100vh - var(--header-height));
+    padding-top: var(--header-height);
+  }
+
+  .sh-shell {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 0;
+    max-width: 1280px;
+    margin: 0 auto;
+    min-height: calc(100vh - var(--header-height));
+  }
+
+  /* --- Rail --- */
+  .sh-rail {
+    border-right: 1px solid var(--color-border-subtle);
+    padding: 32px 24px;
+    position: sticky;
+    top: var(--header-height);
+    height: calc(100vh - var(--header-height));
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sh-rail-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .sh-rail-mascot { border-radius: 8px; flex-shrink: 0; }
+
+  .sh-rail-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--color-fg-primary);
+  }
+
+  .sh-rail-sub {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+
+  .sh-steps { list-style: none; flex: 1; }
+
+  .sh-step-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-align: left;
+    color: var(--color-fg-muted);
+    transition: background 0.15s, color 0.15s;
+    font-family: var(--font-body);
+  }
+
+  .sh-step-btn:hover { background: var(--glass-bg-subtle); color: var(--color-fg-primary); }
+  .sh-step-btn:disabled { cursor: default; opacity: 0.55; }
+  .sh-step-btn:disabled:hover { background: none; color: var(--color-fg-muted); }
+
+  .sh-step-dot {
+    position: relative;
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--color-border);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--color-fg-muted);
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+
+  .sh-step-check { display: none; }
+
+  .sh-step-label { font-size: 0.9rem; }
+
+  .sh-step-item.is-current .sh-step-dot {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: #fff;
+  }
+  .sh-step-item.is-current .sh-step-btn { color: var(--color-fg-primary); font-weight: 600; }
+
+  .sh-step-item.is-done .sh-step-dot {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+  .sh-step-item.is-done .sh-step-num { display: none; }
+  .sh-step-item.is-done .sh-step-check { display: block; }
+
+  .sh-reset {
+    margin-top: 16px;
+    background: none;
+    border: none;
+    color: var(--color-fg-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 6px 10px;
+    text-align: left;
+    font-family: var(--font-body);
+  }
+  .sh-reset:hover { color: var(--color-warning); }
+
+  /* --- Stage --- */
+  .sh-stage {
+    padding: 40px 48px 120px;
+    position: relative;
+    max-width: 760px;
+  }
+
+  .sh-progressbar {
+    height: 3px;
+    background: var(--color-border-subtle);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 36px;
+  }
+  .sh-progressbar span {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--color-accent), var(--color-success));
+    transition: width 0.35s ease;
+  }
+
+  .sh-panel[hidden] { display: none; }
+
+  .sh-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    display: block;
+    margin-bottom: 12px;
+  }
+
+  .sh-h1 {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 20px;
+  }
+
+  .sh-h2 {
+    font-family: var(--font-display);
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+
+  .sh-grad {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .sh-lead {
+    font-size: 1.05rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    margin-bottom: 24px;
+  }
+  .sh-lead code, .sh-callout code, .sh-microcopy code, .sh-derived code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--color-bg-inset);
+    padding: 1px 6px;
+    border-radius: 5px;
+    color: var(--color-fg-primary);
+  }
+  .sh-lead strong { color: var(--color-fg-primary); }
+
+  .sh-microcopy {
+    font-size: 0.82rem;
+    color: var(--color-fg-dim);
+    margin-top: 12px;
+    line-height: 1.5;
+  }
+
+  /* Prereqs */
+  .sh-prereqs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .sh-prereq {
+    background: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+  }
+  .sh-prereq h3 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    margin-bottom: 8px;
+    color: var(--color-fg-primary);
+  }
+  .sh-prereq p { font-size: 0.88rem; color: var(--color-fg-muted); line-height: 1.55; }
+  .sh-prereq code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--color-bg-inset);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  /* Callouts */
+  .sh-callout {
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin: 20px 0;
+    border: 1px solid;
+  }
+  .sh-callout strong { color: var(--color-fg-primary); }
+  .sh-callout-info {
+    background: rgba(22, 163, 74, 0.07);
+    border-color: rgba(22, 163, 74, 0.25);
+    color: var(--color-fg-muted);
+  }
+  .sh-callout-warn {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: var(--color-fg-muted);
+  }
+
+  /* Fields */
+  .sh-field { margin-bottom: 18px; }
+  .sh-field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .sh-field label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--color-fg-muted);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .sh-opt, .sh-hint-inline { color: var(--color-fg-dim); font-weight: 400; }
+  .sh-field input, .sh-field textarea {
+    width: 100%;
+    padding: 11px 14px;
+    font-size: 0.92rem;
+    font-family: var(--font-mono);
+    background: var(--color-bg-inset);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-fg-primary);
+  }
+  .sh-field input:focus, .sh-field textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+  }
+  .sh-field textarea { resize: vertical; line-height: 1.45; }
+  .sh-hint {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--color-fg-dim);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .sh-hint[hidden] { display: none; }
+
+  .sh-radio-group { display: flex; gap: 18px; flex-wrap: wrap; }
+  .sh-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.9rem;
+    color: var(--color-fg-primary);
+    cursor: pointer;
+  }
+  .sh-radio input { accent-color: var(--color-accent); cursor: pointer; }
+
+  /* Buttons */
+  .sh-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 13px 22px;
+    min-height: 48px;
+    font-size: 0.92rem;
+    font-weight: 500;
+    font-family: var(--font-body);
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    transition: all 0.18s;
+    text-decoration: none;
+  }
+  .sh-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .sh-btn-primary {
+    background: var(--color-accent);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(22, 163, 74, 0.25);
+  }
+  .sh-btn-primary:hover { background: var(--color-accent-hover); color: #fff; transform: translateY(-1px); }
+  .sh-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+  .sh-btn-ghost {
+    background: var(--glass-bg);
+    color: var(--color-fg-primary);
+    border: 1px solid var(--glass-border);
+  }
+  .sh-btn-ghost:hover { background: var(--glass-bg-subtle); border-color: var(--glass-border-hover); }
+  a.sh-btn { margin: 4px 0; }
+
+  /* Derived / preview lists */
+  .sh-derived {
+    background: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    margin: 18px 0;
+  }
+  .sh-derived[hidden] { display: none; }
+  .sh-derived h4 {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-fg-dim);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .sh-derived dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 16px;
+    margin: 0;
+  }
+  /* Global: the GitHub App preview dt/dd are created at runtime by JS and never
+     receive Astro's scope attribute, so these rules must not be scoped. */
+  :global(.sh-derived dt) { color: var(--color-fg-muted); font-size: 0.85rem; }
+  :global(.sh-derived dd) {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--color-fg-primary);
+    word-break: break-all;
+  }
+
+  /* Permission table */
+  .sh-perm-table {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin: 20px 0;
+  }
+  .sh-perm-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 80px;
+    gap: 12px;
+    padding: 10px 16px;
+    font-size: 0.86rem;
+    align-items: center;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+  .sh-perm-row:last-child { border-bottom: none; }
+  .sh-perm-head {
+    background: var(--color-bg-inset);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-fg-dim);
+  }
+  .sh-perm-row [data-perm-type] { color: var(--color-fg-muted); }
+  .sh-access {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    padding: 2px 8px;
+    border-radius: 100px;
+  }
+  .sh-access-edit { background: rgba(22, 163, 74, 0.15); color: var(--color-success); }
+  .sh-access-read { background: var(--glass-bg-subtle); color: var(--color-fg-muted); }
+
+  /* Optional / experimental permissions accordion */
+  .sh-optional-perms {
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    margin: -8px 0 20px;
+    background: var(--color-bg-inset);
+  }
+  .sh-optional-perms summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 16px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--color-fg-muted);
+  }
+  .sh-optional-perms summary::-webkit-details-marker { display: none; }
+  .sh-optional-perms .sh-why-chevron { margin-left: auto; transition: transform 0.2s ease; }
+  .sh-optional-perms[open] .sh-why-chevron { transform: rotate(180deg); }
+  .sh-optional-badge {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 100px;
+    background: var(--glass-bg-subtle);
+    color: var(--color-fg-dim);
+    flex-shrink: 0;
+  }
+  .sh-optional-perms-body { padding: 0 16px 14px; }
+  .sh-optional-perms-body > p {
+    font-size: 0.82rem;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+    margin: 0 0 12px;
+  }
+  .sh-perm-row-optional {
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-base);
+  }
+  .sh-perm-note {
+    display: block;
+    font-size: 0.74rem;
+    color: var(--color-fg-dim);
+    margin-top: 2px;
+  }
+
+  /* Secret box + copy fields */
+  .sh-secret-box {
+    background: rgba(22, 163, 74, 0.06);
+    border: 1px solid rgba(22, 163, 74, 0.3);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    margin: 20px 0;
+  }
+  .sh-secret-box h4 {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--color-accent);
+    margin-bottom: 10px;
+  }
+  .sh-secret-box p { font-size: 0.88rem; color: var(--color-fg-muted); margin-bottom: 12px; line-height: 1.55; }
+  .sh-secret-box p strong { color: var(--color-fg-primary); }
+  /* Breathing room between the passphrase copy-field and the Regenerate button below it. */
+  #sh-passphrase-regen { margin-top: 14px; }
+
+  .sh-copy-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--color-bg-inset);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+  }
+  .sh-copy-field-block { margin: 12px 0; }
+  .sh-copy-field code {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--color-fg-primary);
+    word-break: break-all;
+    background: none;
+  }
+  .sh-copy-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-fg-muted);
+    cursor: pointer;
+    padding: 5px 7px;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .sh-copy-btn:hover, .sh-copy-btn.is-copied { color: var(--color-accent); border-color: var(--color-accent); }
+  .sh-copy-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+  /* Secrets output rows */
+  .sh-subhead {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    margin: 28px 0 14px;
+    color: var(--color-fg-primary);
+  }
+  .sh-secrets { display: flex; flex-direction: column; gap: 8px; }
+  /* These rows are created at runtime by self-host-wizard.js, so the
+     selectors must be :global() — Astro's scoped hash is not applied to
+     dynamically-created DOM nodes. */
+  :global(.sh-secret-row) {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    font-size: 0.84rem;
+  }
+  :global(.sh-secret-key) {
+    background: var(--color-bg-inset);
+    padding: 10px 14px;
+    font-family: var(--font-mono);
+    color: var(--color-accent);
+    min-width: 190px;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--color-border);
+    font-size: 0.78rem;
+  }
+  :global(.sh-secret-val) {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 10px 14px;
+    font-family: var(--font-mono);
+    color: var(--color-fg-primary);
+    display: block;
+    align-self: center;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+    font-size: 0.78rem;
+  }
+  :global(.sh-secret-val.is-missing) { color: var(--color-fg-dim); font-style: italic; }
+  :global(.sh-secret-act) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    min-height: 44px;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--color-border);
+    color: var(--color-fg-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+    flex-shrink: 0;
+  }
+  :global(.sh-secret-act:hover), :global(.sh-secret-act.is-copied) { color: var(--color-accent); }
+  :global(.sh-secret-act:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+  :global(.sh-secret-act:disabled) { opacity: 0.4; cursor: not-allowed; }
+  :global(.sh-secret-act svg) { width: 15px; height: 15px; }
+  /* Action cluster (reveal + copy) on the right edge of a secret row. */
+  :global(.sh-secret-acts) { display: flex; flex-shrink: 0; }
+  /* Masked secrets read as a row of dots — widen the tracking so they look
+     deliberate rather than like clipped text. */
+  :global(.sh-secret-val.is-masked) { letter-spacing: 0.18em; color: var(--color-fg-muted); }
+
+  /* gh CLI one-shot command block */
+  .sh-gh-cli summary { font-weight: 600; }
+  .sh-gh-cli .sh-field { margin: 14px 0 10px; }
+  .sh-gh-cli-note {
+    font-size: 0.8rem;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+    margin: 8px 0;
+  }
+  .sh-gh-cli-box {
+    position: relative;
+    background: var(--color-bg-inset);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  .sh-gh-cli-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    z-index: 1;
+  }
+  .sh-gh-cli-actions .sh-secret-act {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-base);
+    padding: 5px 7px;
+    height: 28px;
+  }
+  .sh-gh-cli-box pre {
+    margin: 0;
+    padding: 14px 16px;
+    padding-right: 84px;
+    overflow-x: auto;
+    background: none;
+  }
+  .sh-gh-cli-box code {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.7;
+    color: var(--color-fg-primary);
+    white-space: pre;
+    background: none;
+  }
+
+  /* Details */
+  .sh-details { margin: 18px 0; font-size: 0.9rem; }
+  .sh-details summary { cursor: pointer; color: var(--color-fg-muted); padding: 4px 0; }
+  .sh-details summary:hover { color: var(--color-fg-primary); }
+  .sh-details p { font-size: 0.88rem; color: var(--color-fg-muted); margin: 10px 0; }
+  .sh-details code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--color-bg-inset);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  /* "Why does SAM need this?" context accordion */
+  .sh-why {
+    position: relative;
+    margin: 22px 0;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    background: var(--glass-bg-subtle);
+    overflow: hidden;
+    /* Inner green glow — soft all-around lift, biased toward the bottom edge,
+       to give dark cards definition against the dark background.
+       Experimental: candidate effect to replicate across the app later. */
+    box-shadow:
+      inset 0 0 20px -6px rgba(22, 163, 74, 0.10),
+      inset 0 -34px 44px -30px rgba(22, 163, 74, 0.40);
+    transition: box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  /* Thin gradient highlight line riding the bottom edge — transparent at the
+     sides, green in the centre — to crisp up the glow right at the edge. */
+  .sh-why::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(22, 163, 74, 0.55) 50%,
+      transparent 100%
+    );
+    opacity: 0.85;
+    transition: opacity 0.25s ease, background 0.25s ease;
+    pointer-events: none;
+  }
+  .sh-why[open] {
+    border-color: rgba(22, 163, 74, 0.28);
+    box-shadow:
+      inset 0 0 22px -6px rgba(22, 163, 74, 0.14),
+      inset 0 -40px 52px -30px rgba(22, 163, 74, 0.52);
+  }
+  .sh-why[open]::after {
+    opacity: 1;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(22, 163, 74, 0.85) 50%,
+      transparent 100%
+    );
+  }
+  .sh-why > summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-fg-primary);
+    list-style: none;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .sh-why > summary::-webkit-details-marker { display: none; }
+  .sh-why > summary:hover { background: var(--glass-bg); }
+  .sh-why-icon { flex-shrink: 0; color: var(--color-accent); display: inline-flex; }
+  .sh-why-chevron {
+    margin-left: auto;
+    flex-shrink: 0;
+    color: var(--color-fg-dim);
+    transition: transform 0.2s ease;
+  }
+  .sh-why[open] > summary .sh-why-chevron { transform: rotate(180deg); }
+  .sh-why-body {
+    padding: 2px 16px 16px;
+    font-size: 0.88rem;
+    color: var(--color-fg-muted);
+    line-height: 1.65;
+  }
+  .sh-why-body p { margin-bottom: 10px; }
+  .sh-why-body p:last-child { margin-bottom: 0; }
+  .sh-why-body strong { color: var(--color-fg-primary); }
+  .sh-why-body code {
+    font-family: var(--font-mono);
+    font-size: 0.84em;
+    background: var(--color-bg-inset);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--color-fg-primary);
+  }
+  .sh-why-map {
+    list-style: none;
+    margin: 6px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .sh-why-map li {
+    font-size: 0.85rem;
+    line-height: 1.55;
+    padding-left: 14px;
+    position: relative;
+  }
+  .sh-why-map li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+  .sh-why-map li b {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    margin-bottom: 2px;
+    letter-spacing: 0.01em;
+  }
+
+  /* Done card */
+  .sh-done {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    background: var(--glass-bg-subtle);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    margin-top: 28px;
+  }
+  .sh-done img { flex-shrink: 0; border-radius: 10px; }
+  .sh-done h3 { font-family: var(--font-display); font-size: 1.15rem; margin-bottom: 6px; }
+  .sh-done p { font-size: 0.9rem; color: var(--color-fg-muted); line-height: 1.6; }
+  .sh-done-cta { display: inline-flex; align-items: center; gap: 8px; margin: 14px 0 6px; }
+  .sh-done-cta svg { width: 16px; height: 16px; }
+  .sh-done-help { font-size: 0.82rem; }
+
+  .sh-app-result[hidden] { display: none; }
+
+  /* Footer nav */
+  .sh-nav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 44px;
+    padding-top: 24px;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+  .sh-nav .sh-btn-primary { margin-left: auto; }
+  .sh-nav-help {
+    font-size: 0.85rem;
+    color: var(--color-fg-dim);
+  }
+  .sh-nav-help:hover { color: var(--color-accent); }
+
+  /* --- Mobile --- */
+  @media (max-width: 880px) {
+    .sh-shell { grid-template-columns: minmax(0, 1fr); }
+    .sh-rail {
+      position: static;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--color-border-subtle);
+      padding: 16px;
+    }
+    .sh-rail-head { margin-bottom: 0; }
+    .sh-steps { display: none; }
+    .sh-reset { display: none; }
+    .sh-stage { padding: 28px 20px 100px; max-width: 100%; }
+    .sh-field-row { grid-template-columns: 1fr; gap: 0; }
+    .sh-perm-row { grid-template-columns: 70px 1fr 64px; gap: 8px; padding: 9px 12px; font-size: 0.8rem; }
+    :global(.sh-secret-row) { flex-direction: column; }
+    :global(.sh-secret-key) { min-width: 0; border-right: none; border-bottom: 1px solid var(--color-border); }
+    :global(.sh-secret-act) { border-left: none; border-top: 1px solid var(--color-border); justify-content: center; padding: 8px; }
+    /* Stack the action cluster as a full-width row; each button shares the width
+       evenly, with a divider between reveal and copy. */
+    :global(.sh-secret-acts) { width: 100%; }
+    :global(.sh-secret-acts .sh-secret-act) { flex: 1 1 0; }
+    :global(.sh-secret-acts .sh-secret-act + .sh-secret-act) { border-left: 1px solid var(--color-border); }
+    .sh-nav { flex-wrap: wrap; }
+    .sh-nav-help { order: 3; width: 100%; text-align: center; }
+  }
+</style>

@@ -37,7 +37,7 @@ SAM never has cloud provider credentials. Your Hetzner token is encrypted at res
 
 ### Hybrid storage: D1 + Durable Objects
 
-We use Cloudflare D1 for cross-project queries (dashboard, user settings, task lists) and per-project Durable Objects with embedded SQLite for write-heavy data (chat sessions, messages, activity streams). This gives us the query flexibility of a relational database and the single-writer guarantees of DOs. We wrote about the tradeoffs in [ADR 004](https://github.com/raphaeltm/simple-agent-manager/blob/main/docs/adr/004-hybrid-d1-do-storage.md).
+We use Cloudflare D1 for cross-project queries (dashboard, user settings, task lists) and per-project Durable Objects with embedded SQLite for write-heavy data (chat sessions, messages, activity streams). This gives us the query flexibility of a relational database and the single-writer guarantees of DOs. The [architecture overview](/docs/architecture/overview/) covers the storage split in more detail.
 
 ### Warm node pooling
 

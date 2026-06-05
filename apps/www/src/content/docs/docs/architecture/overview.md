@@ -7,56 +7,57 @@ SAM is a serverless platform for ephemeral AI coding environments. The architect
 
 ## High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Browser                             │
-│  React SPA (app.domain) ──── xterm.js ──── Agent Chat   │
-│         Notifications ──── Command Palette (Cmd+K)       │
-└─────────┬───────────────────────┬───────────────────────┘
-          │ HTTPS                 │ WSS
-          ▼                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Cloudflare Edge                         │
-│                                                          │
-│  ┌─────────────┐  ┌──────┐  ┌────┐  ┌────┐             │
-│  │ API Worker   │  │  D1  │  │ KV │  │ R2 │             │
-│  │ (Hono)       │──│SQLite│  │    │  │    │             │
-│  │              │  └──────┘  └────┘  └────┘             │
-│  │ + Proxy      │                                        │
-│  │ + Auth       │  ┌──────────────────────┐             │
-│  │ + DOs        │  │ Cloudflare Pages     │             │
-│  │ + Workers AI │  │ (React SPA)          │             │
-│  └──────┬───────┘  └──────────────────────┘             │
-│         │                                                │
-│  ┌──────┴──────────────────────────────────┐            │
-│  │ Durable Objects                          │            │
-│  │  ├── ProjectData (per-project SQLite)    │            │
-│  │  ├── NodeLifecycle (warm pool state)     │            │
-│  │  ├── TaskRunner (task orchestration)     │            │
-│  │  ├── AdminLogs (real-time log stream)    │            │
-│  │  └── Notification (delivery management)  │            │
-│  └──────────────────────────────────────────┘            │
-└─────────┼───────────────────────────────────────────────┘
-          │ HTTP/WSS (proxied via DNS-only records)
-          ▼
-┌─────────────────────────────────────────────────────────┐
-│         Cloud VM (Hetzner, Scaleway, or GCP)              │
-│                                                          │
-│  ┌───────────────────────────────────────┐              │
-│  │ VM Agent (Go, :8443)                  │              │
-│  │  ├── PTY Manager (terminal sessions)  │              │
-│  │  ├── Container Manager (Docker)       │              │
-│  │  ├── ACP Gateway (agent sessions)     │              │
-│  │  ├── Port Scanner (auto-detection)    │              │
-│  │  └── JWT Validator (JWKS)             │              │
-│  └───────────────┬───────────────────────┘              │
-│                  │                                       │
-│  ┌───────────────▼───────────────────────┐              │
-│  │ Docker Engine                          │              │
-│  │  ├── Workspace Container 1             │              │
-│  │  └── Workspace Container N             │              │
-│  └───────────────────────────────────────┘              │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Browser
+        SPA["React SPA<br/>(app.domain)"]
+        XTERM["xterm.js"]
+        CHAT["Agent Chat"]
+        NOTIF["Notifications"]
+        CMDK["Command Palette"]
+    end
+
+    subgraph CF["Cloudflare Edge"]
+        subgraph Worker["API Worker (Hono)"]
+            PROXY["Reverse Proxy"]
+            AUTH["Auth"]
+            AI["Workers AI"]
+        end
+        D1["D1 (SQLite)"]
+        KV["KV"]
+        R2["R2"]
+        PAGES["Cloudflare Pages<br/>(React SPA)"]
+        subgraph DOs["Durable Objects"]
+            PD["ProjectData<br/>(per-project SQLite)"]
+            NL["NodeLifecycle<br/>(warm pool state)"]
+            TR["TaskRunner<br/>(task orchestration)"]
+            AL["AdminLogs<br/>(real-time log stream)"]
+            NO["Notification<br/>(delivery management)"]
+        end
+        Worker --- D1
+        Worker --- KV
+        Worker --- R2
+        Worker --- DOs
+    end
+
+    subgraph VM["Cloud VM (Hetzner / Scaleway / GCP)"]
+        subgraph AGENT["VM Agent (Go, :8443)"]
+            PTY["PTY Manager"]
+            CM["Container Manager"]
+            ACP["ACP Gateway"]
+            PS["Port Scanner"]
+            JWT["JWT Validator"]
+        end
+        subgraph DOCKER["Docker Engine"]
+            WS1["Workspace Container 1"]
+            WSN["Workspace Container N"]
+        end
+        AGENT --> DOCKER
+    end
+
+    Browser -- "HTTPS" --> CF
+    Browser -- "WSS" --> CF
+    CF -- "HTTP/WSS<br/>(proxied via DNS)" --> VM
 ```
 
 ## Request Routing
@@ -67,12 +68,12 @@ Every request to `*.domain` passes through the same Cloudflare Worker. The `Host
 |---------|-------------|-----|
 | `app.{domain}` | Cloudflare Pages | Worker proxies to `{project}.pages.dev` |
 | `api.{domain}` | Worker API routes | Direct handling by Hono router |
-| `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via DNS-only `vm-{nodeId}.{domain}` |
+| `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via `{nodeId}.vm.{domain}` backend hostname |
 | `ws-{id}--{port}.{domain}` | Workspace port proxy | Worker proxies to dev server running on `{port}` |
 | `*.{domain}` (other) | 404 | No matching route |
 
-:::note[Why DNS-only backend hostnames?]
-Cloudflare Workers can't fetch IP addresses directly (Error 1003). Non-proxied DNS A records (`vm-{nodeId}.{domain}` → VM IP) are created so the Worker can proxy through hostnames.
+:::note[Why backend hostnames?]
+Cloudflare Workers can't fetch IP addresses directly (Error 1003). Node backend DNS records (`{nodeId}.vm.{domain}` → VM IP) are created so the Worker can proxy through hostnames, with `*.vm.{domain}` excluded from the Worker route.
 :::
 
 ## Control Plane — API Worker
@@ -170,7 +171,15 @@ Each project gets one `ProjectData` Durable Object instance, accessed via `env.P
 
 Each node gets one `NodeLifecycle` Durable Object, accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`.
 
-**State machine:** `active` → `warm` → `destroying`
+**State machine:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> active
+    active --> warm : Task complete / idle
+    warm --> active : Claimed by new task
+    warm --> destroying : Warm timeout elapsed
+```
 
 - `markIdle(nodeId, userId)` — transitions to warm, schedules cleanup alarm
 - `tryClaim(taskId)` — atomically claims a warm node for reuse (single-threaded, no races)
@@ -181,9 +190,15 @@ Each node gets one `NodeLifecycle` Durable Object, accessed via `env.NODE_LIFECY
 Each idea execution gets one `TaskRunner` Durable Object, accessed via `env.TASK_RUNNER.idFromName(taskId)`.
 
 **Orchestration steps** (each idempotent, alarm-driven):
-```
-node_selection → node_provisioning → node_agent_ready →
-workspace_creation → workspace_ready → agent_session → running
+
+```mermaid
+graph LR
+    NS["node_selection"] --> NP["node_provisioning"]
+    NP --> NAR["node_agent_ready"]
+    NAR --> WC["workspace_creation"]
+    WC --> WR["workspace_ready"]
+    WR --> AS["agent_session"]
+    AS --> R["running"]
 ```
 
 Cross-DO coordination with NodeLifecycle (for warm node claims) and ProjectData (for session linkage). Exponential backoff on transient errors.
@@ -192,15 +207,16 @@ Cross-DO coordination with NodeLifecycle (for warm node claims) and ProjectData 
 
 Agent sessions are managed by the ProjectData DO with this state machine:
 
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> assigned : Node selected
+    assigned --> running : Agent started on VM
+    running --> completed : Agent finished
+    running --> failed : Agent error
+    running --> interrupted : Heartbeat lost
+    assigned --> interrupted : Heartbeat lost
 ```
-pending → assigned → running → completed/failed/interrupted
-```
-
-- **pending** → **assigned**: Node selected, workspace being prepared
-- **assigned** → **running**: Agent process started on VM
-- **running** → **completed**: Agent finished successfully
-- **running** → **failed**: Agent encountered an error
-- **running/assigned** → **interrupted**: VM heartbeat lost
 
 **Heartbeat detection**: VM agent sends heartbeats every 60 seconds. If no heartbeat within 5 minutes (`ACP_SESSION_DETECTION_WINDOW_MS`), the DO alarm marks the session as `interrupted`.
 
@@ -223,23 +239,19 @@ The VM Agent (`packages/vm-agent/`) is a Go binary running on each node:
 
 ## Deployment Pipeline
 
-```
-Push to main
-  │
-  ├── Phase 1: Infrastructure (Pulumi)
-  │     └── D1, KV, R2, DNS records
-  │
-  ├── Phase 2: Configuration
-  │     └── Sync wrangler.toml, read security keys
-  │
-  ├── Phase 3: Application
-  │     └── Build → Deploy Worker → Deploy Pages → Migrations → Secrets
-  │
-  ├── Phase 4: VM Agent
-  │     └── Build Go (multi-arch) → Upload to R2
-  │
-  └── Phase 5: Validation
-        └── Health check polling
+```mermaid
+graph TD
+    PUSH["Push to main"] --> P1
+    P1["Phase 1: Infrastructure<br/>(Pulumi)"] --> P2
+    P1 -.- P1D["D1, KV, R2, DNS records"]
+    P2["Phase 2: Configuration"] --> P3
+    P2 -.- P2D["Sync wrangler.toml, read security keys"]
+    P3["Phase 3: Application"] --> P4
+    P3 -.- P3D["Build → Deploy Worker → Deploy Pages → Migrations → Secrets"]
+    P4["Phase 4: VM Agent"] --> P5
+    P4 -.- P4D["Build Go (multi-arch) → Upload to R2"]
+    P5["Phase 5: Validation"]
+    P5 -.- P5D["Health check polling"]
 ```
 
 CI runs lint, typecheck, tests, and build on every push. The deploy workflow only triggers on pushes to `main`.

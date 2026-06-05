@@ -47,7 +47,7 @@ GH_WEBHOOK_SECRET      →  GITHUB_WEBHOOK_SECRET
 
 **Files to Review**:
 
-- `apps/api/src/index.ts` (Env interface, lines 15-40)
+- `apps/api/src/env.ts` (Env interface)
 - `scripts/deploy/types.ts` (REQUIRED_SECRETS array)
 
 **Checklist**:
@@ -62,7 +62,7 @@ GH_WEBHOOK_SECRET      →  GITHUB_WEBHOOK_SECRET
 **Files to Review**:
 
 - `CLAUDE.md` - Environment Variable Naming section
-- `docs/guides/self-hosting.md` - GitHub Environment Configuration
+- `apps/www/src/content/docs/docs/guides/self-hosting.md` - GitHub Environment Configuration
 - `.specify/memory/constitution.md` - Development Workflow
 - `.env.example` files (if any)
 
@@ -79,9 +79,9 @@ GH_WEBHOOK_SECRET      →  GITHUB_WEBHOOK_SECRET
 **Files to Review**:
 
 - `CLAUDE.md`
-- `docs/guides/self-hosting.md`
+- `apps/www/src/content/docs/docs/guides/self-hosting.md`
 - `.specify/memory/constitution.md`
-- `docs/architecture/secrets-taxonomy.md`
+- `apps/www/src/content/docs/docs/reference/configuration.md`
 
 **Checklist**:
 
@@ -112,13 +112,13 @@ Use these to scan the codebase:
 grep -rn "env\." apps/api/src/ --include="*.ts" | grep -v "node_modules"
 
 # Find GITHUB_* in documentation (should only be in Worker context)
-grep -rn "GITHUB_" docs/ CLAUDE.md .specify/
+grep -rn "GITHUB_" apps/www/src/content/docs/docs CLAUDE.md .specify/
 
 # Find GH_* in documentation (should only be in GitHub Environment context)
-grep -rn "GH_" docs/ CLAUDE.md .specify/
+grep -rn "GH_" apps/www/src/content/docs/docs CLAUDE.md .specify/
 
 # Extract Env interface members
-grep -A50 "export interface Env" apps/api/src/index.ts
+grep -A120 "export interface Env" apps/api/src/env.ts
 
 # Check configure-secrets.sh mapping
 grep -n "wrangler secret" scripts/deploy/configure-secrets.sh

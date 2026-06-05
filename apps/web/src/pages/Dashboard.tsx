@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router';
 
 import { ActiveTaskCard } from '../components/ActiveTaskCard';
 import { useAuth } from '../components/AuthProvider';
-import { OnboardingWizard } from '../components/onboarding';
 import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
 import { useActiveTasks } from '../hooks/useActiveTasks';
 import { useProjectList } from '../hooks/useProjectData';
@@ -26,9 +25,6 @@ export function Dashboard() {
           Welcome, {user?.name || user?.email}!
         </h2>
       </div>
-
-      {/* Onboarding wizard for new users */}
-      <OnboardingWizard />
 
       {/* Error messages */}
       {tasksError && (

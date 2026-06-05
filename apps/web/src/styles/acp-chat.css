@@ -394,6 +394,43 @@
 .prose ol {
   margin: 0.375rem 0 0.5rem;
   padding-left: 1.25rem;
+  /* Tailwind v4 preflight resets `ol, ul { list-style: none }`. Re-declare the
+     markers so chat lists show numbers/bullets. Markers sit outside the padded
+     content box so they don't clip on mobile. */
+  list-style-position: outside;
+}
+
+.prose ol {
+  list-style-type: decimal;
+}
+
+.prose ul {
+  list-style-type: disc;
+}
+
+/* Nested lists get distinct markers, matching typographic convention. */
+.prose ul ul {
+  list-style-type: circle;
+}
+
+.prose ul ul ul {
+  list-style-type: square;
+}
+
+.prose ol ol {
+  list-style-type: lower-alpha;
+}
+
+/* GFM task lists render checkboxes, not bullets. react-markdown adds the
+   `contains-task-list` class. */
+.prose ul.contains-task-list {
+  list-style-type: none;
+  padding-left: 0.25rem;
+}
+
+.prose li {
+  /* Slight breathing room so the marker isn't flush against the text. */
+  padding-left: 0.125rem;
 }
 
 .prose li + li {
@@ -410,4 +447,45 @@
 
 .prose code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Tables: the .prose container already has overflow-x-auto (MessageBubble), so
+   give the table a readable natural size and let it scroll. Per-cell min-width
+   gives every column a floor so narrow columns ("No", "Yes") stop collapsing;
+   when the total exceeds the bubble it scrolls horizontally instead of
+   squishing. Subtle green grid lines + header tint + zebra striping make the
+   table structure obvious. */
+.prose table {
+  border-collapse: collapse;
+  width: auto;
+  min-width: 100%;
+  margin: 0.5rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.prose th,
+.prose td {
+  padding: 0.4rem 0.625rem;
+  /* 0.45 opacity reaches the WCAG 1.4.11 3:1 non-text contrast threshold for
+     grid lines against the bubble background (0.16 only gave ~1.3:1). */
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  text-align: left;
+  vertical-align: top;
+  min-width: 6rem;
+  /* max-width is ignored in table-layout:auto; wrap long unbroken strings
+     (URLs, paths, tokens) so a single cell can't blow out the scroll width. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.prose thead th {
+  background: rgba(34, 197, 94, 0.08);
+  border-bottom: 1px solid rgba(34, 197, 94, 0.55);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.prose tbody tr:nth-child(even) td {
+  background: rgba(34, 197, 94, 0.08);
 }

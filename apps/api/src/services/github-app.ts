@@ -223,11 +223,25 @@ export async function generateAppJWT(env: Env): Promise<string> {
 export async function getInstallationToken(
   installationId: string,
   env: Env,
-  extraPermissions?: Record<string, string>,
+  options?: Record<string, string> | {
+    permissions?: Record<string, string>;
+    repositoryIds?: number[];
+    repositories?: string[];
+  },
 ): Promise<{ token: string; expiresAt: string }> {
   const jwt = await generateAppJWT(env);
 
-  const body = extraPermissions ? JSON.stringify({ permissions: extraPermissions }) : undefined;
+  const body = options
+    ? JSON.stringify(
+        'permissions' in options || 'repositoryIds' in options || 'repositories' in options
+          ? {
+              ...(options.permissions ? { permissions: options.permissions } : {}),
+              ...(options.repositoryIds ? { repository_ids: options.repositoryIds } : {}),
+              ...(options.repositories ? { repositories: options.repositories } : {}),
+            }
+          : { permissions: options }
+      )
+    : undefined;
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
@@ -547,6 +561,106 @@ export async function getRepositoryBranches(
   }
 
   return allBranches;
+}
+
+/**
+ * Ensure a branch exists in a repository. If the branch does not exist,
+ * create it from the default branch.
+ *
+ * This is called before workspace provisioning to prevent git clone failures
+ * when a task specifies a branch that hasn't been created yet.
+ *
+ * @returns true if the branch exists (or was created), false if creation failed
+ */
+export async function ensureBranchExists(
+  installationId: string,
+  owner: string,
+  repo: string,
+  branchName: string,
+  defaultBranch: string,
+  env: Env,
+): Promise<boolean> {
+  const { token } = await getInstallationToken(installationId, env);
+  const headers: HeadersInit = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'Simple-Agent-Manager',
+  };
+
+  // Check if the branch already exists
+  const checkResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branchName)}`,
+    { headers },
+  );
+
+  if (checkResp.ok) {
+    return true; // Branch already exists
+  }
+
+  if (checkResp.status !== 404) {
+    // Unexpected error — log and return false
+    log.warn('github.ensure_branch.check_failed', {
+      owner, repo, branchName,
+      status: checkResp.status,
+    });
+    return false;
+  }
+
+  // Branch doesn't exist — get the SHA of the default branch
+  const refResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${encodeURIComponent(defaultBranch)}`,
+    { headers },
+  );
+
+  if (!refResp.ok) {
+    log.warn('github.ensure_branch.default_branch_ref_failed', {
+      owner, repo, defaultBranch,
+      status: refResp.status,
+    });
+    return false;
+  }
+
+  const refData = await refResp.json() as { object?: { sha?: string } };
+  const sha = refData.object?.sha;
+  if (!sha) {
+    log.warn('github.ensure_branch.no_sha', { owner, repo, defaultBranch });
+    return false;
+  }
+
+  // Create the new branch
+  const createResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ref: `refs/heads/${branchName}`,
+        sha,
+      }),
+    },
+  );
+
+  if (createResp.ok) {
+    log.info('github.ensure_branch.created', {
+      owner, repo, branchName, fromBranch: defaultBranch, sha,
+    });
+    return true;
+  }
+
+  if (createResp.status === 422) {
+    // Race condition — another caller created the branch between our check and create
+    log.info('github.ensure_branch.race_already_exists', { owner, repo, branchName });
+    return true;
+  }
+
+  const errorText = await createResp.text().catch(() => '');
+  log.warn('github.ensure_branch.create_failed', {
+    owner, repo, branchName,
+    status: createResp.status,
+    message: errorText.slice(0, 200),
+  });
+  return false;
 }
 
 /**

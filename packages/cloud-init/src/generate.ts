@@ -24,9 +24,8 @@ const SAFE_URL_RE = /^https:\/\/[a-zA-Z0-9._~:/?#[\]@!&()*+,;=-]+$/;
 /** callbackToken: JWT format (base64url segments separated by dots) */
 const SAFE_TOKEN_RE = /^[a-zA-Z0-9_.\-/+=]+$/;
 
-/** Docker DNS servers: one or more quoted dotted-decimal IPv4 addresses, comma-separated.
- * e.g. "1.1.1.1", "8.8.8.8" */
-const SAFE_DNS_SERVERS_RE = /^"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"(, "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")*$/;
+/** Boolean strings accepted by the VM agent config loader. */
+const BOOLEAN_RE = /^(true|false)$/;
 
 /**
  * PEM envelope: must start with -----BEGIN <label>----- and end with -----END <label>-----.
@@ -69,7 +68,8 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     }
   }
   if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
-    if (!NUMERIC_RE.test(variables.cfIpFetchTimeout)) {
+    const timeout = Number(variables.cfIpFetchTimeout);
+    if (!NUMERIC_RE.test(variables.cfIpFetchTimeout) || timeout < 1) {
       errors.push(`cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`);
     }
   }
@@ -114,8 +114,13 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     }
   }
   if (variables.dockerDnsServers !== undefined && variables.dockerDnsServers !== '') {
-    if (!SAFE_DNS_SERVERS_RE.test(variables.dockerDnsServers)) {
-      errors.push(`dockerDnsServers: must contain only quoted IPs (got ${JSON.stringify(variables.dockerDnsServers)})`);
+    if (!isValidDockerDnsServers(variables.dockerDnsServers)) {
+      errors.push(`dockerDnsServers: must be a JSON fragment containing valid quoted IPv4 addresses (got ${JSON.stringify(variables.dockerDnsServers)})`);
+    }
+  }
+  if (variables.devcontainerCacheEnabled !== undefined && variables.devcontainerCacheEnabled !== '') {
+    if (!BOOLEAN_RE.test(variables.devcontainerCacheEnabled)) {
+      errors.push(`devcontainerCacheEnabled: must be "true" or "false" (got ${JSON.stringify(variables.devcontainerCacheEnabled)})`);
     }
   }
   if (variables.originCaCert !== undefined && variables.originCaCert !== '') {
@@ -275,6 +280,28 @@ export function indentForYamlBlock(content: string, indent: number): string {
     .split('\n')
     .map((line, i) => (i === 0 ? line : pad + line))
     .join('\n');
+}
+
+function isValidDockerDnsServers(value: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(`[${value}]`);
+  } catch {
+    return false;
+  }
+
+  return Array.isArray(parsed) && parsed.length > 0 && parsed.every(isValidIpv4Address);
+}
+
+function isValidIpv4Address(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+
+  const octets = value.split('.');
+  return octets.length === 4 && octets.every((octet) => {
+    if (!/^\d{1,3}$/.test(octet)) return false;
+    const numeric = Number(octet);
+    return numeric >= 0 && numeric <= 255;
+  });
 }
 
 function escapeRegExp(str: string): string {

@@ -38,6 +38,11 @@ export interface ProvisioningState {
   startedAt: number;
   workspaceId: string | null;
   workspaceUrl: string | null;
+  /** VM size originally requested (default-derived). */
+  requestedVmSize: string | null;
+  /** VM size actually provisioned. Differs from requestedVmSize only when
+   *  size-fallback descended on transient capacity exhaustion. */
+  provisionedVmSize: string | null;
 }
 
 export function isTerminal(status: TaskStatus): boolean {

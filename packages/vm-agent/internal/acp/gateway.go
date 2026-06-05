@@ -163,6 +163,14 @@ type GatewayConfig struct {
 	PromptTimeout time.Duration
 	// PromptCancelGracePeriod waits after cancel before force-stopping unresponsive prompt.
 	PromptCancelGracePeriod time.Duration
+	// PromptRetryMaxRetries bounds transient provider prompt retries after the initial attempt.
+	PromptRetryMaxRetries int
+	// PromptRetryInitialDelay is the first backoff before retrying a transient provider prompt error.
+	PromptRetryInitialDelay time.Duration
+	// PromptRetryMaxDelay caps exponential backoff for transient provider prompt retries.
+	PromptRetryMaxDelay time.Duration
+	// PromptRetrySleeper is injectable for tests. Nil uses time.Sleep with context cancellation.
+	PromptRetrySleeper func(context.Context, time.Duration) error
 	// TabLastPromptStore persists the last user prompt to SQLite for session discoverability.
 	TabLastPromptStore TabLastPromptUpdater
 	// SessionLastPromptManager persists the last user prompt in the in-memory session manager.

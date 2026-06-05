@@ -149,9 +149,6 @@ export interface Env {
   WORKSPACE_STOPPED_TTL_MS?: string;
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
-  // Built-in profile model overrides (defaults: claude-sonnet-4-5-20250929, claude-opus-4-6)
-  BUILTIN_PROFILE_SONNET_MODEL?: string;
-  BUILTIN_PROFILE_OPUS_MODEL?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
   TASK_RUN_HARD_TIMEOUT_MS?: string;
@@ -209,6 +206,7 @@ export interface Env {
   HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
+  HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
@@ -260,6 +258,9 @@ export interface Env {
   TASK_RUNNER_RETRY_MAX_DELAY_MS?: string;
   TASK_RUNNER_AGENT_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_AGENT_READY_TIMEOUT_MS?: string;
+  TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS?: string;
+  TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS?: string;
+  TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS?: string;
   TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS?: string;
   TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
@@ -519,6 +520,8 @@ export interface Env {
   COMPUTE_USAGE_RECENT_RECORDS_LIMIT?: string;  // Max recent records in admin user detail (default: 50)
   // Compute quota enforcement
   COMPUTE_QUOTA_ENFORCEMENT_ENABLED?: string;    // Kill switch for quota checks (default: true)
+  // VM size fallback on transient capacity exhaustion
+  CAPACITY_SIZE_FALLBACK_ENABLED?: string;       // Kill switch: "false" disables size descent on capacity exhaustion (default: true)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string;                 // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string;               // Min cron interval in minutes (default: 15)

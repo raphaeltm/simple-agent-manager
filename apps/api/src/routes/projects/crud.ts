@@ -193,7 +193,8 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     }
 
     const installation = await requireOwnedInstallation(db, installationId, userId);
-    await assertRepositoryAccess(getExternalInstallationId(installation), repository, c.env);
+    const externalInstallationId = getExternalInstallationId(installation);
+    await assertRepositoryAccess(externalInstallationId, repository, c.env);
 
     const duplicateRepositoryRows = await db
       .select({ id: schema.projects.id })

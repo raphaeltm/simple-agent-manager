@@ -180,6 +180,42 @@ async function fetchDevcontainerConfigsFallback(
   return { defaultConfigExists, configs };
 }
 
+export async function discoverGitHubDevcontainerConfigs(
+  owner: string,
+  repo: string,
+  branch: string,
+  token: string,
+): Promise<{ defaultConfigExists: boolean; configs: DevcontainerConfigEntry[]; truncated: boolean }> {
+  const treeResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    {
+      headers: {
+        ...GITHUB_API_HEADERS,
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!treeResp.ok) {
+    const errBody = await treeResp.text().catch(() => '');
+    throw new Error(`GitHub tree fetch failed: ${treeResp.status} ${errBody.slice(0, 200)}`.trim());
+  }
+
+  const treeData = await treeResp.json() as GitTreeResponse;
+
+  if (treeData.truncated) {
+    return {
+      ...await fetchDevcontainerConfigsFallback(owner, repo, branch, token),
+      truncated: true,
+    };
+  }
+
+  return {
+    ...parseDevcontainerConfigs(treeData.tree),
+    truncated: false,
+  };
+}
+
 const devcontainerConfigRoutes = new Hono<{ Bindings: Env }>();
 
 devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
@@ -207,43 +243,12 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
   const { token } = await getInstallationToken(getExternalInstallationId(installation), c.env);
 
   try {
-    // Fetch the repo tree recursively
-    const treeResp = await fetch(
-      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
-      {
-        headers: {
-          ...GITHUB_API_HEADERS,
-          Authorization: `Bearer ${token}`,
-        },
-      },
+    const { defaultConfigExists, configs, truncated } = await discoverGitHubDevcontainerConfigs(
+      owner,
+      repo,
+      branch,
+      token,
     );
-
-    if (!treeResp.ok) {
-      const errBody = await treeResp.text().catch(() => '');
-      log.warn('devcontainer_configs.github_tree_error', {
-        projectId,
-        status: treeResp.status,
-        body: errBody.slice(0, 200),
-      });
-      return c.json({ error: 'GITHUB_API_ERROR', message: 'Failed to fetch repository tree' }, 502);
-    }
-
-    const treeData = await treeResp.json() as GitTreeResponse;
-
-    // If tree is truncated, fall back to contents API
-    if (treeData.truncated) {
-      const fallbackResult = await fetchDevcontainerConfigsFallback(owner, repo, branch, token);
-      return c.json({
-        provider: 'github',
-        repository: project.repository,
-        branch,
-        defaultConfigExists: fallbackResult.defaultConfigExists,
-        configs: fallbackResult.configs,
-        truncated: true,
-      } satisfies DevcontainerConfigsResponse);
-    }
-
-    const { defaultConfigExists, configs } = parseDevcontainerConfigs(treeData.tree);
 
     return c.json({
       provider: 'github',
@@ -251,6 +256,7 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
       branch,
       defaultConfigExists,
       configs,
+      ...(truncated ? { truncated } : {}),
     } satisfies DevcontainerConfigsResponse);
   } catch (err) {
     log.error('devcontainer_configs.unexpected_error', {

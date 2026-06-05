@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -223,7 +224,7 @@ func TestIdeasShowsTable(t *testing.T) {
 func TestLibraryShowsTable(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"files":[{"id":"file_1","filename":"spec.md","size":1024,"source":"upload"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"files":[{"id":"file_1","filename":"spec.md","directory":"/","sizeBytes":1024,"uploadSource":"user","createdAt":"2026-05-30T00:00:00Z"}],"cursor":null,"total":1}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"library"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -233,7 +234,25 @@ func TestLibraryShowsTable(t *testing.T) {
 	if captured.URL != "https://api.example.com/api/projects/project_1/library" {
 		t.Fatalf("path = %s", captured.URL)
 	}
-	if !strings.Contains(stdout.String(), "spec.md") {
+	if !strings.Contains(stdout.String(), "spec.md") || !strings.Contains(stdout.String(), "1.0 KB") || !strings.Contains(stdout.String(), "use --recursive") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestLibraryRecursiveRequestsAllFiles(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	doer, captured := captureJSONRequest(t, `{"files":[{"id":"file_1","filename":"spec.md","directory":"/docs/","sizeBytes":2048,"uploadSource":"agent","createdAt":"2026-05-30T00:00:00Z"}],"cursor":null,"total":1}`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"library", "--recursive"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if captured.URL != "https://api.example.com/api/projects/project_1/library?recursive=true" {
+		t.Fatalf("path = %s", captured.URL)
+	}
+	if !strings.Contains(stdout.String(), "/docs/spec.md") || strings.Contains(stdout.String(), "use --recursive") {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -241,7 +260,7 @@ func TestLibraryShowsTable(t *testing.T) {
 func TestContextShowsTable(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"entities":[{"entityName":"UserPrefs","entityType":"concept","observationCount":5,"updatedAt":"2026-05-30T00:00:00Z"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"entities":[{"id":"ent_1","name":"UserPrefs","entityType":"context","observationCount":5,"updatedAt":1780099200000}]}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"context"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -257,7 +276,7 @@ func TestContextShowsTable(t *testing.T) {
 }
 
 func TestNotificationsShowsTable(t *testing.T) {
-	doer, captured := captureJSONRequest(t, `{"notifications":[{"id":"notif_1","type":"task_complete","title":"Task done","read":false}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"notifications":[{"id":"notif_1","type":"task_complete","title":"Task done","readAt":null,"createdAt":"2026-05-30T00:00:00Z"}],"unreadCount":1,"nextCursor":null}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"notifications"}, doer, nil)
 
 	code := Run(context.Background(), runtime)
@@ -275,7 +294,7 @@ func TestNotificationsShowsTable(t *testing.T) {
 func TestTriggersShowsTable(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"triggers":[{"id":"trig_1","name":"Daily check","schedule":"0 9 * * *","status":"active"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"triggers":[{"id":"trig_1","name":"Daily check","sourceType":"cron","cronExpression":"0 9 * * *","cronHumanReadable":"Every day at 9:00 AM UTC","status":"active","nextFireAt":"2026-06-02T09:00:00Z"}]}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"triggers"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -285,7 +304,7 @@ func TestTriggersShowsTable(t *testing.T) {
 	if captured.URL != "https://api.example.com/api/projects/project_1/triggers" {
 		t.Fatalf("path = %s", captured.URL)
 	}
-	if !strings.Contains(stdout.String(), "Daily check") {
+	if !strings.Contains(stdout.String(), "Daily check") || !strings.Contains(stdout.String(), "Every day at 9:00 AM UTC") {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -293,7 +312,7 @@ func TestTriggersShowsTable(t *testing.T) {
 func TestProfilesShowsTable(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"profiles":[{"id":"prof_1","name":"fast-agent","agentType":"claude-code","vmSize":"cx22","taskMode":"task"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"items":[{"id":"prof_1","name":"fast-agent","agentType":"claude-code","vmSizeOverride":"cx22","taskMode":"task"}]}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"profiles"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -311,7 +330,7 @@ func TestProfilesShowsTable(t *testing.T) {
 func TestActivityShowsTable(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"events":[{"id":"evt_1","type":"task_started","summary":"Started fix-bugs task"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"events":[{"id":"evt_1","eventType":"task.created","payload":{"title":"Started fix-bugs task"},"createdAt":1780099200000}]}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"activity"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -327,7 +346,7 @@ func TestActivityShowsTable(t *testing.T) {
 }
 
 func TestNodesShowsTable(t *testing.T) {
-	doer, captured := captureJSONRequest(t, `{"nodes":[{"id":"node_1","provider":"hetzner","vmSize":"cx22","location":"fsn1","status":"active","ip":"1.2.3.4","workspaceCount":2}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `[{"id":"node_1","name":"builder","cloudProvider":"hetzner","vmSize":"cx22","vmLocation":"fsn1","status":"running","ipAddress":"1.2.3.4"}]`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"nodes"}, doer, nil)
 
 	code := Run(context.Background(), runtime)
@@ -341,6 +360,194 @@ func TestNodesShowsTable(t *testing.T) {
 	if !strings.Contains(output, "hetzner") || !strings.Contains(output, "1.2.3.4") {
 		t.Fatalf("stdout = %s", output)
 	}
+}
+
+func TestMultilineValuesStayOnSingleTableRows(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		response string
+		want     string
+		env      map[string]string
+	}{
+		{
+			name:     "notifications",
+			args:     []string{"notifications"},
+			response: `{"notifications":[{"id":"notif_1","type":"needs_input","title":"First line\nsecond line","createdAt":"2026-05-30T00:00:00Z"}],"unreadCount":1,"nextCursor":null}`,
+			want:     "First line second line",
+		},
+		{
+			name:     "activity",
+			args:     []string{"activity"},
+			response: `{"events":[{"id":"evt_1","eventType":"task.created","payload":{"title":"Started task\nwith wrapped title"},"createdAt":1780099200000}]}`,
+			want:     "Started task with wrapped title",
+			env:      activeProjectEnv(t),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doer, _ := captureJSONRequest(t, tt.response, http.StatusOK)
+			runtime, stdout, stderr := testRuntime(t, tt.args, doer, tt.env)
+
+			code := Run(context.Background(), runtime)
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s", code, stderr.String())
+			}
+			lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("expected header plus one row, got %d lines: %s", len(lines), stdout.String())
+			}
+			if !strings.Contains(lines[1], tt.want) {
+				t.Fatalf("row = %s", lines[1])
+			}
+		})
+	}
+}
+
+func TestFixedCommandsJSONOutputUsesCurrentContracts(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		response string
+		env      map[string]string
+		assert   func(t *testing.T, value map[string]any)
+	}{
+		{
+			name:     "chat list",
+			args:     []string{"chat", "--json"},
+			response: `{"sessions":[{"id":"sess_1","topic":"Fix bugs","status":"active","messageCount":5,"lastMessageAt":1780099200000}]}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "sessions")
+			},
+		},
+		{
+			name:     "chat detail",
+			args:     []string{"chat", "sess_1", "--json"},
+			response: `{"session":{"id":"sess_1","topic":"Fix bugs","status":"active","messageCount":1},"messages":[{"id":"msg_1","role":"assistant","content":"Done","createdAt":1780099200000}],"hasMore":false,"state":null}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "messages")
+			},
+		},
+		{
+			name:     "library",
+			args:     []string{"library", "--json"},
+			response: `{"files":[{"id":"file_1","filename":"spec.md","directory":"/","sizeBytes":1024,"uploadSource":"user","createdAt":"2026-05-30T00:00:00Z"}],"cursor":null,"total":1}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "files")
+			},
+		},
+		{
+			name:     "context",
+			args:     []string{"context", "--json"},
+			response: `{"entities":[{"id":"ent_1","name":"UserPrefs","entityType":"context","observationCount":5,"updatedAt":1780099200000}]}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "entities")
+			},
+		},
+		{
+			name:     "notifications",
+			args:     []string{"notifications", "--json"},
+			response: `{"notifications":[{"id":"notif_1","type":"task_complete","title":"Task done","createdAt":"2026-05-30T00:00:00Z"}],"unreadCount":1,"nextCursor":null}`,
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "notifications")
+			},
+		},
+		{
+			name:     "triggers",
+			args:     []string{"triggers", "--json"},
+			response: `{"triggers":[{"id":"trig_1","name":"Daily check","sourceType":"cron","cronExpression":"0 9 * * *","status":"active","nextFireAt":"2026-06-02T09:00:00Z"}]}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "triggers")
+			},
+		},
+		{
+			name:     "profiles",
+			args:     []string{"profiles", "--json"},
+			response: `{"items":[{"id":"prof_1","name":"fast-agent","agentType":"claude-code","vmSizeOverride":"cx22","taskMode":"task"}]}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "items")
+			},
+		},
+		{
+			name:     "activity",
+			args:     []string{"activity", "--json"},
+			response: `{"events":[{"id":"evt_1","eventType":"task.created","payload":{"title":"Started fix-bugs task"},"createdAt":1780099200000}]}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "events")
+			},
+		},
+		{
+			name:     "nodes",
+			args:     []string{"nodes", "--json"},
+			response: `[{"id":"node_1","cloudProvider":"hetzner","vmSize":"cx22","vmLocation":"fsn1","status":"running","ipAddress":"1.2.3.4"}]`,
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "nodes")
+			},
+		},
+		{
+			name:     "ideas",
+			args:     []string{"ideas", "--json"},
+			response: `{"tasks":[{"id":"idea_1","title":"Add dark mode","priority":1,"createdAt":"2026-05-30T00:00:00Z"}]}`,
+			env:      activeProjectEnv(t),
+			assert: func(t *testing.T, value map[string]any) {
+				assertArrayField(t, value, "tasks")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doer, _ := captureJSONRequest(t, tt.response, http.StatusOK)
+			runtime, stdout, stderr := testRuntime(t, tt.args, doer, tt.env)
+
+			code := Run(context.Background(), runtime)
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s", code, stderr.String())
+			}
+			var value map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &value); err != nil {
+				t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+			}
+			tt.assert(t, value)
+		})
+	}
+}
+
+func TestStatusJSONOutputUsesCurrentContracts(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/sessions") {
+			return jsonResponse(`{"sessions":[{"id":"sess_1","topic":"Fix bugs","status":"active","messageCount":5,"lastMessageAt":1780099200000}]}`, http.StatusOK), nil
+		}
+		return jsonResponse(`{"id":"project_1","name":"My Project","repository":"github.com/org/repo","activeSessionCount":1,"activeWorkspaceCount":0}`, http.StatusOK), nil
+	})
+	runtime, stdout, stderr := testRuntime(t, []string{"status", "--json"}, doer, env.values)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	var value map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &value); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if _, ok := value["project"].(map[string]any); !ok {
+		t.Fatalf("project missing from %#v", value)
+	}
+	sessionsObj, ok := value["sessions"].(map[string]any)
+	if !ok {
+		t.Fatalf("sessions is not an object in %#v", value)
+	}
+	assertArrayField(t, sessionsObj, "sessions")
 }
 
 func TestProjectScopedCommandWithoutProjectFails(t *testing.T) {
@@ -449,7 +656,7 @@ func TestIdeasEmptyState(t *testing.T) {
 func TestLibraryEmptyState(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, _ := captureJSONRequest(t, `{"files":[]}`, http.StatusOK)
+	doer, _ := captureJSONRequest(t, `{"files":[],"cursor":null,"total":0}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"library"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -477,7 +684,7 @@ func TestContextEmptyState(t *testing.T) {
 }
 
 func TestNodesEmptyState(t *testing.T) {
-	doer, _ := captureJSONRequest(t, `{"nodes":[]}`, http.StatusOK)
+	doer, _ := captureJSONRequest(t, `[]`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"nodes"}, doer, nil)
 
 	code := Run(context.Background(), runtime)
@@ -551,5 +758,23 @@ func TestUnknownCommandShowsHint(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown command: foobar") || !strings.Contains(stderr.String(), "--help") {
 		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func activeProjectEnv(t *testing.T) map[string]string {
+	t.Helper()
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_1", "My Project")
+	return env.values
+}
+
+func assertArrayField(t *testing.T, value map[string]any, field string) {
+	t.Helper()
+	items, ok := value[field].([]any)
+	if !ok {
+		t.Fatalf("%s is not an array in %#v", field, value)
+	}
+	if len(items) == 0 {
+		t.Fatalf("%s is empty in %#v", field, value)
 	}
 }

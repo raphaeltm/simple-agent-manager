@@ -338,6 +338,9 @@ func New(cfg *config.Config) (*Server, error) {
 		PongTimeout:             cfg.ACPPongTimeout,
 		PromptTimeout:           effectivePromptTimeout(cfg),
 		PromptCancelGracePeriod: cfg.ACPPromptCancelGrace,
+		PromptRetryMaxRetries:   cfg.ACPPromptRetryMaxRetries,
+		PromptRetryInitialDelay: cfg.ACPPromptRetryInitial,
+		PromptRetryMaxDelay:     cfg.ACPPromptRetryMax,
 		SAMEnvFallback:          cfg.BuildSAMEnvFallback(),
 		HTTPClient:              config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}

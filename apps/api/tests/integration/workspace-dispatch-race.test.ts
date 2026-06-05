@@ -30,6 +30,18 @@ function sectionAfter(source: string, marker: string): string {
   return source.slice(start);
 }
 
+function sectionBetween(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  if (start === -1) {
+    throw new Error(`Missing start marker: ${startMarker}`);
+  }
+  const end = source.indexOf(endMarker, start);
+  if (end === -1) {
+    throw new Error(`Missing end marker: ${endMarker}`);
+  }
+  return source.slice(start, end);
+}
+
 describe('workspace dispatch race prevention', () => {
   it('adds nullable dispatched_at to the workspaces table', () => {
     expect(migrationSource.trim()).toBe('ALTER TABLE workspaces ADD COLUMN dispatched_at TEXT;');
@@ -63,13 +75,31 @@ describe('workspace dispatch race prevention', () => {
     expect(markerIndex).toBeGreaterThan(dispatchIndex);
   });
 
-  it('task runner sets dispatched_at after successful VM agent workspace creation', () => {
-    const creationSection = sectionAfter(taskRunnerWorkspaceSource, 'async function createAndProvisionWorkspace');
-    const dispatchIndex = creationSection.indexOf('await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId)');
-    const markerIndex = creationSection.indexOf('UPDATE workspaces SET dispatched_at = ? WHERE id = ?');
+  it('task runner routes workspace creation through a durable dispatch step', () => {
+    const creationSection = sectionBetween(
+      taskRunnerWorkspaceSource,
+      'export async function handleWorkspaceCreation',
+      'async function recoverWorkspaceFromD1',
+    );
+
+    expect(creationSection).toContain("advanceToStep(state, 'workspace_dispatch')");
+    expect(creationSection).not.toContain("advanceToStep(state, 'workspace_ready')");
+  });
+
+  it('task runner sets dispatched_at after successful VM agent dispatch acknowledgement', () => {
+    const dispatchSection = sectionAfter(taskRunnerWorkspaceSource, 'export async function handleWorkspaceDispatch');
+    const dispatchIndex = dispatchSection.indexOf('await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId)');
+    const markerIndex = dispatchSection.indexOf('UPDATE workspaces SET dispatched_at = ?, updated_at = ? WHERE id = ?');
 
     expect(dispatchIndex).toBeGreaterThanOrEqual(0);
     expect(markerIndex).toBeGreaterThan(dispatchIndex);
+  });
+
+  it('workspace_ready sends undispatched recovered workspaces back to workspace_dispatch', () => {
+    const readySection = sectionAfter(taskRunnerWorkspaceSource, 'export async function handleWorkspaceReady');
+
+    expect(readySection).toContain('workspace_ready_without_dispatch_ack');
+    expect(readySection).toContain("advanceToStep(state, 'workspace_dispatch')");
   });
 
   it('UI workspace creation path sets dispatched_at after successful VM agent workspace creation', () => {

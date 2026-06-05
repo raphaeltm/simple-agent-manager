@@ -20,9 +20,9 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 |------|---------|
 | `CLAUDE.md` | Primary project instructions for AI agents |
 | `.specify/memory/constitution.md` | Project principles and rules |
-| `docs/guides/self-hosting.md` | Deployment guide |
-| `docs/architecture/secrets-taxonomy.md` | Secrets classification |
-| `docs/architecture/credential-security.md` | Security architecture |
+| `apps/www/src/content/docs/docs/guides/self-hosting.md` | Public deployment guide |
+| `apps/www/src/content/docs/docs/reference/configuration.md` | Public configuration and secrets reference |
+| `apps/www/src/content/docs/docs/architecture/security.md` | Public security architecture |
 | `AGENTS.md` | Agent task patterns (non-Claude agents) |
 | `.claude/rules/*.md` | Auto-loaded behavioral rules (Claude Code) |
 
@@ -30,7 +30,7 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 
 | File | Content |
 |------|---------|
-| `apps/api/src/index.ts` | Env interface (lines 15-40) |
+| `apps/api/src/env.ts` | Env interface |
 | `apps/api/src/db/schema.ts` | Database schema |
 | `apps/api/src/routes/*.ts` | API endpoints |
 | `scripts/deploy/types.ts` | Deployment types, REQUIRED_SECRETS |
@@ -48,21 +48,21 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 ### 1. Environment Variable Documentation
 
 **Compare These Sources**:
-- `apps/api/src/index.ts` → Env interface members
+- `apps/api/src/env.ts` → Env interface members
 - `CLAUDE.md` → Platform Secrets table, Environment Variables section
-- `docs/guides/self-hosting.md` → GitHub Environment Configuration table
+- `apps/www/src/content/docs/docs/guides/self-hosting.md` → GitHub Environment Configuration table
 - `.specify/memory/constitution.md` → GitHub Environment Configuration table
 
 **Detection Commands**:
 ```bash
 # Extract Env interface from code
-grep -A60 "export interface Env" apps/api/src/index.ts
+grep -A120 "export interface Env" apps/api/src/env.ts
 
 # Find env var tables in CLAUDE.md
 grep -n "Secret\|Variable\|GH_\|GITHUB_" CLAUDE.md
 
 # Find env var tables in self-hosting.md
-grep -n "Secret\|Variable\|GH_\|GITHUB_" docs/guides/self-hosting.md
+grep -n "Secret\|Variable\|GH_\|GITHUB_" apps/www/src/content/docs/docs/guides/self-hosting.md
 ```
 
 **Checklist**:
@@ -122,10 +122,10 @@ grep -rn "CREATE TABLE\|sqliteTable" specs/
 **Detection Commands**:
 ```bash
 # Find all internal links
-grep -rn "\[.*\](.*\.md)" docs/ CLAUDE.md AGENTS.md .claude/rules/ .specify/
+grep -rn "\[.*\](.*\.md)" apps/www/src/content/docs/docs CLAUDE.md AGENTS.md .claude/rules/ .specify/
 
 # Find file path references
-grep -rn "apps/\|packages/\|scripts/" docs/ CLAUDE.md AGENTS.md .claude/rules/
+grep -rn "apps/\|packages/\|scripts/" apps/www/src/content/docs/docs CLAUDE.md AGENTS.md .claude/rules/
 ```
 
 **Checklist**:
@@ -137,7 +137,7 @@ grep -rn "apps/\|packages/\|scripts/" docs/ CLAUDE.md AGENTS.md .claude/rules/
 ### 5. Architecture Consistency
 
 **Compare These Sources**:
-- `docs/adr/*.md` → Architecture decisions
+- `apps/www/src/content/docs/docs/architecture/*.md` → Public architecture documentation
 - Actual implementation
 
 **Checklist**:

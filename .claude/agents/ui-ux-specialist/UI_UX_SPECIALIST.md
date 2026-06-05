@@ -97,7 +97,7 @@ When a PR adds or modifies interactive handlers (click, submit, navigate) in a c
 
 ### Reference
 
-See `docs/notes/2026-03-01-new-chat-button-postmortem.md` and `.claude/rules/06-technical-patterns.md` (React Interaction-Effect Analysis) for the incident that motivated this check.
+See the retained incident lesson in this rule and `.claude/rules/06-technical-patterns.md` (React Interaction-Effect Analysis) for the incident that motivated this check.
 
 ## Output Format
 

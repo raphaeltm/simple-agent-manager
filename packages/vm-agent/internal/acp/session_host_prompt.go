@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -39,10 +40,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 
 	promptStart := time.Now()
 	h.markPromptStarted(promptReq.sessionID, len(promptReq.blocks), viewerID)
-	resp, err := promptReq.acpConn.Prompt(promptCtx, acpsdk.PromptRequest{
-		SessionId: promptReq.sessionID,
-		Prompt:    promptReq.blocks,
-	})
+	resp, err := h.promptWithTransientRetry(promptCtx, promptReq, promptStart)
 
 	if !h.isPromptActive(promptID) {
 		return
@@ -54,6 +52,164 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		timeout:   promptTimeout,
 		viewerID:  viewerID,
 	}, resp, err, cancelRequested)
+}
+
+func (h *SessionHost) promptWithTransientRetry(
+	promptCtx context.Context,
+	promptReq preparedPromptRequest,
+	startedAt time.Time,
+) (acpsdk.PromptResponse, error) {
+	// Retrying is limited to hard Prompt() errors before an ACP response is
+	// accepted. User-message persistence and synthetic broadcasts happen once
+	// before this loop, so retries do not duplicate the user's prompt locally.
+	maxRetries := h.config.PromptRetryMaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	totalAttempts := maxRetries + 1
+	delay := h.config.PromptRetryInitialDelay
+	if delay <= 0 {
+		delay = DefaultPromptRetryInitialDelay
+	}
+	maxDelay := h.config.PromptRetryMaxDelay
+	if maxDelay <= 0 {
+		maxDelay = DefaultPromptRetryMaxDelay
+	}
+	if maxDelay < delay {
+		maxDelay = delay
+	}
+
+	var resp acpsdk.PromptResponse
+	var err error
+	for attempt := 1; attempt <= totalAttempts; attempt++ {
+		resp, err = promptReq.acpConn.Prompt(promptCtx, acpsdk.PromptRequest{
+			SessionId: promptReq.sessionID,
+			Prompt:    promptReq.blocks,
+		})
+		if err == nil {
+			return resp, nil
+		}
+		if !h.shouldRetryPromptError(promptCtx, err, attempt, totalAttempts) {
+			return resp, err
+		}
+
+		h.reportPromptRetry(promptReq.sessionID, attempt, totalAttempts, delay, startedAt, err)
+		if sleepErr := h.sleepBeforePromptRetry(promptCtx, delay); sleepErr != nil {
+			return resp, sleepErr
+		}
+		delay = nextPromptRetryDelay(delay, maxDelay)
+	}
+	return resp, err
+}
+
+func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err error, attempt, totalAttempts int) bool {
+	if attempt >= totalAttempts {
+		return false
+	}
+	if err == nil || promptCtx.Err() != nil {
+		return false
+	}
+	if isCrashPromptError(err) {
+		return false
+	}
+	return isTransientProviderPromptError(err)
+}
+
+func (h *SessionHost) sleepBeforePromptRetry(ctx context.Context, delay time.Duration) error {
+	if h.config.PromptRetrySleeper != nil {
+		return h.config.PromptRetrySleeper(ctx, delay)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (h *SessionHost) reportPromptRetry(
+	sessionID acpsdk.SessionId,
+	attempt, totalAttempts int,
+	delay time.Duration,
+	startedAt time.Time,
+	err error,
+) {
+	errText := redactAgentDiagnosticText(err.Error())
+	retryAttempt := attempt + 1
+	maxRetries := totalAttempts - 1
+	detail := map[string]interface{}{
+		"acpSessionId":  string(sessionID),
+		"failedAttempt": attempt,
+		"retryAttempt":  retryAttempt,
+		"totalAttempts": totalAttempts,
+		"maxRetries":    maxRetries,
+		"delay":         delay.String(),
+		"duration":      time.Since(startedAt).String(),
+		"error":         errText,
+	}
+	slog.Warn("ACP Prompt transient provider error; retrying",
+		"attempt", attempt,
+		"retryAttempt", retryAttempt,
+		"totalAttempts", totalAttempts,
+		"delay", delay,
+		"error", errText,
+	)
+	h.reportLifecycle("warn", "ACP Prompt transient provider error; retrying", detail)
+	h.reportEvent("warn", "agent_session.prompt_retry", "Retrying ACP prompt after transient provider error", detail)
+}
+
+func nextPromptRetryDelay(current, maxDelay time.Duration) time.Duration {
+	if current <= 0 {
+		current = DefaultPromptRetryInitialDelay
+	}
+	next := current * 2
+	if next < current || next > maxDelay {
+		return maxDelay
+	}
+	return next
+}
+
+func isTransientProviderPromptError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	signals := []string{
+		"api error: 529",
+		"http 529",
+		"status 529",
+		"status_code\":529",
+		"statuscode\":529",
+		"overloaded_error",
+		"overloaded",
+		"rate_limit_error",
+		"rate limit",
+		"rate-limit",
+		"too many requests",
+		"api error: 429",
+		"http 429",
+		"status 429",
+		"status_code\":429",
+		"statuscode\":429",
+		"api error: 503",
+		"http 503",
+		"status 503",
+		"status_code\":503",
+		"statuscode\":503",
+		"service unavailable",
+		"temporarily unavailable",
+		"temporarily_unavailable",
+		"temporary unavailable",
+		"temporary_unavailable",
+	}
+	for _, signal := range signals {
+		if strings.Contains(msg, signal) {
+			return true
+		}
+	}
+	return false
 }
 
 type preparedPromptRequest struct {

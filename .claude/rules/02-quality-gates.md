@@ -88,12 +88,17 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **Write a test that exercises the contract that was violated.** Not just the symptom — the invariant that should always hold.
 - **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
 - **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
-- **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See `docs/notes/2026-05-02-persisted-tool-call-title-loss-postmortem.md`.
+- **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See the retained incident lesson in this rule.
 - **If the bug involves lifecycle control across a runtime boundary** (agent/session/workspace/node stop, cancel, retry, replacement, suspend, or resume), the regression test MUST assert the runtime command is invoked before accepting the terminal state or dispatching replacement work. Database state changes and successful JSON responses are insufficient; the test must prove the external agent/node/workspace control side effect.
+- **If the bug involves a utility LLM call through a provider-compatible API**, the regression test MUST assert the exact provider payload controls that make the response contract reliable, not just the returned parsed text. For reasoning-capable models, this includes any explicit thinking/reasoning-disable parameters or response-format controls required for the utility to receive text in the field it reads.
 
 ### Destructive Cleanup State Gates
 
 When a workflow deletes state, metadata, lock files, Pulumi stacks, or other recovery handles after deleting external resources, the state-deletion step MUST be gated on an explicit successful cleanup output from the preceding deletion step. Do not gate state deletion only on setup or discovery success. A failed external cleanup must leave state intact so the next run can retry or reconcile resources safely.
+
+### Post-Allocation Cleanup Tests
+
+When a workflow allocates a paid or externally visible resource before later setup steps complete, regression tests MUST cover cleanup after each post-allocation failure. The tests must assert the cleanup request targets the allocated resource directly, preserves the original failure as the primary error, tolerates already-deleted resources when the provider contract allows it, and exposes cleanup failures through structured diagnostics without leaking secrets.
 
 ### Evaluating Test Realism
 
@@ -106,9 +111,9 @@ Before finalizing tests, ask:
 
 Every PR that fixes a bug MUST include a post-mortem and process improvement. Bug fixes without process fixes only fix the symptom — the class of bug will recur.
 
-### 1. Post-Mortem (in `docs/notes/`)
+### 1. Post-Mortem (task record)
 
-Create a post-mortem file at `docs/notes/YYYY-MM-DD-<descriptive-name>-postmortem.md` covering:
+Record the post-mortem in the relevant task record or archive entry, covering:
 
 1. **What broke**: Describe the user-visible failure
 2. **Root cause**: Trace to the specific code change that introduced the bug
@@ -160,7 +165,7 @@ Each reviewer should:
 3. **Check test adequacy** — do the tests actually prove the fix/feature works, or are they too shallow?
 4. **Verify data flow completeness** — for multi-component changes, trace the primary data path from input to output. Ask: "Does the data actually arrive at its destination?" (see `10-e2e-verification.md`)
 5. **Identify missing tests** — what regression test would catch this if it broke again?
-6. **Challenge the design, not just the implementation** — ask "should this work this way?" not just "does this code do what was intended?" If the spec is wrong, the code being correct doesn't help. (see `docs/notes/2026-03-24-gcp-oidc-review-postmortem.md`)
+6. **Challenge the design, not just the implementation** — ask "should this work this way?" not just "does this code do what was intended?" If the spec is wrong, the code being correct doesn't help. (see the retained incident lesson in this rule)
 7. **For external service integrations**: simulate the setup from a self-hoster's perspective. What do they need to register? Are URIs static? Are IAM bindings scoped per-entity? (see `19-external-service-integration.md`)
 8. **Flag any concern**, even minor ones — it's cheaper to address them now
 
@@ -203,7 +208,7 @@ If VM provisioning fails, heartbeats do not arrive, or the workspace is unreacha
 
 ### Why This Gate Exists
 
-The TLS YAML indentation bug (see `docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses — nobody provisioned a VM to verify the cloud-init output actually worked. Unit tests used unrealistic 3-line PEM data that survived the broken indentation by coincidence. The fix PR then repeated the same mistake — skipping verification because the agent rationalized that "this is the fix, not a new change."
+The TLS YAML indentation bug (see the retained incident lesson in this rule) shipped to production because staging verification only checked UI rendering and API responses — nobody provisioned a VM to verify the cloud-init output actually worked. Unit tests used unrealistic 3-line PEM data that survived the broken indentation by coincidence. The fix PR then repeated the same mistake — skipping verification because the agent rationalized that "this is the fix, not a new change."
 
 ## Template Output Verification (Required)
 
@@ -229,7 +234,7 @@ String containment tests on structured output create false confidence. The test 
 3. **Existing workflows MUST be confirmed working.** Navigate the dashboard, projects, settings. Verify no regressions — pages load, data displays, navigation works, no new console errors.
 4. **New feature/fix MUST be verified on staging.** The specific changes in the PR must work correctly on the live staging environment.
 5. **Evidence MUST be reported.** Include screenshots, API responses, or Playwright observations in the PR.
-6. **For browser-consumed streams (SSE / WebSocket), verification MUST use a real browser, not `curl`.** `curl` can confirm bytes arrive on the wire; only a browser confirms the client actually dispatches them to its handler. See `.claude/rules/13-staging-verification.md` for the full reasoning and the post-mortem that motivated this rule (`docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`).
+6. **For browser-consumed streams (SSE / WebSocket), verification MUST use a real browser, not `curl`.** `curl` can confirm bytes arrive on the wire; only a browser confirms the client actually dispatches them to its handler. See `.claude/rules/13-staging-verification.md` for the full reasoning and the post-mortem that motivated this rule (the retained incident lesson in this rule).
 
 ### No Exceptions
 

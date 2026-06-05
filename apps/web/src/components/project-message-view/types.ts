@@ -1,5 +1,4 @@
-import type { ConversationItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent } from '@simple-agent-manager/acp-client';
+import type { ConversationItem, ToolCallContentItem, ToolCallItem } from '@simple-agent-manager/acp-client';
 
 import type { ChatMessageResponse, ChatSessionResponse } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
@@ -32,6 +31,52 @@ export const VIRTUAL_START = 100_000;
 function isPlaceholderContent(content: string): boolean {
   const trimmed = content.trim();
   return trimmed === '(tool call)' || trimmed === '(tool update)';
+}
+
+function estimateContentSize(content: unknown): number | undefined {
+  try {
+    return JSON.stringify(content).length;
+  } catch {
+    return undefined;
+  }
+}
+
+interface ToolContentPointer {
+  messageId: string;
+  contentSize?: number;
+  hasStoredContent: boolean;
+}
+
+function buildToolContentPointer(
+  msg: ChatMessageResponse,
+  structuredContent: unknown[] | undefined,
+  contentSize: number | undefined
+): ToolContentPointer {
+  const fallbackHasContent = !isPlaceholderContent(msg.content) && msg.content.trim().length > 0;
+  const hasStructuredContent = Array.isArray(structuredContent) && structuredContent.length > 0;
+  const estimatedSize = hasStructuredContent
+    ? estimateContentSize(structuredContent)
+    : fallbackHasContent
+      ? msg.content.length
+      : undefined;
+  return {
+    messageId: msg.id,
+    contentSize: contentSize ?? estimatedSize,
+    hasStoredContent: hasStructuredContent || fallbackHasContent || (contentSize !== undefined && contentSize > 0),
+  };
+}
+
+function applyToolContentPointer(toolItem: ToolCallItem, pointer: ToolContentPointer, force = false): void {
+  if (!force && toolItem.messageId && !pointer.hasStoredContent) {
+    return;
+  }
+
+  toolItem.messageId = pointer.messageId;
+  toolItem.contentLoaded = false;
+  toolItem.content = [];
+  if (pointer.contentSize !== undefined) {
+    toolItem.contentSize = pointer.contentSize;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,37 +224,32 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         ? rawStatus
         : 'completed') as 'pending' | 'in_progress' | 'completed' | 'failed';
 
-      // Use structured content from metadata when available; fall back to raw content field.
-      // Content items are now stored as raw ACP JSON (same shape as real-time WebSocket),
-      // so we pass them through mapToolCallContent — the same function the real-time path uses.
-      // In compact mode, content is stripped and contentSize is provided instead.
+      // Project chat loads tool output on demand from the persisted message.
+      // Live WebSocket rows and compact history rows are normalized to the
+      // same lazy-load pointer so inline content cannot disappear on refresh.
       const structuredContent = meta?.content as Array<{ type: string } & Record<string, unknown>> | undefined;
       const contentSize = typeof meta?.contentSize === 'number' ? meta.contentSize : undefined;
-      const isCompact = !structuredContent && contentSize !== undefined && contentSize > 0;
-      let contentItems: Array<{ type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown }>;
-      if (Array.isArray(structuredContent) && structuredContent.length > 0) {
-        contentItems = structuredContent.map((c) => mapToolCallContent(c));
-      } else if (!isCompact) {
-        contentItems = isPlaceholderContent(msg.content) ? [] : [{ type: 'content' as const, text: msg.content }];
-      } else {
-        contentItems = [];
-      }
+      const contentPointer = buildToolContentPointer(msg, structuredContent, contentSize);
+      const contentItems: ToolCallContentItem[] = [];
 
       // Deduplicate tool calls by toolCallId: merge updates into existing tool call
       if (toolCallId && toolCallMap.has(toolCallId)) {
-        const existingIdx = toolCallMap.get(toolCallId)!;
-        const existing = acc[existingIdx] as { status: string; title: string; content: unknown[]; locations: unknown[]; toolKind?: string };
+        const existingIdx = toolCallMap.get(toolCallId);
+        if (existingIdx === undefined) {
+          return acc;
+        }
+        const existing = acc[existingIdx] as ToolCallItem;
         // Update with latest status, explicit title, content, and locations.
         // Status-only tool_call_update rows often omit title/kind; do not let
         // the generic fallback title erase the richer initial tool_call title.
         if (rawStatus) existing.status = status;
         if (rawTitle) existing.title = rawTitle;
-        if (contentItems.length > 0) existing.content = contentItems;
         if (locations.length > 0) existing.locations = locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null }));
         if (kind !== 'tool') existing.toolKind = kind;
+        applyToolContentPointer(existing, contentPointer);
       } else {
         const idx = acc.length;
-        acc.push({
+        const toolItem: ToolCallItem = {
           kind: 'tool_call',
           id: msg.id,
           toolCallId: toolCallId || msg.id,
@@ -219,8 +259,9 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
           content: contentItems,
           locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
           timestamp: msg.createdAt,
-          ...(isCompact ? { contentSize, contentLoaded: false, messageId: msg.id } : {}),
-        });
+        };
+        applyToolContentPointer(toolItem, contentPointer, true);
+        acc.push(toolItem);
         if (toolCallId) {
           toolCallMap.set(toolCallId, idx);
         }

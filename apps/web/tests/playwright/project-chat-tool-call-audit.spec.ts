@@ -1,19 +1,6 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-async function screenshot(page: Page, name: string) {
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
-  });
-}
-
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow).toBe(false);
-}
+import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
 
 const PROJECT_ID = 'proj-test-1';
 const SESSION_ID = 'sess-tool-details';
@@ -44,6 +31,9 @@ const MOCK_SESSION = {
   agentSessionId: null,
   agentType: 'claude-code',
 };
+
+const TOOL_CONTENT = [{ type: 'content', content: { type: 'text', text: 'focused test output' } }];
+const TOOL_BUTTON_NAME = new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 const MOCK_MESSAGES = [
   {
@@ -78,6 +68,7 @@ const MOCK_MESSAGES = [
     toolMetadata: {
       toolCallId: 'tc-focused-test',
       status: 'completed',
+      contentSize: 128,
     },
     createdAt: Date.now() - 30_000,
     sequence: 3,
@@ -94,78 +85,60 @@ const MOCK_MESSAGES = [
 ];
 
 async function setupMocks(page: Page) {
-  await page.route('**/api/auth/get-session', (route: Route) =>
-    route.fulfill({
-      status: 200,
-      json: { user: { id: 'test-user', name: 'Test User', email: 'test@example.com' } },
-    }),
-  );
+  const toolContentRequests: string[] = [];
 
-  await page.route('**/api/github/installations', (route: Route) =>
-    route.fulfill({ status: 200, json: [] }),
-  );
-
-  await page.route(`**/api/projects/${PROJECT_ID}`, (route: Route) => {
-    if (route.request().method() === 'GET') {
-      return route.fulfill({ status: 200, json: MOCK_PROJECT });
-    }
-    return route.continue();
+  await setupProjectChatMocks(page, {
+    projectId: PROJECT_ID,
+    project: MOCK_PROJECT,
+    session: MOCK_SESSION,
+    messages: MOCK_MESSAGES,
   });
 
-  await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}*`, (route: Route) =>
-    route.fulfill({
-      status: 200,
-      json: {
-        session: MOCK_SESSION,
-        messages: MOCK_MESSAGES,
-        hasMore: false,
-      },
-    }),
-  );
+  // Registered after the shared mocks so it wins precedence for its specific
+  // URL (the shared session regex cannot match the deeper tool-content path).
+  await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/messages/*/tool-content`, (route: Route) => {
+    toolContentRequests.push(route.request().url());
+    return route.fulfill({ status: 200, json: { content: TOOL_CONTENT } });
+  });
 
-  await page.route(`**/api/projects/${PROJECT_ID}/sessions*`, (route: Route) =>
-    route.fulfill({
-      status: 200,
-      json: { sessions: [MOCK_SESSION], total: 1 },
-    }),
-  );
+  return { toolContentRequests };
+}
 
-  await page.route(`**/api/projects/${PROJECT_ID}/tasks*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { tasks: [], total: 0 } }),
-  );
+async function assertPersistedToolCallLazyLoads(
+  page: Page,
+  toolContentRequests: string[],
+  screenshotName: string
+) {
+  // Dismiss the first-run onboarding wizard so its modal overlay doesn't
+  // intercept pointer events on the tool-call disclosure button. The wizard
+  // auto-opens for users with incomplete setup (no GitHub installation).
+  await page.addInitScript(() => {
+    localStorage.setItem('sam-onboarding-wizard-dismissed-test-user', 'true');
+  });
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
-  await page.route(`**/api/projects/${PROJECT_ID}/agent-profiles`, (route: Route) =>
-    route.fulfill({ status: 200, json: { items: [] } }),
-  );
+  await expect(page.getByText(TOOL_TITLE)).toBeVisible();
+  await expect(page.getByText('execute')).toBeVisible();
+  await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
+  await expect(page.getByText('128 B')).toBeVisible();
 
-  await page.route('**/api/credentials', (route: Route) =>
-    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] }),
-  );
+  const toolButton = page.getByRole('button', { name: TOOL_BUTTON_NAME });
+  await expect(toolButton).toHaveAttribute('aria-expanded', 'false');
+  await toolButton.click();
 
-  await page.route('**/api/trial/status', (route: Route) =>
-    route.fulfill({ status: 200, json: { available: false } }),
-  );
+  await expect(page.getByText('focused test output')).toBeVisible();
+  expect(toolContentRequests).toEqual([
+    expect.stringContaining('/messages/msg-tool-done/tool-content'),
+  ]);
 
-  await page.route('**/api/agents', (route: Route) =>
-    route.fulfill({ status: 200, json: { agents: [] } }),
-  );
-
-  await page.route(`**/api/projects/${PROJECT_ID}/commands*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { commands: [] } }),
-  );
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
 }
 
 test.describe('Project Chat Persisted Tool Calls — Mobile', () => {
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(page.getByText(TOOL_TITLE)).toBeVisible();
-    await expect(page.getByText('execute')).toBeVisible();
-    await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
-
-    await screenshot(page, 'project-chat-tool-call-persisted-mobile');
-    await assertNoOverflow(page);
+    const { toolContentRequests } = await setupMocks(page);
+    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-mobile');
   });
 });
 
@@ -173,14 +146,7 @@ test.describe('Project Chat Persisted Tool Calls — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
-
-    await expect(page.getByText(TOOL_TITLE)).toBeVisible();
-    await expect(page.getByText('execute')).toBeVisible();
-    await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
-
-    await screenshot(page, 'project-chat-tool-call-persisted-desktop');
-    await assertNoOverflow(page);
+    const { toolContentRequests } = await setupMocks(page);
+    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-desktop');
   });
 });

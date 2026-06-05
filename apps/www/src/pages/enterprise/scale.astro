@@ -1,0 +1,155 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+---
+
+<Base
+  title="Scale to Hundreds of Agents — SAM Enterprise"
+  description="Run 5 or 500 AI coding agents in parallel. Warm node pooling, automatic provisioning, and resource scheduling handle the infrastructure."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Scale</span>
+        <h1 class="detail-title animate-on-scroll">
+          Run 5 or 500<br />
+          <span class="gradient-text">agents in parallel</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          Sprint on large migrations. Audit a codebase across 50 repos simultaneously.
+          Generate test suites in parallel. SAM handles provisioning, scheduling, and cleanup.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Warm Node Pooling</h2>
+          <p>
+            After a task completes, the node stays warm for fast reuse. When the next task arrives,
+            it gets an already-provisioned VM instead of waiting for a fresh one to boot.
+            If no task comes, the node auto-destroys after a configurable timeout.
+          </p>
+          <p>
+            Three layers of defense prevent orphaned VMs: Durable Object alarms, cron sweeps,
+            and maximum lifetime enforcement. You never pay for idle nodes that were forgotten.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Automatic Provisioning</h2>
+          <p>
+            Submit a task, and SAM provisions a VM, creates a workspace, installs the agent,
+            clones the repo, and starts working. When the task is done, the workspace is cleaned up.
+            No manual VM management, no SSH, no Terraform.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Resource Scheduling</h2>
+          <p>
+            Tasks declare their resource requirements. SAM packs tasks onto nodes based on
+            available capacity, using a reservation-based bin-packing model. Full node
+            capacity is tracked so you know exactly what's running where.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Enterprise Use Cases</h2>
+          <div class="use-case-grid">
+            <div class="use-case">
+              <h3>Large migrations</h3>
+              <p>Run agents across dozens of microservices simultaneously. Each agent gets its own isolated workspace with the full repo context.</p>
+            </div>
+            <div class="use-case">
+              <h3>Codebase audits</h3>
+              <p>Spawn agents to review security, dependencies, or code quality across your entire organization's repos in parallel.</p>
+            </div>
+            <div class="use-case">
+              <h3>Test generation</h3>
+              <p>Generate comprehensive test suites for legacy code by running agents on every module at once.</p>
+            </div>
+            <div class="use-case">
+              <h3>Scheduled maintenance</h3>
+              <p>Use triggers and cron jobs to run agents on a schedule for dependency updates, linting, or automated fixes.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/cost-control/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Cost Transparency
+          </a>
+          <a href="/enterprise/security/" class="detail-nav-link">
+            Security Isolation
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
+  .detail-hero-content { max-width: 720px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
+  .back-link:hover { color: var(--color-fg-muted); }
+  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
+  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
+  .detail-content { max-width: 720px; }
+  .detail-block { margin-bottom: 48px; }
+  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
+  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
+
+  .use-case-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  @media (min-width: 640px) { .use-case-grid { grid-template-columns: repeat(2, 1fr); } }
+
+  .use-case {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 20px;
+  }
+
+  .use-case h3 {
+    font-family: var(--font-display);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .use-case p {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+    margin-bottom: 0;
+  }
+
+  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
+  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>

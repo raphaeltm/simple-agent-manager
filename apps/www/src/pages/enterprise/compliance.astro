@@ -1,0 +1,275 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+---
+
+<Base
+  title="Compliance & Control — SAM Enterprise"
+  description="Run AI agents on your own cloud with your own Cloudflare account. Encrypted credentials, BYOC architecture, and full control plane self-hosting."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Compliance & Control</span>
+        <h1 class="detail-title animate-on-scroll">
+          Your compute, your account,<br />
+          <span class="gradient-text">your credentials</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          SAM separates the control plane from compute. Your agents run on VMs in your cloud account.
+          Self-hosters deploy everything to their own Cloudflare account. Credentials never leave your boundary.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Bring Your Own Cloud (BYOC)</h2>
+          <p>
+            SAM doesn't provision VMs using platform credentials. Users provide their own Hetzner, Scaleway, or GCP tokens,
+            which are encrypted per-user with AES-256-GCM and a unique IV per credential. The platform never has access to your cloud accounts.
+          </p>
+          <p>
+            This means agents run on infrastructure that's already covered by your existing cloud contracts, security certifications, and regional compliance.
+            No new vendor to evaluate for where your code actually executes.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Credential Isolation</h2>
+          <p>
+            Every credential is encrypted individually in the database with its own initialization vector.
+            Credentials are never stored as environment variables, platform secrets, or shared state.
+          </p>
+          <p>
+            Agent API keys and OAuth tokens can be scoped at the user level or overridden per project. When an agent needs a key,
+            SAM resolves it through a tiered lookup: project-specific first, then user-level, then platform default.
+            An inactive project credential blocks fallthrough — it doesn't silently fall back to a broader scope.
+            Cloud provider tokens are scoped per-user.
+          </p>
+          <div class="detail-table-wrap">
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>Credential</th>
+                  <th>Scope</th>
+                  <th>Encryption</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Cloud provider tokens</td>
+                  <td>Per-user</td>
+                  <td>AES-256-GCM, per-credential IV</td>
+                </tr>
+                <tr>
+                  <td>Agent API keys</td>
+                  <td>Per-user or per-project</td>
+                  <td>AES-256-GCM, per-credential IV</td>
+                </tr>
+                <tr>
+                  <td>OAuth tokens</td>
+                  <td>Per-user or per-project</td>
+                  <td>AES-256-GCM, per-credential IV</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Self-Hosted Control Plane</h2>
+          <p>
+            For organizations that need full ownership, SAM's control plane can be deployed entirely to your own
+            Cloudflare account. The deployment uses Pulumi for infrastructure-as-code and GitHub Actions for CI/CD.
+          </p>
+          <p>
+            When self-hosting, all data lives in your Cloudflare account's D1 databases, KV namespaces, and
+            Durable Objects. No data flows through SAM's hosted infrastructure.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>What About Message Data?</h2>
+          <p>
+            Today, agent session data and chat messages are stored in Cloudflare Durable Objects. For hosted platform
+            users, this means message data resides in Cloudflare's infrastructure. For self-hosters, it resides in
+            <em>their own</em> Cloudflare account.
+          </p>
+          <p>
+            We're building pluggable storage backends so organizations can route message data to their own databases.
+            Until then, self-hosting gives you full control over where the entire stack runs.
+          </p>
+          <div class="callout">
+            <strong>Honest about the boundary:</strong> On the hosted platform, agent compute runs on your cloud,
+            but session metadata lives in our Cloudflare account. Self-hosting eliminates this dependency entirely.
+          </div>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Back to Enterprise
+          </a>
+          <a href="/enterprise/agent-agnostic/" class="detail-nav-link">
+            Agent Agnostic
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero {
+    position: relative;
+    padding: 140px 0 60px;
+    overflow: hidden;
+  }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+
+  .detail-glow {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 600px; height: 400px;
+    background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .detail-hero-content { max-width: 720px; }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    margin-bottom: 24px;
+  }
+  .back-link:hover { color: var(--color-fg-muted); }
+
+  .detail-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 4.5vw, 2.75rem);
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--color-fg-primary);
+    margin-bottom: 20px;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .detail-subtitle {
+    font-size: 1.0625rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    max-width: 600px;
+  }
+
+  .detail-content { max-width: 720px; }
+
+  .detail-block {
+    margin-bottom: 48px;
+  }
+
+  .detail-block h2 {
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 16px;
+  }
+
+  .detail-block p {
+    font-size: 1rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    margin-bottom: 16px;
+  }
+
+  .detail-table-wrap {
+    overflow-x: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    margin-top: 16px;
+  }
+
+  .detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .detail-table th {
+    padding: 12px 16px;
+    text-align: left;
+    background: var(--color-bg-surface);
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .detail-table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--color-border-subtle);
+    color: var(--color-fg-muted);
+  }
+
+  .detail-table tbody tr:last-child td { border-bottom: none; }
+
+  .callout {
+    background: var(--glass-bg);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+    margin-top: 16px;
+  }
+
+  .callout strong {
+    color: var(--color-fg-primary);
+  }
+
+  .detail-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 32px;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .detail-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-fg-muted);
+  }
+
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>

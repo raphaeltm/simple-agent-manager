@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import "./setup";
+import { findRegisteredResource, getOutputValue } from "./setup";
 
 describe("D1 Database Resource", () => {
   let databaseModule: typeof import("../resources/database");
@@ -12,6 +12,7 @@ describe("D1 Database Resource", () => {
 
   it("should create a D1 database resource", async () => {
     expect(databaseModule.database).toBeDefined();
+    expect(databaseModule.observabilityDatabase).toBeDefined();
   });
 
   it("should export database ID", async () => {
@@ -23,12 +24,36 @@ describe("D1 Database Resource", () => {
   });
 
   it("should compose the database name from prefix and stack", async () => {
-    const name = await new Promise<string>((resolve) => {
-      databaseModule.databaseName.apply((n) => {
-        resolve(n);
-        return n;
-      });
-    });
+    const name = await getOutputValue(databaseModule.databaseName);
     expect(name).toBe(`${configModule.prefix}-${configModule.stack}`);
+  });
+
+  it("registers the main D1 database with account wiring and readReplication ignored", () => {
+    const database = findRegisteredResource(
+      `${configModule.prefix}-database`,
+      "cloudflare:index/d1Database:D1Database"
+    );
+
+    expect(database.inputs).toMatchObject({
+      accountId: "test-account-id-00000000000000000000",
+      name: `${configModule.prefix}-${configModule.stack}`,
+    });
+    expect(database.options.ignoreChanges).toEqual(["readReplication"]);
+  });
+
+  it("registers the observability D1 database with account wiring and readReplication ignored", async () => {
+    const observabilityDatabase = findRegisteredResource(
+      `${configModule.prefix}-observability`,
+      "cloudflare:index/d1Database:D1Database"
+    );
+
+    expect(observabilityDatabase.inputs).toMatchObject({
+      accountId: "test-account-id-00000000000000000000",
+      name: `${configModule.prefix}-observability-${configModule.stack}`,
+    });
+    expect(observabilityDatabase.options.ignoreChanges).toEqual(["readReplication"]);
+    await expect(getOutputValue(databaseModule.observabilityDatabaseName)).resolves.toBe(
+      `${configModule.prefix}-observability-${configModule.stack}`
+    );
   });
 });

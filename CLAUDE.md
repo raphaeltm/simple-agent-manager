@@ -1,5 +1,7 @@
 # Simple Agent Manager (SAM)
 
+> Agent instruction file only. This is not user-facing documentation or a getting-started guide. Canonical public documentation lives in `apps/www/src/content/docs/docs/`.
+
 A serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner Cloud VMs.
 
 ## Repository Structure
@@ -20,8 +22,6 @@ packages/
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
-docs/             # Documentation
-strategy/         # Strategic planning (competitive, business, marketing, engineering, content)
 ```
 
 ## Common Commands
@@ -67,7 +67,7 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 4. **When something fails on staging, QUERY THEN READ LOGS before changing any code** — first query D1/KV/DNS via CF API to understand the data state, then use `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
 5. Merge to main — triggers production deployment.
 
-Full local-development guide: `docs/guides/local-development.md`.
+Full local-development guide: `apps/www/src/content/docs/docs/guides/local-development.md`.
 
 ## Deployment
 
@@ -149,10 +149,10 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 ## Architecture Principles
 
 1. **BYOC (Bring-Your-Own-Cloud)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
-2. **User credentials encrypted per-user** in the database — NOT stored as env vars or Worker secrets. See `docs/architecture/credential-security.md`.
-3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment. See `docs/architecture/secrets-taxonomy.md`.
+2. **User credentials encrypted per-user** in the database — NOT stored as env vars or Worker secrets. Public security architecture documentation lives in `apps/www/src/content/docs/docs/architecture/security.md`.
+3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
 4. **Canonical IDs for identity** — use `workspaceId`, `nodeId`, `sessionId` for all machine-critical operations (storage, routing, lifecycle). Human-readable labels are for UX/logging only and MUST be treated as mutable and non-unique.
-5. **Hybrid D1 + Durable Object storage** — D1 for cross-project queries (dashboard, tasks, users); per-project DOs for write-heavy data (chat sessions, messages, activity events). See `docs/adr/004-hybrid-d1-do-storage.md`.
+5. **Hybrid D1 + Durable Object storage** — D1 for cross-project queries (dashboard, tasks, users); per-project DOs for write-heavy data (chat sessions, messages, activity events). See `apps/www/src/content/docs/docs/architecture/overview.md`.
 
 ## Git Workflow
 
@@ -167,7 +167,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 - **Fix all build/lint errors** before pushing — even pre-existing ones
 - **No dead code** — if code is no longer referenced, remove it in the same change
 - **Capability tests required** — every multi-component feature needs at least one test that exercises the complete happy path across system boundaries. Component tests alone are not sufficient. See `.claude/rules/10-e2e-verification.md`.
-- **Verify assumptions, don't trust documentation** — when specs or docs say "existing X works," verify with a test or manual check before building on it. See post-mortem: `docs/notes/2026-02-28-missing-initial-prompt-postmortem.md`.
+- **Verify assumptions, don't trust documentation** — when specs or docs say "existing X works," verify with a test or manual check before building on it.
 - **Cite code paths in behavioral docs** — when documenting what the system does, cite specific functions. Never write "X happens" without a code reference. Mark unimplemented behavior as "intended" not present tense.
 - **Diagrams in markdown** — use Mermaid (`\`\`\`mermaid`) for all diagrams in `.md` files. The markdown renderer supports Mermaid natively.
 - **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
@@ -218,20 +218,6 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 
 **Memory and ideas**: Keep SAM knowledge, ideas, and policies current when human feedback or shipped work changes what future agents should believe. Do not mark ideas complete unless they are merged or otherwise verifiably shipped. See `.claude/rules/38-agent-feedback-and-memory.md`.
 
-## Strategy Planning
-
-Strategic planning artifacts live in `strategy/` — see `strategy/README.md` for full structure.
-
-| Domain               | Directory               | Skill                   | Key Artifacts                                                    |
-| -------------------- | ----------------------- | ----------------------- | ---------------------------------------------------------------- |
-| Competitive Research | `strategy/competitive/` | `/competitive-research` | Competitor profiles, feature matrix, positioning map, SWOT       |
-| Marketing            | `strategy/marketing/`   | `/marketing-strategy`   | Positioning doc, messaging guide, content calendar, gap analysis |
-| Business             | `strategy/business/`    | `/business-strategy`    | Market sizing (TAM/SAM/SOM), pricing, business model, GTM plan   |
-| Engineering          | `strategy/engineering/` | `/engineering-strategy` | Roadmap (Now/Next/Later), tech radar, tech debt register         |
-| Content              | `strategy/content/`     | `/content-create`       | Social posts, blog drafts, changelogs, launch copy               |
-
-Domains chain together: competitive research feeds marketing and business strategy, which feed engineering priorities and content creation.
-
 ## Active Technologies
 
 - TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent)
@@ -243,8 +229,9 @@ Domains chain together: competitive research feeds marketing and business strate
 
 ## Recent Changes
 
-> Full changelog with implementation details: `docs/recent-changes.md`. Use the `/changelog` skill for structured queries.
+Use the `/changelog` skill for structured queries.
 
+- skills-profile-override-layer: Skills as a first-class profile-override layer (skill → profile → project → platform); additive migration `0058_skills.sql` adds `skills`, `skill_runtime_env_vars`, `skill_runtime_files` and `tasks.skill_id`/`tasks.skill_hint`/`triggers.skill_id`; shared mappers in `profile-fields.ts`/`profile-runtime-assets.ts`; CRUD + runtime routes under `/api/projects/:projectId/skills`; resolution wired through task/trigger/MCP/dispatch + workspace runtime asset injection; Skills UI + chat/task skill selectors in `apps/web`
 - explicit-sam-provider-selection: Require explicit opt-in to SAM as AI provider via `providerMode: 'sam'`; three-mode agent auth (user-api-key, oauth, sam); AI proxy auth gate on all endpoints including /models
 - compact-mode-lazy-load-tool-content: Chat compact mode strips tool content from RPC payload (80-90% reduction); lazy-loads on expand
 - harness-track-d-integration-design: SAM-native harness architecture doc; Gemma 4 26B as default Workers AI model

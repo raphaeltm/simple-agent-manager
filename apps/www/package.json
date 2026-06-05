@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm build:assets && astro dev",
-    "build:assets": "pnpm build:tracker && pnpm build:blog-mermaid",
+    "build:assets": "pnpm build:tracker && pnpm build:blog-mermaid && pnpm build:docs-mermaid",
     "build:blog-mermaid": "pnpm exec esbuild src/scripts/blog-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/blog-mermaid.js",
+    "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
     "build": "pnpm build:assets && astro build",
     "preview": "astro preview"

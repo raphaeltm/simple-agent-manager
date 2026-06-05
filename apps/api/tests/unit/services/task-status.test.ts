@@ -224,12 +224,13 @@ describe('getExecutionStepIndex', () => {
     expect(getExecutionStepIndex('awaiting_followup')).toBe(TASK_EXECUTION_STEPS.length - 1);
   });
 
-  it('steps are ordered: node_selection < node_provisioning < node_agent_ready < workspace_creation < workspace_ready < agent_session < running < awaiting_followup', () => {
+  it('steps are ordered: node_selection < node_provisioning < node_agent_ready < workspace_creation < workspace_dispatch < workspace_ready < agent_session < running < awaiting_followup', () => {
     const ordered: TaskExecutionStep[] = [
       'node_selection',
       'node_provisioning',
       'node_agent_ready',
       'workspace_creation',
+      'workspace_dispatch',
       'workspace_ready',
       'agent_session',
       'running',
@@ -278,6 +279,10 @@ describe('canProgressExecutionStep', () => {
 
     it('workspace_creation → agent_session (skip workspace_ready)', () => {
       expect(canProgressExecutionStep('workspace_creation', 'agent_session')).toBe(true);
+    });
+
+    it('workspace_dispatch → agent_session (skip workspace_ready)', () => {
+      expect(canProgressExecutionStep('workspace_dispatch', 'agent_session')).toBe(true);
     });
   });
 
@@ -496,8 +501,8 @@ describe('edge cases', () => {
     expect(TASK_STATUSES).toHaveLength(8);
   });
 
-  it('TASK_EXECUTION_STEPS has exactly 9 steps', () => {
-    expect(TASK_EXECUTION_STEPS).toHaveLength(9);
+  it('TASK_EXECUTION_STEPS has exactly 10 steps', () => {
+    expect(TASK_EXECUTION_STEPS).toHaveLength(10);
   });
 
   it('execution steps include awaiting_followup', () => {

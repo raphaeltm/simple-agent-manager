@@ -9,7 +9,7 @@ import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { ChatInput } from './ChatInput';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
-import { getLineageText } from './lineageUtils';
+import { getSessionSourceContext } from './lineageUtils';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
 import { SessionList } from './SessionList';
@@ -32,12 +32,12 @@ export function ProjectChat() {
     ];
   }, [state.project?.name, state.project?.repository]);
 
-  // Compute lineage text for the selected session (for header display)
-  const selectedLineageText = useMemo(() => {
+  // Compute source context for the selected retry/fork session (for header display).
+  const selectedSourceContext = useMemo(() => {
     if (!state.sessionId) return undefined;
     const session = state.sessions.find((s) => s.id === state.sessionId);
     if (!session?.taskId) return undefined;
-    return getLineageText(session.taskId, state.taskInfoMap, state.sessions);
+    return getSessionSourceContext(session.taskId, state.taskInfoMap, state.sessions);
   }, [state.sessionId, state.sessions, state.taskInfoMap]);
 
   // Loading state
@@ -309,7 +309,7 @@ export function ProjectChat() {
                 const s = state.sessions.find((sess) => sess.id === state.sessionId);
                 if (s?.taskId) state.handleFork(s);
               }}
-              lineageText={selectedLineageText}
+              sourceContext={selectedSourceContext}
               onCloseConversation={state.handleCloseConversation}
               closingConversation={state.closingConversation}
               closeError={state.closeError}

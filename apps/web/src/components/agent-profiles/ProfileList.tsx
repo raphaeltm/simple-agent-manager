@@ -1,4 +1,8 @@
-import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
+import type {
+  AgentProfile,
+  CreateAgentProfileRequest,
+  UpdateAgentProfileRequest,
+} from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import { type FC, useCallback, useMemo, useState } from 'react';
@@ -19,6 +23,28 @@ interface ProfileListProps {
   projectId: string;
 }
 
+function formatGitHubCliPolicySummary(profile: AgentProfile): string | null {
+  const policy = profile.githubCliPolicy;
+  if (policy?.mode !== 'custom') return null;
+
+  const denied = Object.entries(policy.permissions)
+    .filter(([, level]) => level === 'none')
+    .map(([name]) => name);
+  const readableNames: Record<string, string> = {
+    contents: 'code',
+    pullRequests: 'PRs',
+    issues: 'issues',
+    actions: 'actions',
+    packages: 'packages',
+  };
+
+  if (denied.length > 0) {
+    return `GitHub CLI: no ${denied.map((name) => readableNames[name] ?? name).join(', ')}`;
+  }
+
+  return 'GitHub CLI: repository scoped';
+}
+
 export const ProfileList: FC<ProfileListProps> = ({
   profiles,
   loading,
@@ -37,24 +63,34 @@ export const ProfileList: FC<ProfileListProps> = ({
   const editParam = searchParams.get('edit');
   const formOpen = editParam !== null;
   const editingProfile = useMemo(
-    () => (editParam && editParam !== 'new' ? profiles.find((p) => p.id === editParam) ?? null : null),
-    [editParam, profiles],
+    () =>
+      editParam && editParam !== 'new' ? (profiles.find((p) => p.id === editParam) ?? null) : null,
+    [editParam, profiles]
   );
 
-  const openForm = useCallback((profileId?: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('edit', profileId ?? 'new');
-      return next;
-    }, { replace: true });
-  }, [setSearchParams]);
+  const openForm = useCallback(
+    (profileId?: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('edit', profileId ?? 'new');
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
 
   const closeForm = useCallback(() => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('edit');
-      return next;
-    }, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('edit');
+        return next;
+      },
+      { replace: true }
+    );
   }, [setSearchParams]);
 
   const handleCreate = () => {
@@ -92,11 +128,7 @@ export const ProfileList: FC<ProfileListProps> = ({
   }
 
   if (error) {
-    return (
-      <div className="py-4 px-3 rounded-sm bg-danger-tint text-danger text-sm">
-        {error}
-      </div>
-    );
+    return <div className="py-4 px-3 rounded-sm bg-danger-tint text-danger text-sm">{error}</div>;
   }
 
   return (
@@ -127,10 +159,7 @@ export const ProfileList: FC<ProfileListProps> = ({
       ) : (
         <div className="grid gap-2">
           {profiles.map((profile) => (
-            <div
-              key={profile.id}
-              className="overflow-hidden rounded-md glass-surface"
-            >
+            <div key={profile.id} className="overflow-hidden rounded-md glass-surface">
               <div className="flex items-start gap-3 p-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
@@ -144,7 +173,9 @@ export const ProfileList: FC<ProfileListProps> = ({
                     )}
                   </div>
                   {profile.description && (
-                    <p className="text-xs text-fg-muted mt-0.5 line-clamp-2">{profile.description}</p>
+                    <p className="text-xs text-fg-muted mt-0.5 line-clamp-2">
+                      {profile.description}
+                    </p>
                   )}
                   <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-xs text-fg-muted">
                     <span>{profile.agentType}</span>
@@ -152,6 +183,9 @@ export const ProfileList: FC<ProfileListProps> = ({
                     {profile.permissionMode && <span>{profile.permissionMode}</span>}
                     {profile.vmSizeOverride && <span>VM: {profile.vmSizeOverride}</span>}
                     {profile.taskMode && <span>Mode: {profile.taskMode}</span>}
+                    {formatGitHubCliPolicySummary(profile) && (
+                      <span>{formatGitHubCliPolicySummary(profile)}</span>
+                    )}
                   </div>
                 </div>
 
@@ -167,7 +201,10 @@ export const ProfileList: FC<ProfileListProps> = ({
                   {deleteConfirmId !== profile.id && (
                     <button
                       type="button"
-                      onClick={() => { setDeleteConfirmId(profile.id); setDeleteError(null); }}
+                      onClick={() => {
+                        setDeleteConfirmId(profile.id);
+                        setDeleteError(null);
+                      }}
                       aria-label={`Delete ${profile.name}`}
                       className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-danger hover:bg-danger-tint cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
                     >
@@ -182,7 +219,10 @@ export const ProfileList: FC<ProfileListProps> = ({
                   <span className="text-xs text-fg-muted mr-auto">Delete this profile?</span>
                   <button
                     type="button"
-                    onClick={() => { setDeleteConfirmId(null); setDeleteError(null); }}
+                    onClick={() => {
+                      setDeleteConfirmId(null);
+                      setDeleteError(null);
+                    }}
                     aria-label="Cancel delete"
                     className="px-3 py-2 min-w-[44px] min-h-[44px] rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
                   >

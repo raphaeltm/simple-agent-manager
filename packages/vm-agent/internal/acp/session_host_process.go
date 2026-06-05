@@ -63,18 +63,24 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		return
 	}
 
-	h.restartCount++
 	maxRestarts := h.maxRestartAttempts()
-	if h.restartCount > maxRestarts {
-		h.handleMaxRestartsExceededLocked(agentType, stderrOutput, maxRestarts, crashRecovery)
-		return
+	if !intentionalPromptCancel {
+		h.restartCount++
+		if h.restartCount > maxRestarts {
+			h.handleMaxRestartsExceededLocked(agentType, stderrOutput, maxRestarts, crashRecovery)
+			return
+		}
 	}
 
 	h.clearCurrentAgentSessionLocked()
 	h.status = HostStarting
 	h.mu.Unlock()
 
-	slog.Info("Attempting agent restart", "attempt", h.restartCount, "maxRestarts", maxRestarts)
+	if intentionalPromptCancel {
+		slog.Info("Attempting agent restart after user prompt cancel", "restartCount", h.restartCount, "maxRestarts", maxRestarts)
+	} else {
+		slog.Info("Attempting agent restart", "attempt", h.restartCount, "maxRestarts", maxRestarts)
+	}
 	h.broadcastAgentStatus(StatusRestarting, agentType, "")
 
 	time.Sleep(time.Second)

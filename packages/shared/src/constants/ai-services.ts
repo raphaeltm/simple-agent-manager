@@ -3,7 +3,7 @@
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
-export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+export const DEFAULT_TASK_TITLE_MODEL = '@cf/zai-org/glm-4.7-flash';
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
 export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
@@ -282,6 +282,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
+  }),
+  workersAIModel({
+    id: '@cf/zai-org/glm-4.7-flash',
+    label: 'GLM 4.7 Flash',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00006,
+    costPer1kOutputTokens: 0.0004,
+    contextWindow: 131072,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
   }),
   // --- Anthropic (via AI Gateway) ---
   anthropicModel({

@@ -20,6 +20,10 @@ export const UpdateWorkspaceSchema = v.object({
   displayName: v.string(),
 });
 
+export const UpdateWorkspacePortsPublicSchema = v.object({
+  enabled: v.boolean(),
+});
+
 export const CreateAgentSessionSchema = v.object({
   label: v.optional(v.string()),
   agentType: v.optional(v.string()),
@@ -73,6 +77,7 @@ export const MessageBatchSchema = v.object({
 // Workspace lifecycle schemas
 export const WorkspaceStatusUpdateSchema = v.object({
   status: v.optional(v.string()),
+  workspaceProfile: v.optional(v.picklist(['full', 'lightweight'])),
 });
 
 export const WorkspaceErrorSchema = v.object({

@@ -44,8 +44,8 @@ Also create `.do-state.md` in the repo root (gitignored) as a complementary exte
 
 2. **Research the codebase.** Before writing anything:
    - Search and read to find all relevant code paths
-   - Read related docs in `docs/`, `specs/`, `.claude/rules/`
-   - **Review relevant post-mortems** in `docs/notes/*-postmortem.md`. Search for post-mortems that touch the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections. These contain hard-won lessons about what goes wrong in this codebase — ignoring them risks repeating the exact same mistakes. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is almost certainly a relevant post-mortem.
+   - Read related public docs in `apps/www/src/content/docs/docs/`, plus `specs/` and `.claude/rules/`
+   - **Review relevant post-mortems** in the incident lessons retained in `.claude/rules/` and relevant `tasks/archive/` records. Search for post-mortems that touch the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections. These contain hard-won lessons about what goes wrong in this codebase — ignoring them risks repeating the exact same mistakes. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is almost certainly a relevant post-mortem.
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
@@ -233,7 +233,7 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 
 **If infrastructure verification fails, DO NOT create the PR. DO NOT merge. Fix the issue first.**
 
-> **Why this is mandatory**: The TLS YAML indentation bug (`docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
+> **Why this is mandatory**: The TLS YAML indentation bug (the retained incident lesson in this rule) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
 
 ### No Self-Exemptions
 

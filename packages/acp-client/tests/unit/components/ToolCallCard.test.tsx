@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ToolCallCard } from '../../../src/components/ToolCallCard';
 import type { ToolCallItem } from '../../../src/hooks/useAcpMessages';
 
@@ -70,6 +70,25 @@ describe('ToolCallCard', () => {
     fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
 
     expect(screen.getByText('/workspaces/hono')).toBeTruthy();
+  });
+
+  it('lazy-loads empty tool content and keeps the card expandable', async () => {
+    const onLoadContent = vi.fn().mockResolvedValue([]);
+    const toolCall = createToolCall({
+      content: [],
+      contentLoaded: false,
+      messageId: 'msg-empty-tool',
+    });
+
+    render(<ToolCallCard toolCall={toolCall} onLoadContent={onLoadContent} />);
+
+    const header = screen.getByRole('button', { name: /terminal execute/i });
+    expect(header.className).toContain('cursor-pointer');
+
+    fireEvent.click(header);
+
+    await waitFor(() => expect(onLoadContent).toHaveBeenCalledWith('msg-empty-tool'));
+    expect(screen.getByText('No output.')).toBeTruthy();
   });
 
   describe('onFileClick behavior', () => {

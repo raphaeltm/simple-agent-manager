@@ -68,6 +68,7 @@ export interface HetznerCapacityRetryEnv {
   HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
+  HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
 }
 
 /**
@@ -87,6 +88,7 @@ export function buildProviderConfig(
         capacityRetryInitialDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS),
         capacityRetryMaxDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
         capacityRetryMaxAttempts: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS),
+        capacityRetryBudgetMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_BUDGET_MS),
       };
     case 'scaleway': {
       let parsed: unknown;

@@ -1,5 +1,5 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
-import { ProviderError } from '@simple-agent-manager/providers';
+import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -107,10 +107,27 @@ export interface ProvisionTaskContext {
   taskMode?: TaskMode;
 }
 
+export interface ProvisionNodeOptions {
+  /**
+   * When true, re-throw provider failures (preserving `ProviderError.category` and
+   * `providerCode`) instead of silently writing a `status:'error'` node row and
+   * returning. The TaskRunner size-fallback descent loop sets this so it can branch
+   * on the error category (capacity → descend; anything else → fail fast).
+   *
+   * On a `transient_capacity` failure this also DELETES the failed node row before
+   * throwing, so failed size attempts leave no orphaned `error` rows. Non-capacity
+   * failures keep the existing `status:'error'` row before re-throwing.
+   *
+   * Legacy callers omit this and retain the original swallow-and-record behavior.
+   */
+  rethrowProviderError?: boolean;
+}
+
 export async function provisionNode(
   nodeId: string,
   env: Env,
   taskContext?: ProvisionTaskContext,
+  options?: ProvisionNodeOptions,
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -270,7 +287,30 @@ export async function provisionNode(
       log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
     }
 
-    // Store the actual error message (truncated) in the node record
+    const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
+
+    // Descent-loop mode: re-throw so the caller can branch on the error category.
+    // On a transient_capacity failure, delete the failed node row first so failed
+    // size attempts leave no orphaned `error` rows (decision #1).
+    if (options?.rethrowProviderError) {
+      if (isCapacityFailure) {
+        await db.delete(schema.nodes).where(eq(schema.nodes.id, node.id));
+      } else {
+        const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
+        await db
+          .update(schema.nodes)
+          .set({
+            status: 'error',
+            healthStatus: 'unhealthy',
+            errorMessage: `[${providerName}] ${truncatedError}`,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.nodes.id, node.id));
+      }
+      throw err;
+    }
+
+    // Legacy mode: store the actual error message (truncated) in the node record.
     const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
     await db
       .update(schema.nodes)

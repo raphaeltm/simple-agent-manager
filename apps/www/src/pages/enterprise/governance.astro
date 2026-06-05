@@ -1,0 +1,154 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+---
+
+<Base
+  title="Governance & Observability — SAM Enterprise"
+  description="Platform policies control what agents can do. Agent profiles standardize team configurations. Full audit trails track every session and tool call."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Governance & Observability</span>
+        <h1 class="detail-title animate-on-scroll">
+          Control what agents do.<br />
+          <span class="gradient-text">See everything.</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          Platform policies define what agents are allowed to do. Agent profiles standardize
+          configurations across teams. Full audit trails track every session, tool call, and cost.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Platform Policies</h2>
+          <p>
+            SAM platform policies define rules, constraints, and delegation boundaries for agent behavior.
+            Policies are injected into agent instructions so agents operate within the boundaries
+            your team sets. Policies propagate to child tasks automatically — when one agent
+            dispatches work to another, the child inherits the parent's policy set.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Agent Profiles</h2>
+          <p>
+            Engineering leads create profiles that bundle an agent type, model, and configuration into
+            a reusable template. Teams pick from approved profiles instead of configuring from scratch.
+            New team members get a working setup immediately.
+          </p>
+          <p>
+            When standards change (new model, different agent, updated system prompt), update the profile.
+            Every future task uses the new configuration. No per-user migration needed.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Session Audit Trails</h2>
+          <p>
+            Agent sessions are recorded: what was requested, what the agent produced, and task lifecycle
+            events (start, completion, failure). Project-scoped activity feeds give team leads
+            visibility without requiring access to the agent's workspace.
+            When using SAM-managed AI billing, token usage and cost are tracked per session.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Admin Observability</h2>
+          <p>
+            The admin dashboard provides real-time and historical views of platform health:
+          </p>
+          <ul class="feature-list">
+            <li>Worker log streaming and error tracking</li>
+            <li>VM agent health and heartbeat monitoring</li>
+            <li>Cost monitoring with projections</li>
+            <li>AI usage breakdowns by model and user</li>
+            <li>Node and workspace lifecycle tracking</li>
+          </ul>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Knowledge & Context Management</h2>
+          <p>
+            SAM's knowledge graph stores project context, user preferences, and organizational decisions
+            that persist across agent sessions. Agents start every task with the context they need instead of
+            rediscovering it from scratch. Knowledge is project-scoped and searchable.
+          </p>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/security/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Security Isolation
+          </a>
+          <a href="/enterprise/" class="detail-nav-link">
+            Enterprise Overview
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
+  .detail-hero-content { max-width: 720px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
+  .back-link:hover { color: var(--color-fg-muted); }
+  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
+  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
+  .detail-content { max-width: 720px; }
+  .detail-block { margin-bottom: 48px; }
+  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
+  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
+
+  .feature-list {
+    list-style: none;
+    padding: 0;
+    margin-top: 8px;
+  }
+
+  .feature-list li {
+    position: relative;
+    padding-left: 24px;
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.8;
+  }
+
+  .feature-list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    opacity: 0.6;
+  }
+
+  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
+  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>

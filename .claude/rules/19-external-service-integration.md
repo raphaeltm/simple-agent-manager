@@ -6,7 +6,7 @@ This rule applies when a feature integrates with any external service: OAuth pro
 
 ## Why This Rule Exists
 
-The GCP OIDC deployment feature (PR #499) shipped with a per-project OAuth callback URI that made the feature unusable for self-hosters, and a WIF pool wildcard binding that enabled cross-project privilege escalation. Both issues passed 6 review agents because the reviews validated code against the spec — but the spec itself was wrong. Neither the spec author nor any reviewer simulated the external service setup experience or modeled multi-tenant IAM implications. See `docs/notes/2026-03-24-gcp-oidc-review-postmortem.md`.
+The GCP OIDC deployment feature (PR #499) shipped with a per-project OAuth callback URI that made the feature unusable for self-hosters, and a WIF pool wildcard binding that enabled cross-project privilege escalation. Both issues passed 6 review agents because the reviews validated code against the spec — but the spec itself was wrong. Neither the spec author nor any reviewer simulated the external service setup experience or modeled multi-tenant IAM implications. See the retained incident lesson in this rule.
 
 ## Mandatory Checks
 
@@ -17,7 +17,7 @@ Before marking any external integration complete, walk through the setup from a 
 1. **What does the self-hoster need to register** in the external service's console? (OAuth app, IAM provider, webhook URL, API key, etc.)
 2. **What URIs, scopes, or permissions** must they configure? Write out the exact values.
 3. **Are the URIs static or dynamic?** If dynamic (per-user, per-project, per-resource), verify the external service supports dynamic registration. Most OAuth providers do NOT support wildcard redirect URIs.
-4. **Document the setup steps** in `docs/guides/self-hosting.md` in the same PR.
+4. **Document the setup steps** in `apps/www/src/content/docs/docs/guides/self-hosting.md` in the same PR.
 
 If the self-hoster would need to perform a manual action for each new entity (project, user, workspace), the design is wrong. Redesign to use a single static configuration point.
 
@@ -75,7 +75,7 @@ This review SHOULD happen when the spec is created (in the design conversation) 
 Before committing external service integration code:
 - [ ] OAuth redirect URIs are static (no dynamic segments)
 - [ ] IAM bindings are scoped per-entity (no pool-wide wildcards)
-- [ ] Self-hoster setup documented in `docs/guides/self-hosting.md`
+- [ ] Self-hoster setup documented in `apps/www/src/content/docs/docs/guides/self-hosting.md`
 - [ ] Multi-tenant threat model answered in PR description
 - [ ] External service constraints researched and cited
 - [ ] Edge-case UI states specified and tested (empty data, errors, timeouts)

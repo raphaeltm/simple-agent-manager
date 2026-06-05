@@ -1,5 +1,7 @@
 # Quickstart: Local Mock Mode
 
+> Spec validation artifact only. This is not canonical setup documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Feature**: 002-local-mock-mode
 **Date**: 2025-01-25
 

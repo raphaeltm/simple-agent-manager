@@ -280,6 +280,7 @@ async function autoDispatchSchedulableTasks(
         vmSize: resolvedVmSize,
         vmLocation: resolvedVmLocation,
         branch: projectRow.default_branch,
+        defaultBranch: projectRow.default_branch,
         userName: userRow?.name ?? null,
         userEmail: userRow?.email ?? null,
         githubId: userRow?.github_id ?? null,

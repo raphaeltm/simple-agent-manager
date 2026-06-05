@@ -98,6 +98,12 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
     expect(wsReadySection).toContain("updateD1ExecutionStep(state.taskId, 'workspace_ready')");
   });
 
+  it('does not wait for ready before VM-agent dispatch acknowledgement exists', () => {
+    expect(wsReadySection).toContain('SELECT dispatched_at FROM workspaces WHERE id = ?');
+    expect(wsReadySection).toContain('workspace_ready_without_dispatch_ack');
+    expect(wsReadySection).toContain("advanceToStep(state, 'workspace_dispatch')");
+  });
+
   it('explains periodic polling as a safety net in comments', () => {
     expect(wsReadySection).toContain('safety net');
     expect(wsReadySection).toContain('heartbeat');

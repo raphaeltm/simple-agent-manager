@@ -13,7 +13,7 @@ You execute ideas through the **project chat interface**. Type your description 
 2. **Create a branch** — descriptive branch name with `sam/` prefix
 3. **Select a node** — reuses a warm node if available, otherwise provisions a new one
 4. **Create a workspace** — clones your repo and sets up the environment
-5. **Start the agent** — runs your configured agent (Claude Code, Codex, Gemini, or Mistral Vibe) with your description
+5. **Start the agent** — runs your configured agent (Claude Code, Codex, Gemini, Mistral Vibe, OpenCode, or Amp) with your description
 6. **Stream output** — watch the agent work in real-time through the chat interface
 
 ### Execution Options
@@ -69,7 +69,7 @@ When an agent finishes its work:
 SAM automatically generates concise titles for ideas using Workers AI:
 
 - Messages **at or below 100 characters** are used as the title directly (no AI needed)
-- Longer messages are summarized by a Workers AI model (default: `@cf/google/gemma-4-26b-a4b-it`)
+- Longer messages are summarized by a Workers AI model (default: `@cf/zai-org/glm-4.7-flash`)
 - If AI generation fails or times out, the message is truncated to 100 characters as a fallback
 - Generation uses exponential backoff with up to 2 retries
 
@@ -77,7 +77,7 @@ Configure via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASK_TITLE_MODEL` | `@cf/google/gemma-4-26b-a4b-it` | Workers AI model for title generation |
+| `TASK_TITLE_MODEL` | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation |
 | `TASK_TITLE_GENERATION_ENABLED` | `true` | Set `false` to always use truncation |
 | `TASK_TITLE_TIMEOUT_MS` | `5000` | Per-attempt timeout |
 | `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100` | Messages at or below this length bypass AI |

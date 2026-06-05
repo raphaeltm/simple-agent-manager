@@ -176,6 +176,77 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
+func workspaceCreateConflict(runtime *WorkspaceRuntime, repository, branch, devcontainerConfigName string, lightweight bool) string {
+	if runtime == nil {
+		return ""
+	}
+	if runtime.Repository != "" && repository != "" && runtime.Repository != repository {
+		return "workspace already exists with a different repository"
+	}
+	if runtime.Branch != "" && branch != "" && runtime.Branch != branch {
+		return "workspace already exists with a different branch"
+	}
+	if runtime.DevcontainerConfigName != "" && devcontainerConfigName != "" && runtime.DevcontainerConfigName != devcontainerConfigName {
+		return "workspace already exists with a different devcontainer config"
+	}
+	if runtime.Lightweight != lightweight {
+		return "workspace already exists with a different workspace profile"
+	}
+	return ""
+}
+
+func (s *Server) maybeHandleDuplicateWorkspaceCreate(w http.ResponseWriter, workspaceID, repository, branch, devcontainerConfigName string, lightweight bool) bool {
+	s.workspaceMu.RLock()
+	runtime, ok := s.workspaces[workspaceID]
+	if !ok {
+		s.workspaceMu.RUnlock()
+		return false
+	}
+
+	status := runtime.Status
+	provisioningActive := runtime.ProvisioningActive
+	conflict := workspaceCreateConflict(runtime, repository, branch, devcontainerConfigName, lightweight)
+	s.workspaceMu.RUnlock()
+
+	if conflict != "" {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":       "workspace_conflict",
+			"message":     conflict,
+			"workspaceId": workspaceID,
+			"status":      status,
+		})
+		return true
+	}
+
+	if provisioningActive || status == "running" || status == "recovery" {
+		statusCode := http.StatusOK
+		if provisioningActive {
+			statusCode = http.StatusAccepted
+		}
+		slog.Warn("Workspace creation replay accepted idempotently",
+			"workspace", workspaceID,
+			"status", status,
+			"provisioningActive", provisioningActive)
+		writeJSON(w, statusCode, map[string]interface{}{
+			"workspaceId": workspaceID,
+			"status":      status,
+		})
+		return true
+	}
+
+	if status == "creating" {
+		return false
+	}
+
+	writeJSON(w, http.StatusConflict, map[string]interface{}{
+		"error":       "workspace_not_creatable",
+		"message":     "Workspace cannot be created from current state: " + status,
+		"workspaceId": workspaceID,
+		"status":      status,
+	})
+	return true
+}
+
 // resourceDiagnostics holds the result of a post-timeout resource check.
 type resourceDiagnostics struct {
 	Metrics      *sysinfo.QuickMetrics `json:"metrics"`
@@ -436,12 +507,18 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		branch = "main"
 	}
 
-	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "creating", strings.TrimSpace(body.CallbackToken), workspaceRuntimeOpts{
+	repository := strings.TrimSpace(body.Repository)
+	devcontainerConfigName := strings.TrimSpace(body.DevcontainerConfigName)
+	if s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, repository, branch, devcontainerConfigName, body.Lightweight) {
+		return
+	}
+
+	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, repository, branch, "creating", strings.TrimSpace(body.CallbackToken), workspaceRuntimeOpts{
 		GitUserName:            strings.TrimSpace(body.GitUserName),
 		GitUserEmail:           strings.TrimSpace(body.GitUserEmail),
 		GitHubID:               strings.TrimSpace(body.GitHubID),
 		Lightweight:            body.Lightweight,
-		DevcontainerConfigName: strings.TrimSpace(body.DevcontainerConfigName),
+		DevcontainerConfigName: devcontainerConfigName,
 		DevcontainerCache: DevcontainerCacheCredentials{
 			Registry: strings.TrimSpace(body.DevcontainerCache.Registry),
 			Username: strings.TrimSpace(body.DevcontainerCache.Username),

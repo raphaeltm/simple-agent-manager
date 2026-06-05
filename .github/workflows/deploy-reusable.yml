@@ -177,14 +177,102 @@ jobs:
         run: |
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
 
-          if npx wrangler r2 bucket create $BUCKET_NAME 2>&1; then
+          set +e
+          OUTPUT=$(npx wrangler r2 bucket create "$BUCKET_NAME" 2>&1)
+          STATUS=$?
+          set -e
+          echo "$OUTPUT"
+
+          if [ "$STATUS" -eq 0 ]; then
             echo "Created R2 bucket: $BUCKET_NAME"
+          elif echo "$OUTPUT" | grep -Eq 'already exists, and you own it|\[code: 10004\]'; then
+            echo "R2 bucket already exists: $BUCKET_NAME"
           else
-            echo "R2 bucket already exists or was created: $BUCKET_NAME"
+            echo "::error title=Pulumi state bucket setup failed::Failed to create or verify R2 bucket '$BUCKET_NAME'. Check CF_API_TOKEN, CF_ACCOUNT_ID, and bucket permissions for the '${{ inputs.environment }}' GitHub environment."
+            exit "$STATUS"
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Validate Pulumi R2 Backend Access
+        run: |
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
+          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+
+          CHECK_SCRIPT="apps/api/.pulumi-r2-preflight.mjs"
+          trap 'rm -f "$CHECK_SCRIPT"' EXIT
+          cat > "$CHECK_SCRIPT" <<'JS'
+          import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+          const bucket = process.env.BUCKET_NAME;
+          const endpoint = process.env.R2_ENDPOINT;
+          const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+          const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+
+          if (!bucket || !endpoint || !accessKeyId || !secretAccessKey) {
+            throw new Error("Missing required Pulumi R2 backend preflight environment");
+          }
+
+          const client = new S3Client({
+            region: "auto",
+            endpoint: `https://${endpoint}`,
+            forcePathStyle: true,
+            credentials: { accessKeyId, secretAccessKey },
+          });
+
+          try {
+            await client.send(new HeadObjectCommand({ Bucket: bucket, Key: ".pulumi/meta.yaml" }));
+            console.log(`Pulumi R2 backend read check succeeded for bucket: ${bucket}`);
+          } catch (error) {
+            const details = error;
+            const status = details.$metadata?.httpStatusCode;
+            const code = details.name || details.Code || "Unknown";
+
+            if (status === 404 || code === "NotFound" || code === "NoSuchKey") {
+              console.log("Pulumi metadata object is not present yet; continuing so Pulumi can initialize the backend.");
+              process.exit(0);
+            }
+
+            if (status === 403 || code === "AccessDenied") {
+              console.error(`PULUMI_R2_ACCESS_DENIED status=${status ?? "unknown"} code=${code}`);
+              process.exit(13);
+            }
+
+            console.error(`PULUMI_R2_PREFLIGHT_FAILED status=${status ?? "unknown"} code=${code}`);
+            process.exit(1);
+          }
+          JS
+
+          set +e
+          OUTPUT=$(BUCKET_NAME="$BUCKET_NAME" R2_ENDPOINT="$R2_ENDPOINT" node "$CHECK_SCRIPT" 2>&1)
+          STATUS=$?
+          set -e
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "$OUTPUT"
+          elif [ "$STATUS" -eq 13 ]; then
+            echo "::error title=Pulumi R2 backend access denied::R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY cannot read .pulumi/meta.yaml from bucket '$BUCKET_NAME'. Rotate these secrets for the '${{ inputs.environment }}' GitHub environment with an R2 API token scoped to this bucket in the same Cloudflare account as CF_ACCOUNT_ID."
+            {
+              echo "## Pulumi R2 Backend Access Denied"
+              echo ""
+              echo "The Cloudflare API token could verify the state bucket, but the R2 S3 credentials could not read \`.pulumi/meta.yaml\`."
+              echo ""
+              echo "Rotate the GitHub Environment '${{ inputs.environment }}' secrets:"
+              echo "- \`R2_ACCESS_KEY_ID\`"
+              echo "- \`R2_SECRET_ACCESS_KEY\`"
+              echo ""
+              echo "The replacement R2 API token must be created in the same Cloudflare account as \`CF_ACCOUNT_ID\`, scoped to bucket \`${BUCKET_NAME}\`, and allow object read/write access. Then re-run the deploy workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "$OUTPUT"
+            echo "::error title=Pulumi R2 backend preflight failed::Unexpected failure while checking R2 S3 access for bucket '$BUCKET_NAME'."
+            exit "$STATUS"
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
       - name: Login to Pulumi R2 Backend
         run: |

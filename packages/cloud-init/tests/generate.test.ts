@@ -917,6 +917,7 @@ describe('validateCloudInitVariables', () => {
         logJournalKeepFree: '2G',
         logJournalMaxRetention: '14day',
         dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+        devcontainerCacheEnabled: 'true',
       }))).not.toThrow();
     });
 
@@ -1141,6 +1142,18 @@ describe('validateCloudInitVariables', () => {
       }))).not.toThrow();
     });
 
+    it('rejects DNS server values with invalid IPv4 octets', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"999.999.999.999"',
+      }))).toThrow('dockerDnsServers');
+    });
+
+    it('rejects non-string JSON values in Docker DNS servers', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1.1", 8',
+      }))).toThrow('dockerDnsServers');
+    });
+
     it('collects multiple validation errors', () => {
       try {
         validateCloudInitVariables({
@@ -1315,6 +1328,12 @@ describe('validateCloudInitVariables', () => {
   });
 
   describe('cfIpFetchTimeout edge cases', () => {
+    it('rejects cfIpFetchTimeout of zero', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        cfIpFetchTimeout: '0',
+      }))).toThrow('cfIpFetchTimeout');
+    });
+
     it('rejects cfIpFetchTimeout with decimal point', () => {
       expect(() => validateCloudInitVariables(baseVariables({
         cfIpFetchTimeout: '30.5',
@@ -1414,6 +1433,32 @@ describe('validateCloudInitVariables', () => {
         originCaCert: withTab,
       }))).toThrow('originCaCert');
     });
+  });
+});
+
+describe('validateCloudInitVariables — devcontainer cache flag', () => {
+  it('accepts explicit boolean strings', () => {
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: 'true',
+    }))).not.toThrow();
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: 'false',
+    }))).not.toThrow();
+  });
+
+  it('accepts omitted and empty values', () => {
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: undefined,
+    }))).not.toThrow();
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: '',
+    }))).not.toThrow();
+  });
+
+  it('rejects non-boolean devcontainer cache values before systemd injection', () => {
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: 'yes; systemctl stop vm-agent',
+    }))).toThrow('devcontainerCacheEnabled');
   });
 });
 

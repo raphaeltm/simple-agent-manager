@@ -7,7 +7,7 @@ import {
   upsertProfileRuntimeEnvVar,
   upsertProfileRuntimeFile,
 } from '../../lib/api';
-import { RuntimeAssetsSection, type RuntimeAssetsApi } from '../runtime/RuntimeAssetsSection';
+import { type RuntimeAssetsApi,RuntimeAssetsSection } from '../runtime/RuntimeAssetsSection';
 
 interface ProfileRuntimeSectionProps {
   projectId: string;

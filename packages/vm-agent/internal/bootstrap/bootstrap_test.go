@@ -1872,6 +1872,7 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	readyCalled := false
 	readyAuth := ""
 	readyStatus := ""
+	readyWorkspaceProfile := ""
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/ready" {
@@ -1881,12 +1882,14 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 		readyCalled = true
 		readyAuth = r.Header.Get("Authorization")
 		var payload struct {
-			Status string `json:"status"`
+			Status           string `json:"status"`
+			WorkspaceProfile string `json:"workspaceProfile"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("failed to decode ready payload: %v", err)
 		}
 		readyStatus = payload.Status
+		readyWorkspaceProfile = payload.WorkspaceProfile
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"running"}`))
 	}))
@@ -1917,6 +1920,9 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	}
 	if readyStatus != workspaceReadyStatusRunning {
 		t.Fatalf("expected ready status %q, got %q", workspaceReadyStatusRunning, readyStatus)
+	}
+	if readyWorkspaceProfile != "lightweight" {
+		t.Fatalf("expected no-config workspace to report effective lightweight profile, got %q", readyWorkspaceProfile)
 	}
 	if recoveryMode {
 		t.Fatal("expected recoveryMode=false when no build error marker exists")
@@ -2321,13 +2327,7 @@ exit 0
 
 func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	// Mock devcontainer CLI that always succeeds
-	mockBinDir := t.TempDir()
-	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
-	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("failed to write mock devcontainer command: %v", err)
-	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", mockBinDir+":"+origPath)
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
 
 	workspaceDir := t.TempDir()
 	// Create a repo devcontainer config
@@ -2353,6 +2353,106 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	if usedFallback {
 		t.Fatal("expected usedFallback=false when repo config succeeds")
 	}
+}
+
+func TestEnsureDevcontainerReadyNoConfigUsesLightweightDefault(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "default-devcontainer.json")
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-no-config", configPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "", "", "")
+	if err != nil {
+		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
+	}
+	if usedFallback {
+		t.Fatal("expected usedFallback=false for no-config lightweight default startup")
+	}
+
+	parsed, configJSON := readGeneratedDevcontainerConfig(t, configPath)
+	if _, hasFeatures := parsed["features"]; hasFeatures {
+		t.Fatalf("expected no-config default startup to omit devcontainer Features, got:\n%s", configJSON)
+	}
+	if updateRemoteUserUID, ok := parsed["updateRemoteUserUID"].(bool); !ok || updateRemoteUserUID {
+		t.Fatalf("expected no-config default startup to disable updateRemoteUserUID, got:\n%s", configJSON)
+	}
+}
+
+func TestEnsureDevcontainerReadyNoConfigLightweightStartupHonorsBuildTimeout(t *testing.T) {
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexec sleep 5\n")
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-no-config-timeout", filepath.Join(t.TempDir(), "default-devcontainer.json"))
+	cfg.DevcontainerBuildTimeout = 100 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	startedAt := time.Now()
+	_, err := ensureDevcontainerReady(ctx, cfg, "", "", "", "")
+	if err == nil {
+		t.Fatal("expected no-config lightweight startup to time out")
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("expected lightweight startup to respect build timeout quickly, took %s (err: %v)", elapsed, err)
+	}
+}
+
+func TestEnsureDevcontainerReadyExplicitMissingNamedConfigDoesNotFallback(t *testing.T) {
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-missing-named-config", filepath.Join(t.TempDir(), "default-devcontainer.json"))
+
+	usedFallback, err := ensureDevcontainerReady(context.Background(), cfg, "", "", "python", "")
+	if err == nil {
+		t.Fatal("expected missing explicit devcontainer config to fail")
+	}
+	if usedFallback {
+		t.Fatal("expected missing explicit devcontainer config not to use fallback")
+	}
+	if !strings.Contains(err.Error(), `devcontainer config "python" not found`) {
+		t.Fatalf("expected clear missing named config error, got: %v", err)
+	}
+	if _, statErr := os.Stat(cfg.DefaultDevcontainerConfigPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no fallback config to be written, stat err: %v", statErr)
+	}
+}
+
+func installMockDevcontainerCommand(t *testing.T, script string) {
+	t.Helper()
+
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	if err := os.WriteFile(mockDevcontainer, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+}
+
+func newNoConfigDevcontainerReadyConfig(t *testing.T, labelValue, configPath string) *config.Config {
+	t.Helper()
+
+	return &config.Config{
+		WorkspaceDir:                  t.TempDir(),
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           labelValue,
+		DefaultDevcontainerConfigPath: configPath,
+		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
+	}
+}
+
+func readGeneratedDevcontainerConfig(t *testing.T, configPath string) (map[string]interface{}, string) {
+	t.Helper()
+
+	rawConfig, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("failed to read generated default config: %v", readErr)
+	}
+	configJSON := string(rawConfig)
+	parsed := make(map[string]interface{})
+	if decodeErr := json.Unmarshal(rawConfig, &parsed); decodeErr != nil {
+		t.Fatalf("generated config is not valid JSON: %v\nContent:\n%s", decodeErr, configJSON)
+	}
+	return parsed, configJSON
 }
 
 // --- Credential helper host-side tests ---

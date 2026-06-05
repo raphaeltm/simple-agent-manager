@@ -251,13 +251,23 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
     return c.json({ success: false, reason: 'workspace_not_running' });
   }
 
+  const updateValues: {
+    status: string;
+    lastActivityAt: string;
+    updatedAt: string;
+    workspaceProfile?: 'full' | 'lightweight';
+  } = {
+    status: nextStatus,
+    lastActivityAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  if (body.workspaceProfile) {
+    updateValues.workspaceProfile = body.workspaceProfile;
+  }
+
   await db
     .update(schema.workspaces)
-    .set({
-      status: nextStatus,
-      lastActivityAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
+    .set(updateValues)
     .where(eq(schema.workspaces.id, workspaceId));
 
   // Notify TaskRunner DO inline if a task is associated with this workspace.

@@ -58,6 +58,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
+    portsPublicEnabled: ws.portsPublicEnabled,
     errorMessage: ws.errorMessage,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
@@ -138,7 +139,11 @@ export function toProjectSummaryResponse(
   };
 }
 
-export function toTaskResponse(task: schema.Task, blocked = false): Task {
+export function toTaskResponse(
+  task: schema.Task,
+  blocked = false,
+  displayAgentProfileHint = task.agentProfileHint
+): Task {
   return {
     id: task.id,
     projectId: task.projectId,
@@ -152,13 +157,14 @@ export function toTaskResponse(task: schema.Task, blocked = false): Task {
     priority: task.priority,
     taskMode: (task.taskMode as TaskMode) || 'task',
     dispatchDepth: task.dispatchDepth,
-    agentProfileHint: task.agentProfileHint,
+    agentProfileHint: displayAgentProfileHint,
     blocked,
     triggeredBy: task.triggeredBy ?? 'user',
     triggerId: task.triggerId ?? null,
     triggerExecutionId: task.triggerExecutionId ?? null,
     requestedVmSize: task.requestedVmSize ?? null,
     requestedVmSizeSource: (task.requestedVmSizeSource as Task['requestedVmSizeSource']) ?? null,
+    provisionedVmSize: task.provisionedVmSize ?? null,
     resourceRequirementsJson: task.resourceRequirementsJson ?? null,
     resourceRequirementsSource: (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
     resolvedReservationJson: task.resolvedReservationJson ?? null,

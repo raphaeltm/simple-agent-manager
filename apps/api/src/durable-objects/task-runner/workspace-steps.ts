@@ -1,12 +1,13 @@
 /**
  * Workspace-related step handlers for the TaskRunner DO.
  *
- * Handles workspace_creation, workspace_ready, and attachment_transfer steps.
+ * Handles workspace_creation, workspace_dispatch, workspace_ready, and attachment_transfer steps.
  */
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
+import { computeBackoffMs, isTransientError } from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -29,12 +30,17 @@ export async function handleWorkspaceCreation(
   if (state.stepResults.workspaceId) {
     if (await isTaskDelegated(state, rc)) {
       // TDF-6: Ensure session linking on crash recovery — the DO may have crashed
-      // after creating the workspace but before linking the session.
-      await ensureSessionLinked(state, state.stepResults.workspaceId, rc);
-      await rc.advanceToStep(state, 'workspace_ready');
+      // after creating the workspace but before linking the session. Dispatch
+      // must still be checked separately; D1 workspace linkage is not VM-agent
+      // acknowledgement.
+      await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+      await rc.advanceToStep(state, 'workspace_dispatch');
       return;
     }
-    // If still queued, proceed with delegation transition below
+    // If still queued, the DO recovered after workspace row creation but before
+    // the task delegation transition. Re-run idempotent bookkeeping before
+    // proceeding with delegation and dispatch.
+    await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
   } else {
     await createAndProvisionWorkspace(state, rc);
   }
@@ -68,7 +74,7 @@ export async function handleWorkspaceCreation(
     now,
   ).run();
 
-  await rc.advanceToStep(state, 'workspace_ready');
+  await rc.advanceToStep(state, 'workspace_dispatch');
 }
 
 async function recoverWorkspaceFromD1(
@@ -151,6 +157,7 @@ async function createAndProvisionWorkspace(
     vmLocation: state.config.vmLocation,
     workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: state.config.devcontainerConfigName ?? null,
+    agentProfileHint: state.config.agentProfileHint ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -162,13 +169,19 @@ async function createAndProvisionWorkspace(
   state.stepResults.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
+  await ensureWorkspaceBookkeeping(state, rc, workspaceId, now);
+  await rc.ctx.storage.put('state', state);
+}
+
+async function ensureWorkspaceBookkeeping(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  workspaceId: string,
+  now = new Date().toISOString(),
+): Promise<void> {
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
-  await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId);
-  await rc.env.DATABASE.prepare(
-    `UPDATE workspaces SET dispatched_at = ? WHERE id = ?`
-  ).bind(new Date().toISOString(), workspaceId).run();
-  await rc.ctx.storage.put('state', state);
+  await ensureBranchExistsOnRemote(state, rc);
 }
 
 async function startComputeTrackingBestEffort(
@@ -215,6 +228,70 @@ async function setOutputBranch(
   ).bind(outputBranch, now, state.taskId).run();
 }
 
+/**
+ * Ensure the checkout branch exists on the remote before cloning.
+ * If the branch differs from the project's default branch and doesn't exist,
+ * create it from the default branch via the GitHub API.
+ *
+ * Best-effort: failures are logged but do not block workspace creation.
+ * The clone will fail with a clear error from the VM agent if the branch
+ * truly doesn't exist.
+ */
+export async function ensureBranchExistsOnRemote(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+): Promise<void> {
+  const defaultBranch = state.config.defaultBranch || 'main';
+
+  // If cloning the default branch, no need to check — it always exists
+  if (state.config.branch === defaultBranch) {
+    return;
+  }
+
+  // Parse owner/repo from repository string (format: "owner/repo")
+  const repoParts = state.config.repository.split('/');
+  if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
+    log.warn('task_runner_do.ensure_branch.invalid_repository', {
+      taskId: state.taskId,
+      repository: state.config.repository,
+    });
+    return;
+  }
+
+  const [owner, repo] = repoParts;
+
+  try {
+    const { ensureBranchExists } = await import('../../services/github-app');
+    const created = await ensureBranchExists(
+      state.config.installationId,
+      owner,
+      repo,
+      state.config.branch,
+      defaultBranch,
+      rc.env,
+    );
+
+    if (created) {
+      log.info('task_runner_do.ensure_branch.ok', {
+        taskId: state.taskId,
+        branch: state.config.branch,
+      });
+    } else {
+      log.warn('task_runner_do.ensure_branch.failed', {
+        taskId: state.taskId,
+        branch: state.config.branch,
+        defaultBranch,
+      });
+    }
+  } catch (err) {
+    log.warn('task_runner_do.ensure_branch.error', {
+      taskId: state.taskId,
+      branch: state.config.branch,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 async function createWorkspaceOnVmAgent(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
@@ -225,7 +302,7 @@ async function createWorkspaceOnVmAgent(
   const { createWorkspaceOnNode } = await import('../../services/node-agent');
   const callbackToken = await signCallbackToken(workspaceId, rc.env);
 
-  await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
+  const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,
     branch: state.config.branch,
@@ -237,6 +314,115 @@ async function createWorkspaceOnVmAgent(
     devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
     devcontainerCache: await getDevcontainerCacheForWorkspace(state, rc, workspaceId),
   });
+
+  if (!isWorkspaceDispatchAck(response, workspaceId)) {
+    throw Object.assign(
+      new Error(`Node Agent did not acknowledge workspace dispatch for ${workspaceId}`),
+      { permanent: true },
+    );
+  }
+}
+
+function isWorkspaceDispatchAck(response: unknown, workspaceId: string): boolean {
+  if (!response || typeof response !== 'object') {
+    return false;
+  }
+  const record = response as Record<string, unknown>;
+  return record.workspaceId === workspaceId;
+}
+
+export async function handleWorkspaceDispatch(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+): Promise<void> {
+  await rc.updateD1ExecutionStep(state.taskId, 'workspace_dispatch');
+
+  const nodeId = state.stepResults.nodeId;
+  const workspaceId = state.stepResults.workspaceId;
+  if (!nodeId || !workspaceId) {
+    throw new Error('workspace_dispatch requires nodeId and workspaceId');
+  }
+
+  const workspace = await rc.env.DATABASE.prepare(
+    `SELECT dispatched_at FROM workspaces WHERE id = ?`
+  ).bind(workspaceId).first<{ dispatched_at: string | null }>();
+  if (!workspace) {
+    throw Object.assign(new Error(`Workspace ${workspaceId} not found for dispatch`), {
+      permanent: true,
+    });
+  }
+
+  if (workspace.dispatched_at) {
+    state.workspaceDispatchAckedAt ??= Date.now();
+    await rc.ctx.storage.put('state', state);
+    await rc.advanceToStep(state, 'workspace_ready');
+    return;
+  }
+
+  const now = Date.now();
+  if (!state.workspaceDispatchStartedAt) {
+    state.workspaceDispatchStartedAt = now;
+  }
+
+  const timeoutMs = rc.getWorkspaceDispatchTimeoutMs();
+  const elapsedMs = now - state.workspaceDispatchStartedAt;
+  if (elapsedMs > timeoutMs) {
+    throw Object.assign(
+      new Error(`Workspace dispatch was not acknowledged by node agent within ${timeoutMs}ms`),
+      { permanent: true },
+    );
+  }
+
+  state.workspaceDispatchAttempts += 1;
+  state.workspaceDispatchLastAttemptAt = now;
+  await rc.ctx.storage.put('state', state);
+
+  try {
+    await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId);
+    const dispatchedAt = new Date().toISOString();
+    await rc.env.DATABASE.prepare(
+      `UPDATE workspaces SET dispatched_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(dispatchedAt, dispatchedAt, workspaceId).run();
+    state.workspaceDispatchAckedAt = Date.now();
+    state.workspaceDispatchLastError = null;
+    await rc.ctx.storage.put('state', state);
+    await rc.advanceToStep(state, 'workspace_ready');
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    state.workspaceDispatchLastError = errorMessage;
+    await rc.ctx.storage.put('state', state);
+
+    if (!isTransientError(err)) {
+      throw Object.assign(new Error(errorMessage), { permanent: true });
+    }
+
+    const dispatchStartedAt = state.workspaceDispatchStartedAt ?? Date.now();
+    const elapsedAfterAttemptMs = Date.now() - dispatchStartedAt;
+    const remainingMs = timeoutMs - elapsedAfterAttemptMs;
+    if (remainingMs <= 0) {
+      throw Object.assign(
+        new Error(`Workspace dispatch was not acknowledged by node agent within ${timeoutMs}ms. Last error: ${errorMessage}`),
+        { permanent: true },
+      );
+    }
+
+    const backoffMs = computeBackoffMs(
+      state.workspaceDispatchAttempts - 1,
+      rc.getWorkspaceDispatchBaseDelayMs(),
+      rc.getWorkspaceDispatchMaxDelayMs(),
+    );
+    const nextDelayMs = Math.min(backoffMs, remainingMs);
+    await rc.ctx.storage.setAlarm(Date.now() + nextDelayMs);
+
+    log.warn('task_runner_do.workspace_dispatch_retry_scheduled', {
+      taskId: state.taskId,
+      workspaceId,
+      nodeId,
+      attempts: state.workspaceDispatchAttempts,
+      backoffMs: nextDelayMs,
+      error: errorMessage,
+    });
+  }
 }
 
 async function getDevcontainerCacheForWorkspace(
@@ -269,6 +455,23 @@ export async function handleWorkspaceReady(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
 ): Promise<void> {
+  if (!state.stepResults.workspaceId) {
+    throw new Error('handleWorkspaceReady: workspaceId is null — cannot poll D1');
+  }
+
+  const dispatchRow = await rc.env.DATABASE.prepare(
+    `SELECT dispatched_at FROM workspaces WHERE id = ?`
+  ).bind(state.stepResults.workspaceId).first<{ dispatched_at: string | null }>();
+
+  if (dispatchRow && !dispatchRow.dispatched_at) {
+    log.warn('task_runner_do.workspace_ready_without_dispatch_ack', {
+      taskId: state.taskId,
+      workspaceId: state.stepResults.workspaceId,
+    });
+    await rc.advanceToStep(state, 'workspace_dispatch');
+    return;
+  }
+
   await rc.updateD1ExecutionStep(state.taskId, 'workspace_ready');
 
   // Initialize timeout tracking on first entry
@@ -300,9 +503,6 @@ export async function handleWorkspaceReady(
   // Poll D1 for workspace status — catches cases where the callback succeeded
   // (updating D1) but the DO notification failed, or where the VM agent retried
   // the callback via heartbeat after initial failures.
-  if (!state.stepResults.workspaceId) {
-    throw new Error('handleWorkspaceReady: workspaceId is null — cannot poll D1');
-  }
   const wsRow = await rc.env.DATABASE.prepare(
     `SELECT status, error_message FROM workspaces WHERE id = ?`
   ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();

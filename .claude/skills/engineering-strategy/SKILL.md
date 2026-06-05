@@ -14,7 +14,7 @@ Before creating any artifact, read:
 - `strategy/engineering/` for existing engineering docs
 - `strategy/competitive/feature-matrix.md` for feature gaps
 - `strategy/business/` for business priorities
-- `docs/adr/` for existing architecture decisions
+- `apps/www/src/content/docs/docs/architecture/` for public architecture documentation
 - `specs/` for feature specifications and status
 - `tasks/` for current backlog
 
@@ -38,7 +38,7 @@ Save to `strategy/engineering/`:
 - `roadmap.md` — Now/Next/Later with dependencies and business drivers
 - `tech-radar.md` — Technology assessments by quadrant and ring
 - `tech-debt.md` — Prioritized register with effort estimates
-- `adr/NNN-[title].md` — Architecture Decision Records (also consider `docs/adr/` for implemented decisions)
+- `adr/NNN-[title].md` — strategy-local architecture decision records; public architecture docs belong under `apps/www/src/content/docs/docs/architecture/`
 
 ## Prioritization Criteria
 

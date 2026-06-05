@@ -47,6 +47,16 @@ export async function updateWorkspace(
   });
 }
 
+export async function updateWorkspacePortsPublic(
+  id: string,
+  enabled: boolean
+): Promise<WorkspaceResponse> {
+  return request<WorkspaceResponse>(`/api/workspaces/${id}/ports-public`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export async function stopWorkspace(id: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/workspaces/${id}/stop`, {
     method: 'POST',

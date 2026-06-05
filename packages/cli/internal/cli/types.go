@@ -123,14 +123,14 @@ type TaskSubmitOptions struct {
 
 // Project represents a project in list responses.
 type Project struct {
-	ID                   string  `json:"id"`
-	Name                 string  `json:"name"`
-	Repository           string  `json:"repository,omitempty"`
-	RepoProvider         string  `json:"repoProvider,omitempty"`
-	Status               string  `json:"status,omitempty"`
-	LastActivityAt       *string `json:"lastActivityAt,omitempty"`
-	ActiveSessionCount   int     `json:"activeSessionCount,omitempty"`
-	ActiveWorkspaceCount int     `json:"activeWorkspaceCount,omitempty"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Repository           string `json:"repository,omitempty"`
+	RepoProvider         string `json:"repoProvider,omitempty"`
+	Status               string `json:"status,omitempty"`
+	LastActivityAt       any    `json:"lastActivityAt,omitempty"`
+	ActiveSessionCount   int    `json:"activeSessionCount,omitempty"`
+	ActiveWorkspaceCount int    `json:"activeWorkspaceCount,omitempty"`
 }
 
 // ProjectListResponse wraps a list of projects.
@@ -146,7 +146,7 @@ type ProjectDetail struct {
 	RepoProvider         string    `json:"repoProvider,omitempty"`
 	Status               string    `json:"status,omitempty"`
 	DefaultBranch        string    `json:"defaultBranch,omitempty"`
-	LastActivityAt       *string   `json:"lastActivityAt,omitempty"`
+	LastActivityAt       any       `json:"lastActivityAt,omitempty"`
 	ActiveSessionCount   int       `json:"activeSessionCount,omitempty"`
 	ActiveWorkspaceCount int       `json:"activeWorkspaceCount,omitempty"`
 	RecentSessions       []Session `json:"recentSessions,omitempty"`
@@ -158,8 +158,8 @@ type Session struct {
 	Topic         string  `json:"topic,omitempty"`
 	Status        string  `json:"status,omitempty"`
 	MessageCount  int     `json:"messageCount,omitempty"`
-	StartedAt     *string `json:"startedAt,omitempty"`
-	LastMessageAt *string `json:"lastMessageAt,omitempty"`
+	StartedAt     any     `json:"startedAt,omitempty"`
+	LastMessageAt any     `json:"lastMessageAt,omitempty"`
 	Attention     *string `json:"attention,omitempty"`
 	TaskID        string  `json:"taskId,omitempty"`
 }
@@ -171,25 +171,27 @@ type SessionListResponse struct {
 
 // Message represents a chat message.
 type Message struct {
-	ID        string  `json:"id"`
-	Role      string  `json:"role,omitempty"`
-	Content   string  `json:"content,omitempty"`
-	CreatedAt *string `json:"createdAt,omitempty"`
+	ID        string `json:"id"`
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	CreatedAt any    `json:"createdAt,omitempty"`
 }
 
-// MessageListResponse wraps a list of messages.
-type MessageListResponse struct {
-	Messages []Message `json:"messages"`
+type SessionDetailResponse struct {
+	Session  Session        `json:"session"`
+	Messages []Message      `json:"messages"`
+	HasMore  bool           `json:"hasMore"`
+	State    map[string]any `json:"state,omitempty"`
 }
 
 // Idea represents a draft task (idea).
 type Idea struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title,omitempty"`
-	Status    string  `json:"status,omitempty"`
-	Priority  int     `json:"priority,omitempty"`
-	CreatedAt *string `json:"createdAt,omitempty"`
-	UpdatedAt *string `json:"updatedAt,omitempty"`
+	ID        string `json:"id"`
+	Title     string `json:"title,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Priority  int    `json:"priority,omitempty"`
+	CreatedAt any    `json:"createdAt,omitempty"`
+	UpdatedAt any    `json:"updatedAt,omitempty"`
 }
 
 // IdeaListResponse wraps a list of ideas.
@@ -199,24 +201,31 @@ type IdeaListResponse struct {
 
 // LibraryFile represents a file in the project library.
 type LibraryFile struct {
-	ID         string  `json:"id"`
-	Filename   string  `json:"filename,omitempty"`
-	Size       int64   `json:"size,omitempty"`
-	Source     string  `json:"source,omitempty"`
-	UploadedAt *string `json:"uploadedAt,omitempty"`
+	ID           string `json:"id"`
+	Filename     string `json:"filename,omitempty"`
+	Directory    string `json:"directory,omitempty"`
+	SizeBytes    int64  `json:"sizeBytes,omitempty"`
+	UploadSource string `json:"uploadSource,omitempty"`
+	Status       string `json:"status,omitempty"`
+	CreatedAt    any    `json:"createdAt,omitempty"`
+	UpdatedAt    any    `json:"updatedAt,omitempty"`
 }
 
 // LibraryListResponse wraps a list of library files.
 type LibraryListResponse struct {
-	Files []LibraryFile `json:"files"`
+	Files  []LibraryFile `json:"files"`
+	Cursor *string       `json:"cursor,omitempty"`
+	Total  int           `json:"total,omitempty"`
 }
 
 // KnowledgeEntity represents a knowledge graph entity.
 type KnowledgeEntity struct {
-	EntityName       string `json:"entityName"`
+	ID               string `json:"id,omitempty"`
+	Name             string `json:"name"`
 	EntityType       string `json:"entityType,omitempty"`
 	ObservationCount int    `json:"observationCount,omitempty"`
-	UpdatedAt        string `json:"updatedAt,omitempty"`
+	CreatedAt        any    `json:"createdAt,omitempty"`
+	UpdatedAt        any    `json:"updatedAt,omitempty"`
 }
 
 // KnowledgeListResponse wraps a list of knowledge entities.
@@ -226,25 +235,31 @@ type KnowledgeListResponse struct {
 
 // Notification represents a user notification.
 type Notification struct {
-	ID        string  `json:"id"`
-	Type      string  `json:"type,omitempty"`
-	Title     string  `json:"title,omitempty"`
-	Read      bool    `json:"read"`
-	CreatedAt *string `json:"createdAt,omitempty"`
+	ID          string  `json:"id"`
+	Type        string  `json:"type,omitempty"`
+	Title       string  `json:"title,omitempty"`
+	Read        bool    `json:"read,omitempty"`
+	ReadAt      *string `json:"readAt,omitempty"`
+	DismissedAt *string `json:"dismissedAt,omitempty"`
+	CreatedAt   any     `json:"createdAt,omitempty"`
 }
 
 // NotificationListResponse wraps a list of notifications.
 type NotificationListResponse struct {
 	Notifications []Notification `json:"notifications"`
+	UnreadCount   int            `json:"unreadCount,omitempty"`
+	NextCursor    *string        `json:"nextCursor,omitempty"`
 }
 
 // Trigger represents a project trigger.
 type Trigger struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name,omitempty"`
-	Schedule string  `json:"schedule,omitempty"`
-	Status   string  `json:"status,omitempty"`
-	NextRun  *string `json:"nextRun,omitempty"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name,omitempty"`
+	Status            string  `json:"status,omitempty"`
+	SourceType        string  `json:"sourceType,omitempty"`
+	CronExpression    *string `json:"cronExpression,omitempty"`
+	CronHumanReadable string  `json:"cronHumanReadable,omitempty"`
+	NextFireAt        any     `json:"nextFireAt,omitempty"`
 }
 
 // TriggerListResponse wraps a list of triggers.
@@ -254,24 +269,25 @@ type TriggerListResponse struct {
 
 // AgentProfile represents an agent profile.
 type AgentProfile struct {
-	ID        string `json:"id"`
-	Name      string `json:"name,omitempty"`
-	AgentType string `json:"agentType,omitempty"`
-	VMSize    string `json:"vmSize,omitempty"`
-	TaskMode  string `json:"taskMode,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name,omitempty"`
+	AgentType      string `json:"agentType,omitempty"`
+	VMSize         string `json:"vmSize,omitempty"`
+	VMSizeOverride string `json:"vmSizeOverride,omitempty"`
+	TaskMode       string `json:"taskMode,omitempty"`
 }
 
 // ProfileListResponse wraps a list of agent profiles.
 type ProfileListResponse struct {
-	Profiles []AgentProfile `json:"profiles"`
+	Items []AgentProfile `json:"items"`
 }
 
 // ActivityEvent represents a project activity event.
 type ActivityEvent struct {
-	ID        string  `json:"id"`
-	Type      string  `json:"type,omitempty"`
-	Summary   string  `json:"summary,omitempty"`
-	CreatedAt *string `json:"createdAt,omitempty"`
+	ID        string         `json:"id"`
+	EventType string         `json:"eventType,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	CreatedAt any            `json:"createdAt,omitempty"`
 }
 
 // ActivityListResponse wraps a list of activity events.
@@ -281,13 +297,14 @@ type ActivityListResponse struct {
 
 // Node represents an infrastructure node.
 type Node struct {
-	ID             string `json:"id"`
-	Provider       string `json:"provider,omitempty"`
-	VMSize         string `json:"vmSize,omitempty"`
-	Location       string `json:"location,omitempty"`
-	Status         string `json:"status,omitempty"`
-	IP             string `json:"ip,omitempty"`
-	WorkspaceCount int    `json:"workspaceCount,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	CloudProvider string `json:"cloudProvider,omitempty"`
+	VMSize        string `json:"vmSize,omitempty"`
+	VMLocation    string `json:"vmLocation,omitempty"`
+	Status        string `json:"status,omitempty"`
+	HealthStatus  string `json:"healthStatus,omitempty"`
+	IPAddress     string `json:"ipAddress,omitempty"`
 }
 
 // NodeListResponse wraps a list of nodes.

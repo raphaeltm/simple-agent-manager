@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 const apiProjectsPath = "/api/projects/"
@@ -134,9 +135,9 @@ func (c APIClient) ListSessions(ctx context.Context, projectID string) (SessionL
 	return response, err
 }
 
-func (c APIClient) GetSessionMessages(ctx context.Context, projectID string, sessionID string) (MessageListResponse, error) {
-	var response MessageListResponse
-	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions", sessionID, "messages"), nil, &response)
+func (c APIClient) GetSessionDetail(ctx context.Context, projectID string, sessionID string) (SessionDetailResponse, error) {
+	var response SessionDetailResponse
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions", sessionID), nil, &response)
 	return response, err
 }
 
@@ -146,9 +147,13 @@ func (c APIClient) ListIdeas(ctx context.Context, projectID string) (IdeaListRes
 	return response, err
 }
 
-func (c APIClient) ListLibraryFiles(ctx context.Context, projectID string) (LibraryListResponse, error) {
+func (c APIClient) ListLibraryFiles(ctx context.Context, projectID string, recursive bool) (LibraryListResponse, error) {
 	var response LibraryListResponse
-	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID, "library"), nil, &response)
+	path := projectAPIPath(projectID, "library")
+	if recursive {
+		path += "?" + url.Values{"recursive": {"true"}}.Encode()
+	}
+	err := c.request(ctx, http.MethodGet, path, nil, &response)
 	return response, err
 }
 
@@ -183,9 +188,9 @@ func (c APIClient) ListActivity(ctx context.Context, projectID string) (Activity
 }
 
 func (c APIClient) ListNodes(ctx context.Context) (NodeListResponse, error) {
-	var response NodeListResponse
-	err := c.request(ctx, http.MethodGet, "/api/nodes", nil, &response)
-	return response, err
+	var nodes []Node
+	err := c.request(ctx, http.MethodGet, "/api/nodes", nil, &nodes)
+	return NodeListResponse{Nodes: nodes}, err
 }
 
 func projectAPIPath(projectID string, segments ...string) string {
@@ -238,9 +243,44 @@ func doJSON(ctx context.Context, httpClient HTTPDoer, method string, endpoint st
 		return nil
 	}
 	if err := json.Unmarshal(content, out); err != nil {
-		return APIError{Status: response.StatusCode, Code: "INVALID_JSON", Message: "SAM API returned invalid JSON"}
+		return APIError{
+			Status: response.StatusCode,
+			Code:   "INVALID_JSON",
+			Message: fmt.Sprintf(
+				"SAM API returned invalid JSON for %s %s (status %d): %v",
+				method,
+				safeEndpointPath(endpoint),
+				response.StatusCode,
+				err,
+			),
+		}
 	}
 	return nil
+}
+
+func safeEndpointPath(endpoint string) string {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	if parsed.RawQuery == "" {
+		return parsed.EscapedPath()
+	}
+	query := parsed.Query()
+	for key := range query {
+		if isSensitiveQueryKey(key) {
+			query.Set(key, "REDACTED")
+		}
+	}
+	return parsed.EscapedPath() + "?" + query.Encode()
+}
+
+func isSensitiveQueryKey(key string) bool {
+	normalized := strings.ToLower(key)
+	return strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "cookie") ||
+		strings.Contains(normalized, "secret") ||
+		strings.Contains(normalized, "session")
 }
 
 func parseAPIError(status int, content []byte) error {

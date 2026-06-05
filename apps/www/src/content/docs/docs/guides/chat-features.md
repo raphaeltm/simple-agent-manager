@@ -64,8 +64,6 @@ Click the microphone button to speak your message instead of typing. SAM transcr
 **Limits:**
 
 - Maximum audio file size: 10 MB
-- Maximum recording duration: 60 seconds
-- Rate limit: 30 transcriptions per minute
 
 ## Text-to-Speech Playback
 
@@ -73,7 +71,7 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 - Audio is generated on-demand and cached in R2 for subsequent playback
 - Configurable voice: `luna` by default (via `TTS_SPEAKER`)
-- Maximum text length: 10,000 characters per synthesis
+- Maximum text length: 100,000 characters per synthesis
 - Output format: MP3
 - **Persistent player** — audio continues playing as you navigate between pages
 
@@ -127,13 +125,9 @@ SAM indexes chat messages for full-text search. When a session ends, streaming t
 
 Agents can search messages using the `search_messages` MCP tool.
 
-## Session Suspend and Resume
+## Session Lifecycle
 
-Agent sessions can be suspended and resumed:
-
-- **Auto-suspend**: Idle sessions are suspended after 30 minutes of inactivity (configurable via `ACP_IDLE_SUSPEND_TIMEOUT`)
-- **Manual resume**: Click on a suspended session tab to resume it
-- Suspended sessions show with reduced opacity in the UI
+Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped. The VM agent currently disables automatic idle suspension for these sessions.
 
 ## Command Palette
 

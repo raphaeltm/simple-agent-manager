@@ -1,20 +1,27 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const maxTableCellWidth = 120
 
 // PrintTable writes an aligned text table with headers.
 func PrintTable(w io.Writer, headers []string, rows [][]string) {
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		headers[i] = SanitizeTableCell(h)
+		widths[i] = len(headers[i])
 	}
 	for _, row := range rows {
 		for i := 0; i < len(row) && i < len(widths); i++ {
+			row[i] = SanitizeTableCell(row[i])
 			if len(row[i]) > widths[i] {
 				widths[i] = len(row[i])
 			}
@@ -25,6 +32,21 @@ func PrintTable(w io.Writer, headers []string, rows [][]string) {
 	for _, row := range rows {
 		writeRow(w, row, widths)
 	}
+}
+
+func SanitizeTableCell(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	sanitized := strings.Join(fields, " ")
+	if len(sanitized) <= maxTableCellWidth {
+		return sanitized
+	}
+	if maxTableCellWidth <= 1 {
+		return sanitized[:maxTableCellWidth]
+	}
+	return sanitized[:maxTableCellWidth-3] + "..."
 }
 
 func writeRow(w io.Writer, cells []string, widths []int) {
@@ -63,6 +85,35 @@ func FormatRelativeTime(timestamp string) string {
 		}
 	}
 	return RelativeTime(time.Since(t))
+}
+
+// FormatAnyTimestamp handles the mixed timestamp formats used by the API:
+// some fields send RFC3339 strings, others send Unix milliseconds as JSON numbers.
+// encoding/json always decodes JSON numbers into float64 when the target is any.
+func FormatAnyTimestamp(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return FormatRelativeTime(v)
+	case float64:
+		return FormatUnixTimestamp(v)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func FormatUnixTimestamp(value float64) string {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return ""
+	}
+	seconds := int64(value)
+	nanos := int64(0)
+	if value > 1_000_000_000_000 {
+		seconds = int64(value / 1000)
+		nanos = int64(math.Mod(value, 1000)) * int64(time.Millisecond)
+	}
+	return RelativeTime(time.Since(time.Unix(seconds, nanos)))
 }
 
 // RelativeTime formats a duration as a human-readable relative string.
@@ -106,4 +157,26 @@ func or(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func stringFromAny(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case float64:
+		if v == math.Trunc(v) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(v)
+	default:
+		content, err := json.Marshal(v)
+		if err == nil {
+			return string(content)
+		}
+		return fmt.Sprint(v)
+	}
 }

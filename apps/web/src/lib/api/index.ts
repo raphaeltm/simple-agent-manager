@@ -306,4 +306,5 @@ export {
   stopWorkspace,
   suspendAgentSession,
   updateWorkspace,
+  updateWorkspacePortsPublic,
 } from './workspaces';

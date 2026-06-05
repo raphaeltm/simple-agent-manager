@@ -99,7 +99,6 @@ describe('resolveSkillProfile', () => {
   it('lets skill fields override profile fields and concatenates system prompt append', async () => {
     const db = createMockDB();
     db._pushResult([makeSkill()]);
-    db._pushResult([{ id: 'builtin' }]);
     db._pushResult([makeProfile()]);
 
     const resolved = await resolveSkillProfile(
@@ -123,7 +122,6 @@ describe('resolveSkillProfile', () => {
   it('keeps profile values when the skill leaves a field unset', async () => {
     const db = createMockDB();
     db._pushResult([makeSkill({ model: null, vmSizeOverride: null, systemPromptAppend: null })]);
-    db._pushResult([{ id: 'builtin' }]);
     db._pushResult([makeProfile()]);
 
     const resolved = await resolveSkillProfile(

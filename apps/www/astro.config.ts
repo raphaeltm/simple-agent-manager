@@ -1,7 +1,6 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
-
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
@@ -63,6 +62,8 @@ export default defineConfig({
             { slug: 'docs/reference/api' },
             { slug: 'docs/reference/vm-agent' },
             { slug: 'docs/reference/configuration' },
+            { slug: 'docs/reference/contributing' },
+            { slug: 'docs/reference/roadmap' },
           ],
         },
       ],
@@ -85,6 +86,10 @@ export default defineConfig({
             'data-api': `https://api.${process.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org'}/api/t`,
             defer: true,
           },
+        },
+        {
+          tag: 'script',
+          attrs: { type: 'module', src: '/scripts/docs-mermaid.js' },
         },
       ],
       disable404Route: true,

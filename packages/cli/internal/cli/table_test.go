@@ -27,6 +27,20 @@ func TestPrintTable(t *testing.T) {
 	}
 }
 
+func TestPrintTableSanitizesMultilineCells(t *testing.T) {
+	var sb strings.Builder
+	PrintTable(&sb, []string{"ID", "TITLE"}, [][]string{{"1", "first line\nsecond\tline"}})
+
+	output := strings.TrimRight(sb.String(), "\n")
+	lines := strings.Split(output, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %s", len(lines), output)
+	}
+	if !strings.Contains(lines[1], "first line second line") {
+		t.Fatalf("row = %s", lines[1])
+	}
+}
+
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
 		input string
@@ -64,6 +78,13 @@ func TestRelativeTime(t *testing.T) {
 	}
 }
 
+func TestFormatAnyTimestampHandlesNumericMilliseconds(t *testing.T) {
+	got := FormatAnyTimestamp(float64(time.Now().Add(-2 * time.Hour).UnixMilli()))
+	if got != "2h ago" {
+		t.Fatalf("FormatAnyTimestamp numeric milliseconds = %q", got)
+	}
+}
+
 func TestFormatSize(t *testing.T) {
 	tests := []struct {
 		bytes int64
@@ -94,4 +115,3 @@ func TestOr(t *testing.T) {
 		t.Errorf("or('  ', fallback) = %q", got)
 	}
 }
-

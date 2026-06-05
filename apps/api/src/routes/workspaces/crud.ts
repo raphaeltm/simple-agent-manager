@@ -11,7 +11,7 @@ import { ulid } from '../../lib/ulid';
 import { getAuth, getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
-import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspaceSchema } from '../../schemas';
+import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspacePortsPublicSchema, UpdateWorkspaceSchema } from '../../schemas';
 import { startComputeTracking, stopComputeTracking } from '../../services/compute-usage';
 import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
@@ -121,6 +121,30 @@ crudRoutes.get('/:id/ports', requireAuth(), requireApproved(), async (c) => {
 
   const result = await getWorkspacePortsOnNode(workspace.nodeId, workspaceId, c.env, userId);
   return c.json(result);
+});
+
+crudRoutes.patch('/:id/ports-public', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspacePortsPublicSchema), async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const body = c.req.valid('json');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await getOwnedWorkspace(db, workspaceId, userId);
+
+  const [updated] = await db
+    .update(schema.workspaces)
+    .set({
+      portsPublicEnabled: body.enabled,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
+    .returning();
+
+  if (!updated) {
+    throw errors.notFound('Workspace not found');
+  }
+
+  return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
 });
 
 crudRoutes.patch('/:id', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspaceSchema), async (c) => {

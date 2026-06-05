@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -27,9 +28,7 @@ func runListProjects(ctx context.Context, runtime Runtime, parsed parsedArgs) in
 	var rows [][]string
 	for _, p := range response.Projects {
 		activity := ""
-		if p.LastActivityAt != nil {
-			activity = FormatRelativeTime(*p.LastActivityAt)
-		}
+		activity = FormatAnyTimestamp(p.LastActivityAt)
 		rows = append(rows, []string{
 			TruncateID(p.ID),
 			p.Name,
@@ -137,10 +136,10 @@ func runStatus(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 			if s.Status != "active" && s.Status != "running" {
 				continue
 			}
-			topic := or(s.Topic, "(no topic)")
+			topic := SanitizeTableCell(or(s.Topic, "(no topic)"))
 			lastMsg := "—"
-			if s.LastMessageAt != nil {
-				lastMsg = FormatRelativeTime(*s.LastMessageAt)
+			if formatted := FormatAnyTimestamp(s.LastMessageAt); formatted != "" {
+				lastMsg = formatted
 			}
 			fmt.Fprintf(&sb, "  %s  %s  %s\n", TruncateID(s.ID), topic, lastMsg)
 			count++
@@ -170,8 +169,8 @@ func runChatList(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	var rows [][]string
 	for _, s := range response.Sessions {
 		lastMsg := "—"
-		if s.LastMessageAt != nil {
-			lastMsg = FormatRelativeTime(*s.LastMessageAt)
+		if formatted := FormatAnyTimestamp(s.LastMessageAt); formatted != "" {
+			lastMsg = formatted
 		}
 		rows = append(rows, []string{
 			TruncateID(s.ID),
@@ -220,7 +219,7 @@ func runChatView(ctx context.Context, runtime Runtime, parsed parsedArgs, sessio
 	if resolveErr != nil {
 		return fail(runtime.Stderr, resolveErr)
 	}
-	response, err := client.GetSessionMessages(ctx, projectID, sessionID)
+	response, err := client.GetSessionDetail(ctx, projectID, sessionID)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -237,8 +236,8 @@ func runChatView(ctx context.Context, runtime Runtime, parsed parsedArgs, sessio
 			role = "unknown"
 		}
 		ts := ""
-		if m.CreatedAt != nil {
-			ts = " (" + FormatRelativeTime(*m.CreatedAt) + ")"
+		if formatted := FormatAnyTimestamp(m.CreatedAt); formatted != "" {
+			ts = " (" + formatted + ")"
 		}
 		fmt.Fprintf(&sb, "[%s]%s\n%s", role, ts, m.Content)
 	}
@@ -265,8 +264,8 @@ func runIdeas(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	var rows [][]string
 	for _, idea := range response.Tasks {
 		created := "—"
-		if idea.CreatedAt != nil {
-			created = FormatRelativeTime(*idea.CreatedAt)
+		if formatted := FormatAnyTimestamp(idea.CreatedAt); formatted != "" {
+			created = formatted
 		}
 		rows = append(rows, []string{
 			TruncateID(idea.ID),
@@ -289,29 +288,37 @@ func runLibrary(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	if resolveErr != nil {
 		return fail(runtime.Stderr, resolveErr)
 	}
-	response, err := client.ListLibraryFiles(ctx, projectID)
+	recursive := parsed.Bools["recursive"] || parsed.Bools["all"]
+	response, err := client.ListLibraryFiles(ctx, projectID, recursive)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
 	if len(response.Files) == 0 {
-		return writeOrFail(runtime, parsed.Globals.JSON, "No library files found", response)
+		message := "No library files found"
+		if !recursive {
+			message = "No library files found in / (use --recursive or --all to include subdirectories)"
+		}
+		return writeOrFail(runtime, parsed.Globals.JSON, message, response)
 	}
-	headers := []string{"ID", "FILENAME", "SIZE", "SOURCE", "UPLOADED"}
+	headers := []string{"ID", "PATH", "SIZE", "SOURCE", "UPLOADED"}
 	var rows [][]string
 	for _, f := range response.Files {
 		uploaded := "—"
-		if f.UploadedAt != nil {
-			uploaded = FormatRelativeTime(*f.UploadedAt)
+		if formatted := FormatAnyTimestamp(f.CreatedAt); formatted != "" {
+			uploaded = formatted
 		}
 		rows = append(rows, []string{
 			TruncateID(f.ID),
-			or(f.Filename, "—"),
-			FormatSize(f.Size),
-			or(f.Source, "—"),
+			libraryPath(f),
+			FormatSize(f.SizeBytes),
+			or(f.UploadSource, "—"),
 			uploaded,
 		})
 	}
 	var sb strings.Builder
+	if !recursive {
+		sb.WriteString("Library files in / (use --recursive or --all to include subdirectories)\n")
+	}
 	PrintTable(&sb, headers, rows)
 	return writeOrFail(runtime, parsed.Globals.JSON, strings.TrimRight(sb.String(), "\n"), response)
 }
@@ -335,11 +342,15 @@ func runContext(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	headers := []string{"ENTITY", "TYPE", "OBSERVATIONS", "UPDATED"}
 	var rows [][]string
 	for _, e := range response.Entities {
+		updated := "—"
+		if formatted := FormatAnyTimestamp(e.UpdatedAt); formatted != "" {
+			updated = formatted
+		}
 		rows = append(rows, []string{
-			e.EntityName,
+			e.Name,
 			or(e.EntityType, "—"),
 			fmt.Sprintf("%d", e.ObservationCount),
-			or(e.UpdatedAt, "—"),
+			updated,
 		})
 	}
 	var sb strings.Builder
@@ -363,12 +374,12 @@ func runNotifications(ctx context.Context, runtime Runtime, parsed parsedArgs) i
 	var rows [][]string
 	for _, n := range response.Notifications {
 		read := "no"
-		if n.Read {
+		if n.Read || n.ReadAt != nil {
 			read = "yes"
 		}
 		created := "—"
-		if n.CreatedAt != nil {
-			created = FormatRelativeTime(*n.CreatedAt)
+		if formatted := FormatAnyTimestamp(n.CreatedAt); formatted != "" {
+			created = formatted
 		}
 		rows = append(rows, []string{
 			TruncateID(n.ID),
@@ -403,13 +414,20 @@ func runTriggers(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	var rows [][]string
 	for _, t := range response.Triggers {
 		nextRun := "—"
-		if t.NextRun != nil {
-			nextRun = FormatRelativeTime(*t.NextRun)
+		if formatted := FormatAnyTimestamp(t.NextFireAt); formatted != "" {
+			nextRun = formatted
+		}
+		schedule := t.CronHumanReadable
+		if schedule == "" && t.CronExpression != nil {
+			schedule = *t.CronExpression
+		}
+		if schedule == "" {
+			schedule = t.SourceType
 		}
 		rows = append(rows, []string{
 			TruncateID(t.ID),
 			or(t.Name, "—"),
-			or(t.Schedule, "—"),
+			or(schedule, "—"),
 			or(t.Status, "—"),
 			nextRun,
 		})
@@ -432,17 +450,17 @@ func runProfiles(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if len(response.Profiles) == 0 {
+	if len(response.Items) == 0 {
 		return writeOrFail(runtime, parsed.Globals.JSON, "No agent profiles found", response)
 	}
 	headers := []string{"ID", "NAME", "AGENT", "VM SIZE", "MODE"}
 	var rows [][]string
-	for _, p := range response.Profiles {
+	for _, p := range response.Items {
 		rows = append(rows, []string{
 			TruncateID(p.ID),
 			or(p.Name, "—"),
 			or(p.AgentType, "—"),
-			or(p.VMSize, "—"),
+			or(or(p.VMSizeOverride, p.VMSize), "—"),
 			or(p.TaskMode, "—"),
 		})
 	}
@@ -471,13 +489,13 @@ func runActivity(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	var rows [][]string
 	for _, e := range response.Events {
 		when := "—"
-		if e.CreatedAt != nil {
-			when = FormatRelativeTime(*e.CreatedAt)
+		if formatted := FormatAnyTimestamp(e.CreatedAt); formatted != "" {
+			when = formatted
 		}
 		rows = append(rows, []string{
 			TruncateID(e.ID),
-			or(e.Type, "—"),
-			or(e.Summary, "—"),
+			or(e.EventType, "—"),
+			or(activitySummary(e.Payload), "—"),
 			when,
 		})
 	}
@@ -498,22 +516,51 @@ func runNodes(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	if len(response.Nodes) == 0 {
 		return writeOrFail(runtime, parsed.Globals.JSON, "No nodes found", response)
 	}
-	headers := []string{"ID", "PROVIDER", "SIZE", "LOCATION", "STATUS", "IP", "WORKSPACES"}
+	headers := []string{"ID", "PROVIDER", "SIZE", "LOCATION", "STATUS", "IP"}
 	var rows [][]string
 	for _, n := range response.Nodes {
 		rows = append(rows, []string{
 			TruncateID(n.ID),
-			or(n.Provider, "—"),
+			or(n.CloudProvider, "—"),
 			or(n.VMSize, "—"),
-			or(n.Location, "—"),
+			or(n.VMLocation, "—"),
 			or(n.Status, "—"),
-			or(n.IP, "—"),
-			fmt.Sprintf("%d", n.WorkspaceCount),
+			or(n.IPAddress, "—"),
 		})
 	}
 	var sb strings.Builder
 	PrintTable(&sb, headers, rows)
 	return writeOrFail(runtime, parsed.Globals.JSON, strings.TrimRight(sb.String(), "\n"), response)
+}
+
+func libraryPath(file LibraryFile) string {
+	directory := file.Directory
+	if directory == "" || directory == "/" {
+		return or(file.Filename, "—")
+	}
+	return strings.TrimRight(directory, "/") + "/" + or(file.Filename, "—")
+}
+
+func activitySummary(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	for _, key := range []string{"summary", "title", "message", "workspaceName", "taskTitle", "sessionTopic"} {
+		if value := stringFromAny(payload[key]); value != "" {
+			return value
+		}
+	}
+	parts := make([]string, 0, len(payload))
+	for key, value := range payload {
+		if rendered := stringFromAny(value); rendered != "" {
+			parts = append(parts, fmt.Sprintf("%s=%s", key, rendered))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, " ")
 }
 
 // authenticatedClientWithConfig returns both the API client and the raw config

@@ -17,7 +17,7 @@ Start GitHub OAuth flow. Redirects to GitHub for authorization.
 ### `POST /api/auth/sign-out`
 End the current session.
 
-### `GET /api/auth/get-session`
+### `GET /api/auth/session`
 Returns the current authenticated session and user info.
 
 ## Workspaces
@@ -96,15 +96,15 @@ Add or update a credential (cloud provider token or agent API key).
 ### `GET /api/credentials`
 List all credentials for the authenticated user (tokens are not returned).
 
-### `DELETE /api/credentials/:id`
-Delete a stored credential.
+### `DELETE /api/credentials/:provider`
+Delete a stored cloud-provider credential.
 
 ## GitHub
 
 ### `GET /api/github/installations`
 List GitHub App installations for the authenticated user.
 
-### `GET /api/github/installations/:id/repos`
+### `GET /api/github/repositories?installation_id=:id`
 List repositories accessible through a GitHub App installation.
 
 ### `GET /api/github/callback`
@@ -122,7 +122,17 @@ Create a new project linked to a GitHub repository.
 Get project details.
 
 ### `POST /api/projects/:id/tasks`
-Submit an idea for autonomous execution.
+Create a task record.
+
+**Body:**
+```json
+{
+  "title": "Fix the login button"
+}
+```
+
+### `POST /api/projects/:id/tasks/submit`
+Submit an idea for autonomous execution. This is the chat-first path used by the web app; it creates the task, records the first message, and starts execution.
 
 **Body:**
 ```json

@@ -6,7 +6,7 @@ This rule applies when a feature involves the **browser making direct HTTP reque
 
 ## Why This Rule Exists
 
-The R2 file upload feature (PR #554) shipped with working presigned URL generation, passing unit tests, and a functional API — but the feature was completely broken because the R2 bucket had no CORS configuration. The browser silently blocked every upload. See `docs/notes/2026-03-30-r2-cors-upload-failure-postmortem.md`.
+The R2 file upload feature (PR #554) shipped with working presigned URL generation, passing unit tests, and a functional API — but the feature was completely broken because the R2 bucket had no CORS configuration. The browser silently blocked every upload. See the retained incident lesson in this rule.
 
 ## Required Steps
 

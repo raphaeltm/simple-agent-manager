@@ -1,6 +1,7 @@
 import type {
   AgentProfile,
   CreateAgentProfileRequest,
+  GitHubCliPolicy,
   ResolvedAgentProfile,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
@@ -21,130 +22,56 @@ import {
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 /** Env vars used by agent profile service */
-type ProfileEnv = Pick<Env,
-  | 'DEFAULT_TASK_AGENT_TYPE'
-  | 'BUILTIN_PROFILE_SONNET_MODEL'
-  | 'BUILTIN_PROFILE_OPUS_MODEL'
->;
+type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
-const DEFAULT_SONNET_MODEL = 'claude-sonnet-4-5-20250929';
-const DEFAULT_OPUS_MODEL = 'claude-opus-4-6';
+function parseGitHubCliPolicy(raw: string | null): GitHubCliPolicy | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as GitHubCliPolicy;
+    if (
+      parsed &&
+      (parsed.mode === 'inherit' || parsed.mode === 'custom') &&
+      parsed.repositoryScope === 'project' &&
+      parsed.permissions &&
+      (parsed.permissions.contents === 'read' || parsed.permissions.contents === 'write')
+    ) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
-/** Built-in profile definitions seeded on first access. Models are configurable via env vars. */
-function getBuiltinProfiles(env: ProfileEnv) {
-  const sonnetModel = env.BUILTIN_PROFILE_SONNET_MODEL || DEFAULT_SONNET_MODEL;
-  const opusModel = env.BUILTIN_PROFILE_OPUS_MODEL || DEFAULT_OPUS_MODEL;
-
-  return [
-    {
-      name: 'default',
-      description: 'General-purpose coding agent',
-      agentType: 'claude-code',
-      model: sonnetModel,
-      permissionMode: 'acceptEdits',
-    },
-    {
-      name: 'planner',
-      description: 'Task decomposition and architecture planning',
-      agentType: 'claude-code',
-      model: opusModel,
-      permissionMode: 'plan',
-      systemPromptAppend: 'Decompose tasks. Do not write code directly.',
-    },
-    {
-      name: 'implementer',
-      description: 'Feature implementation with tests',
-      agentType: 'claude-code',
-      model: sonnetModel,
-      permissionMode: 'acceptEdits',
-      systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
-    },
-    {
-      name: 'reviewer',
-      description: 'Code review for correctness, security, and style',
-      agentType: 'claude-code',
-      model: opusModel,
-      permissionMode: 'plan',
-      systemPromptAppend: 'Review code for correctness, security, and style.',
-    },
-  ];
+function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): string | null {
+  if (!policy || policy.mode === 'inherit') return null;
+  return JSON.stringify(policy);
 }
 
 /** Convert a DB row to an API response */
 function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
-  return toBaseProfileFields(row);
-}
-
-/**
- * Seed built-in profiles for a project if they don't already exist.
- * Built-in profiles have is_builtin = 1 and are owned by the project owner.
- */
-export async function seedBuiltinProfiles(
-  db: Db,
-  projectId: string,
-  userId: string,
-  env: ProfileEnv
-): Promise<void> {
-  // Check if any built-in profiles already exist for this project.
-  // If ANY exist, skip all seeding — built-ins are a one-time seed per project.
-  // This allows users to rename or delete individual built-ins without
-  // triggering re-creation. If all built-ins are deleted, they will be
-  // re-seeded on next access.
-  const existing = await db
-    .select({ id: schema.agentProfiles.id })
-    .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.isBuiltin, 1)
-      )
-    );
-
-  if (existing.length > 0) {
-    return;
-  }
-
-  const builtinProfiles = getBuiltinProfiles(env);
-
-  for (const profile of builtinProfiles) {
-    await db.insert(schema.agentProfiles).values({
-      id: ulid(),
-      projectId,
-      userId,
-      name: profile.name,
-      description: profile.description,
-      agentType: profile.agentType,
-      model: profile.model,
-      permissionMode: profile.permissionMode,
-      systemPromptAppend: 'systemPromptAppend' in profile ? profile.systemPromptAppend : null,
-      isBuiltin: 1,
-    });
-  }
+  return {
+    ...toBaseProfileFields(row),
+    githubCliPolicy: parseGitHubCliPolicy(row.githubCliPolicy),
+  };
 }
 
 /**
  * List all profiles for a project (project-scoped + global).
- * Seeds built-in profiles on first access if none exist.
  */
 export async function listProfiles(
   db: Db,
   projectId: string,
   userId: string,
-  env: ProfileEnv
+  _env: ProfileEnv
 ): Promise<AgentProfile[]> {
-  // Seed built-in profiles on first access
-  await seedBuiltinProfiles(db, projectId, userId, env);
-
   const rows = await db
     .select()
     .from(schema.agentProfiles)
     .where(
       or(
         eq(schema.agentProfiles.projectId, projectId),
-        and(
-          isNull(schema.agentProfiles.projectId),
-          eq(schema.agentProfiles.userId, userId)
-        )
+        and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
       )
     )
     .orderBy(schema.agentProfiles.name);
@@ -167,10 +94,7 @@ export async function getProfile(
         eq(schema.agentProfiles.id, profileId),
         or(
           eq(schema.agentProfiles.projectId, projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
+          and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
         )
       )
     )
@@ -205,12 +129,7 @@ export async function createProfile(
   const existing = await db
     .select({ id: schema.agentProfiles.id })
     .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.name, name)
-      )
-    )
+    .where(and(eq(schema.agentProfiles.projectId, projectId), eq(schema.agentProfiles.name, name)))
     .limit(1);
 
   if (existing.length > 0) {
@@ -225,6 +144,7 @@ export async function createProfile(
     name,
     ...baseProfileInsertValues(body, env),
     taskMode: body.taskMode ?? null,
+    githubCliPolicy: serializeGitHubCliPolicy(body.githubCliPolicy),
     isBuiltin: 0,
   });
 
@@ -258,10 +178,7 @@ export async function updateProfile(
         .select({ id: schema.agentProfiles.id })
         .from(schema.agentProfiles)
         .where(
-          and(
-            eq(schema.agentProfiles.projectId, projectId),
-            eq(schema.agentProfiles.name, name)
-          )
+          and(eq(schema.agentProfiles.projectId, projectId), eq(schema.agentProfiles.name, name))
         )
         .limit(1);
 
@@ -276,15 +193,14 @@ export async function updateProfile(
   };
 
   applyBaseProfileUpdates(updates, body);
+  if (body.githubCliPolicy !== undefined)
+    updates.githubCliPolicy = serializeGitHubCliPolicy(body.githubCliPolicy);
 
   await db
     .update(schema.agentProfiles)
     .set(updates)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     );
 
   return getProfile(db, projectId, profileId, userId);
@@ -303,10 +219,7 @@ export async function deleteProfile(
   await db
     .delete(schema.agentProfiles)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     );
 }
 
@@ -342,6 +255,7 @@ export async function resolveAgentProfile(
       workspaceProfile: p.workspaceProfile,
       devcontainerConfigName: p.devcontainerConfigName,
       taskMode: p.taskMode,
+      githubCliPolicy: parseGitHubCliPolicy(p.githubCliPolicy),
     };
   }
 
@@ -362,11 +276,9 @@ export async function resolveAgentProfile(
       workspaceProfile: null,
       devcontainerConfigName: null,
       taskMode: null,
+      githubCliPolicy: null,
     };
   }
-
-  // Seed built-in profiles to ensure they're available for resolution
-  await seedBuiltinProfiles(db, projectId, userId, env);
 
   // Try by ID first
   const byId = await db
@@ -377,10 +289,7 @@ export async function resolveAgentProfile(
         eq(schema.agentProfiles.id, profileNameOrId),
         or(
           eq(schema.agentProfiles.projectId, projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
+          and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
         )
       )
     )
@@ -443,5 +352,6 @@ export async function resolveAgentProfile(
     workspaceProfile: null,
     devcontainerConfigName: null,
     taskMode: null,
+    githubCliPolicy: null,
   };
 }

@@ -8,7 +8,7 @@ SAM uses a **Cloudflare-first development approach**. Local development has sign
 ## Recommended Workflow
 
 1. **Make changes locally** — edit code, run lint and typecheck
-2. **Deploy to staging** — via GitHub Actions or `pnpm deploy:setup --environment staging`
+2. **Deploy to staging** — via the "Deploy Staging" GitHub Actions workflow or `pnpm deploy:staging`
 3. **Test on Cloudflare** — real D1, KV, Workers, DNS
 4. **Merge to main** — triggers production deployment
 
@@ -41,7 +41,7 @@ node --version   # v20.x or higher
 pnpm --version   # 9.x or higher
 ```
 
-Go 1.22+ is only needed if you're working on the VM Agent (`packages/vm-agent/`).
+Go 1.25+ is only needed if you're working on the VM Agent (`packages/vm-agent/`).
 
 ## Setup
 
@@ -109,7 +109,7 @@ apps/
 
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP)
 ├── cloud-init/   # Cloud-init template generator
 ├── terminal/     # Shared terminal component (xterm.js)
 ├── ui/           # Design system components
@@ -122,10 +122,10 @@ For real testing, deploy to a staging environment:
 
 ```bash
 # Via GitHub Actions (recommended)
-# Trigger the "Deploy Setup" workflow with environment=staging
+# Trigger the "Deploy Staging" workflow
 
 # Or via CLI
-pnpm deploy:setup --environment staging
+pnpm deploy:staging
 ```
 
 Staging gives you the full Cloudflare stack: real D1, KV, Workers, DNS, and VM provisioning.

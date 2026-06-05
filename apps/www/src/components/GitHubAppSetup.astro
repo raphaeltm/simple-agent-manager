@@ -1,0 +1,739 @@
+---
+/**
+ * Interactive GitHub App Setup Wizard for self-hosters.
+ * Runs entirely in the browser — no CLI, no cloning required.
+ *
+ * Flow:
+ * 1. User enters their domain
+ * 2. Component generates a pre-filled GitHub App creation URL
+ * 3. User creates the app on GitHub, comes back
+ * 4. User pastes credentials, gets copy-paste-ready secrets
+ */
+---
+
+<div class="github-app-wizard" id="github-app-wizard">
+  <!-- Step 1: Domain Input -->
+  <div class="wizard-step" id="step-domain">
+    <h4>Your Domain</h4>
+    <p>Enter the domain you'll use for SAM (the same <code>BASE_DOMAIN</code> you'll set in Step 6).</p>
+    <div class="input-group">
+      <input
+        type="text"
+        id="domain-input"
+        placeholder="example.com"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+    <div class="input-group">
+      <label for="app-name-input">App name <span class="optional">(optional)</span></label>
+      <input
+        type="text"
+        id="app-name-input"
+        placeholder="SAM"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+    <div class="input-group">
+      <label>Account type</label>
+      <div class="radio-group" id="account-type-group">
+        <label class="radio-label">
+          <input type="radio" name="account-type" value="personal" checked />
+          <span>Personal account</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="account-type" value="org" />
+          <span>GitHub Organization</span>
+        </label>
+      </div>
+    </div>
+    <div class="input-group hidden" id="org-field">
+      <label for="org-input">Organization name</label>
+      <input
+        type="text"
+        id="org-input"
+        placeholder="my-org"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <span class="hint">The exact name of the GitHub Organization (as it appears in the URL).</span>
+    </div>
+    <button id="btn-generate" class="wizard-btn primary" disabled>
+      Generate Setup Link
+    </button>
+  </div>
+
+  <!-- Step 2: Create the App -->
+  <div class="wizard-step hidden" id="step-create">
+    <h4>Create Your GitHub App</h4>
+    <p>Click the button below to open GitHub with all settings pre-filled. Review and click <strong>"Create GitHub App"</strong> on GitHub.</p>
+
+    <div class="url-preview" id="url-preview">
+      <h5>Pre-filled settings</h5>
+      <dl id="settings-preview"></dl>
+    </div>
+
+    <a id="create-app-link" href="#" target="_blank" rel="noopener" class="wizard-btn primary">
+      Create GitHub App on GitHub
+    </a>
+
+    <div class="webhook-secret-box">
+      <h5>Webhook Secret</h5>
+      <p>GitHub doesn't allow pre-filling the webhook secret. Copy this value and paste it into the <strong>Webhook secret</strong> field on the GitHub form:</p>
+      <div class="copy-field">
+        <code id="webhook-secret"></code>
+        <button class="copy-btn" data-copy="webhook-secret" title="Copy">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <button id="btn-created" class="wizard-btn secondary">
+      I've created the app &rarr;
+    </button>
+  </div>
+
+  <!-- Step 3: Collect Credentials -->
+  <div class="wizard-step hidden" id="step-credentials">
+    <h4>Enter Your App Credentials</h4>
+    <p>After creating the app, GitHub shows you the <strong>App ID</strong> and <strong>Client ID</strong>. Generate a <strong>Client Secret</strong> and download the <strong>Private Key</strong> (.pem file).</p>
+
+    <div class="input-group">
+      <label for="cred-app-id">App ID <span class="hint">(shown at the top of the app settings page)</span></label>
+      <input type="text" id="cred-app-id" placeholder="123456" autocomplete="off" />
+    </div>
+    <div class="input-group">
+      <label for="cred-client-id">Client ID</label>
+      <input type="text" id="cred-client-id" placeholder="Iv1.abc123..." autocomplete="off" />
+    </div>
+    <div class="input-group">
+      <label for="cred-client-secret">Client Secret <span class="hint">(click "Generate a new client secret")</span></label>
+      <input type="text" id="cred-client-secret" placeholder="" autocomplete="off" />
+    </div>
+    <div class="input-group">
+      <label for="cred-app-slug">App Slug <span class="hint">(the URL-friendly name, e.g. <code>sam</code> from <code>github.com/apps/sam</code>)</span></label>
+      <input type="text" id="cred-app-slug" placeholder="sam" autocomplete="off" />
+    </div>
+    <div class="input-group">
+      <label for="cred-private-key">Private Key <span class="hint">(paste the contents of the downloaded .pem file)</span></label>
+      <textarea id="cred-private-key" rows="6" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----" spellcheck="false"></textarea>
+    </div>
+
+    <button id="btn-generate-secrets" class="wizard-btn primary" disabled>
+      Generate Environment Secrets
+    </button>
+  </div>
+
+  <!-- Step 4: Output -->
+  <div class="wizard-step hidden" id="step-output">
+    <h4>Your GitHub Environment Secrets</h4>
+    <p>Add these to your fork: <strong>Settings &rarr; Environments &rarr; production &rarr; Environment secrets</strong>.</p>
+
+    <div id="secrets-output"></div>
+
+    <details class="gh-cli-section">
+      <summary>Or use the GitHub CLI</summary>
+      <p>Run these commands from your fork's directory:</p>
+      <div class="copy-field wide">
+        <pre id="gh-cli-commands"></pre>
+        <button class="copy-btn" data-copy="gh-cli-commands" title="Copy">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </details>
+
+    <button id="btn-restart" class="wizard-btn secondary">
+      Start over
+    </button>
+  </div>
+</div>
+
+<style>
+  .github-app-wizard {
+    --wizard-accent: var(--sl-color-accent, #16a34a);
+    --wizard-accent-low: var(--sl-color-accent-low, #0e2a1e);
+    --wizard-bg: var(--sl-color-gray-6, #13201d);
+    --wizard-bg-elevated: var(--sl-color-gray-5, #1e332d);
+    --wizard-border: var(--sl-color-gray-4, #29423b);
+    --wizard-text: var(--sl-color-white, #e6f2ee);
+    --wizard-text-muted: var(--sl-color-gray-2, #9fb7ae);
+    --wizard-font: var(--sl-font, system-ui, sans-serif);
+    --wizard-mono: var(--sl-font-system-mono, monospace);
+
+    font-family: var(--wizard-font);
+    margin: 1.5rem 0;
+  }
+
+  .wizard-step {
+    border: 1px solid var(--wizard-border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    background: var(--wizard-bg);
+  }
+
+  .wizard-step.hidden {
+    display: none;
+  }
+
+  .wizard-step h4 {
+    margin: 0 0 0.25rem;
+    font-size: 1.1rem;
+    color: var(--wizard-text);
+  }
+
+  .wizard-step h5 {
+    margin: 0 0 0.5rem;
+    font-size: 0.9rem;
+    color: var(--wizard-text);
+  }
+
+  .wizard-step p {
+    margin: 0 0 1rem;
+    color: var(--wizard-text-muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .input-group {
+    margin-bottom: 0.75rem;
+  }
+
+  .input-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--wizard-text-muted);
+    margin-bottom: 0.25rem;
+  }
+
+  .input-group .optional,
+  .input-group .hint {
+    color: var(--wizard-text-muted);
+    opacity: 0.7;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    display: block;
+    margin-top: 0.25rem;
+  }
+
+  .radio-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.25rem;
+  }
+
+  .radio-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    color: var(--wizard-text);
+    cursor: pointer;
+  }
+
+  .radio-label input[type="radio"] {
+    accent-color: var(--wizard-accent);
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .input-group > .hint strong {
+    color: var(--wizard-text);
+    font-weight: 600;
+  }
+
+  .input-group input,
+  .input-group textarea {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    font-family: var(--wizard-mono);
+    background: var(--wizard-bg-elevated);
+    border: 1px solid var(--wizard-border);
+    border-radius: 6px;
+    color: var(--wizard-text);
+    box-sizing: border-box;
+  }
+
+  .input-group input:focus,
+  .input-group textarea:focus {
+    outline: none;
+    border-color: var(--wizard-accent);
+    box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
+  }
+
+  .input-group textarea {
+    resize: vertical;
+    line-height: 1.4;
+  }
+
+  .wizard-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.9rem;
+    font-family: var(--wizard-font);
+    font-weight: 500;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity 0.15s, background 0.15s;
+    margin-top: 0.5rem;
+  }
+
+  .wizard-btn.primary {
+    background: var(--wizard-accent);
+    color: #fff;
+  }
+
+  .wizard-btn.primary:hover {
+    opacity: 0.9;
+  }
+
+  .wizard-btn.primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .wizard-btn.secondary {
+    background: var(--wizard-bg-elevated);
+    color: var(--wizard-text);
+    border: 1px solid var(--wizard-border);
+  }
+
+  .wizard-btn.secondary:hover {
+    background: var(--wizard-border);
+  }
+
+  a.wizard-btn {
+    display: inline-flex;
+  }
+
+  .url-preview {
+    background: var(--wizard-bg-elevated);
+    border: 1px solid var(--wizard-border);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+  }
+
+  .url-preview dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.25rem 0.75rem;
+    margin: 0;
+  }
+
+  .url-preview dt {
+    color: var(--wizard-text-muted);
+    font-size: 0.8rem;
+    padding-top: 2px;
+  }
+
+  .url-preview dd {
+    margin: 0;
+    font-family: var(--wizard-mono);
+    font-size: 0.8rem;
+    color: var(--wizard-text);
+    word-break: break-all;
+  }
+
+  .webhook-secret-box {
+    background: var(--wizard-accent-low);
+    border: 1px solid var(--wizard-accent);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 1rem 0;
+  }
+
+  .webhook-secret-box h5 {
+    color: var(--wizard-accent);
+  }
+
+  .copy-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--wizard-bg-elevated);
+    border: 1px solid var(--wizard-border);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    overflow-x: auto;
+  }
+
+  .copy-field.wide {
+    display: block;
+    position: relative;
+  }
+
+  .copy-field.wide .copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+
+  .copy-field code,
+  .copy-field pre {
+    font-family: var(--wizard-mono);
+    font-size: 0.85rem;
+    color: var(--wizard-text);
+    flex: 1;
+    margin: 0;
+    background: none;
+    border: none;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .copy-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid var(--wizard-border);
+    border-radius: 4px;
+    color: var(--wizard-text-muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    display: inline-flex;
+    align-items: center;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .copy-btn:hover {
+    color: var(--wizard-accent);
+    border-color: var(--wizard-accent);
+  }
+
+  .copy-btn.copied {
+    color: var(--wizard-accent);
+    border-color: var(--wizard-accent);
+  }
+
+  /* Secrets output table */
+  .secret-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--wizard-border);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 0.85rem;
+  }
+
+  .secret-name {
+    background: var(--wizard-bg-elevated);
+    padding: 0.5rem 0.75rem;
+    font-family: var(--wizard-mono);
+    color: var(--wizard-accent);
+    min-width: 180px;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--wizard-border);
+    font-size: 0.8rem;
+  }
+
+  .secret-value {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    font-family: var(--wizard-mono);
+    color: var(--wizard-text);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.8rem;
+    word-break: break-all;
+  }
+
+  .secret-copy {
+    display: flex;
+    align-items: center;
+    padding: 0 0.5rem;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--wizard-border);
+    color: var(--wizard-text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .secret-copy:hover {
+    color: var(--wizard-accent);
+  }
+
+  .gh-cli-section {
+    margin-top: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .gh-cli-section summary {
+    cursor: pointer;
+    color: var(--wizard-text-muted);
+  }
+
+  .gh-cli-section summary:hover {
+    color: var(--wizard-text);
+  }
+
+  @media (max-width: 600px) {
+    .wizard-step {
+      padding: 1rem;
+    }
+    .secret-row {
+      flex-direction: column;
+    }
+    .secret-name {
+      min-width: unset;
+      border-right: none;
+      border-bottom: 1px solid var(--wizard-border);
+    }
+    .url-preview dl {
+      grid-template-columns: 1fr;
+    }
+    .url-preview dt {
+      margin-top: 0.5rem;
+    }
+  }
+</style>
+
+<script is:inline>
+  // --- Wizard logic (vanilla JS, runs in-browser) ---
+  (function() {
+    function generateWebhookSecret() {
+      var array = new Uint8Array(32);
+      crypto.getRandomValues(array);
+      return Array.from(array, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+
+    function buildGitHubAppUrl(domain, appName, org) {
+      var apiUrl = 'https://api.' + domain;
+      var appUrl = 'https://app.' + domain;
+
+      var params = new URLSearchParams();
+      params.set('name', appName || 'SAM');
+      params.set('url', appUrl);
+      params.set('public', 'false');
+      params.append('callback_urls[]', apiUrl + '/api/auth/callback/github');
+      params.set('setup_url', apiUrl + '/api/github/callback');
+      params.set('webhook_active', 'true');
+      params.set('webhook_url', apiUrl + '/api/github/webhook');
+      params.set('contents', 'write');
+      params.set('metadata', 'read');
+      params.set('email_addresses', 'read');
+      params.append('events[]', 'push');
+      params.append('events[]', 'pull_request');
+
+      var base = org
+        ? 'https://github.com/organizations/' + encodeURIComponent(org) + '/settings/apps/new'
+        : 'https://github.com/settings/apps/new';
+
+      return base + '?' + params.toString();
+    }
+
+    function base64Encode(str) {
+      var bytes = new TextEncoder().encode(str);
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    // --- DOM setup ---
+    var wizard = document.getElementById('github-app-wizard');
+    var stepDomain = document.getElementById('step-domain');
+    var stepCreate = document.getElementById('step-create');
+    var stepCreds = document.getElementById('step-credentials');
+    var stepOutput = document.getElementById('step-output');
+
+    var domainInput = document.getElementById('domain-input');
+    var appNameInput = document.getElementById('app-name-input');
+    var orgInput = document.getElementById('org-input');
+    var orgField = document.getElementById('org-field');
+    var accountTypeRadios = document.querySelectorAll('input[name="account-type"]');
+    var btnGenerate = document.getElementById('btn-generate');
+    var btnCreated = document.getElementById('btn-created');
+    var btnGenerateSecrets = document.getElementById('btn-generate-secrets');
+    var btnRestart = document.getElementById('btn-restart');
+
+    var createAppLink = document.getElementById('create-app-link');
+    var settingsPreview = document.getElementById('settings-preview');
+    var webhookSecretEl = document.getElementById('webhook-secret');
+
+    var credAppId = document.getElementById('cred-app-id');
+    var credClientId = document.getElementById('cred-client-id');
+    var credClientSecret = document.getElementById('cred-client-secret');
+    var credAppSlug = document.getElementById('cred-app-slug');
+    var credPrivateKey = document.getElementById('cred-private-key');
+
+    var secretsOutput = document.getElementById('secrets-output');
+    var ghCliCommands = document.getElementById('gh-cli-commands');
+
+    if (!wizard || !domainInput || !btnGenerate) return;
+
+    var webhookSecret = '';
+
+    function showStep(step) {
+      [stepDomain, stepCreate, stepCreds, stepOutput].forEach(function(s) { s.classList.add('hidden'); });
+      step.classList.remove('hidden');
+      step.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // --- Step 1: Domain validation ---
+    domainInput.addEventListener('input', function() {
+      var v = domainInput.value.trim();
+      var valid = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(v);
+      btnGenerate.disabled = !valid;
+    });
+
+    // --- Account type toggle ---
+    accountTypeRadios.forEach(function(radio) {
+      radio.addEventListener('change', function() {
+        if (radio.value === 'org') {
+          orgField.classList.remove('hidden');
+        } else {
+          orgField.classList.add('hidden');
+          orgInput.value = '';
+        }
+      });
+    });
+
+    // --- Step 1 -> Step 2 ---
+    btnGenerate.addEventListener('click', function() {
+      var domain = domainInput.value.trim();
+      var appName = appNameInput.value.trim();
+      var isOrg = document.querySelector('input[name="account-type"]:checked').value === 'org';
+      var org = isOrg ? orgInput.value.trim() : '';
+
+      var url = buildGitHubAppUrl(domain, appName, org);
+      createAppLink.href = url;
+
+      webhookSecret = generateWebhookSecret();
+      webhookSecretEl.textContent = webhookSecret;
+
+      var apiUrl = 'https://api.' + domain;
+      var appUrl = 'https://app.' + domain;
+      var previewItems = [
+        ['Homepage', appUrl],
+        ['Callback', apiUrl + '/api/auth/callback/github'],
+        ['Setup URL', apiUrl + '/api/github/callback'],
+        ['Webhook', apiUrl + '/api/github/webhook'],
+        ['Permissions', 'Contents (write), Metadata (read), Email addresses (read)'],
+        ['Events', 'push, pull_request'],
+      ];
+
+      settingsPreview.innerHTML = previewItems
+        .map(function(item) { return '<dt>' + item[0] + '</dt><dd>' + item[1] + '</dd>'; })
+        .join('');
+
+      showStep(stepCreate);
+    });
+
+    // --- Step 2 -> Step 3 ---
+    btnCreated.addEventListener('click', function() {
+      showStep(stepCreds);
+    });
+
+    // --- Step 3: Credential validation ---
+    function validateCredentials() {
+      var hasAppId = credAppId.value.trim().length > 0;
+      var hasClientId = credClientId.value.trim().length > 0;
+      var hasClientSecret = credClientSecret.value.trim().length > 0;
+      var hasPrivateKey = credPrivateKey.value.trim().indexOf('-----BEGIN') !== -1;
+      btnGenerateSecrets.disabled = !(hasAppId && hasClientId && hasClientSecret && hasPrivateKey);
+    }
+
+    [credAppId, credClientId, credClientSecret, credAppSlug, credPrivateKey].forEach(function(el) {
+      el.addEventListener('input', validateCredentials);
+    });
+
+    // --- Step 3 -> Step 4 ---
+    btnGenerateSecrets.addEventListener('click', function() {
+      var appId = credAppId.value.trim();
+      var clientId = credClientId.value.trim();
+      var clientSecret = credClientSecret.value.trim();
+      var appSlug = credAppSlug.value.trim();
+      var privateKeyRaw = credPrivateKey.value.trim();
+      var privateKeyB64 = base64Encode(privateKeyRaw);
+
+      var secrets = [
+        ['GH_APP_ID', appId, appId],
+        ['GH_CLIENT_ID', clientId, clientId],
+        ['GH_CLIENT_SECRET', clientSecret, clientSecret],
+        ['GH_APP_SLUG', appSlug || '(not set)', appSlug],
+        ['GH_APP_PRIVATE_KEY', privateKeyB64.length > 40 ? privateKeyB64.substring(0, 40) + '...' : privateKeyB64, privateKeyB64],
+        ['GH_WEBHOOK_SECRET', webhookSecret, webhookSecret],
+      ];
+
+      secretsOutput.innerHTML = secrets
+        .map(function(s) {
+          var name = s[0], display = s[1], full = s[2];
+          return '<div class="secret-row">' +
+            '<span class="secret-name">' + name + '</span>' +
+            '<span class="secret-value">' + display + '</span>' +
+            '<button class="secret-copy" data-value="' + full.replace(/"/g, '&quot;') + '" title="Copy value">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
+            '</button></div>';
+        })
+        .join('');
+
+      var cliLines = [
+        'gh secret set GH_APP_ID --env production --body "' + appId + '"',
+        'gh secret set GH_CLIENT_ID --env production --body "' + clientId + '"',
+        'gh secret set GH_CLIENT_SECRET --env production --body "' + clientSecret + '"',
+        appSlug ? 'gh secret set GH_APP_SLUG --env production --body "' + appSlug + '"' : '',
+        'gh secret set GH_WEBHOOK_SECRET --env production --body "' + webhookSecret + '"',
+        '# For the private key, pipe the .pem file:',
+        'cat your-key.pem | base64 -w0 | gh secret set GH_APP_PRIVATE_KEY --env production',
+      ].filter(Boolean).join('\n');
+
+      ghCliCommands.textContent = cliLines;
+
+      showStep(stepOutput);
+    });
+
+    // --- Step 4: Restart ---
+    btnRestart.addEventListener('click', function() {
+      domainInput.value = '';
+      appNameInput.value = '';
+      orgInput.value = '';
+      orgField.classList.add('hidden');
+      document.querySelector('input[name="account-type"][value="personal"]').checked = true;
+      credAppId.value = '';
+      credClientId.value = '';
+      credClientSecret.value = '';
+      credAppSlug.value = '';
+      credPrivateKey.value = '';
+      btnGenerate.disabled = true;
+      btnGenerateSecrets.disabled = true;
+      showStep(stepDomain);
+    });
+
+    // --- Copy buttons ---
+    wizard.addEventListener('click', function(e) {
+      var btn = e.target.closest('.copy-btn, .secret-copy');
+      if (!btn) return;
+
+      var text = '';
+      if (btn.classList.contains('secret-copy')) {
+        text = btn.getAttribute('data-value') || '';
+      } else {
+        var targetId = btn.getAttribute('data-copy');
+        if (targetId) {
+          var el = document.getElementById(targetId);
+          text = el ? el.textContent : '';
+        }
+      }
+
+      if (text) {
+        navigator.clipboard.writeText(text).then(function() {
+          btn.classList.add('copied');
+          setTimeout(function() { btn.classList.remove('copied'); }, 1500);
+        });
+      }
+    });
+  })();
+</script>

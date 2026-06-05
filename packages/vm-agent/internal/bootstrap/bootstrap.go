@@ -32,6 +32,8 @@ const (
 	volumePrefix = "sam-ws-"
 
 	buildErrorLogFilename = ".devcontainer-build-error.log"
+	devcontainerDirname   = ".devcontainer"
+	devcontainerFilename  = "devcontainer.json"
 
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
@@ -271,7 +273,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	bootstrapSucceeded = true
 
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
-	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
+	if err := markWorkspaceReady(ctx, cfg, readyStatus, ""); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		return &CallbackError{Err: err, Status: readyStatus}
 	}
@@ -323,6 +325,12 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	repoHasDevcontainerConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
+	effectiveWorkspaceProfile := ""
+	if state.Lightweight || (state.DevcontainerConfigName == "" && !repoHasDevcontainerConfig) {
+		effectiveWorkspaceProfile = "lightweight"
+	}
+
 	// Pre-generate credential helper on the VM host so it can be bind-mounted
 	// into the container during devcontainer lifecycle hooks.
 	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
@@ -341,7 +349,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 
 	// Resolve devcontainer cache ref (best-effort, only for non-lightweight workspaces).
 	cacheRef := ""
-	if cfg.DevcontainerCacheEnabled && !state.Lightweight {
+	if cfg.DevcontainerCacheEnabled && !state.Lightweight && repoHasDevcontainerConfig {
 		var cacheErr error
 		cacheRef, cacheErr = prepareDevcontainerCache(ctx, cfg, bootstrap.GitHubToken, state.DevcontainerConfigName)
 		if cacheErr != nil {
@@ -441,7 +449,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if recoveryMode {
 		readyStatus = workspaceReadyStatusRecovery
 	}
-	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
+	if err := markWorkspaceReady(ctx, cfg, readyStatus, effectiveWorkspaceProfile); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		// Workspace is fully provisioned — only the callback to the control plane
 		// failed. Return a CallbackError so the caller can distinguish this from
@@ -841,7 +849,9 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 	}
 
 	slog.Info("Starting lightweight container (default image)", "workspaceDir", cfg.WorkspaceDir)
-	if _, err := runLightweightDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
+	buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
+	defer buildCancel()
+	if _, err := runLightweightDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath); err != nil {
 		return false, err
 	}
 
@@ -872,6 +882,16 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			return false, err
 		}
 		return false, nil
+	}
+
+	if devcontainerConfigName != "" {
+		configPath := namedDevcontainerConfigPath(cfg.WorkspaceDir, devcontainerConfigName)
+		if _, err := os.Stat(configPath); err != nil {
+			if os.IsNotExist(err) {
+				return false, fmt.Errorf("devcontainer config %q not found at %s", devcontainerConfigName, configPath)
+			}
+			return false, fmt.Errorf("failed to inspect devcontainer config %q at %s: %w", devcontainerConfigName, configPath, err)
+		}
 	}
 
 	// Wait for devcontainer CLI to be available. Cloud-init installs Node.js and
@@ -968,10 +988,13 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			}
 		}
 	} else {
-		// No config — use default.
+		// No config — use the lightweight default image. Repos without a
+		// devcontainer have nothing project-specific to build, so avoid
+		// devcontainer Features and the slower build path entirely.
+		slog.Info("No repo devcontainer config found; using lightweight default image", "workspaceDir", cfg.WorkspaceDir)
 		buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
-		defer buildCancel()
-		_, err := runDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
+		_, err := runLightweightDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
+		buildCancel()
 		if err != nil {
 			return false, err
 		}
@@ -1142,8 +1165,7 @@ func devcontainerUpArgs(cfg *config.Config, overrideConfigPath, devcontainerConf
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
 
 	if devcontainerConfigName != "" {
-		configPath := filepath.Join(cfg.WorkspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
-		args = append(args, "--config", configPath)
+		args = append(args, "--config", namedDevcontainerConfigPath(cfg.WorkspaceDir, devcontainerConfigName))
 	}
 
 	if overrideConfigPath != "" {
@@ -1151,6 +1173,10 @@ func devcontainerUpArgs(cfg *config.Config, overrideConfigPath, devcontainerConf
 	}
 
 	return args
+}
+
+func namedDevcontainerConfigPath(workspaceDir, devcontainerConfigName string) string {
+	return filepath.Join(workspaceDir, devcontainerDirname, devcontainerConfigName, devcontainerFilename)
 }
 
 type devcontainerReadConfigurationResult struct {
@@ -1325,7 +1351,7 @@ func runReadConfiguration(ctx context.Context, workspaceDir, devcontainerConfigN
 		"--include-merged-configuration",
 	}
 	if devcontainerConfigName != "" {
-		configPath := filepath.Join(workspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
+		configPath := namedDevcontainerConfigPath(workspaceDir, devcontainerConfigName)
 		args = append(args, "--config", configPath)
 	}
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
@@ -1871,7 +1897,7 @@ func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credH
 // When present, we skip --additional-features to avoid conflicts with the repo's own setup.
 func hasDevcontainerConfig(workspaceDir string) bool {
 	candidates := []string{
-		filepath.Join(workspaceDir, ".devcontainer", "devcontainer.json"),
+		filepath.Join(workspaceDir, devcontainerDirname, devcontainerFilename),
 		filepath.Join(workspaceDir, ".devcontainer.json"),
 	}
 	for _, path := range candidates {
@@ -1881,12 +1907,12 @@ func hasDevcontainerConfig(workspaceDir string) bool {
 		}
 	}
 	// Check for named subdirectory configs (.devcontainer/*/devcontainer.json)
-	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	devcontainerDir := filepath.Join(workspaceDir, devcontainerDirname)
 	entries, err := os.ReadDir(devcontainerDir)
 	if err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
-				subConfig := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
+				subConfig := filepath.Join(devcontainerDir, entry.Name(), devcontainerFilename)
 				if _, statErr := os.Stat(subConfig); statErr == nil {
 					slog.Info("Found named devcontainer config", "path", subConfig)
 					return true
@@ -2941,15 +2967,16 @@ func ensureProjectRuntimeAssets(
 }
 
 type readyRequestBody struct {
-	Status string `json:"status"`
+	Status           string `json:"status"`
+	WorkspaceProfile string `json:"workspaceProfile,omitempty"`
 }
 
-func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) error {
+func markWorkspaceReady(ctx context.Context, cfg *config.Config, status, workspaceProfile string) error {
 	if status == "" {
 		status = workspaceReadyStatusRunning
 	}
 
-	body, err := json.Marshal(readyRequestBody{Status: status})
+	body, err := json.Marshal(readyRequestBody{Status: status, WorkspaceProfile: workspaceProfile})
 	if err != nil {
 		return fmt.Errorf("failed to encode ready request body: %w", err)
 	}

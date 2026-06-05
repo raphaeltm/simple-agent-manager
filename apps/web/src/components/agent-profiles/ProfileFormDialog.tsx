@@ -1,11 +1,28 @@
-import type { AgentProfile, CreateAgentProfileRequest, ProviderCatalog, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS, VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
-import { Button, Dialog,Input } from '@simple-agent-manager/ui';
-import { type FC, useEffect,useState } from 'react';
+import type {
+  AgentProfile,
+  CreateAgentProfileRequest,
+  GitHubCliPermissionLevel,
+  GitHubCliPolicy,
+  ProviderCatalog,
+  UpdateAgentProfileRequest,
+  VMSize,
+} from '@simple-agent-manager/shared';
+import {
+  AGENT_CATALOG,
+  AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_GITHUB_CLI_POLICY,
+  VALID_PERMISSION_MODES,
+} from '@simple-agent-manager/shared';
+import { Button, Dialog, Input } from '@simple-agent-manager/ui';
+import { type FC, type ReactNode, useEffect, useState } from 'react';
 
 import { getProject, getProviderCatalog } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
-import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
+import {
+  formatProviderCatalogContext,
+  formatVmSizeOption,
+  selectProviderCatalog,
+} from '../vm/format-vm-size';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
@@ -48,6 +65,157 @@ const TASK_MODES = [
   { value: 'conversation', label: 'Conversation' },
 ] as const;
 
+const GITHUB_PERMISSION_OPTIONS = [
+  { value: 'none', label: 'No access' },
+  { value: 'read', label: 'Read' },
+  { value: 'write', label: 'Read and write' },
+] as const;
+
+const GITHUB_CONTENTS_OPTIONS = [
+  { value: 'read', label: 'Read' },
+  { value: 'write', label: 'Read and write' },
+] as const;
+
+const GITHUB_PERMISSION_ROWS = [
+  { key: 'contents', label: 'Code contents', options: GITHUB_CONTENTS_OPTIONS },
+  { key: 'pullRequests', label: 'Pull requests', options: GITHUB_PERMISSION_OPTIONS },
+  { key: 'issues', label: 'Issues', options: GITHUB_PERMISSION_OPTIONS },
+  { key: 'actions', label: 'Actions', options: GITHUB_PERMISSION_OPTIONS },
+  { key: 'packages', label: 'Packages', options: GITHUB_PERMISSION_OPTIONS },
+] as const;
+
+// ---------------------------------------------------------------------------
+// Reusable form primitives
+// ---------------------------------------------------------------------------
+
+interface SectionProps {
+  title: string;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}
+
+function Section({ title, summary, defaultOpen = false, children }: SectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border-t border-border-default">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 py-3 text-left"
+        aria-expanded={open}
+      >
+        <svg
+          className={`h-4 w-4 shrink-0 text-fg-muted transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+          viewBox="0 0 16 16"
+          fill="currentColor"
+        >
+          <path d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.5 3.5a.75.75 0 0 1 0 1.06l-3.5 3.5a.75.75 0 0 1-1.06-1.06L9.44 8 6.22 4.78a.75.75 0 0 1 0-1.06Z" />
+        </svg>
+        <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">{title}</span>
+        {!open && summary && (
+          <span className="ml-auto text-xs text-fg-muted truncate max-w-[60%] text-right">
+            {summary}
+          </span>
+        )}
+      </button>
+      <div className={open ? 'pb-3 grid gap-3' : 'hidden'}>{children}</div>
+    </div>
+  );
+}
+
+const SELECT_CLASSES = 'w-full rounded-md text-fg-primary py-2.5 px-3 min-h-11';
+
+interface SelectFieldProps {
+  label: ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly { readonly value: string; readonly label: string }[];
+  disabled?: boolean;
+}
+
+function SelectField({ label, value, onChange, options, disabled }: SelectFieldProps) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-sm text-fg-muted">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={SELECT_CLASSES}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Summary helpers
+// ---------------------------------------------------------------------------
+
+function agentSettingsSummary(
+  agentType: string,
+  model: string,
+  permissionMode: string,
+  timeoutMinutes: string,
+): string {
+  const parts: string[] = [];
+  const agentName = AGENT_CATALOG.find((a) => a.id === agentType)?.name ?? agentType;
+  parts.push(agentName);
+  if (model) {
+    const short = model.length > 24 ? model.slice(0, 22) + '...' : model;
+    parts.push(short);
+  }
+  if (permissionMode) {
+    parts.push(
+      (AGENT_PERMISSION_MODE_LABELS as Record<string, string>)[permissionMode] ?? permissionMode,
+    );
+  }
+  if (timeoutMinutes) parts.push(`${timeoutMinutes}m`);
+  return parts.join(' · ');
+}
+
+function permTag(label: string, level: GitHubCliPermissionLevel): string | null {
+  if (level === 'none') return null;
+  return `${label}:${level === 'write' ? 'rw' : 'r'}`;
+}
+
+function policySummary(policy: GitHubCliPolicy): string {
+  if (policy.mode === 'inherit') return 'Inherit installation permissions';
+  const p = policy.permissions;
+  const tags = [
+    permTag('code', p.contents),
+    permTag('PRs', p.pullRequests),
+    permTag('issues', p.issues),
+    permTag('actions', p.actions),
+    permTag('pkg', p.packages),
+  ].filter(Boolean);
+  return `Custom: ${tags.join(', ')}`;
+}
+
+function joinOrDefault(parts: (string | false | null | undefined)[], sep = ', '): string {
+  const filtered = parts.filter(Boolean) as string[];
+  return filtered.length ? filtered.join(sep) : 'Defaults';
+}
+
+function executionSummary(maxTurns: string, systemPromptAppend: string): string {
+  return joinOrDefault([maxTurns && `${maxTurns} turns`, systemPromptAppend.trim() && 'custom prompt']);
+}
+
+function infraSummary(vmSize: string, workspaceProfile: string, taskMode: string): string {
+  return joinOrDefault([vmSize && `${vmSize} VM`, workspaceProfile, taskMode], ' · ');
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   isOpen,
   onClose,
@@ -69,6 +237,8 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [workspaceProfile, setWorkspaceProfile] = useState('');
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [taskMode, setTaskMode] = useState('');
+  const [githubCliPolicy, setGithubCliPolicy] =
+    useState<GitHubCliPolicy>(DEFAULT_GITHUB_CLI_POLICY);
   const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
   const [projectProvider, setProjectProvider] = useState<string | null>(null);
   const [projectLocation, setProjectLocation] = useState<string | null>(null);
@@ -90,6 +260,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setWorkspaceProfile(profile.workspaceProfile ?? '');
       setDevcontainerConfigName(profile.devcontainerConfigName ?? '');
       setTaskMode(profile.taskMode ?? '');
+      setGithubCliPolicy(profile.githubCliPolicy ?? DEFAULT_GITHUB_CLI_POLICY);
     } else if (isOpen) {
       setName('');
       setDescription('');
@@ -103,6 +274,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setWorkspaceProfile('');
       setDevcontainerConfigName('');
       setTaskMode('');
+      setGithubCliPolicy(DEFAULT_GITHUB_CLI_POLICY);
     }
     setError(null);
   }, [isOpen, profile]);
@@ -126,12 +298,15 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         }
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, projectId]);
 
   const effectiveProvider = profile?.provider ?? projectProvider;
   const activeCatalog = selectProviderCatalog(catalogs, effectiveProvider);
-  const effectiveLocation = profile?.vmLocation ?? projectLocation ?? activeCatalog?.defaultLocation ?? null;
+  const effectiveLocation =
+    profile?.vmLocation ?? projectLocation ?? activeCatalog?.defaultLocation ?? null;
   const providerContext = formatProviderCatalogContext(activeCatalog, effectiveLocation);
 
   const handleSubmit = async () => {
@@ -155,8 +330,10 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
         vmSizeOverride: vmSizeOverride || null,
         workspaceProfile: workspaceProfile || null,
-        devcontainerConfigName: workspaceProfile !== 'lightweight' ? (devcontainerConfigName.trim() || null) : null,
+        devcontainerConfigName:
+          workspaceProfile !== 'lightweight' ? devcontainerConfigName.trim() || null : null,
         taskMode: taskMode || null,
+        githubCliPolicy: githubCliPolicy.mode === 'custom' ? githubCliPolicy : null,
       };
       await onSave(data);
       onClose();
@@ -167,236 +344,266 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     }
   };
 
-  const selectClasses = 'w-full rounded-md text-fg-primary py-2.5 px-3 min-h-11';
+  const updateGitHubPermission = (
+    key: keyof GitHubCliPolicy['permissions'],
+    value: GitHubCliPermissionLevel
+  ) => {
+    setGithubCliPolicy((current) => ({
+      ...current,
+      permissions: {
+        ...current.permissions,
+        [key]: value,
+      },
+    }));
+  };
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
-      <form onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
-      <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary mb-4">
-        {isEdit ? 'Edit Profile' : 'Create Agent Profile'}
-      </h2>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleSubmit();
+        }}
+      >
+        <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary mb-4">
+          {isEdit ? 'Edit Profile' : 'Create Agent Profile'}
+        </h2>
 
-      {error && (
-        <div role="alert" className="py-2 px-3 mb-3 rounded-sm bg-danger-tint text-danger text-sm">
-          {error}
-        </div>
-      )}
-
-      <div className="grid gap-3">
-        {/* Name */}
-        <label className="grid gap-1.5">
-          <span className="text-sm text-fg-muted">
-            Name <span className="text-danger">*</span>
-          </span>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="e.g. Fast Implementer"
-            disabled={saving}
-          />
-        </label>
-
-        {/* Description */}
-        <label className="grid gap-1.5">
-          <span className="text-sm text-fg-muted">Description</span>
-          <Input
-            value={description}
-            onChange={(e) => setDescription(e.currentTarget.value)}
-            placeholder="What this profile is for..."
-            disabled={saving}
-          />
-        </label>
-
-        {/* Agent settings section */}
-        <div className="border-t border-border-default pt-3 mt-1">
-          <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">Agent Settings</span>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          {/* Agent Type */}
-          <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Agent Type</span>
-            <select
-              value={agentType}
-              onChange={(e) => { setAgentType(e.target.value); setModel(''); }}
-              disabled={saving}
-              className={selectClasses}
-            >
-              {AGENT_CATALOG.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/* Model */}
-          <div className="grid gap-1.5">
-            <label htmlFor="profile-model" className="text-sm text-fg-muted">Model</label>
-            <ModelSelect
-              id="profile-model"
-              agentType={agentType}
-              value={model}
-              onChange={setModel}
-              disabled={saving}
-              placeholder="Select or type a model..."
-            />
+        {error && (
+          <div
+            role="alert"
+            className="py-2 px-3 mb-3 rounded-sm bg-danger-tint text-danger text-sm"
+          >
+            {error}
           </div>
+        )}
 
-          {/* Permission Mode */}
+        {/* Name & Description — always visible */}
+        <div className="grid gap-3">
           <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Permission Mode</span>
-            <select
-              value={permissionMode}
-              onChange={(e) => setPermissionMode(e.target.value)}
+            <span className="text-sm text-fg-muted">
+              Name <span className="text-danger">*</span>
+            </span>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.currentTarget.value)}
+              placeholder="e.g. Fast Implementer"
               disabled={saving}
-              className={selectClasses}
-            >
-              {PERMISSION_MODES.map((pm) => (
-                <option key={pm.value} value={pm.value}>
-                  {pm.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
 
-          {/* Timeout */}
           <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Timeout (minutes)</span>
+            <span className="text-sm text-fg-muted">Description</span>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.currentTarget.value)}
+              placeholder="What this profile is for..."
+              disabled={saving}
+            />
+          </label>
+        </div>
+
+        {/* --- Accordion sections --- */}
+
+        <Section
+          title="Agent Settings"
+          defaultOpen
+          summary={agentSettingsSummary(agentType, model, permissionMode, timeoutMinutes)}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SelectField
+              label="Agent Type"
+              value={agentType}
+              onChange={(v) => { setAgentType(v); setModel(''); }}
+              options={AGENT_CATALOG.map((a) => ({ value: a.id, label: a.name }))}
+              disabled={saving}
+            />
+
+            <div className="grid gap-1.5">
+              <label htmlFor="profile-model" className="text-sm text-fg-muted">
+                Model
+              </label>
+              <ModelSelect
+                id="profile-model"
+                agentType={agentType}
+                value={model}
+                onChange={setModel}
+                disabled={saving}
+                placeholder="Select or type a model..."
+              />
+            </div>
+
+            <SelectField
+              label="Permission Mode"
+              value={permissionMode}
+              onChange={setPermissionMode}
+              options={PERMISSION_MODES}
+              disabled={saving}
+            />
+
+            <label className="grid gap-1.5">
+              <span className="text-sm text-fg-muted">Timeout (minutes)</span>
+              <Input
+                type="number"
+                value={timeoutMinutes}
+                onChange={(e) => setTimeoutMinutes(e.currentTarget.value)}
+                placeholder="Default"
+                disabled={saving}
+              />
+            </label>
+          </div>
+        </Section>
+
+        <Section
+          title="Platform Policy"
+          summary={policySummary(githubCliPolicy)}
+        >
+          <div className="grid gap-3">
+            <SelectField
+              label="GitHub CLI access"
+              value={githubCliPolicy.mode}
+              onChange={(mode) =>
+                setGithubCliPolicy((current) => ({
+                  ...(current ?? DEFAULT_GITHUB_CLI_POLICY),
+                  mode: mode as GitHubCliPolicy['mode'],
+                  repositoryScope: 'project',
+                }))
+              }
+              options={[
+                { value: 'inherit', label: 'Inherit GitHub App installation permissions' },
+                { value: 'custom', label: 'Restrict token minted for this profile' },
+              ]}
+              disabled={saving}
+            />
+
+            {githubCliPolicy.mode === 'custom' && (
+              <fieldset className="grid gap-2 rounded-md border border-border-default p-3">
+                <legend className="px-1 text-sm font-medium text-fg-primary">
+                  Project repository token permissions
+                </legend>
+                <p className="m-0 text-xs text-fg-muted">
+                  The token is narrowed to this project repository before each mint. Code contents
+                  must stay readable so the workspace can clone and fetch the repo.
+                </p>
+                {GITHUB_PERMISSION_ROWS.map((row) => (
+                  <label
+                    key={row.key}
+                    className="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-center"
+                  >
+                    <span className="text-sm text-fg-primary">{row.label}</span>
+                    <select
+                      value={githubCliPolicy.permissions[row.key]}
+                      onChange={(e) =>
+                        updateGitHubPermission(row.key, e.target.value as GitHubCliPermissionLevel)
+                      }
+                      disabled={saving}
+                      className={SELECT_CLASSES}
+                    >
+                      {row.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+          </div>
+        </Section>
+
+        <Section
+          title="Execution"
+          summary={executionSummary(maxTurns, systemPromptAppend)}
+        >
+          <label className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">Max Turns</span>
             <Input
               type="number"
-              value={timeoutMinutes}
-              onChange={(e) => setTimeoutMinutes(e.currentTarget.value)}
+              value={maxTurns}
+              onChange={(e) => setMaxTurns(e.currentTarget.value)}
               placeholder="Default"
               disabled={saving}
             />
           </label>
-        </div>
 
-        {/* Max Turns */}
-        <label className="grid gap-1.5">
-          <span className="text-sm text-fg-muted">Max Turns</span>
-          <Input
-            type="number"
-            value={maxTurns}
-            onChange={(e) => setMaxTurns(e.currentTarget.value)}
-            placeholder="Default"
-            disabled={saving}
-          />
-        </label>
-
-        {/* System Prompt Append */}
-        <label className="grid gap-1.5">
-          <span className="text-sm text-fg-muted">System Prompt (append)</span>
-          <textarea
-            value={systemPromptAppend}
-            onChange={(e) => setSystemPromptAppend(e.target.value)}
-            placeholder="Additional instructions appended to the system prompt..."
-            rows={3}
-            disabled={saving}
-            className="w-full rounded-md text-fg-primary py-2.5 px-3 resize-y"
-          />
-        </label>
-
-        {/* Infrastructure section */}
-        <div className="border-t border-border-default pt-3 mt-1">
-          <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">Infrastructure</span>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          {/* VM Size */}
           <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">
-              VM Size
-              {providerContext && (
-                <span className="font-normal ml-1">({providerContext})</span>
-              )}
-            </span>
-            <select
+            <span className="text-sm text-fg-muted">System Prompt (append)</span>
+            <textarea
+              value={systemPromptAppend}
+              onChange={(e) => setSystemPromptAppend(e.target.value)}
+              placeholder="Additional instructions appended to the system prompt..."
+              rows={3}
+              disabled={saving}
+              className="w-full rounded-md text-fg-primary py-2.5 px-3 resize-y"
+            />
+          </label>
+        </Section>
+
+        <Section
+          title="Infrastructure"
+          summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode)}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SelectField
+              label={<>VM Size{providerContext && <span className="font-normal ml-1">({providerContext})</span>}</>}
               value={vmSizeOverride}
-              onChange={(e) => setVmSizeOverride(e.target.value)}
+              onChange={setVmSizeOverride}
+              options={VM_SIZES.map((vs) => ({
+                value: vs.value,
+                label: vs.value
+                  ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null)
+                  : vs.label,
+              }))}
               disabled={saving}
-              className={selectClasses}
-            >
-              {VM_SIZES.map((vs) => (
-                <option key={vs.value} value={vs.value}>
-                  {vs.value ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null) : vs.label}
-                </option>
-              ))}
-            </select>
-          </label>
+            />
 
-          {/* Workspace Profile */}
-          <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Workspace Profile</span>
-            <select
+            <SelectField
+              label="Workspace Profile"
               value={workspaceProfile}
-              onChange={(e) => setWorkspaceProfile(e.target.value)}
+              onChange={setWorkspaceProfile}
+              options={WORKSPACE_PROFILES}
               disabled={saving}
-              className={selectClasses}
-            >
-              {WORKSPACE_PROFILES.map((wp) => (
-                <option key={wp.value} value={wp.value}>
-                  {wp.label}
-                </option>
-              ))}
-            </select>
-          </label>
+            />
 
-          {/* Devcontainer Config Name */}
-          {workspaceProfile !== 'lightweight' && (
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Devcontainer Config</span>
-              <Input
-                value={devcontainerConfigName}
-                onChange={(e) => setDevcontainerConfigName(e.target.value)}
-                disabled={saving}
-                placeholder="Auto-detect"
-              />
-            </label>
-          )}
+            {workspaceProfile !== 'lightweight' && (
+              <label className="grid gap-1.5">
+                <span className="text-sm text-fg-muted">Devcontainer Config</span>
+                <Input
+                  value={devcontainerConfigName}
+                  onChange={(e) => setDevcontainerConfigName(e.target.value)}
+                  disabled={saving}
+                  placeholder="Auto-detect"
+                />
+              </label>
+            )}
 
-          {/* Task Mode */}
-          <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Task Mode</span>
-            <select
+            <SelectField
+              label="Task Mode"
               value={taskMode}
-              onChange={(e) => setTaskMode(e.target.value)}
+              onChange={setTaskMode}
+              options={TASK_MODES}
               disabled={saving}
-              className={selectClasses}
-            >
-              {TASK_MODES.map((tm) => (
-                <option key={tm.value} value={tm.value}>
-                  {tm.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
-
-      {/* Runtime Environment (edit mode only) */}
-      {isEdit && profile && (
-        <>
-          <div className="border-t border-border-default pt-3 mt-3">
-            <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">Runtime Environment</span>
-            <p className="m-0 mt-1 text-xs text-fg-muted">
-              Env vars and files injected into workspaces using this profile.
-            </p>
+            />
           </div>
-          <ProfileRuntimeSection projectId={projectId} profileId={profile.id} />
-        </>
-      )}
+        </Section>
 
-      {/* Actions */}
-      <div className="flex gap-2 mt-6 justify-end">
-        <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={saving} loading={saving}>
-          {isEdit ? 'Save Changes' : 'Create Profile'}
-        </Button>
-      </div>
+        {/* Runtime Environment (edit mode only) */}
+        {isEdit && profile && (
+          <Section title="Runtime Environment" summary="Env vars and files">
+            <ProfileRuntimeSection projectId={projectId} profileId={profile.id} />
+          </Section>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2 mt-4 pt-3 border-t border-border-default justify-end">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving} loading={saving}>
+            {isEdit ? 'Save Changes' : 'Create Profile'}
+          </Button>
+        </div>
       </form>
     </Dialog>
   );

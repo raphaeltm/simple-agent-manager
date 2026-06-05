@@ -203,14 +203,14 @@ func TestChatNewSubmitsConversationTask(t *testing.T) {
 func TestChatViewShowsMessages(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"messages":[{"id":"msg_1","role":"user","content":"Hello"},{"id":"msg_2","role":"assistant","content":"Hi there"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"session":{"id":"session_1","topic":"Demo","status":"active","messageCount":2},"messages":[{"id":"msg_1","role":"user","content":"Hello","createdAt":1780099200000},{"id":"msg_2","role":"assistant","content":"Hi there","createdAt":1780099200000}],"hasMore":false,"state":null}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"chat", "session_1"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1/sessions/session_1/messages" {
+	if captured.URL != "https://api.example.com/api/projects/project_1/sessions/session_1" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	if !strings.Contains(stdout.String(), "[user]") || !strings.Contains(stdout.String(), "Hello") {

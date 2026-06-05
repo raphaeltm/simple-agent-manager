@@ -1,5 +1,7 @@
 # Quickstart: Provider Interface Modernization
 
+> Spec validation artifact only. This is not canonical provider documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 ## For Implementors: Adding a New Provider
 
 ### 1. Create the Provider Class

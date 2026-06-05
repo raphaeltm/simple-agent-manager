@@ -403,7 +403,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
 
-	t.Run("without_devcontainer_config_includes_features", func(t *testing.T) {
+	t.Run("without_devcontainer_config_uses_lightweight_default", func(t *testing.T) {
 		// Remove any previous args file
 		_ = os.Remove(argsFile)
 
@@ -427,8 +427,8 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 			t.Fatalf("read args file: %v", err)
 		}
 		argsStr := string(args)
-		if !strings.Contains(argsStr, "--additional-features") {
-			t.Fatalf("expected --additional-features in args, got: %s", argsStr)
+		if strings.Contains(argsStr, "--additional-features") {
+			t.Fatalf("expected no-config lightweight startup to omit --additional-features, got: %s", argsStr)
 		}
 		if !strings.Contains(argsStr, "--override-config") {
 			t.Fatalf("expected --override-config in args for repo without devcontainer config, got: %s", argsStr)

@@ -84,7 +84,7 @@ If you need a new tag, use lowercase kebab-case.
 - **Code blocks**: Always specify the language for syntax highlighting (` ```typescript `, ` ```go `, ` ```yaml `, etc.).
 - **Inline code**: Use backticks for function names, file paths, env vars, CLI commands (`getPostBySlug()`, `apps/www/src/`, `NODE_WARM_TIMEOUT_MS`, `pnpm build`).
 - **Bold**: Use for key terms on first introduction or emphasis. Don't overuse.
-- **Links**: Link to source code, docs, ADRs, and specs when referencing them. Use relative links for internal content, absolute URLs for external.
+- **Links**: Link to source code, docs pages, and specs when referencing them. Use relative links for internal content, absolute URLs for external.
 - **Lists**: Use bullet lists for unordered items, numbered lists for sequences/steps.
 - **Tables**: Use for structured comparisons (e.g., "Option A vs Option B").
 - **Blockquotes**: Use for callouts, important notes, or quoting external sources.
@@ -110,16 +110,15 @@ The project history is rich with content. When looking for topics:
 - **Git log**: 497+ commits across 30 days of development
 - **Pull requests**: 191+ merged PRs, many with detailed descriptions
 - **Feature specs**: `specs/` directory contains 22 feature specifications with architecture decisions
-- **ADRs**: `docs/adr/` contains Architecture Decision Records with context and tradeoffs
 - **Task files**: `tasks/` contains implementation notes and retrospectives
 
 ### High-Priority Topics
 
 These topics have strong source material and broad developer appeal:
 
-1. **Hybrid D1 + Durable Objects storage** — ADR 004, spec 018
+1. **Hybrid D1 + Durable Objects storage** — architecture docs and spec 018
 2. **WebSocket reconnection hardening** — 15+ PRs fixing real-time issues
-3. **BYOC security model** — `docs/architecture/credential-security.md`
+3. **BYOC security model** — `apps/www/src/content/docs/docs/architecture/security.md`
 4. **Chat-first UX simplification** — Spec 022, collapsing 7 tabs to 1
 5. **Warm node pooling** — Spec 021, three-layer orphan defense
 6. **PTY multiplexing in Go** — Spec 012, `packages/vm-agent/`

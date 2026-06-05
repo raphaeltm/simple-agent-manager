@@ -21,11 +21,12 @@ import {
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-type SkillEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE' | 'BUILTIN_PROFILE_SONNET_MODEL' | 'BUILTIN_PROFILE_OPUS_MODEL'>;
+type SkillEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
 function toSkill(row: schema.SkillRow): AgentSkill {
   return {
     ...toBaseProfileFields(row),
+    githubCliPolicy: null,
     resourceRequirementsJson: row.resourceRequirementsJson,
     defaultProfileId: row.defaultProfileId,
   };

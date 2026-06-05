@@ -50,21 +50,25 @@ Set in GitHub Settings → Environments → production:
 | `RESOURCE_PREFIX`     | Cloudflare resource name prefix | `sam`              |
 | `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state      | `sam-pulumi-state` |
 
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, and `GH_APP_SLUG`. `GH_WEBHOOK_SECRET` is strongly recommended for webhook signature verification.
+
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. The deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets.
 :::
 
 ## Feature Flags
 
-| Variable           | Default   | Description                                                          |
-| ------------------ | --------- | -------------------------------------------------------------------- |
-| `REQUIRE_APPROVAL` | _(unset)_ | Require admin approval for new users. First user becomes superadmin. |
+| Variable                          | Default   | Description                                                                                                                                |
+| --------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REQUIRE_APPROVAL`                | _(unset)_ | Require admin approval for new users. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
+| `TRIAL_ANONYMOUS_USER_ID`         | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id. |
+| `CAPACITY_SIZE_FALLBACK_ENABLED`  | `true`    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
 
 ## AI Idea Title Generation
 
 | Variable                             | Default                     | Description                                      |
 | ------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `TASK_TITLE_MODEL`                   | `@cf/google/gemma-4-26b-a4b-it` | Workers AI model for title generation            |
+| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation            |
 | `TASK_TITLE_MAX_LENGTH`              | `100`                       | Max characters in generated title                |
 | `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Timeout before falling back to truncation        |
 | `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to disable AI generation             |
@@ -113,6 +117,9 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `ACP_PING_INTERVAL`           | `30s`   | WebSocket keepalive ping interval  |
 | `ACP_PONG_TIMEOUT`            | `10s`   | Pong response timeout              |
 | `ACP_TASK_PROMPT_TIMEOUT`     | `6h`    | Task execution prompt timeout      |
+| `ACP_PROMPT_RETRY_MAX_RETRIES` | `2`     | Max transient provider prompt retries after the initial attempt |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m`    | Max exponential backoff for transient provider prompt retries |
 | `ACP_IDLE_SUSPEND_TIMEOUT`    | `30m`   | Idle session auto-suspend timeout  |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s`    | Notification serialization timeout |
 
@@ -120,7 +127,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                              | Default           | Description                                                         |
 | ------------------------------------- | ----------------- | ------------------------------------------------------------------- |
-| `MCP_TOKEN_TTL_SECONDS`               | `14400` (4 hours) | Token lifetime for agent MCP access (must be >= max execution time) |
+| `MCP_TOKEN_TTL_SECONDS`               | `28800` (8 hours) | Sliding inactivity timeout for agent MCP access                     |
 | `MCP_RATE_LIMIT`                      | `120`             | Max MCP requests per window                                         |
 | `MCP_RATE_LIMIT_WINDOW_SECONDS`       | `60`              | Rate limit window                                                   |
 | `MCP_DISPATCH_MAX_DEPTH`              | `3`               | Max recursion depth for dispatch_task                               |
@@ -179,7 +186,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `MAX_NODES_PER_USER`               | `10`    | Max nodes per user            |
 | `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions |
 | `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user         |
-| `MAX_TASKS_PER_PROJECT`            | `500`   | Max ideas per project         |
+| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project         |
 | `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length   |
 
 ## Durable Object Limits

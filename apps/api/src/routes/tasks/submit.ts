@@ -437,6 +437,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       vmSize,
       vmLocation,
       branch,
+      defaultBranch: project.defaultBranch,
       preferredNodeId: body.nodeId,
       userName: auth.user.name,
       userEmail: auth.user.email,
@@ -472,6 +473,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: resolvedProfile?.profileId ?? null,
       attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,

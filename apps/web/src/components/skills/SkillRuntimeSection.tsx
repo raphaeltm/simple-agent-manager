@@ -7,7 +7,7 @@ import {
   upsertSkillRuntimeEnvVar,
   upsertSkillRuntimeFile,
 } from '../../lib/api';
-import { RuntimeAssetsSection, type RuntimeAssetsApi } from '../runtime/RuntimeAssetsSection';
+import { type RuntimeAssetsApi,RuntimeAssetsSection } from '../runtime/RuntimeAssetsSection';
 
 interface SkillRuntimeSectionProps {
   projectId: string;

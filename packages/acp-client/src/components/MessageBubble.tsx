@@ -123,17 +123,37 @@ function makeCodeComponent(inlineClassName: string): NonNullable<Components['cod
   const CodeComponent: NonNullable<Components['code']> = ({ className, children, ...props }) => {
     const match = /language-(\w+)/.exec(className || '');
     const code = String(children ?? '').replace(/\n$/, '');
-    const isInline = !match && !className;
-    if (isInline) {
+    // A fenced block with no language has no `language-*` class, so the old
+    // `!match && !className` test misclassified it as inline and collapsed its
+    // newlines. Inline code never contains a newline, so a multi-line block is
+    // reliably a block regardless of language.
+    const isBlock = !!match || code.includes('\n');
+    if (!isBlock) {
       return (
         <code className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`} {...props}>
           {children}
         </code>
       );
     }
+    if (match) {
+      return (
+        <div className="my-2">
+          <HighlightedCode code={code} language={match[1] ?? ''} />
+        </div>
+      );
+    }
+    // Language-less block (e.g. command output): preserve line breaks with a
+    // plain dark <pre>; no syntax highlighting or line numbers. Wrapped in a
+    // my-2 div to match the typed-code path's vertical spacing (the <pre>'s own
+    // margin is zeroed by the inline style).
     return (
       <div className="my-2">
-        <HighlightedCode code={code} language={match?.[1] ?? ''} />
+        <pre
+          className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
+          style={{ margin: 0, background: '#011627', fontFamily: 'monospace', lineHeight: '1.5' }}
+        >
+          {code}
+        </pre>
       </div>
     );
   };

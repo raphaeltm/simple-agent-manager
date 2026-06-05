@@ -101,6 +101,69 @@ describe('MessageBubble', () => {
       // Night Owl theme uses #011627 as background (JSDOM normalizes to rgb)
       expect(pre!.style.background).toBe('rgb(1, 22, 39)');
     });
+
+    it('renders a language-less fenced block as a <pre>, preserving line breaks', () => {
+      // No language → no `language-*` class. The old `!match && !className`
+      // test misclassified this as inline <code> and collapsed the newlines.
+      const markdown = '```\nOn branch main\nnothing to commit\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      // Both lines survive AND the newline between them is preserved.
+      expect(pre!.textContent).toContain('On branch main');
+      expect(pre!.textContent).toContain('nothing to commit');
+      expect(pre!.textContent).toContain('\n');
+      expect(pre!.className).toContain('whitespace-pre');
+    });
+
+    it('does not render a multi-line language-less block as inline code', () => {
+      const markdown = '```\nfirst line\nsecond line\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      // It must be a block (<pre>), never a standalone inline <code> pill.
+      expect(container.querySelector('pre')).not.toBeNull();
+      const code = container.querySelector('code');
+      if (code) {
+        // If a <code> exists at all, it must be inside the <pre>, not standalone.
+        expect(code.closest('pre')).not.toBeNull();
+      }
+    });
+
+    it('renders a multi-line language-less block as a <pre> for user messages too', () => {
+      // makeCodeComponent is shared between user and agent roles, so the
+      // block/inline classification must behave identically for user messages.
+      const markdown = '```\nuser line one\nuser line two\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="user" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toContain('user line one');
+      expect(pre!.textContent).toContain('user line two');
+      expect(pre!.textContent).toContain('\n');
+    });
+
+    it('renders a single-line language-less fenced block as inline <code>', () => {
+      // Documents the new logic's edge case: a single-line language-less block
+      // has its trailing newline stripped, so `code.includes('\n')` is false and
+      // there is no language match → it renders inline. This is intentional
+      // (single-line snippets read fine inline) and not a regression.
+      const markdown = '```\ngit status\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      expect(container.querySelector('pre')).toBeNull();
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.textContent).toContain('git status');
+    });
   });
 
   describe('inline code styling per role', () => {

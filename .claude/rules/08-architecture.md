@@ -33,8 +33,8 @@ Build order matters: shared -> providers -> api/web
 Before making ANY changes related to architecture, secrets, credentials, data models, or security:
 
 1. Research relevant architecture documentation:
-   - `docs/architecture/` — Core architecture decisions
-   - `docs/adr/` — Architecture Decision Records
+   - `apps/www/src/content/docs/docs/architecture/` — Core architecture decisions
+   - `apps/www/src/content/docs/docs/architecture/` — Architecture Decision Records
    - `specs/` — Feature specifications with data models
    - `.specify/memory/constitution.md` — Project principles (especially Principle XI)
 
@@ -51,9 +51,9 @@ Before making ANY changes related to architecture, secrets, credentials, data mo
 
 | Document | Contents |
 |----------|----------|
-| `docs/architecture/credential-security.md` | BYOC model, encryption, user credentials |
-| `docs/architecture/secrets-taxonomy.md` | Platform secrets vs user credentials |
-| `docs/adr/002-stateless-architecture.md` | Stateless design principles |
+| `apps/www/src/content/docs/docs/architecture/security.md` | BYOC model, encryption, user credentials |
+| `apps/www/src/content/docs/docs/reference/configuration.md` | Platform secrets vs user credentials |
+| `apps/www/src/content/docs/docs/architecture/overview.md` | Current storage and architecture model |
 | `.specify/memory/constitution.md` | Core principles and rules |
 
 ### Architecture Principles (Quick Reference)

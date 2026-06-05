@@ -78,7 +78,7 @@ wrangler secret put SECRET_NAME
 
 Local development uses `.dev.vars`.
 
-**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `docs/architecture/credential-security.md`.
+**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `apps/www/src/content/docs/docs/architecture/security.md`.
 
 ## URL Construction Rules
 

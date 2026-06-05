@@ -15,6 +15,7 @@ import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'reac
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getMessageToolContent } from '../../lib/api/sessions';
+import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { AcpConversationItemView } from './AcpConversationItemView';
@@ -29,14 +30,14 @@ export { chatMessagesToConversationItems, groupMessages } from './types';
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
-  projectId, lc, onSessionMutated, onRetry, onFork, lineageText,
+  projectId, lc, onSessionMutated, onRetry, onFork, sourceContext,
 }: {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
   onSessionMutated?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
-  lineageText?: string;
+  sourceContext?: SessionSourceContext;
 }) {
   if (!lc.session) return null;
   return (
@@ -56,7 +57,8 @@ function FloatingHeader({
         onOpenGit={lc.handleOpenGitChanges}
         onRetry={onRetry}
         onFork={onFork}
-        lineageText={lineageText}
+        lineageText={sourceContext?.lineageText}
+        sourceContext={sourceContext}
         hasContentBelow={!!lc.taskEmbed?.errorMessage}
       />
       {lc.taskEmbed?.errorMessage && (
@@ -127,8 +129,8 @@ interface ProjectMessageViewProps {
   onRetry?: () => void;
   /** Called when user clicks the fork button in the session header. */
   onFork?: () => void;
-  /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
-  lineageText?: string;
+  /** Source details for retries/forks. */
+  sourceContext?: SessionSourceContext;
   /** Called when the user clicks "End session" on an idle conversation-mode session. */
   onCloseConversation?: () => void;
   /** Whether a close-conversation request is in flight. */
@@ -148,7 +150,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onSessionMutated,
   onRetry,
   onFork,
-  lineageText,
+  sourceContext,
   onCloseConversation,
   closingConversation,
   closeError,
@@ -276,7 +278,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
         <div className="flex-1 min-h-0 flex flex-col relative">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} />
           <div className="flex flex-1 items-center justify-center pt-14">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
@@ -285,7 +287,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} />
           <div className="flex-1 min-h-0">
             <Virtuoso
               ref={virtuosoRef}

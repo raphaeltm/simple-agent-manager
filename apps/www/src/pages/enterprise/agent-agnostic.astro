@@ -1,0 +1,145 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+---
+
+<Base
+  title="Agent Agnostic — SAM Enterprise"
+  description="Run Claude Code, Codex, Gemini CLI, Amp, and more. Switch agents and LLM providers without changing your workflow or platform."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Agent Agnostic</span>
+        <h1 class="detail-title animate-on-scroll">
+          Switch agents without<br />
+          <span class="gradient-text">switching platforms</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          Different teams prefer different tools. SAM supports every major AI coding agent
+          and every major LLM provider. Your workflows stay the same when you switch.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Every Major Agent, One Platform</h2>
+          <p>
+            SAM provisions isolated workspaces for any coding agent. Your team doesn't have to pick one and commit.
+            A frontend team can use Claude Code while the infrastructure team uses Codex. A security team can evaluate
+            Gemini CLI while everyone else keeps working.
+          </p>
+          <div class="agent-grid">
+            <div class="agent-chip">Claude Code</div>
+            <div class="agent-chip">Codex</div>
+            <div class="agent-chip">Gemini CLI</div>
+            <div class="agent-chip">Amp</div>
+            <div class="agent-chip">Mistral Vibe</div>
+            <div class="agent-chip">OpenCode</div>
+          </div>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Bring Your Own API Keys</h2>
+          <p>
+            Use your existing enterprise agreements with Anthropic, OpenAI, Google, or Mistral.
+            Each user provides their own API keys, which are encrypted per-user. No markup, no middleman,
+            no forced provider.
+          </p>
+          <p>
+            Teams can also use OAuth-based subscriptions (like Claude Pro/Max) or opt in to
+            SAM-managed billing when available. The choice is always the user's.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Agent Profiles</h2>
+          <p>
+            Engineering leads can create standardized agent profiles that control which agent, model, and
+            configuration a team uses. Profiles make it easy to roll out a new agent to a team or enforce
+            standards without restricting individual experimentation.
+          </p>
+          <p>
+            When a new agent emerges, you add a profile. No migration, no re-platforming, no downtime.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>No Vendor Lock-In</h2>
+          <p>
+            Managed platforms lock you into their agent, their LLM, their pricing, and their roadmap.
+            If they deprecate a feature, raise prices, or pivot strategy, you're along for the ride.
+          </p>
+          <p>
+            SAM is open source. The platform is infrastructure, not a product you depend on for the agent itself.
+            Swap agents in minutes. Fork the platform if you ever need to.
+          </p>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/compliance/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Compliance & Control
+          </a>
+          <a href="/enterprise/open-source/" class="detail-nav-link">
+            Open Source
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
+  .detail-hero-content { max-width: 720px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
+  .back-link:hover { color: var(--color-fg-muted); }
+  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
+  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
+  .detail-content { max-width: 720px; }
+  .detail-block { margin-bottom: 48px; }
+  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
+  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
+
+  .agent-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .agent-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-fg-primary);
+  }
+
+  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
+  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>

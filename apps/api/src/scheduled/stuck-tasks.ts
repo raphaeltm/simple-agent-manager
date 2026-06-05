@@ -49,6 +49,7 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
   node_provisioning: 'provisioning a new node',
   node_agent_ready: 'waiting for node agent to start',
   workspace_creation: 'creating workspace on node',
+  workspace_dispatch: 'starting workspace on node',
   workspace_ready: 'waiting for workspace to become ready',
   agent_session: 'creating agent session',
   running: 'running (agent active)',

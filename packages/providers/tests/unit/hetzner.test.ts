@@ -1,10 +1,17 @@
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HetznerProvider, isTransientCapacityError } from '../../src/hetzner';
-import type { VMConfig } from '../../src/types';
+import type { ProviderLogger, VMConfig } from '../../src/types';
 import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
 import { fetchCall, jsonBody, testIpv4 } from './test-helpers';
+
+function mockLogger(): ProviderLogger {
+  return {
+    warn: vi.fn(),
+    info: vi.fn(),
+  };
+}
 
 describe('HetznerProvider', () => {
   let provider: HetznerProvider;
@@ -296,6 +303,16 @@ describe('HetznerProvider', () => {
 
     it('should fall back to other locations after primary retry fails', async () => {
       vi.useFakeTimers();
+      const logger = mockLogger();
+      const providerWithLogger = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        undefined,
+        true,
+        undefined,
+        undefined,
+        { logger },
+      );
       const mockFetch = vi.fn()
         .mockResolvedValueOnce(
           new Response(
@@ -318,7 +335,7 @@ describe('HetznerProvider', () => {
 
       globalThis.fetch = mockFetch;
 
-      const promise = provider.createVM(vmConfig);
+      const promise = providerWithLogger.createVM(vmConfig);
       await vi.runAllTimersAsync();
       const result = await promise;
 
@@ -332,6 +349,14 @@ describe('HetznerProvider', () => {
       expect(firstBody.location).toBe('fsn1');
       expect(secondBody.location).toBe('fsn1');
       expect(thirdBody.location).not.toBe('fsn1');
+      expect(logger.warn).toHaveBeenCalledWith('hetzner placement attempt failed', {
+        location: 'fsn1',
+        statusCode: 412,
+      });
+      expect(logger.info).toHaveBeenCalledWith('hetzner placement fallback succeeded', {
+        primaryLocation: 'fsn1',
+        selectedLocation: thirdBody.location,
+      });
     });
 
     it('should throw after all locations exhausted on 412', async () => {
@@ -743,28 +768,35 @@ describe('HetznerProvider capacity retry', () => {
 
   it('should NOT log a warn on the final exhaustion attempt', async () => {
     vi.useFakeTimers();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 2);
+    const logger = mockLogger();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 2,
+      logger,
+    });
     mockAlwaysCapacityError('no capacity for this server type');
 
     const promise = provider.createVM(vmConfig).catch((e) => e);
     await vi.runAllTimersAsync();
     await promise;
 
-    const capacityWarnCalls = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('transient capacity error'),
+    const capacityWarnCalls = vi.mocked(logger.warn).mock.calls.filter(
+      (call) => call[0].includes('transient capacity error'),
     );
     // Only 1 warn for first attempt; second attempt is the last and throws without logging
     expect(capacityWarnCalls).toHaveLength(1);
-    expect(String(capacityWarnCalls[0]?.[0])).toContain('attempt 1/2');
-
-    warnSpy.mockRestore();
+    expect(capacityWarnCalls[0]?.[1]).toEqual(expect.objectContaining({
+      attempt: 1,
+      maxAttempts: 2,
+    }));
   });
 
   it('should log capacity retry attempts with context', async () => {
     vi.useFakeTimers();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3);
+    const logger = mockLogger();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 3,
+      logger,
+    });
     const mockFetch = vi.fn()
       .mockResolvedValueOnce(capacityErrorResponse())
       .mockResolvedValueOnce(successResponse());
@@ -775,16 +807,20 @@ describe('HetznerProvider capacity retry', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    const capacityWarnCalls = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('transient capacity error'),
+    const capacityWarnCalls = vi.mocked(logger.warn).mock.calls.filter(
+      (call) => call[0].includes('transient capacity error'),
     );
     expect(capacityWarnCalls).toHaveLength(1);
-    const logMsg = String(capacityWarnCalls[0]?.[0]);
-    expect(logMsg).toContain('attempt 1/3');
-    expect(logMsg).toContain('server_type=cx33');
-    expect(logMsg).toContain('location=fsn1');
-    expect(logMsg).toContain('100ms');
-
-    warnSpy.mockRestore();
+    expect(capacityWarnCalls[0]).toEqual([
+      'hetzner transient capacity error; retrying createVM',
+      expect.objectContaining({
+        delayMs: 100,
+        attempt: 1,
+        maxAttempts: 3,
+        serverType: 'cx33',
+        location: 'fsn1',
+        statusCode: 422,
+      }),
+    ]);
   });
 });

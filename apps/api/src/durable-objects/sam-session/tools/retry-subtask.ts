@@ -255,6 +255,7 @@ export async function retrySubtask(
       vmSize: resolvedVmSize,
       vmLocation: resolvedVmLocation,
       branch: original.projectDefaultBranch,
+      defaultBranch: original.projectDefaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
@@ -274,6 +275,7 @@ export async function retrySubtask(
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: null,
       projectScaling: {
         taskExecutionTimeoutMs: original.projectTaskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: original.projectMaxWorkspacesPerNode ?? null,

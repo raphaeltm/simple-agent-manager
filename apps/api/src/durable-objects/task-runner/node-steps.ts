@@ -4,11 +4,14 @@
  * Handles node_selection, node_provisioning, and node_agent_ready steps,
  * plus node selection helper functions (warm pool, capacity finding, health).
  */
+import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
+import type { VMSize } from '@simple-agent-manager/shared';
 import {
   canSatisfyVmSize,
   DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  vmSizeFallbackChain,
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
@@ -108,7 +111,59 @@ export async function handleNodeProvisioning(
     await rc.ctx.storage.put('state', state);
   }
 
-  // If we already created the node (retry scenario), check its status
+  // Self-healing recovery: a prior attempt may have provisioned a node in D1
+  // (and in the cloud) but crashed before persisting nodeId to DO storage. The
+  // task row records the node via auto_provisioned_node_id, which is written
+  // BEFORE provisionNode (so it survives the crash window between provision
+  // success and the storage.put below). Adopt that node instead of creating a
+  // duplicate (orphan). Capacity-failed nodes are deleted from D1, so a
+  // missing/dead row means the attempt failed and we should (re)provision below.
+  if (!state.stepResults.nodeId) {
+    const taskRow = await rc.env.DATABASE.prepare(
+      `SELECT auto_provisioned_node_id FROM tasks WHERE id = ?`
+    )
+      .bind(state.taskId)
+      .first<{ auto_provisioned_node_id: string | null }>();
+    const recoveredNodeId = taskRow?.auto_provisioned_node_id ?? null;
+    if (recoveredNodeId) {
+      const existing = await rc.env.DATABASE.prepare(
+        `SELECT id, status, vm_size FROM nodes WHERE id = ?`
+      )
+        .bind(recoveredNodeId)
+        .first<{ id: string; status: string; vm_size: string }>();
+      if (
+        existing &&
+        (existing.status === 'running' ||
+          existing.status === 'creating' ||
+          existing.status === 'recovery')
+      ) {
+        const recoveredSize = existing.vm_size as VMSize;
+        const requestedBeforeRecovery = state.config.vmSize;
+        state.stepResults.nodeId = existing.id;
+        state.stepResults.autoProvisioned = true;
+        state.stepResults.provisionedVmSize = recoveredSize;
+        state.config.vmSize = recoveredSize;
+        await rc.ctx.storage.put('state', state);
+        log.info('task_runner_do.node_provisioning.recovered', {
+          taskId: state.taskId,
+          nodeId: existing.id,
+          recoveredVmSize: recoveredSize,
+          requestedVmSize: requestedBeforeRecovery,
+        });
+        if (recoveredSize !== requestedBeforeRecovery) {
+          // Re-record the downgrade in case the crash happened before it was
+          // persisted on the original success path.
+          await rc.env.DATABASE.prepare(
+            `UPDATE tasks SET provisioned_vm_size = ?, updated_at = ? WHERE id = ?`
+          )
+            .bind(recoveredSize, new Date().toISOString(), state.taskId)
+            .run();
+        }
+      }
+    }
+  }
+
+  // If we already created the node (retry scenario, or recovery above), check its status
   if (state.stepResults.nodeId) {
     // Check timeout before polling
     const timeoutMs = rc.getProvisionTimeoutMs();
@@ -203,55 +258,129 @@ export async function handleNodeProvisioning(
   const { getRuntimeLimits } = await import('../../services/limits');
   const limits = getRuntimeLimits(rc.env);
 
-  const createdNode = await createNodeRecord(rc.env, {
-    userId: state.userId,
-    name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
-    vmSize: state.config.vmSize,
-    vmLocation: state.config.vmLocation,
-    heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-    cloudProvider: state.config.cloudProvider ?? undefined,
-  });
+  // Size-fallback descent (only when the size is default-derived — i.e. nobody
+  // asked for a specific size). When provisioning a brand-new node fails with a
+  // transient_capacity error, drop to the next-smaller size and retry, descending
+  // to the smallest. An explicit size requirement (task/trigger/agent-profile)
+  // never downgrades — it fails with a clear message. See
+  // tasks/active/2026-06-04-vm-size-fallback-on-capacity.md.
+  const fallbackEnabled = rc.env.CAPACITY_SIZE_FALLBACK_ENABLED !== 'false';
+  const sizeIsDefaultDerived =
+    state.config.vmSizeSource === 'project' || state.config.vmSizeSource === 'platform';
+  const fallbackAllowed = fallbackEnabled && sizeIsDefaultDerived;
+  const requestedSize: VMSize = state.config.vmSize;
+  const chain: VMSize[] = fallbackAllowed ? vmSizeFallbackChain(requestedSize) : [requestedSize];
 
-  state.stepResults.nodeId = createdNode.id;
-  state.stepResults.autoProvisioned = true;
+  for (let i = 0; i < chain.length; i++) {
+    const size = chain[i]!;
+    const isLastSize = i === chain.length - 1;
 
-  // Store autoProvisionedNodeId on the task
-  await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET auto_provisioned_node_id = ?, updated_at = ? WHERE id = ?`
-  )
-    .bind(createdNode.id, new Date().toISOString(), state.taskId)
-    .run();
+    const createdNode = await createNodeRecord(rc.env, {
+      userId: state.userId,
+      name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
+      vmSize: size,
+      vmLocation: state.config.vmLocation,
+      heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+      cloudProvider: state.config.cloudProvider ?? undefined,
+    });
 
-  await rc.ctx.storage.put('state', state);
+    // Store autoProvisionedNodeId on the task
+    await rc.env.DATABASE.prepare(
+      `UPDATE tasks SET auto_provisioned_node_id = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(createdNode.id, new Date().toISOString(), state.taskId)
+      .run();
 
-  log.info('task_runner_do.step.node_provisioning', {
-    taskId: state.taskId,
-    nodeId: createdNode.id,
-    vmSize: state.config.vmSize,
-  });
+    log.info('task_runner_do.step.node_provisioning', {
+      taskId: state.taskId,
+      nodeId: createdNode.id,
+      vmSize: size,
+      requestedVmSize: requestedSize,
+      attempt: i + 1,
+      chainLength: chain.length,
+    });
 
-  // Provision the node with task context so the VM agent enables
-  // the message reporter for chat persistence (Bug fix: previously
-  // projectId/chatSessionId were empty, disabling the reporter).
-  await provisionNode(createdNode.id, rc.env, {
-    projectId: state.projectId,
-    chatSessionId: state.stepResults.chatSessionId ?? '',
-    taskId: state.taskId,
-    taskMode: state.config.taskMode,
-  });
+    try {
+      // Provision the node with task context so the VM agent enables
+      // the message reporter for chat persistence. rethrowProviderError makes
+      // provisionNode surface the typed ProviderError (and delete the failed
+      // node row on capacity exhaustion) so we can branch on the category.
+      await provisionNode(
+        createdNode.id,
+        rc.env,
+        {
+          projectId: state.projectId,
+          chatSessionId: state.stepResults.chatSessionId ?? '',
+          taskId: state.taskId,
+          taskMode: state.config.taskMode,
+        },
+        { rethrowProviderError: true }
+      );
+    } catch (err) {
+      const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
 
-  // Verify it's running
-  const provisionedNode = await rc.env.DATABASE.prepare(
-    `SELECT status, error_message FROM nodes WHERE id = ?`
-  )
-    .bind(createdNode.id)
-    .first<{ status: string; error_message: string | null }>();
+      // Any non-capacity provider failure fails fast — never descend on
+      // invalid_config / quota_exceeded / auth_error / rate_limited / unknown.
+      if (!isCapacityFailure) {
+        const message = err instanceof Error ? err.message : 'Node provisioning failed';
+        throw Object.assign(new Error(message), { permanent: true });
+      }
 
-  if (!provisionedNode || provisionedNode.status !== 'running') {
-    throw new Error(provisionedNode?.error_message || 'Node provisioning failed');
+      // transient_capacity: descend to the next-smaller size if one remains.
+      // The failed node row was already deleted inside provisionNode (decision #1).
+      if (!isLastSize) {
+        log.info('task_runner_do.size_fallback', {
+          taskId: state.taskId,
+          fromVmSize: size,
+          toVmSize: chain[i + 1]!,
+          requestedVmSize: requestedSize,
+          providerCode: err instanceof ProviderError ? err.providerCode : undefined,
+        });
+        continue;
+      }
+
+      // Capacity exhausted at the last size in the chain — terminal.
+      const terminalMessage =
+        chain.length === 1
+          ? `There were no ${requestedSize} machines available.`
+          : `No capacity for any available VM size (tried ${chain.join(', ')}).`;
+      throw Object.assign(new Error(terminalMessage), { permanent: true });
+    }
+
+    // provisionNode returned without throwing — this size was accepted.
+    state.stepResults.nodeId = createdNode.id;
+    state.stepResults.autoProvisioned = true;
+    state.stepResults.provisionedVmSize = size;
+    // Update the working size so downstream steps reference the size actually
+    // provisioned (relevant when we descended below the requested size).
+    state.config.vmSize = size;
+    await rc.ctx.storage.put('state', state);
+
+    if (size !== requestedSize) {
+      // Persist the downgraded size on the task so the UI can surface it.
+      await rc.env.DATABASE.prepare(
+        `UPDATE tasks SET provisioned_vm_size = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(size, new Date().toISOString(), state.taskId)
+        .run();
+    }
+
+    // Verify it's running. Async-IP providers (e.g. Scaleway) return with
+    // status 'creating' — the non-permanent throw drives the alarm poll-resume
+    // loop (handled by the nodeId-set branch at the top of this function).
+    const provisionedNode = await rc.env.DATABASE.prepare(
+      `SELECT status, error_message FROM nodes WHERE id = ?`
+    )
+      .bind(createdNode.id)
+      .first<{ status: string; error_message: string | null }>();
+
+    if (!provisionedNode || provisionedNode.status !== 'running') {
+      throw new Error(provisionedNode?.error_message || 'Node provisioning failed');
+    }
+
+    await rc.advanceToStep(state, 'node_agent_ready');
+    return;
   }
-
-  await rc.advanceToStep(state, 'node_agent_ready');
 }
 
 export async function handleNodeAgentReady(
