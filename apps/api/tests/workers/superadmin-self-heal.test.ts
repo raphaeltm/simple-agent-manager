@@ -132,6 +132,14 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
 
     expect(await getUser('real-1')).toMatchObject({ role: 'user', status: 'suspended' });
   });
+
+  it('promotes a sole pending user (edge case 10)', async () => {
+    await insertUser('real-1', { role: 'user', status: 'pending' });
+
+    await env.DATABASE.exec(migrationSql.replaceAll('\n', ' '));
+
+    expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+  });
 });
 
 describe('session.create.after — login-time self-heal (real D1)', () => {
@@ -184,6 +192,25 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'user', status: 'suspended' });
+  });
+
+  it('promotes a sole pending user on login (edge case 10)', async () => {
+    await insertUser('real-1', { role: 'user', status: 'pending' });
+    const hook = getSessionAfterHook();
+
+    await hook({ userId: 'real-1' });
+
+    expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+  });
+
+  it('promotes the sole user even when REQUIRE_APPROVAL is unset (open registration)', async () => {
+    await insertUser('real-1', { role: 'user', status: 'active' });
+    // Omit REQUIRE_APPROVAL entirely — the self-heal is ungated and must still fire.
+    const hook = getSessionAfterHook({ REQUIRE_APPROVAL: undefined });
+
+    await hook({ userId: 'real-1' });
+
+    expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
   });
 
   it('never mutates the sentinel even if its id is passed as the login user', async () => {
