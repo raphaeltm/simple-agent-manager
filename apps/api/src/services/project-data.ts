@@ -14,6 +14,12 @@ import {
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
+import {
+  computeDurableObjectRetryDelayMs,
+  getDurableObjectRetryConfig,
+  isTransientDurableObjectError,
+} from './durable-object-retry';
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
@@ -28,6 +34,46 @@ async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<P
   const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
   await stub.ensureProjectId(projectId);
   return stub;
+}
+
+async function callProjectDataWithRetry<T>(
+  env: Env,
+  projectId: string,
+  operation: string,
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>,
+): Promise<T> {
+  const retryConfig = getDurableObjectRetryConfig(env);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
+    try {
+      const stub = await getStub(env, projectId);
+      return await call(stub);
+    } catch (err) {
+      lastError = err;
+
+      if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
+        throw err;
+      }
+
+      const delayMs = computeDurableObjectRetryDelayMs(attempt, retryConfig.baseDelayMs);
+      log.warn('project_data.do_rpc_retry', {
+        projectId,
+        operation,
+        attempt,
+        maxAttempts: retryConfig.maxAttempts,
+        delayMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError ?? new Error('ProjectData DO retry exhausted without an error');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // =========================================================================
@@ -51,8 +97,9 @@ export async function linkSessionToWorkspace(
   sessionId: string,
   workspaceId: string
 ): Promise<void> {
-  const stub = await getStub(env, projectId);
-  return stub.linkSessionToWorkspace(sessionId, workspaceId);
+  return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
+    stub.linkSessionToWorkspace(sessionId, workspaceId)
+  );
 }
 
 export async function stopSession(
@@ -156,8 +203,9 @@ export async function getSession(
   projectId: string,
   sessionId: string
 ): Promise<Record<string, unknown> | null> {
-  const stub = await getStub(env, projectId);
-  return stub.getSession(sessionId);
+  return callProjectDataWithRetry(env, projectId, 'getSession', (stub) =>
+    stub.getSession(sessionId)
+  );
 }
 
 export async function getMessages(
@@ -169,8 +217,9 @@ export async function getMessages(
   roles?: string[],
   compact: boolean = false
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
-  const stub = await getStub(env, projectId);
-  return stub.getMessages(sessionId, limit, before, roles, compact);
+  return callProjectDataWithRetry(env, projectId, 'getMessages', (stub) =>
+    stub.getMessages(sessionId, limit, before, roles, compact)
+  );
 }
 
 export async function getMessageToolContent(
@@ -383,15 +432,16 @@ export async function createAcpSession(
   forkDepth: number = 0,
   id?: string
 ): Promise<AcpSession> {
-  const stub = await getStub(env, projectId);
-  return stub.createAcpSession({
-    chatSessionId,
-    initialPrompt,
-    agentType,
-    parentSessionId,
-    forkDepth,
-    id,
-  });
+  return callProjectDataWithRetry(env, projectId, 'createAcpSession', (stub) =>
+    stub.createAcpSession({
+      chatSessionId,
+      initialPrompt,
+      agentType,
+      parentSessionId,
+      forkDepth,
+      id,
+    })
+  );
 }
 
 export async function getAcpSession(
@@ -434,8 +484,9 @@ export async function transitionAcpSession(
     errorMessage?: string;
   }
 ): Promise<AcpSession> {
-  const stub = await getStub(env, projectId);
-  return stub.transitionAcpSession(sessionId, toStatus, opts);
+  return callProjectDataWithRetry(env, projectId, 'transitionAcpSession', (stub) =>
+    stub.transitionAcpSession(sessionId, toStatus, opts)
+  );
 }
 
 export async function updateAcpSessionHeartbeat(

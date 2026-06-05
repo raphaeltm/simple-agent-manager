@@ -26,18 +26,19 @@ The VM agent already classifies this exact string as transient for ACP heartbeat
 
 ## Checklist
 
-- [ ] Add a TypeScript Durable Object transient classifier with explicit coverage for `Durable Object reset because its code was updated` and related reset/overload conditions.
-- [ ] Add unit tests for the classifier, including the exact string and case variants.
-- [ ] Add env-backed retry configuration to `Env` for `DO_RETRY_MAX_ATTEMPTS` and `DO_RETRY_BASE_DELAY_MS`.
-- [ ] Add a bounded ProjectData DO RPC retry helper that retries `getStub()`/`ensureProjectId()` and the target RPC when the classifier says the error is transient.
-- [ ] Apply the retry helper to `getSession()`, `getMessages()`, `linkSessionToWorkspace()`, `createAcpSession()`, and `transitionAcpSession()`.
-- [ ] Wire the classifier into `task-runner/helpers.ts:isTransientError()` before the default-true fallback.
-- [ ] Add regression tests for `isTransientError()` explicitly matching the DO reset string.
-- [ ] Add a behavioral route/service test where `getSession()` or `getMessages()` throws a DO-reset error on the first call, succeeds on retry, returns a successful chat session detail response, and does not record `chat.session_detail_load_failed`.
-- [ ] Add a retry-exhaustion test proving the error still surfaces and chat session load failure recording occurs only after retries are exhausted.
-- [ ] Run focused tests, then full quality gates.
-- [ ] Run specialist review: `$task-completion-validator`, `$cloudflare-specialist`, `$constitution-validator`, `$test-engineer`, and `$env-validator`.
-- [ ] Deploy the branch to staging via `deploy-staging.yml`, open a chat session immediately during/after deploy, and confirm no new `chat.session_detail_load_failed` observability event for that action.
+- [x] Add a TypeScript Durable Object transient classifier with explicit coverage for `Durable Object reset because its code was updated` and related reset/overload conditions.
+- [x] Add unit tests for the classifier, including the exact string and case variants.
+- [x] Add env-backed retry configuration to `Env` for `DO_RETRY_MAX_ATTEMPTS` and `DO_RETRY_BASE_DELAY_MS`.
+- [x] Document retry configuration in `.env.example` and the public configuration reference.
+- [x] Add a bounded ProjectData DO RPC retry helper that retries `getStub()`/`ensureProjectId()` and the target RPC when the classifier says the error is transient.
+- [x] Apply the retry helper to `getSession()`, `getMessages()`, `linkSessionToWorkspace()`, `createAcpSession()`, and `transitionAcpSession()`.
+- [x] Wire the classifier into `task-runner/helpers.ts:isTransientError()` before the default-true fallback.
+- [x] Add regression tests for `isTransientError()` explicitly matching the DO reset string.
+- [x] Add a behavioral route/service test where `getSession()` or `getMessages()` throws a DO-reset error on the first call, succeeds on retry, returns a successful chat session detail response, and does not record `chat.session_detail_load_failed`.
+- [x] Add a retry-exhaustion test proving the error still surfaces and chat session load failure recording occurs only after retries are exhausted.
+- [x] Run focused tests, then full quality gates. Focused retry/classifier/chat route tests passed: 4 files, 47 tests; API typecheck passed; API lint passed with existing warnings; full `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed.
+- [x] Run specialist review: `$task-completion-validator`, `$cloudflare-specialist`, `$constitution-validator`, `$test-engineer`, and `$env-validator`.
+- [x] Deploy the branch to staging via `deploy-staging.yml`, open a chat session immediately during/after deploy, and confirm no new `chat.session_detail_load_failed` observability event for that action. Evidence: staging run `27038038460` passed; authenticated `GET /api/projects/01KJNR9R3TEN3KX1ETE33852R8/sessions/ff93ffb2-2c15-4a5b-8c8a-07de1d30c548?limit=25` returned 200 with 25 messages after deploy; observability D1 count for `chat.session_detail_load_failed` was 0 for the verification window.
 - [ ] Create PR, wait for CI, merge when green and staging verification passes, then monitor production deploy.
 
 ## Acceptance Criteria

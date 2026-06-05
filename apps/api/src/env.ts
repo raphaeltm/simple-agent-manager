@@ -252,6 +252,9 @@ export interface Env {
   IDLE_CLEANUP_MAX_RETRIES?: string;
   // Heartbeat ACP sweep timeout (per-call timeout for DO heartbeat updates in waitUntil)
   HEARTBEAT_ACP_SWEEP_TIMEOUT_MS?: string;
+  // Durable Object RPC retry configuration for transient reset/overload errors
+  DO_RETRY_MAX_ATTEMPTS?: string;
+  DO_RETRY_BASE_DELAY_MS?: string;
   // TaskRunner DO configuration (TDF-2: alarm-driven orchestration)
   TASK_RUNNER_STEP_MAX_RETRIES?: string;
   TASK_RUNNER_RETRY_BASE_DELAY_MS?: string;
