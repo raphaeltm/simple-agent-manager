@@ -18,6 +18,53 @@ export interface RuntimeAssetRows {
   files: WorkspaceRuntimeFile[];
 }
 
+/** Stored env-var row shape shared by the profile and skill runtime tables. */
+interface StoredEnvVarRow {
+  envKey: string;
+  storedValue: string;
+  isSecret: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Stored file row shape shared by the profile and skill runtime tables. */
+interface StoredFileRow {
+  filePath: string;
+  storedContent: string;
+  isSecret: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Map stored env-var/file rows to the API config response. Secret values are
+ * redacted (`null`) but `hasValue` stays true so the UI can render a masked
+ * placeholder. Shared by the profile and skill config builders.
+ */
+function toRuntimeConfigResponse(
+  envRows: StoredEnvVarRow[],
+  fileRows: StoredFileRow[]
+): ProjectRuntimeConfigResponse {
+  return {
+    envVars: envRows.map((row) => ({
+      key: row.envKey,
+      value: row.isSecret ? null : row.storedValue,
+      isSecret: row.isSecret,
+      hasValue: true,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    })),
+    files: fileRows.map((row) => ({
+      path: row.filePath,
+      content: row.isSecret ? null : row.storedContent,
+      isSecret: row.isSecret,
+      hasValue: true,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    })),
+  };
+}
+
 export async function requireOwnedProjectScopedProfile(
   db: Db,
   projectId: string,
@@ -72,24 +119,7 @@ export async function buildProfileRuntimeConfigResponse(
       .orderBy(schema.profileRuntimeFiles.filePath),
   ]);
 
-  return {
-    envVars: envRows.map((row) => ({
-      key: row.envKey,
-      value: row.isSecret ? null : row.storedValue,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    })),
-    files: fileRows.map((row) => ({
-      path: row.filePath,
-      content: row.isSecret ? null : row.storedContent,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    })),
-  };
+  return toRuntimeConfigResponse(envRows, fileRows);
 }
 
 export async function buildSkillRuntimeConfigResponse(
@@ -110,24 +140,7 @@ export async function buildSkillRuntimeConfigResponse(
       .orderBy(schema.skillRuntimeFiles.filePath),
   ]);
 
-  return {
-    envVars: envRows.map((row) => ({
-      key: row.envKey,
-      value: row.isSecret ? null : row.storedValue,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    })),
-    files: fileRows.map((row) => ({
-      path: row.filePath,
-      content: row.isSecret ? null : row.storedContent,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    })),
-  };
+  return toRuntimeConfigResponse(envRows, fileRows);
 }
 
 export function mergeRuntimeAssetRows(

@@ -10,26 +10,40 @@ import { resolveSkillProfile } from '../../../src/services/skills';
 function createMockDB() {
   const queryResults: unknown[] = [];
   let queryIndex = 0;
+  // Resolves to the next queued query result, mirroring Drizzle's lazy execution.
+  const nextResult = () => Promise.resolve(queryResults[queryIndex++] ?? []);
+
+  // Drizzle query builders are thenable: a chain ending at `.where()` (with no
+  // `.limit()`/`.orderBy()`) is awaited directly. We model that with a Proxy so
+  // the `then` handler is supplied via the get-trap rather than as an object
+  // literal property (which would be a thenable foot-gun and a SonarCloud bug).
+  function makeChain(): any {
+    return new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === 'then') {
+            return (
+              resolve: (value: unknown) => unknown,
+              reject?: (reason: unknown) => unknown
+            ) => nextResult().then(resolve, reject);
+          }
+          if (prop === 'limit' || prop === 'orderBy') {
+            return () => nextResult();
+          }
+          // from / where and any other builder method stay chainable.
+          return () => makeChain();
+        },
+      }
+    );
+  }
+
   const db: any = {
     _pushResult(value: unknown) {
       queryResults.push(value);
     },
-    select: vi.fn(),
+    select: vi.fn(() => makeChain()),
   };
-
-  function makeChain() {
-    const chain: any = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      orderBy: vi.fn(() => Promise.resolve(queryResults[queryIndex++] ?? [])),
-      limit: vi.fn(() => Promise.resolve(queryResults[queryIndex++] ?? [])),
-      then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
-        Promise.resolve(queryResults[queryIndex++] ?? []).then(resolve, reject),
-    };
-    return chain;
-  }
-
-  db.select.mockImplementation(() => makeChain());
   return db;
 }
 

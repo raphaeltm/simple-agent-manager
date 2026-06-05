@@ -13,6 +13,11 @@ import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { resolveAgentProfile } from './agent-profiles';
+import {
+  applyBaseProfileUpdates,
+  baseProfileInsertValues,
+  toBaseProfileFields,
+} from './profile-fields';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -20,28 +25,9 @@ type SkillEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE' | 'BUILTIN_PROFILE_SONNET_MO
 
 function toSkill(row: schema.SkillRow): AgentSkill {
   return {
-    id: row.id,
-    projectId: row.projectId,
-    userId: row.userId,
-    name: row.name,
-    description: row.description,
-    agentType: row.agentType,
-    model: row.model,
-    permissionMode: row.permissionMode,
-    systemPromptAppend: row.systemPromptAppend,
-    maxTurns: row.maxTurns,
-    timeoutMinutes: row.timeoutMinutes,
-    vmSizeOverride: row.vmSizeOverride,
-    provider: row.provider,
-    vmLocation: row.vmLocation,
-    workspaceProfile: row.workspaceProfile,
-    devcontainerConfigName: row.devcontainerConfigName,
-    taskMode: row.taskMode,
+    ...toBaseProfileFields(row),
     resourceRequirementsJson: row.resourceRequirementsJson,
     defaultProfileId: row.defaultProfileId,
-    isBuiltin: row.isBuiltin === 1,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
   };
 }
 
@@ -165,18 +151,7 @@ export async function createSkill(
     projectId,
     userId,
     name,
-    description: body.description ?? null,
-    agentType: body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode',
-    model: body.model ?? null,
-    permissionMode: body.permissionMode ?? null,
-    systemPromptAppend: body.systemPromptAppend ?? null,
-    maxTurns: body.maxTurns ?? null,
-    timeoutMinutes: body.timeoutMinutes ?? null,
-    vmSizeOverride: body.vmSizeOverride ?? null,
-    provider: body.provider ?? null,
-    vmLocation: body.vmLocation ?? null,
-    workspaceProfile: body.workspaceProfile ?? null,
-    devcontainerConfigName: body.devcontainerConfigName ?? null,
+    ...baseProfileInsertValues(body, env),
     taskMode: body.taskMode ?? 'task',
     resourceRequirementsJson: validateResourceRequirementsJson(body.resourceRequirementsJson),
     defaultProfileId: await requireProjectProfile(db, projectId, body.defaultProfileId, userId),
@@ -212,20 +187,7 @@ export async function updateSkill(
   }
 
   const updates: Partial<schema.NewSkillRow> = { updatedAt: new Date().toISOString() };
-  if (body.name !== undefined) updates.name = body.name.trim();
-  if (body.description !== undefined) updates.description = body.description;
-  if (body.agentType !== undefined) updates.agentType = body.agentType;
-  if (body.model !== undefined) updates.model = body.model;
-  if (body.permissionMode !== undefined) updates.permissionMode = body.permissionMode;
-  if (body.systemPromptAppend !== undefined) updates.systemPromptAppend = body.systemPromptAppend;
-  if (body.maxTurns !== undefined) updates.maxTurns = body.maxTurns;
-  if (body.timeoutMinutes !== undefined) updates.timeoutMinutes = body.timeoutMinutes;
-  if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
-  if (body.provider !== undefined) updates.provider = body.provider;
-  if (body.vmLocation !== undefined) updates.vmLocation = body.vmLocation;
-  if (body.workspaceProfile !== undefined) updates.workspaceProfile = body.workspaceProfile;
-  if (body.devcontainerConfigName !== undefined) updates.devcontainerConfigName = body.devcontainerConfigName;
-  if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
+  applyBaseProfileUpdates(updates, body);
   if (body.resourceRequirementsJson !== undefined) {
     updates.resourceRequirementsJson = validateResourceRequirementsJson(body.resourceRequirementsJson);
   }
