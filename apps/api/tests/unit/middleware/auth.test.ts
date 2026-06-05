@@ -109,27 +109,17 @@ describe('resolveSessionStatus via requireAuth', () => {
     expect(mocks.warn).not.toHaveBeenCalled();
   });
 
-  it('passes through a normal active status verbatim', async () => {
-    mocks.getSession.mockResolvedValue(
-      makeSession({ id: 'user-2', email: 'a@x.com', role: 'user', status: 'active' }),
-    );
+  it.each([
+    { id: 'user-2', email: 'a@x.com', status: 'active' },
+    { id: 'user-3', email: 'b@x.com', status: 'suspended' },
+  ])('passes through a $status status verbatim', async ({ id, email, status }) => {
+    mocks.getSession.mockResolvedValue(makeSession({ id, email, role: 'user', status }));
     const { c, store } = makeContext();
 
     await requireAuth()(c as never, vi.fn(async () => {}) as never);
 
-    expect((store.auth as CapturedAuth).user.status).toBe('active');
+    expect((store.auth as CapturedAuth).user.status).toBe(status);
     expect(mocks.warn).not.toHaveBeenCalled();
-  });
-
-  it('passes through a suspended status verbatim', async () => {
-    mocks.getSession.mockResolvedValue(
-      makeSession({ id: 'user-3', email: 'b@x.com', role: 'user', status: 'suspended' }),
-    );
-    const { c, store } = makeContext();
-
-    await requireAuth()(c as never, vi.fn(async () => {}) as never);
-
-    expect((store.auth as CapturedAuth).user.status).toBe('suspended');
   });
 });
 

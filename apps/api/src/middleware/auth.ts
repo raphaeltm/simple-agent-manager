@@ -52,6 +52,33 @@ function resolveSessionStatus(rawStatus: unknown, userId: string): UserStatus {
   return rawStatus as UserStatus;
 }
 
+type AuthSession = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>
+>;
+
+/**
+ * Project a validated BetterAuth session onto the request `auth` context shape.
+ * Shared by requireAuth and optionalAuth so the role/status resolution lives in
+ * exactly one place.
+ */
+function buildAuthContext(session: AuthSession): AuthContext {
+  const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
+  return {
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name ?? null,
+      avatarUrl: session.user.image ?? null,
+      role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
+      status: resolveSessionStatus(sessionUser.status, session.user.id),
+    },
+    session: {
+      id: session.session.id,
+      expiresAt: session.session.expiresAt,
+    },
+  };
+}
+
 /**
  * Authentication middleware.
  * Validates session and adds user info to context.
@@ -68,21 +95,7 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
       throw errors.unauthorized('Authentication required');
     }
 
-    const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
-    c.set('auth', {
-      user: {
-        id: session.user.id,
-        email: session.user.email,
-        name: session.user.name ?? null,
-        avatarUrl: session.user.image ?? null,
-        role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
-        status: resolveSessionStatus(sessionUser.status, session.user.id),
-      },
-      session: {
-        id: session.session.id,
-        expiresAt: session.session.expiresAt,
-      },
-    });
+    c.set('auth', buildAuthContext(session));
 
     await next();
   };
@@ -102,21 +115,7 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
       });
 
       if (session?.user) {
-        const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
-        c.set('auth', {
-          user: {
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.name ?? null,
-            avatarUrl: session.user.image ?? null,
-            role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
-            status: resolveSessionStatus(sessionUser.status, session.user.id),
-          },
-          session: {
-            id: session.session.id,
-            expiresAt: session.session.expiresAt,
-          },
-        });
+        c.set('auth', buildAuthContext(session));
       }
     } catch (e) {
       log.warn('optional_auth.check_failed', { error: String(e) });
