@@ -16,8 +16,8 @@ import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import migrationSql from '../../src/db/migrations/0062_login_time_superadmin_self_heal.sql?raw';
 import { createAuth } from '../../src/auth';
+import migrationSql from '../../src/db/migrations/0062_login_time_superadmin_self_heal.sql?raw';
 
 interface UserRow {
   id: string;
