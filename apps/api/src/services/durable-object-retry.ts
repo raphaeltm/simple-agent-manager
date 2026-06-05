@@ -1,7 +1,8 @@
 import { parsePositiveInt } from '../lib/route-helpers';
 
-export const DEFAULT_DO_RETRY_MAX_ATTEMPTS = 3;
-export const DEFAULT_DO_RETRY_BASE_DELAY_MS = 50;
+export const DEFAULT_DO_RETRY_MAX_ATTEMPTS = 8;
+export const DEFAULT_DO_RETRY_BASE_DELAY_MS = 100;
+export const DEFAULT_DO_RETRY_MAX_DELAY_MS = 250;
 
 const TRANSIENT_DURABLE_OBJECT_PATTERNS = [
   /durable object reset because its code was updated/i,
@@ -13,11 +14,13 @@ const TRANSIENT_DURABLE_OBJECT_PATTERNS = [
 export interface DurableObjectRetryEnv {
   DO_RETRY_MAX_ATTEMPTS?: string;
   DO_RETRY_BASE_DELAY_MS?: string;
+  DO_RETRY_MAX_DELAY_MS?: string;
 }
 
 export interface DurableObjectRetryConfig {
   maxAttempts: number;
   baseDelayMs: number;
+  maxDelayMs: number;
 }
 
 export function isTransientDurableObjectError(err: unknown): boolean {
@@ -30,11 +33,16 @@ export function getDurableObjectRetryConfig(env: DurableObjectRetryEnv): Durable
   return {
     maxAttempts: parsePositiveInt(env.DO_RETRY_MAX_ATTEMPTS, DEFAULT_DO_RETRY_MAX_ATTEMPTS),
     baseDelayMs: parsePositiveInt(env.DO_RETRY_BASE_DELAY_MS, DEFAULT_DO_RETRY_BASE_DELAY_MS),
+    maxDelayMs: parsePositiveInt(env.DO_RETRY_MAX_DELAY_MS, DEFAULT_DO_RETRY_MAX_DELAY_MS),
   };
 }
 
-export function computeDurableObjectRetryDelayMs(attempt: number, baseDelayMs: number): number {
-  return baseDelayMs * Math.pow(2, Math.max(0, attempt - 1));
+export function computeDurableObjectRetryDelayMs(
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number
+): number {
+  return Math.min(maxDelayMs, baseDelayMs * Math.pow(2, Math.max(0, attempt - 1)));
 }
 
 function extractErrorMessage(err: unknown): string {

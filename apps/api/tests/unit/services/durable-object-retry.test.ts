@@ -4,6 +4,7 @@ import {
   computeDurableObjectRetryDelayMs,
   DEFAULT_DO_RETRY_BASE_DELAY_MS,
   DEFAULT_DO_RETRY_MAX_ATTEMPTS,
+  DEFAULT_DO_RETRY_MAX_DELAY_MS,
   getDurableObjectRetryConfig,
   isTransientDurableObjectError,
 } from '../../../src/services/durable-object-retry';
@@ -42,13 +43,16 @@ describe('getDurableObjectRetryConfig', () => {
     expect(getDurableObjectRetryConfig({})).toEqual({
       maxAttempts: DEFAULT_DO_RETRY_MAX_ATTEMPTS,
       baseDelayMs: DEFAULT_DO_RETRY_BASE_DELAY_MS,
+      maxDelayMs: DEFAULT_DO_RETRY_MAX_DELAY_MS,
     });
     expect(getDurableObjectRetryConfig({
       DO_RETRY_MAX_ATTEMPTS: '0',
       DO_RETRY_BASE_DELAY_MS: 'not-a-number',
+      DO_RETRY_MAX_DELAY_MS: '-1',
     })).toEqual({
       maxAttempts: DEFAULT_DO_RETRY_MAX_ATTEMPTS,
       baseDelayMs: DEFAULT_DO_RETRY_BASE_DELAY_MS,
+      maxDelayMs: DEFAULT_DO_RETRY_MAX_DELAY_MS,
     });
   });
 
@@ -56,17 +60,21 @@ describe('getDurableObjectRetryConfig', () => {
     expect(getDurableObjectRetryConfig({
       DO_RETRY_MAX_ATTEMPTS: '5',
       DO_RETRY_BASE_DELAY_MS: '25',
+      DO_RETRY_MAX_DELAY_MS: '125',
     })).toEqual({
       maxAttempts: 5,
       baseDelayMs: 25,
+      maxDelayMs: 125,
     });
   });
 });
 
 describe('computeDurableObjectRetryDelayMs', () => {
-  it('uses bounded per-attempt exponential delay from the configured base', () => {
-    expect(computeDurableObjectRetryDelayMs(1, 50)).toBe(50);
-    expect(computeDurableObjectRetryDelayMs(2, 50)).toBe(100);
-    expect(computeDurableObjectRetryDelayMs(3, 50)).toBe(200);
+  it('uses capped per-attempt exponential delay from the configured base', () => {
+    expect(computeDurableObjectRetryDelayMs(1, 50, 250)).toBe(50);
+    expect(computeDurableObjectRetryDelayMs(2, 50, 250)).toBe(100);
+    expect(computeDurableObjectRetryDelayMs(3, 50, 250)).toBe(200);
+    expect(computeDurableObjectRetryDelayMs(4, 50, 250)).toBe(250);
+    expect(computeDurableObjectRetryDelayMs(5, 50, 250)).toBe(250);
   });
 });

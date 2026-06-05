@@ -56,7 +56,11 @@ async function callProjectDataWithRetry<T>(
         throw err;
       }
 
-      const delayMs = computeDurableObjectRetryDelayMs(attempt, retryConfig.baseDelayMs);
+      const delayMs = computeDurableObjectRetryDelayMs(
+        attempt,
+        retryConfig.baseDelayMs,
+        retryConfig.maxDelayMs
+      );
       log.warn('project_data.do_rpc_retry', {
         projectId,
         operation,

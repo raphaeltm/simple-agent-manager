@@ -204,8 +204,9 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                 | Default | Description                                                               |
 | ------------------------ | ------- | ------------------------------------------------------------------------- |
-| `DO_RETRY_MAX_ATTEMPTS`  | `3`     | Max attempts for transient Durable Object RPC reset/overload errors       |
-| `DO_RETRY_BASE_DELAY_MS` | `50`    | Base retry delay in milliseconds for transient Durable Object RPC failures |
+| `DO_RETRY_MAX_ATTEMPTS`  | `8`     | Max attempts for transient Durable Object RPC reset/overload errors       |
+| `DO_RETRY_BASE_DELAY_MS` | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures |
+| `DO_RETRY_MAX_DELAY_MS`  | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures      |
 
 ## Runtime Config Limits
 
