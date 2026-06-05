@@ -1,7 +1,7 @@
 # Markdown Chat Rendering Fixes (graduate prototype → real project chat)
 
 **Date:** 2026-06-05
-**Status:** backlog
+**Status:** complete
 
 ## Problem Statement
 
@@ -53,27 +53,30 @@ approved changes into production and deletes the prototype.
 
 ## Implementation Checklist
 
-- [ ] **acp-chat.css — list markers.** Add (unscoped) `.prose ol { list-style-type: decimal }`,
+- [x] **acp-chat.css — list markers.** Add (unscoped) `.prose ol { list-style-type: decimal }`,
       `.prose ul { list-style-type: disc }`, nested `ul ul → circle`, `ul ul ul → square`,
       `ol ol → lower-alpha`, `list-style-position: outside`, `li { padding-left: 0.125rem }`,
       and `ul.contains-task-list { list-style-type: none; padding-left: 0.25rem }`.
-- [ ] **acp-chat.css — tables.** Add `.prose table` (border-collapse, width:auto,
+- [x] **acp-chat.css — tables.** Add `.prose table` (border-collapse, width:auto,
       min-width:100%, margin, font-size, line-height), `.prose th/td` (padding, green border,
       text-align, vertical-align, min-width:6rem, max-width:18rem), `.prose thead th` (tint,
       bottom border, font-weight:600, white-space:nowrap), `.prose tbody tr:nth-child(even) td`
       (zebra tint).
-- [ ] **index.css — green glow.** Update `.glass-msg-assistant` with `position: relative`,
+- [x] **index.css — green glow.** Update `.glass-msg-assistant` with `position: relative`,
       layered green background gradient, green border, box-shadow (rim + depth + outer glow +
       inner bottom pool), and a `.glass-msg-assistant::after` bottom gradient hairline.
-- [ ] **MessageBubble.tsx — code fix.** Replace `isInline = !match && !className` with
+- [x] **MessageBubble.tsx — code fix.** Replace `isInline = !match && !className` with
       `isBlock = !!match || code.includes('\n')`. Render: not block → inline pill `<code>`;
       `match` → `HighlightedCode`; language-less block → plain `<pre>` (dark bg, whitespace-pre,
       overflow-x-auto, no line numbers).
-- [ ] **Delete prototype.** Remove `App.tsx` import (line ~45) + route (line ~94), the
-      `apps/web/src/pages/markdown-chat-prototype/` directory, and the audit scripts
-      (`apps/web/audit-proto.mjs`, `apps/web/audit-table.mjs`).
-- [ ] **Local Playwright visual audit.** Render real project chat (or a mock harness) with
-      lists, tables, language-less code blocks, at 375 and 1280; assert `scrollWidth <= innerWidth`.
+- [x] **Delete prototype.** N/A in this worktree — prototype files (`markdown-chat-prototype/`,
+      App.tsx import+route, `audit-*.mjs`) only ever existed as uncommitted local files in the
+      MAIN worktree, never committed to origin/main, so the feature branch is already clean.
+      Verified: no prototype dir, no App.tsx refs, no audit scripts present.
+- [x] **Local Playwright visual audit.** `apps/web/tests/playwright/markdown-chat-rendering-audit.spec.ts`
+      renders the real project chat with lists, tables, typed + language-less code blocks at 375
+      and 1280; asserts computed list-style markers, table cell borders, ≥2 `<pre>`, language-less
+      newline preservation, and `scrollWidth <= innerWidth`. All pass; screenshots captured.
 
 ## Acceptance Criteria
 
