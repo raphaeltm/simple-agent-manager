@@ -15,6 +15,7 @@ interface SkillListProps {
   onCreateSkill: (data: CreateSkillRequest) => Promise<AgentSkill>;
   onUpdateSkill: (skillId: string, data: UpdateSkillRequest) => Promise<AgentSkill>;
   onDeleteSkill: (skillId: string) => Promise<void>;
+  onRetry?: () => void;
   projectId: string;
 }
 
@@ -26,10 +27,12 @@ export const SkillList: FC<SkillListProps> = ({
   onCreateSkill,
   onUpdateSkill,
   onDeleteSkill,
+  onRetry,
   projectId,
 }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const editParam = searchParams.get('edit');
   const formOpen = editParam !== null;
   const editingSkill = useMemo(
@@ -53,12 +56,23 @@ export const SkillList: FC<SkillListProps> = ({
   };
 
   if (loading) return <div className="flex justify-center py-8"><Spinner /></div>;
-  if (error) return <div className="rounded-sm bg-danger-tint px-3 py-2 text-sm text-danger">{error}</div>;
+  if (error) {
+    return (
+      <div className="rounded-sm bg-danger-tint px-3 py-2 text-sm text-danger">
+        <p>{error}</p>
+        {onRetry && (
+          <button type="button" onClick={onRetry} className="mt-2 min-h-[44px] rounded bg-danger px-3 py-2 text-xs font-medium text-white hover:opacity-90">
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="mb-4 flex justify-end">
-        <Button onClick={() => openForm()}>
+        <Button onClick={() => openForm()} className="w-full sm:w-auto">
           <Plus className="mr-1.5 inline-block h-4 w-4" />
           New Skill
         </Button>
@@ -98,10 +112,26 @@ export const SkillList: FC<SkillListProps> = ({
                   </div>
                 </div>
                 {deleteId === skill.id && (
-                  <div className="flex items-center justify-end gap-2 px-3 pb-3">
-                    <span className="mr-auto text-xs text-fg-muted">Delete this skill?</span>
-                    <button type="button" onClick={() => setDeleteId(null)} className="min-h-[44px] rounded px-3 py-2 text-xs text-fg-muted hover:text-fg-primary">Cancel</button>
-                    <button type="button" onClick={() => void onDeleteSkill(skill.id).then(() => setDeleteId(null))} className="min-h-[44px] rounded bg-danger-tint px-3 py-2 text-xs text-danger hover:bg-danger hover:text-white">Confirm</button>
+                  <div className="px-3 pb-3">
+                    {deleteError && (
+                      <div role="alert" className="mb-2 rounded-sm bg-danger-tint px-2 py-1 text-xs text-danger">{deleteError}</div>
+                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="mr-auto text-xs text-fg-muted">Delete this skill?</span>
+                      <button type="button" onClick={() => { setDeleteId(null); setDeleteError(null); }} className="min-h-[44px] rounded px-3 py-2 text-xs text-fg-muted hover:text-fg-primary">Cancel</button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteError(null);
+                          void onDeleteSkill(skill.id)
+                            .then(() => setDeleteId(null))
+                            .catch((err) => setDeleteError(err instanceof Error ? err.message : 'Failed to delete skill'));
+                        }}
+                        className="min-h-[44px] rounded bg-danger-tint px-3 py-2 text-xs text-danger hover:bg-danger hover:text-white"
+                      >
+                        Confirm
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

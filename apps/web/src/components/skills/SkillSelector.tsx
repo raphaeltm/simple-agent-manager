@@ -41,15 +41,19 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
 
   return (
     <div className="grid gap-1">
-      <div className="flex items-center gap-1.5">
-        <Zap size={compact ? 14 : 16} className="text-fg-muted" />
+      <div className="relative flex items-center">
+        <Zap
+          size={compact ? 14 : 16}
+          aria-hidden="true"
+          className="pointer-events-none absolute left-2.5 text-fg-muted"
+        />
         <select
           id={id}
           value={selectedSkillId ?? ''}
           onChange={(event) => onChange(event.target.value || null)}
           disabled={disabled}
           aria-label="Skill"
-          className={classes}
+          className={`${classes} ${compact ? 'pl-7' : 'pl-9'}`}
         >
           <option value="">No skill</option>
           {skills.map((skill) => (
@@ -59,11 +63,13 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
           ))}
         </select>
       </div>
-      {selected && (
+      {selected ? (
         <div className="text-xs text-fg-muted line-clamp-2">
           {selected.description || 'Skill selected'}
           {summary ? ` · ${summary}` : ''}
         </div>
+      ) : (
+        <div aria-hidden="true" className="text-xs text-transparent">No skill selected</div>
       )}
     </div>
   );

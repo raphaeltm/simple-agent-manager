@@ -362,7 +362,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={submitting || uploading}
-          className="shrink-0 p-2 bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:border-fg-muted cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center p-2 bg-transparent border border-border-default rounded-md text-fg-muted hover:text-fg-primary hover:border-fg-muted cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           aria-label="Attach files"
           title="Attach files to this task"
         >
