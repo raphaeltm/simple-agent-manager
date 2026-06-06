@@ -33,7 +33,7 @@ Before deploying any UI changes:
 ## UI Agent Rules
 
 1. Prefer shared components from `@simple-agent-manager/ui` when available
-2. Use semantic tokens from `packages/ui/src/tokens/semantic-tokens.ts` and CSS vars from `packages/ui/src/tokens/theme.css`
+2. Use the design tokens (CSS custom properties) defined in `packages/ui/src/tokens/theme.css`
 3. Mobile-first: single-column baseline, 56px minimum touch targets, no horizontal scrolling at 320px
 4. Accessibility: keyboard-accessible, visible focus states, non-color-only status
 5. Invoke `$ui-ux-specialist` for every UI task

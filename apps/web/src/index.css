@@ -53,9 +53,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background:
-      radial-gradient(ellipse 80% 50% at 10% 15%, rgba(16, 185, 129, 0.15) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 40% at 90% 80%, rgba(34, 197, 94, 0.10) 0%, transparent 55%),
-      radial-gradient(ellipse 70% 50% at 50% 50%, rgba(6, 78, 59, 0.12) 0%, transparent 50%),
+      radial-gradient(ellipse 80% 50% at 10% 15%, var(--sam-bg-gradient-1) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 90% 80%, var(--sam-bg-gradient-2) 0%, transparent 55%),
+      radial-gradient(ellipse 70% 50% at 50% 50%, var(--sam-bg-gradient-3) 0%, transparent 50%),
       var(--sam-color-bg-canvas);
     color: var(--sam-color-fg-primary);
   }
@@ -71,9 +71,9 @@
     width: 100%;
     padding: 0.5rem 0.75rem;
     min-height: 44px;
-    border: 1px solid rgba(34, 197, 94, 0.10);
+    border: 1px solid var(--sam-form-border);
     border-radius: var(--sam-radius-sm);
-    background-color: rgba(8, 15, 12, 0.5);
+    background-color: var(--sam-form-bg);
     color: var(--sam-color-fg-primary);
     font-size: 0.875rem;
     font-family: inherit;
@@ -90,15 +90,15 @@
   textarea:focus,
   select:focus {
     outline: none;
-    border-color: rgba(34, 197, 94, 0.35);
-    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.10), inset 0 0 8px rgba(34, 197, 94, 0.05);
-    background-color: rgba(8, 15, 12, 0.6);
+    border-color: var(--sam-form-border-focus);
+    box-shadow: 0 0 0 3px var(--sam-form-focus-ring), inset 0 0 8px var(--sam-form-focus-inset);
+    background-color: var(--sam-form-bg-focus);
   }
 
   input:hover:not(:focus):not(:disabled),
   textarea:hover:not(:focus):not(:disabled),
   select:hover:not(:focus):not(:disabled) {
-    border-color: rgba(34, 197, 94, 0.18);
+    border-color: var(--sam-form-border-hover);
   }
 
   input:disabled,
@@ -192,7 +192,7 @@
   .glass-surface .glass-modal,
   .glass-modal .glass-surface,
   .glass-modal .glass-modal {
-    background-color: rgba(8, 15, 12, 0.5);
+    background-color: var(--sam-glass-nested-bg);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -263,15 +263,15 @@
 
   .glass-chrome,
   .glass-modal {
-    background-color: rgb(8, 15, 12);
+    background-color: var(--sam-glass-fallback-chrome);
   }
 
   .glass-surface {
-    background-color: rgb(13, 24, 20);
+    background-color: var(--sam-glass-fallback-surface);
   }
 
   .glass-backdrop-dim {
-    background-color: rgb(0, 0, 0);
+    background-color: var(--sam-glass-fallback-backdrop);
   }
 }
 
@@ -287,15 +287,15 @@
 
   .glass-chrome,
   .glass-modal {
-    background-color: rgb(8, 15, 12);
+    background-color: var(--sam-glass-fallback-chrome);
   }
 
   .glass-surface {
-    background-color: rgb(13, 24, 20);
+    background-color: var(--sam-glass-fallback-surface);
   }
 
   .glass-backdrop-dim {
-    background-color: rgb(0, 0, 0);
+    background-color: var(--sam-glass-fallback-backdrop);
   }
 }
 
@@ -314,15 +314,15 @@
 @supports not (backdrop-filter: blur(1px)) {
   .glass-chrome,
   .glass-modal {
-    background-color: rgb(8, 15, 12);
+    background-color: var(--sam-glass-fallback-chrome);
   }
 
   .glass-surface {
-    background-color: rgb(13, 24, 20);
+    background-color: var(--sam-glass-fallback-surface);
   }
 
   .glass-backdrop-dim {
-    background-color: rgb(0, 0, 0);
+    background-color: var(--sam-glass-fallback-backdrop);
   }
 
   .glass-chrome,
@@ -337,8 +337,8 @@
 /* ── Glass message bubbles (overrides acp-client defaults for project chat) ── */
 @layer utilities {
   .glass-msg-user {
-    background: linear-gradient(135deg, rgba(22, 163, 74, 0.22), rgba(34, 197, 94, 0.1)) !important;
-    border: 1px solid rgba(34, 197, 94, 0.22) !important;
+    background: var(--sam-msg-user-bg) !important;
+    border: 1px solid var(--sam-msg-user-border) !important;
     border-bottom-right-radius: 4px !important;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
     color: var(--sam-color-fg-primary) !important;
@@ -347,10 +347,8 @@
   .glass-msg-assistant {
     position: relative;
     /* Layered fill: a faint green wash rising from the bottom over the base. */
-    background:
-      linear-gradient(to top, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0) 45%),
-      rgba(12, 20, 17, 0.72) !important;
-    border: 1px solid rgba(34, 197, 94, 0.34) !important;
+    background: var(--sam-msg-assistant-bg) !important;
+    border: 1px solid var(--sam-msg-assistant-border) !important;
     border-bottom-left-radius: 4px !important;
     box-shadow:
       /* tight green rim */

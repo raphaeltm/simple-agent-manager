@@ -47,6 +47,35 @@
   --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.68);
   --sam-glass-backdrop-blur: 12px;
 
+  /* Opaque glass fallbacks (no backdrop-filter / reduced-transparency / contrast) */
+  --sam-glass-fallback-chrome: rgb(8, 15, 12);
+  --sam-glass-fallback-surface: rgb(13, 24, 20);
+  --sam-glass-fallback-backdrop: rgb(0, 0, 0);
+  /* Nested glass (a glass surface inside another) — flat fill, no blur */
+  --sam-glass-nested-bg: rgba(8, 15, 12, 0.5);
+
+  /* Body background radial-gradient color stops */
+  --sam-bg-gradient-1: rgba(16, 185, 129, 0.15);
+  --sam-bg-gradient-2: rgba(34, 197, 94, 0.1);
+  --sam-bg-gradient-3: rgba(6, 78, 59, 0.12);
+
+  /* Form element surfaces and borders */
+  --sam-form-bg: rgba(8, 15, 12, 0.5);
+  --sam-form-bg-focus: rgba(8, 15, 12, 0.6);
+  --sam-form-border: rgba(34, 197, 94, 0.1);
+  --sam-form-border-hover: rgba(34, 197, 94, 0.18);
+  --sam-form-border-focus: rgba(34, 197, 94, 0.35);
+  --sam-form-focus-ring: rgba(34, 197, 94, 0.1);
+  --sam-form-focus-inset: rgba(34, 197, 94, 0.05);
+
+  /* Glass chat message bubbles */
+  --sam-msg-user-bg: linear-gradient(135deg, rgba(22, 163, 74, 0.22), rgba(34, 197, 94, 0.1));
+  --sam-msg-user-border: rgba(34, 197, 94, 0.22);
+  --sam-msg-assistant-bg:
+    linear-gradient(to top, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0) 45%),
+    rgba(12, 20, 17, 0.72);
+  --sam-msg-assistant-border: rgba(34, 197, 94, 0.34);
+
   --sam-space-1: 4px;
   --sam-space-2: 8px;
   --sam-space-3: 12px;
@@ -155,6 +184,111 @@
 }
 
 [data-ui-theme='sam'] {
+  color: var(--sam-color-fg-primary);
+  background-color: var(--sam-color-bg-canvas);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   LIGHT THEME — additive override layer (Phase 0 foundation)
+
+   Every value below overrides a token defined in :root above. Dark mode is the
+   default (:root) and is NOT touched here. This block only takes effect when
+   <html data-ui-theme="sam-light"> is set by the runtime ThemeProvider.
+
+   Palette: warm greenish-white canvas/surfaces (NOT pure #fff), dark
+   green-tinted text, light green-tinted borders. The green accent hue is
+   preserved; accents/hovers are darkened for WCAG AA contrast on light bg.
+
+   Tokyo Night (--sam-color-tn-*) is intentionally NOT overridden — those
+   surfaces stay dark in both themes (terminal/workspace "islands").
+   ────────────────────────────────────────────────────────────────────────── */
+[data-ui-theme='sam-light'] {
+  /* Base surfaces — warm greenish-white, not pure white */
+  --sam-color-bg-canvas: #eef3ef;
+  --sam-color-bg-surface: #f8fbf8;
+  --sam-color-fg-primary: #11271d;
+  --sam-color-fg-muted: #4a5d54;
+  --sam-color-border-default: #cdddd2;
+  --sam-color-accent-primary: #15803d;
+  --sam-color-accent-primary-hover: #166534;
+  --sam-color-success: #15803d;
+  --sam-color-warning: #b45309;
+  --sam-color-danger: #dc2626;
+  --sam-color-focus-ring: #16a34a;
+  --sam-color-bg-surface-hover: #eaf2eb;
+  --sam-color-bg-overlay: rgba(0, 0, 0, 0.4);
+  --sam-color-bg-inset: #e3ebe4;
+  --sam-color-bg-page: #eef3ef;
+
+  /* Glass background colors (frosted white with faint green tint) */
+  --sam-glass-bg-chrome: rgba(248, 252, 249, 0.6);
+  --sam-glass-bg-surface: rgba(248, 252, 249, 0.7);
+  --sam-glass-bg-modal: rgba(248, 252, 249, 0.6);
+
+  /* Edge glow — softer green on light */
+  --sam-glass-glow-color: rgba(22, 163, 74, 0.25);
+
+  /* Glass border */
+  --sam-glass-border-color: rgba(22, 163, 74, 0.18);
+
+  /* Backdrop dim for modals — dark green-tinted scrim, lighter than dark theme */
+  --sam-glass-backdrop-dim: rgba(20, 40, 30, 0.32);
+
+  /* Opaque glass fallbacks (no backdrop-filter / reduced-transparency / contrast) */
+  --sam-glass-fallback-chrome: rgb(248, 252, 249);
+  --sam-glass-fallback-surface: rgb(241, 247, 242);
+  --sam-glass-fallback-backdrop: rgb(225, 232, 227);
+  --sam-glass-nested-bg: rgba(255, 255, 255, 0.5);
+
+  /* Body background radial-gradient color stops — lighter green washes */
+  --sam-bg-gradient-1: rgba(16, 185, 129, 0.1);
+  --sam-bg-gradient-2: rgba(34, 197, 94, 0.07);
+  --sam-bg-gradient-3: rgba(134, 239, 172, 0.18);
+
+  /* Form element surfaces and borders */
+  --sam-form-bg: rgba(255, 255, 255, 0.7);
+  --sam-form-bg-focus: rgba(255, 255, 255, 0.9);
+  --sam-form-border: rgba(22, 163, 74, 0.2);
+  --sam-form-border-hover: rgba(22, 163, 74, 0.32);
+  --sam-form-border-focus: rgba(22, 163, 74, 0.5);
+  --sam-form-focus-ring: rgba(22, 163, 74, 0.15);
+  --sam-form-focus-inset: rgba(22, 163, 74, 0.06);
+
+  /* Glass chat message bubbles — lighter washes */
+  --sam-msg-user-bg: linear-gradient(135deg, rgba(22, 163, 74, 0.18), rgba(34, 197, 94, 0.08));
+  --sam-msg-user-border: rgba(22, 163, 74, 0.28);
+  --sam-msg-assistant-bg:
+    linear-gradient(to top, rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0) 45%),
+    rgba(255, 255, 255, 0.82);
+  --sam-msg-assistant-border: rgba(22, 163, 74, 0.3);
+
+  /* Additional semantic colors — darkened for contrast on light bg */
+  --sam-color-info: #2563eb;
+  --sam-color-fg-on-accent: #ffffff;
+  --sam-color-success-fg: #15803d;
+  --sam-color-danger-fg: #b91c1c;
+  --sam-color-warning-fg: #b45309;
+  --sam-color-info-fg: #1d4ed8;
+  --sam-color-purple: #7c3aed;
+  --sam-color-warning-surface: #fdf6e9;
+
+  /* Color Tints */
+  --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.08);
+  --sam-color-success-tint: rgba(34, 197, 94, 0.08);
+  --sam-color-warning-tint: rgba(245, 158, 11, 0.1);
+  --sam-color-danger-tint: rgba(239, 68, 68, 0.08);
+  --sam-color-info-tint: rgba(37, 99, 235, 0.08);
+
+  /* Shadows — softer, lower opacity, green-tinted for light UI */
+  --sam-shadow-sm: 0 1px 2px rgba(16, 40, 28, 0.06);
+  --sam-shadow-default: 0 1px 3px rgba(16, 40, 28, 0.08);
+  --sam-shadow-md: 0 4px 6px -1px rgba(16, 40, 28, 0.08);
+  --sam-shadow-lg: 0 10px 15px -3px rgba(16, 40, 28, 0.1);
+  --sam-shadow-xl: 0 20px 25px -5px rgba(16, 40, 28, 0.1);
+  --sam-shadow-dropdown: 0 4px 16px rgba(16, 40, 28, 0.12);
+  --sam-shadow-overlay: 0 8px 32px rgba(16, 40, 28, 0.16);
+  --sam-shadow-tooltip: 0 2px 8px rgba(16, 40, 28, 0.12);
+
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);
 }

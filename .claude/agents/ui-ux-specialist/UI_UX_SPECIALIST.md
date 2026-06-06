@@ -37,7 +37,7 @@ If any category is below 4, revise and re-evaluate before completion.
 ## Mandatory Implementation Standards
 
 1. Prefer shared components from `@simple-agent-manager/ui` when available.
-2. Use semantic tokens from `packages/ui/src/tokens/semantic-tokens.ts` and CSS variables from `packages/ui/src/tokens/theme.css`.
+2. Use the design tokens (CSS custom properties) defined in `packages/ui/src/tokens/theme.css`.
 3. Preserve existing design-system patterns where they already exist; avoid introducing ad-hoc visual languages in established sections.
 4. Avoid generic default styling choices when creating new visual surfaces:
    - do not default to stock system look without intentional hierarchy/spacing

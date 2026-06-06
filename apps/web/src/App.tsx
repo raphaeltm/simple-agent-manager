@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageViewTracker } from './components/PageViewTracker';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './hooks/useToast';
 import { AccountMap } from './pages/AccountMap';
 import { Admin } from './pages/Admin';
@@ -76,9 +77,10 @@ function ProtectedLayout() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <ToastProvider>
-          <GlobalAudioProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <GlobalAudioProvider>
             <BrowserRouter>
               <PageViewTracker />
               <Routes>
@@ -171,9 +173,10 @@ export default function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </BrowserRouter>
-          </GlobalAudioProvider>
-        </ToastProvider>
-      </AuthProvider>
+            </GlobalAudioProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

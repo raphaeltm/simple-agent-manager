@@ -8,9 +8,8 @@ Design system tokens and shared UI components for the control plane app. Provide
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Barrel export — all components, primitives, hooks, tokens |
-| `src/tokens/semantic-tokens.ts` | Design token definitions (TypeScript constants) |
-| `src/tokens/theme.css` | CSS custom properties (consumed by Tailwind and components) |
+| `src/index.ts` | Barrel export — all components, primitives, hooks |
+| `src/tokens/theme.css` | Design tokens — CSS custom properties (consumed by Tailwind and components); includes the `[data-ui-theme='sam']` dark and `[data-ui-theme='sam-light']` light themes |
 | `src/components/` | Shared components (Button, Card, Dialog, Input, Select, Toast, etc.) |
 | `src/primitives/` | Layout primitives (Container, PageLayout, Typography) |
 | `src/hooks/` | Shared UI hooks |

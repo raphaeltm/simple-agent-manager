@@ -43,7 +43,7 @@ Before deploying any UI changes:
 For UI changes in `apps/web` or `packages/ui`:
 
 1. Prefer shared components from `@simple-agent-manager/ui` when available.
-2. Use semantic tokens from `packages/ui/src/tokens/semantic-tokens.ts` and CSS vars from `packages/ui/src/tokens/theme.css`.
+2. Use the design tokens (CSS custom properties) defined in `packages/ui/src/tokens/theme.css`.
 3. Maintain mobile-first behavior:
    - single-column baseline at small widths
    - primary action target minimum 56px on mobile

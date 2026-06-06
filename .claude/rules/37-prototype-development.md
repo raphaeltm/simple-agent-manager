@@ -79,8 +79,7 @@ Prefer existing components from the codebase:
 
 - `VmSizeCard` for VM size selection
 - Components from `@simple-agent-manager/ui` package
-- Design tokens from `packages/ui/src/tokens/semantic-tokens.ts`
-- CSS variables from `packages/ui/src/tokens/theme.css`
+- Design tokens (CSS custom properties) from `packages/ui/src/tokens/theme.css`
 
 When existing components don't fit the prototype's needs, use inline styles matching the app's design tokens. Do NOT add new CSS files or modify global stylesheets for prototype work.
 
