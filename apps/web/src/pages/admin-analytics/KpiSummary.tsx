@@ -77,7 +77,7 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
       {cards.map((card) => (
         <div
           key={card.label}
-          className="rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-primary p-4"
+          className="rounded-lg border border-border-default bg-surface-secondary p-4"
         >
           <div className="text-xs font-medium text-fg-muted uppercase tracking-wide">
             {card.label}

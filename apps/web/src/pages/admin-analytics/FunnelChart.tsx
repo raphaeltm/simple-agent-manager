@@ -1,6 +1,8 @@
 import { Body } from '@simple-agent-manager/ui';
 import { type FC } from 'react';
 
+import { adminChartSeries } from './chartTokens';
+
 const FUNNEL_STEPS = ['signup', 'login', 'project_created', 'workspace_created', 'task_submitted'];
 const FUNNEL_LABELS: Record<string, string> = {
   signup: 'Signup',
@@ -12,11 +14,11 @@ const FUNNEL_LABELS: Record<string, string> = {
 
 /** Color scale: progressively less saturated as drop-off increases. */
 const STEP_COLORS = [
-  'var(--sam-color-accent-primary, #16a34a)',
-  'var(--sam-color-success, #22c55e)',
-  'var(--sam-color-warning, #f59e0b)',
-  '#f97316',
-  'var(--sam-color-danger, #ef4444)',
+  adminChartSeries[0],
+  'var(--sam-color-success)',
+  adminChartSeries[3],
+  adminChartSeries[4],
+  'var(--sam-color-danger)',
 ];
 
 export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: number }> }> = ({ data }) => {
@@ -66,7 +68,7 @@ export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: n
                     minWidth: '60px',
                   }}
                 >
-                  <span className="text-xs font-semibold text-white tabular-nums drop-shadow-sm">
+                  <span className="text-xs font-semibold text-fg-on-accent tabular-nums drop-shadow-sm">
                     {step.users.toLocaleString()}
                   </span>
                 </div>

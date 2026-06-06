@@ -1,5 +1,5 @@
 import { Body } from '@simple-agent-manager/ui';
-import { type CSSProperties, type FC, useId } from 'react';
+import { type FC, useId } from 'react';
 import {
   Area,
   AreaChart,
@@ -10,11 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 
-const CHART_TOOLTIP_STYLE: CSSProperties = {
-  background: 'rgba(8,15,12,0.78)',
-  WebkitBackdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
-  backdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
-};
+import { adminChartSeries, chartAxisStroke, chartGridStroke, chartTick, chartTooltipStyle } from './chartTokens';
 
 /** Format date for X-axis ticks — "Mar 5" style. */
 function formatDateTick(dateStr: string): string {
@@ -27,7 +23,7 @@ function formatDateTick(dateStr: string): string {
 function DauTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-md border border-[rgba(34,197,94,0.10)] px-3 py-2 shadow-lg text-sm" style={CHART_TOOLTIP_STYLE}>
+    <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-muted text-xs">{label ? formatDateTick(label) : ''}</div>
       <div className="text-fg-primary font-semibold tabular-nums">
         {payload[0]!.value.toLocaleString()} users
@@ -50,22 +46,22 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
         <AreaChart data={data} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
           <defs>
             <linearGradient id={safeGradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="var(--sam-color-accent-primary, #16a34a)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="var(--sam-color-accent-primary, #16a34a)" stopOpacity={0} />
+              <stop offset="5%" stopColor={adminChartSeries[0]} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={adminChartSeries[0]} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--sam-color-border-default, #29423b)" strokeOpacity={0.5} />
+          <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} strokeOpacity={0.5} />
           <XAxis
             dataKey="date"
             tickFormatter={formatDateTick}
-            tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted, #9fb7ae)' }}
-            axisLine={{ stroke: 'var(--sam-color-border-default, #29423b)' }}
+            tick={chartTick}
+            axisLine={{ stroke: chartAxisStroke }}
             tickLine={false}
             interval="preserveStartEnd"
             minTickGap={50}
           />
           <YAxis
-            tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted, #9fb7ae)' }}
+            tick={chartTick}
             axisLine={false}
             tickLine={false}
             allowDecimals={false}
@@ -74,11 +70,11 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
           <Area
             type="monotone"
             dataKey="unique_users"
-            stroke="var(--sam-color-accent-primary, #16a34a)"
+            stroke={adminChartSeries[0]}
             strokeWidth={2}
             fill={`url(#${safeGradientId})`}
             dot={false}
-            activeDot={{ r: 4, stroke: 'var(--sam-color-accent-primary, #16a34a)', strokeWidth: 2, fill: 'var(--sam-color-bg-surface, #13201d)' }}
+            activeDot={{ r: 4, stroke: adminChartSeries[0], strokeWidth: 2, fill: 'var(--sam-color-bg-surface)' }}
           />
         </AreaChart>
       </ResponsiveContainer>

@@ -112,7 +112,7 @@ export function AdminPlatformCredentials() {
       </div>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+        <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
           {error}
         </div>
       )}
@@ -122,7 +122,7 @@ export function AdminPlatformCredentials() {
       {credentials.length === 0 ? (
         <Card>
           <div className="py-8 text-center">
-            <Body className="text-[var(--sam-text-secondary)]">
+            <Body className="text-fg-muted">
               No platform credentials configured. Add one to enable fallback credentials for users.
             </Body>
           </div>
@@ -138,14 +138,14 @@ export function AdminPlatformCredentials() {
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-xs ${
                         cred.isEnabled
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                          ? 'bg-success-tint text-success-fg'
+                          : 'bg-surface-secondary text-fg-muted'
                       }`}
                     >
                       {cred.isEnabled ? 'Enabled' : 'Disabled'}
                     </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--sam-text-secondary)]">
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-muted">
                     <span>{CREDENTIAL_TYPE_LABELS[cred.credentialType]}</span>
                     {cred.provider && <span>{PROVIDER_LABELS[cred.provider] || cred.provider}</span>}
                     {cred.agentType && (
@@ -232,7 +232,7 @@ function AddCredentialForm({
             <select
               value={credentialType}
               onChange={(e) => setCredentialType(e.target.value as PlatformCredentialType)}
-              className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
             >
               <option value="cloud-provider">Cloud Provider</option>
               <option value="agent-api-key">Agent API Key</option>
@@ -245,7 +245,7 @@ function AddCredentialForm({
               <select
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
               >
                 <option value="hetzner">Hetzner</option>
                 <option value="scaleway">Scaleway</option>
@@ -258,7 +258,7 @@ function AddCredentialForm({
               <select
                 value={agentType}
                 onChange={(e) => setAgentType(e.target.value)}
-                className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
               >
                 <option value="claude-code">Claude Code (Anthropic)</option>
                 <option value="openai-codex">OpenAI Codex</option>
@@ -274,7 +274,7 @@ function AddCredentialForm({
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g., Team Hetzner, Shared Anthropic Key"
-            className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
             required
             maxLength={100}
           />
@@ -293,13 +293,13 @@ function AddCredentialForm({
                 ? 'Paste your provider API token...'
                 : 'Paste your agent API key...'
             }
-            className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm font-mono"
+            className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm font-mono text-fg-primary"
             required
           />
         </div>
 
         {formError && (
-          <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+          <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
             {formError}
           </div>
         )}

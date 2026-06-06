@@ -1,4 +1,4 @@
-import { expect, type Page, type Route,test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock Data Factories
@@ -188,7 +188,44 @@ interface MockScenario {
   geo?: ReturnType<typeof makeGeoData>;
   retention?: ReturnType<typeof makeRetentionData>;
   events?: ReturnType<typeof makeEventsData>;
+  aiUsage?: ReturnType<typeof makeAiUsageData>;
   apiError?: boolean;
+}
+
+function makeAiUsageData(opts: { empty?: boolean; manyModels?: boolean } = {}) {
+  const models = opts.manyModels
+    ? Array.from({ length: 12 }, (_, i) => `@cf/provider/model-with-long-name-${i}`)
+    : ['@cf/meta/llama-4-scout-17b-16e-instruct', 'gpt-4.1-mini', 'claude-haiku-4-5'];
+
+  return {
+    totalRequests: opts.empty ? 0 : 1234567,
+    totalInputTokens: opts.empty ? 0 : 987654321,
+    totalOutputTokens: opts.empty ? 0 : 123456789,
+    totalCostUsd: opts.empty ? 0 : 1234.5678,
+    trialRequests: opts.empty ? 0 : 9876,
+    trialCostUsd: opts.empty ? 0 : 12.3456,
+    cachedRequests: opts.empty ? 0 : 4321,
+    errorRequests: opts.empty ? 0 : 42,
+    byModel: opts.empty ? [] : models.map((model, i) => ({
+      model,
+      provider: model.startsWith('@cf/') ? 'workers-ai' : model.startsWith('gpt') ? 'openai' : 'anthropic',
+      requests: 100000 - i * 7000,
+      inputTokens: 8000000 - i * 250000,
+      outputTokens: 1000000 - i * 50000,
+      totalTokens: 9000000 - i * 300000,
+      costUsd: i === 0 ? 0.0042 : 123.456 / (i + 1),
+      cachedRequests: 100 - i,
+      errorRequests: i,
+    })),
+    byDay: opts.empty ? [] : Array.from({ length: 14 }, (_, i) => ({
+      date: `2026-03-${String(i + 1).padStart(2, '0')}`,
+      requests: 1000 + i * 500,
+      inputTokens: 100000 + i * 10000,
+      outputTokens: 20000 + i * 2000,
+      costUsd: i === 0 ? 0.0004 : 10 + i * 2,
+    })),
+    period: '30d',
+  };
 }
 
 const NORMAL: MockScenario = {
@@ -198,6 +235,7 @@ const NORMAL: MockScenario = {
   geo: makeGeoData(),
   retention: makeRetentionData({ weeks: 6 }),
   events: makeEventsData(),
+  aiUsage: makeAiUsageData(),
 };
 
 const EMPTY: MockScenario = {
@@ -207,6 +245,7 @@ const EMPTY: MockScenario = {
   geo: { geo: [], period: '30d' },
   retention: { retention: [], weeks: 12 },
   events: { events: [], period: '30d' },
+  aiUsage: makeAiUsageData({ empty: true }),
 };
 
 const MANY_ITEMS: MockScenario = {
@@ -216,6 +255,7 @@ const MANY_ITEMS: MockScenario = {
   geo: makeGeoData({ manyCountries: true }),
   retention: makeRetentionData({ weeks: 12 }),
   events: makeEventsData({ manyRows: true }),
+  aiUsage: makeAiUsageData({ manyModels: true }),
 };
 
 const LONG_TEXT: MockScenario = {
@@ -225,6 +265,7 @@ const LONG_TEXT: MockScenario = {
   geo: makeGeoData(),
   retention: makeRetentionData({ weeks: 6 }),
   events: makeEventsData({ longNames: true }),
+  aiUsage: makeAiUsageData({ manyModels: true }),
 };
 
 const HIGH_RETENTION: MockScenario = {
@@ -306,6 +347,11 @@ async function setupMocks(page: Page, scenario: MockScenario) {
       });
     }
 
+    if (path.includes('/admin/analytics/ai-usage')) {
+      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
+      return respond(route, 200, scenario.aiUsage ?? makeAiUsageData());
+    }
+
     if (path.includes('/admin/analytics/forward-status')) {
       if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
       return respond(route, 200, {
@@ -326,7 +372,7 @@ async function setupMocks(page: Page, scenario: MockScenario) {
     }
 
     if (path.startsWith('/api/projects')) {
-      return respond(route, 200, []);
+      return respond(route, 200, { projects: [], nextCursor: null });
     }
 
     if (path.startsWith('/api/credentials')) {
@@ -346,6 +392,18 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
+async function seedTheme(page: Page, theme: 'dark' | 'light') {
+  await page.addInitScript((value) => {
+    window.localStorage.setItem('sam-theme', value);
+  }, theme);
+}
+
+async function expectTheme(page: Page, theme: 'dark' | 'light') {
+  const expected = theme === 'dark' ? 'sam' : 'sam-light';
+  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
+  expect(attr).toBe(expected);
+}
+
 async function assertNoHorizontalOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
@@ -358,6 +416,8 @@ async function assertNoHorizontalOverflow(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Admin Analytics — Mobile (375x667)', () => {
+  test.skip(({ viewport }) => viewport?.width !== 375, 'Mobile audit runs only on the 375px project');
+
   test('normal data — all charts render', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
@@ -405,6 +465,36 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     const emptyMessages = page.locator('text=/No .* data available yet/');
     const count = await emptyMessages.count();
     expect(count).toBeGreaterThan(0);
+  });
+
+  test('light theme — normal charts and tables', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await expectTheme(page, 'light');
+    await screenshot(page, 'admin-analytics-light-normal-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('light theme — many rows and large numbers', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupMocks(page, MANY_ITEMS);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await expectTheme(page, 'light');
+    await screenshot(page, 'admin-analytics-light-many-items-mobile');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('light theme — empty and error states', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupMocks(page, API_ERROR);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+    await expectTheme(page, 'light');
+    await screenshot(page, 'admin-analytics-light-error-mobile');
+    await assertNoHorizontalOverflow(page);
   });
 
   test('high retention heat map — deep green cells', async ({ page }) => {
@@ -482,14 +572,10 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await page.goto('/admin/analytics');
     await page.waitForTimeout(700);
 
-    // KPI cards should show key metrics
-    const kpiGrid = page.locator('.grid.grid-cols-2');
-    await expect(kpiGrid).toBeVisible();
-
-    // Should have at least 3 KPI cards (DAU, avg DAU, funnel, events)
-    const kpiCards = kpiGrid.locator('> div');
-    const count = await kpiCards.count();
-    expect(count).toBeGreaterThanOrEqual(3);
+    await expect(page.getByText('DAU (latest)')).toBeVisible();
+    await expect(page.getByText('Avg DAU')).toBeVisible();
+    await expect(page.getByText('Funnel Conversion')).toBeVisible();
+    await expect(page.getByText(/^Events /)).toBeVisible();
   });
 
   test('DAU chart renders as Recharts area chart', async ({ page }) => {
@@ -553,6 +639,8 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Admin Analytics — Desktop (1280x800)', () => {
+  test.skip(({ viewport }) => viewport?.width !== 1280, 'Desktop audit runs only on the 1280px project');
+
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('normal data — full layout', async ({ page }) => {
@@ -593,6 +681,36 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
     await screenshot(page, 'admin-analytics-error-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('light theme — normal data', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await expectTheme(page, 'light');
+    await screenshot(page, 'admin-analytics-light-normal-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('light theme — empty state', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupMocks(page, EMPTY);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(600);
+    await expectTheme(page, 'light');
+    await screenshot(page, 'admin-analytics-light-empty-desktop');
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('light theme — many rows and retention heat map', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupMocks(page, MANY_ITEMS);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+    await expectTheme(page, 'light');
+    await screenshot(page, 'admin-analytics-light-many-items-desktop');
     await assertNoHorizontalOverflow(page);
   });
 

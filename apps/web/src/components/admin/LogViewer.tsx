@@ -3,7 +3,7 @@ import { type FC, useCallback,useState } from 'react';
 
 import { type LogLevel, type LogTimeRange,useAdminLogQuery } from '../../hooks/useAdminLogQuery';
 import { CopyButton } from '../shared/log';
-import { formatLogEntries,LEVEL_COLORS, LogEntryRow } from './LogEntryRow';
+import { formatLogEntries,LEVEL_COLORS, LEVEL_TINTS, LogEntryRow } from './LogEntryRow';
 
 const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'Error' },
@@ -86,7 +86,7 @@ export const LogViewer: FC = () => {
                 style={{
                   padding: '2px 8px',
                   backgroundColor: filter.levels.includes(opt.value)
-                    ? (LEVEL_COLORS[opt.value] + '22')
+                    ? LEVEL_TINTS[opt.value]
                     : 'transparent',
                   color: filter.levels.includes(opt.value)
                     ? LEVEL_COLORS[opt.value]
