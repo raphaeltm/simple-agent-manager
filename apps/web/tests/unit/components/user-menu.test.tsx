@@ -21,8 +21,8 @@ vi.mock('../../../src/lib/auth', () => ({
   signOut: mocks.signOut,
 }));
 
-import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 import { UserMenu } from '../../../src/components/UserMenu';
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 function renderUserMenu() {
   return render(
