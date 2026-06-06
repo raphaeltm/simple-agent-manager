@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/workspace/harness/llm"
@@ -79,5 +80,36 @@ func TestRegistry_Definitions(t *testing.T) {
 	}
 	if defs[0].Name != "echo" {
 		t.Errorf("name = %q, want %q", defs[0].Name, "echo")
+	}
+}
+
+type namedTool struct {
+	name string
+}
+
+func (t namedTool) Name() string        { return t.name }
+func (t namedTool) Description() string { return t.name }
+func (t namedTool) Schema() map[string]any {
+	return map[string]any{"type": "object"}
+}
+func (t namedTool) Execute(context.Context, map[string]any) (string, error) {
+	return t.name, nil
+}
+
+func TestRegistry_DeterministicNamesAndDefinitions(t *testing.T) {
+	reg := NewRegistry()
+	for _, name := range []string{"write_file", "bash", "grep"} {
+		if err := reg.Register(namedTool{name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got, want := reg.Names(), []string{"bash", "grep", "write_file"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Names() = %v, want %v", got, want)
+	}
+	defs := reg.Definitions()
+	got := []string{defs[0].Name, defs[1].Name, defs[2].Name}
+	if want := []string{"bash", "grep", "write_file"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Definitions() names = %v, want %v", got, want)
 	}
 }

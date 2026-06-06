@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -44,13 +45,12 @@ func (t *Grep) Schema() map[string]any {
 }
 
 func (t *Grep) Execute(_ context.Context, params map[string]any) (string, error) {
-	patternVal, ok := params["pattern"]
-	if !ok {
-		return "", fmt.Errorf("missing required parameter: pattern")
+	pattern, err := requireString(params, "pattern")
+	if err != nil {
+		return "", err
 	}
-	pattern, ok := patternVal.(string)
-	if !ok {
-		return "", fmt.Errorf("parameter 'pattern' must be a string")
+	if pattern == "" {
+		return "", fmt.Errorf("parameter \"pattern\" must not be empty")
 	}
 
 	re, err := regexp.Compile(pattern)
@@ -59,61 +59,104 @@ func (t *Grep) Execute(_ context.Context, params map[string]any) (string, error)
 	}
 
 	searchPath := "."
-	if v, ok := params["path"].(string); ok && v != "" {
-		searchPath = v
+	if v, ok := params["path"]; ok {
+		path, ok := v.(string)
+		if !ok {
+			return "", fmt.Errorf("parameter \"path\" must be a string")
+		}
+		if strings.TrimSpace(path) != "" {
+			searchPath = path
+		}
 	}
 
-	resolved, err := safePath(t.WorkDir, searchPath)
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := boundary.existingSearchRoot(searchPath)
 	if err != nil {
 		return "", err
 	}
 
 	var include string
-	if v, ok := params["include"].(string); ok {
-		include = v
+	if v, ok := params["include"]; ok {
+		includeVal, ok := v.(string)
+		if !ok {
+			return "", fmt.Errorf("parameter \"include\" must be a string")
+		}
+		include, err = validateRelativePattern(includeVal)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	contextLines := 0
-	if v, ok := params["context_lines"].(float64); ok {
-		contextLines = int(v)
+	if v, ok := params["context_lines"]; ok {
+		switch n := v.(type) {
+		case float64:
+			contextLines = int(n)
+			if float64(contextLines) != n {
+				return "", fmt.Errorf("parameter \"context_lines\" must be an integer")
+			}
+		case int:
+			contextLines = n
+		default:
+			return "", fmt.Errorf("parameter \"context_lines\" must be an integer")
+		}
+		if contextLines < 0 {
+			return "", fmt.Errorf("parameter \"context_lines\" must be non-negative")
+		}
 	}
 
-	const maxMatches = 200
 	var results []string
 	matchCount := 0
 
 	err = filepath.WalkDir(resolved, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // skip unreadable entries
+			return fmt.Errorf("walking %s: %w", path, walkErr)
 		}
-		if d.IsDir() {
-			name := d.Name()
-			if name == ".git" || name == "node_modules" || name == "vendor" {
+		if d.Type()&os.ModeSymlink != 0 {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if matchCount >= maxMatches {
+		if d.IsDir() {
+			name := d.Name()
+			if _, skip := skippedSearchDirs[name]; skip {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if matchCount >= MaxGrepMatches {
 			return fs.SkipAll
 		}
 
-		// Apply include filter
 		if include != "" {
-			matched, _ := filepath.Match(include, d.Name())
+			relPath, err := filepath.Rel(boundary.root, path)
+			if err != nil {
+				return err
+			}
+			matched := globMatch(include, relPath)
 			if !matched {
 				return nil
 			}
 		}
 
-		// Skip binary files heuristic: check first 512 bytes
 		if isBinary(path) {
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(t.WorkDir, path)
-		matches := searchFile(path, re, relPath, contextLines)
+		relPath, err := filepath.Rel(boundary.root, path)
+		if err != nil {
+			return err
+		}
+		matches, err := searchFile(path, re, filepath.ToSlash(relPath), contextLines)
+		if err != nil {
+			return err
+		}
 		for _, m := range matches {
-			if matchCount >= maxMatches {
+			if matchCount >= MaxGrepMatches {
 				break
 			}
 			results = append(results, m)
@@ -129,27 +172,35 @@ func (t *Grep) Execute(_ context.Context, params map[string]any) (string, error)
 		return "No matches found.", nil
 	}
 
+	sort.Strings(results)
 	output := strings.Join(results, "\n")
-	if matchCount >= maxMatches {
-		output += fmt.Sprintf("\n\n(truncated: showing first %d matches)", maxMatches)
+	if matchCount >= MaxGrepMatches {
+		output += fmt.Sprintf("\n\n(truncated: showing first %d matches)", MaxGrepMatches)
 	}
 	return output, nil
 }
 
-func searchFile(path string, re *regexp.Regexp, relPath string, contextLines int) []string {
+func searchFile(path string, re *regexp.Regexp, relPath string, contextLines int) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer f.Close()
 
 	var lines []string
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 4096), MaxGrepLineBytes)
+	bytesRead := 0
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		line := scanner.Text()
+		bytesRead += len(line) + 1
+		if bytesRead > MaxGrepFileBytes {
+			return nil, fmt.Errorf("file %s exceeds grep limit of %d bytes", relPath, MaxGrepFileBytes)
+		}
+		lines = append(lines, line)
 	}
 	if scanner.Err() != nil {
-		return nil
+		return nil, fmt.Errorf("scanning %s: %w", relPath, scanner.Err())
 	}
 
 	var results []string
@@ -179,7 +230,7 @@ func searchFile(path string, re *regexp.Regexp, relPath string, contextLines int
 			}
 		}
 	}
-	return results
+	return results, nil
 }
 
 func isBinary(path string) bool {

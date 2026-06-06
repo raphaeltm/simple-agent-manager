@@ -17,6 +17,9 @@ func tmpDir(t *testing.T) string {
 
 func writeTestFile(t *testing.T, dir, name, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -243,5 +246,122 @@ func TestEditFile_PathTraversal(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for path traversal")
+	}
+}
+
+func TestReadFile_RejectsSymlinkEscape(t *testing.T) {
+	dir := tmpDir(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("external secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &ReadFile{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{"path": "link.txt"})
+	if err == nil {
+		t.Fatal("expected symlink rejection")
+	}
+	if strings.Contains(result, "external secret") {
+		t.Fatalf("leaked external content: %q", result)
+	}
+}
+
+func TestReadFile_TruncatesLargeFile(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "large.txt", strings.Repeat("a", MaxReadFileBytes+128))
+
+	tool := &ReadFile{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{"path": "large.txt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "truncated: showing first") {
+		t.Fatalf("expected truncation message, got tail: %q", result[len(result)-80:])
+	}
+}
+
+func TestWriteFile_RejectsFinalPathSymlink(t *testing.T) {
+	dir := tmpDir(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &WriteFile{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"path":    "link.txt",
+		"content": "overwrite",
+	})
+	if err == nil {
+		t.Fatal("expected symlink rejection")
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "keep" {
+		t.Fatalf("external symlink target was modified: %q", string(data))
+	}
+}
+
+func TestEditFile_RejectsSymlinkBeforeReading(t *testing.T) {
+	dir := tmpDir(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &EditFile{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"path":       "link.txt",
+		"old_string": "secret",
+		"new_string": "public",
+	})
+	if err == nil {
+		t.Fatal("expected symlink rejection")
+	}
+	if strings.Contains(result, "secret") {
+		t.Fatalf("leaked external content: %q", result)
+	}
+}
+
+func TestEditFile_RejectsEmptyOldString(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "code.go", "abc")
+
+	tool := &EditFile{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"path":       "code.go",
+		"old_string": "",
+		"new_string": "x",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty old_string")
+	}
+}
+
+func TestBash_TruncatesStdoutAndStderr(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &Bash{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": "printf '%*s' 70000 '' | tr ' ' a; printf '%*s' 70000 '' | tr ' ' b >&2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "truncated stdout") {
+		t.Fatalf("expected stdout truncation message")
+	}
+	if !strings.Contains(result, "truncated stderr") {
+		t.Fatalf("expected stderr truncation message")
 	}
 }

@@ -4,6 +4,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/workspace/harness/llm"
@@ -92,6 +93,9 @@ func (r *Registry) Definitions() []llm.ToolDefinition {
 			Parameters:  t.Schema(),
 		})
 	}
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
 	return defs
 }
 
@@ -103,5 +107,6 @@ func (r *Registry) Names() []string {
 	for name := range r.tools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
