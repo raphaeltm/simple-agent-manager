@@ -149,6 +149,41 @@
   --sam-color-danger-tint: rgba(239, 68, 68, 0.1);
   --sam-color-info-tint: rgba(122, 162, 247, 0.1);
 
+  /* Chrome interaction tints */
+  --sam-chrome-accent-hover-subtle: rgba(34, 197, 94, 0.04);
+  --sam-chrome-accent-soft: rgba(34, 197, 94, 0.06);
+  --sam-chrome-accent-active-subtle: rgba(34, 197, 94, 0.08);
+  --sam-chrome-accent-active: rgba(34, 197, 94, 0.12);
+  --sam-chrome-accent-divider: rgba(34, 197, 94, 0.18);
+  --sam-chrome-accent-glow: rgba(34, 197, 94, 0.3);
+  --sam-chrome-drawer-edge-glow: rgba(34, 197, 94, 0.55);
+  --sam-chrome-footer-bg: rgba(0, 0, 0, 0.15);
+  --sam-button-secondary-hover-bg: rgba(8, 15, 12, 0.3);
+  --sam-button-on-accent-border: rgba(255, 255, 255, 0.2);
+  --sam-button-on-accent-spinner-border: rgba(255, 255, 255, 0.3);
+  --sam-tabs-active-border: rgba(52, 211, 153, 0.85);
+  --sam-tooltip-bg: rgba(8, 15, 12, 0.82);
+  --sam-status-muted-bg: rgba(159, 183, 174, 0.15);
+  --sam-status-muted-fg: #9fb7ae;
+  --sam-status-info-bg: rgba(59, 130, 246, 0.15);
+  --sam-status-info-fg: #60a5fa;
+  --sam-status-success-bg: rgba(34, 197, 94, 0.15);
+  --sam-status-success-strong-bg: rgba(34, 197, 94, 0.2);
+  --sam-status-success-fg: #4ade80;
+  --sam-status-success-strong-fg: #22c55e;
+  --sam-status-warning-bg: rgba(245, 158, 11, 0.15);
+  --sam-status-warning-fg: #fbbf24;
+  --sam-status-danger-bg: rgba(239, 68, 68, 0.15);
+  --sam-status-danger-fg: #f87171;
+  --sam-status-neutral-bg: rgba(127, 127, 127, 0.15);
+  --sam-status-neutral-fg: #9ca3af;
+  --sam-status-indigo-bg: rgba(99, 102, 241, 0.15);
+  --sam-status-indigo-fg: #a5b4fc;
+  --sam-status-purple-bg: rgba(139, 92, 246, 0.15);
+  --sam-status-purple-fg: #c4b5fd;
+  --sam-status-unknown-bg: #e5e7eb;
+  --sam-status-unknown-fg: #1f2937;
+
   /* Shadows — scale (dark-tuned: 4x stronger opacity for dark UI) */
   --sam-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
   --sam-shadow-default: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -288,6 +323,41 @@
   --sam-color-warning-tint: rgba(245, 158, 11, 0.1);
   --sam-color-danger-tint: rgba(239, 68, 68, 0.08);
   --sam-color-info-tint: rgba(37, 99, 235, 0.08);
+
+  /* Chrome interaction tints */
+  --sam-chrome-accent-hover-subtle: rgba(22, 163, 74, 0.07);
+  --sam-chrome-accent-soft: rgba(22, 163, 74, 0.09);
+  --sam-chrome-accent-active-subtle: rgba(22, 163, 74, 0.11);
+  --sam-chrome-accent-active: rgba(22, 163, 74, 0.16);
+  --sam-chrome-accent-divider: rgba(22, 163, 74, 0.22);
+  --sam-chrome-accent-glow: rgba(22, 163, 74, 0.22);
+  --sam-chrome-drawer-edge-glow: rgba(22, 163, 74, 0.32);
+  --sam-chrome-footer-bg: rgba(255, 255, 255, 0.42);
+  --sam-button-secondary-hover-bg: rgba(227, 235, 228, 0.9);
+  --sam-button-on-accent-border: rgba(255, 255, 255, 0.28);
+  --sam-button-on-accent-spinner-border: rgba(255, 255, 255, 0.38);
+  --sam-tabs-active-border: rgba(22, 163, 74, 0.85);
+  --sam-tooltip-bg: rgba(17, 39, 29, 0.92);
+  --sam-status-muted-bg: rgba(74, 93, 84, 0.12);
+  --sam-status-muted-fg: #4a5d54;
+  --sam-status-info-bg: rgba(37, 99, 235, 0.1);
+  --sam-status-info-fg: #1d4ed8;
+  --sam-status-success-bg: rgba(21, 128, 61, 0.12);
+  --sam-status-success-strong-bg: rgba(21, 128, 61, 0.16);
+  --sam-status-success-fg: #15803d;
+  --sam-status-success-strong-fg: #15803d;
+  --sam-status-warning-bg: rgba(180, 83, 9, 0.12);
+  --sam-status-warning-fg: #b45309;
+  --sam-status-danger-bg: rgba(185, 28, 28, 0.1);
+  --sam-status-danger-fg: #b91c1c;
+  --sam-status-neutral-bg: rgba(74, 93, 84, 0.12);
+  --sam-status-neutral-fg: #4a5d54;
+  --sam-status-indigo-bg: rgba(67, 56, 202, 0.1);
+  --sam-status-indigo-fg: #4338ca;
+  --sam-status-purple-bg: rgba(124, 58, 237, 0.1);
+  --sam-status-purple-fg: #7c3aed;
+  --sam-status-unknown-bg: #e3ebe4;
+  --sam-status-unknown-fg: #11271d;
 
   /* Shadows — softer, lower opacity, green-tinted for light UI */
   --sam-shadow-sm: 0 1px 2px rgba(16, 40, 28, 0.06);

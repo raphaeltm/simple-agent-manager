@@ -4,11 +4,12 @@
   color-scheme: light dark;
 }
 
-[data-ui-theme='sam'] {
+[data-ui-theme='sam'],
+[data-ui-theme='sam-light'] {
   background:
-    radial-gradient(ellipse 80% 50% at 10% 15%, rgba(16, 185, 129, 0.15) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 90% 80%, rgba(34, 197, 94, 0.10) 0%, transparent 55%),
-    radial-gradient(ellipse 70% 50% at 50% 50%, rgba(6, 78, 59, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 50% at 10% 15%, var(--sam-bg-gradient-1) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 90% 80%, var(--sam-bg-gradient-2) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 50% 50%, var(--sam-bg-gradient-3) 0%, transparent 50%),
     var(--sam-color-bg-canvas);
   color: var(--sam-color-fg-primary);
 }

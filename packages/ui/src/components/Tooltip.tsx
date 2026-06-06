@@ -107,7 +107,7 @@ export function Tooltip({ content, children, side = 'top', delay = 400 }: Toolti
           ref={tooltipRef}
           id={tooltipId}
           role="tooltip"
-          className="fixed py-1 px-2 glass-surface bg-[rgba(8,15,12,0.82)] rounded-sm shadow-tooltip text-fg-primary max-w-[200px] z-dropdown pointer-events-none whitespace-normal"
+          className="fixed py-1 px-2 glass-surface bg-[var(--sam-tooltip-bg)] rounded-sm shadow-tooltip text-fg-primary max-w-[200px] z-dropdown pointer-events-none whitespace-normal"
           style={{
             fontSize: 'var(--sam-type-caption-size)',
             lineHeight: 'var(--sam-type-caption-line-height)',
