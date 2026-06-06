@@ -27,12 +27,18 @@ ending in motion rather than an empty room?
    a repo is chosen, the **required** details appear pre-filled: project name
    (derived from the repo, editable) and a **working-branch** selector. These
    three — repo, name, branch — are the only things collected up front.
-2. **Discover what SAM gives you** — *optional and fully skippable.* Modeled on
-   the website's self-host setup, which explains *why* each piece matters rather
-   than just *what* it is. Highlights the three power surfaces a new user should
-   know exist: **Agent profiles**, **Triggers**, and **Skills** — each with a
-   "why it matters" line. The task system is intentionally **not** highlighted
-   (still maturing).
+2. **Set up** — a *hand-held, skippable* walkthrough that actually **creates**
+   things rather than describing them. Three sub-steps, each individually
+   skippable:
+   - **Conversational profile** ("Your everyday agent") — pick an agent + model;
+     SAM wires it up as a lightweight workspace in conversation mode.
+   - **Task profile** ("Your task runner") — pick an agent + model, then tell it
+     *how to finish a task* (which branch, commit, open a PR, always push). An
+     amber callout explains that **workspaces are ephemeral** — unpushed work is
+     gone for good when the VM is destroyed.
+   - **Trigger** (optional) — "Anything you want done regularly?" Sets up a
+     **cron-only** schedule that runs the task profile. GitHub event triggers
+     are intentionally excluded (untested — "schedules only for now").
 3. **Kick off** — an isolated, centered version of the project-chat composer
    (with voice input) lifted to center stage. A mode toggle starts either a
    **task** ("describe exactly what you want your agent to do") or a
@@ -45,22 +51,35 @@ ending in motion rather than an empty room?
 - **GitHub only.** The internal SAM Git "start fresh" path is non-functional and
   was removed entirely.
 - **Required info is minimal and up front:** repo + name + branch. Branch matters
-  (agents work off it) so it is a first-class required field; description was
-  dropped (it added no value at creation time).
-- **Intent does not change where you land.** Earlier iterations routed different
-  intents to different screens. Now every path lands *in the project* — the only
-  difference is whether you kicked off a task or a conversation.
-- **Education over configuration.** Step 2 teaches the feature set with value-prop
-  framing instead of forcing setup. Everything is deferrable; nothing past Step 1
-  is required.
-- **Everything after Step 1 is skippable** for power users.
+  (agents check out and work on it) so it is a first-class required field;
+  description was dropped (it added no value at creation time).
+- **Branch protection is the user's job, not SAM's.** Agents work *directly on*
+  the chosen branch (the default branch by default). The copy makes clear that
+  if you want a branch protected, you set branch protection rules in GitHub —
+  SAM respects whatever you define rather than inventing its own guard rails.
+- **Setup creates, it doesn't lecture.** An earlier iteration was a static
+  feature-education screen. It is now an interactive walkthrough that stands up a
+  conversational profile, a task profile, and (optionally) a trigger — so the
+  user leaves onboarding with real, usable configuration.
+- **Skills are deliberately excluded** from onboarding (still untested).
+- **Triggers are cron-only** in onboarding (GitHub event triggers untested).
+- **Everything after Step 1 is skippable** for power users — each sub-step has a
+  "Skip" button and the whole setup has a "Skip setup →" link.
+- **Education over configuration where it counts:** the ephemeral-workspace
+  warning teaches the single most surprising thing about SAM (unpushed work
+  disappears) at the exact moment it matters — while configuring the task
+  profile.
 - **Borrowed visual language:** card options with `aria-pressed`, accent icon
   tiles, the green-glow vignette, progress dots, and the dark glassy composer
-  styling from `ProjectChatComposer`.
+  styling from `ProjectChatComposer`. The shared `Button` component from
+  `@simple-agent-manager/ui` is used for primary actions (correct
+  `text-fg-on-accent` contrast).
 
 ## Stress-test mock data
 
 `mock-data.ts` includes long repo names, empty descriptions, a single-char repo
 (`oss/x`), a Unicode/emoji/`<script>` injection repo, and branch lists with an
 extremely long branch name — to verify wrapping, dropdown truncation, empty-state
-handling, and XSS-safe rendering (React escapes by default).
+handling, and XSS-safe rendering (React escapes by default). The agent/model
+options in `index.tsx` mirror the real agent types (`claude-code`,
+`openai-codex`, `google-gemini`) and example models.

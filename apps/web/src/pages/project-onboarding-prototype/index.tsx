@@ -7,9 +7,10 @@
  * Premise: today's /projects/new is a flat form that drops you into an empty
  * project. This reimagines creation as a short *guided onboarding* that:
  *   1. Connect — link a GitHub repo + branch and name the project (required).
- *   2. Discover — teach SAM's power surfaces (Agent Profiles, Triggers, Skills)
- *      with a "here's why" framing borrowed from the website's self-host setup.
- *      Fully skippable for power users.
+ *   2. Set up — a hand-held walkthrough that actually *creates* a lightweight
+ *      conversational profile, a task profile (with PR/branch guidance + the
+ *      ephemeral-workspace warning), and an optional cron trigger. Every step
+ *      is skippable. (Skills are intentionally left out — still untested.)
  *   3. Kick off — an isolated, centered version of the project-chat composer
  *      (voice included) to start either a *task* or a *conversation*. Either way
  *      you land in the project, in motion — never an empty room.
@@ -17,81 +18,95 @@
  * Visual language borrows from the account-level Choose-Your-Path wizard and the
  * project-chat composer (green-glow vignette, card options, dark glassy input).
  */
+import { Button } from '@simple-agent-manager/ui';
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
+  Calendar,
   Check,
   ChevronRight,
   GitBranch,
   Github,
+  Info,
   Lock,
   MessageSquare,
   Mic,
   Search,
   Send,
-  Sparkles,
   SplitSquareVertical,
-  Users,
-  Wrench,
   X,
-  Zap,
 } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 
 import { deriveProjectName, MOCK_REPOS, type MockRepo } from './mock-data';
 
-type Phase = 'connect' | 'discover' | 'kickoff';
+type Phase = 'connect' | 'setup' | 'kickoff';
+type SetupStep = 'conversational' | 'task' | 'trigger';
 
 const STEPS: { id: Phase; label: string }[] = [
   { id: 'connect', label: 'Connect' },
-  { id: 'discover', label: 'Discover' },
+  { id: 'setup', label: 'Set up' },
   { id: 'kickoff', label: 'Start' },
 ];
 
-/* Feature surfaces SAM unlocks — taught during onboarding the way the website's
- * self-host setup explains *why* each piece matters, not just *what* it is. */
-interface FeatureCard {
+const SETUP_ORDER: SetupStep[] = ['conversational', 'task', 'trigger'];
+
+/* Agent options offered during the walkthrough — mirrors the real agent types
+ * (claude-code / openai-codex / google-gemini) and their example models. */
+interface AgentOption {
   id: string;
-  icon: ReactNode;
-  title: string;
-  what: string;
-  why: string;
+  label: string;
+  blurb: string;
+  models: string[];
 }
 
-const FEATURES: FeatureCard[] = [
+const AGENTS: AgentOption[] = [
   {
-    id: 'profiles',
-    icon: <Users size={18} />,
-    title: 'Agent profiles',
-    what: 'Named agents with their own model, tools, and instructions.',
-    why: 'Keep a careful reviewer and a fast prototyper side by side — pick the right one per conversation instead of re-explaining context every time.',
+    id: 'claude-code',
+    label: 'Claude Code',
+    blurb: 'Anthropic · strong all-rounder',
+    models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
   },
   {
-    id: 'triggers',
-    icon: <Zap size={18} />,
-    title: 'Triggers',
-    what: 'Run a profile automatically on a schedule or an event.',
-    why: 'Have an agent triage new issues every morning or watch a branch — work happens while you sleep, on your terms.',
+    id: 'openai-codex',
+    label: 'Codex',
+    blurb: 'OpenAI · fast & precise',
+    models: ['gpt-5-codex', 'o3'],
   },
   {
-    id: 'skills',
-    icon: <Wrench size={18} />,
-    title: 'Skills',
-    what: 'Reusable instructions + files an agent loads on demand.',
-    why: 'Teach SAM your conventions once — release steps, a writing voice, a deploy checklist — and any profile can reach for it.',
+    id: 'google-gemini',
+    label: 'Gemini',
+    blurb: 'Google · big context window',
+    models: ['gemini-2.5-pro'],
   },
 ];
 
+const DEFAULT_AGENT = AGENTS[0]!;
+
 type KickoffMode = 'task' | 'conversation';
+
+type TriggerSchedule = 'daily' | 'weekdays' | 'weekly';
 
 export function ProjectOnboardingPrototype() {
   const [phase, setPhase] = useState<Phase>('connect');
+  const [setupStep, setSetupStep] = useState<SetupStep>('conversational');
 
   // Step 1 — required info
   const [query, setQuery] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<MockRepo | null>(null);
   const [projectName, setProjectName] = useState('');
   const [branch, setBranch] = useState('');
+
+  // Step 2 — guided setup (mock local state)
+  const [convAgent, setConvAgent] = useState(DEFAULT_AGENT.id);
+  const [convModel, setConvModel] = useState(DEFAULT_AGENT.models[0]!);
+  const [taskAgent, setTaskAgent] = useState(DEFAULT_AGENT.id);
+  const [taskModel, setTaskModel] = useState(DEFAULT_AGENT.models[0]!);
+  const [taskInstructions, setTaskInstructions] = useState('');
+  const [wantTrigger, setWantTrigger] = useState(false);
+  const [triggerSchedule, setTriggerSchedule] = useState<TriggerSchedule>('weekdays');
+  const [triggerPrompt, setTriggerPrompt] = useState('');
 
   // Step 3 — kickoff
   const [mode, setMode] = useState<KickoffMode>('task');
@@ -116,9 +131,35 @@ export function ProjectOnboardingPrototype() {
     setBranch(repo.defaultBranch);
   }
 
+  function selectConvAgent(id: string) {
+    setConvAgent(id);
+    setConvModel(AGENTS.find((a) => a.id === id)?.models[0] ?? '');
+  }
+  function selectTaskAgent(id: string) {
+    setTaskAgent(id);
+    setTaskModel(AGENTS.find((a) => a.id === id)?.models[0] ?? '');
+  }
+
+  function startSetup() {
+    setSetupStep('conversational');
+    setPhase('setup');
+  }
+
+  function advanceSetup() {
+    const i = SETUP_ORDER.indexOf(setupStep);
+    if (i < SETUP_ORDER.length - 1) setSetupStep(SETUP_ORDER[i + 1]!);
+    else setPhase('kickoff');
+  }
+
   function back() {
-    if (phase === 'discover') setPhase('connect');
-    else if (phase === 'kickoff') setPhase('discover');
+    if (phase === 'setup') {
+      const i = SETUP_ORDER.indexOf(setupStep);
+      if (i > 0) setSetupStep(SETUP_ORDER[i - 1]!);
+      else setPhase('connect');
+    } else if (phase === 'kickoff') {
+      setSetupStep('trigger');
+      setPhase('setup');
+    }
   }
 
   return (
@@ -174,14 +215,31 @@ export function ProjectOnboardingPrototype() {
                 branch={branch}
                 setBranch={setBranch}
                 canContinue={canContinueConnect}
-                onContinue={() => setPhase('discover')}
+                onContinue={startSetup}
               />
             )}
-            {phase === 'discover' && (
-              <DiscoverStep
-                projectName={projectName}
-                onContinue={() => setPhase('kickoff')}
-                onSkip={() => setPhase('kickoff')}
+            {phase === 'setup' && (
+              <SetupWalkthrough
+                step={setupStep}
+                branch={branch}
+                convAgent={convAgent}
+                convModel={convModel}
+                onSelectConvAgent={selectConvAgent}
+                setConvModel={setConvModel}
+                taskAgent={taskAgent}
+                taskModel={taskModel}
+                onSelectTaskAgent={selectTaskAgent}
+                setTaskModel={setTaskModel}
+                taskInstructions={taskInstructions}
+                setTaskInstructions={setTaskInstructions}
+                wantTrigger={wantTrigger}
+                setWantTrigger={setWantTrigger}
+                triggerSchedule={triggerSchedule}
+                setTriggerSchedule={setTriggerSchedule}
+                triggerPrompt={triggerPrompt}
+                setTriggerPrompt={setTriggerPrompt}
+                onAdvance={advanceSetup}
+                onSkipAll={() => setPhase('kickoff')}
               />
             )}
             {phase === 'kickoff' && (
@@ -346,96 +404,349 @@ function ConnectStep({
               />
             </div>
             <span className="text-[11px] text-fg-muted/70 mt-1 block">
-              Agents branch off this when they work — your default branch stays untouched.
+              Agents check out and work on this branch. Want to keep it protected? Set branch
+              protection rules in GitHub — SAM respects whatever you define.
             </span>
           </label>
         </div>
       )}
 
-      <button
+      <Button
         type="button"
+        variant="primary"
+        size="lg"
         disabled={!canContinue}
         onClick={onContinue}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-accent text-black font-semibold text-sm py-3 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
+        className="w-full"
       >
         Continue <ArrowRight size={15} />
-      </button>
+      </Button>
     </div>
   );
 }
 
-/* ──────────────────── Step 2 · Discover what SAM gives you ──────────────────── */
+/* ──────────────────── Step 2 · Guided setup walkthrough ──────────────────── */
 
-interface DiscoverStepProps {
-  projectName: string;
-  onContinue: () => void;
-  onSkip: () => void;
+interface SetupWalkthroughProps {
+  step: SetupStep;
+  branch: string;
+  convAgent: string;
+  convModel: string;
+  onSelectConvAgent: (id: string) => void;
+  setConvModel: (v: string) => void;
+  taskAgent: string;
+  taskModel: string;
+  onSelectTaskAgent: (id: string) => void;
+  setTaskModel: (v: string) => void;
+  taskInstructions: string;
+  setTaskInstructions: (v: string) => void;
+  wantTrigger: boolean;
+  setWantTrigger: (v: boolean) => void;
+  triggerSchedule: TriggerSchedule;
+  setTriggerSchedule: (v: TriggerSchedule) => void;
+  triggerPrompt: string;
+  setTriggerPrompt: (v: string) => void;
+  onAdvance: () => void;
+  onSkipAll: () => void;
 }
 
-function DiscoverStep({ projectName, onContinue, onSkip }: DiscoverStepProps) {
+function SetupWalkthrough(props: SetupWalkthroughProps) {
+  const { step, onAdvance, onSkipAll } = props;
+  const subIndex = SETUP_ORDER.indexOf(step);
+
+  const eyebrow =
+    step === 'conversational'
+      ? 'Set up · 1 of 3'
+      : step === 'task'
+        ? 'Set up · 2 of 3'
+        : 'Set up · 3 of 3 · Optional';
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
-          Step 2 of 3 · Optional
+          {eyebrow}
         </p>
         <button
           type="button"
-          onClick={onSkip}
+          onClick={onSkipAll}
           className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer transition-colors"
         >
-          Skip intro →
+          Skip setup →
         </button>
       </div>
 
-      <h1 className="sam-type-section-heading text-fg-primary mb-1">
-        {projectName.trim() || 'Your project'} is more than a chat box
-      </h1>
-      <p className="sam-type-body text-fg-muted mb-6">
-        Three things make SAM worth setting up. You don&apos;t need any of them to start — but
-        here&apos;s what you can reach for as the project grows.
-      </p>
-
-      <div className="flex flex-col gap-3 mb-6">
-        {FEATURES.map((f) => (
+      {/* Sub-progress within setup */}
+      <div className="flex items-center gap-1.5 mb-5" aria-hidden="true">
+        {SETUP_ORDER.map((s, i) => (
           <div
-            key={f.id}
-            className="rounded-lg border border-border-default bg-surface p-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-accent shrink-0">
-                {f.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-fg-primary text-sm">{f.title}</p>
-                <p className="text-sm text-fg-muted mt-0.5">{f.what}</p>
-                <p className="text-[13px] text-fg-muted/80 mt-2 leading-relaxed">
-                  <span className="text-accent font-medium">Why it matters · </span>
-                  {f.why}
-                </p>
-              </div>
-            </div>
-          </div>
+            key={s}
+            className={`h-1 rounded-full flex-1 transition-all ${
+              i <= subIndex ? 'bg-accent/70' : 'bg-white/10'
+            }`}
+          />
         ))}
       </div>
 
-      <div className="rounded-lg border border-border-default bg-white/[0.02] p-3 mb-6 flex items-start gap-2.5">
-        <Sparkles size={14} className="text-accent shrink-0 mt-0.5" />
-        <p className="text-xs text-fg-muted leading-relaxed">
-          SAM starts you with one conversational profile so you can begin right away. Add
-          specialized profiles, triggers, and skills whenever you&apos;re ready — nothing here is
-          required up front.
+      {step === 'conversational' && <ConversationalProfileStep {...props} />}
+      {step === 'task' && <TaskProfileStep {...props} />}
+      {step === 'trigger' && <TriggerStep {...props} />}
+
+      <div className="flex items-center gap-2 mt-6">
+        <Button type="button" variant="primary" size="lg" onClick={onAdvance} className="flex-1">
+          {step === 'trigger'
+            ? props.wantTrigger
+              ? 'Create trigger & finish'
+              : 'Finish setup'
+            : 'Continue'}{' '}
+          <ArrowRight size={15} />
+        </Button>
+        <Button type="button" variant="ghost" size="lg" onClick={onAdvance}>
+          Skip
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ConversationalProfileStep({
+  convAgent,
+  convModel,
+  onSelectConvAgent,
+  setConvModel,
+}: SetupWalkthroughProps) {
+  return (
+    <div>
+      <h1 className="sam-type-section-heading text-fg-primary mb-1 flex items-center gap-2">
+        <MessageSquare size={20} className="text-accent" /> Your everyday agent
+      </h1>
+      <p className="sam-type-body text-fg-muted mb-5">
+        A <span className="text-fg-primary">conversational profile</span> is who you chat with —
+        back-and-forth, interactive. Pick an agent and model; we&apos;ll wire it up as a lightweight
+        workspace in conversation mode so it&apos;s ready the moment you open the project.
+      </p>
+
+      <AgentModelPicker
+        selectedAgent={convAgent}
+        model={convModel}
+        onSelectAgent={onSelectConvAgent}
+        onChangeModel={setConvModel}
+      />
+
+      <div className="flex flex-wrap gap-2 mt-4">
+        <ReadonlyChip>Lightweight workspace</ReadonlyChip>
+        <ReadonlyChip>Conversation mode</ReadonlyChip>
+        <ReadonlyChip>Set up for you</ReadonlyChip>
+      </div>
+    </div>
+  );
+}
+
+function TaskProfileStep({
+  branch,
+  taskAgent,
+  taskModel,
+  onSelectTaskAgent,
+  setTaskModel,
+  taskInstructions,
+  setTaskInstructions,
+}: SetupWalkthroughProps) {
+  return (
+    <div>
+      <h1 className="sam-type-section-heading text-fg-primary mb-1 flex items-center gap-2">
+        <SplitSquareVertical size={20} className="text-accent" /> Your task runner
+      </h1>
+      <p className="sam-type-body text-fg-muted mb-5">
+        A <span className="text-fg-primary">task profile</span> is who you hand work to. It spins up
+        on its own, works autonomously, and you review the result.
+      </p>
+
+      <AgentModelPicker
+        selectedAgent={taskAgent}
+        model={taskModel}
+        onSelectAgent={onSelectTaskAgent}
+        onChangeModel={setTaskModel}
+      />
+
+      <label className="block mt-4">
+        <span className="text-sm text-fg-muted">How should it finish a task?</span>
+        <textarea
+          value={taskInstructions}
+          onChange={(e) => setTaskInstructions(e.target.value)}
+          rows={4}
+          placeholder={`e.g. Create a branch off ${branch || 'main'}, commit your work, and open a pull request. Always push before you finish — don't leave changes only on the VM.`}
+          className="w-full mt-1.5 rounded-lg bg-surface border border-border-default text-fg-primary text-sm px-3 py-2.5 outline-none focus:border-accent transition-colors resize-none leading-relaxed placeholder:text-fg-muted/60"
+        />
+      </label>
+
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 mt-4 flex items-start gap-2.5">
+        <Info size={15} className="text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-[13px] text-fg-muted leading-relaxed">
+          <span className="text-fg-primary font-medium">Workspaces are ephemeral.</span> When a task
+          finishes, the VM is destroyed. If the agent doesn&apos;t push a branch or open a PR, its
+          work is gone for good — so tell it here exactly how to hand work back to you.
         </p>
       </div>
-
-      <button
-        type="button"
-        onClick={onContinue}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-accent text-black font-semibold text-sm py-3 cursor-pointer transition-opacity"
-      >
-        Got it — let&apos;s start <ArrowRight size={15} />
-      </button>
     </div>
+  );
+}
+
+function TriggerStep({
+  taskAgent,
+  wantTrigger,
+  setWantTrigger,
+  triggerSchedule,
+  setTriggerSchedule,
+  triggerPrompt,
+  setTriggerPrompt,
+}: SetupWalkthroughProps) {
+  const taskLabel = AGENTS.find((a) => a.id === taskAgent)?.label ?? 'your task profile';
+  return (
+    <div>
+      <h1 className="sam-type-section-heading text-fg-primary mb-1 flex items-center gap-2">
+        <Calendar size={20} className="text-accent" /> Run it on a schedule
+      </h1>
+      <p className="sam-type-body text-fg-muted mb-5">
+        Anything you want done regularly? A <span className="text-fg-primary">trigger</span> runs
+        your task profile ({taskLabel}) automatically — no need to be at your desk. Totally
+        optional.
+      </p>
+
+      {/* Enable toggle */}
+      <div className="flex flex-col gap-2 mb-2">
+        <button
+          type="button"
+          aria-pressed={wantTrigger}
+          onClick={() => setWantTrigger(true)}
+          className={`w-full text-left p-3 rounded-lg border transition-all cursor-pointer bg-surface ${
+            wantTrigger ? 'border-accent ring-1 ring-accent' : 'border-border-default hover:border-fg-muted'
+          }`}
+        >
+          <span className="font-medium text-fg-primary text-sm">Yes, set up a schedule</span>
+          <p className="text-xs text-fg-muted mt-0.5">Pick a cadence and what it should do.</p>
+        </button>
+        <button
+          type="button"
+          aria-pressed={!wantTrigger}
+          onClick={() => setWantTrigger(false)}
+          className={`w-full text-left p-3 rounded-lg border transition-all cursor-pointer bg-surface ${
+            !wantTrigger ? 'border-accent ring-1 ring-accent' : 'border-border-default hover:border-fg-muted'
+          }`}
+        >
+          <span className="font-medium text-fg-primary text-sm">Not now</span>
+          <p className="text-xs text-fg-muted mt-0.5">You can add triggers anytime later.</p>
+        </button>
+      </div>
+
+      {wantTrigger && (
+        <div className="rounded-lg border border-accent/30 bg-accent/[0.04] p-4 mt-3">
+          <label className="block mb-4">
+            <span className="text-sm text-fg-muted">How often?</span>
+            <div className="relative mt-1.5">
+              <select
+                value={triggerSchedule}
+                onChange={(e) => setTriggerSchedule(e.target.value as TriggerSchedule)}
+                className="w-full appearance-none rounded-lg bg-surface border border-border-default text-fg-primary text-sm pl-3 pr-9 py-2.5 outline-none focus:border-accent transition-colors cursor-pointer"
+              >
+                <option value="daily">Every day at 9:00 AM</option>
+                <option value="weekdays">Every weekday at 9:00 AM</option>
+                <option value="weekly">Every Monday at 9:00 AM</option>
+              </select>
+              <ChevronRight
+                size={14}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-fg-muted pointer-events-none"
+              />
+            </div>
+          </label>
+          <label className="block">
+            <span className="text-sm text-fg-muted">What should it do each run?</span>
+            <textarea
+              value={triggerPrompt}
+              onChange={(e) => setTriggerPrompt(e.target.value)}
+              rows={3}
+              placeholder="e.g. Triage any new issues opened since yesterday and label them."
+              className="w-full mt-1.5 rounded-lg bg-surface border border-border-default text-fg-primary text-sm px-3 py-2.5 outline-none focus:border-accent transition-colors resize-none leading-relaxed placeholder:text-fg-muted/60"
+            />
+          </label>
+        </div>
+      )}
+
+      <p className="text-[11px] text-fg-muted/70 mt-3 flex items-center gap-1.5">
+        <Info size={12} /> Schedules only for now — event triggers (like new pull requests) are
+        coming.
+      </p>
+    </div>
+  );
+}
+
+/* Agent + model picker shared by both profile sub-steps. */
+function AgentModelPicker({
+  selectedAgent,
+  model,
+  onSelectAgent,
+  onChangeModel,
+}: {
+  selectedAgent: string;
+  model: string;
+  onSelectAgent: (id: string) => void;
+  onChangeModel: (v: string) => void;
+}) {
+  const agent = AGENTS.find((a) => a.id === selectedAgent) ?? DEFAULT_AGENT;
+  return (
+    <div>
+      <span className="text-sm text-fg-muted block mb-1.5">Agent</span>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {AGENTS.map((a) => {
+          const active = a.id === selectedAgent;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onSelectAgent(a.id)}
+              className={`text-left p-3 rounded-lg border transition-all cursor-pointer bg-surface ${
+                active ? 'border-accent ring-1 ring-accent' : 'border-border-default hover:border-fg-muted'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1.5 font-medium text-fg-primary text-sm">
+                <Bot size={14} className="text-accent" /> {a.label}
+                {active && <Check size={13} className="text-accent ml-auto" />}
+              </span>
+              <p className="text-[11px] text-fg-muted mt-0.5">{a.blurb}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="block mt-3">
+        <span className="text-sm text-fg-muted">Model</span>
+        <div className="relative mt-1.5">
+          <select
+            value={model}
+            onChange={(e) => onChangeModel(e.target.value)}
+            className="w-full appearance-none rounded-lg bg-surface border border-border-default text-fg-primary text-sm pl-3 pr-9 py-2.5 outline-none focus:border-accent transition-colors cursor-pointer"
+          >
+            {agent.models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <ChevronRight
+            size={14}
+            className="absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-fg-muted pointer-events-none"
+          />
+        </div>
+      </label>
+    </div>
+  );
+}
+
+function ReadonlyChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-fg-muted bg-white/[0.03] border border-border-default rounded-full px-2.5 py-1">
+      <Check size={11} className="text-accent" /> {children}
+    </span>
   );
 }
 
