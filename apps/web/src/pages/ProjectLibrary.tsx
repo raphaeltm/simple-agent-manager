@@ -17,6 +17,7 @@ import { UploadProgressChips } from '../components/library/UploadProgressChips';
 import { UploadZone } from '../components/library/UploadZone';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useLibraryIndex } from '../hooks/useLibraryIndex';
 import {
   downloadLibraryFile,
   getLibraryFilePreviewUrl,
@@ -31,22 +32,40 @@ import {
   setCachedDirectories,
   setCachedFiles,
 } from '../lib/library-cache';
+import { searchIndex } from '../lib/library-search';
 import { useProjectContext } from './ProjectContext';
 
 let uploadIdCounter = 0;
 
-/** Client-side filter: match files whose filename contains the search string. */
-function filterFilesBySearch(files: FileWithTags[], search: string): FileWithTags[] {
-  if (!search) return files;
-  const lower = search.toLowerCase();
-  return files.filter((f) => f.filename.toLowerCase().includes(lower));
+/** Sort a file list for the unfiltered (non-search) view. Matches server defaults. */
+function sortFiles(files: FileWithTags[], sortBy: SortOption): FileWithTags[] {
+  const copy = [...files];
+  switch (sortBy) {
+    case 'filename':
+      return copy.sort((a, b) => a.filename.localeCompare(b.filename));
+    case 'sizeBytes':
+      return copy.sort((a, b) => b.sizeBytes - a.sizeBytes);
+    case 'createdAt':
+    default:
+      return copy.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
 }
 
-/** Client-side filter: match directories whose name contains the search string. */
-function filterDirectoriesBySearch(dirs: DirectoryEntry[], search: string): DirectoryEntry[] {
-  if (!search) return dirs;
-  const lower = search.toLowerCase();
-  return dirs.filter((d) => d.name.toLowerCase().includes(lower));
+/** Apply the advanced tag/source filters client-side (sub-cap path). */
+function applyAdvancedFilters(
+  files: FileWithTags[],
+  activeTags: string[],
+  sourceFilter: 'all' | FileUploadSource,
+): FileWithTags[] {
+  if (activeTags.length === 0 && sourceFilter === 'all') return files;
+  return files.filter((f) => {
+    if (sourceFilter !== 'all' && f.uploadSource !== sourceFilter) return false;
+    if (activeTags.length > 0) {
+      const fileTags = new Set(f.tags.map((t) => t.tag));
+      if (!activeTags.every((t) => fileTags.has(t))) return false;
+    }
+    return true;
+  });
 }
 
 export function ProjectLibrary() {
@@ -59,16 +78,35 @@ export function ProjectLibrary() {
   // URL-driven file preview — `?preview=fileId`
   const previewFileId = searchParams.get('preview');
 
-  // Initialize from cache for instant render (avoids loading spinner on revisit)
-  const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt');
-  const initialCachedDirs = getCachedDirectories(projectId, '/');
-  const hasCachedData = !!(initialCachedFiles && initialCachedDirs);
+  // ---------------------------------------------------------------------------
+  // Client-side index (sub-cap projects). At/over cap, `status === 'overCap'`
+  // and we fall back to the legacy server-search path below.
+  // ---------------------------------------------------------------------------
+  const {
+    files: sweptFiles,
+    index,
+    status: indexStatus,
+    isSweeping,
+    sweepError,
+    invalidate,
+  } = useLibraryIndex(projectId);
+  const isOverCap = indexStatus === 'overCap';
 
-  // Data state — holds the last full API response (unfiltered)
-  const [files, setFiles] = useState<FileWithTags[]>(hasCachedData ? initialCachedFiles.files : []);
-  const [directories, setDirectories] = useState<DirectoryEntry[]>(hasCachedData ? initialCachedDirs : []);
-  const [loading, setLoading] = useState(!hasCachedData);
+  // Directory cache for instant render of folder cards
+  const initialCachedDirs = getCachedDirectories(projectId, '/') ?? [];
+  const [directories, setDirectories] = useState<DirectoryEntry[]>(initialCachedDirs);
+  const [dirRefreshToken, setDirRefreshToken] = useState(0);
+
+  // ---------------------------------------------------------------------------
+  // Legacy server-search state (used ONLY when status === 'overCap')
+  // ---------------------------------------------------------------------------
+  const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt');
+  const [serverFiles, setServerFiles] = useState<FileWithTags[]>(
+    initialCachedFiles ? initialCachedFiles.files : [],
+  );
+  const [loading, setLoading] = useState(!initialCachedFiles);
   const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedOnce = useRef(!!initialCachedFiles);
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -77,14 +115,17 @@ export function ProjectLibrary() {
   const [showUpload, setShowUpload] = useState(false);
   const [showCreateDir, setShowCreateDir] = useState(false);
 
-  // Filter state — searchInput is the raw value; debouncedSearch drives API calls
+  // Search — searchInput is LOCAL state; filtering against the index is instant.
+  // debouncedSearch drives ONLY (a) URL write-only reflection and (b) the
+  // over-cap server-search fallback. It is never read back into the input.
   const [searchInput, setSearchInput] = useState('');
   const debouncedSearch = useDebouncedValue(searchInput, 300);
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<'all' | FileUploadSource>('all');
-
-  // Track whether search is pending (input changed but debounced value hasn't caught up)
   const isSearchPending = searchInput !== debouncedSearch;
+
+  const query = searchInput.trim();
+  const isSearching = query.length > 0;
 
   // Uploads
   const [uploads, setUploads] = useState<UploadItem[]>([]);
@@ -92,63 +133,92 @@ export function ProjectLibrary() {
   // Tag editor
   const [editingTagsFile, setEditingTagsFile] = useState<FileWithTags | null>(null);
 
+  // The authoritative file set for the active mode (used for preview + tag list)
+  const allFiles = isOverCap ? serverFiles : sweptFiles;
+
   // Preview — derived from URL param + loaded files
   const previewFile = useMemo(
-    () => (previewFileId ? files.find((f) => f.id === previewFileId) ?? null : null),
-    [previewFileId, files],
+    () => (previewFileId ? allFiles.find((f) => f.id === previewFileId) ?? null : null),
+    [previewFileId, allFiles],
   );
 
-  // Active filter count for badge
-  const activeFilterCount =
-    (searchInput ? 1 : 0) + activeTags.length + (sourceFilter !== 'all' ? 1 : 0);
+  // Active filter count for badge — EXCLUDES searchInput (search is always visible)
+  const activeFilterCount = activeTags.length + (sourceFilter !== 'all' ? 1 : 0);
 
-  // Searching spans all directories
-  const isSearching = !!debouncedSearch;
-
-  // All unique tags from loaded files
+  // All unique tags from the active file set
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
-    for (const f of files) {
+    for (const f of allFiles) {
       for (const t of f.tags) tagSet.add(t.tag);
     }
     return Array.from(tagSet).sort();
-  }, [files]);
+  }, [allFiles]);
 
   // ---------------------------------------------------------------------------
-  // Client-side filtering — instant feedback while API call is in-flight
+  // Display lists — instant client filtering (sub-cap) or server result (over-cap)
   // ---------------------------------------------------------------------------
 
   const displayFiles = useMemo(() => {
-    // When the user is typing (searchInput differs from debouncedSearch),
-    // client-filter the existing data for instant feedback
-    if (searchInput && searchInput !== debouncedSearch) {
-      return filterFilesBySearch(files, searchInput);
+    if (isOverCap) {
+      // Server already applied search + tag + source filters
+      return serverFiles;
     }
-    return files;
-  }, [files, searchInput, debouncedSearch]);
+    let result: FileWithTags[];
+    if (isSearching) {
+      const matches = searchIndex(index, query);
+      result = matches ? matches.map((m) => m.file) : [];
+    } else {
+      result = sortFiles(
+        sweptFiles.filter((f) => f.directory === currentDirectory),
+        sortBy,
+      );
+    }
+    return applyAdvancedFilters(result, activeTags, sourceFilter);
+  }, [
+    isOverCap,
+    serverFiles,
+    isSearching,
+    index,
+    query,
+    sweptFiles,
+    currentDirectory,
+    sortBy,
+    activeTags,
+    sourceFilter,
+  ]);
 
-  const displayDirectories = useMemo(() => {
-    if (searchInput && searchInput !== debouncedSearch) {
-      return filterDirectoriesBySearch(directories, searchInput);
-    }
-    return directories;
-  }, [directories, searchInput, debouncedSearch]);
+  // Directory cards are hidden during active search (the matcher already spans
+  // directory paths, surfacing files across all folders).
+  const displayDirectories = isSearching ? [] : directories;
 
   // ---------------------------------------------------------------------------
-  // Data loading — only uses debouncedSearch, not raw searchInput
+  // Directory fetch — runs for both modes, on project/dir change or mutation.
+  // Kept server-side so freshly created (empty) directories still appear.
   // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let cancelled = false;
+    listLibraryDirectories(projectId, currentDirectory)
+      .then((res) => {
+        if (cancelled) return;
+        setDirectories(res.directories);
+        setCachedDirectories(projectId, currentDirectory, res.directories);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error('Failed to load directories:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, currentDirectory, dirRefreshToken]);
 
-  // Track whether initial load has completed so subsequent filter changes use background refresh
-  const hasLoadedOnce = useRef(hasCachedData);
-
-  const loadFiles = useCallback(
+  // ---------------------------------------------------------------------------
+  // Legacy server-search load — gated behind the over-cap fallback
+  // ---------------------------------------------------------------------------
+  const loadServerFiles = useCallback(
     async (opts?: { background?: boolean }) => {
       const isBackground = opts?.background || hasLoadedOnce.current;
-      if (isBackground) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+      if (isBackground) setRefreshing(true);
+      else setLoading(true);
       try {
         const filters: ListFilesRequest = {
           search: debouncedSearch || undefined,
@@ -160,23 +230,11 @@ export function ProjectLibrary() {
           sortOrder: sortBy === 'filename' ? 'asc' : 'desc',
           limit: LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE,
         };
-
-        const [filesResult, dirsResult] = await Promise.all([
-          listLibraryFiles(projectId, filters),
-          // When searching, also fetch directories with search parameter
-          isSearching
-            ? listLibraryDirectories(projectId, currentDirectory, debouncedSearch)
-            : listLibraryDirectories(projectId, currentDirectory),
-        ]);
-
-        setFiles(filesResult.files);
-        setDirectories(dirsResult.directories);
+        const filesResult = await listLibraryFiles(projectId, filters);
+        setServerFiles(filesResult.files);
         hasLoadedOnce.current = true;
-
-        // Cache unfiltered results (no search, no tag/source filters)
         if (!debouncedSearch && activeTags.length === 0 && sourceFilter === 'all') {
           setCachedFiles(projectId, currentDirectory, sortBy, filesResult);
-          setCachedDirectories(projectId, currentDirectory, dirsResult.directories);
         }
       } catch (err) {
         console.error('Failed to load library files:', err);
@@ -189,28 +247,65 @@ export function ProjectLibrary() {
   );
 
   useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
+    if (isOverCap) void loadServerFiles();
+  }, [isOverCap, loadServerFiles]);
+
+  // ---------------------------------------------------------------------------
+  // Mutation refresh — re-sweep the client index (sub-cap), re-fetch
+  // directories, and refresh the server list (over-cap). dir fileCounts are a
+  // server aggregate; move returns no tags — so a trailing re-sweep is required.
+  // ---------------------------------------------------------------------------
+  const refreshAfterMutation = useCallback(() => {
+    invalidate();
+    setDirRefreshToken((t) => t + 1);
+    if (isOverCap) void loadServerFiles({ background: true });
+  }, [invalidate, isOverCap, loadServerFiles]);
+
+  // ---------------------------------------------------------------------------
+  // Write-only URL reflection of the search query (debounced). Never read back.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (debouncedSearch) next.set('q', debouncedSearch);
+        else next.delete('q');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [debouncedSearch, setSearchParams]);
 
   // ---------------------------------------------------------------------------
   // Directory navigation
   // ---------------------------------------------------------------------------
+  const navigateToDirectory = useCallback(
+    (dir: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (dir === '/') next.delete('dir');
+        else next.set('dir', dir);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
-  const navigateToDirectory = useCallback((dir: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (dir === '/') {
-        next.delete('dir');
-      } else {
-        next.set('dir', dir);
-      }
-      return next;
-    });
-  }, [setSearchParams]);
+  // Move focus to the breadcrumb after a directory change (skip initial mount)
+  const breadcrumbRef = useRef<HTMLDivElement>(null);
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    breadcrumbRef.current?.focus();
+  }, [currentDirectory]);
 
   const handleCreateDirectory = useCallback(
     (dirPath: string) => {
       setShowCreateDir(false);
+      setDirRefreshToken((t) => t + 1);
       navigateToDirectory(dirPath);
     },
     [navigateToDirectory],
@@ -219,7 +314,6 @@ export function ProjectLibrary() {
   // ---------------------------------------------------------------------------
   // Upload handling
   // ---------------------------------------------------------------------------
-
   const handleUploadFiles = useCallback(
     (newFiles: File[]) => {
       for (const file of newFiles) {
@@ -238,32 +332,27 @@ export function ProjectLibrary() {
           continue;
         }
 
-        const existing = files.find((f) => f.filename === file.name && f.directory === currentDirectory);
-        if (existing) {
-          continue;
-        }
+        const existing = allFiles.find(
+          (f) => f.filename === file.name && f.directory === currentDirectory,
+        );
+        if (existing) continue;
 
         const id = `upload-${++uploadIdCounter}`;
         const item: UploadItem = { id, file, progress: 0, status: 'uploading' };
-
         setUploads((prev) => [...prev, item]);
 
         uploadLibraryFile(projectId, file, {
           directory: currentDirectory,
           onProgress: (loaded, uploadTotal) => {
             const pct = Math.round((loaded / uploadTotal) * 100);
-            setUploads((prev) =>
-              prev.map((u) => (u.id === id ? { ...u, progress: pct } : u)),
-            );
+            setUploads((prev) => prev.map((u) => (u.id === id ? { ...u, progress: pct } : u)));
           },
         })
           .then(() => {
             setUploads((prev) =>
-              prev.map((u) =>
-                u.id === id ? { ...u, status: 'done' as const, progress: 100 } : u,
-              ),
+              prev.map((u) => (u.id === id ? { ...u, status: 'done' as const, progress: 100 } : u)),
             );
-            loadFiles({ background: true });
+            refreshAfterMutation();
           })
           .catch((err: Error) => {
             setUploads((prev) =>
@@ -274,7 +363,7 @@ export function ProjectLibrary() {
           });
       }
     },
-    [projectId, files, loadFiles, currentDirectory],
+    [projectId, allFiles, refreshAfterMutation, currentDirectory],
   );
 
   const dismissUpload = useCallback((id: string) => {
@@ -282,42 +371,57 @@ export function ProjectLibrary() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Tag filter toggle
+  // Preview + tag filter
   // ---------------------------------------------------------------------------
-
-  const openPreview = useCallback((file: FileWithTags) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('preview', file.id);
-      return next;
-    }, { replace: true });
-  }, [setSearchParams]);
+  const openPreview = useCallback(
+    (file: FileWithTags) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('preview', file.id);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const closePreview = useCallback(() => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('preview');
-      return next;
-    }, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('preview');
+        return next;
+      },
+      { replace: true },
+    );
   }, [setSearchParams]);
 
   const handleTagClick = useCallback((tag: string) => {
-    setActiveTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
-    );
+    setActiveTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   }, []);
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
-  if (loading) {
+  // Full-page spinner ONLY on a true first load with nothing to show. Background
+  // re-sweeps and refreshes keep existing rows mounted (no flicker).
+  const isInitialLoading = isOverCap
+    ? loading
+    : indexStatus === 'loading' && sweptFiles.length === 0;
+  const isRefreshing = isOverCap ? refreshing : isSweeping;
+
+  if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Spinner size="lg" />
       </div>
     );
   }
+
+  const hasContent = displayFiles.length > 0 || displayDirectories.length > 0;
 
   return (
     <div
@@ -412,10 +516,56 @@ export function ProjectLibrary() {
         </button>
       </div>
 
-      {/* Directory breadcrumb */}
-      <DirectoryBreadcrumb directory={currentDirectory} onNavigate={navigateToDirectory} />
+      {/* Always-visible search row — full width, between header and breadcrumb.
+          Sticky on mobile so it stays reachable while scrolling long lists. */}
+      <div className={isMobile ? 'sticky top-0 z-10 -mx-4 px-4 py-2 bg-canvas' : ''}>
+        <div className="relative">
+          <Search
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none"
+            aria-hidden="true"
+          />
+          <input
+            id="library-search"
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            aria-label="Search files and folders"
+            placeholder="Search files and folders..."
+            maxLength={LIBRARY_DEFAULTS.MAX_SEARCH_LENGTH}
+            className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
+          />
+          {/* Inline spinner only in the over-cap server path (sub-cap is instant) */}
+          {isOverCap && (isSearchPending || refreshing) && searchInput && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Spinner size="sm" />
+            </div>
+          )}
+        </div>
+      </div>
 
-      {/* Filter bar (collapsible) */}
+      {/* Directory breadcrumb (focus target after navigation) */}
+      <div ref={breadcrumbRef} tabIndex={-1} className="outline-none">
+        <DirectoryBreadcrumb directory={currentDirectory} onNavigate={navigateToDirectory} />
+      </div>
+
+      {/* Non-blocking sweep error banner */}
+      {!isOverCap && sweepError && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] text-xs text-warning-fg"
+        >
+          <span>Some files may be missing — refresh to retry.</span>
+          <button
+            onClick={() => invalidate()}
+            className={`px-2 py-1 rounded-md border border-[rgba(245,158,11,0.4)] bg-transparent text-warning-fg cursor-pointer ${FOCUS_RING}`}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Filter bar (collapsible) — advanced tag/source filters only */}
       {showFilters && (
         <div className="flex flex-col gap-3 p-3 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-inset">
           {/* Sort (mobile only — hidden on desktop where it's in the header) */}
@@ -432,27 +582,6 @@ export function ProjectLibrary() {
             </select>
           )}
 
-          {/* Search input with inline spinner */}
-          <div className="relative">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none"
-            />
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search files and folders..."
-              className="w-full pl-9 pr-9 py-2 text-sm rounded-lg text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
-            />
-            {/* Inline spinner shown while debounce is pending or API is in-flight */}
-            {(isSearchPending || refreshing) && searchInput && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <Spinner size="sm" />
-              </div>
-            )}
-          </div>
-
           {/* Tag chips */}
           {allTags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -462,6 +591,7 @@ export function ProjectLibrary() {
                   <button
                     key={tag}
                     onClick={() => handleTagClick(tag)}
+                    aria-pressed={isActive}
                     className={`px-2.5 py-1 rounded-full text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
                       isActive
                         ? 'bg-accent text-white'
@@ -481,6 +611,7 @@ export function ProjectLibrary() {
               <button
                 key={src}
                 onClick={() => setSourceFilter(src)}
+                aria-pressed={sourceFilter === src}
                 className={`px-3 py-1.5 rounded-lg text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
                   sourceFilter === src
                     ? 'bg-accent text-white'
@@ -505,7 +636,7 @@ export function ProjectLibrary() {
         <TagEditor
           file={editingTagsFile}
           projectId={projectId}
-          onUpdated={() => loadFiles({ background: true })}
+          onUpdated={refreshAfterMutation}
           onClose={() => setEditingTagsFile(null)}
         />
       )}
@@ -519,28 +650,33 @@ export function ProjectLibrary() {
         />
       )}
 
-      {/* Status bar — file count + refreshing indicator (at TOP, always visible) */}
-      {(displayFiles.length > 0 || displayDirectories.length > 0) && (
-        <div className="flex items-center gap-2">
-          {refreshing && <Spinner size="sm" />}
-          <p className="text-xs text-fg-muted m-0">
-            {displayFiles.length} file{displayFiles.length !== 1 ? 's' : ''}
-            {displayDirectories.length > 0 && `, ${displayDirectories.length} folder${displayDirectories.length !== 1 ? 's' : ''}`}
-            {currentDirectory !== '/' && !isSearching && (
-              <span> in {currentDirectory}</span>
-            )}
-            {refreshing && <span className="ml-1">— updating...</span>}
-          </p>
-        </div>
-      )}
+      {/* Status bar — file/folder count + live region for screen readers */}
+      <div className="flex items-center gap-2">
+        {isRefreshing && <Spinner size="sm" />}
+        <p className="text-xs text-fg-muted m-0" aria-live="polite" aria-atomic="true">
+          {hasContent ? (
+            <>
+              {isSearching
+                ? `${displayFiles.length} result${displayFiles.length !== 1 ? 's' : ''} for “${query}”`
+                : `${displayFiles.length} file${displayFiles.length !== 1 ? 's' : ''}`}
+              {displayDirectories.length > 0 &&
+                `, ${displayDirectories.length} folder${displayDirectories.length !== 1 ? 's' : ''}`}
+              {currentDirectory !== '/' && !isSearching && <span> in {currentDirectory}</span>}
+              {isRefreshing && <span className="ml-1">— updating…</span>}
+            </>
+          ) : isSearching ? (
+            `No files match “${query}”`
+          ) : (
+            ''
+          )}
+        </p>
+      </div>
 
-      {/* Directories — always shown as a compact card grid */}
+      {/* Directories — compact card grid (hidden during search) */}
       {displayDirectories.length > 0 && (
         <div
           className={`grid gap-3 ${
-            isMobile
-              ? 'grid-cols-2'
-              : 'grid-cols-[repeat(auto-fill,minmax(120px,140px))]'
+            isMobile ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(120px,140px))]'
           }`}
         >
           {displayDirectories.map((dir) => (
@@ -567,13 +703,15 @@ export function ProjectLibrary() {
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FolderOpen size={40} className="text-fg-muted mb-3 opacity-30" />
           <p className="text-sm text-fg-muted m-0 max-w-xs">
-            {activeFilterCount > 0
-              ? 'No files match your filters.'
-              : currentDirectory !== '/'
-                ? 'This folder is empty.'
-                : 'No files yet. Upload files to share with your agents.'}
+            {isSearching
+              ? `No files match “${query}”.`
+              : activeFilterCount > 0
+                ? 'No files match your filters.'
+                : currentDirectory !== '/'
+                  ? 'This folder is empty.'
+                  : 'No files yet. Upload files to share with your agents.'}
           </p>
-          {activeFilterCount === 0 && (
+          {!isSearching && activeFilterCount === 0 && (
             <button
               onClick={() => setShowUpload(true)}
               className={`mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-medium border-none cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
@@ -589,7 +727,7 @@ export function ProjectLibrary() {
               key={file.id}
               file={file}
               projectId={projectId}
-              onDeleted={() => loadFiles({ background: true })}
+              onDeleted={refreshAfterMutation}
               onEditTags={setEditingTagsFile}
               onTagClick={handleTagClick}
               onPreview={openPreview}
@@ -605,7 +743,7 @@ export function ProjectLibrary() {
               key={file.id}
               file={file}
               projectId={projectId}
-              onDeleted={() => loadFiles({ background: true })}
+              onDeleted={refreshAfterMutation}
               onEditTags={setEditingTagsFile}
               onTagClick={handleTagClick}
               onPreview={openPreview}
