@@ -1,13 +1,40 @@
 import type { ListFilesResponse } from '@simple-agent-manager/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CachedIndexFile } from '../../../src/lib/library-cache';
 import {
+  clearCachedIndex,
   clearLibraryCache,
   getCachedDirectories,
   getCachedFiles,
+  getCachedIndex,
   setCachedDirectories,
   setCachedFiles,
+  setCachedIndex,
 } from '../../../src/lib/library-cache';
+
+function makeIndexFile(id: string): CachedIndexFile {
+  return {
+    id,
+    projectId: 'proj-1',
+    filename: `${id}.txt`,
+    directory: '/',
+    mimeType: 'text/plain',
+    sizeBytes: 1,
+    description: null,
+    uploadedBy: 'user-1',
+    uploadSource: 'user',
+    uploadSessionId: null,
+    uploadTaskId: null,
+    replacedAt: null,
+    replacedBy: null,
+    status: 'ready',
+    extractedTextPreview: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    tags: [],
+  };
+}
 
 describe('library-cache', () => {
   beforeEach(() => {
@@ -119,5 +146,60 @@ describe('library-cache', () => {
   it('handles corrupted cache entries gracefully', () => {
     localStorage.setItem('sam-library:proj-1:files:/:createdAt', 'not-json');
     expect(getCachedFiles('proj-1', '/', 'createdAt')).toBeNull();
+  });
+
+  describe('global index', () => {
+    it('stores and retrieves the swept index with a count', () => {
+      const files = [makeIndexFile('a'), makeIndexFile('b')];
+      expect(setCachedIndex('proj-1', files)).toBe(true);
+
+      const result = getCachedIndex('proj-1');
+      expect(result?.count).toBe(2);
+      expect(result?.files.map((f) => f.id)).toEqual(['a', 'b']);
+    });
+
+    it('uses a distinct key from per-directory file caches', () => {
+      setCachedFiles('proj-1', '/', 'createdAt', { files: [], cursor: null, total: 0 });
+      setCachedIndex('proj-1', [makeIndexFile('a')]);
+
+      // The per-directory cache and the global index do not collide
+      expect(getCachedFiles('proj-1', '/', 'createdAt')).toEqual({
+        files: [],
+        cursor: null,
+        total: 0,
+      });
+      expect(getCachedIndex('proj-1')?.count).toBe(1);
+    });
+
+    it('returns null for a missing index', () => {
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
+
+    it('expires the index past TTL', () => {
+      setCachedIndex('proj-1', [makeIndexFile('a')]);
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
+
+    it('clearCachedIndex removes only the index', () => {
+      setCachedIndex('proj-1', [makeIndexFile('a')]);
+      setCachedFiles('proj-1', '/', 'createdAt', { files: [], cursor: null, total: 0 });
+
+      clearCachedIndex('proj-1');
+
+      expect(getCachedIndex('proj-1')).toBeNull();
+      expect(getCachedFiles('proj-1', '/', 'createdAt')).not.toBeNull();
+    });
+
+    it('handles a corrupted index entry gracefully', () => {
+      localStorage.setItem('sam-library:proj-1:global-index', 'not-json');
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
+
+    it('clearLibraryCache removes the global index too', () => {
+      setCachedIndex('proj-1', [makeIndexFile('a')]);
+      clearLibraryCache();
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
   });
 });
