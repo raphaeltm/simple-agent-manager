@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  getAuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
   getUserAccessibleInstallations,
   verifyUserInstallationAccess,
@@ -104,6 +105,64 @@ describe('getUserAccessibleInstallations', () => {
       status: 401,
       ok: false,
       installationCount: 0,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+});
+
+describe('getAuthenticatedGitHubUser', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('fetches the OAuth token owner without logging the token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      id: 591860,
+      login: 'lionello',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getAuthenticatedGitHubUser('github-user-token', {
+      flow: 'sync',
+      userId: 'user-1',
+    });
+
+    expect(result).toEqual({ id: 591860, login: 'lionello' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer github-user-token',
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        }),
+      })
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith('github.authenticated_user.response', {
+      flow: 'sync',
+      userId: 'user-1',
+      status: 200,
+      ok: true,
+    });
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
+  });
+
+  it('throws the GitHub error message when authenticated user lookup fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ message: 'Bad credentials' }, { status: 401 }))
+    );
+
+    await expect(getAuthenticatedGitHubUser('expired-token', {
+      flow: 'sync',
+      userId: 'user-1',
+    })).rejects.toThrow('Bad credentials');
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.authenticated_user.response', {
+      flow: 'sync',
+      userId: 'user-1',
+      status: 401,
+      ok: false,
     });
     expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
   });

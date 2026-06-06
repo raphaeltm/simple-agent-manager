@@ -17,12 +17,12 @@ The bad row was removed manually from production, but code still needs to preven
 
 ## Implementation Checklist
 
-- [ ] Add a GitHub user identity helper that reads the authenticated user's GitHub id/login from the OAuth token.
-- [ ] Update direct installation sync so personal installations are stored only when the installation account is the authenticated GitHub user.
-- [ ] Keep shared organization discovery behavior intact for verified org installations.
-- [ ] Add regression tests covering cross-user personal installation sync denial.
-- [ ] Add regression tests confirming the current user's own personal installation still syncs.
-- [ ] Add regression tests confirming verified shared org installation sync still works.
+- [x] Add a GitHub user identity helper that reads the authenticated user's GitHub id/login from the OAuth token.
+- [x] Update direct installation sync so personal installations are stored only when the installation account is the authenticated GitHub user.
+- [x] Keep shared organization discovery behavior intact for verified org installations.
+- [x] Add regression tests covering cross-user personal installation sync denial.
+- [x] Add regression tests confirming the current user's own personal installation still syncs.
+- [x] Add regression tests confirming verified shared org installation sync still works.
 - [ ] Run focused API tests and quality checks.
 - [ ] Perform local critical review with security and test focus before PR.
 

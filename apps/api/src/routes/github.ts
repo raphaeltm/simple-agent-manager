@@ -10,10 +10,13 @@ import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
+  type AuthenticatedGitHubUser,
+  getAuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
   getInstallationRepositories,
   getRepositoryBranches,
   getUserAccessibleInstallations,
+  type UserAccessibleInstallation,
   verifyUserInstallationAccess,
 } from '../services/github-app';
 import {
@@ -432,10 +435,10 @@ async function syncDirectUserInstallations(
 
     // User-context GitHub verification: only sync installations the
     // authenticated GitHub user can access.
-    const accessibleInstallations = await getUserAccessibleInstallations(accessToken, {
-      flow: 'sync',
-      userId,
-    });
+    const [authenticatedGitHubUser, accessibleInstallations] = await Promise.all([
+      getAuthenticatedGitHubUser(accessToken, { flow: 'sync', userId }),
+      getUserAccessibleInstallations(accessToken, { flow: 'sync', userId }),
+    ]);
     log.info('github.installations_sync.accessible_installations', {
       userId,
       installationCount: accessibleInstallations.length,
@@ -443,14 +446,31 @@ async function syncDirectUserInstallations(
     });
     if (accessibleInstallations.length === 0) return;
 
+    const canonicalInstallations = accessibleInstallations.filter((inst) =>
+      normalizeAccountType(inst.account.type) === 'organization' ||
+      isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
+    );
+    const syncableInstallations = accessibleInstallations.filter((inst) =>
+      isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
+    );
+    const skippedInstallations = accessibleInstallations.length - syncableInstallations.length;
+    if (skippedInstallations > 0) {
+      log.info('github.installations_sync.skipped_direct_installations', {
+        userId,
+        skippedInstallationCount: skippedInstallations,
+        reason: 'not_authenticated_user_personal_installation',
+      });
+    }
     const now = new Date().toISOString();
-    for (const inst of accessibleInstallations) {
+    for (const inst of canonicalInstallations) {
       await upsertCanonicalInstallationAccount(
         db,
         getCanonicalAccountInput(String(inst.id), inst.account.type, inst.account.login),
         now
       );
     }
+
+    if (syncableInstallations.length === 0) return;
 
     // Get user's existing installation records
     const existingRecords = await db
@@ -465,7 +485,7 @@ async function syncDirectUserInstallations(
       existingRecords.map((record) => getExternalInstallationId(record))
     );
 
-    const missingInstallations = accessibleInstallations.filter(
+    const missingInstallations = syncableInstallations.filter(
       (inst) => !existingInstallationIds.has(String(inst.id))
     );
 
@@ -525,6 +545,19 @@ async function syncDirectUserInstallations(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function isAuthenticatedUsersPersonalInstallation(
+  installation: UserAccessibleInstallation,
+  authenticatedUser: AuthenticatedGitHubUser
+): boolean {
+  if (normalizeAccountType(installation.account.type) !== 'personal') {
+    return false;
+  }
+  if (typeof installation.account.id === 'number') {
+    return installation.account.id === authenticatedUser.id;
+  }
+  return installation.account.login.toLowerCase() === authenticatedUser.login.toLowerCase();
 }
 
 async function syncSharedOrgInstallations(

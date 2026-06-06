@@ -29,6 +29,7 @@ const installationRepositoriesSchema = v.object({
 const userInstallationSchema = v.object({
   id: v.number(),
   account: v.object({
+    id: v.optional(v.number()),
     login: v.string(),
     type: v.string(),
   }),
@@ -36,6 +37,11 @@ const userInstallationSchema = v.object({
 
 const userInstallationsSchema = v.object({
   installations: v.array(userInstallationSchema),
+});
+
+const authenticatedGitHubUserSchema = v.object({
+  id: v.number(),
+  login: v.string(),
 });
 
 const branchSchema = v.object({
@@ -53,7 +59,12 @@ async function readGitHubError(response: Response, fallback: string): Promise<st
 
 export interface UserAccessibleInstallation {
   id: number;
-  account: { login: string; type: string };
+  account: { id?: number; login: string; type: string };
+}
+
+export interface AuthenticatedGitHubUser {
+  id: number;
+  login: string;
 }
 
 export interface GitHubUserOrganization {
@@ -76,6 +87,11 @@ interface UserInstallationAccessDiagnostics {
   userId: string;
   installationId: string;
   accountName?: string;
+}
+
+interface AuthenticatedGitHubUserDiagnostics {
+  flow: 'sync';
+  userId: string;
 }
 
 /**
@@ -388,6 +404,40 @@ export async function getUserAccessibleInstallations(
   }
 
   return allInstallations;
+}
+
+/**
+ * Fetch the GitHub identity for the OAuth token owner.
+ *
+ * SAM cannot infer this from `users.github_id` because older production rows may
+ * not have that column populated. The OAuth token is the source of truth for the
+ * current sync request.
+ */
+export async function getAuthenticatedGitHubUser(
+  accessToken: string,
+  diagnostics: AuthenticatedGitHubUserDiagnostics
+): Promise<AuthenticatedGitHubUser> {
+  const response = await fetch('https://api.github.com/user', {
+    headers: githubUserTokenHeaders(accessToken),
+  });
+
+  const details = {
+    flow: diagnostics.flow,
+    userId: diagnostics.userId,
+    status: response.status,
+    ok: response.ok,
+  };
+  if (response.ok) {
+    log.info('github.authenticated_user.response', details);
+  } else {
+    log.warn('github.authenticated_user.response', details);
+  }
+
+  if (!response.ok) {
+    throw new Error(await readGitHubError(response, `Failed to get authenticated GitHub user: ${response.status}`));
+  }
+
+  return readResponseJson(response, authenticatedGitHubUserSchema, 'github.authenticated_user');
 }
 
 /**
