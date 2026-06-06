@@ -237,7 +237,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
 
         {error && (
           <div
-            className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
+            className="m-4 p-3 bg-danger-tint rounded-lg text-danger-fg"
             style={{ fontSize: 'var(--sam-type-caption-size)' }}
           >
             {error}
@@ -488,4 +488,3 @@ function iconBtnStyle(isMobile: boolean): CSSProperties {
     flexShrink: 0,
   };
 }
-

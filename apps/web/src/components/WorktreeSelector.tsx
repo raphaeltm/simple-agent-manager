@@ -319,7 +319,7 @@ export function WorktreeSelector({
                           style={{
                             fontSize: 10,
                             fontWeight: 600,
-                            color: 'var(--sam-color-warning, #f59e0b)',
+                            color: 'var(--sam-workspace-warning-fg)',
                             flexShrink: 0,
                           }}
                         >

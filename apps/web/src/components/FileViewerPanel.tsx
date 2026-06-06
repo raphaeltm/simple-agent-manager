@@ -228,7 +228,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
 
             {error && (
               <div
-                className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
+                className="m-4 p-3 bg-danger-tint rounded-lg text-danger-fg"
                 style={{ fontSize: 'var(--sam-type-caption-size)' }}
               >
                 {error}

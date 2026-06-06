@@ -1,4 +1,5 @@
 import '../../styles/acp-chat.css';
+import '../../styles/workspace-chrome.css';
 
 import type { AgentSession } from '@simple-agent-manager/shared';
 import type { MultiTerminalHandle, MultiTerminalSessionSnapshot } from '@simple-agent-manager/terminal';
@@ -294,16 +295,16 @@ export function Workspace() {
   );
 
   // ── Early returns ──
-  if (core.loading && !core.workspace) return <div className="flex items-center justify-center bg-tn-bg" style={{ height: 'var(--sam-app-height)' }}><Spinner size="lg" /></div>;
+  if (core.loading && !core.workspace) return <div className="flex items-center justify-center" style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}><Spinner size="lg" /></div>;
   if (core.error && !core.workspace) return (
-    <div className="flex flex-col bg-tn-bg" style={{ height: 'var(--sam-app-height)' }}>
+    <div className="flex flex-col" style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}>
       <MinimalToolbar onBack={() => navigate('/dashboard')} />
       <CenteredStatus color="var(--sam-color-danger-fg)" title="Failed to Load Workspace" subtitle={core.error} action={<Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>} />
     </div>
   );
 
   return (
-    <div className="flex flex-col bg-tn-bg overflow-hidden" style={{ height: 'var(--sam-app-height)' }}>
+    <div className="flex flex-col overflow-hidden" style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}>
       <WorkspaceHeader workspace={core.workspace} isMobile={isMobile} isRunning={core.isRunning} terminalToken={core.terminalToken}
         error={core.error} gitChangeCount={nav.gitChangeCount} gitStatusStale={nav.gitStatusStale}
         worktrees={nav.worktrees} activeWorktree={nav.activeWorktree} worktreeLoading={nav.worktreeLoading}
@@ -315,7 +316,7 @@ export function Workspace() {
         onCreateWorktree={nav.handleCreateWorktree} onRemoveWorktree={nav.handleRemoveWorktree} onRequestBranches={nav.fetchRemoteBranches} />
 
       {isMobile && core.error && (
-        <div style={{ padding: '6px 12px', backgroundColor: 'var(--sam-color-danger-tint)', borderBottom: '1px solid rgba(248, 113, 113, 0.3)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ padding: '6px 12px', backgroundColor: 'var(--sam-color-danger-tint)', borderBottom: '1px solid var(--sam-color-border-default)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{core.error}</span>
           <button onClick={() => core.setError(null)} style={{ background: 'none', border: 'none', color: 'var(--sam-color-danger-fg)', cursor: 'pointer', padding: '4px 8px', fontSize: 'var(--sam-type-secondary-size)', flexShrink: 0 }}>×</button>
         </div>
@@ -394,8 +395,8 @@ export function Workspace() {
       {isMobile && mobileMenuOpen && (
         <>
           <div data-testid="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 glass-backdrop-dim z-drawer-backdrop" />
-          <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-[rgba(34,197,94,0.10)] z-drawer flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-[rgba(34,197,94,0.10)] shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
+          <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-border-default z-drawer flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border-default shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
               <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Workspace</span>
               <button onClick={() => setMobileMenuOpen(false)} aria-label="Close workspace menu" className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"><X size={18} /></button>
             </div>

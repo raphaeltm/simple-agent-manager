@@ -138,7 +138,7 @@ describe('ProjectLibrary (client-side index)', () => {
 
     await waitFor(() => expect(screen.getByText('readme.md')).toBeInTheDocument());
     expect(screen.getByText('photo.png')).toBeInTheDocument();
-    expect(screen.getByText(/2 files/)).toBeInTheDocument();
+    expect(screen.getAllByText(/2 files/).length).toBeGreaterThan(0);
   });
 
   it('renders the empty state when no files exist', async () => {

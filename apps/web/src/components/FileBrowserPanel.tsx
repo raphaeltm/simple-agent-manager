@@ -223,7 +223,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
               padding: 12,
               backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: 'var(--sam-color-tn-red)',
+              color: 'var(--sam-color-danger-fg)',
               fontSize: 'var(--sam-type-caption-size)',
             }}
           >

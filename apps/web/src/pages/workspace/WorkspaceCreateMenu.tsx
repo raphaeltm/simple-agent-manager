@@ -98,7 +98,7 @@ export function WorkspaceCreateMenu({
           background: 'none',
           border: 'none',
           borderLeft: '1px solid var(--sam-color-border-default)',
-          color: 'var(--sam-color-tn-fg-muted)',
+          color: 'var(--sam-color-fg-muted)',
           cursor: sessionsLoading ? 'not-allowed' : 'pointer',
           fontSize: 18,
           fontWeight: 300,

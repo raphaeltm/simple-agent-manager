@@ -10,10 +10,10 @@ interface LogEntryProps {
 
 const defaultLevelStyle = { color: 'var(--sam-color-fg-muted)', bg: 'transparent' };
 const levelColors: Record<string, { color: string; bg: string }> = {
-  error: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.12)' },
-  warn: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.12)' },
+  error: { color: 'var(--sam-node-danger-fg)', bg: 'var(--sam-node-danger-tint)' },
+  warn: { color: 'var(--sam-node-warning-fg)', bg: 'var(--sam-node-warning-tint)' },
   info: defaultLevelStyle,
-  debug: { color: 'var(--sam-color-fg-disabled, #6b7280)', bg: 'transparent' },
+  debug: { color: 'var(--sam-node-neutral-fg)', bg: 'transparent' },
 };
 
 function getLevelStyle(level: string): { color: string; bg: string } {
@@ -64,7 +64,7 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
         padding: '2px var(--sam-space-2)',
         fontSize: 'var(--sam-type-caption-size, 0.75rem)',
         backgroundColor: bg,
-        borderLeft: entry.level === 'error' ? '2px solid #ef4444' : entry.level === 'warn' ? '2px solid #f59e0b' : '2px solid transparent',
+        borderLeft: entry.level === 'error' ? '2px solid var(--sam-node-danger-fg)' : entry.level === 'warn' ? '2px solid var(--sam-node-warning-fg)' : '2px solid transparent',
         cursor: hasMetadata ? 'pointer' : 'default',
       }}
       onClick={hasMetadata ? () => setExpanded(!expanded) : undefined}
@@ -79,7 +79,7 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
       aria-expanded={hasMetadata ? expanded : undefined}
     >
       {/* Timestamp */}
-      <span className="shrink-0 whitespace-nowrap" style={{ color: 'var(--sam-color-fg-disabled, #6b7280)' }}>
+      <span className="shrink-0 whitespace-nowrap" style={{ color: 'var(--sam-node-neutral-fg)' }}>
         {formatTimestamp(entry.timestamp)}
       </span>
 
@@ -101,7 +101,7 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
         style={{
           padding: '0 4px',
           fontSize: '0.625rem',
-          backgroundColor: 'rgba(128, 128, 128, 0.1)',
+          backgroundColor: 'var(--sam-node-neutral-tint)',
         }}
       >
         {entry.source}
@@ -111,7 +111,7 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
       <span className="text-fg-primary flex-1 break-words pr-8">
         {highlightText(entry.message, searchTerm)}
         {hasMetadata && (
-          <span className="ml-1" style={{ color: 'var(--sam-color-fg-disabled)' }}>
+          <span className="ml-1" style={{ color: 'var(--sam-node-neutral-fg)' }}>
             {expanded ? '\u25BC' : '\u25B6'}
           </span>
         )}
@@ -130,7 +130,7 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
         <div
           className="mt-1 p-2 rounded-sm text-fg-muted whitespace-pre-wrap break-all"
           style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.05)',
+            backgroundColor: 'var(--sam-node-code-subtle-bg)',
             fontSize: '0.6875rem',
           }}
         >
