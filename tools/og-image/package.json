@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@resvg/resvg-js": "2.6.2",
-    "satori": "0.12.2"
+    "satori": "0.26.0"
   },
   "devDependencies": {
     "tsx": "catalog:",
