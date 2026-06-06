@@ -62,7 +62,14 @@ ending in motion rather than an empty room?
   conversational profile, a task profile, and (optionally) a trigger — so the
   user leaves onboarding with real, usable configuration.
 - **Skills are deliberately excluded** from onboarding (still untested).
-- **Triggers are cron-only** in onboarding (GitHub event triggers untested).
+- **Real platform data, no claims.** The agent picker shows the user's *enabled*
+  agents only (mock: Claude Code, OpenAI Codex, Gemini CLI) with a muted "N more
+  available in your profile settings →" link to the rest of the real catalog
+  (Mistral Vibe, OpenCode, Amp). Agent and model labels are factual names from
+  `packages/shared/src/agents.ts` and `model-catalog.ts` — no marketing or
+  quality positioning ("big context window", "good at X").
+- **Triggers are cron-only** in onboarding. GitHub event triggers are simply not
+  shown — there is no copy mentioning or teasing them.
 - **Everything after Step 1 is skippable** for power users — each sub-step has a
   "Skip" button and the whole setup has a "Skip setup →" link.
 - **Education over configuration where it counts:** the ephemeral-workspace
@@ -81,5 +88,7 @@ ending in motion rather than an empty room?
 (`oss/x`), a Unicode/emoji/`<script>` injection repo, and branch lists with an
 extremely long branch name — to verify wrapping, dropdown truncation, empty-state
 handling, and XSS-safe rendering (React escapes by default). The agent/model
-options in `index.tsx` mirror the real agent types (`claude-code`,
-`openai-codex`, `google-gemini`) and example models.
+options in `index.tsx` mirror the real catalog: all six agent types
+(`claude-code`, `openai-codex`, `google-gemini`, `mistral-vibe`, `opencode`,
+`amp`) with the first three flagged enabled, and real model IDs/display names —
+the disabled ones surface only through the "more in settings" link.

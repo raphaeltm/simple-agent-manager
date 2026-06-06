@@ -52,37 +52,73 @@ const STEPS: { id: Phase; label: string }[] = [
 
 const SETUP_ORDER: SetupStep[] = ['conversational', 'task', 'trigger'];
 
-/* Agent options offered during the walkthrough — mirrors the real agent types
- * (claude-code / openai-codex / google-gemini) and their example models. */
+/* Agent options offered during the walkthrough. These mirror SAM's real agent
+ * catalog (packages/shared/src/agents.ts — six harnesses) and model catalog
+ * (packages/shared/src/model-catalog.ts). No quality/positioning claims: the
+ * user already knows why they use their harness. The picker only shows the
+ * agents the user has *enabled* (a credential is configured); the rest live one
+ * link away in profile settings. `enabled` here is mocked for the prototype. */
+interface AgentModel {
+  id: string;
+  name: string;
+}
 interface AgentOption {
   id: string;
   label: string;
-  blurb: string;
-  models: string[];
+  enabled: boolean;
+  models: AgentModel[];
 }
 
 const AGENTS: AgentOption[] = [
   {
     id: 'claude-code',
     label: 'Claude Code',
-    blurb: 'Anthropic · strong all-rounder',
-    models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
+    enabled: true,
+    models: [
+      { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
+      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+    ],
   },
   {
     id: 'openai-codex',
-    label: 'Codex',
-    blurb: 'OpenAI · fast & precise',
-    models: ['gpt-5-codex', 'o3'],
+    label: 'OpenAI Codex',
+    enabled: true,
+    models: [
+      { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro' },
+      { id: 'gpt-5.5', name: 'GPT-5.5' },
+      { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+      { id: 'o3', name: 'O3' },
+    ],
   },
   {
     id: 'google-gemini',
-    label: 'Gemini',
-    blurb: 'Google · big context window',
-    models: ['gemini-2.5-pro'],
+    label: 'Gemini CLI',
+    enabled: true,
+    models: [
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    ],
   },
+  // Available in the catalog but not configured for this mock user — surfaced
+  // via the "more in settings" link rather than as selectable cards.
+  {
+    id: 'mistral-vibe',
+    label: 'Mistral Vibe',
+    enabled: false,
+    models: [
+      { id: 'devstral-2-2512', name: 'Devstral 2' },
+      { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5' },
+    ],
+  },
+  { id: 'opencode', label: 'OpenCode', enabled: false, models: [] },
+  { id: 'amp', label: 'Amp', enabled: false, models: [] },
 ];
 
-const DEFAULT_AGENT = AGENTS[0]!;
+const ENABLED_AGENTS = AGENTS.filter((a) => a.enabled);
+const DEFAULT_AGENT = ENABLED_AGENTS[0]!;
+const DISABLED_AGENT_COUNT = AGENTS.length - ENABLED_AGENTS.length;
 
 type KickoffMode = 'task' | 'conversation';
 
@@ -100,9 +136,9 @@ export function ProjectOnboardingPrototype() {
 
   // Step 2 — guided setup (mock local state)
   const [convAgent, setConvAgent] = useState(DEFAULT_AGENT.id);
-  const [convModel, setConvModel] = useState(DEFAULT_AGENT.models[0]!);
+  const [convModel, setConvModel] = useState(DEFAULT_AGENT.models[0]!.id);
   const [taskAgent, setTaskAgent] = useState(DEFAULT_AGENT.id);
-  const [taskModel, setTaskModel] = useState(DEFAULT_AGENT.models[0]!);
+  const [taskModel, setTaskModel] = useState(DEFAULT_AGENT.models[0]!.id);
   const [taskInstructions, setTaskInstructions] = useState('');
   const [wantTrigger, setWantTrigger] = useState(false);
   const [triggerSchedule, setTriggerSchedule] = useState<TriggerSchedule>('weekdays');
@@ -133,11 +169,11 @@ export function ProjectOnboardingPrototype() {
 
   function selectConvAgent(id: string) {
     setConvAgent(id);
-    setConvModel(AGENTS.find((a) => a.id === id)?.models[0] ?? '');
+    setConvModel(AGENTS.find((a) => a.id === id)?.models[0]?.id ?? '');
   }
   function selectTaskAgent(id: string) {
     setTaskAgent(id);
-    setTaskModel(AGENTS.find((a) => a.id === id)?.models[0] ?? '');
+    setTaskModel(AGENTS.find((a) => a.id === id)?.models[0]?.id ?? '');
   }
 
   function startSetup() {
@@ -670,11 +706,6 @@ function TriggerStep({
           </label>
         </div>
       )}
-
-      <p className="text-[11px] text-fg-muted/70 mt-3 flex items-center gap-1.5">
-        <Info size={12} /> Schedules only for now — event triggers (like new pull requests) are
-        coming.
-      </p>
     </div>
   );
 }
@@ -696,7 +727,7 @@ function AgentModelPicker({
     <div>
       <span className="text-sm text-fg-muted block mb-1.5">Agent</span>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {AGENTS.map((a) => {
+        {ENABLED_AGENTS.map((a) => {
           const active = a.id === selectedAgent;
           return (
             <button
@@ -712,11 +743,20 @@ function AgentModelPicker({
                 <Bot size={14} className="text-accent" /> {a.label}
                 {active && <Check size={13} className="text-accent ml-auto" />}
               </span>
-              <p className="text-[11px] text-fg-muted mt-0.5">{a.blurb}</p>
             </button>
           );
         })}
       </div>
+
+      {DISABLED_AGENT_COUNT > 0 && (
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-xs text-accent hover:underline mt-2 bg-transparent border-none cursor-pointer p-0"
+        >
+          Using a different harness? {DISABLED_AGENT_COUNT} more available in your profile settings
+          <ArrowRight size={12} />
+        </button>
+      )}
 
       <label className="block mt-3">
         <span className="text-sm text-fg-muted">Model</span>
@@ -727,8 +767,8 @@ function AgentModelPicker({
             className="w-full appearance-none rounded-lg bg-surface border border-border-default text-fg-primary text-sm pl-3 pr-9 py-2.5 outline-none focus:border-accent transition-colors cursor-pointer"
           >
             {agent.models.map((m) => (
-              <option key={m} value={m}>
-                {m}
+              <option key={m.id} value={m.id}>
+                {m.name}
               </option>
             ))}
           </select>
