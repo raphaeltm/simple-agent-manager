@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: GitHub installation security routes share callback, sync, repo, and branch invariants; split after hotfix stabilization.
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';

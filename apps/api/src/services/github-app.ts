@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: GitHub App API wrapper centralizes shared schemas, token minting, and user-context access during security hotfix.
 import { importPKCS8, SignJWT } from 'jose';
 import * as v from 'valibot';
 
