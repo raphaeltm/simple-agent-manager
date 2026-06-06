@@ -5,93 +5,98 @@
  * only. Route: /prototype/project-onboarding
  *
  * Premise: today's /projects/new is a flat form that drops you into an empty
- * project. This reimagines creation as a short *guided onboarding* that (1)
- * connects your code, (2) establishes intent — what you want to do first — and
- * (3) lands you in motion instead of an empty room. Visual language borrows from
- * the account-level Choose-Your-Path wizard (card options, green-glow vignette,
- * progress, accessible focus model).
+ * project. This reimagines creation as a short *guided onboarding* that:
+ *   1. Connect — link a GitHub repo + branch and name the project (required).
+ *   2. Discover — teach SAM's power surfaces (Agent Profiles, Triggers, Skills)
+ *      with a "here's why" framing borrowed from the website's self-host setup.
+ *      Fully skippable for power users.
+ *   3. Kick off — an isolated, centered version of the project-chat composer
+ *      (voice included) to start either a *task* or a *conversation*. Either way
+ *      you land in the project, in motion — never an empty room.
+ *
+ * Visual language borrows from the account-level Choose-Your-Path wizard and the
+ * project-chat composer (green-glow vignette, card options, dark glassy input).
  */
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronRight,
-  Compass,
   GitBranch,
   Github,
-  ListChecks,
   Lock,
   MessageSquare,
+  Mic,
   Search,
-  Settings2,
+  Send,
   Sparkles,
+  SplitSquareVertical,
+  Users,
+  Wrench,
   X,
+  Zap,
 } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 
-import { deriveProjectName, MOCK_REPOS,type MockRepo } from './mock-data';
+import { deriveProjectName, MOCK_REPOS, type MockRepo } from './mock-data';
 
-type Phase = 'source' | 'intent' | 'ready';
-
-type IntentId = 'chat' | 'task' | 'explore' | 'setup';
-
-interface IntentOption {
-  id: IntentId;
-  label: string;
-  description: string;
-  icon: ReactNode;
-  /** Where this intent lands the user after the project is created. */
-  landing: string;
-  /** Shown as a small chip to teach the profile boundary without overwhelming. */
-  profileHint?: string;
-}
-
-const INTENT_OPTIONS: IntentOption[] = [
-  {
-    id: 'chat',
-    label: 'Just start chatting',
-    description: 'Open a fresh conversation and describe what you want — the agent takes it from there.',
-    icon: <MessageSquare size={18} />,
-    landing: 'Opens a new chat in your project',
-    profileHint: 'Default conversational profile',
-  },
-  {
-    id: 'task',
-    label: 'Hand off a task',
-    description: 'Write one task and the agent runs it autonomously on a fresh VM, then opens a PR.',
-    icon: <ListChecks size={18} />,
-    landing: 'Opens the task composer, pre-filled',
-    profileHint: 'Default conversational profile',
-  },
-  {
-    id: 'explore',
-    label: 'Explore the codebase',
-    description: "Start with the agent already oriented — it reads the repo and summarizes how it's built.",
-    icon: <Compass size={18} />,
-    landing: 'Opens a chat seeded with an explore prompt',
-  },
-  {
-    id: 'setup',
-    label: "I'll set it up myself",
-    description: 'Skip ahead to the project home and configure profiles, triggers, and skills first.',
-    icon: <Settings2 size={18} />,
-    landing: 'Lands on the project home',
-  },
-];
+type Phase = 'connect' | 'discover' | 'kickoff';
 
 const STEPS: { id: Phase; label: string }[] = [
-  { id: 'source', label: 'Code' },
-  { id: 'intent', label: 'First move' },
-  { id: 'ready', label: 'Ready' },
+  { id: 'connect', label: 'Connect' },
+  { id: 'discover', label: 'Discover' },
+  { id: 'kickoff', label: 'Start' },
 ];
 
+/* Feature surfaces SAM unlocks — taught during onboarding the way the website's
+ * self-host setup explains *why* each piece matters, not just *what* it is. */
+interface FeatureCard {
+  id: string;
+  icon: ReactNode;
+  title: string;
+  what: string;
+  why: string;
+}
+
+const FEATURES: FeatureCard[] = [
+  {
+    id: 'profiles',
+    icon: <Users size={18} />,
+    title: 'Agent profiles',
+    what: 'Named agents with their own model, tools, and instructions.',
+    why: 'Keep a careful reviewer and a fast prototyper side by side — pick the right one per conversation instead of re-explaining context every time.',
+  },
+  {
+    id: 'triggers',
+    icon: <Zap size={18} />,
+    title: 'Triggers',
+    what: 'Run a profile automatically on a schedule or an event.',
+    why: 'Have an agent triage new issues every morning or watch a branch — work happens while you sleep, on your terms.',
+  },
+  {
+    id: 'skills',
+    icon: <Wrench size={18} />,
+    title: 'Skills',
+    what: 'Reusable instructions + files an agent loads on demand.',
+    why: 'Teach SAM your conventions once — release steps, a writing voice, a deploy checklist — and any profile can reach for it.',
+  },
+];
+
+type KickoffMode = 'task' | 'conversation';
+
 export function ProjectOnboardingPrototype() {
-  const [phase, setPhase] = useState<Phase>('source');
+  const [phase, setPhase] = useState<Phase>('connect');
+
+  // Step 1 — required info
   const [query, setQuery] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<MockRepo | null>(null);
-  const [samGit, setSamGit] = useState(false);
   const [projectName, setProjectName] = useState('');
-  const [intent, setIntent] = useState<IntentId | null>(null);
+  const [branch, setBranch] = useState('');
+
+  // Step 3 — kickoff
+  const [mode, setMode] = useState<KickoffMode>('task');
+  const [kickoffText, setKickoffText] = useState('');
+  const [listening, setListening] = useState(false);
 
   const filteredRepos = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -102,26 +107,19 @@ export function ProjectOnboardingPrototype() {
   }, [query]);
 
   const stepIndex = STEPS.findIndex((s) => s.id === phase);
-  const canContinueSource = (selectedRepo !== null || samGit) && projectName.trim().length > 0;
+  const canContinueConnect =
+    selectedRepo !== null && projectName.trim().length > 0 && branch.trim().length > 0;
 
   function selectRepo(repo: MockRepo) {
     setSelectedRepo(repo);
-    setSamGit(false);
     setProjectName(deriveProjectName(repo.fullName));
-  }
-
-  function chooseSamGit() {
-    setSamGit(true);
-    setSelectedRepo(null);
-    setProjectName((prev) => prev || 'New Project');
+    setBranch(repo.defaultBranch);
   }
 
   function back() {
-    if (phase === 'intent') setPhase('source');
-    else if (phase === 'ready') setPhase('intent');
+    if (phase === 'discover') setPhase('connect');
+    else if (phase === 'kickoff') setPhase('discover');
   }
-
-  const selectedIntent = INTENT_OPTIONS.find((o) => o.id === intent) ?? null;
 
   return (
     <div
@@ -138,7 +136,7 @@ export function ProjectOnboardingPrototype() {
       <div className="min-h-full flex flex-col">
         {/* Top bar */}
         <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-[64px]">
             {stepIndex > 0 && (
               <button
                 type="button"
@@ -150,46 +148,53 @@ export function ProjectOnboardingPrototype() {
             )}
           </div>
           <StepDots index={stepIndex} />
-          <button
-            type="button"
-            aria-label="Exit"
-            className="inline-flex items-center justify-center w-11 h-11 rounded-full text-fg-muted hover:text-fg-primary hover:bg-white/5 bg-transparent border-none cursor-pointer transition-colors"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center justify-end min-w-[64px]">
+            <button
+              type="button"
+              aria-label="Exit"
+              className="inline-flex items-center justify-center w-11 h-11 rounded-full text-fg-muted hover:text-fg-primary hover:bg-white/5 bg-transparent border-none cursor-pointer transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
         <div className="flex-1 px-4 pb-10 sm:px-6">
           <div className="max-w-lg mx-auto pt-2 sm:pt-10">
-            {phase === 'source' && (
-              <SourceStep
+            {phase === 'connect' && (
+              <ConnectStep
                 query={query}
                 setQuery={setQuery}
                 repos={filteredRepos}
                 selectedRepo={selectedRepo}
-                samGit={samGit}
                 onSelectRepo={selectRepo}
-                onChooseSamGit={chooseSamGit}
                 projectName={projectName}
                 setProjectName={setProjectName}
-                canContinue={canContinueSource}
-                onContinue={() => setPhase('intent')}
+                branch={branch}
+                setBranch={setBranch}
+                canContinue={canContinueConnect}
+                onContinue={() => setPhase('discover')}
               />
             )}
-            {phase === 'intent' && (
-              <IntentStep
+            {phase === 'discover' && (
+              <DiscoverStep
                 projectName={projectName}
-                selected={intent}
-                onSelect={setIntent}
-                onContinue={() => setPhase('ready')}
+                onContinue={() => setPhase('kickoff')}
+                onSkip={() => setPhase('kickoff')}
               />
             )}
-            {phase === 'ready' && (
-              <ReadyStep
+            {phase === 'kickoff' && (
+              <KickoffStep
                 projectName={projectName}
-                source={samGit ? 'SAM Git repository' : (selectedRepo?.fullName ?? '')}
-                intent={selectedIntent}
+                source={selectedRepo?.fullName ?? ''}
+                branch={branch}
+                mode={mode}
+                setMode={setMode}
+                text={kickoffText}
+                setText={setKickoffText}
+                listening={listening}
+                onToggleListening={() => setListening((v) => !v)}
               />
             )}
           </div>
@@ -199,40 +204,44 @@ export function ProjectOnboardingPrototype() {
   );
 }
 
-/* ─────────────────────── Step 1 · Bring your code ─────────────────────── */
+/* ─────────────────────── Step 1 · Connect your code ─────────────────────── */
 
-interface SourceStepProps {
+interface ConnectStepProps {
   query: string;
   setQuery: (v: string) => void;
   repos: MockRepo[];
   selectedRepo: MockRepo | null;
-  samGit: boolean;
   onSelectRepo: (r: MockRepo) => void;
-  onChooseSamGit: () => void;
   projectName: string;
   setProjectName: (v: string) => void;
+  branch: string;
+  setBranch: (v: string) => void;
   canContinue: boolean;
   onContinue: () => void;
 }
 
-function SourceStep({
+function ConnectStep({
   query,
   setQuery,
   repos,
   selectedRepo,
-  samGit,
   onSelectRepo,
-  onChooseSamGit,
   projectName,
   setProjectName,
+  branch,
+  setBranch,
   canContinue,
   onContinue,
-}: SourceStepProps) {
+}: ConnectStepProps) {
   return (
     <div>
-      <h1 className="sam-type-section-heading text-fg-primary mb-1">Bring your code</h1>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent mb-2">
+        New project · Step 1 of 3
+      </p>
+      <h1 className="sam-type-section-heading text-fg-primary mb-1">Connect your code</h1>
       <p className="sam-type-body text-fg-muted mb-6">
-        A project links a codebase to chats, tasks, and agents. Pick where this one&apos;s code lives.
+        A SAM project wraps one GitHub repository with chats, agents, and automation. Pick the repo
+        and branch your agents will work in.
       </p>
 
       {/* Search */}
@@ -251,7 +260,7 @@ function SourceStep({
       </div>
 
       {/* Repo list */}
-      <div className="flex flex-col gap-2 mb-3">
+      <div className="flex flex-col gap-2 mb-6">
         {repos.length === 0 && (
           <div className="text-sm text-fg-muted text-center py-8 border border-dashed border-border-default rounded-lg">
             No repositories match &ldquo;{query}&rdquo;.
@@ -298,47 +307,49 @@ function SourceStep({
         })}
       </div>
 
-      {/* Start fresh */}
-      <button
-        type="button"
-        aria-pressed={samGit}
-        onClick={onChooseSamGit}
-        className={`w-full text-left p-3 rounded-lg border border-dashed transition-all cursor-pointer bg-surface/50 mb-6 ${
-          samGit ? 'border-accent ring-1 ring-accent' : 'border-border-default hover:border-fg-muted'
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 text-accent">
-            <Sparkles size={16} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <span className="font-semibold text-fg-primary text-sm">No repo yet — start fresh</span>
-            <p className="text-xs text-fg-muted mt-0.5">
-              SAM creates a Git repo for you. Connect GitHub later anytime.
-            </p>
-          </div>
-          {samGit ? (
-            <Check size={14} className="text-accent shrink-0" />
-          ) : (
-            <ChevronRight size={14} className="text-fg-muted/30 shrink-0" />
-          )}
-        </div>
-      </button>
+      {/* Required details — name + branch, revealed once a repo is chosen */}
+      {selectedRepo && (
+        <div className="rounded-lg border border-accent/30 bg-accent/[0.04] p-4 mb-6">
+          <label className="block mb-4">
+            <span className="text-sm text-fg-muted">Project name</span>
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              className="w-full mt-1.5 rounded-lg bg-surface border border-border-default text-fg-primary text-sm px-3 py-2.5 outline-none focus:border-accent transition-colors"
+            />
+            <span className="text-[11px] text-fg-muted/70 mt-1 block">
+              Pre-filled from the repo — change it if you like.
+            </span>
+          </label>
 
-      {/* Inline name — auto-filled from the selection, editable */}
-      {(selectedRepo || samGit) && (
-        <label className="block mb-6">
-          <span className="text-sm text-fg-muted">Project name</span>
-          <input
-            type="text"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            className="w-full mt-1.5 rounded-lg bg-surface border border-border-default text-fg-primary text-sm px-3 py-2.5 outline-none focus:border-accent transition-colors"
-          />
-          <span className="text-[11px] text-fg-muted/70 mt-1 block">
-            Pre-filled from your selection — change it if you like.
-          </span>
-        </label>
+          <label className="block">
+            <span className="text-sm text-fg-muted inline-flex items-center gap-1.5">
+              <GitBranch size={12} className="text-accent" /> Working branch
+            </span>
+            <div className="relative mt-1.5">
+              <select
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                className="w-full appearance-none rounded-lg bg-surface border border-border-default text-fg-primary text-sm pl-3 pr-9 py-2.5 outline-none focus:border-accent transition-colors cursor-pointer truncate"
+              >
+                {selectedRepo.branches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                    {b === selectedRepo.defaultBranch ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronRight
+                size={14}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-fg-muted pointer-events-none"
+              />
+            </div>
+            <span className="text-[11px] text-fg-muted/70 mt-1 block">
+              Agents branch off this when they work — your default branch stays untouched.
+            </span>
+          </label>
+        </div>
       )}
 
       <button
@@ -353,124 +364,240 @@ function SourceStep({
   );
 }
 
-/* ───────────────────── Step 2 · What do you want first ───────────────────── */
+/* ──────────────────── Step 2 · Discover what SAM gives you ──────────────────── */
 
-interface IntentStepProps {
+interface DiscoverStepProps {
   projectName: string;
-  selected: IntentId | null;
-  onSelect: (id: IntentId) => void;
   onContinue: () => void;
+  onSkip: () => void;
 }
 
-function IntentStep({ projectName, selected, onSelect, onContinue }: IntentStepProps) {
+function DiscoverStep({ projectName, onContinue, onSkip }: DiscoverStepProps) {
   return (
     <div>
-      <h1 className="sam-type-section-heading text-fg-primary mb-1">
-        What do you want to do first in {projectName.trim() || 'this project'}?
-      </h1>
-      <p className="sam-type-body text-fg-muted mb-6">
-        We&apos;ll create the project and drop you straight into it — no empty screen.
-      </p>
-
-      <div className="flex flex-col gap-3 mb-6" role="group" aria-label="First action">
-        {INTENT_OPTIONS.map((option) => {
-          const isSelected = selected === option.id;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={isSelected}
-              onClick={() => onSelect(option.id)}
-              className={`w-full text-left p-4 rounded-lg border transition-all cursor-pointer group bg-surface ${
-                isSelected ? 'border-accent ring-1 ring-accent' : 'border-border-default hover:border-fg-muted'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-accent shrink-0">
-                  {option.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-fg-primary text-sm">{option.label}</span>
-                    {isSelected ? (
-                      <Check size={16} className="text-accent shrink-0" />
-                    ) : (
-                      <ChevronRight
-                        size={14}
-                        className="text-fg-muted/20 group-hover:text-fg-muted/50 transition-colors shrink-0"
-                      />
-                    )}
-                  </div>
-                  <p className="text-sm text-fg-muted mt-0.5">{option.description}</p>
-                  {option.profileHint && (
-                    <div className="inline-flex items-center gap-1.5 mt-2 text-[11px] text-fg-muted/80 bg-white/[0.03] border border-border-default rounded-full px-2 py-0.5">
-                      <Sparkles size={10} className="text-accent" />
-                      {option.profileHint}
-                      <span className="text-fg-muted/50">· customize later</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
+          Step 2 of 3 · Optional
+        </p>
+        <button
+          type="button"
+          onClick={onSkip}
+          className="text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer transition-colors"
+        >
+          Skip intro →
+        </button>
       </div>
 
-      <p className="text-[11px] text-fg-muted/70 mb-3 text-center">
-        SAM starts you with one conversational profile. Add specialized profiles when you need them.
+      <h1 className="sam-type-section-heading text-fg-primary mb-1">
+        {projectName.trim() || 'Your project'} is more than a chat box
+      </h1>
+      <p className="sam-type-body text-fg-muted mb-6">
+        Three things make SAM worth setting up. You don&apos;t need any of them to start — but
+        here&apos;s what you can reach for as the project grows.
       </p>
+
+      <div className="flex flex-col gap-3 mb-6">
+        {FEATURES.map((f) => (
+          <div
+            key={f.id}
+            className="rounded-lg border border-border-default bg-surface p-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-accent shrink-0">
+                {f.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-fg-primary text-sm">{f.title}</p>
+                <p className="text-sm text-fg-muted mt-0.5">{f.what}</p>
+                <p className="text-[13px] text-fg-muted/80 mt-2 leading-relaxed">
+                  <span className="text-accent font-medium">Why it matters · </span>
+                  {f.why}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-border-default bg-white/[0.02] p-3 mb-6 flex items-start gap-2.5">
+        <Sparkles size={14} className="text-accent shrink-0 mt-0.5" />
+        <p className="text-xs text-fg-muted leading-relaxed">
+          SAM starts you with one conversational profile so you can begin right away. Add
+          specialized profiles, triggers, and skills whenever you&apos;re ready — nothing here is
+          required up front.
+        </p>
+      </div>
 
       <button
         type="button"
-        disabled={selected === null}
         onClick={onContinue}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-accent text-black font-semibold text-sm py-3 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-accent text-black font-semibold text-sm py-3 cursor-pointer transition-opacity"
       >
-        Create project <ArrowRight size={15} />
+        Got it — let&apos;s start <ArrowRight size={15} />
       </button>
     </div>
   );
 }
 
-/* ───────────────────────────── Step 3 · Ready ───────────────────────────── */
+/* ──────────────────────────── Step 3 · Kick off ──────────────────────────── */
 
-interface ReadyStepProps {
+interface KickoffStepProps {
   projectName: string;
   source: string;
-  intent: IntentOption | null;
+  branch: string;
+  mode: KickoffMode;
+  setMode: (m: KickoffMode) => void;
+  text: string;
+  setText: (v: string) => void;
+  listening: boolean;
+  onToggleListening: () => void;
 }
 
-function ReadyStep({ projectName, source, intent }: ReadyStepProps) {
-  return (
-    <div className="text-center pt-6">
-      <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-4">
-        <Check size={36} className="text-success" />
-      </div>
-      <h1 className="sam-type-page-title text-fg-primary mb-2">{projectName} is ready</h1>
-      <p className="text-fg-muted max-w-sm mx-auto mb-6">
-        Linked to <span className="text-fg-primary">{source}</span>. Here&apos;s where you&apos;re headed.
-      </p>
+function KickoffStep({
+  projectName,
+  source,
+  branch,
+  mode,
+  setMode,
+  text,
+  setText,
+  listening,
+  onToggleListening,
+}: KickoffStepProps) {
+  const placeholder =
+    mode === 'task'
+      ? 'Describe exactly what you want your agent to do. It runs autonomously on a fresh VM and opens a PR when it’s done…'
+      : "Say hi, or describe what you're thinking about. We'll figure it out together…";
+  const canSend = text.trim().length > 0;
 
-      <div className="rounded-lg border border-accent/40 bg-accent/[0.06] p-4 text-left max-w-sm mx-auto mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center text-accent shrink-0">
-            {intent?.icon ?? <MessageSquare size={18} />}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-fg-primary">{intent?.label ?? 'Start chatting'}</p>
-            <p className="text-xs text-fg-muted">{intent?.landing ?? 'Opens a new chat'}</p>
+  return (
+    <div className="pt-2 sm:pt-6">
+      {/* Project context */}
+      <div className="text-center mb-6">
+        <div className="w-14 h-14 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-3">
+          <Check size={28} className="text-success" />
+        </div>
+        <h1 className="sam-type-section-heading text-fg-primary mb-1">
+          {projectName.trim() || 'Your project'} is ready
+        </h1>
+        <p className="text-sm text-fg-muted">
+          Linked to <span className="text-fg-primary">{source}</span>
+          {branch && (
+            <>
+              {' '}
+              on{' '}
+              <span className="inline-flex items-center gap-1 text-fg-primary align-middle">
+                <GitBranch size={11} className="text-accent" />
+                {branch}
+              </span>
+            </>
+          )}
+          . What should we do first?
+        </p>
+      </div>
+
+      {/* Mode toggle */}
+      <div
+        className="flex items-center gap-1 p-1 rounded-xl border border-border-default bg-surface mb-3"
+        role="group"
+        aria-label="How to start"
+      >
+        <ModeTab
+          active={mode === 'task'}
+          onClick={() => setMode('task')}
+          icon={<SplitSquareVertical size={15} />}
+          label="Hand off a task"
+        />
+        <ModeTab
+          active={mode === 'conversation'}
+          onClick={() => setMode('conversation')}
+          icon={<MessageSquare size={15} />}
+          label="Start a conversation"
+        />
+      </div>
+
+      {/* Isolated composer — the project-chat input, lifted to center stage */}
+      <div className="rounded-2xl border border-[rgba(34,197,94,0.18)] bg-[rgba(10,15,13,0.6)] p-3 shadow-[0_0_40px_rgba(22,163,74,0.08)]">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={placeholder}
+          rows={4}
+          className="w-full bg-transparent border-none text-fg-primary text-base outline-none resize-none leading-relaxed placeholder:text-fg-muted/60 min-h-[96px]"
+        />
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-[rgba(34,197,94,0.1)]">
+          <span className="text-[11px] text-fg-muted/70 truncate">
+            {mode === 'task'
+              ? 'Runs autonomously, then opens a PR'
+              : 'Opens an interactive chat session'}
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onToggleListening}
+              aria-pressed={listening}
+              aria-label="Voice input"
+              className={`p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg border transition-all cursor-pointer ${
+                listening
+                  ? 'border-accent text-accent bg-accent/10 animate-pulse'
+                  : 'border-[rgba(34,197,94,0.15)] text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.3)]'
+              }`}
+            >
+              <Mic size={18} />
+            </button>
+            <button
+              type="button"
+              disabled={!canSend}
+              className={`px-4 py-2 min-h-[44px] inline-flex items-center gap-2 rounded-lg text-sm font-medium transition-all ${
+                canSend
+                  ? 'bg-[linear-gradient(135deg,var(--sam-color-accent-primary,#16a34a),#22c55e)] text-white cursor-pointer shadow-[0_0_16px_rgba(22,163,74,0.3)] hover:shadow-[0_0_24px_rgba(22,163,74,0.4)]'
+                  : 'bg-inset text-fg-muted opacity-50 cursor-default'
+              }`}
+            >
+              {mode === 'task' ? 'Launch' : 'Send'} <Send size={15} />
+            </button>
           </div>
         </div>
       </div>
 
-      <button
-        type="button"
-        className="w-full max-w-xs mx-auto inline-flex items-center justify-center gap-2 rounded-lg bg-accent text-black font-semibold text-sm py-3 cursor-pointer"
-      >
-        <Sparkles size={14} /> Let&apos;s go
-      </button>
-      <p className="text-xs text-fg-muted mt-3">You can change anything later in project settings.</p>
+      <p className="text-center text-xs text-fg-muted/70 mt-4">
+        Either way you land inside {projectName.trim() || 'your project'}.{' '}
+        <button
+          type="button"
+          className="text-fg-muted hover:text-fg-primary underline underline-offset-2 bg-transparent border-none cursor-pointer p-0"
+        >
+          Skip — just open the project
+        </button>
+      </p>
     </div>
+  );
+}
+
+function ModeTab({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex-1 inline-flex items-center justify-center gap-1.5 min-h-[40px] px-2 rounded-lg text-xs sm:text-sm font-medium transition-all cursor-pointer ${
+        active
+          ? 'bg-accent/15 text-accent ring-1 ring-accent/40'
+          : 'text-fg-muted hover:text-fg-primary'
+      }`}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 

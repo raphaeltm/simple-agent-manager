@@ -10,45 +10,57 @@ data only). Delete before any merge to `main` — see
 Today the two surfaces are mismatched in quality:
 
 - **Account onboarding** (the Choose-Your-Path wizard) is guided, data-driven,
-  and polished — it asks a few questions, generates a personalized setup path,
-  and ends at *"create your first project."*
+  and polished — it asks a few questions and ends at *"create your first
+  project."*
 - **Project creation** (`/projects/new` → `ProjectForm`) is a flat data-entry
-  form. It hands you back an **empty project** with no agent profile, no
-  settings, and nothing in motion. The momentum the wizard built evaporates at
-  exactly the moment the user should feel most capable.
+  form. It hands you back an **empty project** with no momentum and nothing in
+  motion — at exactly the moment the user should feel most capable.
 
 So the polished onboarding funnels into a cold form. This prototype asks: what
-if creating a project *felt like* the onboarding — short, guided, and ending in
-motion rather than an empty room?
+if creating a project *felt like* onboarding — short, guided, educational, and
+ending in motion rather than an empty room?
 
 ## The reimagined flow (3 steps)
 
-1. **Bring your code** — search/select a GitHub repo (or "start fresh" with a
-   SAM Git repo). The project name auto-fills from the repo and stays editable.
-   One decision, pre-filled defaults.
-2. **What do you want to do first?** — the novel step. Instead of dropping the
-   user into an empty project, we ask their *first intent*: start chatting, hand
-   off a task, explore the codebase, or "set it up myself." This both teaches
-   what SAM can do and lets us land them on the right screen.
-3. **Ready** — a confirmation that lands the user *in motion* (the chosen first
-   action), not on an empty project home.
+1. **Connect your code** — search/select a **GitHub** repo (GitHub is the only
+   working source today — the internal "SAM Git" option has been removed). Once
+   a repo is chosen, the **required** details appear pre-filled: project name
+   (derived from the repo, editable) and a **working-branch** selector. These
+   three — repo, name, branch — are the only things collected up front.
+2. **Discover what SAM gives you** — *optional and fully skippable.* Modeled on
+   the website's self-host setup, which explains *why* each piece matters rather
+   than just *what* it is. Highlights the three power surfaces a new user should
+   know exist: **Agent profiles**, **Triggers**, and **Skills** — each with a
+   "why it matters" line. The task system is intentionally **not** highlighted
+   (still maturing).
+3. **Kick off** — an isolated, centered version of the project-chat composer
+   (with voice input) lifted to center stage. A mode toggle starts either a
+   **task** ("describe exactly what you want your agent to do") or a
+   **conversation** ("start a conversation"). Either way the user lands *inside
+   the project, in motion* — never on an empty home. A "skip — just open the
+   project" escape hatch is always available.
 
 ## Design decisions worth noting
 
-- **One conversational profile, taught not seeded.** Per Raphaël's preference,
-  SAM starts every project with a single default conversational profile. The
-  intent step surfaces this as a small chip ("Default conversational profile ·
-  customize later") plus a footer line, rather than asking the user to pick
-  among provider-specific profiles up front. The boundary is taught, not
-  imposed.
-- **Intent → landing, not intent → config.** The first-action choice routes the
-  user somewhere useful; it does not turn onboarding into a settings wizard.
-- **Borrowed visual language** from the Choose-Your-Path wizard: card options
-  with `aria-pressed`, accent icon tiles, the green-glow vignette, progress
-  dots, and an accessible focus model.
+- **GitHub only.** The internal SAM Git "start fresh" path is non-functional and
+  was removed entirely.
+- **Required info is minimal and up front:** repo + name + branch. Branch matters
+  (agents work off it) so it is a first-class required field; description was
+  dropped (it added no value at creation time).
+- **Intent does not change where you land.** Earlier iterations routed different
+  intents to different screens. Now every path lands *in the project* — the only
+  difference is whether you kicked off a task or a conversation.
+- **Education over configuration.** Step 2 teaches the feature set with value-prop
+  framing instead of forcing setup. Everything is deferrable; nothing past Step 1
+  is required.
+- **Everything after Step 1 is skippable** for power users.
+- **Borrowed visual language:** card options with `aria-pressed`, accent icon
+  tiles, the green-glow vignette, progress dots, and the dark glassy composer
+  styling from `ProjectChatComposer`.
 
 ## Stress-test mock data
 
 `mock-data.ts` includes long repo names, empty descriptions, a single-char repo
-(`oss/x`), and a Unicode/emoji/`<script>` injection repo to verify wrapping,
-empty-state handling, and XSS-safe rendering (React escapes by default).
+(`oss/x`), a Unicode/emoji/`<script>` injection repo, and branch lists with an
+extremely long branch name — to verify wrapping, dropdown truncation, empty-state
+handling, and XSS-safe rendering (React escapes by default).

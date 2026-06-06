@@ -10,6 +10,8 @@ export interface MockRepo {
   fullName: string;
   description: string;
   defaultBranch: string;
+  /** Selectable branches for this repo — branch choice is required during onboarding. */
+  branches: string[];
   language: string;
   private: boolean;
   pushedAt: string;
@@ -21,6 +23,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'raphaeltm/simple-agent-manager',
     description: 'Serverless platform for ephemeral AI coding agent environments',
     defaultBranch: 'main',
+    branches: ['main', 'develop', 'sam/lets-imagine-better-project-01kteg', 'staging'],
     language: 'TypeScript',
     private: false,
     pushedAt: '2 hours ago',
@@ -30,6 +33,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'acme-corp/billing-service',
     description: 'Stripe-backed billing and metering for the core product',
     defaultBranch: 'develop',
+    branches: ['develop', 'main', 'release/2026-q2'],
     language: 'Go',
     private: true,
     pushedAt: 'yesterday',
@@ -39,6 +43,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'acme-corp/marketing-site',
     description: '',
     defaultBranch: 'main',
+    branches: ['main'],
     language: 'Astro',
     private: false,
     pushedAt: '3 days ago',
@@ -49,6 +54,11 @@ export const MOCK_REPOS: MockRepo[] = [
     description:
       'A deliberately over-long description used to verify that the repository card wraps gracefully on the narrowest supported viewport without clipping or horizontal overflow, even when the maintainer never learned the value of brevity.',
     defaultBranch: 'release/2026-q2-stabilization-branch',
+    branches: [
+      'release/2026-q2-stabilization-branch',
+      'main',
+      'feature/an-extremely-long-branch-name-used-to-verify-the-dropdown-truncates-rather-than-overflowing',
+    ],
     language: 'Rust',
     private: true,
     pushedAt: 'last week',
@@ -58,6 +68,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'oss/x',
     description: 'Single-char repo',
     defaultBranch: 'main',
+    branches: ['main'],
     language: 'C',
     private: false,
     pushedAt: '1 month ago',
@@ -67,6 +78,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'oss/emoji-playground-🎮',
     description: 'Unicode & emoji in names: 日本語 — <script>alert(1)</script>',
     defaultBranch: 'main',
+    branches: ['main', '日本語-ブランチ'],
     language: 'JavaScript',
     private: false,
     pushedAt: '2 months ago',
@@ -76,6 +88,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'data-team/etl-pipelines',
     description: 'Airflow DAGs and dbt models for the analytics warehouse',
     defaultBranch: 'main',
+    branches: ['main', 'develop', 'experiment/dbt-1.8-upgrade'],
     language: 'Python',
     private: true,
     pushedAt: '4 hours ago',
@@ -85,6 +98,7 @@ export const MOCK_REPOS: MockRepo[] = [
     fullName: 'design-system/tokens',
     description: 'Shared design tokens and primitives',
     defaultBranch: 'main',
+    branches: ['main', 'next'],
     language: 'CSS',
     private: false,
     pushedAt: '5 days ago',
