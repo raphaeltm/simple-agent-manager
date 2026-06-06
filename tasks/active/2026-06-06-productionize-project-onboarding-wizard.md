@@ -55,29 +55,40 @@ The current `/projects/new` route renders a flat `ProjectForm` (`apps/web/src/co
 
 ## Implementation Checklist
 
-- [ ] Build wizard shell component with 3-phase state machine (connect → setup → kickoff) + step indicator.
-- [ ] Step 1: ConnectStep — RepoSelector + BranchSelector + name (derived) + create project; handle G4 409s inline.
-- [ ] Step 2: SetupWalkthrough with conversational profile, task profile, cron trigger sub-steps, each skippable.
-- [ ] Step 2: enabled-agents picker reads `GET /api/agents` filtered `configured === true` (X3).
-- [ ] Step 2: githubCliPolicy sent only when `mode === 'custom'` (X2).
-- [ ] Step 2: cron trigger requires cronExpression client-side; handle name 409 (X1).
-- [ ] Step 3: KickoffStep — task / conversation via `tasks/submit` with taskMode; credential requirement on both (G3); "skip — open project".
-- [ ] Replace ProjectCreate page to render the wizard; remove flat ProjectForm usage if now unused.
-- [ ] Vertical-slice + behavioral tests (render + interact + assert UI-to-backend data path) per rules 06/35.
-- [ ] Playwright visual audit at 375px and 1280px → `.codex/tmp/playwright-screenshots/`.
+- [x] Build wizard shell component with 3-phase state machine (connect → setup → kickoff) + step indicator.
+- [x] Step 1: ConnectStep — RepoSelector + BranchSelector + name (derived) + create project; handle G4 409s inline.
+- [x] Step 2: SetupWalkthrough with conversational profile, task profile, cron trigger sub-steps, each skippable.
+- [x] Step 2: enabled-agents picker reads `GET /api/agents` filtered `configured === true` (X3).
+- [x] Step 2: githubCliPolicy sent only when `mode === 'custom'` (X2).
+- [x] Step 2: cron trigger requires cronExpression client-side; handle name 409 (X1).
+- [x] Step 3: KickoffStep — task / conversation via `tasks/submit` with taskMode; credential requirement on both (G3); "skip — open project".
+- [x] Replace ProjectCreate page to render the wizard; remove flat ProjectForm usage if now unused.
+- [x] Vertical-slice + behavioral tests (render + interact + assert UI-to-backend data path) per rules 06/35.
+- [x] Playwright visual audit at 375px and 1280px → `.codex/tmp/playwright-screenshots/`.
 - [ ] Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 - [ ] Staging verification: create-project-then-kickoff flow end-to-end on app.sammy.party.
 
 ## Acceptance Criteria
 
-- [ ] `/projects/new` renders the 3-step wizard, not the flat form.
-- [ ] A project can be created from a selected GitHub repo + branch; duplicate name/repo/repoId surface clear inline errors (G4).
-- [ ] In Step 2, only configured agents appear in the enabled-agents picker (X3); each sub-step is independently skippable.
-- [ ] githubCliPolicy is sent only when custom (X2); cron trigger requires a schedule and surfaces name conflicts (X1).
-- [ ] Step 3 starts a task or conversation via `tasks/submit`; both surface the cloud-credential requirement (G3); "skip" opens the project.
-- [ ] Behavioral tests prove the UI-to-backend data path for project create, profile create, trigger create, and task submit.
-- [ ] Playwright audit shows no horizontal overflow at 375px and 1280px.
+- [x] `/projects/new` renders the 3-step wizard, not the flat form.
+- [x] A project can be created from a selected GitHub repo + branch; duplicate name/repo/repoId surface clear inline errors (G4).
+- [x] In Step 2, only configured agents appear in the enabled-agents picker (X3); each sub-step is independently skippable.
+- [x] githubCliPolicy is sent only when custom (X2); cron trigger requires a schedule and surfaces name conflicts (X1).
+- [x] Step 3 starts a task or conversation via `tasks/submit`; both surface the cloud-credential requirement (G3); "skip" opens the project.
+- [x] Behavioral tests prove the UI-to-backend data path for project create, profile create, trigger create, and task submit.
+- [x] Playwright audit shows no horizontal overflow at 375px and 1280px.
 - [ ] Staging end-to-end create-then-kickoff verified.
+
+## Verification Notes
+
+- Unit coverage: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/project-onboarding-wizard.test.tsx`.
+- Visual audit: `npx playwright test tests/playwright/project-create-artifacts-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"`.
+- Screenshots captured under `.codex/tmp/playwright-screenshots/` for mobile connect, setup, kickoff 403, empty installations, desktop connect, and desktop trigger-name conflict states.
+- Prototype cleanup check: no `/prototype/project-onboarding` route or prototype directory exists in the current tree.
+- `pnpm lint`: pass, with existing repository warnings.
+- `pnpm typecheck`: pass.
+- `pnpm build`: pass.
+- `pnpm test`: onboarding unit coverage passed, API suite passed, but the workspace run failed on an unrelated order-dependent assertion in `apps/web/tests/unit/pages/project-library.test.tsx` (`screen.getByText(/2 files/)` matches visible text and an `sr-only` live-region duplicate). Isolated rerun passed: `pnpm --filter @simple-agent-manager/web test -- tests/unit/pages/project-library.test.tsx`.
 
 ## References
 - Idea 01KTEQTH0E2VYRBP6MK3QK6HJ1

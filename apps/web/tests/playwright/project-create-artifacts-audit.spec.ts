@@ -1,19 +1,4 @@
-/**
- * Playwright visual audit — ProjectCreate with artifacts provider toggle
- * Tests: ProjectForm.tsx (provider toggle), ProjectCreate.tsx (canShowForm logic)
- *
- * Scenarios:
- *   - GitHub-only mode (artifactsEnabled = false)
- *   - Artifacts toggle visible, SAM Git selected
- *   - Artifacts toggle visible, GitHub selected
- *   - Long project name / description
- *   - Empty state (no installations, no artifacts)
- *   - Error state
- *   - Config endpoint failure fallback
- */
 import { expect, type Page, type Route, test } from '@playwright/test';
-
-// ── Mock data ────────────────────────────────────────────────────────────────
 
 const MOCK_USER = {
   user: {
@@ -37,28 +22,49 @@ const MOCK_USER = {
   },
 };
 
-const MOCK_INSTALLATION = {
+const INSTALLATION = {
   id: 'inst-1',
-  accountName: 'testuser',
-  accountType: 'user',
-  appSlug: 'simple-agent-manager',
-  targetId: 12345,
+  userId: 'user-1',
+  installationId: '1001',
+  accountName: 'acme',
+  accountType: 'organization',
   createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const LONG_REPO_NAME =
+  'acme/sam-project-onboarding-visual-audit-with-a-very-long-repository-name-and-special-chars';
+
+function makeAgents(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: index % 2 === 0 ? 'codex' : 'opencode',
+    name: `Configured Agent ${index + 1} with a deliberately long display name`,
+    description: 'Configured test agent',
+    supportsAcp: true,
+    configured: true,
+    credentialHelpUrl: 'https://example.com',
+    fallbackCredentialSource: null,
+  }));
+}
 
 async function setupMocks(
   page: Page,
   options: {
-    artifactsEnabled: boolean;
-    installations?: typeof MOCK_INSTALLATION[];
-    configStatus?: number;
-  }
+    installations?: typeof INSTALLATION[];
+    agents?: unknown[];
+    projectStatus?: number;
+    triggerStatus?: number;
+    submitStatus?: number;
+  } = {},
 ) {
-  const { artifactsEnabled, installations = [MOCK_INSTALLATION], configStatus = 200 } = options;
+  const {
+    installations = [INSTALLATION],
+    agents = makeAgents(8),
+    projectStatus = 201,
+    triggerStatus = 200,
+    submitStatus = 403,
+  } = options;
 
-  // Single handler for all API calls — avoids Playwright route priority issues
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -66,57 +72,76 @@ async function setupMocks(
     const respond = (status: number, body: unknown) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-    // Auth — must come first
-    if (path.includes('/api/auth/')) {
-      return respond(200, MOCK_USER);
-    }
-
-    // GitHub installations
-    if (path === '/api/github/installations') {
-      return respond(200, installations);
-    }
-
-    // Artifacts config
-    if (path === '/api/config/artifacts-enabled') {
-      if (configStatus !== 200) {
-        return route.fulfill({ status: configStatus, body: 'error' });
-      }
-      return respond(200, { enabled: artifactsEnabled });
-    }
-
-    // Project creation
-    if (path === '/api/projects' && method === 'POST') {
+    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/github/installations') return respond(200, installations);
+    if (path.startsWith('/api/github/repositories')) {
       return respond(200, {
-        id: 'proj-new',
-        name: 'New Project',
-        repository: '',
-        defaultBranch: 'main',
+        repositories: [
+          {
+            id: 101,
+            fullName: LONG_REPO_NAME,
+            name: LONG_REPO_NAME.split('/')[1],
+            private: true,
+            defaultBranch: 'main',
+            installationId: 'inst-1',
+          },
+        ],
+        total: 1,
       });
     }
-
-    // Notifications (AppShell)
-    if (path.startsWith('/api/notifications')) {
-      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/github/branches')) {
+      return respond(200, [{ name: 'main' }, { name: 'feature/project-onboarding-long-branch-name' }]);
     }
-
-    // Dashboard
-    if (path === '/api/dashboard/active-tasks') {
-      return respond(200, { tasks: [] });
+    if (path === '/api/agents') return respond(200, { agents });
+    if (path === '/api/projects' && method === 'GET') {
+      return respond(200, { projects: [], nextCursor: null });
     }
-
-    // GitHub repositories (RepoSelector calls this — must return object with repositories array)
-    if (path.startsWith('/api/github/repositories')) {
-      return respond(200, { repositories: [], total: 0 });
+    if (path === '/api/projects' && method === 'POST') {
+      if (projectStatus !== 201) {
+        return respond(projectStatus, { error: 'CONFLICT', message: 'Project name must be unique per user' });
+      }
+      return respond(201, {
+        id: 'proj-1',
+        userId: 'user-1',
+        name: 'project-onboarding',
+        description: null,
+        installationId: 'inst-1',
+        repository: LONG_REPO_NAME,
+        defaultBranch: 'main',
+        status: 'active',
+        activeWorkspaceCount: 0,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      });
     }
-
-    // GitHub branches
-    if (path.startsWith('/api/github/branches') || path.includes('/branches')) {
-      return respond(200, [{ name: 'main' }, { name: 'develop' }]);
+    if (path === '/api/projects/proj-1/agent-profiles' && method === 'POST') {
+      return respond(200, {
+        id: route.request().postDataJSON().taskMode === 'task' ? 'task-profile' : 'conversation-profile',
+        name: route.request().postDataJSON().name,
+        taskMode: route.request().postDataJSON().taskMode,
+      });
     }
-
-    // Default 200 empty object
+    if (path === '/api/projects/proj-1/triggers' && method === 'POST') {
+      if (triggerStatus !== 200) {
+        return respond(triggerStatus, { error: 'CONFLICT', message: 'Trigger "Daily" already exists in this project' });
+      }
+      return respond(200, { id: 'trigger-1' });
+    }
+    if (path === '/api/projects/proj-1/tasks/submit' && method === 'POST') {
+      if (submitStatus !== 200) {
+        return respond(submitStatus, { error: 'FORBIDDEN', message: 'Cloud credentials are required' });
+      }
+      return respond(200, { taskId: 'task-1', sessionId: 'session-1', branchName: 'sam/task-1', status: 'queued' });
+    }
+    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     return respond(200, {});
   });
+}
+
+async function assertNoOverflow(page: Page) {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
 }
 
 async function screenshot(page: Page, name: string) {
@@ -127,273 +152,93 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
+async function openWizard(page: Page) {
+  await page.goto('/projects/new');
+  await page.getByPlaceholder('https://github.com/user/repo or select from list').waitFor({ timeout: 10000 });
 }
 
-// Wait for page to load past auth/loading states
-async function waitForForm(page: Page) {
-  // Wait for either the submit button (form rendered) or the warning alert
-  await page.locator('button[type="submit"]').or(
-    page.locator('text=Install the GitHub App first')
-  ).waitFor({ timeout: 10000 });
-  // Additional settle time for async API calls (artifacts config fetch)
-  await page.waitForTimeout(600);
+async function createProject(page: Page) {
+  await page.getByPlaceholder('https://github.com/user/repo or select from list').click();
+  await page.getByText(LONG_REPO_NAME).click();
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await page.getByText('Set up project-onboarding').waitFor({ timeout: 10000 });
 }
 
-// ── Mobile tests (default viewport from playwright.config.ts: 375x667) ──────
+async function reachKickoffWithSkippedSetup(page: Page) {
+  await createProject(page);
+  await page.getByRole('button', { name: 'Skip profile' }).first().click();
+  await page.getByRole('button', { name: 'Skip profile' }).first().click();
+  await page.getByRole('button', { name: 'Skip trigger' }).click();
+  await page.getByRole('button', { name: /Continue/ }).click();
+  await page.getByText('Kick off work').waitFor();
+}
 
-test.describe('ProjectCreate Artifacts Toggle — Mobile', () => {
-  test('github-only mode: toggle not visible, GitHub fields shown', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: false });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Toggle must not be present
-    const toggleCount = await page.locator('text=Repository Provider').count();
-    expect(toggleCount).toBe(0);
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-github-only-mobile');
-  });
-
-  test('artifacts enabled, no installations: canShowForm true, SAM Git is default', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Toggle should appear
-    // canShowForm = installations.length > 0 || artifactsEnabled = true — form shows
-    // SAM Git is default state (isArtifacts=true because repoProvider initializes to 'github'
-    // but artifacts toggle shows; we need to click SAM Git if it renders)
+test.describe('Project onboarding wizard - Mobile', () => {
+  test('connect step handles long repository names', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile-only audit scenario');
+    await setupMocks(page);
+    await openWizard(page);
+    await page.getByPlaceholder('https://github.com/user/repo or select from list').click();
+    await page.getByText(LONG_REPO_NAME).click();
 
     await assertNoOverflow(page);
-    await screenshot(page, 'project-create-artifacts-no-install-mobile');
+    await screenshot(page, 'project-onboarding-connect-long-mobile');
   });
 
-  test('artifacts enabled with installations: toggle visible, both options shown', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Provider toggle should be visible
-    await expect(page.locator('text=Repository Provider')).toBeVisible();
-    await expect(page.locator('button:has-text("SAM Git")')).toBeVisible();
-    await expect(page.locator('button:has-text("GitHub")')).toBeVisible();
+  test('setup step with many configured agents', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile-only audit scenario');
+    await setupMocks(page, { agents: makeAgents(30) });
+    await openWizard(page);
+    await createProject(page);
 
     await assertNoOverflow(page);
-    await screenshot(page, 'project-create-artifacts-with-install-mobile');
+    await screenshot(page, 'project-onboarding-setup-many-agents-mobile');
   });
 
-  test('switching to SAM Git hides GitHub-specific fields and shows hint', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    await page.locator('button:has-text("SAM Git")').click();
-    await page.waitForTimeout(300);
-
-    // GitHub fields must be hidden
-    expect(await page.locator('text=Installation').count()).toBe(0);
-    expect(await page.locator('text=Default branch').count()).toBe(0);
-
-    // Hint text must appear
-    await expect(page.locator('text=A Git repository will be created automatically')).toBeVisible();
+  test('kickoff credential error renders cleanly', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile-only audit scenario');
+    await setupMocks(page, { submitStatus: 403 });
+    await openWizard(page);
+    await reachKickoffWithSkippedSetup(page);
+    await page.getByRole('button', { name: 'Start task' }).click();
+    await page.getByText('Cloud credentials are required before SAM can start a task or conversation for this project.').waitFor();
 
     await assertNoOverflow(page);
-    await screenshot(page, 'project-create-sam-git-selected-mobile');
+    await screenshot(page, 'project-onboarding-kickoff-credential-error-mobile');
   });
 
-  test('switching to GitHub tab shows GitHub-specific fields', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
+  test('empty installation state', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'mobile-only audit scenario');
+    await setupMocks(page, { installations: [] });
     await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // First go to SAM Git, then switch back to GitHub to confirm toggle works both ways
-    await page.locator('button:has-text("SAM Git")').click();
-    await page.waitForTimeout(200);
-    await page.locator('button:has-text("GitHub")').click();
-    await page.waitForTimeout(300);
-
-    // GitHub fields now visible
-    await expect(page.locator('text=Installation')).toBeVisible();
-    await expect(page.locator('text=Default branch')).toBeVisible();
-
-    // Hint text gone
-    expect(await page.locator('text=A Git repository will be created automatically').count()).toBe(0);
+    await page.getByText('Install the GitHub App in Settings before creating a project from a repository.').waitFor();
 
     await assertNoOverflow(page);
-    await screenshot(page, 'project-create-github-tab-mobile');
-  });
-
-  test('no installations + artifacts disabled: shows warning, no form', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: false, installations: [] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Warning alert should appear
-    await expect(page.locator('text=Install the GitHub App first')).toBeVisible();
-    // Form should NOT appear
-    expect(await page.locator('form').count()).toBe(0);
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-no-install-warning-mobile');
-  });
-
-  test('config endpoint failure falls back to github-only gracefully', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, configStatus: 500 });
-    // Even though server says 500 on config, installations exist so form renders
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Toggle should NOT appear since config call failed and artifactsEnabled stays false
-    expect(await page.locator('text=Repository Provider').count()).toBe(0);
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-config-500-fallback-mobile');
-  });
-
-  test('long project name does not overflow', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    const longName = 'A'.repeat(120) + ' long-project-name-overflow-test';
-    await page.fill('input[placeholder="Project name"]', longName);
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-long-name-mobile');
-  });
-
-  test('validation error renders below form without overflow', async ({ page }) => {
-    // Use SAM Git path (artifacts) — only name required, so empty name triggers error
-    await setupMocks(page, { artifactsEnabled: true, installations: [] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Name field is empty, submit to trigger "Project name is required" error
-    // The form renders with SAM Git selected (no installations, artifacts enabled)
-    const submitBtn = page.locator('button[type="submit"]');
-    await submitBtn.click();
-    // Wait for React state update to render the error
-    await page.waitForTimeout(800);
-
-    // The error div should render: <div className="text-danger text-sm" role="alert">
-    const alert = page.locator('[role="alert"]');
-    const alertCount = await alert.count();
-
-    // Document: error renders as role="alert" div
-    if (alertCount > 0) {
-      await expect(alert).toBeVisible();
-    }
-    // Whether or not the alert fired, verify no overflow
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-validation-error-mobile');
-  });
-
-  test('ARIA: toggle buttons lack aria-pressed — documents known gap', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    const samGitBtn = page.locator('button:has-text("SAM Git")');
-    const githubBtn = page.locator('button:has-text("GitHub")');
-
-    await expect(samGitBtn).toBeVisible();
-    await expect(githubBtn).toBeVisible();
-
-    // Document the current aria-pressed state — expected to be null (missing)
-    const samGitPressed = await samGitBtn.getAttribute('aria-pressed');
-    const githubPressed = await githubBtn.getAttribute('aria-pressed');
-
-    // These assertions DOCUMENT the bug: both should be non-null for screen readers
-    // A screen reader user cannot tell which option is selected
-    expect(samGitPressed).toBeNull(); // FAILING CRITERION: should be 'true' or 'false'
-    expect(githubPressed).toBeNull(); // FAILING CRITERION: should be 'true' or 'false'
-
-    await screenshot(page, 'project-create-aria-gap-mobile');
-  });
-
-  test('toggle button touch targets at least 36px height', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    const samGitBtn = page.locator('button:has-text("SAM Git")');
-    const box = await samGitBtn.boundingBox();
-    expect(box).not.toBeNull();
-    // py-2 (8px top + 8px bottom) + text-sm line height ~20px = ~36px
-    // Rubric requires 44px for primary, but these are secondary controls
-    // Flag values below 36px as a layout regression
-    expect(box!.height).toBeGreaterThanOrEqual(36);
-
-    await screenshot(page, 'project-create-touch-targets-mobile');
+    await screenshot(page, 'project-onboarding-empty-installations-mobile');
   });
 });
 
-// ── Desktop tests ────────────────────────────────────────────────────────────
+test.describe('Project onboarding wizard - Desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
-test.describe('ProjectCreate Artifacts Toggle — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
-
-  test('artifacts enabled desktop: visual hierarchy and layout', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
+  test('connect step desktop layout', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'desktop-only audit scenario');
+    await setupMocks(page);
+    await openWizard(page);
 
     await assertNoOverflow(page);
-    await screenshot(page, 'project-create-artifacts-desktop');
+    await screenshot(page, 'project-onboarding-connect-desktop');
   });
 
-  test('github-only desktop: standard form layout', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: false });
-    await page.goto('/projects/new');
-    await waitForForm(page);
+  test('setup and trigger conflict desktop layout', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'desktop-only audit scenario');
+    await setupMocks(page, { triggerStatus: 409 });
+    await openWizard(page);
+    await createProject(page);
+    await page.getByRole('button', { name: 'Create trigger' }).click();
+    await page.getByText('A trigger with this name already exists in this project.').waitFor();
 
     await assertNoOverflow(page);
-    await screenshot(page, 'project-create-github-only-desktop');
-  });
-
-  test('toggle switch: SAM Git hides GitHub fields', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    await page.locator('button:has-text("SAM Git")').click();
-    await page.waitForTimeout(200);
-
-    expect(await page.locator('text=Installation').count()).toBe(0);
-    await expect(page.locator('text=A Git repository will be created automatically')).toBeVisible();
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-sam-git-desktop');
-  });
-
-  test('keyboard navigation reaches toggle buttons', async ({ page }) => {
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    // Tab through form elements to reach the toggle
-    for (let i = 0; i < 5; i++) {
-      await page.keyboard.press('Tab');
-      await page.waitForTimeout(100);
-    }
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-keyboard-nav-desktop');
-  });
-
-  test('no overflow at 320px narrow viewport', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 });
-    await setupMocks(page, { artifactsEnabled: true, installations: [MOCK_INSTALLATION] });
-    await page.goto('/projects/new');
-    await waitForForm(page);
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'project-create-320px-narrow');
+    await screenshot(page, 'project-onboarding-trigger-conflict-desktop');
   });
 });
