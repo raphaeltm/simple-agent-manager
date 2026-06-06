@@ -3,13 +3,13 @@ import { Check,Copy } from 'lucide-react';
 import { type FC, useCallback,useEffect, useRef, useState } from 'react';
 
 import { type StreamConnectionState,useAdminLogStream } from '../../hooks/useAdminLogStream';
-import { formatLogEntries,LEVEL_COLORS, LogEntryRow } from './LogEntryRow';
+import { formatLogEntries,LEVEL_COLORS, LEVEL_TINTS, LogEntryRow } from './LogEntryRow';
 
 const STATE_COLORS: Record<StreamConnectionState, string> = {
-  connected: '#4ade80',
-  connecting: '#fbbf24',
-  reconnecting: '#fbbf24',
-  disconnected: '#f87171',
+  connected: 'var(--sam-color-success-fg)',
+  connecting: 'var(--sam-color-warning-fg)',
+  reconnecting: 'var(--sam-color-warning-fg)',
+  disconnected: 'var(--sam-color-danger-fg)',
 };
 
 const STATE_LABELS: Record<StreamConnectionState, string> = {
@@ -111,7 +111,7 @@ export const LogStream: FC = () => {
                 style={{
                   padding: '2px 8px',
                   backgroundColor: filter.levels.includes(level)
-                    ? (LEVEL_COLORS[level] + '22')
+                    ? LEVEL_TINTS[level]
                     : 'transparent',
                   color: filter.levels.includes(level)
                     ? LEVEL_COLORS[level]
@@ -153,12 +153,12 @@ export const LogStream: FC = () => {
           {entries.length > 0 && (
             <button
               onClick={handleCopyAll}
-              className="p-2.5 rounded-sm border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px]"
+              className="p-2.5 rounded-sm border border-border-default bg-surface-secondary text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px]"
               aria-label="Copy all visible logs"
               title="Copy all visible logs"
               data-testid="copy-all-button"
             >
-              {copiedAll ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+              {copiedAll ? <Check size={14} className="text-success-fg" /> : <Copy size={14} />}
             </button>
           )}
 

@@ -6,15 +6,15 @@ interface ObservabilityLogEntryProps {
 }
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
-  client: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa' },
-  'vm-agent': { bg: 'rgba(168, 85, 247, 0.15)', text: '#c084fc' },
-  api: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24' },
+  client: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-admin-chart-series-2, var(--sam-color-info-fg))' },
+  'vm-agent': { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-admin-chart-series-3, var(--sam-color-purple))' },
+  api: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
 };
 
 const LEVEL_COLORS: Record<string, { bg: string; text: string }> = {
-  error: { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171' },
-  warn: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24' },
-  info: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa' },
+  error: { bg: 'var(--sam-color-danger-tint)', text: 'var(--sam-color-danger-fg)' },
+  warn: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
+  info: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-color-info-fg)' },
 };
 
 function formatTimestamp(iso: string): string {

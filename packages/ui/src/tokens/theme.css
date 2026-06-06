@@ -142,6 +142,32 @@
   --sam-color-purple: #c084fc;
   --sam-color-warning-surface: #2e2a1f;
 
+  /* Admin analytics chart tokens.
+     Dark defaults match the pre-light slice colors; light overrides below
+     darken non-green series so bars/lines remain legible on light surfaces. */
+  --sam-admin-chart-tooltip-bg: rgba(8, 15, 12, 0.78);
+  --sam-admin-chart-tooltip-border: rgba(34, 197, 94, 0.10);
+  --sam-admin-chart-grid: var(--sam-color-border-default);
+  --sam-admin-chart-axis: var(--sam-color-border-default);
+  --sam-admin-chart-cursor: var(--sam-color-bg-surface-hover);
+  --sam-admin-chart-series-1: var(--sam-color-accent-primary);
+  --sam-admin-chart-series-2: #60a5fa;
+  --sam-admin-chart-series-3: #a78bfa;
+  --sam-admin-chart-series-4: var(--sam-color-warning);
+  --sam-admin-chart-series-5: #f97316;
+  --sam-admin-chart-series-6: #ec4899;
+  --sam-admin-chart-series-7: #14b8a6;
+  --sam-admin-chart-series-8: #8b5cf6;
+  --sam-admin-chart-series-9: #06b6d4;
+  --sam-admin-chart-series-10: #84cc16;
+  --sam-admin-chart-series-11: #f43f5e;
+  --sam-admin-chart-series-12: #6366f1;
+  --sam-admin-chart-heat-0: var(--sam-color-bg-inset);
+  --sam-admin-chart-heat-1: rgba(34, 197, 94, 0.10);
+  --sam-admin-chart-heat-2: rgba(34, 197, 94, 0.25);
+  --sam-admin-chart-heat-3: rgba(34, 197, 94, 0.50);
+  --sam-admin-chart-heat-text-on-strong: #ffffff;
+
   /* Color Tints */
   --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.1);
   --sam-color-success-tint: rgba(34, 197, 94, 0.1);
@@ -281,6 +307,34 @@
   --sam-color-info-fg: #1d4ed8;
   --sam-color-purple: #7c3aed;
   --sam-color-warning-surface: #fdf6e9;
+
+  /* Admin analytics chart tokens — contrast checked on #f8fbf8 surfaces:
+     series-2 #2563eb 5.27:1, series-3 #7c3aed 4.81:1,
+     series-5 #c2410c 4.53:1, series-6 #be185d 4.91:1,
+     series-7 #0f766e 4.95:1, series-8 #6d28d9 6.56:1,
+     series-9 #0e7490 4.93:1, series-10 #3f6212 6.81:1. */
+  --sam-admin-chart-tooltip-bg: rgba(248, 252, 249, 0.96);
+  --sam-admin-chart-tooltip-border: var(--sam-color-border-default);
+  --sam-admin-chart-grid: var(--sam-color-border-default);
+  --sam-admin-chart-axis: var(--sam-color-border-default);
+  --sam-admin-chart-cursor: var(--sam-color-bg-surface-hover);
+  --sam-admin-chart-series-1: var(--sam-color-accent-primary);
+  --sam-admin-chart-series-2: var(--sam-color-info);
+  --sam-admin-chart-series-3: var(--sam-color-purple);
+  --sam-admin-chart-series-4: var(--sam-color-warning);
+  --sam-admin-chart-series-5: #c2410c;
+  --sam-admin-chart-series-6: #be185d;
+  --sam-admin-chart-series-7: #0f766e;
+  --sam-admin-chart-series-8: #6d28d9;
+  --sam-admin-chart-series-9: #0e7490;
+  --sam-admin-chart-series-10: #3f6212;
+  --sam-admin-chart-series-11: #be123c;
+  --sam-admin-chart-series-12: #4338ca;
+  --sam-admin-chart-heat-0: var(--sam-color-bg-inset);
+  --sam-admin-chart-heat-1: rgba(21, 128, 61, 0.10);
+  --sam-admin-chart-heat-2: rgba(21, 128, 61, 0.22);
+  --sam-admin-chart-heat-3: rgba(21, 128, 61, 0.48);
+  --sam-admin-chart-heat-text-on-strong: #ffffff;
 
   /* Color Tints */
   --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.08);

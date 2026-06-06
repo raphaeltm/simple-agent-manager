@@ -8,9 +8,9 @@ const RANGES = ['1h', '24h', '7d', '30d'] as const;
 type Range = (typeof RANGES)[number];
 
 const SOURCE_COLORS: Record<string, string> = {
-  client: '#3b82f6',    // blue
-  'vm-agent': '#f97316', // orange
-  api: '#ef4444',        // red
+  client: 'var(--sam-admin-chart-series-2, #3b82f6)',
+  'vm-agent': 'var(--sam-admin-chart-series-5, #f97316)',
+  api: 'var(--sam-color-danger, #ef4444)',
 };
 
 const SOURCE_LABELS: Record<string, string> = {

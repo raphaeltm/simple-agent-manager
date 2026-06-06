@@ -29,11 +29,19 @@ export interface LogEntryRowProps {
 // ---------------------------------------------------------------------------
 
 export const LEVEL_COLORS: Record<string, string> = {
-  error: '#f87171',
-  warn: '#fbbf24',
-  info: '#60a5fa',
-  debug: '#a78bfa',
+  error: 'var(--sam-color-danger-fg, #f87171)',
+  warn: 'var(--sam-color-warning-fg, #fbbf24)',
+  info: 'var(--sam-color-info-fg, #60a5fa)',
+  debug: 'var(--sam-color-purple, #a78bfa)',
   log: 'var(--sam-color-fg-muted)',
+};
+
+export const LEVEL_TINTS: Record<string, string> = {
+  error: 'var(--sam-color-danger-tint, rgba(239, 68, 68, 0.1))',
+  warn: 'var(--sam-color-warning-tint, rgba(245, 158, 11, 0.1))',
+  info: 'var(--sam-color-info-tint, rgba(122, 162, 247, 0.1))',
+  debug: 'var(--sam-color-info-tint, rgba(122, 162, 247, 0.1))',
+  log: 'var(--sam-color-bg-surface-hover)',
 };
 
 // ---------------------------------------------------------------------------

@@ -9,12 +9,12 @@ interface Props {
 
 /** Map a retention rate (0-100) to inline styles using design system CSS variables. */
 function retentionStyle(rate: number): React.CSSProperties {
-  if (rate >= 80) return { backgroundColor: 'var(--sam-color-accent-primary, #16a34a)', color: '#fff' };
-  if (rate >= 60) return { backgroundColor: 'var(--sam-color-success, #22c55e)', color: '#fff' };
-  if (rate >= 40) return { backgroundColor: 'rgba(34, 197, 94, 0.5)', color: '#fff' };
-  if (rate >= 20) return { backgroundColor: 'rgba(34, 197, 94, 0.25)', color: 'var(--sam-color-fg-primary, #e6f2ee)' };
-  if (rate > 0) return { backgroundColor: 'rgba(34, 197, 94, 0.1)', color: 'var(--sam-color-fg-muted, #9fb7ae)' };
-  return { backgroundColor: 'var(--sam-color-bg-inset, #0e1a17)', color: 'var(--sam-color-fg-muted, #9fb7ae)' };
+  if (rate >= 80) return { backgroundColor: 'var(--sam-color-accent-primary)', color: 'var(--sam-admin-chart-heat-text-on-strong)' };
+  if (rate >= 60) return { backgroundColor: 'var(--sam-color-success)', color: 'var(--sam-admin-chart-heat-text-on-strong)' };
+  if (rate >= 40) return { backgroundColor: 'var(--sam-admin-chart-heat-3)', color: 'var(--sam-admin-chart-heat-text-on-strong)' };
+  if (rate >= 20) return { backgroundColor: 'var(--sam-admin-chart-heat-2)', color: 'var(--sam-color-fg-primary)' };
+  if (rate > 0) return { backgroundColor: 'var(--sam-admin-chart-heat-1)', color: 'var(--sam-color-fg-muted)' };
+  return { backgroundColor: 'var(--sam-admin-chart-heat-0)', color: 'var(--sam-color-fg-muted)' };
 }
 
 /** Map a retention rate to a human-readable tier label for non-color cues. */
@@ -57,7 +57,7 @@ export const RetentionCohorts: FC<Props> = ({ data }) => {
         </caption>
         <thead>
           <tr>
-            <th scope="col" className="py-1.5 pr-3 text-left font-medium text-fg-muted whitespace-nowrap sticky left-0 z-10" style={{ backgroundColor: 'var(--sam-color-bg-surface, #13201d)' }}>Cohort</th>
+            <th scope="col" className="py-1.5 pr-3 text-left font-medium text-fg-muted whitespace-nowrap sticky left-0 z-10" style={{ backgroundColor: 'var(--sam-color-bg-surface)' }}>Cohort</th>
             <th scope="col" className="py-1.5 px-1 text-center font-medium text-fg-muted">Size</th>
             {Array.from({ length: displayWeeks + 1 }, (_, i) => (
               <th key={i} scope="col" className="py-1.5 px-1 text-center font-medium text-fg-muted whitespace-nowrap">
@@ -72,7 +72,7 @@ export const RetentionCohorts: FC<Props> = ({ data }) => {
 
             return (
               <tr key={cohort.cohortWeek}>
-                <th scope="row" className="py-1 pr-3 font-mono text-fg-secondary whitespace-nowrap font-normal sticky left-0 z-10" style={{ backgroundColor: 'var(--sam-color-bg-surface, #13201d)' }}>
+                <th scope="row" className="py-1 pr-3 font-mono text-fg-secondary whitespace-nowrap font-normal sticky left-0 z-10" style={{ backgroundColor: 'var(--sam-color-bg-surface)' }}>
                   {formatWeekLabel(cohort.cohortWeek)}
                 </th>
                 <td className="py-1 px-1 text-center tabular-nums text-fg-secondary">

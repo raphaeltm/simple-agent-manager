@@ -16,7 +16,7 @@ export const PeriodSelector: FC<{ value: string; onChange: (v: string) => void }
         aria-pressed={value === p.value}
         className={`px-3 py-2 text-xs rounded-sm border transition-colors min-h-[44px] min-w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
           value === p.value
-            ? 'bg-accent-emphasis text-white border-accent-emphasis'
+            ? 'bg-accent text-fg-on-accent border-accent'
             : 'border-border-default text-fg-secondary hover:bg-surface-secondary'
         }`}
       >

@@ -1,5 +1,5 @@
 import { Body } from '@simple-agent-manager/ui';
-import { type CSSProperties, type FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import {
   Area,
   AreaChart,
@@ -13,24 +13,7 @@ import {
 } from 'recharts';
 
 import type { AnalyticsAiUsageResponse } from '../../lib/api';
-
-const BAR_COLORS = [
-  'var(--sam-color-accent-primary, #16a34a)',
-  '#60a5fa',
-  '#a78bfa',
-  'var(--sam-color-warning, #f59e0b)',
-  '#ec4899',
-  '#14b8a6',
-];
-
-const CHART_TOOLTIP_STYLE: CSSProperties = {
-  background: 'rgba(8,15,12,0.78)',
-  border: '1px solid var(--sam-color-border-default)',
-  borderRadius: 6,
-  fontSize: 12,
-  WebkitBackdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
-  backdropFilter: 'blur(var(--sam-glass-blur-surface)) saturate(calc(100% + var(--sam-glass-saturate-boost)))',
-};
+import { adminChartSeries, chartGridStroke, chartTick, chartTooltipStyle } from './chartTokens';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -56,6 +39,7 @@ interface Props {
 }
 
 export const AIUsageChart: FC<Props> = ({ data }) => {
+  const byDay = data?.byDay ?? [];
   const modelData = useMemo(
     () => (data?.byModel ?? []).map((m) => ({ ...m, label: shortModel(m.model) })),
     [data?.byModel],
@@ -82,15 +66,15 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
           <div className="w-full" style={{ height: Math.max(120, modelData.length * 50) }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={modelData} layout="vertical" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--sam-color-border-default)" strokeOpacity={0.3} />
-                <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }} tickFormatter={formatTokens} />
-                <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} strokeOpacity={0.3} />
+                <XAxis type="number" tick={chartTick} tickFormatter={formatTokens} />
+                <YAxis type="category" dataKey="label" width={140} tick={chartTick} />
                 <Tooltip
                   formatter={(value) => [formatTokens(Number(value)), '']}
-                  contentStyle={CHART_TOOLTIP_STYLE}
+                  contentStyle={chartTooltipStyle}
                 />
-                <Bar dataKey="inputTokens" stackId="tokens" fill={BAR_COLORS[0]} name="Input" />
-                <Bar dataKey="outputTokens" stackId="tokens" fill={BAR_COLORS[1]} name="Output" />
+                <Bar dataKey="inputTokens" stackId="tokens" fill={adminChartSeries[0]} name="Input" />
+                <Bar dataKey="outputTokens" stackId="tokens" fill={adminChartSeries[1]} name="Output" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -98,28 +82,28 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
       )}
 
       {/* Daily usage trend — area chart */}
-      {data.byDay.length > 1 && (
+      {byDay.length > 1 && (
         <div>
           <h4 className="text-sm font-medium text-fg-secondary mb-2">Daily Usage</h4>
           <div className="w-full" style={{ height: 200 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.byDay} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--sam-color-border-default)" strokeOpacity={0.3} />
+              <AreaChart data={byDay} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} strokeOpacity={0.3} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }}
+                  tick={chartTick}
                   tickFormatter={(d: string) => d.slice(5)} // MM-DD
                 />
-                <YAxis tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }} />
+                <YAxis tick={chartTick} />
                 <Tooltip
                   formatter={(value) => [Number(value).toLocaleString(), 'Requests']}
-                  contentStyle={CHART_TOOLTIP_STYLE}
+                  contentStyle={chartTooltipStyle}
                 />
                 <Area
                   type="monotone"
                   dataKey="requests"
-                  stroke="var(--sam-color-accent-primary, #16a34a)"
-                  fill="var(--sam-color-accent-primary, #16a34a)"
+                  stroke={adminChartSeries[0]}
+                  fill={adminChartSeries[0]}
                   fillOpacity={0.15}
                 />
               </AreaChart>
@@ -147,7 +131,7 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
                 {modelData.map((m, i) => (
                   <tr key={m.model} className="border-b border-border-default last:border-0">
                     <td className="py-2 pr-4">
-                      <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ backgroundColor: BAR_COLORS[i % BAR_COLORS.length] }} />
+                      <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ backgroundColor: adminChartSeries[i % adminChartSeries.length] }} />
                       <span className="text-fg-primary">{m.label}</span>
                       <span className="text-fg-muted ml-1 text-xs">({m.provider})</span>
                     </td>

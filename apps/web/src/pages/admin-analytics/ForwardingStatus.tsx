@@ -9,8 +9,8 @@ function StatusBadge({ active, label }: { active: boolean; label: string }) {
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
         active
-          ? 'bg-success-subtle text-success-fg'
-          : 'bg-neutral-subtle text-fg-muted'
+          ? 'bg-success-tint text-success-fg'
+          : 'bg-surface-secondary text-fg-muted'
       }`}
     >
       <span
