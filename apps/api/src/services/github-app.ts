@@ -16,6 +16,7 @@ const installationTokenSchema = v.object({
 
 const repositorySchema = v.object({
   id: v.number(),
+  node_id: v.optional(v.string()),
   full_name: v.string(),
   private: v.boolean(),
   default_branch: v.string(),
@@ -67,6 +68,14 @@ export interface AuthenticatedGitHubUser {
   login: string;
 }
 
+export interface GitHubRepositoryAccess {
+  id: number;
+  nodeId: string | null;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+}
+
 export interface GitHubUserOrganization {
   login: string;
 }
@@ -75,6 +84,13 @@ interface UserAccessibleInstallationsDiagnostics {
   flow: 'callback' | 'sync';
   userId?: string;
   installationId?: string;
+}
+
+interface UserInstallationRepositoriesDiagnostics {
+  flow: 'repositories' | 'branches' | 'project-access';
+  userId: string;
+  installationId: string;
+  repository?: string;
 }
 
 interface UserOrganizationDiagnostics {
@@ -90,7 +106,7 @@ interface UserInstallationAccessDiagnostics {
 }
 
 interface AuthenticatedGitHubUserDiagnostics {
-  flow: 'sync';
+  flow: 'callback' | 'sync';
   userId: string;
 }
 
@@ -292,10 +308,10 @@ export async function getInstallationToken(
 export async function getInstallationRepositories(
   installationId: string,
   env: Env
-): Promise<Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }>> {
+): Promise<GitHubRepositoryAccess[]> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const allRepos: Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }> = [];
+  const allRepos: GitHubRepositoryAccess[] = [];
   let page = 1;
   const perPage = 100; // GitHub's max per_page value
   let hasMore = true;
@@ -321,6 +337,7 @@ export async function getInstallationRepositories(
 
     const repos = data.repositories.map((repo) => ({
       id: repo.id,
+      nodeId: repo.node_id ?? null,
       fullName: repo.full_name,
       private: repo.private,
       defaultBranch: repo.default_branch,
@@ -404,6 +421,75 @@ export async function getUserAccessibleInstallations(
   }
 
   return allInstallations;
+}
+
+/**
+ * Get repositories accessible to the authenticated GitHub user for a specific
+ * app installation. Unlike `/installation/repositories`, this endpoint is
+ * filtered by the OAuth user token and is safe for UI lists and authorization.
+ */
+export async function getUserInstallationRepositories(
+  accessToken: string,
+  installationId: string,
+  diagnostics: UserInstallationRepositoriesDiagnostics
+): Promise<GitHubRepositoryAccess[]> {
+  const allRepos: GitHubRepositoryAccess[] = [];
+  let page = 1;
+  const perPage = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=${perPage}&page=${page}`,
+      {
+        headers: githubUserTokenHeaders(accessToken),
+      }
+    );
+
+    const details = {
+      flow: diagnostics.flow,
+      userId: diagnostics.userId,
+      installationId: diagnostics.installationId,
+      repository: diagnostics.repository,
+      page,
+      status: response.status,
+      ok: response.ok,
+    };
+    if (response.ok) {
+      log.info('github.user_installation_repositories.response', details);
+    } else {
+      log.warn('github.user_installation_repositories.response', details);
+    }
+
+    if (!response.ok) {
+      throw new Error(await readGitHubError(response, `Failed to get user installation repositories: ${response.status}`));
+    }
+
+    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.user_installation_repositories');
+    allRepos.push(...data.repositories.map((repo) => ({
+      id: repo.id,
+      nodeId: repo.node_id ?? null,
+      fullName: repo.full_name,
+      private: repo.private,
+      defaultBranch: repo.default_branch,
+    })));
+
+    hasMore = data.repositories.length === perPage;
+    page++;
+
+    if (allRepos.length >= 10000) {
+      log.warn('github.user_installation_repositories.safety_limit_reached', {
+        flow: diagnostics.flow,
+        userId: diagnostics.userId,
+        installationId: diagnostics.installationId,
+        repository: diagnostics.repository,
+        repoCount: allRepos.length,
+      });
+      break;
+    }
+  }
+
+  return allRepos;
 }
 
 /**

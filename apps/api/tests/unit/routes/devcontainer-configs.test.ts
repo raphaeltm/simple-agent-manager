@@ -243,6 +243,7 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     defaultBranch: 'main',
     repoProvider: 'github',
     installationId: 'install-row-1',
+    githubRepoId: 42,
     ...overrides,
   };
 }
@@ -301,6 +302,18 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
     expect(body.branch).toBe('main');
     expect(body.defaultConfigExists).toBe(true);
     expect(body.configs).toEqual(EXPECTED_NODE_PYTHON_CONFIGS);
+    expect(mockGetInstallationToken).toHaveBeenCalledWith('12345', expect.any(Object), {
+      repositoryIds: [42],
+    });
+  });
+
+  it('rejects legacy GitHub projects without a verified repository id', async () => {
+    setupGithubProject({ project: { githubRepoId: null } });
+
+    const res = await requestConfigs(app);
+
+    expect(res.status).toBe(403);
+    expect(mockGetInstallationToken).not.toHaveBeenCalled();
   });
 
   it('returns unsupported for non-GitHub projects', async () => {

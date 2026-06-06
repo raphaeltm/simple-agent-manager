@@ -1,6 +1,7 @@
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
@@ -13,9 +14,9 @@ import {
   type AuthenticatedGitHubUser,
   getAuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
-  getInstallationRepositories,
   getRepositoryBranches,
   getUserAccessibleInstallations,
+  getUserInstallationRepositories,
   type UserAccessibleInstallation,
   verifyUserInstallationAccess,
 } from '../services/github-app';
@@ -64,8 +65,11 @@ githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) =
     .select()
     .from(schema.githubInstallations)
     .where(eq(schema.githubInstallations.userId, userId));
+  const visibleInstallations = accessToken
+    ? await filterVisibleInstallations(db, userId, accessToken, installations)
+    : installations.filter((inst) => normalizeAccountType(inst.accountType) === 'organization');
 
-  const response: GitHubInstallation[] = installations.map((inst) => ({
+  const response: GitHubInstallation[] = visibleInstallations.map((inst) => ({
     id: inst.id,
     userId: inst.userId,
     installationId: getExternalInstallationId(inst),
@@ -117,10 +121,20 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
     throw errors.notFound('Installation');
   }
 
+  const accessToken = await getRequiredGitHubUserAccessToken(c, userId);
+
   // Fetch repositories from all installations in parallel
   const repoResults = await Promise.allSettled(
     targetInstallations.map(async (inst) => {
-      const repos = await getInstallationRepositories(getExternalInstallationId(inst), c.env);
+      const repos = await getUserInstallationRepositories(
+        accessToken,
+        getExternalInstallationId(inst),
+        {
+          flow: 'repositories',
+          userId,
+          installationId: inst.id,
+        }
+      );
       return repos.map((repo) => ({
         id: repo.id,
         fullName: repo.fullName,
@@ -170,10 +184,11 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
   }
 
   const parts = repoFullName.split('/');
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+  const owner = parts[0];
+  const repo = parts[1];
+  if (parts.length !== 2 || !owner || !repo) {
     throw errors.badRequest('repository must be in owner/repo format');
   }
-  const [owner, repo] = parts;
 
   // Get user's installations
   const installations = await db
@@ -194,21 +209,40 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
     throw errors.notFound('Installation');
   }
 
+  const accessToken = await getRequiredGitHubUserAccessToken(c, userId);
+
   // Validate the repository owner matches the installation's account.
   // Prevents using the installation token to enumerate arbitrary repositories.
   // See SSRF-VULN-03 in Shannon security assessment.
-  if (owner!.toLowerCase() !== targetInstallation.accountName.toLowerCase()) {
+  if (owner.toLowerCase() !== targetInstallation.accountName.toLowerCase()) {
     throw errors.forbidden(
       `Repository owner "${owner}" does not match installation account "${targetInstallation.accountName}"`
     );
+  }
+
+  const userRepos = await getUserInstallationRepositories(
+    accessToken,
+    getExternalInstallationId(targetInstallation),
+    {
+      flow: 'branches',
+      userId,
+      installationId: targetInstallation.id,
+      repository: repoFullName.toLowerCase(),
+    }
+  );
+  const hasUserRepoAccess = userRepos.some(
+    (githubRepo) => githubRepo.fullName.toLowerCase() === repoFullName.toLowerCase()
+  );
+  if (!hasUserRepoAccess) {
+    throw errors.forbidden('Repository is not accessible through the selected installation');
   }
 
   try {
     const defaultBranch = c.req.query('default_branch') || undefined;
     const branches = await getRepositoryBranches(
       getExternalInstallationId(targetInstallation),
-      owner!,
-      repo!,
+      owner,
+      repo,
       c.env,
       defaultBranch
     );
@@ -250,6 +284,16 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
+  const accessToken = await getGitHubUserAccessToken(c, auth.user.id);
+  log.info('github.installation_callback.token_status', {
+    userId: auth.user.id,
+    installationId,
+    tokenPresent: Boolean(accessToken),
+  });
+  if (!accessToken) {
+    return c.redirect(`${settingsUrl}?github_app=error&reason=github_user_token_unavailable`);
+  }
+
   // Check if this user already has a record for this installation
   const existing = await db
     .select()
@@ -265,45 +309,18 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     )
     .limit(1);
 
-  if (existing.length > 0) {
-    const existingInstallation = existing[0]!;
-    await upsertCanonicalInstallationAccount(
-      db,
-      {
-        installationId,
-        accountType: normalizeAccountType(existingInstallation.accountType),
-        accountName: existingInstallation.accountName,
-      },
-      now
-    );
-    log.info('github.installation_callback.insert_result', {
-      userId: auth.user.id,
-      installationId,
-      result: 'conflict',
-      reason: 'already_exists',
-    });
-    return c.redirect(`${settingsUrl}?github_app=installed`);
-  }
-
   // Verify the setup callback's installation_id against the authenticated
   // GitHub user's accessible installations before saving it.
   let insertAttempted = false;
   try {
-    const accessToken = await getGitHubUserAccessToken(c, auth.user.id);
-    log.info('github.installation_callback.token_status', {
-      userId: auth.user.id,
-      installationId,
-      tokenPresent: Boolean(accessToken),
-    });
-    if (!accessToken) {
-      return c.redirect(`${settingsUrl}?github_app=error&reason=github_user_token_unavailable`);
-    }
-
-    const accessibleInstallations = await getUserAccessibleInstallations(accessToken, {
-      flow: 'callback',
-      userId: auth.user.id,
-      installationId,
-    });
+    const [authenticatedGitHubUser, accessibleInstallations] = await Promise.all([
+      getAuthenticatedGitHubUser(accessToken, { flow: 'callback', userId: auth.user.id }),
+      getUserAccessibleInstallations(accessToken, {
+        flow: 'callback',
+        userId: auth.user.id,
+        installationId,
+      }),
+    ]);
     log.info('github.installation_callback.accessible_installations', {
       userId: auth.user.id,
       installationId,
@@ -324,6 +341,44 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
         userId: auth.user.id,
       });
       return c.redirect(`${settingsUrl}?github_app=error&reason=installation_not_accessible`);
+    }
+
+    if (
+      normalizeAccountType(accessibleInstallation.account.type) === 'personal' &&
+      !isAuthenticatedUsersPersonalInstallation(accessibleInstallation, authenticatedGitHubUser)
+    ) {
+      log.warn('github.personal_installation_owner_mismatch', {
+        installationId,
+        userId: auth.user.id,
+        authenticatedGitHubUserId: authenticatedGitHubUser.id,
+        authenticatedGitHubLogin: authenticatedGitHubUser.login,
+        installationAccountId: accessibleInstallation.account.id ?? null,
+        installationAccountLogin: accessibleInstallation.account.login,
+      });
+      if (existing[0]) {
+        await deleteInstallationRow(db, auth.user.id, existing[0].id);
+      }
+      return c.redirect(`${settingsUrl}?github_app=error&reason=installation_not_accessible`);
+    }
+
+    if (existing.length > 0) {
+      const existingInstallation = existing[0]!;
+      await upsertCanonicalInstallationAccount(
+        db,
+        {
+          installationId,
+          accountType: normalizeAccountType(existingInstallation.accountType),
+          accountName: existingInstallation.accountName,
+        },
+        now
+      );
+      log.info('github.installation_callback.insert_result', {
+        userId: auth.user.id,
+        installationId,
+        result: 'conflict',
+        reason: 'already_exists',
+      });
+      return c.redirect(`${settingsUrl}?github_app=installed`);
     }
 
     insertAttempted = true;
@@ -422,6 +477,85 @@ async function syncUserInstallations(
   await syncSharedOrgInstallations(db, userId, accessToken);
 }
 
+async function getRequiredGitHubUserAccessToken(
+  c: Context<{ Bindings: Env }>,
+  userId: string
+): Promise<string> {
+  const accessToken = await getGitHubUserAccessToken(c, userId);
+  log.info('github.user_context_required.token_status', {
+    userId,
+    tokenPresent: Boolean(accessToken),
+  });
+  if (!accessToken) {
+    throw errors.forbidden('GitHub user token unavailable');
+  }
+  return accessToken;
+}
+
+async function filterVisibleInstallations(
+  db: GitHubDb,
+  userId: string,
+  accessToken: string,
+  installations: schema.GitHubInstallation[]
+): Promise<schema.GitHubInstallation[]> {
+  const personalRows = installations.filter(
+    (inst) => normalizeAccountType(inst.accountType) === 'personal'
+  );
+  if (personalRows.length === 0) {
+    return installations;
+  }
+
+  const [authenticatedGitHubUser, accessibleInstallations] = await Promise.all([
+    getAuthenticatedGitHubUser(accessToken, { flow: 'sync', userId }),
+    getUserAccessibleInstallations(accessToken, { flow: 'sync', userId }),
+  ]);
+  const accessibleById = new Map(
+    accessibleInstallations.map((installation) => [String(installation.id), installation])
+  );
+
+  const visible: schema.GitHubInstallation[] = [];
+  for (const installation of installations) {
+    if (normalizeAccountType(installation.accountType) !== 'personal') {
+      visible.push(installation);
+      continue;
+    }
+
+    const externalInstallationId = getExternalInstallationId(installation);
+    const accessibleInstallation = accessibleById.get(externalInstallationId);
+    if (
+      accessibleInstallation &&
+      isAuthenticatedUsersPersonalInstallation(accessibleInstallation, authenticatedGitHubUser)
+    ) {
+      visible.push(installation);
+      continue;
+    }
+
+    await deleteInstallationRow(db, userId, installation.id);
+    log.warn('github.installations_sync.removed_mismatched_personal_installation', {
+      userId,
+      installationId: externalInstallationId,
+      accountName: installation.accountName,
+    });
+  }
+
+  return visible;
+}
+
+async function deleteInstallationRow(
+  db: GitHubDb,
+  userId: string,
+  installationRowId: string
+): Promise<void> {
+  await db
+    .delete(schema.githubInstallations)
+    .where(
+      and(
+        eq(schema.githubInstallations.id, installationRowId),
+        eq(schema.githubInstallations.userId, userId)
+      )
+    );
+}
+
 async function syncDirectUserInstallations(
   db: GitHubDb,
   userId: string,
@@ -453,11 +587,24 @@ async function syncDirectUserInstallations(
     const syncableInstallations = accessibleInstallations.filter((inst) =>
       isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
     );
-    const skippedInstallations = accessibleInstallations.length - syncableInstallations.length;
-    if (skippedInstallations > 0) {
+    const deferredOrgInstallationCount = accessibleInstallations.filter((inst) =>
+      normalizeAccountType(inst.account.type) === 'organization'
+    ).length;
+    const rejectedPersonalInstallationCount = accessibleInstallations.filter((inst) =>
+      normalizeAccountType(inst.account.type) === 'personal' &&
+      !isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
+    ).length;
+    if (deferredOrgInstallationCount > 0) {
+      log.info('github.installations_sync.deferred_org_installations', {
+        userId,
+        deferredInstallationCount: deferredOrgInstallationCount,
+        reason: 'shared_org_discovery_required',
+      });
+    }
+    if (rejectedPersonalInstallationCount > 0) {
       log.info('github.installations_sync.skipped_direct_installations', {
         userId,
-        skippedInstallationCount: skippedInstallations,
+        skippedInstallationCount: rejectedPersonalInstallationCount,
         reason: 'not_authenticated_user_personal_installation',
       });
     }

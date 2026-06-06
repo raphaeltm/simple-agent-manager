@@ -25,6 +25,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
@@ -46,6 +47,7 @@ import {
 } from '../../schemas';
 import { encrypt } from '../../services/encryption';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { getGitHubUserAccessToken } from '../../services/github-user-access-token';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -194,7 +196,21 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
 
     const installation = await requireOwnedInstallation(db, installationId, userId);
     const externalInstallationId = getExternalInstallationId(installation);
-    await assertRepositoryAccess(externalInstallationId, repository, c.env);
+    const accessToken = await requireGitHubUserAccessToken(c, userId);
+    const verifiedRepo = await assertRepositoryAccess(
+      accessToken,
+      externalInstallationId,
+      repository,
+      userId
+    );
+    if (githubRepoId !== null && githubRepoId !== verifiedRepo.id) {
+      throw errors.forbidden('GitHub repository ID does not match the selected repository');
+    }
+    if (githubRepoNodeId !== null && verifiedRepo.nodeId !== null && githubRepoNodeId !== verifiedRepo.nodeId) {
+      throw errors.forbidden('GitHub repository node ID does not match the selected repository');
+    }
+    const storedGitHubRepoId = verifiedRepo.id;
+    const storedGitHubRepoNodeId = verifiedRepo.nodeId;
 
     const duplicateRepositoryRows = await db
       .select({ id: schema.projects.id })
@@ -211,20 +227,18 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       throw errors.conflict('Project repository is already linked');
     }
 
-    if (githubRepoId !== null) {
-      const duplicateRepoIdRows = await db
-        .select({ id: schema.projects.id })
-        .from(schema.projects)
-        .where(
-          and(
-            eq(schema.projects.userId, userId),
-            eq(schema.projects.githubRepoId, githubRepoId)
-          )
+    const duplicateRepoIdRows = await db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(
+        and(
+          eq(schema.projects.userId, userId),
+          eq(schema.projects.githubRepoId, storedGitHubRepoId)
         )
-        .limit(1);
-      if (duplicateRepoIdRows[0]) {
-        throw errors.conflict('A project with this GitHub repository ID already exists');
-      }
+      )
+      .limit(1);
+    if (duplicateRepoIdRows[0]) {
+      throw errors.conflict('A project with this GitHub repository ID already exists');
     }
 
     await db.insert(schema.projects).values({
@@ -237,8 +251,8 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       repository,
       defaultBranch,
       repoProvider: 'github',
-      githubRepoId,
-      githubRepoNodeId,
+      githubRepoId: storedGitHubRepoId,
+      githubRepoNodeId: storedGitHubRepoNodeId,
       createdBy: userId,
       createdAt: now,
       updatedAt: now,
@@ -757,10 +771,12 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   // Only verify GitHub repository access for GitHub-backed projects
   if (existing.installationId) {
     const installation = await requireOwnedInstallation(db, existing.installationId, userId);
+    const accessToken = await requireGitHubUserAccessToken(c, userId);
     await assertRepositoryAccess(
+      accessToken,
       getExternalInstallationId(installation),
       existing.repository,
-      c.env
+      userId
     );
   }
 
@@ -921,3 +937,14 @@ crudRoutes.delete('/:id', async (c) => {
 });
 
 export { crudRoutes };
+
+async function requireGitHubUserAccessToken(
+  c: Context<{ Bindings: Env }>,
+  userId: string
+): Promise<string> {
+  const accessToken = await getGitHubUserAccessToken(c, userId);
+  if (!accessToken) {
+    throw errors.forbidden('GitHub user token unavailable');
+  }
+  return accessToken;
+}
