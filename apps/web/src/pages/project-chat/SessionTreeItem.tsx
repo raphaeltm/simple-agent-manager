@@ -157,7 +157,7 @@ export function SessionTreeItem({
           aria-label={`Nesting level ${node.depth + 1}`}
           style={{
             background: 'rgba(245,158,11,0.15)',
-            color: '#fbbf24',
+            color: 'var(--sam-color-warning-fg)',
             padding: '0 4px',
             borderRadius: 9999,
             fontSize: 10,

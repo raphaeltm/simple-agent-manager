@@ -339,7 +339,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                   behavior: 'smooth',
                 });
               }}
-              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-md cursor-pointer hover:bg-page"
+              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
               data-agent-active={lc.agentActivity !== 'idle'}
               aria-label="Scroll to bottom"
             >

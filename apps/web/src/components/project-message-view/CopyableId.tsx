@@ -17,7 +17,7 @@ export function CopyableId({ label, value, icon }: { label: string; value: strin
       type="button"
       onClick={handleCopy}
       title={`${label}: ${value} - click to copy`}
-      className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-default cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors min-w-0"
+      className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors min-w-0"
       style={{ color: copied ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}
     >
       {icon && <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>}
