@@ -62,7 +62,7 @@ nodeAcpHeartbeatRoute.post('/:id/node-acp-heartbeat', jsonValidator(AcpSessionHe
     });
     throw error;
   }
-  log.info('acp_heartbeat.node_level', { projectId, nodeId: body.nodeId, updatedSessions: updated });
+  log.debug('acp_heartbeat.node_level', { projectId, nodeId: body.nodeId, updatedSessions: updated });
   return c.body(null, 204);
 });
 

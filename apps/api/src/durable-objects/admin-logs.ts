@@ -168,7 +168,7 @@ export class AdminLogs extends DurableObject<Env> {
     }
 
     if (logs.length === 0) {
-      return new Response('No logs', { status: 200 });
+      return this.ingestResponse();
     }
 
     // Add to ring buffer
@@ -184,7 +184,23 @@ export class AdminLogs extends DurableObject<Env> {
     // Broadcast to connected clients
     this.broadcastLogs(logs);
 
-    return new Response('OK', { status: 200 });
+    return this.ingestResponse();
+  }
+
+  /**
+   * Build the ingest response carrying the current connected-subscriber count.
+   *
+   * The Tail Worker reads `subscribers` to decide whether to keep forwarding
+   * logs: when zero admins are watching the live stream, forwarding broadcasts
+   * to nobody, so the worker can skip the round trip entirely. See the tail
+   * worker's subscriber-aware gate.
+   */
+  private ingestResponse(): Response {
+    const subscribers = this.ctx.getWebSockets().length;
+    return new Response(JSON.stringify({ ok: true, subscribers }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   private broadcastLogs(logs: LogBufferEntry[]): void {

@@ -154,6 +154,52 @@ describe('AdminLogs Durable Object', () => {
       const response = await adminLogs.fetch(request);
       expect(response.status).toBe(400);
     });
+
+    it('should report zero subscribers when no WebSocket clients are connected', async () => {
+      const request = new Request('https://internal/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logs: [] }),
+      });
+
+      const response = await adminLogs.fetch(request);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('application/json');
+      const body = await response.json() as { ok: boolean; subscribers: number };
+      expect(body.subscribers).toBe(0);
+    });
+
+    it('should report the connected subscriber count after clients connect', async () => {
+      // Connect two WebSocket clients directly (the Node test env rejects the
+      // status-101 upgrade Response, so we register sockets via acceptWebSocket
+      // exactly as handleWebSocketUpgrade would).
+      mockCtx.acceptWebSocket(createMockWebSocket());
+      mockCtx.acceptWebSocket(createMockWebSocket());
+
+      const logs = [
+        {
+          type: 'log',
+          entry: {
+            timestamp: '2026-02-14T12:00:00Z',
+            level: 'info',
+            event: 'http.request',
+            message: 'GET /health',
+            details: {},
+            scriptName: 'workspaces-api',
+          },
+        },
+      ];
+
+      const response = await adminLogs.fetch(new Request('https://internal/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logs }),
+      }));
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { ok: boolean; subscribers: number };
+      expect(body.subscribers).toBe(2);
+    });
   });
 
   describe('webSocketMessage()', () => {

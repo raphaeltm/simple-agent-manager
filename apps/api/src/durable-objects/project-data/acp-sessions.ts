@@ -499,7 +499,7 @@ export function updateNodeHeartbeats(
   );
   const updated = result.rowsWritten;
   if (updated > 0) {
-    log.info('acp_session.node_heartbeats_updated', {
+    log.debug('acp_session.node_heartbeats_updated', {
       nodeId,
       projectId,
       sessionsUpdated: updated,

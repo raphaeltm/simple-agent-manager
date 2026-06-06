@@ -223,7 +223,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           );
 
         const projectIds = [...new Set(workspaces.map((w) => w.projectId).filter(Boolean))] as string[];
-        log.info('heartbeat.acp_sweep', { nodeId, workspaces: workspaces.length, projects: projectIds.length });
+        log.debug('heartbeat.acp_sweep', { nodeId, workspaces: workspaces.length, projects: projectIds.length });
 
         await Promise.all(
           projectIds.map(async (projectId) => {
@@ -234,7 +234,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
                   setTimeout(() => reject(new Error('acp_sweep_timeout')), acpSweepTimeoutMs)
                 ),
               ]);
-              log.info('heartbeat.acp_sweep_updated', { nodeId, projectId, updatedSessions: updated });
+              log.debug('heartbeat.acp_sweep_updated', { nodeId, projectId, updatedSessions: updated });
             } catch (err) {
               log.warn('heartbeat.acp_session_update_failed', { nodeId, projectId, error: String(err) });
             }
