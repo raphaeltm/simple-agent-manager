@@ -497,7 +497,7 @@ export function ProjectLibrary() {
             aria-label="Search files and folders"
             placeholder="Search files and folders..."
             maxLength={LIBRARY_DEFAULTS.MAX_SEARCH_LENGTH}
-            className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
+            className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
           />
           {/* Inline spinner only in the over-cap server path (sub-cap is instant) */}
           {isOverCap && (isSearchPending || refreshing) && searchInput && (
@@ -517,12 +517,12 @@ export function ProjectLibrary() {
       {!isOverCap && sweepError && (
         <div
           role="status"
-          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] text-xs text-warning-fg"
+          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-warning/30 bg-warning-tint text-xs text-warning-fg"
         >
           <span>Some files may be missing — refresh to retry.</span>
           <button
             onClick={() => invalidate()}
-            className={`px-2 py-1 rounded-md border border-[rgba(245,158,11,0.4)] bg-transparent text-warning-fg cursor-pointer ${FOCUS_RING}`}
+            className={`px-2 py-1 rounded-md border border-warning/40 bg-transparent text-warning-fg cursor-pointer ${FOCUS_RING}`}
           >
             Retry
           </button>
@@ -531,14 +531,14 @@ export function ProjectLibrary() {
 
       {/* Filter bar (collapsible) — advanced tag/source filters only */}
       {showFilters && (
-        <div className="flex flex-col gap-3 p-3 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-inset">
+        <div className="flex flex-col gap-3 p-3 rounded-lg border border-[var(--sam-form-border)] bg-inset">
           {/* Sort (mobile only — hidden on desktop where it's in the header) */}
           {isMobile && (
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortOption)}
               aria-label="Sort by"
-              className="w-full px-2.5 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
+              className="w-full px-2.5 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
             >
               <option value="createdAt">Newest</option>
               <option value="filename">Name</option>
@@ -559,8 +559,8 @@ export function ProjectLibrary() {
                     aria-label={`Filter by tag: ${tag}`}
                     className={`px-2.5 py-1 rounded-full text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
                       isActive
-                        ? 'bg-accent text-white'
-                        : 'bg-[rgba(8,15,12,0.4)] text-fg-muted hover:bg-accent/10 hover:text-accent'
+                        ? 'bg-accent text-fg-on-accent'
+                        : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:bg-accent/10 hover:text-accent'
                     }`}
                   >
                     {tag}
@@ -586,8 +586,8 @@ export function ProjectLibrary() {
                 }
                 className={`px-3 py-1.5 rounded-lg text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
                   sourceFilter === src
-                    ? 'bg-accent text-white'
-                    : 'bg-[rgba(8,15,12,0.4)] text-fg-muted hover:bg-accent/10 hover:text-accent'
+                    ? 'bg-accent text-fg-on-accent'
+                    : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:bg-accent/10 hover:text-accent'
                 }`}
               >
                 {src === 'all' ? 'All' : src === 'user' ? 'User' : 'Agent'}
@@ -661,7 +661,7 @@ export function ProjectLibrary() {
               key={dir.path}
               onClick={() => navigateToDirectory(dir.path)}
               aria-label={`Folder: ${dir.name}, ${dir.fileCount} file${dir.fileCount !== 1 ? 's' : ''}`}
-              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] hover:bg-surface-inset cursor-pointer aspect-square ${FOCUS_RING}`}
+              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] hover:bg-surface-inset cursor-pointer aspect-square ${FOCUS_RING}`}
             >
               <Folder size={32} className="text-accent shrink-0" aria-hidden="true" />
               <span className="text-sm font-medium text-fg-primary truncate max-w-full text-center">
@@ -691,7 +691,7 @@ export function ProjectLibrary() {
           {!isSearching && activeFilterCount === 0 && (
             <button
               onClick={() => setShowUpload(true)}
-              className={`mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-medium border-none cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
+              className={`mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent text-fg-on-accent text-sm font-medium border-none cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
             >
               <Upload size={16} /> Upload Files
             </button>

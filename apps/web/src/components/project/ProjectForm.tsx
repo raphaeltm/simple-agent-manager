@@ -211,7 +211,7 @@ export function ProjectForm({
               className={`flex-1 rounded-md py-3 px-3 text-sm font-medium transition-colors ${
                 isArtifacts
                   ? 'border-2 border-accent bg-accent/10 text-accent'
-                  : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted hover:border-fg-muted'
+                  : 'border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-fg-muted hover:border-fg-muted'
               }`}
             >
               SAM Git
@@ -225,7 +225,7 @@ export function ProjectForm({
               className={`flex-1 rounded-md py-3 px-3 text-sm font-medium transition-colors ${
                 !isArtifacts
                   ? 'border-2 border-accent bg-accent/10 text-accent'
-                  : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted hover:border-fg-muted'
+                  : 'border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-fg-muted hover:border-fg-muted'
               }`}
             >
               GitHub

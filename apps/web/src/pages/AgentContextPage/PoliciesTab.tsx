@@ -9,10 +9,10 @@ import { deletePolicy, updatePolicy } from '../../lib/api';
 import { Badge, FOCUS_RING, GLASS_CARD, SectionHeader } from './index';
 
 const categoryColors: Record<PolicyCategory, string> = {
-  rule: 'border-red-500/20 bg-red-500/8 text-red-300',
-  constraint: 'border-amber-500/20 bg-amber-500/8 text-amber-300',
-  delegation: 'border-sky-500/20 bg-sky-500/8 text-sky-300',
-  preference: 'border-emerald-500/20 bg-emerald-500/8 text-emerald-300',
+  rule: 'border-danger/30 bg-danger-tint text-danger-fg',
+  constraint: 'border-warning/30 bg-warning-tint text-warning-fg',
+  delegation: 'border-info/30 bg-info-tint text-info-fg',
+  preference: 'border-success/30 bg-success-tint text-success-fg',
 };
 
 function formatDate(ts: number): string {
@@ -31,7 +31,7 @@ function IconButton({ label, children, className = '', onClick }: { label: strin
       aria-label={label}
       title={label}
       onClick={(event) => { event.stopPropagation(); onClick(); }}
-      className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(34,197,94,0.04)] text-fg-muted transition-colors hover:border-[rgba(34,197,94,0.24)] hover:text-fg-primary ${FOCUS_RING} ${className}`}
+      className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-[var(--sam-form-border)] bg-accent-tint text-fg-muted transition-colors hover:border-[var(--sam-form-border-hover)] hover:text-fg-primary ${FOCUS_RING} ${className}`}
     >
       {children}
     </button>
@@ -43,7 +43,7 @@ function CancelButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={(event) => { event.stopPropagation(); onClick(); }}
-      className={`min-h-11 rounded-lg border border-[rgba(34,197,94,0.10)] bg-transparent px-3 text-sm font-medium text-fg-muted transition-colors hover:text-fg-primary ${FOCUS_RING}`}
+      className={`min-h-11 rounded-lg border border-[var(--sam-form-border)] bg-transparent px-3 text-sm font-medium text-fg-muted transition-colors hover:text-fg-primary ${FOCUS_RING}`}
     >
       Cancel
     </button>
@@ -53,13 +53,13 @@ function CancelButton({ onClick }: { onClick: () => void }) {
 function DeleteDialog({ policy, busy, onCancel, onConfirm }: { policy: ProjectPolicy; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation">
-      <button type="button" aria-label="Cancel delete" className="absolute inset-0 bg-black/45 backdrop-blur-md" onClick={onCancel} />
+      <button type="button" aria-label="Cancel delete" className="absolute inset-0 bg-overlay backdrop-blur-md" onClick={onCancel} />
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="policy-delete-title"
         aria-describedby="policy-delete-description"
-        className={`${GLASS_CARD} relative w-full max-w-md p-4 shadow-2xl shadow-black/40`}
+        className={`${GLASS_CARD} relative w-full max-w-md p-4 shadow-overlay`}
       >
         <h3 id="policy-delete-title" className="m-0 text-base font-semibold text-fg-primary">Delete policy</h3>
         <p id="policy-delete-description" className="m-0 mt-2 text-sm leading-relaxed text-fg-muted">
@@ -71,7 +71,7 @@ function DeleteDialog({ policy, busy, onCancel, onConfirm }: { policy: ProjectPo
             type="button"
             disabled={busy}
             onClick={onConfirm}
-            className={`min-h-11 rounded-lg border border-red-500/30 bg-red-500/10 px-3 text-sm font-medium text-red-200 transition-colors hover:border-red-500/50 disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+            className={`min-h-11 rounded-lg border border-danger/30 bg-danger-tint px-3 text-sm font-medium text-danger-fg transition-colors hover:border-danger disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
           >
             {busy ? 'Deleting...' : 'Delete'}
           </button>
@@ -123,7 +123,7 @@ function PolicyEditForm({ policy, projectId, onCancel, onSaved }: { policy: Proj
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            className={`mt-1 w-full rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-full rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           />
         </label>
         <label className="block text-xs font-medium text-fg-muted">
@@ -131,7 +131,7 @@ function PolicyEditForm({ policy, projectId, onCancel, onSaved }: { policy: Proj
           <select
             value={category}
             onChange={(event) => setCategory(event.target.value as PolicyCategory)}
-            className={`mt-1 w-full rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-full rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           >
             {POLICY_CATEGORIES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
@@ -143,7 +143,7 @@ function PolicyEditForm({ policy, projectId, onCancel, onSaved }: { policy: Proj
           value={content}
           onChange={(event) => setContent(event.target.value)}
           rows={4}
-          className={`mt-1 w-full resize-y rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+          className={`mt-1 w-full resize-y rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
         />
       </label>
       <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
@@ -155,7 +155,7 @@ function PolicyEditForm({ policy, projectId, onCancel, onSaved }: { policy: Proj
             max="100"
             value={confidence}
             onChange={(event) => setConfidence(Number(event.target.value))}
-            className={`mt-1 w-full rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-full rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           />
         </label>
         <label className="flex min-h-11 items-center gap-2 self-end text-sm text-fg-muted">
@@ -219,8 +219,8 @@ function PolicyCard({ policy, projectId, onRefresh }: { policy: ProjectPolicy; p
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge className={categoryColors[policy.category]}>{policy.category}</Badge>
                   <Badge className={policy.active
-                    ? 'border-emerald-500/20 bg-emerald-500/8 text-emerald-300'
-                    : 'border-zinc-500/20 bg-zinc-500/8 text-zinc-400'
+                    ? 'border-success/30 bg-success-tint text-success-fg'
+                    : 'border-border-default bg-inset text-fg-muted'
                   }>
                     {policy.active ? 'active' : 'inactive'}
                   </Badge>
@@ -231,15 +231,15 @@ function PolicyCard({ policy, projectId, onRefresh }: { policy: ProjectPolicy; p
               <div className="flex shrink-0 flex-row items-start gap-1.5 md:items-end">
                 <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                   <IconButton label="Edit policy" onClick={() => setEditing(true)}><Pencil size={15} /></IconButton>
-                  <IconButton label="Delete policy" className="hover:border-red-500/40 hover:text-red-200" onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></IconButton>
+                  <IconButton label="Delete policy" className="hover:border-danger hover:text-danger-fg" onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></IconButton>
                 </div>
                 <div className="flex flex-row gap-1.5 md:flex-col md:items-end">
-                  <Badge className="border-[rgba(34,197,94,0.12)] bg-[rgba(34,197,94,0.04)] text-fg-muted">{Math.round(policy.confidence * 100)}%</Badge>
-                  <Badge className="border-[rgba(34,197,94,0.12)] bg-[rgba(34,197,94,0.04)] text-fg-muted">{policy.source}</Badge>
+                  <Badge className="border-glass-border bg-accent-tint text-fg-muted">{Math.round(policy.confidence * 100)}%</Badge>
+                  <Badge className="border-glass-border bg-accent-tint text-fg-muted">{policy.source}</Badge>
                 </div>
               </div>
             </div>
-            <div className="mt-3 flex flex-col gap-1.5 border-t border-[rgba(34,197,94,0.08)] pt-3 text-xs text-fg-muted sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-3 flex flex-col gap-1.5 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3 text-xs text-fg-muted sm:flex-row sm:items-center sm:justify-between">
               <span className="min-w-0 break-words">Source: {policy.source}</span>
               <span className="shrink-0 text-accent/70">Updated {formatDate(policy.updatedAt)}</span>
             </div>

@@ -54,7 +54,7 @@ export function TagEditor({ file, projectId, onUpdated, onClose }: TagEditorProp
   };
 
   return (
-    <div className="flex flex-col gap-2 p-3 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]">
+    <div className="flex flex-col gap-2 p-3 rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)]">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">
           Tags for {file.filename}
@@ -96,12 +96,12 @@ export function TagEditor({ file, projectId, onUpdated, onClose }: TagEditorProp
           }}
           placeholder="Add tag..."
           maxLength={LIBRARY_DEFAULTS.MAX_TAG_LENGTH}
-          className="flex-1 px-2.5 py-1.5 text-xs rounded border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-inset text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
+          className="flex-1 px-2.5 py-1.5 text-xs rounded border border-[var(--sam-form-border)] bg-inset text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent"
         />
         <button
           onClick={handleAddTag}
           disabled={saving || !newTag.trim()}
-          className={`px-2.5 py-1.5 text-xs rounded bg-accent text-white border-none cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
+          className={`px-2.5 py-1.5 text-xs rounded bg-accent text-fg-on-accent border-none cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
         >
           {saving ? <Spinner size="sm" /> : <Plus size={12} />}
         </button>

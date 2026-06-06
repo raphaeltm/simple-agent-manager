@@ -15,13 +15,13 @@ import {
 import { Badge, FOCUS_RING, GLASS_CARD, GLASS_CARD_MUTED, SectionHeader } from './index';
 
 const entityTypeColors: Record<string, string> = {
-  preference: 'bg-blue-500/8 text-blue-300 border-blue-500/20',
-  context: 'bg-amber-500/8 text-amber-300 border-amber-500/20',
-  workflow: 'bg-emerald-500/8 text-emerald-300 border-emerald-500/20',
-  expertise: 'bg-purple-500/8 text-purple-300 border-purple-500/20',
-  style: 'bg-sky-500/8 text-sky-300 border-sky-500/20',
-  personality: 'bg-pink-500/8 text-pink-300 border-pink-500/20',
-  custom: 'bg-zinc-500/8 text-zinc-300 border-zinc-500/20',
+  preference: 'bg-info-tint text-info-fg border-info/30',
+  context: 'bg-warning-tint text-warning-fg border-warning/30',
+  workflow: 'bg-success-tint text-success-fg border-success/30',
+  expertise: 'bg-purple/10 text-purple border-purple/30',
+  style: 'bg-info-tint text-info-fg border-info/30',
+  personality: 'bg-purple/10 text-purple border-purple/30',
+  custom: 'bg-inset text-fg-muted border-border-default',
 };
 
 type DeleteTarget =
@@ -29,7 +29,7 @@ type DeleteTarget =
   | { kind: 'observation'; id: string; entityId: string; label: string };
 
 function getTypeColor(type: string): string {
-  return entityTypeColors[type] ?? 'bg-zinc-500/8 text-zinc-300 border-zinc-500/20';
+  return entityTypeColors[type] ?? 'bg-inset text-fg-muted border-border-default';
 }
 
 function formatDate(ts: number): string {
@@ -58,7 +58,7 @@ function IconButton({
       aria-label={label}
       title={label}
       onClick={(event) => { event.stopPropagation(); onClick(); }}
-      className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(34,197,94,0.04)] text-fg-muted transition-colors hover:border-[rgba(34,197,94,0.24)] hover:text-fg-primary ${FOCUS_RING} ${className}`}
+      className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-[var(--sam-form-border)] bg-accent-tint text-fg-muted transition-colors hover:border-[var(--sam-form-border-hover)] hover:text-fg-primary ${FOCUS_RING} ${className}`}
     >
       {children}
     </button>
@@ -72,7 +72,7 @@ function FormButton({ children, variant = 'default', disabled = false }: { child
       disabled={disabled}
       className={`min-h-11 rounded-lg border px-3 text-sm font-medium transition-colors ${FOCUS_RING} disabled:cursor-not-allowed disabled:opacity-50 ${
         variant === 'danger'
-          ? 'border-red-500/25 bg-red-500/10 text-red-200 hover:border-red-500/40'
+          ? 'border-danger/30 bg-danger-tint text-danger-fg hover:border-danger'
           : 'border-accent/30 bg-accent/10 text-accent hover:border-accent/50'
       }`}
     >
@@ -86,7 +86,7 @@ function CancelButton({ children = 'Cancel', onClick }: { children?: ReactNode; 
     <button
       type="button"
       onClick={(event) => { event.stopPropagation(); onClick(); }}
-      className={`min-h-11 rounded-lg border border-[rgba(34,197,94,0.10)] bg-transparent px-3 text-sm font-medium text-fg-muted transition-colors hover:text-fg-primary ${FOCUS_RING}`}
+      className={`min-h-11 rounded-lg border border-[var(--sam-form-border)] bg-transparent px-3 text-sm font-medium text-fg-muted transition-colors hover:text-fg-primary ${FOCUS_RING}`}
     >
       {children}
     </button>
@@ -96,13 +96,13 @@ function CancelButton({ children = 'Cancel', onClick }: { children?: ReactNode; 
 function DeleteDialog({ target, busy, onCancel, onConfirm }: { target: DeleteTarget; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation">
-      <button type="button" aria-label="Cancel delete" className="absolute inset-0 bg-black/45 backdrop-blur-md" onClick={onCancel} />
+      <button type="button" aria-label="Cancel delete" className="absolute inset-0 bg-overlay backdrop-blur-md" onClick={onCancel} />
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="memory-delete-title"
         aria-describedby="memory-delete-description"
-        className={`${GLASS_CARD} relative w-full max-w-md p-4 shadow-2xl shadow-black/40`}
+        className={`${GLASS_CARD} relative w-full max-w-md p-4 shadow-overlay`}
       >
         <h3 id="memory-delete-title" className="m-0 text-base font-semibold text-fg-primary">Delete {target.kind}</h3>
         <p id="memory-delete-description" className="m-0 mt-2 text-sm leading-relaxed text-fg-muted">
@@ -114,7 +114,7 @@ function DeleteDialog({ target, busy, onCancel, onConfirm }: { target: DeleteTar
             type="button"
             disabled={busy}
             onClick={onConfirm}
-            className={`min-h-11 rounded-lg border border-red-500/30 bg-red-500/10 px-3 text-sm font-medium text-red-200 transition-colors hover:border-red-500/50 disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+            className={`min-h-11 rounded-lg border border-danger/30 bg-danger-tint px-3 text-sm font-medium text-danger-fg transition-colors hover:border-danger disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
           >
             {busy ? 'Deleting...' : 'Delete'}
           </button>
@@ -179,7 +179,7 @@ function ObservationRow({
             value={content}
             onChange={(event) => setContent(event.target.value)}
             rows={4}
-            className={`mt-1 w-full resize-y rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-full resize-y rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-accent/40 ${FOCUS_RING}`}
           />
         </label>
         <label className="block text-xs font-medium text-fg-muted">
@@ -190,7 +190,7 @@ function ObservationRow({
             max="100"
             value={confidence}
             onChange={(event) => setConfidence(Number(event.target.value))}
-            className={`mt-1 w-28 rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-28 rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           />
         </label>
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -209,7 +209,7 @@ function ObservationRow({
           <IconButton label="Edit observation" onClick={() => setEditing(true)}><Pencil size={15} /></IconButton>
           <IconButton
             label="Delete observation"
-            className="hover:border-red-500/40 hover:text-red-200"
+            className="hover:border-danger hover:text-danger-fg"
             onClick={() => onRequestDelete({ kind: 'observation', id: observation.id, entityId: observation.entityId, label: observation.content.slice(0, 80) || 'observation' })}
           >
             <Trash2 size={15} />
@@ -217,8 +217,8 @@ function ObservationRow({
         </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
-        <Badge className="border-[rgba(34,197,94,0.12)] bg-[rgba(34,197,94,0.04)] text-fg-muted">{Math.round(observation.confidence * 100)}%</Badge>
-        <Badge className="border-[rgba(34,197,94,0.12)] bg-[rgba(34,197,94,0.04)] text-fg-muted">{observation.sourceType}</Badge>
+        <Badge className="border-glass-border bg-accent-tint text-fg-muted">{Math.round(observation.confidence * 100)}%</Badge>
+        <Badge className="border-glass-border bg-accent-tint text-fg-muted">{observation.sourceType}</Badge>
         <span className="text-accent/70">Confirmed {formatDate(observation.lastConfirmedAt)}</span>
       </div>
     </div>
@@ -272,7 +272,7 @@ function EntityEditForm({
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className={`mt-1 w-full rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-full rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           />
         </label>
         <label className="block text-xs font-medium text-fg-muted">
@@ -280,7 +280,7 @@ function EntityEditForm({
           <select
             value={entityType}
             onChange={(event) => setEntityType(event.target.value as KnowledgeEntityType)}
-            className={`mt-1 w-full rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
+            className={`mt-1 w-full rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           >
             {KNOWLEDGE_ENTITY_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
@@ -292,7 +292,7 @@ function EntityEditForm({
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           rows={3}
-          className={`mt-1 w-full resize-y rounded-lg border border-[rgba(34,197,94,0.12)] bg-black/20 px-3 py-2 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-accent/40 ${FOCUS_RING}`}
+          className={`mt-1 w-full resize-y rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none placeholder:text-fg-muted focus:border-accent/40 ${FOCUS_RING}`}
         />
       </label>
       <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -367,7 +367,7 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
 
   return (
     <>
-      <article className={`${GLASS_CARD} group p-3 transition-colors hover:border-[rgba(34,197,94,0.24)]`}>
+      <article className={`${GLASS_CARD} group p-3 transition-colors hover:border-[var(--sam-form-border-hover)]`}>
         {editing ? (
           <EntityEditForm entity={entity} projectId={projectId} onCancel={() => setEditing(false)} onSaved={handleSavedEntity} />
         ) : (
@@ -396,13 +396,13 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
               </div>
             </div>
             </button>
-            <div className="mt-3 flex items-center justify-between gap-2 border-t border-[rgba(34,197,94,0.08)] pt-3 text-xs text-fg-muted">
+            <div className="mt-3 flex items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3 text-xs text-fg-muted">
               <span className="shrink-0 text-accent/70">Updated {formatDate(entity.updatedAt)}</span>
               <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                 <IconButton label="Edit memory entity" onClick={() => { setEditing(true); setExpanded(true); }}><Pencil size={15} /></IconButton>
                 <IconButton
                   label="Delete memory entity"
-                  className="hover:border-red-500/40 hover:text-red-200"
+                  className="hover:border-danger hover:text-danger-fg"
                   onClick={() => setDeleteTarget({ kind: 'entity', id: entity.id, label: entity.name })}
                 >
                   <Trash2 size={15} />
@@ -413,7 +413,7 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
         )}
 
         {expanded && !editing && (
-          <div className="mt-3 space-y-2 border-t border-[rgba(34,197,94,0.08)] pt-3">
+          <div className="mt-3 space-y-2 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3">
             {loadingDetail && <p className="m-0 text-sm text-fg-muted">Loading observations...</p>}
             {!loadingDetail && observations.length === 0 && (
               <div className={`${GLASS_CARD_MUTED} p-3 text-sm text-fg-muted`}>No observations attached to this entity.</div>

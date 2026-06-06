@@ -151,7 +151,7 @@ export function ProjectNotifications() {
             onClick={() => handleTypeFilterChange(opt.value)}
             className={`px-3 py-2 min-h-[44px] text-xs rounded-full border cursor-pointer transition-colors flex items-center ${
               typeFilter === opt.value
-                ? 'bg-accent text-white border-accent'
+                ? 'bg-accent text-fg-on-accent border-accent'
                 : 'bg-surface border-border-default text-fg-secondary hover:bg-surface-hover'
             }`}
           >

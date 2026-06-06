@@ -21,9 +21,9 @@ import { PoliciesTab } from './PoliciesTab';
 
 // ── Shared glass styling constants ──────────────────────────────────────────
 
-export const GLASS_CARD = 'rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]';
-export const GLASS_CARD_HOVER = `${GLASS_CARD} hover:border-[rgba(34,197,94,0.25)] transition-colors`;
-export const GLASS_CARD_MUTED = 'rounded-md bg-[rgba(34,197,94,0.04)] border border-[rgba(34,197,94,0.06)]';
+export const GLASS_CARD = 'rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)]';
+export const GLASS_CARD_HOVER = `${GLASS_CARD} hover:border-[var(--sam-form-border-hover)] transition-colors`;
+export const GLASS_CARD_MUTED = 'rounded-md bg-accent-tint border border-[color-mix(in_srgb,var(--sam-form-border)_60%,transparent)]';
 export const GLASS_BADGE = 'inline-flex min-h-[22px] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight';
 export const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
@@ -128,7 +128,7 @@ export function AgentContextPage() {
               className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors bg-transparent cursor-pointer ${FOCUS_RING} ${
                 active
                   ? 'border-accent/40 bg-accent/10 text-accent'
-                  : 'border-[rgba(34,197,94,0.08)] text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.2)]'
+                  : 'border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] text-fg-muted hover:text-fg-primary hover:border-[var(--sam-form-border-hover)]'
               }`}
             >
               {tab.icon}
@@ -141,7 +141,7 @@ export function AgentContextPage() {
       {/* Content */}
       <div id={`tabpanel-${activeTab}`} role="tabpanel" aria-label={TABS.find((t) => t.id === activeTab)?.label} className="mt-4 flex-1 space-y-3 pb-8">
         {activeTab !== 'overview' && (
-          <label className={`flex min-h-11 items-center gap-2 px-3 text-sm text-fg-muted ${GLASS_CARD} focus-within:border-[rgba(34,197,94,0.3)]`}>
+          <label className={`flex min-h-11 items-center gap-2 px-3 text-sm text-fg-muted ${GLASS_CARD} focus-within:border-[var(--sam-form-border-focus)]`}>
             <Search size={15} className="shrink-0 text-fg-muted" />
             <input
               value={filter}

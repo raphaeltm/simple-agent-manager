@@ -45,7 +45,7 @@ export function LibraryToolbar({
             className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
               viewMode === 'list'
                 ? 'bg-accent/10 text-accent'
-                : 'bg-[rgba(8,15,12,0.4)] text-fg-muted hover:text-fg-primary'
+                : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
             }`}
           >
             <List size={16} />
@@ -57,7 +57,7 @@ export function LibraryToolbar({
             className={`p-2 border-none cursor-pointer ${FOCUS_RING} ${
               viewMode === 'grid'
                 ? 'bg-accent/10 text-accent'
-                : 'bg-[rgba(8,15,12,0.4)] text-fg-muted hover:text-fg-primary'
+                : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
             }`}
           >
             <Grid3X3 size={16} />
@@ -71,7 +71,7 @@ export function LibraryToolbar({
           value={sortBy}
           onChange={(e) => onSortChange(e.target.value as SortOption)}
           aria-label="Sort by"
-          className="px-2.5 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
+          className="px-2.5 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer shrink-0"
         >
           <option value="createdAt">Newest</option>
           <option value="filename">Name</option>
@@ -87,12 +87,12 @@ export function LibraryToolbar({
         className={`relative p-2 rounded-lg border cursor-pointer ${FOCUS_RING} ${
           showFilters || activeFilterCount > 0
             ? 'border-accent bg-accent/10 text-accent'
-            : 'border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)] text-fg-muted hover:text-fg-primary'
+            : 'border-[var(--sam-form-border)] bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
         }`}
       >
         <Filter size={16} />
         {activeFilterCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-accent text-white text-[10px] font-semibold px-1">
+          <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-accent text-fg-on-accent text-[10px] font-semibold px-1">
             {activeFilterCount}
           </span>
         )}
@@ -102,7 +102,7 @@ export function LibraryToolbar({
       <button
         onClick={onNewFolder}
         aria-label="New folder"
-        className={`p-2 rounded-lg border border-[rgba(34,197,94,0.10)] cursor-pointer bg-[rgba(8,15,12,0.4)] text-fg-muted hover:text-fg-primary ${FOCUS_RING} shrink-0`}
+        className={`p-2 rounded-lg border border-[var(--sam-form-border)] cursor-pointer bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary ${FOCUS_RING} shrink-0`}
       >
         <FolderPlus size={16} />
       </button>
@@ -111,7 +111,7 @@ export function LibraryToolbar({
       <button
         onClick={onToggleUpload}
         aria-label="Upload files"
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg border-none cursor-pointer bg-accent text-white font-medium text-sm hover:bg-accent/90 ${FOCUS_RING} shrink-0`}
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg border-none cursor-pointer bg-accent text-fg-on-accent font-medium text-sm hover:bg-accent/90 ${FOCUS_RING} shrink-0`}
       >
         <Upload size={16} />
         {!isMobile && <span>Upload</span>}
