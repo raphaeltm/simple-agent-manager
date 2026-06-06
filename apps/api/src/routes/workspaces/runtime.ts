@@ -709,6 +709,9 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   if (!workspace.installationId) {
     throw errors.notFound('Workspace has no GitHub installation');
   }
+  if (!githubRepoId) {
+    throw errors.forbidden('GitHub repository ID is not verified for this workspace');
+  }
 
   const installations = await db
     .select({
@@ -737,10 +740,14 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     }
     throw err;
   }
+  const scopedTokenOptions = {
+    ...(tokenOptions ?? {}),
+    repositoryIds: [githubRepoId],
+  };
   const token = await getInstallationToken(
     getExternalInstallationId(installation),
     c.env,
-    tokenOptions ?? undefined
+    scopedTokenOptions
   );
   return c.json({ token: token.token, expiresAt: token.expiresAt });
 });

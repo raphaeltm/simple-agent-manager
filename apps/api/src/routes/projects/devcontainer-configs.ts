@@ -9,6 +9,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { getInstallationToken } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
@@ -238,9 +239,15 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
   const [owner, repo] = repoParts;
   const branch = project.defaultBranch;
 
+  if (!project.githubRepoId) {
+    throw errors.forbidden('GitHub repository ID is not verified for this project');
+  }
+
   // Load the GitHub installation to get the external installation ID
   const installation = await requireOwnedInstallation(db, project.installationId, userId);
-  const { token } = await getInstallationToken(getExternalInstallationId(installation), c.env);
+  const { token } = await getInstallationToken(getExternalInstallationId(installation), c.env, {
+    repositoryIds: [project.githubRepoId],
+  });
 
   try {
     const { defaultConfigExists, configs, truncated } = await discoverGitHubDevcontainerConfigs(

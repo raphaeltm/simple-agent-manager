@@ -3,9 +3,11 @@ import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
-import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
-import { getInstallationRepositories } from '../../services/github-app';
+import {
+  getUserInstallationRepositories,
+  type GitHubRepositoryAccess,
+} from '../../services/github-app';
 
 export function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -208,13 +210,28 @@ export async function requireOwnedInstallation(
 }
 
 export async function assertRepositoryAccess(
+  accessToken: string,
   installationExternalId: string,
   repository: string,
-  env: Env
-): Promise<void> {
-  const repositories = await getInstallationRepositories(installationExternalId, env);
-  const hasAccess = repositories.some((repo) => repo.fullName.toLowerCase() === repository);
-  if (!hasAccess) {
+  userId: string,
+  flow: 'project-access' | 'branches' = 'project-access'
+): Promise<GitHubRepositoryAccess> {
+  const repositories = await getUserInstallationRepositories(
+    accessToken,
+    installationExternalId,
+    {
+      flow,
+      userId,
+      installationId: installationExternalId,
+      repository,
+    }
+  );
+  const normalizedRepository = repository.toLowerCase();
+  const matchedRepo = repositories.find(
+    (repo) => repo.fullName.toLowerCase() === normalizedRepository
+  );
+  if (!matchedRepo) {
     throw errors.forbidden('Repository is not accessible through the selected installation');
   }
+  return matchedRepo;
 }

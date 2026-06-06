@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: GitHub App API wrapper centralizes shared schemas, token minting, and user-context access during security hotfix.
 import { importPKCS8, SignJWT } from 'jose';
 import * as v from 'valibot';
 
@@ -16,6 +17,7 @@ const installationTokenSchema = v.object({
 
 const repositorySchema = v.object({
   id: v.number(),
+  node_id: v.optional(v.string()),
   full_name: v.string(),
   private: v.boolean(),
   default_branch: v.string(),
@@ -29,6 +31,7 @@ const installationRepositoriesSchema = v.object({
 const userInstallationSchema = v.object({
   id: v.number(),
   account: v.object({
+    id: v.optional(v.number()),
     login: v.string(),
     type: v.string(),
   }),
@@ -36,6 +39,11 @@ const userInstallationSchema = v.object({
 
 const userInstallationsSchema = v.object({
   installations: v.array(userInstallationSchema),
+});
+
+const authenticatedGitHubUserSchema = v.object({
+  id: v.number(),
+  login: v.string(),
 });
 
 const branchSchema = v.object({
@@ -53,7 +61,20 @@ async function readGitHubError(response: Response, fallback: string): Promise<st
 
 export interface UserAccessibleInstallation {
   id: number;
-  account: { login: string; type: string };
+  account: { id?: number; login: string; type: string };
+}
+
+export interface AuthenticatedGitHubUser {
+  id: number;
+  login: string;
+}
+
+export interface GitHubRepositoryAccess {
+  id: number;
+  nodeId: string | null;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
 }
 
 export interface GitHubUserOrganization {
@@ -66,6 +87,13 @@ interface UserAccessibleInstallationsDiagnostics {
   installationId?: string;
 }
 
+interface UserInstallationRepositoriesDiagnostics {
+  flow: 'repositories' | 'branches' | 'project-access';
+  userId: string;
+  installationId: string;
+  repository?: string;
+}
+
 interface UserOrganizationDiagnostics {
   flow: 'shared-org-discovery';
   userId: string;
@@ -76,6 +104,11 @@ interface UserInstallationAccessDiagnostics {
   userId: string;
   installationId: string;
   accountName?: string;
+}
+
+interface AuthenticatedGitHubUserDiagnostics {
+  flow: 'callback' | 'sync';
+  userId: string;
 }
 
 /**
@@ -276,10 +309,10 @@ export async function getInstallationToken(
 export async function getInstallationRepositories(
   installationId: string,
   env: Env
-): Promise<Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }>> {
+): Promise<GitHubRepositoryAccess[]> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const allRepos: Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }> = [];
+  const allRepos: GitHubRepositoryAccess[] = [];
   let page = 1;
   const perPage = 100; // GitHub's max per_page value
   let hasMore = true;
@@ -305,6 +338,7 @@ export async function getInstallationRepositories(
 
     const repos = data.repositories.map((repo) => ({
       id: repo.id,
+      nodeId: repo.node_id ?? null,
       fullName: repo.full_name,
       private: repo.private,
       defaultBranch: repo.default_branch,
@@ -388,6 +422,109 @@ export async function getUserAccessibleInstallations(
   }
 
   return allInstallations;
+}
+
+/**
+ * Get repositories accessible to the authenticated GitHub user for a specific
+ * app installation. Unlike `/installation/repositories`, this endpoint is
+ * filtered by the OAuth user token and is safe for UI lists and authorization.
+ */
+export async function getUserInstallationRepositories(
+  accessToken: string,
+  installationId: string,
+  diagnostics: UserInstallationRepositoriesDiagnostics
+): Promise<GitHubRepositoryAccess[]> {
+  const allRepos: GitHubRepositoryAccess[] = [];
+  let page = 1;
+  const perPage = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=${perPage}&page=${page}`,
+      {
+        headers: githubUserTokenHeaders(accessToken),
+      }
+    );
+
+    const details = {
+      flow: diagnostics.flow,
+      userId: diagnostics.userId,
+      installationId: diagnostics.installationId,
+      repository: diagnostics.repository,
+      page,
+      status: response.status,
+      ok: response.ok,
+    };
+    if (response.ok) {
+      log.info('github.user_installation_repositories.response', details);
+    } else {
+      log.warn('github.user_installation_repositories.response', details);
+    }
+
+    if (!response.ok) {
+      throw new Error(await readGitHubError(response, `Failed to get user installation repositories: ${response.status}`));
+    }
+
+    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.user_installation_repositories');
+    allRepos.push(...data.repositories.map((repo) => ({
+      id: repo.id,
+      nodeId: repo.node_id ?? null,
+      fullName: repo.full_name,
+      private: repo.private,
+      defaultBranch: repo.default_branch,
+    })));
+
+    hasMore = data.repositories.length === perPage;
+    page++;
+
+    if (allRepos.length >= 10000) {
+      log.warn('github.user_installation_repositories.safety_limit_reached', {
+        flow: diagnostics.flow,
+        userId: diagnostics.userId,
+        installationId: diagnostics.installationId,
+        repository: diagnostics.repository,
+        repoCount: allRepos.length,
+      });
+      break;
+    }
+  }
+
+  return allRepos;
+}
+
+/**
+ * Fetch the GitHub identity for the OAuth token owner.
+ *
+ * SAM cannot infer this from `users.github_id` because older production rows may
+ * not have that column populated. The OAuth token is the source of truth for the
+ * current sync request.
+ */
+export async function getAuthenticatedGitHubUser(
+  accessToken: string,
+  diagnostics: AuthenticatedGitHubUserDiagnostics
+): Promise<AuthenticatedGitHubUser> {
+  const response = await fetch('https://api.github.com/user', {
+    headers: githubUserTokenHeaders(accessToken),
+  });
+
+  const details = {
+    flow: diagnostics.flow,
+    userId: diagnostics.userId,
+    status: response.status,
+    ok: response.ok,
+  };
+  if (response.ok) {
+    log.info('github.authenticated_user.response', details);
+  } else {
+    log.warn('github.authenticated_user.response', details);
+  }
+
+  if (!response.ok) {
+    throw new Error(await readGitHubError(response, `Failed to get authenticated GitHub user: ${response.status}`));
+  }
+
+  return readResponseJson(response, authenticatedGitHubUserSchema, 'github.authenticated_user');
 }
 
 /**

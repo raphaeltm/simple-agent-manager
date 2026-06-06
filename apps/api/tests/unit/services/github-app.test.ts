@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  getAuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
   getUserAccessibleInstallations,
+  getUserInstallationRepositories,
   verifyUserInstallationAccess,
 } from '../../../src/services/github-app';
 
@@ -104,6 +106,162 @@ describe('getUserAccessibleInstallations', () => {
       status: 401,
       ok: false,
       installationCount: 0,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+});
+
+describe('getAuthenticatedGitHubUser', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('fetches the OAuth token owner without logging the token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      id: 591860,
+      login: 'lionello',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getAuthenticatedGitHubUser('github-user-token', {
+      flow: 'sync',
+      userId: 'user-1',
+    });
+
+    expect(result).toEqual({ id: 591860, login: 'lionello' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer github-user-token',
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        }),
+      })
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith('github.authenticated_user.response', {
+      flow: 'sync',
+      userId: 'user-1',
+      status: 200,
+      ok: true,
+    });
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
+  });
+
+  it('throws the GitHub error message when authenticated user lookup fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ message: 'Bad credentials' }, { status: 401 }))
+    );
+
+    await expect(getAuthenticatedGitHubUser('expired-token', {
+      flow: 'sync',
+      userId: 'user-1',
+    })).rejects.toThrow('Bad credentials');
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.authenticated_user.response', {
+      flow: 'sync',
+      userId: 'user-1',
+      status: 401,
+      ok: false,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+});
+
+describe('getUserInstallationRepositories', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('lists user-accessible repositories for one installation across pages', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      full_name: `acme/repo-${index + 1}`,
+      private: true,
+      default_branch: 'main',
+    }));
+    const secondPage = [{
+      id: 101,
+      full_name: 'acme/final-repo',
+      private: false,
+      default_branch: 'trunk',
+    }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ total_count: 101, repositories: firstPage }))
+      .mockResolvedValueOnce(Response.json({ total_count: 101, repositories: secondPage }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getUserInstallationRepositories('github-user-token', '120081765', {
+      flow: 'repositories',
+      userId: 'user-1',
+      installationId: '120081765',
+    });
+
+    expect(result).toHaveLength(101);
+    expect(result[0]).toEqual({
+      id: 1,
+      nodeId: null,
+      fullName: 'acme/repo-1',
+      private: true,
+      defaultBranch: 'main',
+    });
+    expect(result[100]).toEqual({
+      id: 101,
+      nodeId: null,
+      fullName: 'acme/final-repo',
+      private: false,
+      defaultBranch: 'trunk',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.github.com/user/installations/120081765/repositories?per_page=100&page=1',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer github-user-token',
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        }),
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://api.github.com/user/installations/120081765/repositories?per_page=100&page=2',
+      expect.any(Object)
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith('github.user_installation_repositories.response', {
+      flow: 'repositories',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: undefined,
+      page: 1,
+      status: 200,
+      ok: true,
+    });
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
+  });
+
+  it('throws GitHub errors without logging the user token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ message: 'Resource not accessible' }, { status: 403 }))
+    );
+
+    await expect(getUserInstallationRepositories('expired-token', '120081765', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private',
+    })).rejects.toThrow('Resource not accessible');
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_installation_repositories.response', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private',
+      page: 1,
+      status: 403,
+      ok: false,
     });
     expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
   });
