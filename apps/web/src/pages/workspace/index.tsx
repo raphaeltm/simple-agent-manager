@@ -394,8 +394,8 @@ export function Workspace() {
       {isMobile && mobileMenuOpen && (
         <>
           <div data-testid="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 glass-backdrop-dim z-drawer-backdrop" />
-          <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-[rgba(34,197,94,0.10)] z-drawer flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-[rgba(34,197,94,0.10)] shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
+          <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-[var(--sam-form-border)] z-drawer flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[var(--sam-form-border)] shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
               <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Workspace</span>
               <button onClick={() => setMobileMenuOpen(false)} aria-label="Close workspace menu" className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"><X size={18} /></button>
             </div>

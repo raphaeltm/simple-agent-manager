@@ -14,15 +14,15 @@ interface DockerSectionProps {
 function stateStyle(state: string): React.CSSProperties {
   switch (state) {
     case 'running':
-      return { color: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.12)' };
+      return { color: 'var(--sam-color-success)', backgroundColor: 'rgba(34, 197, 94, 0.12)' };
     case 'exited':
       return { color: 'var(--sam-color-fg-muted)', backgroundColor: 'rgba(128, 128, 128, 0.1)' };
     case 'paused':
-      return { color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.12)' };
+      return { color: 'var(--sam-color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.12)' };
     case 'restarting':
       return { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.12)' };
     case 'dead':
-      return { color: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.12)' };
+      return { color: 'var(--sam-color-danger)', backgroundColor: 'rgba(239, 68, 68, 0.12)' };
     default:
       return { color: 'var(--sam-color-fg-muted)', backgroundColor: 'rgba(128, 128, 128, 0.08)' };
   }
@@ -53,7 +53,7 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
           className="p-3 rounded-md"
           style={{
             fontSize: 'var(--sam-type-secondary-size)',
-            color: 'var(--sam-color-fg-danger, #ef4444)',
+            color: 'var(--sam-color-danger)',
             backgroundColor: 'rgba(239, 68, 68, 0.08)',
             border: '1px solid rgba(239, 68, 68, 0.2)',
           }}
