@@ -141,7 +141,7 @@ export function ProjectTriggers() {
         </div>
         <button
           onClick={handleNewTrigger}
-          className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-white rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
         >
           <Plus size={16} aria-hidden="true" />
           New Trigger
@@ -192,7 +192,7 @@ function EmptyState({ onCreateTrigger }: { onCreateTrigger: () => void }) {
       </p>
       <button
         onClick={onCreateTrigger}
-        className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-white rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
+        className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
       >
         <Plus size={16} aria-hidden="true" />
         Create your first trigger

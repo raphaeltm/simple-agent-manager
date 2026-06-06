@@ -403,7 +403,7 @@ export function ProjectTriggerDetail() {
               </button>
               <button
                 onClick={() => { setConfirmDelete(false); void handleDelete(); }}
-                className={`px-4 py-2 text-sm font-medium text-white bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
+                className={`px-4 py-2 text-sm font-medium text-fg-on-accent bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
               >
                 Delete
               </button>

@@ -328,7 +328,7 @@ export function ProjectSettings() {
                 className={`p-3 rounded-md text-left text-fg-primary transition-all ${
                   isSelected
                     ? 'border-2 border-accent bg-accent-tint'
-                    : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
+                    : 'border border-[var(--sam-form-border)] bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)]'
                 } ${savingAgentType ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
               >
                 <div className="font-medium">{agent.name}</div>
@@ -622,7 +622,7 @@ export function ProjectSettings() {
       <DeploymentSettings projectId={projectId} />
 
       {/* Danger Zone */}
-      <section className="bg-[rgba(8,15,12,0.3)] backdrop-blur-[12px] rounded-lg border border-danger p-4 grid gap-3">
+      <section className="bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] backdrop-blur-[12px] rounded-lg border border-danger p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-danger">
             Danger Zone

@@ -90,7 +90,7 @@ function SessionRow({ session, onClick }: SessionRowProps) {
   return (
     <button
       onClick={onClick}
-      className="flex items-start gap-3 px-3 py-3 rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex items-start gap-3 px-3 py-3 rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       aria-label={`Open conversation: ${session.topic || 'Untitled conversation'}`}
     >
       <MessageSquare
@@ -243,14 +243,14 @@ function MobileConversationsModal({
       />
       {/* Panel */}
       <div
-        className="fixed inset-x-0 bottom-0 max-h-[80vh] glass-modal glass-panel-container glass-composited border-t border-[rgba(34,197,94,0.10)] rounded-t-2xl z-drawer flex flex-col overflow-hidden"
+        className="fixed inset-x-0 bottom-0 max-h-[80vh] glass-modal glass-panel-container glass-composited border-t border-[var(--sam-form-border)] rounded-t-2xl z-drawer flex flex-col overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label="Linked conversations"
         tabIndex={-1}
       >
         {/* Header + close */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[rgba(34,197,94,0.10)] shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--sam-form-border)] shrink-0">
           <h2 className="text-sm font-semibold text-fg-primary m-0">
             Conversations {sessions.length > 0 && `(${sessions.length})`}
           </h2>
@@ -407,7 +407,7 @@ export function IdeaDetailPage() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer shrink-0 min-h-[44px] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             style={{
               backgroundColor: 'var(--sam-color-accent-primary)',
-              color: 'white',
+              color: 'var(--sam-color-fg-on-accent)',
             }}
             aria-label="Execute this idea"
           >
@@ -487,14 +487,14 @@ export function IdeaDetailPage() {
       <button
         onClick={() => setShowMobileConversations(true)}
         className="fixed bottom-5 right-5 z-[5] flex items-center justify-center w-14 h-14 rounded-full shadow-lg hover:opacity-90 transition-opacity cursor-pointer border-none"
-        style={{ backgroundColor: 'var(--sam-color-accent-primary)', color: 'white' }}
+        style={{ backgroundColor: 'var(--sam-color-accent-primary)', color: 'var(--sam-color-fg-on-accent)' }}
         aria-label={`Show conversations${sessions.length > 0 ? ` (${sessions.length})` : ''}`}
       >
         <MessageSquare size={22} />
         {sessions.length > 0 && (
           <span
             className="absolute -top-1 -right-1 flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full text-[11px] font-bold"
-            style={{ backgroundColor: 'white', color: 'var(--sam-color-accent-primary)' }}
+            style={{ backgroundColor: 'var(--sam-color-bg-surface)', color: 'var(--sam-color-accent-primary)' }}
           >
             {sessions.length}
           </span>

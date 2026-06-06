@@ -202,7 +202,7 @@ export function FilePreviewModal({
                   className={`flex items-center gap-1.5 px-2.5 py-2 text-xs border-none cursor-pointer ${FOCUS_RING} ${
                     mdViewMode === 'rendered'
                       ? 'bg-accent/10 text-accent'
-                      : 'bg-[rgba(8,15,12,0.4)] text-fg-muted hover:text-fg-primary'
+                      : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
                   }`}
                 >
                   <Eye size={14} />
@@ -216,7 +216,7 @@ export function FilePreviewModal({
                   className={`flex items-center gap-1.5 px-2.5 py-2 text-xs border-none cursor-pointer ${FOCUS_RING} ${
                     mdViewMode === 'source'
                       ? 'bg-accent/10 text-accent'
-                      : 'bg-[rgba(8,15,12,0.4)] text-fg-muted hover:text-fg-primary'
+                      : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
                   }`}
                 >
                   <Code size={14} />

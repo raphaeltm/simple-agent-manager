@@ -15,7 +15,7 @@ export function UploadProgressChips({ uploads, onDismiss }: UploadProgressChipsP
       {uploads.map((u) => (
         <div
           key={u.id}
-          className="relative flex items-center gap-2 px-3 py-1.5 rounded-full border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-xs overflow-hidden"
+          className="relative flex items-center gap-2 px-3 py-1.5 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-xs overflow-hidden"
         >
           {/* Progress bar background */}
           {u.status === 'uploading' && (

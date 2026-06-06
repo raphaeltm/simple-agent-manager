@@ -294,7 +294,7 @@ export function NotificationCenter() {
                 {hasMore && (
                   <button
                     onClick={() => loadMore()}
-                    className="w-full py-2 text-xs text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-colors"
+                    className="w-full py-2 text-xs text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg-primary hover:bg-accent-tint transition-colors"
                   >
                     Load more
                   </button>
@@ -324,7 +324,7 @@ export function NotificationCenter() {
                 {hasMore && (
                   <button
                     onClick={() => loadMore()}
-                    className="w-full py-2 text-xs text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-colors"
+                    className="w-full py-2 text-xs text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg-primary hover:bg-accent-tint transition-colors"
                   >
                     Load more
                   </button>
@@ -364,8 +364,8 @@ function NotificationItem({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
-      className={`group flex gap-3 px-4 py-3 cursor-pointer border-b border-border-default border-l-2 transition-colors hover:bg-[rgba(34,197,94,0.04)] ${
-        isUnread ? 'border-l-accent bg-[rgba(34,197,94,0.06)]' : 'border-l-transparent'
+      className={`group flex gap-3 px-4 py-3 cursor-pointer border-b border-border-default border-l-2 transition-colors hover:bg-accent-tint ${
+        isUnread ? 'border-l-accent bg-accent-tint' : 'border-l-transparent'
       }`}
     >
       {/* Type icon */}
@@ -459,7 +459,7 @@ function NotificationGroup({
         onClick={() => setIsCollapsed(!isCollapsed)}
         aria-expanded={!isCollapsed}
         aria-label={`${projectName} — ${notifications.length} notifications${unreadInGroup > 0 ? `, ${unreadInGroup} unread` : ''}`}
-        className="w-full flex items-center gap-2 px-4 py-2.5 min-h-[44px] bg-transparent border-none cursor-pointer border-b border-border-default hover:bg-[rgba(34,197,94,0.04)] transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-2.5 min-h-[44px] bg-transparent border-none cursor-pointer border-b border-border-default hover:bg-accent-tint transition-colors"
       >
         {isCollapsed ? <ChevronRight size={14} className="text-fg-muted" /> : <ChevronDown size={14} className="text-fg-muted" />}
         <Folder size={14} className="text-fg-muted" />

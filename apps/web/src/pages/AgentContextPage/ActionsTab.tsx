@@ -6,17 +6,17 @@ function formatDate(ts: number): string {
 }
 
 const eventTypeColors: Record<string, string> = {
-  error: 'text-red-300 bg-red-500/8 border-red-500/20',
-  fail: 'text-red-300 bg-red-500/8 border-red-500/20',
-  success: 'text-emerald-300 bg-emerald-500/8 border-emerald-500/20',
-  complete: 'text-emerald-300 bg-emerald-500/8 border-emerald-500/20',
+  error: 'text-danger-fg bg-danger-tint border-danger/30',
+  fail: 'text-danger-fg bg-danger-tint border-danger/30',
+  success: 'text-success-fg bg-success-tint border-success/30',
+  complete: 'text-success-fg bg-success-tint border-success/30',
 };
 
 function getEventColor(eventType: string): string {
   for (const [key, value] of Object.entries(eventTypeColors)) {
     if (eventType.toLowerCase().includes(key)) return value;
   }
-  return 'text-fg-muted bg-[rgba(34,197,94,0.04)] border-[rgba(34,197,94,0.08)]';
+  return 'text-fg-muted bg-accent-tint border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)]';
 }
 
 function getSummary(event: ActivityEventResponse): string | undefined {
@@ -37,7 +37,7 @@ function ActionRow({ event }: { event: ActivityEventResponse }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge className={getEventColor(event.eventType)}>{event.eventType}</Badge>
-            <Badge className="border-[rgba(34,197,94,0.12)] bg-[rgba(34,197,94,0.04)] text-fg-muted">{event.actorType}</Badge>
+            <Badge className="border-glass-border bg-accent-tint text-fg-muted">{event.actorType}</Badge>
           </div>
           {summary && (
             <p className="m-0 mt-2 text-[13px] text-fg-muted leading-relaxed break-words">{summary}</p>

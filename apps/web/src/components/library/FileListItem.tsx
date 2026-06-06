@@ -24,7 +24,7 @@ export function FileListItem({
   const overflowCount = file.tags.length - maxVisibleTags;
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] hover:border-accent/40 transition-colors">
+    <div className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] hover:border-accent/40 transition-colors">
       {/* Icon */}
       <div className="shrink-0">{getFileIcon(file.mimeType)}</div>
 

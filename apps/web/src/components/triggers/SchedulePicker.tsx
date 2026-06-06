@@ -363,8 +363,8 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
                   aria-label={day.label}
                   className={`w-9 h-9 rounded-md text-xs font-medium border cursor-pointer transition-colors ${FOCUS_RING} ${
                     selected
-                      ? 'bg-accent text-white border-accent'
-                      : 'bg-[rgba(8,15,12,0.4)] text-fg-muted border-[rgba(34,197,94,0.10)] hover:border-fg-muted'
+                      ? 'bg-accent text-fg-on-accent border-accent'
+                      : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted border-[var(--sam-form-border)] hover:border-fg-muted'
                   }`}
                 >
                   {day.short}

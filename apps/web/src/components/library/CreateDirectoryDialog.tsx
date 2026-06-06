@@ -101,10 +101,10 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
             maxLength={100}
             aria-describedby={error ? 'dir-name-error' : undefined}
             aria-invalid={!!error}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-inset text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent mb-1"
+            className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-inset text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent mb-1"
           />
           {error && (
-            <p id="dir-name-error" role="alert" className="text-xs text-red-500 m-0 mb-2">
+            <p id="dir-name-error" role="alert" className="text-xs text-danger m-0 mb-2">
               {error}
             </p>
           )}
@@ -112,13 +112,13 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className={`px-3 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted hover:text-fg-primary cursor-pointer ${FOCUS_RING}`}
+              className={`px-3 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-fg-muted hover:text-fg-primary cursor-pointer ${FOCUS_RING}`}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={`px-3 py-2 text-sm rounded-lg border-none bg-accent text-white font-medium cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
+              className={`px-3 py-2 text-sm rounded-lg border-none bg-accent text-fg-on-accent font-medium cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
             >
               Create
             </button>
