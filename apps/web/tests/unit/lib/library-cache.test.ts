@@ -202,4 +202,82 @@ describe('library-cache', () => {
       expect(getCachedIndex('proj-1')).toBeNull();
     });
   });
+
+  describe('localStorage quota safety', () => {
+    it('skips the write (no throw, no eviction) when the value exceeds the size guard', () => {
+      // Default INDEX_MAX_CACHE_CHARS is ~2M chars; build a payload above it.
+      const huge = Array.from({ length: 8000 }, (_, i) => {
+        const f = makeIndexFile(`f${i}`);
+        f.description = 'x'.repeat(400);
+        return f;
+      });
+
+      const removeSpy = vi.spyOn(Storage.prototype, 'removeItem');
+      const ok = setCachedIndex('proj-1', huge);
+
+      expect(ok).toBe(false);
+      expect(getCachedIndex('proj-1')).toBeNull();
+      // Oversized values are skipped outright — no eviction churn.
+      expect(removeSpy).not.toHaveBeenCalled();
+      removeSpy.mockRestore();
+    });
+
+    it('evicts the oldest sam-library entry and retries once on a quota error', () => {
+      // Seed an older library entry that becomes the eviction victim.
+      vi.setSystemTime(new Date('2026-04-24T11:00:00Z'));
+      setCachedFiles('proj-1', '/old/', 'createdAt', { files: [], cursor: null, total: 0 });
+      vi.setSystemTime(new Date('2026-04-24T12:00:00Z'));
+
+      const realSetItem = Storage.prototype.setItem;
+      let firstWrite = true;
+      const setSpy = vi
+        .spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(function (this: Storage, key: string, value: string) {
+          // Fail only the FIRST index write to trigger one eviction + retry.
+          if (firstWrite && key.endsWith(':global-index')) {
+            firstWrite = false;
+            throw new DOMException('quota', 'QuotaExceededError');
+          }
+          return realSetItem.call(this, key, value);
+        } as typeof Storage.prototype.setItem);
+
+      const ok = setCachedIndex('proj-1', [makeIndexFile('a')]);
+
+      expect(ok).toBe(true);
+      // The older per-directory entry was evicted to make room.
+      expect(getCachedDirectories('proj-1', '/old/')).toBeNull();
+      // The retry succeeded and the index persisted.
+      expect(getCachedIndex('proj-1')?.count).toBe(1);
+      setSpy.mockRestore();
+    });
+
+    it('gives up after MAX_EVICTIONS persistent quota failures without throwing or looping', () => {
+      // Seed several library entries so eviction always finds a victim.
+      vi.setSystemTime(new Date('2026-04-24T11:00:00Z'));
+      for (let i = 0; i < 10; i++) {
+        setCachedFiles('proj-1', `/d${i}/`, 'createdAt', { files: [], cursor: null, total: 0 });
+      }
+      vi.setSystemTime(new Date('2026-04-24T12:00:00Z'));
+
+      const realSetItem = Storage.prototype.setItem;
+      const setSpy = vi
+        .spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(function (this: Storage, key: string, value: string) {
+          // Persistent quota failure for the index write — every attempt throws.
+          if (key.endsWith(':global-index')) {
+            throw new DOMException('quota', 'QuotaExceededError');
+          }
+          return realSetItem.call(this, key, value);
+        } as typeof Storage.prototype.setItem);
+
+      // Must return false (not throw, not loop forever).
+      const ok = setCachedIndex('proj-1', [makeIndexFile('a')]);
+
+      expect(ok).toBe(false);
+      // Bounded by MAX_EVICTIONS (5) + 1 initial attempt = 6 index-write attempts.
+      const indexWrites = setSpy.mock.calls.filter(([k]) => String(k).endsWith(':global-index'));
+      expect(indexWrites.length).toBe(6);
+      setSpy.mockRestore();
+    });
+  });
 });

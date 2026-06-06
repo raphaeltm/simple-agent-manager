@@ -143,4 +143,41 @@ describe('useLibraryIndex', () => {
     act(() => result.current.invalidate());
     await waitFor(() => expect(listLibraryFiles.mock.calls.length).toBeGreaterThan(before));
   });
+
+  it('generation guard discards a stale in-flight sweep when invalidate() supersedes it', async () => {
+    // Two deferred sweeps: A is in-flight when invalidate() starts B.
+    function deferred() {
+      let resolve!: (v: ListFilesResponse) => void;
+      const promise = new Promise<ListFilesResponse>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+    const sweepA = deferred();
+    const sweepB = deferred();
+    listLibraryFiles.mockReturnValueOnce(sweepA.promise).mockReturnValueOnce(sweepB.promise);
+
+    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+    expect(result.current.status).toBe('loading');
+
+    // Supersede sweep A before it resolves — bumps the generation, starts sweep B.
+    act(() => result.current.invalidate());
+    await waitFor(() => expect(listLibraryFiles.mock.calls.length).toBe(2));
+
+    // Resolve the STALE sweep first, then the current one.
+    await act(async () => {
+      sweepA.resolve(page([makeFile({ id: 'stale' })], null, 1));
+      sweepB.resolve(page([makeFile({ id: 'fresh' })], null, 1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    // Stale sweep A's result must be discarded; only sweep B's files survive.
+    expect(result.current.files.map((f) => f.id)).toEqual(['fresh']);
+    // And the stale result must never have been cached.
+    for (const call of cache.setCachedIndex.mock.calls) {
+      const cached = call[1] as FileWithTags[];
+      expect(cached.map((f) => f.id)).not.toContain('stale');
+    }
+  });
 });
