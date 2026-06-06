@@ -169,6 +169,13 @@ export const LIBRARY_DEFAULTS = {
   FILE_PREVIEW_MAX_BYTES: 50 * 1024 * 1024,
   /** Maximum search query length in characters (default: 200). Env: LIBRARY_MAX_SEARCH_LENGTH */
   MAX_SEARCH_LENGTH: 200,
+  /**
+   * Maximum file count for which the web client sweeps the entire library into
+   * a client-side index for instant ranked search (default: 300). At or above
+   * this count the client falls back to the server-search path. The web app may
+   * override this via VITE_LIBRARY_CLIENT_SWEEP_CAP.
+   */
+  CLIENT_SWEEP_CAP: 300,
 } as const;
 
 /**
