@@ -1,9 +1,9 @@
 # Productionize Project Onboarding Wizard
 
 **Date:** 2026-06-06
-**SAM Task:** 01KTER829FVMTCYCVWTDQNBBXY
+**SAM Task:** 01KTEVD7N7M28P5RDJ7M0Y5ZPF
 **SAM Idea:** 01KTEQTH0E2VYRBP6MK3QK6HJ1
-**Output branch:** sam/productionize-project-onboarding-prototype-01kter
+**Output branch:** sam/productionize-project-onboarding-prototype-01ktev
 **Constraint:** Open a DRAFT PR; do NOT merge.
 
 ## Problem Statement
