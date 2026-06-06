@@ -172,7 +172,7 @@ export function AppShell({ children }: AppShellProps) {
       <OnboardingProvider>
       <ChoosePathWizard />
       <div className="flex flex-col h-screen">
-        <header className="relative z-30 flex items-center justify-between px-4 py-2 glass-chrome glass-panel-container glass-composited border-x-0 border-t-0 after:content-[''] after:absolute after:bottom-0 after:left-[10%] after:right-[10%] after:h-0.5 after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.3)_0%,transparent_70%)] after:blur-[1px] after:pointer-events-none">
+        <header className="relative z-30 flex items-center justify-between px-4 py-2 glass-chrome glass-panel-container glass-composited border-x-0 border-t-0 after:content-[''] after:absolute after:bottom-0 after:left-[10%] after:right-[10%] after:h-0.5 after:bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow)_0%,transparent_70%)] after:blur-[1px] after:pointer-events-none">
           {/* Title on the left */}
           <Link to="/dashboard">
             <img src="/sam-head.png" alt="SAM" className="h-7 w-7 object-contain" />
@@ -262,7 +262,7 @@ export function AppShell({ children }: AppShellProps) {
           projectListSection={desktopProjectListSection}
         />
         {user && (
-          <div className="mt-auto p-3 border-t border-[rgba(34,197,94,0.12)] bg-[rgba(0,0,0,0.15)] flex items-center gap-2">
+          <div className="mt-auto p-3 border-t border-[var(--sam-glass-border-color)] bg-[var(--sam-chrome-footer-bg)] flex items-center gap-2">
             {avatarElement}
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">

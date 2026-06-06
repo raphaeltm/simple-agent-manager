@@ -93,7 +93,7 @@ export const SplitButton: FC<SplitButtonProps> = ({
         type="button"
         onClick={onPrimaryAction}
         disabled={isDisabled}
-        className={`inline-flex items-center gap-2 px-4 py-2 bg-accent text-white border-none text-sm font-medium transition-[filter] duration-150 ${
+        className={`inline-flex items-center gap-2 px-4 py-2 bg-accent text-fg-on-accent border-none text-sm font-medium transition-[filter] duration-150 ${
           isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:brightness-110'
         }`}
         style={{ borderRadius: 'var(--sam-radius-md) 0 0 var(--sam-radius-md)' }}
@@ -102,8 +102,8 @@ export const SplitButton: FC<SplitButtonProps> = ({
           <span
             className="inline-block w-3.5 h-3.5 rounded-full animate-spin"
             style={{
-              border: '2px solid rgba(255,255,255,0.3)',
-              borderTopColor: '#fff',
+              border: '2px solid var(--sam-button-on-accent-spinner-border)',
+              borderTopColor: 'var(--sam-color-fg-on-accent)',
             }}
           />
         )}
@@ -116,11 +116,11 @@ export const SplitButton: FC<SplitButtonProps> = ({
         onClick={() => !isDisabled && setOpen(!open)}
         disabled={isDisabled}
         aria-label="More options"
-        className={`inline-flex items-center px-2 py-2 bg-accent text-white border-none transition-[filter] duration-150 ${
+        className={`inline-flex items-center px-2 py-2 bg-accent text-fg-on-accent border-none transition-[filter] duration-150 ${
           isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:brightness-110'
         }`}
         style={{
-          borderLeft: '1px solid rgba(255,255,255,0.2)',
+          borderLeft: '1px solid var(--sam-button-on-accent-border)',
           borderRadius: '0 var(--sam-radius-md) var(--sam-radius-md) 0',
         }}
       >

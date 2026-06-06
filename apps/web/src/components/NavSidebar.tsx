@@ -84,9 +84,9 @@ function isProjectSubActive(subPath: string, projectId: string, pathname: string
 
 const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 const NAV_ITEM_BASE = `flex items-center gap-3 pl-[10px] pr-3 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
-const NAV_ITEM_ACTIVE = 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]';
-const NAV_ITEM_INACTIVE = 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]';
-const SECTION_DIVIDER = 'mt-2 pt-2 before:content-[\'\'] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,rgba(34,197,94,0.18),transparent)]';
+const NAV_ITEM_ACTIVE = 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]';
+const NAV_ITEM_INACTIVE = 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]';
+const SECTION_DIVIDER = 'mt-2 pt-2 before:content-[\'\'] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,var(--sam-chrome-accent-divider),transparent)]';
 
 interface NavSidebarProps {
   className?: string;
@@ -112,7 +112,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
     <div className={SECTION_DIVIDER}>
       <button
         onClick={() => setInfraOpen(!infraOpen)}
-        className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
+        className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-150 ${FOCUS_RING}`}
         aria-expanded={infraOpen}
         aria-controls="infra-nav-panel"
       >
@@ -150,7 +150,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
     <div className={SECTION_DIVIDER}>
       <button
         onClick={openOnboarding}
-        className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[rgba(34,197,94,0.06)] hover:bg-[rgba(34,197,94,0.12)]`}
+        className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[var(--sam-chrome-accent-soft)] hover:bg-[var(--sam-chrome-accent-active)]`}
       >
         <PlayCircle size={18} />
         Complete Setup
@@ -181,7 +181,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             {/* Toggle to global nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label="Show global navigation"
             >
               <ArrowLeft size={16} />
@@ -222,7 +222,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             {/* Toggle back to project nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label={`Back to ${projectName || 'project'} navigation`}
             >
               <ArrowRight size={16} />
