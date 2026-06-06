@@ -136,7 +136,10 @@ describe('library-search — searchIndex ranking and ordering', () => {
       makeFile({ id: 'nested', filename: 'budget-q2.txt', directory: '/finance/2026/' }),
     ]);
     const results = searchIndex(index, 'budget')!;
-    expect(results.map((r) => r.file.id).sort()).toEqual(['nested', 'root']);
+    expect(results.map((r) => r.file.id).sort((a, b) => a.localeCompare(b))).toEqual([
+      'nested',
+      'root',
+    ]);
   });
 
   it('excludes non-matching files', () => {
