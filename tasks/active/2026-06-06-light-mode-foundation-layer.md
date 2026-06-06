@@ -1,6 +1,6 @@
 # Light Mode Foundation Layer (Phase 0)
 
-**Status:** active
+**Status:** ready for draft PR
 **Branch:** sam/implement-foundation-layer-light-01kten
 **Date:** 2026-06-06
 
@@ -49,34 +49,41 @@ converted to a token MUST keep its dark value byte-for-byte identical.
 
 ## Implementation Checklist
 
-- [ ] Add `[data-ui-theme='sam-light']` (+ `*` descendant) block in theme.css:
+- [x] Add `[data-ui-theme='sam-light']` (+ `*` descendant) block in theme.css:
       override every semantic `--sam-color-*` with warm greenish-white light values,
       light glass vars, softer light shadows. Do NOT override `--sam-color-tn-*`.
-- [ ] Convert hardcoded glass rgb() fallbacks in index.css to new `--sam-glass-*`
+- [x] Convert hardcoded glass rgb() fallbacks in index.css to new `--sam-glass-*`
       fallback vars (dark = exact current literals), add light values.
-- [ ] Tokenize body gradients into `--sam-*` vars (dark = current literals) + light.
-- [ ] Tokenize form bg/border/focus into `--sam-*` vars (dark = current) + light.
-- [ ] Add light `.glass-msg-user` / `.glass-msg-assistant` variants.
-- [ ] Build ThemeProvider (React context) + useTheme hook. State 'dark'|'light',
+- [x] Tokenize body gradients into `--sam-*` vars (dark = current literals) + light.
+- [x] Tokenize form bg/border/focus into `--sam-*` vars (dark = current) + light.
+- [x] Add light `.glass-msg-user` / `.glass-msg-assistant` variants.
+- [x] Build ThemeProvider (React context) + useTheme hook. State 'dark'|'light',
       default dark, persist localStorage key 'sam-theme', apply attribute on <html>.
-- [ ] Pre-paint init in main.tsx: read localStorage, fall back to dark, before render.
-- [ ] Add sun/moon toggle in UserMenu wired through useTheme.
-- [ ] Delete semantic-tokens.ts + remove barrel export line.
-- [ ] Behavioral test: render toggle, click, assert attribute + localStorage flip.
-- [ ] Playwright visual audit: dark+light @ 375px & 1280px; dark parity before/after;
+- [x] Pre-paint init in main.tsx: read localStorage, fall back to dark, before render.
+- [x] Add sun/moon toggle in UserMenu wired through useTheme.
+- [x] Delete semantic-tokens.ts + remove barrel export line.
+- [x] Behavioral test: render toggle, click, assert attribute + localStorage flip.
+- [x] Playwright visual audit: dark+light @ 375px & 1280px; dark parity before/after;
       assert no horizontal overflow. Save to `.codex/tmp/playwright-screenshots/`.
 
 ## Acceptance Criteria
 
-- [ ] Dark mode is byte-for-byte unchanged (visual parity screenshots match).
-- [ ] `[data-ui-theme='sam-light']` overrides all semantic colors + glass + shadows.
-- [ ] Tokyo Night palette stays dark in both themes.
-- [ ] Theme toggle in UserMenu switches themes and persists across reload.
-- [ ] No FOUC: correct theme applied before first paint.
-- [ ] WCAG AA: light body text ≥4.5:1, large/UI ≥3:1.
-- [ ] semantic-tokens.ts removed; no dangling imports.
+- [x] Dark mode is byte-for-byte unchanged (visual parity screenshots match).
+- [x] `[data-ui-theme='sam-light']` overrides all semantic colors + glass + shadows.
+- [x] Tokyo Night palette stays dark in both themes.
+- [x] Theme toggle in UserMenu switches themes and persists across reload.
+- [x] No FOUC: correct theme applied before first paint.
+- [x] WCAG AA: light body text ≥4.5:1, large/UI ≥3:1.
+- [x] semantic-tokens.ts removed; no dangling imports.
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all green.
-- [ ] No horizontal overflow at mobile/desktop in either theme.
+- [x] No horizontal overflow at mobile/desktop in either theme.
+
+## Continuation Notes
+
+- Rebased this branch onto `origin/main` on 2026-06-06 after Claude usage exhausted,
+  so the draft PR no longer includes reversions of newer mainline work.
+- The remaining unchecked item is the current-session validation rerun; previous
+  commits already include unit and Playwright audit coverage.
 
 ## Delivery Constraints
 
