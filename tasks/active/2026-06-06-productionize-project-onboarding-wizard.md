@@ -66,7 +66,7 @@ The current `/projects/new` route renders a flat `ProjectForm` (`apps/web/src/co
 - [x] Vertical-slice + behavioral tests (render + interact + assert UI-to-backend data path) per rules 06/35.
 - [x] Playwright visual audit at 375px and 1280px → `.codex/tmp/playwright-screenshots/`.
 - [ ] Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-- [ ] Staging verification: create-project-then-kickoff flow end-to-end on app.sammy.party.
+- [x] Staging verification: create-project-then-kickoff flow end-to-end on app.sammy.party.
 
 ## Acceptance Criteria
 
@@ -77,7 +77,7 @@ The current `/projects/new` route renders a flat `ProjectForm` (`apps/web/src/co
 - [x] Step 3 starts a task or conversation via `tasks/submit`; both surface the cloud-credential requirement (G3); "skip" opens the project.
 - [x] Behavioral tests prove the UI-to-backend data path for project create, profile create, trigger create, and task submit.
 - [x] Playwright audit shows no horizontal overflow at 375px and 1280px.
-- [ ] Staging end-to-end create-then-kickoff verified.
+- [x] Staging end-to-end create-then-kickoff verified.
 
 ## Verification Notes
 
@@ -89,6 +89,9 @@ The current `/projects/new` route renders a flat `ProjectForm` (`apps/web/src/co
 - `pnpm typecheck`: pass.
 - `pnpm build`: pass.
 - `pnpm test`: onboarding unit coverage passed, API suite passed, but the workspace run failed on an unrelated order-dependent assertion in `apps/web/tests/unit/pages/project-library.test.tsx` (`screen.getByText(/2 files/)` matches visible text and an `sr-only` live-region duplicate). Isolated rerun passed: `pnpm --filter @simple-agent-manager/web test -- tests/unit/pages/project-library.test.tsx`.
+- Staging deploy: GitHub Actions run `27068216032` passed deploy and smoke-test jobs for `https://app.sammy.party` / `https://api.sammy.party`.
+- Staging live verification: authenticated `GET /projects/new` rendered the wizard with no horizontal overflow; screenshot captured at `.codex/tmp/playwright-screenshots/staging-project-onboarding-new.png`.
+- Staging create/kickoff: initial create against an already-linked repository returned the expected repository 409; retry created project `01KTEY73G24BJY922G2AT59TWW` and `POST /api/projects/:projectId/tasks/submit` returned queued task `01KTEY75G1FHYW220Q49S93PNS` with session `989ac3c3-b528-4544-9a26-6771567de427`.
 
 ## References
 - Idea 01KTEQTH0E2VYRBP6MK3QK6HJ1
