@@ -1,12 +1,19 @@
-import type {
-  DirectoryEntry,
-  ListFilesResponse,
-  ProjectFile,
-  ProjectFileTag,
+import {
+  type DirectoryEntry,
+  LIBRARY_DEFAULTS,
+  type ListFilesResponse,
+  type ProjectFile,
+  type ProjectFileTag,
 } from '@simple-agent-manager/shared';
 
 const CACHE_PREFIX = 'sam-library:';
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Cache TTL (ms). Overridable via VITE_LIBRARY_CACHE_TTL_MS for self-hosters. */
+const CACHE_TTL_MS = (() => {
+  const raw = import.meta.env?.VITE_LIBRARY_CACHE_TTL_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : LIBRARY_DEFAULTS.CLIENT_CACHE_TTL_MS;
+})();
 
 /**
  * Approximate ceiling for a single cached value (UTF-16 chars). Above this we
@@ -84,7 +91,14 @@ function readCache<T>(key: string): T | null {
   }
 }
 
-const MAX_EVICTIONS = 5;
+/** Max LRU evictions on a quota error. Overridable via VITE_LIBRARY_CACHE_MAX_EVICTIONS. */
+const MAX_EVICTIONS = (() => {
+  const raw = import.meta.env?.VITE_LIBRARY_CACHE_MAX_EVICTIONS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : LIBRARY_DEFAULTS.CLIENT_CACHE_MAX_EVICTIONS;
+})();
 
 /**
  * Write to localStorage with a size guard and LRU eviction. Returns true if the

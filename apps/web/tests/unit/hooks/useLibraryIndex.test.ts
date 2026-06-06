@@ -133,6 +133,33 @@ describe('useLibraryIndex', () => {
     expect(result.current.files[0]!.id).toBe('cached');
   });
 
+  it('reports status:error when the first page fails with no cache and nothing accumulated', async () => {
+    cache.getCachedIndex.mockReturnValue(null);
+    listLibraryFiles.mockRejectedValueOnce(new Error('network'));
+
+    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.sweepError).toBe(true);
+    expect(result.current.files).toEqual([]);
+    expect(cache.setCachedIndex).not.toHaveBeenCalled();
+  });
+
+  it('stops sweeping at the page cap even when the cursor never goes null', async () => {
+    // Every page returns a non-null cursor and a sub-cap total, so only the
+    // runaway-guard (maxSweepPages, default 10) can terminate the loop.
+    listLibraryFiles.mockImplementation(async (_projectId: string, opts: { cursor?: string }) => {
+      const next = `${Number(opts.cursor ?? '0') + 1}`;
+      return page([makeFile({ id: next })], next, 5);
+    });
+
+    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(listLibraryFiles.mock.calls.length).toBe(10);
+    expect(result.current.files.length).toBe(10);
+  });
+
   it('re-sweeps when invalidate() is called', async () => {
     listLibraryFiles.mockResolvedValue(page([makeFile({ id: 'a' })], null, 1));
 

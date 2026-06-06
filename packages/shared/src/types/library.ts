@@ -176,6 +176,29 @@ export const LIBRARY_DEFAULTS = {
    * override this via VITE_LIBRARY_CLIENT_SWEEP_CAP.
    */
   CLIENT_SWEEP_CAP: 300,
+  /**
+   * Safety cap on client sweep iterations (default: 10). At LIST_MAX_PAGE_SIZE
+   * (200) this covers 2000 files — far above CLIENT_SWEEP_CAP — so it only ever
+   * fires as a runaway guard. The web app may override via
+   * VITE_LIBRARY_CLIENT_MAX_SWEEP_PAGES.
+   */
+  CLIENT_MAX_SWEEP_PAGES: 10,
+  /**
+   * Client-side library cache TTL in milliseconds (default: 5 minutes). The web
+   * app may override via VITE_LIBRARY_CACHE_TTL_MS.
+   */
+  CLIENT_CACHE_TTL_MS: 5 * 60 * 1000,
+  /**
+   * Maximum LRU evictions attempted on a localStorage quota error before giving
+   * up on a cache write (default: 5). The web app may override via
+   * VITE_LIBRARY_CACHE_MAX_EVICTIONS.
+   */
+  CLIENT_CACHE_MAX_EVICTIONS: 5,
+  /**
+   * Debounce delay in milliseconds for the always-visible library search input
+   * (default: 300). The web app may override via VITE_LIBRARY_SEARCH_DEBOUNCE_MS.
+   */
+  CLIENT_SEARCH_DEBOUNCE_MS: 300,
 } as const;
 
 /**

@@ -205,9 +205,13 @@ describe('ProjectLibrary (client-side index)', () => {
     await waitFor(() => expect(screen.getByText('test.txt')).toBeInTheDocument());
 
     // Source filter buttons live inside the (collapsed) filter panel.
-    expect(screen.queryByRole('button', { name: 'Agent' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Show only agent-uploaded files' }),
+    ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Toggle filters' }));
-    expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Show only agent-uploaded files' }),
+    ).toBeInTheDocument();
   });
 
   it('switches between list and grid view', async () => {
@@ -251,8 +255,8 @@ describe('ProjectLibrary (client-side index)', () => {
 
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
     expect(screen.getByText('readme.md')).toBeInTheDocument();
-    expect(screen.getByText(/2 files/)).toBeInTheDocument();
-    expect(screen.getByText(/1 folder/)).toBeInTheDocument();
+    expect(screen.getAllByText(/2 files/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/1 folder/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('opens the preview modal when ?preview= matches a swept file', async () => {
@@ -401,7 +405,7 @@ describe('ProjectLibrary (client-side index)', () => {
 
     // The 50-item server page size does not cap the client index.
     expect(screen.getByText('file-59.txt')).toBeInTheDocument();
-    expect(screen.getByText(/60 files/)).toBeInTheDocument();
+    expect(screen.getAllByText(/60 files/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('regression: a mutation refresh does not resurrect a deleted file', async () => {
@@ -430,6 +434,87 @@ describe('ProjectLibrary (client-side index)', () => {
     // After the re-sweep the deleted file is gone and stays gone.
     await waitFor(() => expect(screen.queryByText('delete-me.md')).not.toBeInTheDocument());
     expect(screen.getByText('keep.md')).toBeInTheDocument();
+  });
+
+  // --- Advanced filter + sort interactions (applyAdvancedFilters / sortFiles) ---
+
+  it('source filter narrows the displayed files to the selected upload source', async () => {
+    mocks.listLibraryFiles.mockResolvedValue(
+      page([
+        makeFile({ id: 'f1', filename: 'human-note.txt', uploadSource: 'user' }),
+        makeFile({ id: 'f2', filename: 'agent-report.json', uploadSource: 'agent' }),
+      ]),
+    );
+
+    renderLibrary();
+
+    await waitFor(() => expect(screen.getByText('human-note.txt')).toBeInTheDocument());
+    expect(screen.getByText('agent-report.json')).toBeInTheDocument();
+
+    // Open the filter panel and restrict to agent-uploaded files.
+    await userEvent.click(screen.getByRole('button', { name: 'Toggle filters' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show only agent-uploaded files' }));
+
+    // The user file is filtered out; the agent file remains.
+    await waitFor(() => expect(screen.queryByText('human-note.txt')).not.toBeInTheDocument());
+    expect(screen.getByText('agent-report.json')).toBeInTheDocument();
+    expect(screen.getAllByText(/1 file/).length).toBeGreaterThanOrEqual(1);
+    // No server round-trip — filtering is served from the client index.
+    expect(mocks.listLibraryFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('tag filter narrows the displayed files to those carrying the selected tag', async () => {
+    mocks.listLibraryFiles.mockResolvedValue(
+      page([
+        makeFile({
+          id: 'f1',
+          filename: 'spec.md',
+          tags: [{ fileId: 'f1', tag: 'docs', tagSource: 'user' }],
+        }),
+        makeFile({ id: 'f2', filename: 'photo.png', mimeType: 'image/png' }),
+      ]),
+    );
+
+    renderLibrary();
+
+    await waitFor(() => expect(screen.getByText('spec.md')).toBeInTheDocument());
+    expect(screen.getByText('photo.png')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Toggle filters' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Filter by tag: docs' }));
+
+    // Only the tagged file survives the filter.
+    await waitFor(() => expect(screen.queryByText('photo.png')).not.toBeInTheDocument());
+    expect(screen.getByText('spec.md')).toBeInTheDocument();
+    expect(mocks.listLibraryFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('changing the sort dropdown reorders the unfiltered file list', async () => {
+    // Distinct sizes + names so createdAt (default), name, and size orders differ.
+    mocks.listLibraryFiles.mockResolvedValue(
+      page([
+        makeFile({ id: 'f1', filename: 'zebra.txt', sizeBytes: 10, createdAt: '2026-04-03T00:00:00Z' }),
+        makeFile({ id: 'f2', filename: 'apple.txt', sizeBytes: 30, createdAt: '2026-04-02T00:00:00Z' }),
+        makeFile({ id: 'f3', filename: 'mango.txt', sizeBytes: 20, createdAt: '2026-04-01T00:00:00Z' }),
+      ]),
+    );
+
+    renderLibrary();
+
+    await waitFor(() => expect(screen.getByText('zebra.txt')).toBeInTheDocument());
+
+    const filenamesInOrder = () =>
+      screen
+        .getAllByText(/\.txt$/)
+        .map((el) => el.textContent)
+        .filter((t): t is string => t !== null);
+
+    // Default sort is newest-first by createdAt: zebra (04-03) → apple (04-02) → mango (04-01).
+    expect(filenamesInOrder()).toEqual(['zebra.txt', 'apple.txt', 'mango.txt']);
+
+    // Switch to name order — alphabetical ascending.
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Sort by' }), 'filename');
+    await waitFor(() => expect(filenamesInOrder()).toEqual(['apple.txt', 'mango.txt', 'zebra.txt']));
   });
 
   // --- Over-cap server fallback --------------------------------------------

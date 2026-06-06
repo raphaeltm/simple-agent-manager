@@ -119,13 +119,19 @@ export function ProjectLibrary() {
   // debouncedSearch drives ONLY (a) URL write-only reflection and (b) the
   // over-cap server-search fallback. It is never read back into the input.
   const [searchInput, setSearchInput] = useState('');
-  const debouncedSearch = useDebouncedValue(searchInput, 300);
+  const debouncedSearch = useDebouncedValue(searchInput, LIBRARY_DEFAULTS.CLIENT_SEARCH_DEBOUNCE_MS);
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<'all' | FileUploadSource>('all');
   const isSearchPending = searchInput !== debouncedSearch;
 
   const query = searchInput.trim();
   const isSearching = query.length > 0;
+
+  // Debounced screen-reader announcement. The visible count updates instantly on
+  // every keystroke (sub-cap filtering is synchronous), but announcing on every
+  // keystroke floods assistive tech. We mirror the visible text into a separate
+  // sr-only live region that only updates once typing settles (debouncedSearch).
+  const [announcement, setAnnouncement] = useState('');
 
   // Uploads
   const [uploads, setUploads] = useState<UploadItem[]>([]);
@@ -190,6 +196,35 @@ export function ProjectLibrary() {
   // Directory cards are hidden during active search (the matcher already spans
   // directory paths, surfacing files across all folders).
   const displayDirectories = isSearching ? [] : directories;
+
+  // Refs hold the latest counts so the debounced announcement effect can read
+  // settled values without re-firing on every intermediate keystroke.
+  const displayFilesCountRef = useRef(displayFiles.length);
+  displayFilesCountRef.current = displayFiles.length;
+  const displayDirsCountRef = useRef(displayDirectories.length);
+  displayDirsCountRef.current = displayDirectories.length;
+
+  // anyContent toggles only at the empty boundary (and on first load), never on
+  // every keystroke — so it drives the initial announcement without flooding.
+  const anyContent = displayFiles.length > 0 || displayDirectories.length > 0;
+  useEffect(() => {
+    const dq = debouncedSearch.trim();
+    const searching = dq.length > 0;
+    const fileCount = displayFilesCountRef.current;
+    const dirCount = displayDirsCountRef.current;
+    if (fileCount > 0 || dirCount > 0) {
+      let text = searching
+        ? `${fileCount} result${fileCount !== 1 ? 's' : ''} for “${dq}”`
+        : `${fileCount} file${fileCount !== 1 ? 's' : ''}`;
+      if (dirCount > 0) text += `, ${dirCount} folder${dirCount !== 1 ? 's' : ''}`;
+      if (currentDirectory !== '/' && !searching) text += ` in ${currentDirectory}`;
+      setAnnouncement(text);
+    } else if (searching) {
+      setAnnouncement(`No files match “${dq}”`);
+    } else {
+      setAnnouncement('');
+    }
+  }, [debouncedSearch, currentDirectory, anyContent]);
 
   // ---------------------------------------------------------------------------
   // Directory fetch — runs for both modes, on project/dir change or mutation.
@@ -517,7 +552,10 @@ export function ProjectLibrary() {
       </div>
 
       {/* Always-visible search row — full width, between header and breadcrumb.
-          Sticky on mobile so it stays reachable while scrolling long lists. */}
+          Sticky on mobile so it stays reachable while scrolling long lists.
+          z-10 lifts the row above scrolling file/folder cards (which create no
+          stacking context of their own) so it stays opaque over them; the bg
+          fill prevents content bleeding through during scroll. */}
       <div className={isMobile ? 'sticky top-0 z-10 -mx-4 px-4 py-2 bg-canvas' : ''}>
         <div className="relative">
           <Search
@@ -574,7 +612,7 @@ export function ProjectLibrary() {
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortOption)}
               aria-label="Sort by"
-              className="w-full px-2.5 py-2 text-sm rounded-lg text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
+              className="w-full px-2.5 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
             >
               <option value="createdAt">Newest</option>
               <option value="filename">Name</option>
@@ -592,6 +630,7 @@ export function ProjectLibrary() {
                     key={tag}
                     onClick={() => handleTagClick(tag)}
                     aria-pressed={isActive}
+                    aria-label={`Filter by tag: ${tag}`}
                     className={`px-2.5 py-1 rounded-full text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
                       isActive
                         ? 'bg-accent text-white'
@@ -612,6 +651,13 @@ export function ProjectLibrary() {
                 key={src}
                 onClick={() => setSourceFilter(src)}
                 aria-pressed={sourceFilter === src}
+                aria-label={
+                  src === 'all'
+                    ? 'Show files from all sources'
+                    : src === 'user'
+                      ? 'Show only user-uploaded files'
+                      : 'Show only agent-uploaded files'
+                }
                 className={`px-3 py-1.5 rounded-lg text-xs border-none cursor-pointer transition-colors ${FOCUS_RING} ${
                   sourceFilter === src
                     ? 'bg-accent text-white'
@@ -650,10 +696,11 @@ export function ProjectLibrary() {
         />
       )}
 
-      {/* Status bar — file/folder count + live region for screen readers */}
+      {/* Status bar — visible count updates instantly; the debounced sr-only live
+          region below announces the settled count without flooding screen readers. */}
       <div className="flex items-center gap-2">
         {isRefreshing && <Spinner size="sm" />}
-        <p className="text-xs text-fg-muted m-0" aria-live="polite" aria-atomic="true">
+        <p className="text-xs text-fg-muted m-0">
           {hasContent ? (
             <>
               {isSearching
@@ -670,6 +717,10 @@ export function ProjectLibrary() {
             ''
           )}
         </p>
+        {/* Debounced live region — announces only the settled result count. */}
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {announcement}
+        </span>
       </div>
 
       {/* Directories — compact card grid (hidden during search) */}

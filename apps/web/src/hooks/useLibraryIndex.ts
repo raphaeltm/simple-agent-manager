@@ -29,7 +29,11 @@ import {
 import { buildIndex, type LibraryIndex } from '../lib/library-search';
 
 /** Safety cap on sweep iterations (200/page × 10 = 2000, far above the file cap). */
-const MAX_SWEEP_PAGES = 10;
+function resolveMaxSweepPages(): number {
+  const raw = import.meta.env?.VITE_LIBRARY_CLIENT_MAX_SWEEP_PAGES;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : LIBRARY_DEFAULTS.CLIENT_MAX_SWEEP_PAGES;
+}
 
 export type LibraryIndexStatus = 'loading' | 'ready' | 'overCap' | 'error';
 
@@ -62,6 +66,7 @@ function stripPreview(file: FileWithTags): CachedIndexFile {
 
 export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
   const cap = resolveCap();
+  const maxSweepPages = resolveMaxSweepPages();
   const [files, setFiles] = useState<FileWithTags[]>([]);
   const [status, setStatus] = useState<LibraryIndexStatus>('loading');
   const [isSweeping, setIsSweeping] = useState(false);
@@ -126,7 +131,7 @@ export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
             setStatus('ready');
           }
 
-          if (resp.cursor === null || pages >= MAX_SWEEP_PAGES) break;
+          if (resp.cursor === null || pages >= maxSweepPages) break;
           cursor = resp.cursor;
         }
 
