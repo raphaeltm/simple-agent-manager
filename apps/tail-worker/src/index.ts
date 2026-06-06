@@ -23,6 +23,22 @@ export interface Env {
 const DEFAULT_SUBSCRIBER_CACHE_MS = 5_000;
 
 /**
+ * Resolve the cache TTL from the env var, honoring explicit values.
+ *
+ * A `parseInt(...) || DEFAULT` shortcut is wrong here: it silently maps `'0'`
+ * back to the default and lets negatives through. We want `0` to be a usable
+ * escape hatch (TTL of zero makes the cache never fresh, disabling the gate so
+ * every invocation forwards), and any unparseable or negative value to fall
+ * back to the documented default.
+ */
+function resolveCacheTtlMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SUBSCRIBER_CACHE_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 0) return DEFAULT_SUBSCRIBER_CACHE_MS;
+  return parsed;
+}
+
+/**
  * Module-global cache of the last observed connected-admin count.
  *
  * `count === null` means "unknown" — never skip forwarding when unknown. A
@@ -104,7 +120,7 @@ export default {
     // waste and was the source of the clientDisconnected firehose. The cache
     // expires after TAIL_SUBSCRIBER_CACHE_MS so we periodically re-probe and
     // resume forwarding promptly once an admin connects.
-    const cacheTtlMs = parseInt(env.TAIL_SUBSCRIBER_CACHE_MS || '', 10) || DEFAULT_SUBSCRIBER_CACHE_MS;
+    const cacheTtlMs = resolveCacheTtlMs(env.TAIL_SUBSCRIBER_CACHE_MS);
     const cacheFresh = Date.now() - subscriberCache.ts < cacheTtlMs;
     if (cacheFresh && subscriberCache.count === 0) {
       return;

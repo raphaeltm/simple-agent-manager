@@ -306,11 +306,19 @@ function syncTailWorkerConfig(stack: string, accountId: string, envKey: string):
 
   if (!config.env) config.env = {};
 
+  // Propagate top-level [vars] (e.g. TAIL_SUBSCRIBER_CACHE_MS) into the
+  // generated env section — wrangler does not inherit them automatically.
+  const topLevelVars =
+    config.vars && typeof config.vars === 'object' && !Array.isArray(config.vars)
+      ? (config.vars as TOML.JsonMap)
+      : {};
+
   const envConfig = ensureTomlMap(config.env, 'tail worker env config');
   envConfig[envKey] = {
     name: tailWorkerName,
     account_id: accountId,
     services: [{ binding: 'API_WORKER', service: apiWorkerName }],
+    ...(Object.keys(topLevelVars).length > 0 ? { vars: { ...topLevelVars } } : {}),
   };
 
   const output = TOML.stringify(config);

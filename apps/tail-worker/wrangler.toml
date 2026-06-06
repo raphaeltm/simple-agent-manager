@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# How long (ms) to trust a cached zero-subscriber count before re-probing.
+# While fresh AND reporting zero connected admins, the worker skips forwarding
+# (broadcasting to nobody is pure waste). `0` disables the gate (always forward).
+[vars]
+TAIL_SUBSCRIBER_CACHE_MS = "5000"
+
 # NOTE: [env.*] sections are NOT checked in — they are generated at deploy time
 # by scripts/deploy/sync-wrangler-config.ts with environment-specific worker names
-# and service bindings.
+# and service bindings. The top-level [vars] above are propagated into each
+# generated env section by syncTailWorkerConfig().
