@@ -21,13 +21,16 @@ vi.mock('../../../src/lib/auth', () => ({
   signOut: mocks.signOut,
 }));
 
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 import { UserMenu } from '../../../src/components/UserMenu';
 
 function renderUserMenu() {
   return render(
-    <MemoryRouter>
-      <UserMenu />
-    </MemoryRouter>
+    <ThemeProvider>
+      <MemoryRouter>
+        <UserMenu />
+      </MemoryRouter>
+    </ThemeProvider>
   );
 }
 
