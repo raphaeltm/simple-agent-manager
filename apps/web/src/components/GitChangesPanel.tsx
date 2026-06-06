@@ -28,13 +28,13 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  M: 'var(--sam-color-tn-yellow)',
-  A: 'var(--sam-color-tn-green)',
-  D: 'var(--sam-color-tn-red)',
-  R: 'var(--sam-color-tn-blue)',
-  C: 'var(--sam-color-tn-blue)',
-  U: 'var(--sam-color-tn-orange)',
-  '??': 'var(--sam-color-tn-fg-muted)',
+  M: 'var(--sam-color-warning-fg)',
+  A: 'var(--sam-color-success-fg)',
+  D: 'var(--sam-color-danger-fg)',
+  R: 'var(--sam-color-info-fg)',
+  C: 'var(--sam-color-info-fg)',
+  U: 'var(--sam-color-warning-fg)',
+  '??': 'var(--sam-color-fg-muted)',
 };
 
 function statusColor(status: string): string {
@@ -189,7 +189,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
               padding: 12,
               backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: 'var(--sam-color-tn-red)',
+              color: 'var(--sam-color-danger-fg)',
               fontSize: 'var(--sam-type-caption-size)',
             }}
           >

@@ -42,13 +42,13 @@ export function workspaceTabStatusColor(tab: WorkspaceTab): string {
   if (tab.kind === 'terminal') {
     switch (tab.status) {
       case 'connecting':
-        return 'var(--sam-color-tn-yellow)';
+        return 'var(--sam-workspace-warning-fg)';
       case 'connected':
-        return 'var(--sam-color-tn-green)';
+        return 'var(--sam-workspace-success-fg)';
       case 'error':
-        return 'var(--sam-color-tn-red)';
+        return 'var(--sam-workspace-danger-fg)';
       default:
-        return 'var(--sam-color-tn-fg-muted)';
+        return 'var(--sam-workspace-tab-muted)';
     }
   }
 
@@ -56,30 +56,30 @@ export function workspaceTabStatusColor(tab: WorkspaceTab): string {
   if (tab.hostStatus) {
     switch (tab.hostStatus) {
       case 'prompting':
-        return 'var(--sam-color-tn-purple)'; // purple — actively working
+        return 'var(--sam-workspace-purple-fg)'; // purple: actively working
       case 'ready':
-        return 'var(--sam-color-tn-green)'; // green — ready for prompts
+        return 'var(--sam-workspace-success-fg)'; // green: ready for prompts
       case 'starting':
-        return 'var(--sam-color-tn-yellow)'; // amber — initializing
+        return 'var(--sam-workspace-warning-fg)'; // amber: initializing
       case 'idle':
-        return 'var(--sam-color-tn-fg-muted)'; // dim — no agent selected
+        return 'var(--sam-workspace-tab-muted)'; // dim: no agent selected
       case 'stopped':
-        return 'var(--sam-color-tn-fg-dimmer)'; // dimmer — stopped
+        return 'var(--sam-workspace-muted-dot)'; // dimmer: stopped
       case 'error':
-        return 'var(--sam-color-tn-red)'; // red
+        return 'var(--sam-workspace-danger-fg)'; // red
     }
   }
 
   // Fallback to DB status when hostStatus is not available
   switch (tab.status) {
     case 'running':
-      return 'var(--sam-color-tn-green)';
+      return 'var(--sam-workspace-success-fg)';
     case 'suspended':
-      return 'var(--sam-color-tn-yellow)';
+      return 'var(--sam-workspace-warning-fg)';
     case 'error':
-      return 'var(--sam-color-tn-red)';
+      return 'var(--sam-workspace-danger-fg)';
     default:
-      return 'var(--sam-color-tn-fg-muted)';
+      return 'var(--sam-workspace-tab-muted)';
   }
 }
 

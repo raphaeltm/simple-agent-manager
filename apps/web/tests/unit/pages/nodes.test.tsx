@@ -71,7 +71,7 @@ describe('Nodes page', () => {
       expect(mocks.listNodes).toHaveBeenCalled();
     });
 
-    expect(screen.getByText('Node 1')).toBeInTheDocument();
+    expect(await screen.findByText('Node 1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create node/i })).toBeInTheDocument();
   });
 

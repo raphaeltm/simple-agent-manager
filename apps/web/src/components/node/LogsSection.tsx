@@ -59,8 +59,8 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
   return (
     <Section>
       <SectionHeader
-        icon={<ScrollText size={20} color="#06b6d4" />}
-        iconBg="rgba(6, 182, 212, 0.15)"
+        icon={<ScrollText size={20} color="var(--sam-node-log-icon-fg)" />}
+        iconBg="var(--sam-node-log-icon-bg)"
         title="Logs"
         description={
           isRunning
@@ -94,7 +94,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
                 className="inline-flex items-center gap-1 font-semibold"
                 style={{
                   fontSize: '0.625rem',
-                  color: streaming ? '#22c55e' : 'var(--sam-color-fg-muted)',
+                  color: streaming ? 'var(--sam-node-live-fg)' : 'var(--sam-color-fg-muted)',
                 }}
               >
                 <span
@@ -102,7 +102,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
                   style={{
                     width: 6,
                     height: 6,
-                    backgroundColor: streaming ? '#22c55e' : 'var(--sam-color-fg-disabled)',
+                    backgroundColor: streaming ? 'var(--sam-node-live-fg)' : 'var(--sam-color-fg-muted)',
                   }}
                 />
                 {streaming ? 'LIVE' : 'DISCONNECTED'}
@@ -112,7 +112,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               <button
                 onClick={togglePause}
                 title={paused ? 'Resume streaming' : 'Pause streaming'}
-                className="inline-flex items-center justify-center w-7 h-7 rounded-sm border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted cursor-pointer"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer"
               >
                 {paused ? <Play size={14} /> : <Pause size={14} />}
               </button>
@@ -121,7 +121,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               <button
                 onClick={refresh}
                 title="Refresh logs"
-                className="inline-flex items-center justify-center w-7 h-7 rounded-sm border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted cursor-pointer"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer"
               >
                 <RefreshCw size={14} />
               </button>
@@ -143,9 +143,9 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
             <div
               className="px-3 py-2 rounded-sm mb-2"
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                border: '1px solid rgba(239, 68, 68, 0.2)',
-                color: 'var(--sam-color-fg-danger, #ef4444)',
+                backgroundColor: 'var(--sam-node-danger-tint-subtle)',
+                border: '1px solid var(--sam-node-danger-border)',
+                color: 'var(--sam-node-danger-fg)',
                 fontSize: 'var(--sam-type-caption-size)',
               }}
             >
@@ -170,7 +170,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               ref={listRef}
               onScroll={handleScroll}
               className="max-h-[500px] overflow-y-auto border border-border-default rounded-md"
-              style={{ backgroundColor: 'var(--sam-color-bg-primary, #0d1117)' }}
+              style={{ backgroundColor: 'var(--sam-node-code-bg)' }}
             >
               {entries.map((entry, idx) => (
                 <LogEntry
@@ -189,7 +189,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
                     className="bg-transparent border-none underline"
                     style={{
                       fontSize: 'var(--sam-type-caption-size)',
-                      color: 'var(--sam-color-fg-accent, #3b82f6)',
+                      color: 'var(--sam-node-info-fg)',
                       cursor: loading ? 'default' : 'pointer',
                     }}
                   >

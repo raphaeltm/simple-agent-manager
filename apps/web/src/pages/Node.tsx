@@ -1,3 +1,5 @@
+import '../styles/workspace-chrome.css';
+
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';

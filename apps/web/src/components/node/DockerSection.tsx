@@ -14,17 +14,17 @@ interface DockerSectionProps {
 function stateStyle(state: string): React.CSSProperties {
   switch (state) {
     case 'running':
-      return { color: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.12)' };
+      return { color: 'var(--sam-node-live-fg)', backgroundColor: 'var(--sam-node-success-tint)' };
     case 'exited':
-      return { color: 'var(--sam-color-fg-muted)', backgroundColor: 'rgba(128, 128, 128, 0.1)' };
+      return { color: 'var(--sam-color-fg-muted)', backgroundColor: 'var(--sam-node-neutral-tint)' };
     case 'paused':
-      return { color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.12)' };
+      return { color: 'var(--sam-node-warning-fg)', backgroundColor: 'var(--sam-node-warning-tint)' };
     case 'restarting':
-      return { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.12)' };
+      return { color: 'var(--sam-node-info-fg)', backgroundColor: 'var(--sam-node-info-tint)' };
     case 'dead':
-      return { color: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.12)' };
+      return { color: 'var(--sam-node-danger-fg)', backgroundColor: 'var(--sam-node-danger-tint)' };
     default:
-      return { color: 'var(--sam-color-fg-muted)', backgroundColor: 'rgba(128, 128, 128, 0.08)' };
+      return { color: 'var(--sam-color-fg-muted)', backgroundColor: 'var(--sam-node-neutral-tint-subtle)' };
   }
 }
 
@@ -32,8 +32,8 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
   return (
     <Section>
       <SectionHeader
-        icon={<Container size={20} color="#a78bfa" />}
-        iconBg="rgba(167, 139, 250, 0.15)"
+        icon={<Container size={20} color="var(--sam-node-purple-fg)" />}
+        iconBg="var(--sam-node-purple-tint)"
         title="Docker"
         description={
           docker?.version
@@ -53,9 +53,9 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
           className="p-3 rounded-md"
           style={{
             fontSize: 'var(--sam-type-secondary-size)',
-            color: 'var(--sam-color-fg-danger, #ef4444)',
-            backgroundColor: 'rgba(239, 68, 68, 0.08)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
+            color: 'var(--sam-node-danger-fg)',
+            backgroundColor: 'var(--sam-node-danger-tint-subtle)',
+            border: '1px solid var(--sam-node-danger-border)',
           }}
         >
           Failed to query Docker: {docker.error}

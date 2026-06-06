@@ -40,13 +40,13 @@ export function CenteredStatus({
   loading?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-3 bg-tn-bg text-tn-fg">
+    <div className="flex flex-col items-center justify-center h-full gap-3" style={{ backgroundColor: 'var(--sam-workspace-chrome-bg)', color: 'var(--sam-workspace-status-fg)' }}>
       {isLoading && <Spinner size="lg" />}
       <h3 className="font-semibold m-0" style={{ fontSize: 'var(--sam-type-card-title-size)', color }}>{title}</h3>
       {subtitle && (
         <p
-          className="m-0 max-w-[400px] text-center text-tn-fg-muted"
-          style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          className="m-0 max-w-[400px] text-center"
+          style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-workspace-status-muted)' }}
         >
           {subtitle}
         </p>
@@ -72,7 +72,7 @@ export function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   const hasFailed = lastStep?.status === 'failed';
 
   return (
-    <div className="flex flex-col items-center justify-center h-full bg-tn-bg text-tn-fg p-6">
+    <div className="flex flex-col items-center justify-center h-full p-6" style={{ backgroundColor: 'var(--sam-workspace-chrome-bg)', color: 'var(--sam-workspace-status-fg)' }}>
       <h3
         className="font-semibold mb-4"
         style={{

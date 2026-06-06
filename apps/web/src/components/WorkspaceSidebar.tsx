@@ -120,31 +120,31 @@ function sessionStatusColor(status: string, hostStatus?: string | null): string 
   if (hostStatus) {
     switch (hostStatus) {
       case 'prompting':
-        return 'var(--sam-color-tn-purple)'; // purple — actively working
+        return 'var(--sam-workspace-purple-fg)'; // purple: actively working
       case 'ready':
-        return 'var(--sam-color-tn-green)'; // green — ready for prompts
+        return 'var(--sam-workspace-success-fg)'; // green: ready for prompts
       case 'starting':
-        return 'var(--sam-color-tn-yellow)'; // amber — initializing
+        return 'var(--sam-workspace-warning-fg)'; // amber: initializing
       case 'idle':
-        return 'var(--sam-color-tn-fg-muted)'; // dim — no agent selected
+        return 'var(--sam-workspace-tab-muted)'; // dim: no agent selected
       case 'stopped':
-        return 'var(--sam-color-tn-fg-dimmer)'; // dimmer — stopped
+        return 'var(--sam-workspace-muted-dot)'; // dimmer: stopped
       case 'error':
-        return 'var(--sam-color-tn-red)'; // red
+        return 'var(--sam-workspace-danger-fg)'; // red
     }
   }
 
   switch (status) {
     case 'connected':
     case 'running':
-      return 'var(--sam-color-tn-green)';
+      return 'var(--sam-workspace-success-fg)';
     case 'connecting':
     case 'reconnecting':
-      return 'var(--sam-color-tn-yellow)';
+      return 'var(--sam-workspace-warning-fg)';
     case 'error':
-      return 'var(--sam-color-tn-red)';
+      return 'var(--sam-workspace-danger-fg)';
     default:
-      return 'var(--sam-color-tn-fg-muted)';
+      return 'var(--sam-workspace-tab-muted)';
   }
 }
 
@@ -305,7 +305,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     href={repoUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-tn-blue no-underline inline-flex items-center gap-1"
+                    className="no-underline inline-flex items-center gap-1"
+                    style={{ color: 'var(--sam-workspace-link-fg)' }}
                   >
                     {workspace.repository}
                     <ExternalLink size={11} />
@@ -341,7 +342,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               <InfoRow label="Node">
                 <Link
                   to={`/nodes/${workspace.nodeId}`}
-                  className="text-tn-blue no-underline inline-flex items-center gap-1"
+                  className="no-underline inline-flex items-center gap-1"
+                  style={{ color: 'var(--sam-workspace-link-fg)' }}
                 >
                   {workspace.nodeId.slice(0, 8)}
                   <ExternalLink size={11} />
@@ -491,8 +493,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {/* Active label for non-chat or when no hostStatus */}
                       {active && !(isChat && tab.hostStatus) && (
                         <span
-                          className="text-tn-blue shrink-0"
-                          style={{ fontSize: 'var(--sam-type-caption-size)' }}
+                          className="shrink-0"
+                          style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-workspace-link-fg)' }}
                         >
                           active
                         </span>
@@ -549,8 +551,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     style={{
                       backgroundColor:
                         session.status === 'suspended'
-                          ? 'var(--sam-color-tn-yellow)'
-                          : 'var(--sam-color-tn-fg-dimmer)',
+                          ? 'var(--sam-workspace-warning-fg)'
+                          : 'var(--sam-workspace-muted-dot)',
                     }}
                   />
                   {/* Label + last prompt */}
@@ -589,10 +591,11 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         onClick={() => onResumeSession(session.id)}
                         title="Resume session"
                         aria-label={`Resume session ${session.label || session.id}`}
-                        className="flex items-center justify-center p-0 border-none bg-transparent text-tn-green cursor-pointer rounded-sm"
+                        className="flex items-center justify-center p-0 border-none bg-transparent cursor-pointer rounded-sm"
                         style={{
                           width: isMobile ? 36 : 24,
                           height: isMobile ? 36 : 24,
+                          color: 'var(--sam-workspace-success-fg)',
                         }}
                       >
                         <Play size={12} />
@@ -633,19 +636,19 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   style={{ fontSize: 'var(--sam-type-caption-size)' }}
                 >
                   <span>
-                    <strong className="text-tn-green">{gitStatus.staged.length}</strong> staged
+                    <strong style={{ color: 'var(--sam-workspace-success-fg)' }}>{gitStatus.staged.length}</strong> staged
                   </span>
                   <span>
-                    <strong className="text-tn-yellow">{gitStatus.unstaged.length}</strong> unstaged
+                    <strong style={{ color: 'var(--sam-workspace-warning-fg)' }}>{gitStatus.unstaged.length}</strong> unstaged
                   </span>
                   <span>
-                    <strong className="text-tn-fg-muted">{gitStatus.untracked.length}</strong> untracked
+                    <strong className="text-fg-muted">{gitStatus.untracked.length}</strong> untracked
                   </span>
                 </div>
                 <button
                   onClick={onOpenGitChanges}
-                  className="inline-flex items-center gap-1.5 py-1 px-0 bg-transparent border-none cursor-pointer text-tn-blue text-left"
-                  style={{ fontSize: 'var(--sam-type-caption-size)' }}
+                  className="inline-flex items-center gap-1.5 py-1 px-0 bg-transparent border-none cursor-pointer text-left"
+                  style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-workspace-link-fg)' }}
                 >
                   <GitBranch size={12} />
                   View Changes
