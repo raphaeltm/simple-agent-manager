@@ -266,6 +266,33 @@ export interface ResolvedAgentProfile {
 }
 
 // =============================================================================
+// Skills (per-project repeatable-work definitions)
+// =============================================================================
+
+export interface AgentSkill extends AgentProfile {
+  resourceRequirementsJson: string | null;
+  defaultProfileId: string | null;
+}
+
+export interface CreateSkillRequest extends CreateAgentProfileRequest {
+  resourceRequirementsJson?: string | null;
+  defaultProfileId?: string | null;
+}
+
+export interface UpdateSkillRequest extends UpdateAgentProfileRequest {
+  resourceRequirementsJson?: string | null;
+  defaultProfileId?: string | null;
+}
+
+export interface ResolvedSkillProfile extends ResolvedAgentProfile {
+  skillId: string | null;
+  skillName: string | null;
+  skillHint: string | null;
+  resourceRequirementsJson: string | null;
+  defaultProfileId: string | null;
+}
+
+// =============================================================================
 // SAM Platform Policy — GitHub CLI
 // =============================================================================
 

@@ -51,4 +51,24 @@ describe('mergeRuntimeAssetRows', () => {
       { path: 'profile.txt', content: 'profile-only-file', isSecret: false },
     ]);
   });
+
+  it('lets skill env vars and files override profile and project assets on collision', () => {
+    const merged = mergeRuntimeAssetRows(
+      {
+        envVars: [{ key: 'SHARED', value: 'project', isSecret: false }],
+        files: [{ path: 'shared.txt', content: 'project-file', isSecret: false }],
+      },
+      {
+        envVars: [{ key: 'SHARED', value: 'profile', isSecret: false }],
+        files: [{ path: 'shared.txt', content: 'profile-file', isSecret: false }],
+      },
+      {
+        envVars: [{ key: 'SHARED', value: 'skill', isSecret: true }],
+        files: [{ path: 'shared.txt', content: 'skill-file', isSecret: true }],
+      }
+    );
+
+    expect(merged.envVars).toEqual([{ key: 'SHARED', value: 'skill', isSecret: true }]);
+    expect(merged.files).toEqual([{ path: 'shared.txt', content: 'skill-file', isSecret: true }]);
+  });
 });

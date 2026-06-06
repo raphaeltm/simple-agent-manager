@@ -274,6 +274,7 @@ async function processTriggersForProject(
         renderedPrompt: rendered.rendered,
         triggeredBy: 'github',
         agentProfileId: trigger.agentProfileId,
+        skillId: trigger.skillId,
         taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
         vmSizeOverride: trigger.vmSizeOverride,
         triggerName: trigger.name,

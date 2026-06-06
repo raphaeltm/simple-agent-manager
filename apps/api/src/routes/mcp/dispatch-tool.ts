@@ -15,11 +15,11 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { resolveAgentProfile } from '../../services/agent-profiles';
 import { generateBranchName } from '../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
@@ -100,6 +100,10 @@ export async function handleDispatchTask(
   const agentProfileId = typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : undefined;
   if (params.agentProfileId !== undefined && !agentProfileId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId must be a non-empty string');
+  }
+  const skillId = typeof params.skillId === 'string' ? params.skillId.trim() : undefined;
+  if (params.skillId !== undefined && !skillId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'skillId must be a non-empty string');
   }
 
   // taskMode
@@ -286,9 +290,10 @@ export async function handleDispatchTask(
   // ── Resolve agent profile ───────────────────────────────────────────────
   // Same pattern as submit.ts — resolveAgentProfile handles ID/name lookup
   // with built-in profile seeding.
-  const resolvedProfile = agentProfileId
-    ? await resolveAgentProfile(db, tokenData.projectId, agentProfileId, tokenData.userId, env)
+  const resolvedProfile = agentProfileId || skillId
+    ? await resolveSkillProfile(db, tokenData.projectId, agentProfileId, skillId, tokenData.userId, env)
     : null;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;
@@ -329,8 +334,9 @@ export async function handleDispatchTask(
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(
-    {}, // MCP dispatch: no task-level resource requirements in Phase 0
+    { skill: skillResourceRequirements },
     {
+      skillId: resolvedProfile?.skillId ?? undefined,
       agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId: tokenData.projectId,
       userId: tokenData.userId,
@@ -454,12 +460,12 @@ export async function handleDispatchTask(
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resolved_reservation_json,
+     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?, ?, 'mcp',
-     ?, ?, ?,
+     ?, ?, ?, ?, ?, 'mcp',
+     ?, ?, ?, ?, ?,
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -476,9 +482,9 @@ export async function handleDispatchTask(
     taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
     taskTitle, fullDescription, priority, newDepth, branchName,
     tokenData.userId,
-    resolvedTaskMode, resolvedProfile?.profileId ?? null,
+    resolvedTaskMode, resolvedProfile?.profileId ?? null, resolvedProfile?.skillId ?? null, skillId ?? null,
     explicitMissionId ?? currentTask.missionId ?? null,
-    resolvedVmSize, vmSizeSource, JSON.stringify(resolvedReservation),
+    resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
@@ -654,6 +660,7 @@ export async function handleDispatchTask(
           title: taskTitle,
           branchName,
           agentProfileId: agentProfileId ?? undefined,
+          skillId: skillId ?? undefined,
           taskMode: resolvedTaskMode,
         },
       }),
@@ -691,6 +698,7 @@ export async function handleDispatchTask(
     taskMode: resolvedTaskMode,
     agentType: resolvedAgentType,
     agentProfileId: agentProfileId ?? null,
+    skillId: skillId ?? null,
   });
 
   const appDomain = `app.${env.BASE_DOMAIN}`;

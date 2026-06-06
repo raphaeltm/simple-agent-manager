@@ -13,6 +13,7 @@ import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import {
   getProfileRuntimeAssets,
+  getSkillRuntimeAssets,
   mergeRuntimeAssetRows,
   resolveRuntimeEnvRows,
   resolveRuntimeFileRows,
@@ -201,11 +202,14 @@ export async function getWorkspaceRuntimeAssets(
     files: await resolveRuntimeFileRows(fileRows, encryptionKey),
   };
 
-  const profileId = await getWorkspaceTaskProfileId(db, workspace.id, workspace.projectId, workspace.userId);
-  const profileAssets = profileId
-    ? await getProfileRuntimeAssets(db, profileId, workspace.userId, encryptionKey)
+  const taskRuntimeIds = await getWorkspaceTaskRuntimeIds(db, workspace.id, workspace.projectId, workspace.userId);
+  const profileAssets = taskRuntimeIds.profileId
+    ? await getProfileRuntimeAssets(db, taskRuntimeIds.profileId, workspace.userId, encryptionKey)
     : { envVars: [], files: [] };
-  const mergedAssets = mergeRuntimeAssetRows(projectAssets, profileAssets);
+  const skillAssets = taskRuntimeIds.skillId
+    ? await getSkillRuntimeAssets(db, taskRuntimeIds.skillId, workspace.userId, encryptionKey)
+    : { envVars: [], files: [] };
+  const mergedAssets = mergeRuntimeAssetRows(projectAssets, profileAssets, skillAssets);
 
   return {
     workspaceId: workspace.id,
@@ -214,14 +218,14 @@ export async function getWorkspaceRuntimeAssets(
   };
 }
 
-async function getWorkspaceTaskProfileId(
+async function getWorkspaceTaskRuntimeIds(
   db: ReturnType<typeof drizzle<typeof schema>>,
   workspaceId: string,
   projectId: string,
   userId: string
-): Promise<string | null> {
+): Promise<{ profileId: string | null; skillId: string | null }> {
   const taskRows = await db
-    .select({ profileId: schema.tasks.agentProfileHint })
+    .select({ profileId: schema.tasks.agentProfileHint, skillId: schema.tasks.skillId })
     .from(schema.tasks)
     .where(
       and(
@@ -233,23 +237,41 @@ async function getWorkspaceTaskProfileId(
     .limit(1);
 
   const profileId = taskRows[0]?.profileId;
-  if (!profileId) {
-    return null;
-  }
+  const skillId = taskRows[0]?.skillId;
 
-  const profileRows = await db
-    .select({ id: schema.agentProfiles.id })
-    .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.userId, userId)
-      )
-    )
-    .limit(1);
+  const [profileRows, skillRows] = await Promise.all([
+    profileId
+      ? db
+        .select({ id: schema.agentProfiles.id })
+        .from(schema.agentProfiles)
+        .where(
+          and(
+            eq(schema.agentProfiles.id, profileId),
+            eq(schema.agentProfiles.projectId, projectId),
+            eq(schema.agentProfiles.userId, userId)
+          )
+        )
+        .limit(1)
+      : Promise.resolve([]),
+    skillId
+      ? db
+        .select({ id: schema.skills.id })
+        .from(schema.skills)
+        .where(
+          and(
+            eq(schema.skills.id, skillId),
+            eq(schema.skills.projectId, projectId),
+            eq(schema.skills.userId, userId)
+          )
+        )
+        .limit(1)
+      : Promise.resolve([]),
+  ]);
 
-  return profileRows[0]?.id ?? null;
+  return {
+    profileId: profileRows[0]?.id ?? null,
+    skillId: skillRows[0]?.id ?? null,
+  };
 }
 
 export async function scheduleWorkspaceCreateOnNode(

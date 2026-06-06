@@ -113,6 +113,7 @@ export function resolveResourceReservation(
   ids: {
     taskId?: string;
     triggerId?: string;
+    skillId?: string;
     agentProfileId?: string;
     projectId?: string;
     userId?: string;
@@ -121,6 +122,7 @@ export function resolveResourceReservation(
   const layers: ResolutionLayer[] = [
     { source: 'task', sourceId: ids.taskId ?? '', requirements: input.task },
     { source: 'trigger', sourceId: ids.triggerId ?? '', requirements: input.trigger },
+    { source: 'skill', sourceId: ids.skillId ?? '', requirements: input.skill },
     { source: 'agent-profile', sourceId: ids.agentProfileId ?? '', requirements: input.agentProfile },
     { source: 'project', sourceId: ids.projectId ?? '', requirements: input.project },
     { source: 'user', sourceId: ids.userId ?? '', requirements: input.user },

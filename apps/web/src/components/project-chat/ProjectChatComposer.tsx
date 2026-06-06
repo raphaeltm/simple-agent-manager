@@ -1,11 +1,12 @@
 import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
 import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { Paperclip, X } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
+import { SkillSelector } from '../skills/SkillSelector';
 
 export interface ProjectChatComposerAttachment {
   file: File;
@@ -24,6 +25,9 @@ interface ProjectChatComposerProps {
   transcribeApiUrl: string;
   slashCommands?: SlashCommand[];
   agentProfiles?: AgentProfile[];
+  skills?: AgentSkill[];
+  selectedSkillId?: string | null;
+  onSkillChange?: (skillId: string | null) => void;
   attachments?: ProjectChatComposerAttachment[];
   onFilesSelected?: (files: FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
@@ -49,6 +53,9 @@ export function ProjectChatComposer({
   transcribeApiUrl,
   slashCommands = [],
   agentProfiles = [],
+  skills = [],
+  selectedSkillId = null,
+  onSkillChange,
   attachments = [],
   onFilesSelected,
   onRemoveAttachment,
@@ -218,6 +225,17 @@ export function ProjectChatComposer({
               )}
             </div>
           ))}
+        </div>
+      )}
+      {skills.length > 0 && onSkillChange && (
+        <div className="mb-2 max-w-md">
+          <SkillSelector
+            skills={skills}
+            selectedSkillId={selectedSkillId}
+            onChange={onSkillChange}
+            disabled={sending || disabled}
+            compact
+          />
         </div>
       )}
       <div className="flex gap-2 items-end">

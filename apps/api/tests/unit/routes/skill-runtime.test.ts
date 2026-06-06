@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 
-import { profileRuntimeRoutes } from '../../../src/routes/profile-runtime';
+import { skillRuntimeRoutes } from '../../../src/routes/skill-runtime';
 import { runRuntimeRouteTests } from './runtime-routes-test-suite';
 
 const mocks = vi.hoisted(() => ({
@@ -22,13 +22,13 @@ vi.mock('../../../src/services/encryption', () => ({
 }));
 
 runRuntimeRouteTests({
-  entityLabel: 'profile',
-  basePath: '/api/projects/:projectId/agent-profiles/:profileId/runtime',
-  routes: profileRuntimeRoutes,
-  requestPrefix: '/api/projects/proj-1/agent-profiles/prof-1/runtime',
-  outsideEntityEnvVarsPath: '/api/projects/proj-1/agent-profiles/other-prof/runtime/env-vars',
-  entityRow: { id: 'prof-1', projectId: 'proj-1', userId: 'user-1' },
-  rowTimestamp: '2026-05-16T00:00:00.000Z',
-  expectedInsertEntity: { profileId: 'prof-1' },
+  entityLabel: 'skill',
+  basePath: '/api/projects/:projectId/skills/:skillId/runtime',
+  routes: skillRuntimeRoutes,
+  requestPrefix: '/api/projects/proj-1/skills/skill-1/runtime',
+  outsideEntityEnvVarsPath: '/api/projects/proj-1/skills/other-skill/runtime/env-vars',
+  entityRow: { id: 'skill-1', projectId: 'proj-1', userId: 'user-1' },
+  rowTimestamp: '2026-05-31T00:00:00.000Z',
+  expectedInsertEntity: { skillId: 'skill-1' },
   mocks,
 });

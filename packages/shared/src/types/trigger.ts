@@ -48,6 +48,7 @@ export interface Trigger {
   skipIfRunning: boolean;
   promptTemplate: string;
   agentProfileId: string | null;
+  skillId: string | null;
   taskMode: TaskMode;
   vmSizeOverride: string | null;
   maxConcurrent: number;
@@ -91,6 +92,7 @@ export interface CreateTriggerRequest {
   skipIfRunning?: boolean;
   promptTemplate: string;
   agentProfileId?: string;
+  skillId?: string;
   taskMode?: TaskMode;
   vmSizeOverride?: string;
   maxConcurrent?: number;
@@ -109,6 +111,7 @@ export interface UpdateTriggerRequest {
   skipIfRunning?: boolean;
   promptTemplate?: string;
   agentProfileId?: string | null;
+  skillId?: string | null;
   taskMode?: TaskMode;
   vmSizeOverride?: string | null;
   maxConcurrent?: number;

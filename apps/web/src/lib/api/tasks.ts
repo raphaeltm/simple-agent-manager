@@ -47,6 +47,7 @@ export interface SubmitTaskRequest {
   contextSummary?: string;
   taskMode?: 'task' | 'conversation';
   agentProfileId?: string;
+  skillId?: string;
   attachments?: TaskAttachmentRef[];
 }
 

@@ -158,6 +158,8 @@ export function toTaskResponse(
     taskMode: (task.taskMode as TaskMode) || 'task',
     dispatchDepth: task.dispatchDepth,
     agentProfileHint: displayAgentProfileHint,
+    skillId: task.skillId ?? null,
+    skillHint: task.skillHint ?? null,
     blocked,
     triggeredBy: task.triggeredBy ?? 'user',
     triggerId: task.triggerId ?? null,

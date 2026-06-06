@@ -267,6 +267,9 @@ export function ProjectChat() {
               agentProfiles={state.agentProfiles}
               selectedProfileId={state.selectedProfileId}
               onProfileChange={state.setSelectedProfileId}
+              skills={state.skills}
+              selectedSkillId={state.selectedSkillId}
+              onSkillChange={state.setSelectedSkillId}
               onUpdateProfile={state.handleUpdateProfile}
               providerCatalogs={state.providerCatalogs}
               projectDefaultProvider={state.project?.defaultProvider}

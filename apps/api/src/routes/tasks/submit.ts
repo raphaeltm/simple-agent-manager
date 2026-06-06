@@ -31,12 +31,12 @@ import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
-import { resolveAgentProfile } from '../../services/agent-profiles';
 import { validateAttachments } from '../../services/attachment-upload';
 import { generateBranchName } from '../../services/branch-name';
 import { enrichMessageWithMentions } from '../../services/mention-enrichment';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 
@@ -168,9 +168,10 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
 
   // Resolve agent profile if specified.
   // Precedence: explicit task field > profile value > project default > platform default.
-  const resolvedProfile = body.agentProfileId
-    ? await resolveAgentProfile(db, projectId, body.agentProfileId, userId, c.env)
+  const resolvedProfile = body.agentProfileId || body.skillId
+    ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
     : null;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
   // Determine VM config (with profile overrides in the middle of the precedence chain)
   // Track which level provided the VM size for audit
@@ -221,11 +222,11 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
   const resolvedReservation = resolveResourceReservation(
     {
       task: body.resourceRequirements,
-      // Agent profile, project, and user-level resource requirements are future additions.
-      // For Phase 0, only task-level explicit requirements are supported.
+      skill: skillResourceRequirements,
     },
     {
       taskId,
+      skillId: resolvedProfile?.skillId ?? undefined,
       agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId,
       userId,
@@ -299,11 +300,15 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     executionStep: 'node_selection',
     priority: 0,
     agentProfileHint: resolvedProfile?.profileId ?? null,
+    skillId: resolvedProfile?.skillId ?? null,
+    skillHint: body.skillId ?? null,
     taskMode,
     outputBranch: branchName,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
-    resourceRequirementsJson: body.resourceRequirements ? JSON.stringify(body.resourceRequirements) : null,
+    resourceRequirementsJson: body.resourceRequirements
+      ? JSON.stringify(body.resourceRequirements)
+      : (resolvedProfile?.resourceRequirementsJson ?? null),
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     createdBy: userId,

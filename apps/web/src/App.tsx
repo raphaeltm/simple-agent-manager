@@ -40,6 +40,7 @@ import { ProjectNotifications } from './pages/ProjectNotifications';
 import { ProjectProfiles } from './pages/ProjectProfiles';
 import { Projects } from './pages/Projects';
 import { ProjectSettings } from './pages/ProjectSettings';
+import { ProjectSkills } from './pages/ProjectSkills';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
@@ -118,6 +119,7 @@ export default function App() {
                     <Route path="triggers" element={<ProjectTriggers />} />
                     <Route path="triggers/:triggerId" element={<ProjectTriggerDetail />} />
                     <Route path="profiles" element={<ProjectProfiles />} />
+                    <Route path="skills" element={<ProjectSkills />} />
                   </Route>
 
                   <Route path="/nodes" element={<Nodes />} />

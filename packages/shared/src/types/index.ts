@@ -236,7 +236,9 @@ export type {
   AgentProviderMode,
   AgentSettings,
   AgentSettingsResponse,
+  AgentSkill,
   CreateAgentProfileRequest,
+  CreateSkillRequest,
   GitHubCliContentsPermissionLevel,
   GitHubCliPermissionLevel,
   GitHubCliPolicy,
@@ -245,8 +247,10 @@ export type {
   OpenCodeProvider,
   OpenCodeProviderMeta,
   ResolvedAgentProfile,
+  ResolvedSkillProfile,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpdateSkillRequest,
 } from './agent-settings';
 export {
   DEFAULT_GITHUB_CLI_POLICY,

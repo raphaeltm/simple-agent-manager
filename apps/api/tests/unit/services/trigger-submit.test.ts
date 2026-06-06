@@ -23,6 +23,13 @@ vi.mock('../../../src/services/agent-profiles', () => ({
   resolveAgentProfile: vi.fn().mockResolvedValue(null),
 }));
 
+const skillMocks = vi.hoisted(() => ({
+  resolveSkillProfile: vi.fn(),
+  parseSkillResourceRequirementsJson: vi.fn(),
+}));
+
+vi.mock('../../../src/services/skills', () => skillMocks);
+
 vi.mock('../../../src/services/branch-name', () => ({
   generateBranchName: vi.fn().mockReturnValue('sam/daily-review-abc123'),
 }));
@@ -83,6 +90,7 @@ const defaultInput: SubmitTriggeredTaskInput = {
   triggeredBy: 'cron',
   agentProfileId: null,
   taskMode: 'task',
+  skillId: null,
   vmSizeOverride: null,
   triggerName: 'Daily Review',
 };
@@ -137,6 +145,70 @@ describe('submitTriggeredTask', () => {
     expect(insertCall.triggerId).toBe('trigger-1');
     expect(insertCall.triggerExecutionId).toBe('exec-1');
     expect(insertCall.status).toBe('queued');
+  });
+
+  it('persists resolved skill metadata for trigger submissions', async () => {
+    skillMocks.resolveSkillProfile.mockResolvedValueOnce({
+      profileId: 'profile-1',
+      profileName: 'Reviewer',
+      skillId: 'skill-1',
+      skillName: 'Triage',
+      skillHint: 'triage',
+      agentType: 'opencode',
+      model: 'gpt-test',
+      permissionMode: null,
+      systemPromptAppend: 'Profile prompt\n\nSkill prompt',
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: 'medium',
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      devcontainerConfigName: null,
+      taskMode: 'task',
+      resourceRequirementsJson: '{"cpu":4}',
+      defaultProfileId: 'profile-1',
+    });
+    skillMocks.parseSkillResourceRequirementsJson.mockReturnValueOnce({ cpu: 4 });
+    mockSelectResult.push(
+      [{
+        id: 'project-1',
+        userId: 'user-1',
+        name: 'Test Project',
+        repository: 'user/repo',
+        installationId: 'install-1',
+        defaultBranch: 'main',
+        defaultVmSize: null,
+        defaultAgentType: null,
+        defaultWorkspaceProfile: null,
+        defaultProvider: null,
+        defaultLocation: null,
+        taskExecutionTimeoutMs: null,
+        maxWorkspacesPerNode: null,
+        nodeCpuThresholdPercent: null,
+        nodeMemoryThresholdPercent: null,
+        warmNodeTimeoutMs: null,
+      }],
+      [{ id: 'cred-1' }],
+      [{ githubId: '123', name: 'User', email: 'user@test.com' }],
+    );
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await submitTriggeredTask({} as any, { ...defaultInput, skillId: 'triage' });
+
+    expect(skillMocks.resolveSkillProfile).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      null,
+      'triage',
+      'user-1',
+      expect.anything()
+    );
+    const insertCall = mockInsertValues.mock.calls[0]![0];
+    expect(insertCall.agentProfileHint).toBe('profile-1');
+    expect(insertCall.skillId).toBe('skill-1');
+    expect(insertCall.skillHint).toBe('triage');
+    expect(insertCall.resourceRequirementsJson).toBe('{"cpu":4}');
   });
 
   it('throws when project is not found', async () => {
