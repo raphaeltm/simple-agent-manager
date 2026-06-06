@@ -489,3 +489,55 @@
 .prose tbody tr:nth-child(even) td {
   background: rgba(34, 197, 94, 0.08);
 }
+
+/* Light-mode overrides for ACP utility colors.
+   ADDITIVE ONLY — this block is scoped to [data-ui-theme='sam-light'] and never
+   affects dark mode (zero dark-delta). The base utilities above bake in
+   bright-on-dark literals (gray text ramp, status colors) that are unreadable on
+   a light canvas; here they are remapped to the light-aware semantic fg tokens.
+
+   Deliberately EXCLUDED (forced-dark islands / on-accent text that must keep
+   their dark literals even in light mode):
+     .bg-gray-800/.bg-gray-900, .text-gray-200/.text-gray-300,
+     .text-green-400, .border-gray-700  -> terminal/code block surfaces
+     .text-white, .text-blue-50         -> text sitting on an accent fill */
+[data-ui-theme='sam-light'] .text-gray-400 {
+  color: var(--sam-color-fg-muted);
+}
+
+[data-ui-theme='sam-light'] .text-gray-600,
+[data-ui-theme='sam-light'] .text-gray-700,
+[data-ui-theme='sam-light'] .text-gray-800 {
+  color: var(--sam-color-fg-primary);
+}
+
+[data-ui-theme='sam-light'] .text-red-500,
+[data-ui-theme='sam-light'] .text-red-600,
+[data-ui-theme='sam-light'] .text-red-700,
+[data-ui-theme='sam-light'] .text-red-800 {
+  color: var(--sam-color-danger-fg);
+}
+
+[data-ui-theme='sam-light'] .text-yellow-600,
+[data-ui-theme='sam-light'] .text-yellow-700,
+[data-ui-theme='sam-light'] .text-yellow-800,
+[data-ui-theme='sam-light'] .text-orange-600 {
+  color: var(--sam-color-warning-fg);
+}
+
+[data-ui-theme='sam-light'] .text-green-800 {
+  color: var(--sam-color-success-fg);
+}
+
+[data-ui-theme='sam-light'] .text-blue-400,
+[data-ui-theme='sam-light'] .text-blue-600 {
+  color: var(--sam-color-accent-primary);
+}
+
+[data-ui-theme='sam-light'] .border-gray-300 {
+  border-color: var(--sam-color-border-default);
+}
+
+[data-ui-theme='sam-light'] .bg-gray-300 {
+  background-color: var(--sam-color-border-default);
+}
