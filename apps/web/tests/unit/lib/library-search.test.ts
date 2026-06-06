@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { FileWithTags } from '../../../src/components/library/types';
 import {
   buildIndex,
-  matchFile,
   MATCH_TIER,
+  matchFile,
   normalizeQuery,
   searchIndex,
 } from '../../../src/lib/library-search';
