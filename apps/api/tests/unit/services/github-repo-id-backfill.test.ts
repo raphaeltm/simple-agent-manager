@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getRepositoryMetadata: vi.fn(),
+  getInstallationToken: vi.fn(),
   log: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/lib/logger', () => ({ log: mocks.log }));
 vi.mock('../../../src/services/github-app', () => ({
   getRepositoryMetadata: mocks.getRepositoryMetadata,
+  getInstallationToken: mocks.getInstallationToken,
 }));
 
 import * as schema from '../../../src/db/schema';
@@ -57,8 +59,18 @@ function makeUpdateDb(opts: { whereError?: Error } = {}) {
  * function caches by installationId, so each unique id is queried once in
  * order of first appearance).
  */
-function makeBulkDb(opts: { projects: unknown[]; installRows: unknown[][] }) {
+function makeBulkDb(opts: {
+  projects: unknown[];
+  installRows: unknown[][];
+  /**
+   * Optional queue of per-UPDATE errors, consumed in heal order. `null` (or a
+   * missing entry) means that heal succeeds; an `Error` is thrown from `where`
+   * to simulate a unique-constraint collision or unexpected db error.
+   */
+  updateErrors?: (Error | null)[];
+}) {
   const installQueue = [...opts.installRows];
+  const updateErrorQueue = [...(opts.updateErrors ?? [])];
   const updatedSets: unknown[] = [];
   const db = {
     select: () => {
@@ -70,7 +82,7 @@ function makeBulkDb(opts: { projects: unknown[]; installRows: unknown[][] }) {
         },
         where: () => {
           if (table === schema.projects) {
-            return Promise.resolve(opts.projects);
+            return { limit: () => Promise.resolve(opts.projects) };
           }
           return { limit: () => Promise.resolve(installQueue.shift() ?? []) };
         },
@@ -80,7 +92,14 @@ function makeBulkDb(opts: { projects: unknown[]; installRows: unknown[][] }) {
     update: () => ({
       set: (values: unknown) => {
         updatedSets.push(values);
-        return { where: async () => {} };
+        const err = updateErrorQueue.shift() ?? null;
+        return {
+          where: async () => {
+            if (err) {
+              throw err;
+            }
+          },
+        };
       },
     }),
   } as never;
@@ -106,7 +125,8 @@ describe('backfillProjectGithubRepoId', () => {
       externalInstallationId: '120081765',
     });
 
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('120081765', 'raph', 'sam', env);
+    // No pre-minted token on the lazy self-heal path -> minted on demand inside getRepositoryMetadata.
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('120081765', 'raph', 'sam', env, undefined);
     expect(result).toEqual({
       status: 'backfilled',
       githubRepoId: 42,
@@ -186,7 +206,8 @@ describe('backfillProjectGithubRepoId', () => {
       fullName: 'raph/sam',
     });
     const { db } = makeUpdateDb({
-      whereError: new Error('D1_ERROR: UNIQUE constraint failed: SQLITE_CONSTRAINT'),
+      // Real D1 collision message format (no SQLITE_CONSTRAINT prefix in production).
+      whereError: new Error('UNIQUE constraint failed: projects.user_id, github_repo_id'),
     });
 
     const result = await backfillProjectGithubRepoId(db, env, {
@@ -239,6 +260,12 @@ describe('backfillProjectGithubRepoId', () => {
 describe('bulkBackfillGithubRepoIds', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: every installation mints a token. Tests that exercise mint
+    // failure override this per case.
+    mocks.getInstallationToken.mockResolvedValue({
+      token: 'inst-token',
+      expiresAt: '2026-06-07T00:00:00.000Z',
+    });
   });
 
   it('processes every dormant project, tallies a summary, and a single inaccessible repo does not abort the batch', async () => {
@@ -271,13 +298,15 @@ describe('bulkBackfillGithubRepoIds', () => {
       skippedCollision: 0,
       fetchFailed: 0,
       noInstallation: 0,
+      hasMore: false,
     });
     // Both reachable projects were healed; the inaccessible one was skipped, not fatal.
     expect(updatedSets).toHaveLength(2);
-    // inst-a was cached: only two installation lookups for three projects.
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-a', 'org', 'one', env);
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-a', 'org', 'gone', env);
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-b', 'org', 'three', env);
+    // inst-a was cached: one token mint + repo lookups reuse it; two installations.
+    expect(mocks.getInstallationToken).toHaveBeenCalledTimes(2);
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-a', 'org', 'one', env, 'inst-token');
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-a', 'org', 'gone', env, 'inst-token');
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-b', 'org', 'three', env, 'inst-token');
   });
 
   it('counts projects with no installation (or an installation missing an external id) as noInstallation', async () => {
@@ -296,8 +325,11 @@ describe('bulkBackfillGithubRepoIds', () => {
     expect(summary.total).toBe(2);
     expect(summary.noInstallation).toBe(2);
     expect(summary.backfilled).toBe(0);
+    expect(summary.hasMore).toBe(false);
     expect(updatedSets).toHaveLength(0);
     expect(mocks.getRepositoryMetadata).not.toHaveBeenCalled();
+    // No external installation resolved, so no token is minted.
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
   });
 
   it('is idempotent: with no dormant projects remaining it does nothing', async () => {
@@ -312,8 +344,89 @@ describe('bulkBackfillGithubRepoIds', () => {
       skippedCollision: 0,
       fetchFailed: 0,
       noInstallation: 0,
+      hasMore: false,
     });
     expect(updatedSets).toHaveLength(0);
     expect(mocks.getRepositoryMetadata).not.toHaveBeenCalled();
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('tallies skipped_collision and fetch_failed without aborting, and reuses one token per installation', async () => {
+    // p1 heals; p2 hits a unique collision on UPDATE; p3 fetch throws.
+    mocks.getRepositoryMetadata.mockImplementation(
+      async (_inst: string, _owner: string, repo: string) => {
+        if (repo === 'boom') {
+          throw new Error('GitHub 502');
+        }
+        return { id: repo === 'one' ? 1 : 2, nodeId: `R_${repo}`, fullName: `org/${repo}` };
+      },
+    );
+
+    const { db, updatedSets } = makeBulkDb({
+      projects: [
+        { projectId: 'p1', repository: 'org/one', installationId: 'inst-a' },
+        { projectId: 'p2', repository: 'org/two', installationId: 'inst-a' },
+        { projectId: 'p3', repository: 'org/boom', installationId: 'inst-a' },
+      ],
+      installRows: [[{ externalInstallationId: 'ext-a' }]],
+      // First heal (p1) succeeds; second heal (p2) collides.
+      updateErrors: [null, new Error('UNIQUE constraint failed: projects.user_id, github_repo_id')],
+    });
+
+    const summary = await bulkBackfillGithubRepoIds(db, env);
+
+    expect(summary).toEqual({
+      total: 3,
+      backfilled: 1,
+      skippedNoRepo: 0,
+      skippedCollision: 1,
+      fetchFailed: 1,
+      noInstallation: 0,
+      hasMore: false,
+    });
+    // p1 + p2 both attempted an UPDATE (p3 failed before persistence).
+    expect(updatedSets).toHaveLength(2);
+    // One installation -> exactly one token mint, reused across all three repos.
+    expect(mocks.getInstallationToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts every project under an installation whose token cannot be minted as fetch_failed (no repo lookup)', async () => {
+    mocks.getInstallationToken.mockRejectedValue(new Error('token mint rate limited'));
+
+    const { db, updatedSets } = makeBulkDb({
+      projects: [
+        { projectId: 'p1', repository: 'org/one', installationId: 'inst-a' },
+        { projectId: 'p2', repository: 'org/two', installationId: 'inst-a' },
+      ],
+      installRows: [[{ externalInstallationId: 'ext-a' }]],
+    });
+
+    const summary = await bulkBackfillGithubRepoIds(db, env);
+
+    expect(summary.fetchFailed).toBe(2);
+    expect(summary.backfilled).toBe(0);
+    expect(updatedSets).toHaveLength(0);
+    // Mint failure is cached: only one mint attempt for the shared installation.
+    expect(mocks.getInstallationToken).toHaveBeenCalledTimes(1);
+    // No token -> never reach the repo metadata fetch.
+    expect(mocks.getRepositoryMetadata).not.toHaveBeenCalled();
+  });
+
+  it('caps a batch at the limit and reports hasMore when the batch fills', async () => {
+    mocks.getRepositoryMetadata.mockResolvedValue({ id: 1, nodeId: 'R_1', fullName: 'org/one' });
+
+    const { db } = makeBulkDb({
+      projects: [
+        { projectId: 'p1', repository: 'org/one', installationId: 'inst-a' },
+        { projectId: 'p2', repository: 'org/two', installationId: 'inst-a' },
+      ],
+      installRows: [[{ externalInstallationId: 'ext-a' }]],
+    });
+
+    const summary = await bulkBackfillGithubRepoIds(db, env, { limit: 2 });
+
+    // The batch filled to the requested limit, so more dormant projects may remain.
+    expect(summary.total).toBe(2);
+    expect(summary.hasMore).toBe(true);
   });
 });

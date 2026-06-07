@@ -651,14 +651,20 @@ export interface GitHubRepositoryMetadata {
  * Returns `null` when the repository is inaccessible (404 repo deleted/never-installed,
  * or 403 permission) so callers can fall back to name-based scoping without throwing.
  * Throws on other unexpected errors (auth/rate-limit) so they surface loudly.
+ *
+ * Pass `installationToken` to reuse an already-minted installation token (the bulk
+ * backfill mints one token per installation and reuses it across that installation's
+ * repos to stay under GitHub's installation-token rate limit). When omitted, a token
+ * is minted on demand.
  */
 export async function getRepositoryMetadata(
   installationId: string,
   owner: string,
   repo: string,
   env: Env,
+  installationToken?: string,
 ): Promise<GitHubRepositoryMetadata | null> {
-  const { token } = await getInstallationToken(installationId, env);
+  const token = installationToken ?? (await getInstallationToken(installationId, env)).token;
 
   const response = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,

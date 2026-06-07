@@ -22,7 +22,19 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getRepositoryMetadata } from './github-app';
+import { getInstallationToken, getRepositoryMetadata } from './github-app';
+
+/**
+ * Default max projects healed per bulk-backfill invocation. Each project costs up
+ * to two GitHub subrequests (token mint — cached per installation — plus a repo
+ * metadata GET) and one D1 UPDATE, so this keeps a single invocation well under
+ * the Workers 1000-subrequest / 30s limits. Override with
+ * `GITHUB_REPO_ID_BACKFILL_BATCH_SIZE`. The backfill is idempotent (guarded by
+ * `github_repo_id IS NULL`), so the admin re-runs until `hasMore` is false.
+ */
+const DEFAULT_BULK_BACKFILL_BATCH_SIZE = 50;
+/** Emit a progress log every this many processed projects within a batch. */
+const BULK_BACKFILL_PROGRESS_INTERVAL = 25;
 
 export type BackfillStatus = 'backfilled' | 'skipped_no_repo' | 'skipped_collision' | 'fetch_failed';
 
@@ -57,9 +69,16 @@ export async function backfillProjectGithubRepoId(
     repository: string;
     /** GitHub's external installation id (numeric, as a string). */
     externalInstallationId: string;
+    /**
+     * Optional pre-minted installation token. The bulk backfill mints one token
+     * per installation and passes it here so each installation's repos share a
+     * single token (avoids GitHub's installation-token rate limit). When omitted
+     * (the lazy self-heal path), a token is minted on demand.
+     */
+    installationToken?: string;
   },
 ): Promise<BackfillResult> {
-  const { projectId, repository, externalInstallationId } = params;
+  const { projectId, repository, externalInstallationId, installationToken } = params;
 
   const slashIndex = repository.indexOf('/');
   const owner = slashIndex > 0 ? repository.slice(0, slashIndex) : null;
@@ -75,7 +94,7 @@ export async function backfillProjectGithubRepoId(
 
   let metadata;
   try {
-    metadata = await getRepositoryMetadata(externalInstallationId, owner, repo, env);
+    metadata = await getRepositoryMetadata(externalInstallationId, owner, repo, env, installationToken);
   } catch (err) {
     log.warn('github_repo_id_backfill.fetch_failed', {
       projectId,
@@ -114,7 +133,7 @@ export async function backfillProjectGithubRepoId(
     // (user_id, github_repo_id) index or the (user_id, installation_id, repository)
     // index when we update the canonical name. Skip persistence but still report
     // the id so the caller can scope correctly.
-    if (/SQLITE_CONSTRAINT|UNIQUE/i.test(message)) {
+    if (/UNIQUE constraint failed/i.test(message)) {
       log.warn('github_repo_id_backfill.skipped_collision', {
         projectId,
         externalInstallationId,
@@ -151,19 +170,36 @@ export interface BulkBackfillSummary {
   skippedCollision: number;
   fetchFailed: number;
   noInstallation: number;
+  /**
+   * True when the batch filled to its limit, so more dormant projects may remain.
+   * The admin re-runs the route until this is false (the IS NULL guard makes each
+   * run pick up the next batch).
+   */
+  hasMore: boolean;
 }
 
 /**
- * One-time bulk backfill over every dormant legacy GitHub-backed project
- * (`repo_provider = 'github' AND github_repo_id IS NULL`). Groups rows by
- * installation so each installation token is minted once, and processes one
- * project at a time. A single failing/inaccessible repo is skipped + logged and
- * does NOT abort the batch.
+ * One-time (re-runnable) bulk backfill over dormant legacy GitHub-backed projects
+ * (`repo_provider = 'github' AND github_repo_id IS NULL`). Processes at most
+ * `limit` projects per invocation so a single Workers request stays under the
+ * 1000-subrequest / 30s limits; mints one installation token per installation and
+ * reuses it across that installation's repos (GitHub rate-limits installation-token
+ * creation). A single failing/inaccessible repo is skipped + logged and does NOT
+ * abort the batch. The UPDATE is guarded by `github_repo_id IS NULL`, so re-running
+ * picks up the next batch — the admin re-runs until `summary.hasMore` is false.
  */
 export async function bulkBackfillGithubRepoIds(
   db: DrizzleD1Database<typeof schema>,
   env: Env,
+  options?: { limit?: number },
 ): Promise<BulkBackfillSummary> {
+  const configuredDefault = Number.parseInt(env.GITHUB_REPO_ID_BACKFILL_BATCH_SIZE ?? '', 10);
+  const defaultLimit =
+    Number.isFinite(configuredDefault) && configuredDefault > 0
+      ? configuredDefault
+      : DEFAULT_BULK_BACKFILL_BATCH_SIZE;
+  const limit = options?.limit && options.limit > 0 ? options.limit : defaultLimit;
+
   const rows = await db
     .select({
       projectId: schema.projects.id,
@@ -171,7 +207,8 @@ export async function bulkBackfillGithubRepoIds(
       installationId: schema.projects.installationId,
     })
     .from(schema.projects)
-    .where(and(eq(schema.projects.repoProvider, 'github'), isNull(schema.projects.githubRepoId)));
+    .where(and(eq(schema.projects.repoProvider, 'github'), isNull(schema.projects.githubRepoId)))
+    .limit(limit);
 
   const summary: BulkBackfillSummary = {
     total: rows.length,
@@ -180,10 +217,16 @@ export async function bulkBackfillGithubRepoIds(
     skippedCollision: 0,
     fetchFailed: 0,
     noInstallation: 0,
+    hasMore: rows.length === limit,
   };
 
   // Cache external installation ids so we don't re-query per project.
   const externalInstallationCache = new Map<string, string | null>();
+  // Cache one installation token per external installation id for the lifetime of
+  // this batch — minting one token per repo would hit GitHub's installation-token
+  // rate limit on installations with many dormant projects. `null` records a mint
+  // failure so we don't retry it for every project under that installation.
+  const installationTokenCache = new Map<string, string | null>();
 
   async function resolveExternalInstallationId(installationId: string): Promise<string | null> {
     const cached = externalInstallationCache.get(installationId);
@@ -200,7 +243,28 @@ export async function bulkBackfillGithubRepoIds(
     return external;
   }
 
+  async function resolveInstallationToken(externalInstallationId: string): Promise<string | null> {
+    const cached = installationTokenCache.get(externalInstallationId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    let token: string | null = null;
+    try {
+      ({ token } = await getInstallationToken(externalInstallationId, env));
+    } catch (err) {
+      token = null;
+      log.warn('github_repo_id_backfill.bulk_token_mint_failed', {
+        externalInstallationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    installationTokenCache.set(externalInstallationId, token);
+    return token;
+  }
+
+  let processed = 0;
   for (const row of rows) {
+    processed++;
     if (!row.installationId) {
       summary.noInstallation++;
       log.warn('github_repo_id_backfill.bulk_skip_no_installation', { projectId: row.projectId });
@@ -217,10 +281,19 @@ export async function bulkBackfillGithubRepoIds(
       continue;
     }
 
+    const installationToken = await resolveInstallationToken(externalInstallationId);
+    if (!installationToken) {
+      // Could not mint a token for this installation — treat as a transient fetch
+      // failure so a re-run retries it (the row stays IS NULL).
+      summary.fetchFailed++;
+      continue;
+    }
+
     const result = await backfillProjectGithubRepoId(db, env, {
       projectId: row.projectId,
       repository: row.repository,
       externalInstallationId,
+      installationToken,
     });
 
     switch (result.status) {
@@ -236,6 +309,14 @@ export async function bulkBackfillGithubRepoIds(
       case 'fetch_failed':
         summary.fetchFailed++;
         break;
+    }
+
+    if (processed % BULK_BACKFILL_PROGRESS_INTERVAL === 0) {
+      log.info('github_repo_id_backfill.bulk_progress', {
+        processed,
+        total: summary.total,
+        backfilled: summary.backfilled,
+      });
     }
   }
 

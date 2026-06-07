@@ -167,6 +167,29 @@ describe('workspace git-token GitHub scoping', () => {
     });
   });
 
+  it('scopes the token by repositoryIds when self-heal resolves the id but skips persistence (collision)', async () => {
+    // A concurrent heal already persisted the id, so this UPDATE collides — but the
+    // numeric id is still returned so the current mint scopes correctly.
+    mocks.backfillProjectGithubRepoId.mockResolvedValue({
+      status: 'skipped_collision',
+      githubRepoId: 77,
+      githubRepoNodeId: 'R_77',
+      fullName: 'raph/sam',
+    });
+    limitResponses.push(
+      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
+      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
+      [{ installationId: 'user-1:120081765', externalInstallationId: '120081765' }]
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [77],
+    });
+  });
+
   it('does not 403 under a custom GitHub CLI policy once the id is self-healed before policy resolution', async () => {
     mocks.backfillProjectGithubRepoId.mockResolvedValue({
       status: 'backfilled',
