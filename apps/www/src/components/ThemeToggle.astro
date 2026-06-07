@@ -1,0 +1,162 @@
+---
+// 3-way theme switcher (System / Light / Dark).
+// Shares Starlight's `starlight-theme` localStorage key so the marketing site
+// and the docs stay in sync. Pre-paint resolution happens in Base.astro.
+interface Props {
+  class?: string;
+}
+const { class: className } = Astro.props;
+---
+
+<theme-toggle class:list={['theme-toggle', className]} role="group" aria-label="Theme">
+  <button type="button" class="tt-btn" data-theme-value="auto" aria-label="System theme" title="System">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
+  </button>
+  <button type="button" class="tt-btn" data-theme-value="light" aria-label="Light theme" title="Light">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+    </svg>
+  </button>
+  <button type="button" class="tt-btn" data-theme-value="dark" aria-label="Dark theme" title="Dark">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  </button>
+</theme-toggle>
+
+<style>
+  .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius-md);
+    background: var(--color-bg-inset);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .tt-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-fg-dim);
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+  }
+
+  .tt-btn:hover {
+    color: var(--color-fg-primary);
+    background: var(--color-bg-surface-hover);
+  }
+
+  .tt-btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .tt-btn[aria-pressed='true'] {
+    color: var(--color-accent);
+    background: var(--color-bg-surface);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  }
+
+  :root[data-theme='light'] .tt-btn[aria-pressed='true'] {
+    box-shadow: 0 1px 2px rgba(16, 40, 28, 0.12);
+  }
+</style>
+
+<script>
+  class ThemeToggle extends HTMLElement {
+    constructor() {
+      super();
+      const buttons = Array.from(
+        this.querySelectorAll<HTMLButtonElement>('.tt-btn')
+      );
+
+      const parse = (t: string | null): 'auto' | 'light' | 'dark' =>
+        t === 'auto' || t === 'light' || t === 'dark' ? t : 'auto';
+
+      const getStored = (): 'auto' | 'light' | 'dark' => {
+        try {
+          return parse(localStorage.getItem('starlight-theme'));
+        } catch {
+          return 'auto';
+        }
+      };
+
+      const resolve = (pref: 'auto' | 'light' | 'dark'): 'light' | 'dark' =>
+        pref === 'auto'
+          ? window.matchMedia('(prefers-color-scheme: light)').matches
+            ? 'light'
+            : 'dark'
+          : pref;
+
+      const apply = (pref: 'auto' | 'light' | 'dark', persist: boolean) => {
+        document.documentElement.dataset.theme = resolve(pref);
+        if (persist) {
+          try {
+            localStorage.setItem(
+              'starlight-theme',
+              pref === 'auto' ? '' : pref
+            );
+          } catch {}
+        }
+        // Keep Starlight's own picker (docs) in sync if present on this page.
+        const sl = document.querySelector('starlight-theme-select select');
+        if (sl instanceof HTMLSelectElement && sl.value !== pref) {
+          sl.value = pref;
+        }
+        document
+          .querySelectorAll<ThemeToggle>('theme-toggle')
+          .forEach((el) => el.refresh());
+      };
+
+      this.refresh = () => {
+        const pref = getStored();
+        buttons.forEach((b) =>
+          b.setAttribute(
+            'aria-pressed',
+            String(b.dataset.themeValue === pref)
+          )
+        );
+      };
+
+      buttons.forEach((b) =>
+        b.addEventListener('click', () =>
+          apply(parse(b.dataset.themeValue ?? 'auto'), true)
+        )
+      );
+
+      // React to OS scheme changes while in auto.
+      window
+        .matchMedia('(prefers-color-scheme: light)')
+        .addEventListener('change', () => {
+          if (getStored() === 'auto') apply('auto', false);
+        });
+
+      // Sync across tabs / Starlight picker writes.
+      window.addEventListener('storage', (e) => {
+        if (e.key === 'starlight-theme') apply(getStored(), false);
+      });
+
+      this.refresh();
+    }
+
+    refresh: () => void = () => {};
+  }
+
+  if (!customElements.get('theme-toggle')) {
+    customElements.define('theme-toggle', ThemeToggle);
+  }
+</script>

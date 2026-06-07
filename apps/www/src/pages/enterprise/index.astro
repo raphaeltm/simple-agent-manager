@@ -563,4 +563,34 @@ const pillars = [
   .comp-table tbody tr:hover {
     background: var(--glass-bg-subtle);
   }
+
+  :global(html[data-theme='light']) .ent-hero-glow {
+    background: radial-gradient(ellipse, rgba(21, 128, 61, 0.08) 0%, transparent 70%);
+  }
+
+  :global(html[data-theme='light']) .btn-ent-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft);
+  }
+
+  :global(html[data-theme='light']) .btn-ent-primary:hover {
+    box-shadow: 0 0 30px var(--shadow-accent-strong);
+  }
+
+  :global(html[data-theme='light']) .pain-icon {
+    background: rgba(21, 128, 61, 0.1);
+  }
+
+  /* Light mode: faint dividers/header need stronger borders + a distinct
+     header zone on the near-white table surface. */
+  :global(html[data-theme='light']) .comp-table thead {
+    background: var(--color-bg-inset);
+  }
+
+  :global(html[data-theme='light']) .comp-table th {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  :global(html[data-theme='light']) .comp-table td {
+    border-bottom: 1px solid var(--color-border);
+  }
 </style>

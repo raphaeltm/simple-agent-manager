@@ -1,32 +1,61 @@
 import mermaid from 'mermaid';
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: 'loose',
-  theme: 'base',
-  themeVariables: {
-    background: '#13201d',
-    primaryColor: '#13201d',
-    primaryTextColor: '#e6f2ee',
-    primaryBorderColor: '#2f6d58',
-    lineColor: '#6ed79a',
-    secondaryColor: '#0e1a17',
-    secondaryTextColor: '#d6e8e0',
-    tertiaryColor: '#162723',
-    tertiaryTextColor: '#9fb7ae',
-    clusterBkg: '#101b18',
-    clusterBorder: '#2f6d58',
-    edgeLabelBackground: '#0b1110',
-    nodeBorder: '#3f7a63',
-    fontFamily:
-      'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  },
-  flowchart: {
-    curve: 'basis',
-    useMaxWidth: false,
-    htmlLabels: false,
-  },
-});
+const MERMAID_FONT =
+  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+const DARK_THEME_VARIABLES = {
+  background: '#13201d',
+  primaryColor: '#13201d',
+  primaryTextColor: '#e6f2ee',
+  primaryBorderColor: '#2f6d58',
+  lineColor: '#6ed79a',
+  secondaryColor: '#0e1a17',
+  secondaryTextColor: '#d6e8e0',
+  tertiaryColor: '#162723',
+  tertiaryTextColor: '#9fb7ae',
+  clusterBkg: '#101b18',
+  clusterBorder: '#2f6d58',
+  edgeLabelBackground: '#0b1110',
+  nodeBorder: '#3f7a63',
+  fontFamily: MERMAID_FONT,
+};
+
+const LIGHT_THEME_VARIABLES = {
+  background: '#f8fbf8',
+  primaryColor: '#eaf3ec',
+  primaryTextColor: '#11271d',
+  primaryBorderColor: '#3f8a63',
+  lineColor: '#2f6d4e',
+  secondaryColor: '#dfeee4',
+  secondaryTextColor: '#11271d',
+  tertiaryColor: '#eef3ef',
+  tertiaryTextColor: '#45584f',
+  clusterBkg: '#e8f1ea',
+  clusterBorder: '#bcd0c3',
+  edgeLabelBackground: '#f8fbf8',
+  nodeBorder: '#3f8a63',
+  fontFamily: MERMAID_FONT,
+};
+
+const resolveTheme = (): 'light' | 'dark' =>
+  document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+
+const initializeMermaid = (theme: 'light' | 'dark') => {
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: 'base',
+    themeVariables:
+      theme === 'light' ? LIGHT_THEME_VARIABLES : DARK_THEME_VARIABLES,
+    flowchart: {
+      curve: 'basis',
+      useMaxWidth: false,
+      htmlLabels: false,
+    },
+  });
+};
+
+initializeMermaid(resolveTheme());
 
 const diagramBlocks = Array.from(
   document.querySelectorAll<HTMLElement>('.post-body [data-language="mermaid"]')
@@ -355,6 +384,68 @@ const attachPanZoom = (surface: HTMLElement, svg: SVGElement) => {
   return { reset };
 };
 
+type Diagram = {
+  index: number;
+  source: string;
+  title: string;
+  wrapper: HTMLElement;
+  surface: HTMLElement | null;
+  controls: { reset: () => void };
+};
+
+let renderCounter = 0;
+
+const renderDiagram = async (diagram: Diagram, theme: 'light' | 'dark') => {
+  initializeMermaid(theme);
+
+  const surface = document.createElement('div');
+  surface.className = 'mermaid-surface';
+
+  const canvas = document.createElement('div');
+  canvas.className = 'mermaid-canvas';
+  surface.append(canvas);
+
+  diagram.wrapper.classList.remove('mermaid-shell--error');
+
+  try {
+    const { svg } = await mermaid.render(
+      `sam-diagram-${diagram.index}-${renderCounter++}`,
+      diagram.source
+    );
+    canvas.innerHTML = svg;
+
+    const svgElement = canvas.querySelector<SVGElement>('svg');
+    if (svgElement) {
+      svgElement.removeAttribute('width');
+      svgElement.removeAttribute('height');
+      svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      svgElement.setAttribute('role', 'img');
+      svgElement.setAttribute('aria-label', `Diagram for ${diagram.title}`);
+      diagram.controls = attachPanZoom(surface, svgElement);
+    } else {
+      diagram.controls = { reset: () => {} };
+    }
+  } catch (error) {
+    diagram.wrapper.classList.add('mermaid-shell--error');
+    diagram.controls = { reset: () => {} };
+    surface.innerHTML = `
+      <div class="mermaid-error">
+        <strong>Mermaid failed to render.</strong>
+        <pre>${String(error)}</pre>
+      </div>
+    `;
+  }
+
+  if (diagram.surface) {
+    diagram.surface.replaceWith(surface);
+  } else {
+    diagram.wrapper.append(surface);
+  }
+  diagram.surface = surface;
+};
+
+const diagrams: Diagram[] = [];
+
 for (const [index, block] of diagramBlocks.entries()) {
   const pre = block.matches('pre') ? block : block.querySelector('pre');
   const copyButton = block.querySelector<HTMLButtonElement>('button[data-code]');
@@ -396,63 +487,60 @@ for (const [index, block] of diagramBlocks.entries()) {
   actions.append(expandButton, resetButton);
   chrome.append(actions);
 
-  const surface = document.createElement('div');
-  surface.className = 'mermaid-surface';
-
-  const canvas = document.createElement('div');
-  canvas.className = 'mermaid-canvas';
-  canvas.innerHTML = `<div class="mermaid">${source}</div>`;
-  surface.append(canvas);
-
-  wrapper.append(chrome, surface);
+  wrapper.append(chrome);
   block.replaceWith(wrapper);
 
-  try {
-    const { svg } = await mermaid.render(`sam-diagram-${index}`, source);
-    canvas.innerHTML = svg;
+  const diagram: Diagram = {
+    index,
+    source,
+    title,
+    wrapper,
+    surface: null,
+    controls: { reset: () => {} },
+  };
+  diagrams.push(diagram);
 
-    const svgElement = canvas.querySelector<SVGElement>('svg');
-    if (!svgElement) {
-      continue;
+  resetButton.addEventListener('click', () => diagram.controls.reset());
+  expandButton.addEventListener('click', () => {
+    wrapper.classList.toggle('is-fullscreen');
+    document.body.classList.toggle(
+      'mermaid-fullscreen-open',
+      wrapper.classList.contains('is-fullscreen')
+    );
+    expandButton.textContent = wrapper.classList.contains('is-fullscreen')
+      ? 'Close full screen'
+      : 'Full screen';
+    diagram.controls.reset();
+  });
+
+  wrapper.addEventListener('click', (event) => {
+    if (
+      wrapper.classList.contains('is-fullscreen') &&
+      event.target === wrapper
+    ) {
+      wrapper.classList.remove('is-fullscreen');
+      document.body.classList.remove('mermaid-fullscreen-open');
+      expandButton.textContent = 'Full screen';
+      diagram.controls.reset();
     }
+  });
 
-    svgElement.removeAttribute('width');
-    svgElement.removeAttribute('height');
-    svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-    svgElement.setAttribute('role', 'img');
-    svgElement.setAttribute('aria-label', `Diagram for ${title}`);
-    const controls = attachPanZoom(surface, svgElement);
-    resetButton.addEventListener('click', controls.reset);
-    expandButton.addEventListener('click', () => {
-      wrapper.classList.toggle('is-fullscreen');
-      document.body.classList.toggle(
-        'mermaid-fullscreen-open',
-        wrapper.classList.contains('is-fullscreen')
-      );
-      expandButton.textContent = wrapper.classList.contains('is-fullscreen')
-        ? 'Close full screen'
-        : 'Full screen';
-      controls.reset();
-    });
-
-    wrapper.addEventListener('click', (event) => {
-      if (
-        wrapper.classList.contains('is-fullscreen') &&
-        event.target === wrapper
-      ) {
-        wrapper.classList.remove('is-fullscreen');
-        document.body.classList.remove('mermaid-fullscreen-open');
-        expandButton.textContent = 'Full screen';
-        controls.reset();
-      }
-    });
-  } catch (error) {
-    wrapper.classList.add('mermaid-shell--error');
-    surface.innerHTML = `
-      <div class="mermaid-error">
-        <strong>Mermaid failed to render.</strong>
-        <pre>${String(error)}</pre>
-      </div>
-    `;
-  }
+  await renderDiagram(diagram, resolveTheme());
 }
+
+// Re-render diagrams when the site theme changes so colours always match.
+let activeTheme = resolveTheme();
+const themeObserver = new MutationObserver(() => {
+  const nextTheme = resolveTheme();
+  if (nextTheme === activeTheme) {
+    return;
+  }
+  activeTheme = nextTheme;
+  for (const diagram of diagrams) {
+    void renderDiagram(diagram, nextTheme);
+  }
+});
+themeObserver.observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ['data-theme'],
+});

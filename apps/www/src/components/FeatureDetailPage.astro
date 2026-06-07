@@ -375,4 +375,23 @@ const { feature, prevFeature, nextFeature } = Astro.props;
     color: var(--color-fg-primary);
     border-color: var(--glass-border-hover);
   }
+
+  :global(html[data-theme='light']) .feature-hero-image {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 50px rgba(21, 128, 61, 0.08),
+      0 0 100px rgba(21, 128, 61, 0.04);
+  }
+
+  :global(html[data-theme='light']) .cta-card {
+    box-shadow: var(--glass-shadow), 0 0 70px rgba(21, 128, 61, 0.06);
+  }
+
+  :global(html[data-theme='light']) .btn-hero-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft), 0 0 60px var(--color-accent-glow);
+  }
+
+  :global(html[data-theme='light']) .btn-hero-primary:hover {
+    box-shadow: 0 0 30px var(--shadow-accent-strong), 0 0 80px var(--color-accent-glow);
+  }
 </style>

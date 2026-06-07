@@ -17,12 +17,32 @@ const apiUrl = `https://api.${baseDomain}`;
 ---
 
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
-    <meta name="theme-color" content="#0b1110" />
+
+    <!-- Pre-paint theme init (shares Starlight's `starlight-theme` key so docs + marketing stay in sync). Must run before first paint to avoid FOUC. -->
+    <script is:inline>
+      (() => {
+        const parse = (t) =>
+          t === 'auto' || t === 'light' || t === 'dark' ? t : 'auto';
+        let stored = 'auto';
+        try {
+          stored = parse(localStorage.getItem('starlight-theme') || 'auto');
+        } catch {}
+        const resolved =
+          stored === 'auto'
+            ? window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark'
+            : stored;
+        document.documentElement.dataset.theme = resolved;
+      })();
+    </script>
+    <meta name="theme-color" content="#0b1110" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8fbf8" media="(prefers-color-scheme: light)" />
 
     <!-- Content Security Policy -->
     <meta http-equiv="Content-Security-Policy" content={`default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https:; connect-src 'self' ${apiUrl}; frame-src 'none'; object-src 'none'; base-uri 'self'`} />

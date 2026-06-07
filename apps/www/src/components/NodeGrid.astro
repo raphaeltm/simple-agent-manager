@@ -29,6 +29,34 @@
     overflow: hidden;
     -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
     mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+
+    /* Node animation palette (dark default). The JS-drawn SVG pulses read
+       these same custom properties so the whole animation stays theme-aware. */
+    --node-dormant-border: rgba(22, 163, 74, 0.08);
+    --node-dormant-bg: rgba(22, 163, 74, 0.015);
+    --node-active-border: rgba(22, 163, 74, 0.3);
+    --node-active-bg: rgba(22, 163, 74, 0.05);
+    --node-agent: rgba(34, 197, 94, 0.25);
+    --node-agent-flash: rgba(34, 197, 94, 0.95);
+    --node-agent-flash-shadow: rgba(34, 197, 94, 0.5);
+    --node-connection-stroke: rgba(34, 197, 94, 0.2);
+    --node-connection-dot: rgba(34, 197, 94, 0.9);
+    --node-connection-glow: rgba(34, 197, 94, 0.15);
+  }
+
+  /* Light mode: the canvas is pale, so the faint dark-theme greens vanish.
+     Use the darker accent green at higher opacity for legible nodes. */
+  :global(html[data-theme='light']) .node-grid {
+    --node-dormant-border: rgba(21, 128, 61, 0.22);
+    --node-dormant-bg: rgba(21, 128, 61, 0.05);
+    --node-active-border: rgba(21, 128, 61, 0.45);
+    --node-active-bg: rgba(21, 128, 61, 0.09);
+    --node-agent: rgba(21, 128, 61, 0.4);
+    --node-agent-flash: rgba(21, 128, 61, 0.95);
+    --node-agent-flash-shadow: rgba(21, 128, 61, 0.4);
+    --node-connection-stroke: rgba(21, 128, 61, 0.35);
+    --node-connection-dot: rgba(21, 128, 61, 0.95);
+    --node-connection-glow: rgba(21, 128, 61, 0.2);
   }
 
   /* ---- Grid: brick-pattern offset, no padding, bleeds past edges ---- */
@@ -71,13 +99,13 @@
   }
 
   .grid-node.dormant {
-    border: 1px solid rgba(22, 163, 74, 0.08);
-    background: rgba(22, 163, 74, 0.015);
+    border: 1px solid var(--node-dormant-border);
+    background: var(--node-dormant-bg);
   }
 
   .grid-node.active {
-    border: 1px solid rgba(22, 163, 74, 0.3);
-    background: rgba(22, 163, 74, 0.05);
+    border: 1px solid var(--node-active-border);
+    background: var(--node-active-bg);
   }
 
   /* Brick-pattern: offset odd rows by half a cell */
@@ -100,7 +128,7 @@
   }
 
   .agent-square {
-    background: rgba(34, 197, 94, 0.25);
+    background: var(--node-agent);
     border-radius: 2px;
     opacity: 0;
     transition: opacity 0.6s ease;
@@ -135,9 +163,9 @@
   }
 
   @keyframes agent-flash {
-    0%   { background: rgba(34, 197, 94, 0.25); }
-    35%  { background: rgba(34, 197, 94, 0.95); box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
-    100% { background: rgba(34, 197, 94, 0.25); }
+    0%   { background: var(--node-agent); }
+    35%  { background: var(--node-agent-flash); box-shadow: 0 0 8px var(--node-agent-flash-shadow); }
+    100% { background: var(--node-agent); }
   }
 </style>
 
@@ -365,6 +393,12 @@
     return { x: r.left + r.width / 2 - s.left, y: r.top + r.height / 2 - s.top };
   }
 
+  // Read a node-palette custom property fresh so theme switches are reflected.
+  function nodeColor(name: string, fallback: string): string {
+    const v = getComputedStyle(gridContainer).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+
   function spawnConnection() {
     if (connectionBusy) return;
     const visible = getVisibleAgents();
@@ -389,7 +423,7 @@
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', 'rgba(34, 197, 94, 0.2)');
+    path.setAttribute('stroke', nodeColor('--node-connection-stroke', 'rgba(34, 197, 94, 0.2)'));
     path.setAttribute('stroke-width', '1.5');
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
@@ -408,12 +442,12 @@
 
     const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     dot.setAttribute('r', '2.5');
-    dot.setAttribute('fill', 'rgba(34, 197, 94, 0.9)');
+    dot.setAttribute('fill', nodeColor('--node-connection-dot', 'rgba(34, 197, 94, 0.9)'));
     svg.appendChild(dot);
 
     const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     glow.setAttribute('r', '6');
-    glow.setAttribute('fill', 'rgba(34, 197, 94, 0.15)');
+    glow.setAttribute('fill', nodeColor('--node-connection-glow', 'rgba(34, 197, 94, 0.15)'));
     svg.appendChild(glow);
 
     const duration = 1600;

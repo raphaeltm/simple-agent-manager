@@ -197,4 +197,23 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
     width: 100%;
     height: auto;
   }
+
+  :global(html[data-theme='light']) .hero-glow {
+    background: radial-gradient(ellipse at center, rgba(21, 128, 61, 0.12) 0%, rgba(21, 128, 61, 0.05) 40%, transparent 70%);
+  }
+
+  :global(html[data-theme='light']) .btn-hero-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft), 0 0 60px var(--color-accent-glow);
+  }
+
+  :global(html[data-theme='light']) .btn-hero-primary:hover {
+    box-shadow: 0 0 30px var(--shadow-accent-strong), 0 0 80px var(--color-accent-glow);
+  }
+
+  :global(html[data-theme='light']) .screenshot-preview {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 50px rgba(21, 128, 61, 0.08),
+      0 0 100px rgba(21, 128, 61, 0.04);
+  }
 </style>

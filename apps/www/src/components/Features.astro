@@ -161,4 +161,14 @@ const iconPaths: Record<string, string[]> = {
     color: var(--color-fg-muted);
     line-height: 1.6;
   }
+
+  :global(html[data-theme='light']) .feature-card:hover {
+    box-shadow: var(--glass-shadow), 0 0 32px var(--color-accent-glow);
+  }
+
+  :global(html[data-theme='light']) .feature-icon {
+    background: rgba(21, 128, 61, 0.1);
+    border-color: rgba(21, 128, 61, 0.22);
+    box-shadow: 0 0 16px rgba(21, 128, 61, 0.08);
+  }
 </style>
