@@ -65,7 +65,7 @@ export const StickyPlanButton: React.FC<StickyPlanButtonProps> = ({ plan, onClic
           backgroundColor: allDone
             ? 'rgba(34, 197, 94, 0.2)'
             : 'rgba(34, 197, 94, 0.12)',
-          color: allDone ? '#4ade80' : 'var(--sam-color-fg-primary)',
+          color: allDone ? 'var(--sam-color-success-fg)' : 'var(--sam-color-fg-primary)',
         }}
       >
         {completed}/{total}
