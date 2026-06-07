@@ -203,6 +203,38 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     return app;
   }
 
+  // Shared test helpers — collapse the repeated request/assertion boilerplate so
+  // each test asserts only what is unique to its entry point.
+  const REPO_NOT_ACCESSIBLE = 'Repository is not accessible through the selected installation';
+
+  function post(path: string, body: unknown, ctx?: ExecutionContext): Promise<Response> {
+    return buildApp().request(
+      path,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      mockEnv,
+      ctx
+    );
+  }
+
+  async function expectForbidden(res: Response, message: string): Promise<void> {
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN', message });
+  }
+
+  // The gate always consults the user's OAuth token + the installation's EXTERNAL
+  // id for the bound repository — assert that invariant from the happy-path tests.
+  function expectGateRan(): void {
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      expect.objectContaining({
+        flow: 'project-access',
+        userId: 'user-1',
+        repository: 'acme/allowed-private',
+      })
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Workspace create: POST /api/workspaces
   // ---------------------------------------------------------------------------
@@ -212,17 +244,9 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     limitResponses.push([INSTALLATION_ROW]);
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
 
-    const res = await buildApp().request('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'WS One', projectId: 'proj-1' }),
-    }, mockEnv);
+    const res = await post('/api/workspaces', { name: 'WS One', projectId: 'proj-1' });
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error: 'FORBIDDEN',
-      message: 'Repository is not accessible through the selected installation',
-    });
+    await expectForbidden(res, REPO_NOT_ACCESSIBLE);
     // Fail-fast: no node was ever created.
     expect(mocks.createNodeRecord).not.toHaveBeenCalled();
   });
@@ -232,19 +256,11 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     whereResponses.push([{ count: 0 }]); // user node count
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
 
-    await buildApp().request('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'WS One', projectId: 'proj-1' }),
-    }, mockEnv);
+    await post('/api/workspaces', { name: 'WS One', projectId: 'proj-1' });
 
     // Gate allowed the request through to provisioning.
     expect(mocks.createNodeRecord).toHaveBeenCalled();
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
-      'github-user-token',
-      '120081765',
-      expect.objectContaining({ flow: 'project-access', userId: 'user-1', repository: 'acme/allowed-private' })
-    );
+    expectGateRan();
   });
 
   // ---------------------------------------------------------------------------
@@ -255,17 +271,9 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     limitResponses.push([INSTALLATION_ROW]);
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
 
-    const res = await buildApp().request('/api/projects/proj-1/tasks/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Do the thing' }),
-    }, mockEnv);
+    const res = await post('/api/projects/proj-1/tasks/submit', { message: 'Do the thing' });
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error: 'FORBIDDEN',
-      message: 'Repository is not accessible through the selected installation',
-    });
+    await expectForbidden(res, REPO_NOT_ACCESSIBLE);
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
@@ -277,18 +285,10 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
 
-    await buildApp().request('/api/projects/proj-1/tasks/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Do the thing' }),
-    }, mockEnv, mockExecutionCtx);
+    await post('/api/projects/proj-1/tasks/submit', { message: 'Do the thing' }, mockExecutionCtx);
 
     // Gate ran (user OAuth token + external installation id) BEFORE provisioning.
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
-      'github-user-token',
-      '120081765',
-      expect.objectContaining({ flow: 'project-access', userId: 'user-1', repository: 'acme/allowed-private' })
-    );
+    expectGateRan();
     // Gate allowed the request through to Task Runner provisioning.
     expect(mocks.startTaskRunnerDO).toHaveBeenCalled();
   });
@@ -306,17 +306,9 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
 
-    const res = await buildApp().request('/api/projects/proj-1/tasks/task-1/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }, mockEnv);
+    const res = await post('/api/projects/proj-1/tasks/task-1/run', {});
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error: 'FORBIDDEN',
-      message: 'Repository is not accessible through the selected installation',
-    });
+    await expectForbidden(res, REPO_NOT_ACCESSIBLE);
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
@@ -328,17 +320,9 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     // User can still see a repo with the bound full name, but a DIFFERENT id.
     mocks.getUserInstallationRepositories.mockResolvedValue([{ ...VISIBLE_REPO, id: 999 }]);
 
-    const res = await buildApp().request('/api/projects/proj-1/tasks/task-1/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }, mockEnv);
+    const res = await post('/api/projects/proj-1/tasks/task-1/run', {});
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error: 'FORBIDDEN',
-      message: 'GitHub repository access has changed; repository ID no longer matches',
-    });
+    await expectForbidden(res, 'GitHub repository access has changed; repository ID no longer matches');
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
@@ -354,19 +338,11 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
 
-    const res = await buildApp().request('/api/projects/proj-1/tasks/task-1/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }, mockEnv);
+    const res = await post('/api/projects/proj-1/tasks/task-1/run', {});
 
     expect(res.status).toBe(202);
     // Gate ran (user OAuth token + external installation id) BEFORE provisioning.
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
-      'github-user-token',
-      '120081765',
-      expect.objectContaining({ flow: 'project-access', userId: 'user-1', repository: 'acme/allowed-private' })
-    );
+    expectGateRan();
     // Gate allowed the request through to Task Runner provisioning.
     expect(mocks.startTaskRunnerDO).toHaveBeenCalled();
   });
