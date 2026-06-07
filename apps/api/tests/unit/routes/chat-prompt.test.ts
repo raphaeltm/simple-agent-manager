@@ -189,6 +189,33 @@ describe('POST /sessions/:sessionId/prompt', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('returns 404 when the workspace has no node (nodeId null)', async () => {
+    // A workspace whose node was destroyed (FK set null) resolves but has no
+    // node to drive — the handler must 404, not contact any agent.
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: null, nodeStatus: null },
+      agentSession: { id: 'agent-sess-1' },
+    });
+
+    const response = await postPrompt();
+
+    expect(response.status).toBe(404);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when the prompt content is empty', async () => {
+    mocks.parseOptionalBody.mockResolvedValue({ content: '' });
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+
+    const response = await postPrompt();
+
+    expect(response.status).toBe(400);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
   it('returns 404 when no running agent session is found', async () => {
     setupDrizzle({
       workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },

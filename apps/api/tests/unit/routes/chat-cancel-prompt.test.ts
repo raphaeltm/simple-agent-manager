@@ -174,6 +174,22 @@ describe('POST /sessions/:sessionId/cancel', () => {
     expect(body.message).toBe('No prompt in flight to cancel');
   });
 
+  it('returns 500 when the cancel signal fails for a non-idle reason', async () => {
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 500 });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/cancel',
+      { method: 'POST' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(500);
+  });
+
   it('returns 404 when no active workspace is found', async () => {
     setupDrizzle({ workspace: null, agentSession: null });
 

@@ -31,9 +31,17 @@ const PROJECT_A = `${PREFIX}-projA`;
 const PROJECT_B = `${PREFIX}-projB`;
 const NODE_A = `${PREFIX}-nodeA`;
 const NODE_B = `${PREFIX}-nodeB`;
-// The shared chat session id that the victim workspace is keyed on. An attacker
-// who learns/guesses this id must NOT be able to resolve the victim's workspace.
+// The chat session id that the victim workspace (WS_A) is keyed on. An attacker
+// who learns/guesses this id must NOT be able to resolve the victim's workspace
+// from another tenant's scope.
 const SHARED_SESSION = `${PREFIX}-session`;
+// Distinct session id for the attacker's own workspace (WS_B). The workspaces
+// table has a partial UNIQUE index on chat_session_id (idx_workspaces_chat_session_id_unique
+// WHERE chat_session_id IS NOT NULL), so two workspaces can never share a chat
+// session id — that 1:1 mapping is itself a security property. WS_B exists as a
+// decoy to prove the resolver returns the *correct* workspace for SHARED_SESSION
+// and never leaks across tenants.
+const SESSION_B = `${PREFIX}-sessionB`;
 const WS_A = `${PREFIX}-wsA`;
 const WS_B = `${PREFIX}-wsB`;
 
@@ -54,13 +62,14 @@ describe('resolveLiveWorkspaceForSession — query-layer tenant scoping', () => 
       status: 'running',
       chatSessionId: SHARED_SESSION,
     });
-    // A second workspace owned by user B / project B that ALSO references the
-    // same chat session id (simulating a stale/replayed id). It must never be
-    // returned to user A or for project A.
+    // A second workspace owned by user B / project B with its OWN distinct chat
+    // session id. (The unique index forbids reusing SHARED_SESSION.) It must
+    // never be returned when user A / project A resolve SHARED_SESSION, and the
+    // victim's session must never resolve under B's scope.
     await seedWorkspace(WS_B, NODE_B, USER_B, {
       projectId: PROJECT_B,
       status: 'running',
-      chatSessionId: SHARED_SESSION,
+      chatSessionId: SESSION_B,
     });
   });
 
@@ -123,5 +132,26 @@ describe('resolveLiveWorkspaceForSession — query-layer tenant scoping', () => 
       userId: USER_A,
     });
     expect(ws).toBeNull();
+  });
+
+  it('resolves a workspace in recovery status (active state)', async () => {
+    // 'recovery' is an active state accepted by the resolver's status filter
+    // (inArray(status, ['running', 'recovery'])). A workspace mid-recovery must
+    // still be resolvable so the chat bridge can drive its VM agent.
+    const recoverySession = `${PREFIX}-recovery-session`;
+    const recoveryWs = `${PREFIX}-wsRecovery`;
+    await seedWorkspace(recoveryWs, NODE_A, USER_A, {
+      projectId: PROJECT_A,
+      status: 'recovery',
+      chatSessionId: recoverySession,
+    });
+    const ws = await resolveLiveWorkspaceForSession(db(), {
+      projectId: PROJECT_A,
+      sessionId: recoverySession,
+      userId: USER_A,
+    });
+    expect(ws).not.toBeNull();
+    expect(ws?.id).toBe(recoveryWs);
+    expect(ws?.nodeId).toBe(NODE_A);
   });
 });
