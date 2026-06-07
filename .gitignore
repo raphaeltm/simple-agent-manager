@@ -55,6 +55,8 @@ pnpm-debug.log*
 .codex/log/
 .codex/sessions/
 .codex/tmp/
+# Playwright audit screenshots write under apps/web cwd, not the repo root
+**/.codex/tmp/
 
 # /do workflow state (ephemeral, per-session)
 .do-state.md
