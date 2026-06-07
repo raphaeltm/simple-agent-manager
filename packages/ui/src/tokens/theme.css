@@ -59,6 +59,12 @@
   --sam-bg-gradient-2: rgba(34, 197, 94, 0.10);
   --sam-bg-gradient-3: rgba(6, 78, 59, 0.12);
 
+  /* Onboarding full-screen overlay background — green vignette over the app bg */
+  --sam-onboarding-overlay-bg:
+    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.12) 0%, rgba(34, 197, 94, 0.04) 40%, transparent 70%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(10, 14, 10, 0) 30%, rgba(0, 0, 0, 0.7) 100%),
+    #0a0e0a;
+
   /* Form element surfaces and borders */
   --sam-form-bg: rgba(8, 15, 12, 0.5);
   --sam-form-bg-focus: rgba(8, 15, 12, 0.6);
@@ -315,6 +321,12 @@
   --sam-bg-gradient-1: rgba(16, 185, 129, 0.1);
   --sam-bg-gradient-2: rgba(34, 197, 94, 0.07);
   --sam-bg-gradient-3: rgba(134, 239, 172, 0.18);
+
+  /* Onboarding full-screen overlay background — soft green vignette over the light app bg */
+  --sam-onboarding-overlay-bg:
+    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.03) 40%, transparent 70%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(238, 243, 239, 0) 30%, rgba(205, 221, 210, 0.55) 100%),
+    #eef3ef;
 
   /* Form element surfaces and borders */
   --sam-form-bg: rgba(255, 255, 255, 0.7);

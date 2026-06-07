@@ -192,13 +192,7 @@ export function ChoosePathWizard() {
       aria-label="Account setup"
       aria-modal="true"
       className="fixed inset-0 z-50 flex flex-col"
-      style={{
-        background: `
-          radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.12) 0%, rgba(34, 197, 94, 0.04) 40%, transparent 70%),
-          radial-gradient(ellipse 100% 100% at 50% 50%, rgba(10, 14, 10, 0.0) 30%, rgba(0, 0, 0, 0.7) 100%),
-          var(--bg-app, #0a0e0a)
-        `,
-      }}
+      style={{ background: 'var(--sam-onboarding-overlay-bg)' }}
     >
       {/* Screen reader announcement */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
@@ -227,7 +221,7 @@ export function ChoosePathWizard() {
           type="button"
           onClick={dismissOnboarding}
           aria-label="Exit setup"
-          className="inline-flex items-center justify-center w-11 h-11 rounded-full text-fg-muted hover:text-fg-primary hover:bg-white/5 bg-transparent border-none cursor-pointer transition-colors"
+          className="inline-flex items-center justify-center w-11 h-11 rounded-full text-fg-muted hover:text-fg-primary hover:bg-fg-primary/5 bg-transparent border-none cursor-pointer transition-colors"
         >
           <X size={20} />
         </button>
