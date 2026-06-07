@@ -1010,6 +1010,120 @@ describe('GitHub App installation sharing', () => {
     expect(insertedPerUserRows()).toHaveLength(0);
   });
 
+  it('does NOT insert a per-user row when a personal installation account does not match the sender (webhook owner guard)', async () => {
+    // User lookup by sender.id returns a SAM user, but the installation's account
+    // identity (910895) does not match the installing sender (591860). This is the
+    // residual-leak scenario the guard exists to prevent.
+    limitResponses.push([{ id: 'user-1' }]);
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: {
+        id: 555000111,
+        account: { id: 910895, login: 'raphaeltm', type: 'User' },
+      },
+      sender: { id: 591860, login: 'lionello' },
+    });
+
+    const res = await app.request('/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-hub-signature-256': 'sha256=test',
+        'x-github-event': 'installation',
+        'content-type': 'application/json',
+      },
+      body: payload,
+    }, mockEnv);
+
+    expect(res.status).toBe(200);
+    // Canonical state is still recorded unconditionally.
+    expect(insertedCanonicalRows()).toEqual([
+      expect.objectContaining({
+        installationId: '555000111',
+        accountType: 'personal',
+        accountName: 'raphaeltm',
+      }),
+    ]);
+    // The leaked per-user row must NOT be created.
+    expect(insertedPerUserRows()).toHaveLength(0);
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      'github.webhook.personal_installation_owner_mismatch',
+      expect.objectContaining({
+        installationId: '555000111',
+        senderId: '591860',
+        accountId: '910895',
+        accountLogin: 'raphaeltm',
+      })
+    );
+  });
+
+  it('inserts a per-user row when a personal installation account matches the sender (webhook owner guard)', async () => {
+    limitResponses.push([{ id: 'user-1' }]);
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: {
+        id: 555000222,
+        account: { id: 591860, login: 'lionello', type: 'User' },
+      },
+      sender: { id: 591860, login: 'lionello' },
+    });
+
+    const res = await app.request('/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-hub-signature-256': 'sha256=test',
+        'x-github-event': 'installation',
+        'content-type': 'application/json',
+      },
+      body: payload,
+    }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(insertedPerUserRows()).toEqual([
+      expect.objectContaining({
+        userId: 'user-1',
+        externalInstallationId: '555000222',
+        accountType: 'personal',
+        accountName: 'lionello',
+      }),
+    ]);
+  });
+
+  it('inserts a per-user row for an org installation regardless of sender identity (webhook owner guard exempts orgs)', async () => {
+    limitResponses.push([{ id: 'user-1' }]);
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: {
+        id: 555000333,
+        account: { id: 12345, login: 'acme', type: 'Organization' },
+      },
+      sender: { id: 591860, login: 'lionello' },
+    });
+
+    const res = await app.request('/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-hub-signature-256': 'sha256=test',
+        'x-github-event': 'installation',
+        'content-type': 'application/json',
+      },
+      body: payload,
+    }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(insertedPerUserRows()).toEqual([
+      expect.objectContaining({
+        userId: 'user-1',
+        externalInstallationId: '555000333',
+        accountType: 'organization',
+        accountName: 'acme',
+      }),
+    ]);
+    expect(mocks.log.warn).not.toHaveBeenCalledWith(
+      'github.webhook.personal_installation_owner_mismatch',
+      expect.anything()
+    );
+  });
+
   it('tombstones canonical state and removes per-user links on GitHub uninstall webhook', async () => {
     const payload = JSON.stringify({
       action: 'deleted',
