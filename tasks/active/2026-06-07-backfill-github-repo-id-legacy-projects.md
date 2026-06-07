@@ -51,23 +51,23 @@ Decide A-only-vs-A+B with the reviewer during `/do`; if B is deferred, file it e
 
 ## Implementation Checklist
 
-- [ ] Add a `GET /repos/{owner}/{repo}` helper (installation-token-authenticated) returning `{ id, nodeId, fullName }`; reuse existing GitHub fetch/error conventions in `services/github-app.ts`.
-- [ ] Part A: lazy self-heal in `runtime.ts` git-token handler — fetch+persist id/node_id/canonical name BEFORE policy resolution; guard unique collision; fall through to name-fallback on fetch failure.
-- [ ] Part B: bulk backfill (superadmin route or one-shot job) over legacy github projects, batched per installation with a sane concurrency cap.
-- [ ] Idempotency: both parts only touch rows where `github_repo_id IS NULL`; safe to re-run.
-- [ ] Rename handling: when the fetched canonical `full_name` differs from stored `repository`, update `repository` too.
-- [ ] Structured logging on every skip/failure (project id, installation id, reason) per `.claude/rules/11-fail-fast-patterns.md`.
-- [ ] Docs sync: update any self-hosting/architecture docs that describe repo-id capture if behavior is documented (`.claude/rules/01-doc-sync.md`).
+- [x] Add a `GET /repos/{owner}/{repo}` helper (installation-token-authenticated) returning `{ id, nodeId, fullName }`; reuse existing GitHub fetch/error conventions in `services/github-app.ts` — `getRepositoryMetadata`.
+- [x] Part A: lazy self-heal in `runtime.ts` git-token handler — fetch+persist id/node_id/canonical name BEFORE policy resolution; guard unique collision; fall through to name-fallback on fetch failure.
+- [x] Part B: bulk backfill (superadmin route `POST /api/admin/github-repo-id-backfill`) over legacy github projects, batched per installation (token minted once per installation via cache).
+- [x] Idempotency: both parts only touch rows where `github_repo_id IS NULL` (UPDATE guarded by `isNull`; bulk SELECT filters null); safe to re-run.
+- [x] Rename handling: when the fetched canonical `full_name` differs from stored `repository`, update `repository` too.
+- [x] Structured logging on every skip/failure (project id, installation id, reason) per `.claude/rules/11-fail-fast-patterns.md`.
+- [x] Docs sync: no docs describe repo-id capture behavior (grep clean) — no-op.
 
 ## Acceptance Criteria (each maps to a test)
 
-- [ ] Legacy github project (id null, has installation + repo name) mints a git token → `github_repo_id`/`github_repo_node_id` are persisted and `repositoryIds` scoping is used (NOT `repositories`). *(vertical-slice test, rule 35)*
-- [ ] Legacy github project **with a custom GitHub CLI policy** mints a git token successfully (no 403) after self-heal. *(regression test — the class of bug that motivated this task, rule 02)*
-- [ ] Bulk backfill updates every dormant legacy github project across multiple installations; a project whose repo returns 404 is skipped + logged and does NOT abort the batch.
-- [ ] Stored name was stale (repo renamed while id was null) → backfill updates `repository` to the canonical `full_name` and sets the id.
-- [ ] Re-running either path is a no-op on already-backfilled rows (idempotent).
-- [ ] Would-be `(user_id, github_repo_id)` unique collision is handled gracefully (skip + log), no 500.
-- [ ] The personal-installation leak fix is preserved: post-backfill scoping is `repositoryIds: [id]` (strictly tighter than name scoping).
+- [x] Legacy github project (id null, has installation + repo name) mints a git token → `github_repo_id`/`github_repo_node_id` are persisted and `repositoryIds` scoping is used (NOT `repositories`). *(route test "self-heals a legacy project…")*
+- [x] Legacy github project **with a custom GitHub CLI policy** mints a git token successfully (no 403) after self-heal. *(route test "does not 403 under a custom GitHub CLI policy once the id is self-healed before policy resolution")*
+- [x] Bulk backfill updates every dormant legacy github project across multiple installations; a project whose repo returns 404 is skipped + logged and does NOT abort the batch. *(service test "processes every dormant project… a single inaccessible repo does not abort")*
+- [x] Stored name was stale (repo renamed while id was null) → backfill updates `repository` to the canonical `full_name` and sets the id. *(service test "refreshes the stored repository to the canonical full name on a rename")*
+- [x] Re-running either path is a no-op on already-backfilled rows (idempotent). *(service tests: guarded `where` update; bulk no-op on empty dormant set)*
+- [x] Would-be `(user_id, github_repo_id)` unique collision is handled gracefully (skip + log), no 500. *(service test "returns skipped_collision WITH the numeric id (no throw)")*
+- [x] The personal-installation leak fix is preserved: post-backfill scoping is `repositoryIds: [id]` (strictly tighter than name scoping). *(route test asserts `repositoryIds: [42]`)*
 
 ## Out of Scope / Notes
 - Not changing the `repositories: [name]` last-resort guard's existence — it remains for the no-project / fetch-failure path, but should rarely fire after backfill.

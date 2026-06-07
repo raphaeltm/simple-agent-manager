@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
+import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
 import { getInstallationToken } from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),
   resolveWorkspaceGitHubTokenOptions: vi.fn(),
   verifyWorkspaceCallbackAuth: vi.fn(),
+  backfillProjectGithubRepoId: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -37,6 +39,9 @@ vi.mock('../../../src/services/github-cli-policy', () => {
     resolveWorkspaceGitHubTokenOptions: mocks.resolveWorkspaceGitHubTokenOptions,
   };
 });
+vi.mock('../../../src/services/github-repo-id-backfill', () => ({
+  backfillProjectGithubRepoId: mocks.backfillProjectGithubRepoId,
+}));
 
 describe('workspace git-token GitHub scoping', () => {
   let app: Hono<{ Bindings: Env }>;
@@ -50,6 +55,13 @@ describe('workspace git-token GitHub scoping', () => {
     limitResponses = [];
     mocks.verifyWorkspaceCallbackAuth.mockResolvedValue(undefined);
     mocks.resolveWorkspaceGitHubTokenOptions.mockResolvedValue(null);
+    // Default: self-heal cannot resolve an id (legacy fall-through to name scoping).
+    mocks.backfillProjectGithubRepoId.mockResolvedValue({
+      status: 'fetch_failed',
+      githubRepoId: null,
+      githubRepoNodeId: null,
+      fullName: null,
+    });
     mocks.getInstallationToken.mockResolvedValue({
       token: 'github-installation-token',
       expiresAt: '2026-06-06T19:00:00.000Z',
@@ -126,6 +138,66 @@ describe('workspace git-token GitHub scoping', () => {
     await expect(res.json()).resolves.toEqual({
       token: 'github-installation-token',
       expiresAt: '2026-06-06T19:00:00.000Z',
+    });
+  });
+
+  it('self-heals a legacy project: persists the numeric id and scopes the token to repositoryIds', async () => {
+    mocks.backfillProjectGithubRepoId.mockResolvedValue({
+      status: 'backfilled',
+      githubRepoId: 42,
+      githubRepoNodeId: 'R_42',
+      fullName: 'raph/sam',
+    });
+    limitResponses.push(
+      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
+      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
+      [{ installationId: 'user-1:120081765', externalInstallationId: '120081765' }]
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.backfillProjectGithubRepoId).toHaveBeenCalledWith(expect.anything(), mockEnv, {
+      projectId: 'proj-1',
+      repository: 'raph/sam',
+      externalInstallationId: '120081765',
+    });
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42],
+    });
+  });
+
+  it('does not 403 under a custom GitHub CLI policy once the id is self-healed before policy resolution', async () => {
+    mocks.backfillProjectGithubRepoId.mockResolvedValue({
+      status: 'backfilled',
+      githubRepoId: 42,
+      githubRepoNodeId: 'R_42',
+      fullName: 'raph/sam',
+    });
+    // Custom policy rejects when it has no numeric id; succeeds once self-healed.
+    mocks.resolveWorkspaceGitHubTokenOptions.mockImplementation(
+      async (_db: unknown, opts: { githubRepoId: number | null }) => {
+        if (!opts.githubRepoId) {
+          throw new GitHubCliPolicyError('custom policy requires a numeric repo id');
+        }
+        return null;
+      }
+    );
+    limitResponses.push(
+      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
+      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
+      [{ installationId: 'user-1:120081765', externalInstallationId: '120081765' }]
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.resolveWorkspaceGitHubTokenOptions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ githubRepoId: 42 })
+    );
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42],
     });
   });
 });
