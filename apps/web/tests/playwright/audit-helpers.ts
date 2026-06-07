@@ -122,7 +122,7 @@ export async function visitAndCapture(
 export type AuditResponder = (status: number, body: unknown) => Promise<void>;
 
 /**
- * Registers the `**​/api/**` catch-all route used by the theme audits. The
+ * Registers the catch-all `/api` glob route used by the theme audits. The
  * supplied handler returns the `respond(...)` promise for paths it handles and
  * `undefined` for everything else, which falls through to an empty `{}` 200 so
  * unmocked endpoints never hang the page.
