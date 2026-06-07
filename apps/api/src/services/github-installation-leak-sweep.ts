@@ -34,7 +34,7 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getInstallationAccount } from './github-app';
+import { generateAppJWT, getInstallationAccount } from './github-app';
 import { getExternalInstallationId } from './github-installation-ids';
 
 /**
@@ -147,6 +147,11 @@ export async function bulkSweepMismatchedPersonalInstallations(
     return githubId;
   }
 
+  // Mint one app JWT for the whole batch. The token is valid for 10 minutes,
+  // and each row would otherwise re-import the RSA key + re-sign a JWT inside
+  // getInstallationAccount. Amortizing it keeps a 50-row batch to one key import.
+  const appJwt = await generateAppJWT(env);
+
   let processed = 0;
   for (const row of rows) {
     processed++;
@@ -168,7 +173,7 @@ export async function bulkSweepMismatchedPersonalInstallations(
     });
     let account;
     try {
-      account = await getInstallationAccount(externalInstallationId, env);
+      account = await getInstallationAccount(externalInstallationId, env, appJwt);
     } catch (err) {
       summary.fetchFailed++;
       log.warn('github.installation_leak_sweep.account_fetch_failed', {
@@ -194,20 +199,29 @@ export async function bulkSweepMismatchedPersonalInstallations(
       continue;
     }
 
-    // Mismatch confirmed. Cascade guard: never delete a row a project references,
-    // or we cascade-delete the project (and its tasks/triggers). Surface instead.
+    // Mismatch confirmed. Reference guard: never delete a row another table still
+    // references, or we either cascade-delete a project (projects.installation_id
+    // is ON DELETE CASCADE -> tasks/triggers) or leave a workspace with a dangling
+    // installation_id FK (workspaces.installation_id has no ON DELETE action and
+    // SQLite FK enforcement is off in migrations). Surface instead of destroying.
     const referencingProjects = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
       .where(eq(schema.projects.installationId, row.id))
       .limit(1);
-    if (referencingProjects.length > 0) {
+    const referencingWorkspaces = await db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.installationId, row.id))
+      .limit(1);
+    if (referencingProjects.length > 0 || referencingWorkspaces.length > 0) {
       summary.skippedReferenced++;
       log.warn('github.installation_leak_sweep.skipped_referenced', {
         installationRowId: row.id,
         userId: row.userId,
         accountId: String(account.id),
         userGithubId,
+        referencedBy: referencingProjects.length > 0 ? 'project' : 'workspace',
       });
       continue;
     }

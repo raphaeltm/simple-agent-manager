@@ -107,7 +107,9 @@ export function personalInstallationOwnerMatches(
   owner: { id?: number | null; login?: string | null }
 ): boolean {
   if (typeof account.id === 'number' && typeof owner.id === 'number') {
-    return account.id === owner.id;
+    // Real GitHub account ids are positive. Reject 0 / negatives so a zeroed or
+    // sentinel id on both sides can't be read as a match (0 === 0).
+    return account.id > 0 && owner.id > 0 && account.id === owner.id;
   }
   if (
     typeof account.login === 'string' &&

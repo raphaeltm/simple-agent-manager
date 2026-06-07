@@ -7,6 +7,13 @@ import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { bulkSweepMismatchedPersonalInstallations } from '../services/github-installation-leak-sweep';
 
+/**
+ * Hard ceiling on a caller-supplied `limit`. A single Workers request is bounded
+ * by the 1000-subrequest limit and each swept row costs ~1 GitHub subrequest, so
+ * keep the batch comfortably under that even if the caller asks for more.
+ */
+const MAX_LEAK_SWEEP_LIMIT = 500;
+
 const adminGithubInstallationLeakSweepRoutes = new Hono<{ Bindings: Env }>();
 
 adminGithubInstallationLeakSweepRoutes.use(
@@ -39,7 +46,11 @@ adminGithubInstallationLeakSweepRoutes.post('/', async (c) => {
   let afterId: string | undefined;
   const body = await c.req.json().catch(() => null);
   if (body && typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0) {
-    limit = Math.floor(body.limit);
+    // Cap the per-invocation batch: each row costs one GitHub subrequest plus a
+    // few D1 reads/writes, and a single Workers request is bounded by the
+    // 1000-subrequest / CPU-time limits. Clamp so a caller can't request a batch
+    // big enough to blow the subrequest ceiling mid-sweep.
+    limit = Math.min(Math.floor(body.limit), MAX_LEAK_SWEEP_LIMIT);
   }
   if (body && typeof body.afterId === 'string' && body.afterId.length > 0) {
     afterId = body.afterId;

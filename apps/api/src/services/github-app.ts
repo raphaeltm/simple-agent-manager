@@ -328,12 +328,18 @@ export interface InstallationAccount {
  * numeric account id against the owning SAM user's github_id — a comparison that
  * cannot be done in SQL because neither the users table nor the canonical
  * account table stores both the numeric id and the login.
+ *
+ * Pass `appJwt` to reuse a single App JWT across many calls (e.g. the leak-row
+ * sweep resolves up to a full batch of installations per invocation). A GitHub
+ * App JWT is valid for 10 minutes, so minting it once avoids one RSA key import
+ * + sign per row. When omitted, a fresh JWT is generated.
  */
 export async function getInstallationAccount(
   installationId: string,
-  env: Env
+  env: Env,
+  appJwt?: string
 ): Promise<InstallationAccount | null> {
-  const jwt = await generateAppJWT(env);
+  const jwt = appJwt ?? (await generateAppJWT(env));
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}`,
@@ -937,30 +943,42 @@ export async function ensureBranchExists(
 
 /**
  * Verify a webhook signature from GitHub.
+ *
+ * Uses `crypto.subtle.verify`, which performs the HMAC comparison in constant
+ * time, instead of a string `===` of hex digests (which short-circuits on the
+ * first differing character and is therefore timing-unsafe). The owner guard on
+ * the `installation.created` webhook path depends on this signature check being
+ * trustworthy, so it must not leak comparison timing.
  */
 export async function verifyWebhookSignature(
   payload: string,
   signature: string,
   secret: string
 ): Promise<boolean> {
+  const prefix = 'sha256=';
+  if (!signature.startsWith(prefix)) {
+    return false;
+  }
+  const hex = signature.slice(prefix.length);
+  // A SHA-256 HMAC is 32 bytes -> 64 hex chars. Reject anything malformed
+  // before decoding so a bad header can't reach crypto.subtle.verify.
+  if (hex.length !== 64 || !/^[0-9a-f]{64}$/i.test(hex)) {
+    return false;
+  }
+
+  const signatureBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    signatureBytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ['sign']
+    ['verify']
   );
 
-  const signatureBuffer = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    encoder.encode(payload)
-  );
-
-  const expectedSignature = 'sha256=' + Array.from(new Uint8Array(signatureBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  return signature === expectedSignature;
+  return crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(payload));
 }

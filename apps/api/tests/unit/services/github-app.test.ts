@@ -6,6 +6,7 @@ import {
   getUserAccessibleInstallations,
   getUserInstallationRepositories,
   verifyUserInstallationAccess,
+  verifyWebhookSignature,
 } from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
@@ -409,5 +410,53 @@ describe('verifyUserInstallationAccess', () => {
       installationId: '120081765',
       accountName: 'effprop',
     })).rejects.toThrow('Server unavailable');
+  });
+});
+
+describe('verifyWebhookSignature', () => {
+  const secret = 'webhook-secret';
+  const payload = '{"action":"installation.created"}';
+
+  async function sign(body: string, key: string): Promise<string> {
+    const enc = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(key),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const mac = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(body));
+    const hex = Array.from(new Uint8Array(mac))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    return `sha256=${hex}`;
+  }
+
+  it('accepts a valid sha256 HMAC signature', async () => {
+    const signature = await sign(payload, secret);
+    await expect(verifyWebhookSignature(payload, signature, secret)).resolves.toBe(true);
+  });
+
+  it('rejects a signature computed with the wrong secret', async () => {
+    const signature = await sign(payload, 'other-secret');
+    await expect(verifyWebhookSignature(payload, signature, secret)).resolves.toBe(false);
+  });
+
+  it('rejects a signature for a tampered payload', async () => {
+    const signature = await sign(payload, secret);
+    await expect(
+      verifyWebhookSignature('{"action":"tampered"}', signature, secret)
+    ).resolves.toBe(false);
+  });
+
+  it('rejects a header missing the sha256= prefix', async () => {
+    const signature = (await sign(payload, secret)).slice('sha256='.length);
+    await expect(verifyWebhookSignature(payload, signature, secret)).resolves.toBe(false);
+  });
+
+  it('rejects a malformed (non-hex / wrong-length) digest without throwing', async () => {
+    await expect(verifyWebhookSignature(payload, 'sha256=not-hex', secret)).resolves.toBe(false);
+    await expect(verifyWebhookSignature(payload, 'sha256=abcd', secret)).resolves.toBe(false);
   });
 });

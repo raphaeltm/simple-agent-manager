@@ -1,8 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getInstallationAccount: vi.fn(),
+  generateAppJWT: vi.fn(),
   log: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/lib/logger', () => ({ log: mocks.log }));
 vi.mock('../../../src/services/github-app', () => ({
   getInstallationAccount: mocks.getInstallationAccount,
+  generateAppJWT: mocks.generateAppJWT,
 }));
 
 import * as schema from '../../../src/db/schema';
@@ -38,9 +40,11 @@ function makeSweepDb(opts: {
   installations: unknown[];
   usersQueue: unknown[][];
   projectsQueue?: unknown[][];
+  workspacesQueue?: unknown[][];
 }) {
   const usersQueue = [...opts.usersQueue];
   const projectsQueue = [...(opts.projectsQueue ?? [])];
+  const workspacesQueue = [...(opts.workspacesQueue ?? [])];
   const deletedConditions: unknown[] = [];
   const installationsWhere: unknown[] = [];
   const db = {
@@ -67,6 +71,9 @@ function makeSweepDb(opts: {
           }
           if (table === schema.projects) {
             return Promise.resolve(projectsQueue.shift() ?? []);
+          }
+          if (table === schema.workspaces) {
+            return Promise.resolve(workspacesQueue.shift() ?? []);
           }
           return Promise.resolve([]);
         },
@@ -97,6 +104,7 @@ function personalRow(overrides: Record<string, unknown> = {}) {
 describe('bulkSweepMismatchedPersonalInstallations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.generateAppJWT.mockResolvedValue('app-jwt');
   });
 
   it('deletes only the mismatched, unreferenced personal row — keeps the matched one and skips the project-referenced mismatch', async () => {
@@ -253,6 +261,48 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     expect(installationsWhere).toHaveLength(1);
     expect(installationsWhere[0]).toEqual(
       eq(schema.githubInstallations.accountType, 'personal')
+    );
+  });
+
+  it('skips a mismatched row referenced only by a workspace (dangling-FK guard) without deleting it', async () => {
+    // workspaces.installation_id references github_installations.id with NO ON DELETE
+    // action, and SQLite FK enforcement is off in migrations — deleting the row would
+    // leave the workspace with a dangling installation_id. The guard must skip it even
+    // when no project references it.
+    mocks.getInstallationAccount.mockResolvedValue({ id: 999, login: 'a', type: 'User' });
+
+    const { db, deletedConditions } = makeSweepDb({
+      installations: [personalRow()],
+      usersQueue: [[{ githubId: '111' }]], // 111 != account 999 -> mismatch
+      projectsQueue: [[]], // not project-referenced
+      workspacesQueue: [[{ id: 'ws-1' }]], // but a workspace still references it
+    });
+
+    const summary = await bulkSweepMismatchedPersonalInstallations(db, env);
+
+    expect(summary.skippedReferenced).toBe(1);
+    expect(summary.deleted).toBe(0);
+    expect(deletedConditions).toHaveLength(0);
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      'github.installation_leak_sweep.skipped_referenced',
+      expect.objectContaining({ installationRowId: 'row-1', referencedBy: 'workspace' }),
+    );
+  });
+
+  it('continues from afterId with the personal filter still intact (composite cursor WHERE)', async () => {
+    // A re-run passes afterId = previous nextCursor. The batch query must combine the
+    // cursor with the account_type='personal' filter so pagination cannot silently
+    // start scanning org rows.
+    const { db, installationsWhere } = makeSweepDb({ installations: [], usersQueue: [] });
+
+    await bulkSweepMismatchedPersonalInstallations(db, env, { afterId: 'cursor-x' });
+
+    expect(installationsWhere).toHaveLength(1);
+    expect(installationsWhere[0]).toEqual(
+      and(
+        eq(schema.githubInstallations.accountType, 'personal'),
+        gt(schema.githubInstallations.id, 'cursor-x')
+      )
     );
   });
 
