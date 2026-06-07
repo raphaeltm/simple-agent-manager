@@ -28,6 +28,7 @@ import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
 import { cleanupTaskRun } from '../../services/task-runner';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
 
@@ -143,6 +144,12 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   if (!project) {
     throw errors.notFound('Project');
   }
+
+  // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
+  // access to the bound repository through the app installation BEFORE the task
+  // is queued and the Task Runner DO provisions a node / clones the repo. Throws
+  // 403 if access was revoked or the repository id drifted.
+  await requireRepositoryUserAccess(c, db, project, userId);
 
   // Determine VM config (precedence: explicit override > project default > platform default)
   const vmSize: VMSize = body.vmSize

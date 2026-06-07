@@ -24,6 +24,7 @@ import { createNodeRecord, provisionNode } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
+import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { getOwnedNode, getOwnedWorkspace, scheduleWorkspaceCreateOnNode } from './_helpers';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
@@ -208,19 +209,12 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
   }
   const normalizedRepository = resolvedRepository.toLowerCase();
 
-  const installationRows = await db
-    .select({ id: schema.githubInstallations.id })
-    .from(schema.githubInstallations)
-    .where(
-      and(
-        eq(schema.githubInstallations.id, resolvedInstallationId),
-        eq(schema.githubInstallations.userId, userId)
-      )
-    )
-    .limit(1);
-  if (!installationRows[0]) {
-    throw errors.badRequest('GitHub installation not found');
-  }
+  // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
+  // access to the bound repository through the app installation BEFORE
+  // provisioning any node or creating any workspace. Throws 403 if access was
+  // revoked or the repository id drifted. Also covers installation ownership
+  // (via requireOwnedInstallation), so no separate ownership query is needed.
+  await requireRepositoryUserAccess(c, db, linkedProject, userId);
 
   const vmSize = body.vmSize ?? DEFAULT_VM_SIZE;
   const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;

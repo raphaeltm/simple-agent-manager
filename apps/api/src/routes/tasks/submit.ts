@@ -39,6 +39,7 @@ import * as projectDataService from '../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
@@ -65,6 +66,12 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
 
   // Validate ownership
   const project = await requireOwnedProject(db, projectId, userId);
+
+  // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
+  // access to the bound repository through the app installation BEFORE the
+  // task is enqueued and the Task Runner DO provisions a node / clones the
+  // repo. Throws 403 if access was revoked or the repository id drifted.
+  await requireRepositoryUserAccess(c, db, project, userId);
 
   // Validated by Valibot middleware
   const body = c.req.valid('json');

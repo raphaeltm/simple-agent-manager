@@ -1,13 +1,17 @@
 import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
 
 import * as schema from '../../db/schema';
+import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
   getUserInstallationRepositories,
   type GitHubRepositoryAccess,
 } from '../../services/github-app';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { getGitHubUserAccessToken } from '../../services/github-user-access-token';
 
 export function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -234,4 +238,66 @@ export async function assertRepositoryAccess(
     throw errors.forbidden('Repository is not accessible through the selected installation');
   }
   return matchedRepo;
+}
+
+/**
+ * Resolve the authenticated user's GitHub OAuth access token, failing fast if
+ * it is unavailable. BetterAuth owns the underlying token refresh/encryption;
+ * a null result means the user has no usable GitHub authorization.
+ */
+export async function requireGitHubUserAccessToken(
+  c: Context<{ Bindings: Env }>,
+  userId: string
+): Promise<string> {
+  const accessToken = await getGitHubUserAccessToken(c, userId);
+  if (!accessToken) {
+    throw errors.forbidden('GitHub user token unavailable');
+  }
+  return accessToken;
+}
+
+/**
+ * Fail-fast user∩app GitHub repo-access gate for spawn paths.
+ *
+ * Every GitHub action must be authorized by the intersection of (a) what the
+ * GitHub app installation grants AND (b) what the user's own GitHub
+ * authorization allows. The create/update paths already enforce this; this
+ * helper re-verifies it at workspace/task spawn BEFORE any machine is
+ * provisioned or any clone is attempted, so a user removed from an org/repo
+ * after project creation cannot spawn workspaces that clone the repo via the
+ * app-installation token.
+ *
+ * Throws 403 (forbidden) — without side effects — if the user no longer has
+ * access to the bound repository, or if the verified repository id has drifted
+ * from the project's bound `githubRepoId`.
+ *
+ * Same bug class as the production leak fixed in PR #1236 (5be1ea96) and
+ * PR #1238 (b8e42783).
+ */
+export async function requireRepositoryUserAccess(
+  c: Context<{ Bindings: Env }>,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  project: schema.Project,
+  userId: string
+): Promise<void> {
+  // Artifacts-backed (non-github) projects have no GitHub installation to
+  // intersect against — they are out of scope for this gate.
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    return;
+  }
+
+  const installation = await requireOwnedInstallation(db, project.installationId, userId);
+  const externalInstallationId = getExternalInstallationId(installation);
+  const accessToken = await requireGitHubUserAccessToken(c, userId);
+  const verifiedRepo = await assertRepositoryAccess(
+    accessToken,
+    externalInstallationId,
+    project.repository,
+    userId
+  );
+  if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
+    throw errors.forbidden(
+      'GitHub repository access has changed; repository ID no longer matches'
+    );
+  }
 }

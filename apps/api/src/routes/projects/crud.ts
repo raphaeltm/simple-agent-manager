@@ -25,7 +25,6 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
@@ -47,7 +46,6 @@ import {
 } from '../../schemas';
 import { encrypt } from '../../services/encryption';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
-import { getGitHubUserAccessToken } from '../../services/github-user-access-token';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -59,6 +57,7 @@ import {
   normalizeProjectName,
   normalizeRepository,
   PROJECT_ENV_KEY_PATTERN,
+  requireGitHubUserAccessToken,
   requireOwnedInstallation,
 } from './_helpers';
 
@@ -937,14 +936,3 @@ crudRoutes.delete('/:id', async (c) => {
 });
 
 export { crudRoutes };
-
-async function requireGitHubUserAccessToken(
-  c: Context<{ Bindings: Env }>,
-  userId: string
-): Promise<string> {
-  const accessToken = await getGitHubUserAccessToken(c, userId);
-  if (!accessToken) {
-    throw errors.forbidden('GitHub user token unavailable');
-  }
-  return accessToken;
-}
