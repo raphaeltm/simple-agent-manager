@@ -70,21 +70,22 @@ describe('UserMenu', () => {
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
   });
 
-  it('toggles the theme when the theme button in the dropdown is clicked', () => {
+  it('renders the three-way theme switcher in the dropdown and switches theme', () => {
     document.documentElement.removeAttribute('data-ui-theme');
     localStorage.clear();
     renderUserMenu();
     fireEvent.click(screen.getByText('Dev User'));
 
-    // Defaults to dark → button offers to switch to light.
-    const toggle = screen.getByRole('button', { name: 'Switch to light theme' });
-    expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam');
+    // The shared switcher offers all three options.
+    const group = screen.getByRole('group', { name: 'Theme' });
+    expect(group).toBeInTheDocument();
+    const light = screen.getByRole('button', { name: 'Light' });
 
-    fireEvent.click(toggle);
+    fireEvent.click(light);
 
     expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam-light');
     expect(localStorage.getItem('sam-theme')).toBe('light');
-    expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeInTheDocument();
+    expect(light).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('does not render navigation links (moved to AppShell)', () => {
