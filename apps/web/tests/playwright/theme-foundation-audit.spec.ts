@@ -1,4 +1,6 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { type Page, type Route, test } from '@playwright/test';
+
+import { assertNoOverflow, expectTheme, makeMockUser, screenshot, seedTheme } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Theme Foundation Visual Audit
@@ -13,27 +15,13 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 // first render — exactly the production FOUC-prevention path.
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+  sessionId: 'session-test-1',
+  userId: 'user-test-1',
+});
 
 const MOCK_PROJECT = {
   id: 'proj-test-1',
@@ -157,26 +145,6 @@ async function setupApiMocks(page: Page) {
   });
 }
 
-// Seed the persisted theme preference before any app code runs, mirroring the
-// pre-paint init in main.tsx (applyThemeAttribute(readStoredTheme())).
-async function seedTheme(page: Page, theme: 'dark' | 'light') {
-  await page.addInitScript((value) => {
-    window.localStorage.setItem('sam-theme', value);
-  }, theme);
-}
-
-async function screenshot(page: Page, name: string) {
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
-  });
-}
-
-async function expectedAttribute(theme: 'dark' | 'light') {
-  return theme === 'dark' ? 'sam' : 'sam-light';
-}
-
 async function auditTheme(page: Page, theme: 'dark' | 'light', label: string) {
   await seedTheme(page, theme);
   await setupApiMocks(page);
@@ -184,14 +152,10 @@ async function auditTheme(page: Page, theme: 'dark' | 'light', label: string) {
   await page.waitForTimeout(1200);
 
   // The pre-paint init must have applied the correct theme attribute.
-  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
-  expect(attr).toBe(await expectedAttribute(theme));
+  await expectTheme(page, theme);
 
   // No theme may introduce horizontal overflow.
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
+  await assertNoOverflow(page);
 
   await screenshot(page, `theme-${theme}-chat-${label}`);
 }

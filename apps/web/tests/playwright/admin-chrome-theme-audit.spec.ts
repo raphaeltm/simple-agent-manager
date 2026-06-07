@@ -1,53 +1,20 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { type Page, type Route, test } from '@playwright/test';
 
-const SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
+import {
+  assertNoOverflow as assertNoHorizontalOverflow,
+  expectTheme,
+  makeMockUser,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
 
-const MOCK_USER = {
-  user: {
-    id: 'admin-theme-1',
-    email: 'admin@example.com',
-    name: 'Admin User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-admin-theme-1',
-    userId: 'admin-theme-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
-
-async function seedTheme(page: Page, theme: 'dark' | 'light') {
-  await page.addInitScript((value) => {
-    window.localStorage.setItem('sam-theme', value);
-  }, theme);
-}
-
-async function expectTheme(page: Page, theme: 'dark' | 'light') {
-  const expected = theme === 'dark' ? 'sam' : 'sam-light';
-  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
-  expect(attr).toBe(expected);
-}
-
-async function screenshot(page: Page, name: string) {
-  await page.waitForTimeout(700);
-  await page.screenshot({
-    path: `${SCREENSHOT_DIR}/${name}.png`,
-    fullPage: true,
-  });
-}
-
-async function assertNoHorizontalOverflow(page: Page) {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-  expect(overflow).toBe(false);
-}
+const MOCK_USER = makeMockUser({
+  email: 'admin@example.com',
+  name: 'Admin User',
+  role: 'superadmin',
+  sessionId: 'session-admin-theme-1',
+  userId: 'admin-theme-1',
+});
 
 function makeCostSummary(empty = false) {
   return {

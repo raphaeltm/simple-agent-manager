@@ -1,26 +1,14 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-const MOCK_USER = {
-  user: {
-    id: 'user-theme-1',
-    email: 'theme@example.com',
-    name: 'Theme User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-06-06T00:00:00Z',
-    updatedAt: '2026-06-06T00:00:00Z',
-  },
-  session: {
-    id: 'session-theme-1',
-    userId: 'user-theme-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-session-token',
-    createdAt: '2026-06-06T00:00:00Z',
-    updatedAt: '2026-06-06T00:00:00Z',
-  },
-};
+import { makeMockUser, screenshot, seedTheme } from './audit-helpers';
+
+const MOCK_USER = makeMockUser({
+  email: 'theme@example.com',
+  name: 'Theme User',
+  role: 'superadmin',
+  sessionId: 'session-theme-1',
+  userId: 'user-theme-1',
+});
 
 const MOCK_WORKSPACE = {
   id: 'ws-theme-1',
@@ -265,12 +253,6 @@ const MOCK_SYSTEM_INFO = {
   },
 };
 
-async function seedTheme(page: Page, theme: 'dark' | 'light') {
-  await page.addInitScript((value) => {
-    window.localStorage.setItem('sam-theme', value);
-  }, theme);
-}
-
 function fulfill(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -351,16 +333,6 @@ async function assertNoOverflow(page: Page) {
   }));
   expect(overflow.docOverflow, `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
   expect(overflow.bodyOverflow, `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
-}
-
-async function screenshot(page: Page, name: string) {
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown';
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
-    fullPage: true,
-  });
 }
 
 async function gotoAuditedPage(page: Page, theme: 'dark' | 'light', path: string) {

@@ -54,6 +54,29 @@ export async function assertNoOverflow(page: Page) {
   expect(overflow).toBe(false);
 }
 
+/**
+ * Seeds the theme before the app boots by writing the `sam-theme` localStorage
+ * key. The ThemeContext reads this on mount and applies `data-ui-theme` on the
+ * `<html>` element.
+ */
+export async function seedTheme(page: Page, theme: 'dark' | 'light') {
+  await page.addInitScript((value) => {
+    window.localStorage.setItem('sam-theme', value);
+  }, theme);
+}
+
+/**
+ * Asserts the active theme resolved to the expected `data-ui-theme` token on
+ * `<html>` (`sam` for dark, `sam-light` for light).
+ */
+export async function expectTheme(page: Page, theme: 'dark' | 'light') {
+  const expected = theme === 'dark' ? 'sam' : 'sam-light';
+  const attr = await page.evaluate(() =>
+    document.documentElement.getAttribute('data-ui-theme')
+  );
+  expect(attr).toBe(expected);
+}
+
 export function getProjectSuffix(projectName: string): string {
   return projectName.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 }

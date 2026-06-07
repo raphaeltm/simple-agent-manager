@@ -1,30 +1,24 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import {
+  assertNoOverflow as assertNoHorizontalOverflow,
+  expectTheme,
+  makeMockUser,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
+
 // ---------------------------------------------------------------------------
 // Mock Data Factories
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-admin-1',
-    email: 'admin@example.com',
-    name: 'Admin User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-admin-1',
-    userId: 'user-admin-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-admin-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'admin@example.com',
+  name: 'Admin User',
+  role: 'superadmin',
+  sessionId: 'session-admin-1',
+  userId: 'user-admin-1',
+});
 
 // Generate 30 days of DAU data
 function makeDauData(
@@ -382,33 +376,6 @@ async function setupMocks(page: Page, scenario: MockScenario) {
     // Catch-all for any other API calls
     return respond(route, 200, {});
   });
-}
-
-async function screenshot(page: Page, name: string) {
-  await page.waitForTimeout(700);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
-  });
-}
-
-async function seedTheme(page: Page, theme: 'dark' | 'light') {
-  await page.addInitScript((value) => {
-    window.localStorage.setItem('sam-theme', value);
-  }, theme);
-}
-
-async function expectTheme(page: Page, theme: 'dark' | 'light') {
-  const expected = theme === 'dark' ? 'sam' : 'sam-light';
-  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
-  expect(attr).toBe(expected);
-}
-
-async function assertNoHorizontalOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow, 'Page must not have horizontal overflow').toBe(false);
 }
 
 // ---------------------------------------------------------------------------
