@@ -1,7 +1,15 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render as baseRender, type RenderOptions, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MobileNavDrawer } from '../../../src/components/MobileNavDrawer';
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
+
+// MobileNavDrawer renders the shared <ThemeSwitcher />, which calls useTheme and
+// therefore requires a ThemeProvider ancestor.
+function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
+  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+}
 
 const defaultProps = {
   onClose: vi.fn(),

@@ -12,8 +12,10 @@ import { initErrorReporter } from './lib/error-reporter';
 import { startMobileViewportSync } from './lib/mobile-viewport';
 import { registerAppServiceWorker } from './lib/pwa';
 
-// Pre-paint theme init: apply the persisted theme (default dark) before first
-// render so there is no flash of the wrong theme (FOUC).
+// Pre-paint theme init: resolve the persisted preference (dark | light |
+// system; default system) and apply the effective `data-ui-theme` before first
+// render so there is no flash of the wrong theme (FOUC). `system` is resolved
+// inline against the OS color-scheme media query inside applyThemeAttribute.
 applyThemeAttribute(readStoredTheme());
 
 const stopViewportSync = startMobileViewportSync();

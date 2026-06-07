@@ -4,17 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
+  useAuth: vi.fn(),
 }));
 
+const DEFAULT_USER = {
+  id: 'user_123',
+  email: 'dev@example.com',
+  name: 'Dev User',
+  image: null,
+};
+
 vi.mock('../../../src/components/AuthProvider', () => ({
-  useAuth: () => ({
-    user: {
-      id: 'user_123',
-      email: 'dev@example.com',
-      name: 'Dev User',
-      image: null,
-    },
-  }),
+  useAuth: mocks.useAuth,
 }));
 
 vi.mock('../../../src/lib/auth', () => ({
@@ -22,7 +23,26 @@ vi.mock('../../../src/lib/auth', () => ({
 }));
 
 import { UserMenu } from '../../../src/components/UserMenu';
-import { ThemeProvider } from '../../../src/contexts/ThemeContext';
+import { THEME_STORAGE_KEY, ThemeProvider } from '../../../src/contexts/ThemeContext';
+
+/**
+ * Install a controllable `matchMedia` so System mode resolves deterministically.
+ * jsdom does not implement matchMedia; the global setup stubs it, but we install
+ * a per-suite mock with a known OS preference so the System-click assertion is
+ * stable regardless of harness defaults.
+ */
+function installMatchMedia(prefersDark: boolean) {
+  window.matchMedia = vi.fn().mockReturnValue({
+    matches: prefersDark,
+    media: '(prefers-color-scheme: dark)',
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true,
+  } as unknown as MediaQueryList);
+}
 
 function renderUserMenu() {
   return render(
@@ -37,6 +57,10 @@ function renderUserMenu() {
 describe('UserMenu', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.useAuth.mockReturnValue({ user: DEFAULT_USER });
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-ui-theme');
+    installMatchMedia(true); // OS prefers dark by default in this suite
   });
 
   it('renders user name', () => {
@@ -70,21 +94,55 @@ describe('UserMenu', () => {
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
   });
 
-  it('toggles the theme when the theme button in the dropdown is clicked', () => {
-    document.documentElement.removeAttribute('data-ui-theme');
-    localStorage.clear();
+  it('renders the three-way theme switcher in the dropdown and switches to Light', () => {
     renderUserMenu();
     fireEvent.click(screen.getByText('Dev User'));
 
-    // Defaults to dark → button offers to switch to light.
-    const toggle = screen.getByRole('button', { name: 'Switch to light theme' });
-    expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam');
+    // The shared switcher offers all three options.
+    const group = screen.getByRole('group', { name: 'Theme' });
+    expect(group).toBeInTheDocument();
+    const light = screen.getByRole('button', { name: 'Light' });
 
-    fireEvent.click(toggle);
+    fireEvent.click(light);
 
     expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam-light');
-    expect(localStorage.getItem('sam-theme')).toBe('light');
-    expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeInTheDocument();
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
+    expect(light).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('switches to Dark from the dropdown switcher', () => {
+    renderUserMenu();
+    fireEvent.click(screen.getByText('Dev User'));
+
+    const dark = screen.getByRole('button', { name: 'Dark' });
+    fireEvent.click(dark);
+
+    expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    expect(dark).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('switches to System and resolves via the OS preference', () => {
+    // OS prefers dark (installed in beforeEach) → System resolves to sam.
+    renderUserMenu();
+    fireEvent.click(screen.getByText('Dev User'));
+
+    const system = screen.getByRole('button', { name: 'System' });
+    fireEvent.click(system);
+
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('system');
+    expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam');
+    expect(system).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('exposes accessible attributes on the menu trigger', () => {
+    renderUserMenu();
+    const trigger = screen.getByRole('button', { name: 'User menu' });
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('does not render navigation links (moved to AppShell)', () => {
@@ -105,15 +163,11 @@ describe('UserMenu', () => {
     expect(screen.queryByText('dev@example.com')).not.toBeInTheDocument();
   });
 
-  it('returns null when no user is provided', () => {
-    // Override the mock for this test
-    vi.doMock('../../../src/components/AuthProvider', () => ({
-      useAuth: () => ({ user: null }),
-    }));
-    // The component itself handles the null case
-    renderUserMenu();
-    // The user name should still be present due to the module-level mock
-    // This test verifies the component renders without crashing
-    expect(document.body).toBeInTheDocument();
+  it('renders nothing when there is no authenticated user', () => {
+    mocks.useAuth.mockReturnValue({ user: null });
+    const { container } = renderUserMenu();
+    // UserMenu returns null for a missing user — no trigger, no name.
+    expect(container.querySelector('button')).toBeNull();
+    expect(screen.queryByText('Dev User')).not.toBeInTheDocument();
   });
 });

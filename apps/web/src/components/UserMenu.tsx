@@ -8,9 +8,9 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { useTheme } from '../contexts/ThemeContext';
 import { signOut } from '../lib/auth';
 import { useAuth } from './AuthProvider';
+import { ThemeSwitcher } from './ThemeSwitcher';
 
 /**
  * User menu with avatar and dropdown for user-specific actions.
@@ -18,7 +18,6 @@ import { useAuth } from './AuthProvider';
  */
 export function UserMenu({ compact = false }: { compact?: boolean }) {
   const { user } = useAuth();
-  const { isDark, toggleTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const menuRef = useRef<HTMLDivElement>(null);
@@ -30,7 +29,7 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
     if (!trigger) return;
 
     const rect = trigger.getBoundingClientRect();
-    const menuWidth = 192;
+    const menuWidth = 248;
     const gutter = 8;
     setMenuStyle({
       position: 'fixed',
@@ -92,7 +91,10 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
       <button
         ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 text-fg-muted bg-transparent border-none cursor-pointer p-1"
+        aria-label="User menu"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        className="flex items-center justify-center gap-2 text-fg-muted bg-transparent border-none cursor-pointer p-1 min-h-[44px] min-w-[44px]"
       >
         {avatarElement}
         {!compact && (
@@ -134,46 +136,9 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-              className="flex w-full items-center justify-between gap-2 px-4 py-2 text-sm text-fg-primary bg-transparent border-none border-b border-border-default cursor-pointer hover:bg-surface-hover"
-            >
-              <span>{isDark ? 'Light theme' : 'Dark theme'}</span>
-              {isDark ? (
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="12" r="4" strokeWidth={2} />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.07-7.07l-1.41 1.41M6.34 17.66l-1.41 1.41m12.14 0l-1.41-1.41M6.34 6.34L4.93 4.93"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"
-                  />
-                </svg>
-              )}
-            </button>
+            <div className="px-3 py-2 border-b border-border-default">
+              <ThemeSwitcher />
+            </div>
 
             <button
               onClick={handleSignOut}

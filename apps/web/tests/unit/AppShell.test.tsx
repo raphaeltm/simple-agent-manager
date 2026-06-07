@@ -1,8 +1,16 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render as baseRender, type RenderOptions, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
+import { ThemeProvider } from '../../src/contexts/ThemeContext';
+
+// AppShell renders the shared <ThemeSwitcher /> (desktop sidebar footer and the
+// mobile drawer), which calls useTheme and requires a ThemeProvider ancestor.
+function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
+  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+}
 
 // Mutable auth state so individual tests can override
 let mockAuthState: Record<string, unknown> = {

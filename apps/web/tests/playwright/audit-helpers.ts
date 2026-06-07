@@ -55,22 +55,81 @@ export async function assertNoOverflow(page: Page) {
 }
 
 /**
+ * Regression guard for the "System" label clipping inside the narrow (220px)
+ * desktop sidebar. Document-level overflow checks do NOT catch a label that is
+ * truncated *within* its own button — the button stays inside the viewport while
+ * its text is clipped. This asserts every option button in the Theme group fully
+ * contains its content (scrollWidth must not exceed clientWidth).
+ */
+export async function assertThemeButtonsNotClipped(page: Page) {
+  const clipped = await page.evaluate(() => {
+    const group = document.querySelector('[role="group"][aria-label="Theme"]');
+    if (!group) return ['MISSING_GROUP'];
+    const offenders: string[] = [];
+    for (const btn of Array.from(group.querySelectorAll('button'))) {
+      // +1 tolerance for sub-pixel rounding.
+      if (btn.scrollWidth > btn.clientWidth + 1) {
+        offenders.push(`${btn.textContent?.trim() ?? '?'}: ${btn.scrollWidth}>${btn.clientWidth}`);
+      }
+    }
+    return offenders;
+  });
+  expect(clipped).toEqual([]);
+}
+
+/**
  * Seeds the theme before the app boots by writing the `sam-theme` localStorage
  * key. The ThemeContext reads this on mount and applies `data-ui-theme` on the
  * `<html>` element.
+ *
+ * For `'system'`, pass `prefersDark` to deterministically control the OS
+ * preference: a `matchMedia` override is installed before the app boots so the
+ * pre-paint script and ThemeContext resolve `system` to a known value.
  */
-export async function seedTheme(page: Page, theme: 'dark' | 'light') {
-  await page.addInitScript((value) => {
-    window.localStorage.setItem('sam-theme', value);
-  }, theme);
+export async function seedTheme(
+  page: Page,
+  theme: 'dark' | 'light' | 'system',
+  prefersDark = true,
+) {
+  await page.addInitScript(
+    ({ value, dark }) => {
+      window.localStorage.setItem('sam-theme', value);
+      if (value === 'system') {
+        // Only intercept `prefers-color-scheme` queries so OS-theme resolution
+        // is deterministic. Delegate every other query (notably
+        // `useIsMobile`'s `(max-width: 767px)` breakpoint) to the real
+        // matchMedia so the AppShell still picks the correct mobile/desktop
+        // render branch.
+        const realMatchMedia = window.matchMedia.bind(window);
+        // @ts-expect-error overriding for deterministic system resolution
+        window.matchMedia = (query: string) => {
+          if (query.includes('prefers-color-scheme')) {
+            return {
+              matches: query.includes('dark') ? dark : !dark,
+              media: query,
+              onchange: null,
+              addEventListener: () => {},
+              removeEventListener: () => {},
+              addListener: () => {},
+              removeListener: () => {},
+              dispatchEvent: () => true,
+            };
+          }
+          return realMatchMedia(query);
+        };
+      }
+    },
+    { value: theme, dark: prefersDark },
+  );
 }
 
 /**
  * Asserts the active theme resolved to the expected `data-ui-theme` token on
- * `<html>` (`sam` for dark, `sam-light` for light).
+ * `<html>` (`sam` for dark, `sam-light` for light). `effective` is the resolved
+ * theme — for `system` seeds, pass the value the OS preference should resolve to.
  */
-export async function expectTheme(page: Page, theme: 'dark' | 'light') {
-  const expected = theme === 'dark' ? 'sam' : 'sam-light';
+export async function expectTheme(page: Page, effective: 'dark' | 'light') {
+  const expected = effective === 'dark' ? 'sam' : 'sam-light';
   const attr = await page.evaluate(() =>
     document.documentElement.getAttribute('data-ui-theme')
   );
