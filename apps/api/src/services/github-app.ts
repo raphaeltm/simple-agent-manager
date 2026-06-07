@@ -46,6 +46,16 @@ const authenticatedGitHubUserSchema = v.object({
   login: v.string(),
 });
 
+const installationDetailSchema = v.object({
+  account: v.nullable(
+    v.object({
+      id: v.optional(v.number()),
+      login: v.optional(v.string()),
+      type: v.optional(v.string()),
+    })
+  ),
+});
+
 const branchSchema = v.object({
   name: v.string(),
 });
@@ -299,6 +309,68 @@ export async function getInstallationToken(
   return {
     token: data.token,
     expiresAt: data.expires_at,
+  };
+}
+
+/** Canonical GitHub account identity for an installation (resolved via the App API). */
+export interface InstallationAccount {
+  id: number | null;
+  login: string | null;
+  type: string | null;
+}
+
+/**
+ * Resolve the canonical GitHub account that owns an installation by calling
+ * GET /app/installations/{id} with the App JWT.
+ *
+ * Returns null when the installation no longer exists (404) or has no account
+ * object. Used by the residual leak-row sweep to compare the installation's true
+ * numeric account id against the owning SAM user's github_id — a comparison that
+ * cannot be done in SQL because neither the users table nor the canonical
+ * account table stores both the numeric id and the login.
+ */
+export async function getInstallationAccount(
+  installationId: string,
+  env: Env
+): Promise<InstallationAccount | null> {
+  const jwt = await generateAppJWT(env);
+
+  const response = await fetch(
+    `https://api.github.com/app/installations/${installationId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    }
+  );
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readGitHubError(response, `Failed to get installation: ${response.status}`)
+    );
+  }
+
+  const data = await readResponseJson(
+    response,
+    installationDetailSchema,
+    'github.installation_detail'
+  );
+
+  if (!data.account) {
+    return null;
+  }
+
+  return {
+    id: typeof data.account.id === 'number' ? data.account.id : null,
+    login: typeof data.account.login === 'string' ? data.account.login : null,
+    type: typeof data.account.type === 'string' ? data.account.type : null,
   };
 }
 

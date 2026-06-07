@@ -12,6 +12,7 @@ import { AppError, errors } from '../middleware/error';
 import { verifyWebhookSignature } from '../services/github-app';
 import {
   getCanonicalAccountInput,
+  personalInstallationOwnerMatches,
   tombstoneCanonicalInstallationAccount,
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
@@ -91,6 +92,33 @@ async function handleInstallationEvent(
 
     const foundUser = users[0];
     if (!foundUser) return;
+
+    // Personal-installation owner guard (mirrors the OAuth/sync path in github.ts).
+    // A personal installation may only be recorded under the SAM user whose GitHub
+    // identity owns it. The webhook `sender` is the installer; only insert the
+    // per-user row when the installation's account identity matches the sender.
+    // Org installations are owned at the org level, so they are exempt.
+    if (canonicalAccount.accountType === 'personal') {
+      const ownerMatches = personalInstallationOwnerMatches(
+        {
+          id: typeof account?.id === 'number' ? account.id : null,
+          login: typeof account?.login === 'string' ? account.login : null,
+        },
+        {
+          id: typeof sender.id === 'number' ? sender.id : null,
+          login: typeof sender.login === 'string' ? sender.login : null,
+        }
+      );
+      if (!ownerMatches) {
+        log.warn('github.webhook.personal_installation_owner_mismatch', {
+          installationId: String(installation.id),
+          senderId: String(sender.id),
+          accountId: account?.id != null ? String(account.id) : null,
+          accountLogin: typeof account?.login === 'string' ? account.login : null,
+        });
+        return;
+      }
+    }
 
     await db.insert(schema.githubInstallations).values({
       id: ulid(),

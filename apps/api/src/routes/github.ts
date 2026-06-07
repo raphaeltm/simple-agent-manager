@@ -26,6 +26,7 @@ import {
   type GitHubDb,
   type GitHubInstallationAccountRow,
   normalizeAccountType,
+  personalInstallationOwnerMatches,
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import {
@@ -702,10 +703,7 @@ function isAuthenticatedUsersPersonalInstallation(
   if (normalizeAccountType(installation.account.type) !== 'personal') {
     return false;
   }
-  if (typeof installation.account.id === 'number') {
-    return installation.account.id === authenticatedUser.id;
-  }
-  return installation.account.login.toLowerCase() === authenticatedUser.login.toLowerCase();
+  return personalInstallationOwnerMatches(installation.account, authenticatedUser);
 }
 
 async function syncSharedOrgInstallations(
