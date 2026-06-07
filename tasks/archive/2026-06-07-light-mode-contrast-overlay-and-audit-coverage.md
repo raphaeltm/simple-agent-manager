@@ -86,26 +86,26 @@ viewport suffix to `.codex/tmp/playwright-screenshots`), `assertNoOverflow`,
 ## Implementation Checklist
 
 ### Part 1 — Contrast bug
-- [ ] `ToolsCli.tsx` ~166: `text-black` -> `text-fg-on-accent`
+- [x] `ToolsCli.tsx` ~166: `text-black` -> `text-fg-on-accent`
 
 ### Part 2 — Dark-assuming overlays -> tokens
-- [ ] `Tools.tsx` ~82: `bg-white/[0.04]` -> `bg-inset`
-- [ ] `Tools.tsx` ~87: `bg-white/[0.05]` -> `bg-inset`
-- [ ] `ToolsCli.tsx` ~191: `bg-white/[0.03]` -> `bg-inset`
-- [ ] `AdminComputeQuotas.tsx` ~282: `bg-black/50` -> `glass-backdrop-dim`
-- [ ] `BootLogPanel.tsx` ~46: `bg-black/20` -> `glass-backdrop-dim`
-- [ ] `ChatFilePanel.tsx` ~276: `bg-black/20` -> `glass-backdrop-dim`
+- [x] `Tools.tsx` ~82: `bg-white/[0.04]` -> `bg-inset`
+- [x] `Tools.tsx` ~87: `bg-white/[0.05]` -> `bg-inset`
+- [x] `ToolsCli.tsx` ~191: `bg-white/[0.03]` -> `bg-inset`
+- [x] `AdminComputeQuotas.tsx` ~282: `bg-black/50` -> `glass-backdrop-dim`
+- [x] `BootLogPanel.tsx` ~46: `bg-black/20` -> `glass-backdrop-dim`
+- [x] `ChatFilePanel.tsx` ~276: `bg-black/20` -> `glass-backdrop-dim`
 
 ### Part 3 — New light-mode Playwright audits (dark + light, mobile 375x667 + desktop 1280x800, assertNoOverflow each, stress mock data)
-- [ ] Settings cluster audit (cloud-provider, github, agents, notifications, usage, api-tokens)
-- [ ] Lists audit (/projects, /chats, task detail)
-- [ ] Tools audit (/tools, /tools/cli) — asserts CTA + chips render in light
-- [ ] Admin audit (overview, users, stream, ai-proxy, usage, quotas, credentials)
+- [x] Settings cluster audit (cloud-provider, github, agents, notifications, usage, api-tokens)
+- [x] Lists audit (/projects, /chats, task detail)
+- [x] Tools audit (/tools, /tools/cli) — asserts CTA + chips render in light
+- [x] Admin audit (overview, users, stream, ai-proxy, usage, quotas, credentials)
 
 ### Validation
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
-- [ ] Run new Playwright audits locally; confirm no overflow, screenshots clean
-- [ ] task-completion-validator
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
+- [x] Run new Playwright audits locally; confirm no overflow, screenshots clean
+- [x] task-completion-validator
 
 ## Acceptance Criteria
 - ToolsCli CTA uses `text-fg-on-accent`; passes AA contrast in light mode.
