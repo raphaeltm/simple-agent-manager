@@ -271,6 +271,17 @@ describe('GitHub App installation sharing', () => {
       typeof row === 'object' && row !== null && 'accountNameNormalized' in row
     );
 
+  const postInstallationWebhook = (payload: string) =>
+    app.request('/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-hub-signature-256': 'sha256=test',
+        'x-github-event': 'installation',
+        'content-type': 'application/json',
+      },
+      body: payload,
+    }, mockEnv);
+
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);
     mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
@@ -987,15 +998,7 @@ describe('GitHub App installation sharing', () => {
       sender: { id: 987654 },
     });
 
-    const res = await app.request('/api/github/webhook', {
-      method: 'POST',
-      headers: {
-        'x-hub-signature-256': 'sha256=test',
-        'x-github-event': 'installation',
-        'content-type': 'application/json',
-      },
-      body: payload,
-    }, mockEnv);
+    const res = await postInstallationWebhook(payload);
 
     expect(res.status).toBe(200);
     expect(insertedCanonicalRows()).toEqual([
@@ -1024,15 +1027,7 @@ describe('GitHub App installation sharing', () => {
       sender: { id: 591860, login: 'lionello' },
     });
 
-    const res = await app.request('/api/github/webhook', {
-      method: 'POST',
-      headers: {
-        'x-hub-signature-256': 'sha256=test',
-        'x-github-event': 'installation',
-        'content-type': 'application/json',
-      },
-      body: payload,
-    }, mockEnv);
+    const res = await postInstallationWebhook(payload);
 
     expect(res.status).toBe(200);
     // Canonical state is still recorded unconditionally.
@@ -1067,15 +1062,7 @@ describe('GitHub App installation sharing', () => {
       sender: { id: 591860, login: 'lionello' },
     });
 
-    const res = await app.request('/api/github/webhook', {
-      method: 'POST',
-      headers: {
-        'x-hub-signature-256': 'sha256=test',
-        'x-github-event': 'installation',
-        'content-type': 'application/json',
-      },
-      body: payload,
-    }, mockEnv);
+    const res = await postInstallationWebhook(payload);
 
     expect(res.status).toBe(200);
     expect(insertedPerUserRows()).toEqual([
@@ -1099,15 +1086,7 @@ describe('GitHub App installation sharing', () => {
       sender: { id: 591860, login: 'lionello' },
     });
 
-    const res = await app.request('/api/github/webhook', {
-      method: 'POST',
-      headers: {
-        'x-hub-signature-256': 'sha256=test',
-        'x-github-event': 'installation',
-        'content-type': 'application/json',
-      },
-      body: payload,
-    }, mockEnv);
+    const res = await postInstallationWebhook(payload);
 
     expect(res.status).toBe(200);
     expect(insertedPerUserRows()).toEqual([
@@ -1133,15 +1112,7 @@ describe('GitHub App installation sharing', () => {
       },
     });
 
-    const res = await app.request('/api/github/webhook', {
-      method: 'POST',
-      headers: {
-        'x-hub-signature-256': 'sha256=test',
-        'x-github-event': 'installation',
-        'content-type': 'application/json',
-      },
-      body: payload,
-    }, mockEnv);
+    const res = await postInstallationWebhook(payload);
 
     expect(res.status).toBe(200);
     expect(verifyWebhookSignature).toHaveBeenCalledWith(payload, 'sha256=test', expect.any(String));

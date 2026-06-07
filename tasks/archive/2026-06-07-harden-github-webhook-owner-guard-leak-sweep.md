@@ -110,33 +110,40 @@ Two gaps remain:
    `/api/admin/github-installation-leak-sweep`, returns `{ summary }`.
 
 ## Implementation Checklist
-- [ ] Add `personalInstallationOwnerMatches()` shared primitive in `github-installation-accounts.ts`
-- [ ] Refactor `github.ts:isAuthenticatedUsersPersonalInstallation()` to delegate
-- [ ] Add webhook personal owner guard in `github-webhook.ts` (skip + warn on mismatch)
-- [ ] Add `getInstallationAccount()` helper in `github-app.ts` (GET /app/installations/{id})
-- [ ] Add `bulkSweepMismatchedPersonalInstallations()` service with cascade guard
-- [ ] Add superadmin admin route + mount in `index.ts`
-- [ ] Add env var `GITHUB_INSTALLATION_LEAK_SWEEP_BATCH_SIZE` (default const, documented)
-- [ ] Test (a): webhook personal mismatch -> no per-user row inserted
-- [ ] Test (b): webhook personal match -> per-user row inserted
-- [ ] Test (c): webhook org install (with user link) -> row inserted regardless
-- [ ] Test (d): sweep -> mismatched personal deleted; valid personal kept; valid
-      org kept; project-referenced mismatched personal SKIPPED (not deleted)
-- [ ] Update docs (security architecture / env reference) if behavior/config surface changes
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
+- [x] Add `personalInstallationOwnerMatches()` shared primitive in `github-installation-accounts.ts`
+- [x] Refactor `github.ts:isAuthenticatedUsersPersonalInstallation()` to delegate
+- [x] Add webhook personal owner guard in `github-webhook.ts` (skip + warn on mismatch)
+- [x] Add `getInstallationAccount()` helper in `github-app.ts` (GET /app/installations/{id})
+- [x] Add `bulkSweepMismatchedPersonalInstallations()` service with cascade guard
+- [x] Add superadmin admin route + mount in `index.ts`
+- [x] Add env var `GITHUB_INSTALLATION_LEAK_SWEEP_BATCH_SIZE` (default const, documented)
+- [x] Test (a): webhook personal mismatch -> no per-user row inserted
+- [x] Test (b): webhook personal match -> per-user row inserted
+- [x] Test (c): webhook org install (with user link) -> row inserted regardless
+- [x] Test (d): sweep -> mismatched personal deleted; valid personal kept; valid
+      org kept (asserted via the `account_type = 'personal'` filter test); project-referenced
+      mismatched personal SKIPPED (not deleted)
+- [x] Update docs (security architecture / env reference) if behavior/config surface changes
+      — **Determination: no doc change needed.** The new env var
+      `GITHUB_INSTALLATION_LEAK_SWEEP_BATCH_SIZE` is documented inline in `env.ts`
+      exactly like its precedent `GITHUB_REPO_ID_BACKFILL_BATCH_SIZE` (neither appears
+      in `apps/www` docs nor `.env.example`). The personal-install owner guard is an
+      internal enforcement detail; `security.md` does not document the existing OAuth-path
+      guard from PR #1236 either, so the webhook extension matches established precedent.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green (local; CI confirms in PR)
 
 ## Acceptance Criteria
-- [ ] Webhook `installation.created` does NOT insert a per-user personal row when
+- [x] Webhook `installation.created` does NOT insert a per-user personal row when
       the account owner differs from the sender (verified by test a).
-- [ ] Webhook still inserts personal rows on owner match (test b) and org rows
+- [x] Webhook still inserts personal rows on owner match (test b) and org rows
       regardless of owner (test c).
-- [ ] The owner-match logic is a single shared primitive used by both the sync
+- [x] The owner-match logic is a single shared primitive used by both the sync
       path and the webhook path (no duplicated divergent logic).
-- [ ] Admin sweep deletes only mismatched personal rows, never org rows, never
+- [x] Admin sweep deletes only mismatched personal rows, never org rows, never
       project-referenced rows (test d), is idempotent, and returns a summary with `hasMore`.
-- [ ] No `DROP TABLE`; all deletes are scoped `DELETE ... WHERE` (rule 31).
+- [x] No `DROP TABLE`; all deletes are scoped `DELETE ... WHERE` (rule 31).
 - [ ] Staging: admin sweep endpoint returns a valid summary; webhook endpoint
-      still accepts a valid signed delivery without error.
+      still accepts a valid signed delivery without error. (Phase 6 — pending deploy.)
 
 ## References
 - PR #1236 (personal installation leak fix), PR #1240 (repo-id backfill durable)
