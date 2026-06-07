@@ -9,6 +9,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
+import { errors } from '../middleware/error';
 
 type ChatDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -72,4 +73,63 @@ export async function resolveLiveWorkspaceForSession(
   }
 
   return { id: workspace.id, nodeId: workspace.nodeId, nodeStatus: workspace.nodeStatus };
+}
+
+/**
+ * Resolve the live workspace AND its running agent session for a chat action
+ * (e.g. /prompt, /cancel), enforcing tenant scoping at every layer.
+ *
+ * Consolidates the shared resolution path used by the /prompt and /cancel
+ * handlers: workspace bridge resolution (project + user scoped), node-liveness
+ * guards, and the defence-in-depth user-scoped agent-session lookup (backed by
+ * idx_agent_sessions_ws_user_status). Throws the same fail-fast errors both
+ * handlers relied on so callers can forward straight to the VM agent.
+ *
+ * @throws notFound when no active workspace/node or running agent session exists
+ * @throws conflict when the workspace node is no longer running
+ */
+export async function resolveLiveAgentSessionForChat(
+  db: ChatDb,
+  { projectId, sessionId, userId }: { projectId: string; sessionId: string; userId: string }
+): Promise<{ workspace: { id: string; nodeId: string }; agentSession: { id: string } }> {
+  // Find the workspace linked to this chat session, scoped to the owning
+  // project + user (see resolveLiveWorkspaceForSession). The node join also
+  // verifies the node is still active: when a node is destroyed (e.g., after
+  // task timeout), its DNS record is cleaned up but the workspace may still be
+  // marked 'running' in D1. Without this check, the request to the VM agent
+  // would hit the wildcard DNS record and loop back to this Worker (404).
+  const workspace = await resolveLiveWorkspaceForSession(db, { projectId, sessionId, userId });
+
+  if (!workspace || !workspace.nodeId) {
+    throw errors.notFound('No active workspace found for this session');
+  }
+
+  // Verify the node is still reachable — prevents requests to destroyed VMs
+  // whose DNS records no longer exist (would loop back via wildcard DNS).
+  // D1 nodes.status uses 'running' for healthy nodes (not 'active'/'warm', which are DO states).
+  if (workspace.nodeStatus !== 'running') {
+    throw errors.conflict(
+      'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
+    );
+  }
+
+  // Find the running agent session on that workspace, scoped to the user
+  // for defence-in-depth (uses idx_agent_sessions_ws_user_status composite index).
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId),
+        eq(schema.agentSessions.status, 'running')
+      )
+    )
+    .limit(1);
+
+  if (!agentSession) {
+    throw errors.notFound('No running agent session found');
+  }
+
+  return { workspace: { id: workspace.id, nodeId: workspace.nodeId }, agentSession };
 }
