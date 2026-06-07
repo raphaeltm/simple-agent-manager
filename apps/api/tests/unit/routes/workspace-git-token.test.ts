@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
-import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
 import { getInstallationToken } from '../../../src/services/github-app';
+import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
 
 const mocks = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),
