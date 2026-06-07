@@ -85,6 +85,62 @@ export function jsonResponse(route: Route, status: number, body: unknown) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
+/**
+ * Polling variant of {@link expectTheme}. Waits for the ThemeContext to resolve
+ * `data-ui-theme` rather than asserting synchronously, which is required when
+ * the assertion runs immediately after `page.goto()` before the app has mounted.
+ */
+export async function expectThemePoll(page: Page, theme: 'dark' | 'light') {
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-ui-theme')))
+    .toBe(theme === 'light' ? 'sam-light' : 'sam');
+}
+
+/**
+ * Navigates to a route, waits for the expected theme to resolve, then captures a
+ * full-page screenshot and asserts no horizontal overflow.
+ *
+ * Includes the ErrorBoundary false-pass guard: a crashed page keeps the seeded
+ * `data-ui-theme` attribute and has no overflow, so the theme + overflow checks
+ * both pass on the error screen. The "Something went wrong" assertion fails
+ * loudly if the boundary rendered instead of the real surface.
+ */
+export async function visitAndCapture(
+  page: Page,
+  path: string,
+  name: string,
+  theme: 'dark' | 'light',
+) {
+  await page.goto(path);
+  await expectThemePoll(page, theme);
+  await page.waitForTimeout(700);
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  await screenshot(page, name);
+  await assertNoOverflow(page);
+}
+
+export type AuditResponder = (status: number, body: unknown) => Promise<void>;
+
+/**
+ * Registers the `**​/api/**` catch-all route used by the theme audits. The
+ * supplied handler returns the `respond(...)` promise for paths it handles and
+ * `undefined` for everything else, which falls through to an empty `{}` 200 so
+ * unmocked endpoints never hang the page.
+ */
+export async function setupAuditRoutes(
+  page: Page,
+  handler: (path: string, respond: AuditResponder) => Promise<void> | undefined,
+) {
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond: AuditResponder = (status, body) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const result = handler(path, respond);
+    if (result === undefined) return respond(200, {});
+    return result;
+  });
+}
+
 interface ProjectChatMockOptions {
   projectId: string;
   project: unknown;

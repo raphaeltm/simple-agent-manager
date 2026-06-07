@@ -1,6 +1,11 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  makeMockUser,
+  seedTheme,
+  setupAuditRoutes,
+  visitAndCapture,
+} from './audit-helpers';
 
 /**
  * Light-mode visual audit for the Admin cluster sub-pages:
@@ -161,19 +166,8 @@ const platformCredentials = {
   ],
 };
 
-async function seedTheme(page: Page, theme: 'dark' | 'light') {
-  await page.addInitScript((value) => {
-    window.localStorage.setItem('sam-theme', value);
-  }, theme);
-}
-
 async function setupMocks(page: Page) {
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-
+  await setupAuditRoutes(page, (path, respond) => {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/trial-status') return respond(200, { isTrial: false });
@@ -192,27 +186,8 @@ async function setupMocks(page: Page) {
     if (path === '/api/admin/usage/nodes') return respond(200, nodeUsage);
     if (path === '/api/admin/quotas/users') return respond(200, quotas);
     if (path === '/api/admin/platform-credentials') return respond(200, platformCredentials);
-
-    return respond(200, {});
+    return undefined;
   });
-}
-
-async function expectTheme(page: Page, theme: 'dark' | 'light') {
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-ui-theme')))
-    .toBe(theme === 'light' ? 'sam-light' : 'sam');
-}
-
-async function visitAndCapture(page: Page, path: string, name: string, theme: 'dark' | 'light') {
-  await page.goto(path);
-  await expectTheme(page, theme);
-  await page.waitForTimeout(700);
-  // Guard against the ErrorBoundary false-pass: a crashed page keeps the seeded
-  // theme attribute and has no overflow, so expectTheme + assertNoOverflow both
-  // pass on the error screen. Fail loudly if the boundary rendered.
-  await expect(page.getByText('Something went wrong')).toHaveCount(0);
-  await screenshot(page, name);
-  await assertNoOverflow(page);
 }
 
 for (const theme of ['dark', 'light'] as const) {
