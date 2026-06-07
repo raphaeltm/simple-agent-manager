@@ -1,6 +1,6 @@
-import { type Page, test } from '@playwright/test';
+import { type Page } from '@playwright/test';
 
-import { makeMockUser, seedTheme, setupAuditRoutes, visitAndCapture } from './audit-helpers';
+import { describeThemeAudit, makeMockUser, setupAuditRoutes, visitAndCapture } from './audit-helpers';
 
 /**
  * Light-mode visual audit for the Settings cluster sub-pages:
@@ -275,19 +275,11 @@ async function setupMocks(page: Page) {
   });
 }
 
-for (const theme of ['dark', 'light'] as const) {
-  test.describe(`Settings cluster theme audit — ${theme}`, () => {
-    test('surfaces', async ({ page }) => {
-      await seedTheme(page, theme);
-      await setupMocks(page);
-      const suffix = `${theme}-${page.viewportSize()?.width ?? 'unknown'}`;
-
-      await visitAndCapture(page, '/settings/cloud-provider', `settings-cloud-provider-${suffix}`, theme);
-      await visitAndCapture(page, '/settings/github', `settings-github-${suffix}`, theme);
-      await visitAndCapture(page, '/settings/agents', `settings-agents-${suffix}`, theme);
-      await visitAndCapture(page, '/settings/notifications', `settings-notifications-${suffix}`, theme);
-      await visitAndCapture(page, '/settings/usage', `settings-usage-${suffix}`, theme);
-      await visitAndCapture(page, '/settings/api-tokens', `settings-api-tokens-${suffix}`, theme);
-    });
-  });
-}
+describeThemeAudit('Settings cluster theme audit', setupMocks, async (page, theme, suffix) => {
+  await visitAndCapture(page, '/settings/cloud-provider', `settings-cloud-provider-${suffix}`, theme);
+  await visitAndCapture(page, '/settings/github', `settings-github-${suffix}`, theme);
+  await visitAndCapture(page, '/settings/agents', `settings-agents-${suffix}`, theme);
+  await visitAndCapture(page, '/settings/notifications', `settings-notifications-${suffix}`, theme);
+  await visitAndCapture(page, '/settings/usage', `settings-usage-${suffix}`, theme);
+  await visitAndCapture(page, '/settings/api-tokens', `settings-api-tokens-${suffix}`, theme);
+});

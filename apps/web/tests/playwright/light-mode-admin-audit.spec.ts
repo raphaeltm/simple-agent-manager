@@ -1,8 +1,8 @@
-import { type Page, test } from '@playwright/test';
+import { type Page } from '@playwright/test';
 
 import {
+  describeThemeAudit,
   makeMockUser,
-  seedTheme,
   setupAuditRoutes,
   visitAndCapture,
 } from './audit-helpers';
@@ -190,20 +190,12 @@ async function setupMocks(page: Page) {
   });
 }
 
-for (const theme of ['dark', 'light'] as const) {
-  test.describe(`Admin cluster theme audit — ${theme}`, () => {
-    test('surfaces', async ({ page }) => {
-      await seedTheme(page, theme);
-      await setupMocks(page);
-      const suffix = `${theme}-${page.viewportSize()?.width ?? 'unknown'}`;
-
-      await visitAndCapture(page, '/admin/overview', `admin-overview-${suffix}`, theme);
-      await visitAndCapture(page, '/admin/users', `admin-users-${suffix}`, theme);
-      await visitAndCapture(page, '/admin/stream', `admin-stream-${suffix}`, theme);
-      await visitAndCapture(page, '/admin/ai-proxy', `admin-ai-proxy-${suffix}`, theme);
-      await visitAndCapture(page, '/admin/usage', `admin-usage-${suffix}`, theme);
-      await visitAndCapture(page, '/admin/quotas', `admin-quotas-${suffix}`, theme);
-      await visitAndCapture(page, '/admin/credentials', `admin-credentials-${suffix}`, theme);
-    });
-  });
-}
+describeThemeAudit('Admin cluster theme audit', setupMocks, async (page, theme, suffix) => {
+  await visitAndCapture(page, '/admin/overview', `admin-overview-${suffix}`, theme);
+  await visitAndCapture(page, '/admin/users', `admin-users-${suffix}`, theme);
+  await visitAndCapture(page, '/admin/stream', `admin-stream-${suffix}`, theme);
+  await visitAndCapture(page, '/admin/ai-proxy', `admin-ai-proxy-${suffix}`, theme);
+  await visitAndCapture(page, '/admin/usage', `admin-usage-${suffix}`, theme);
+  await visitAndCapture(page, '/admin/quotas', `admin-quotas-${suffix}`, theme);
+  await visitAndCapture(page, '/admin/credentials', `admin-credentials-${suffix}`, theme);
+});

@@ -1,10 +1,10 @@
-import { type Page, test } from '@playwright/test';
+import { type Page } from '@playwright/test';
 
 import {
   assertNoOverflow,
+  describeThemeAudit,
   makeMockUser,
   screenshot,
-  seedTheme,
   setupAuditRoutes,
   visitAndCapture,
 } from './audit-helpers';
@@ -52,24 +52,16 @@ async function setupMocks(page: Page) {
   });
 }
 
-for (const theme of ['dark', 'light'] as const) {
-  test.describe(`Tools theme audit — ${theme}`, () => {
-    test('surfaces', async ({ page }) => {
-      await seedTheme(page, theme);
-      await setupMocks(page);
-      const suffix = `${theme}-${page.viewportSize()?.width ?? 'unknown'}`;
+describeThemeAudit('Tools theme audit', setupMocks, async (page, theme, suffix) => {
+  // /tools — grid of tool cards (available + coming-soon chips on bg-inset)
+  await visitAndCapture(page, '/tools', `tools-grid-${suffix}`, theme);
 
-      // /tools — grid of tool cards (available + coming-soon chips on bg-inset)
-      await visitAndCapture(page, '/tools', `tools-grid-${suffix}`, theme);
+  // /tools/cli — download CTA (accent fill + text-fg-on-accent) + other-platforms chips
+  await visitAndCapture(page, '/tools/cli', `tools-cli-${suffix}`, theme);
 
-      // /tools/cli — download CTA (accent fill + text-fg-on-accent) + other-platforms chips
-      await visitAndCapture(page, '/tools/cli', `tools-cli-${suffix}`, theme);
-
-      // Expand the "Other platforms" disclosure to render the bg-inset chip rows.
-      await page.getByRole('button', { name: 'Other platforms' }).click();
-      await page.waitForTimeout(300);
-      await screenshot(page, `tools-cli-platforms-${suffix}`);
-      await assertNoOverflow(page);
-    });
-  });
-}
+  // Expand the "Other platforms" disclosure to render the bg-inset chip rows.
+  await page.getByRole('button', { name: 'Other platforms' }).click();
+  await page.waitForTimeout(300);
+  await screenshot(page, `tools-cli-platforms-${suffix}`);
+  await assertNoOverflow(page);
+});

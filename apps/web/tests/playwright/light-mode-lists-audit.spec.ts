@@ -1,8 +1,8 @@
-import { type Page, test } from '@playwright/test';
+import { type Page } from '@playwright/test';
 
 import {
+  describeThemeAudit,
   makeMockUser,
-  seedTheme,
   setupAuditRoutes,
   visitAndCapture,
 } from './audit-helpers';
@@ -170,26 +170,18 @@ async function setupMocks(page: Page) {
   });
 }
 
-for (const theme of ['dark', 'light'] as const) {
-  test.describe(`Lists theme audit — ${theme}`, () => {
-    test('surfaces', async ({ page }) => {
-      await seedTheme(page, theme);
-      await setupMocks(page);
-      const suffix = `${theme}-${page.viewportSize()?.width ?? 'unknown'}`;
+describeThemeAudit('Lists theme audit', setupMocks, async (page, theme, suffix) => {
+  // /projects — grid of project summary cards
+  await visitAndCapture(page, '/projects', `lists-projects-${suffix}`, theme);
 
-      // /projects — grid of project summary cards
-      await visitAndCapture(page, '/projects', `lists-projects-${suffix}`, theme);
+  // /chats — list of active chat session cards across all projects
+  await visitAndCapture(page, '/chats', `lists-chats-${suffix}`, theme);
 
-      // /chats — list of active chat session cards across all projects
-      await visitAndCapture(page, '/chats', `lists-chats-${suffix}`, theme);
-
-      // /projects/:id/tasks/:taskId — task detail with output, trigger, metadata
-      await visitAndCapture(
-        page,
-        `/projects/${PROJECT_ID}/tasks/task-lists-audit`,
-        `lists-task-detail-${suffix}`,
-        theme,
-      );
-    });
-  });
-}
+  // /projects/:id/tasks/:taskId — task detail with output, trigger, metadata
+  await visitAndCapture(
+    page,
+    `/projects/${PROJECT_ID}/tasks/task-lists-audit`,
+    `lists-task-detail-${suffix}`,
+    theme,
+  );
+});

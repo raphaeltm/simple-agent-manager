@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 
-import { expect, type Page, type Route } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 interface MockUserOptions {
   email: string;
@@ -120,6 +120,29 @@ export async function visitAndCapture(
 }
 
 export type AuditResponder = (status: number, body: unknown) => Promise<void>;
+
+/**
+ * Declares the standard dark + light theme audit describe/test scaffold shared by
+ * every light-mode audit spec. For each theme it seeds the theme, registers the
+ * spec's API mocks, computes the `theme-viewport` screenshot suffix, then invokes
+ * the spec's `run` callback to capture its surfaces.
+ */
+export function describeThemeAudit(
+  label: string,
+  setupMocks: (page: Page) => Promise<void>,
+  run: (page: Page, theme: 'dark' | 'light', suffix: string) => Promise<void>,
+) {
+  for (const theme of ['dark', 'light'] as const) {
+    test.describe(`${label} — ${theme}`, () => {
+      test('surfaces', async ({ page }) => {
+        await seedTheme(page, theme);
+        await setupMocks(page);
+        const suffix = `${theme}-${page.viewportSize()?.width ?? 'unknown'}`;
+        await run(page, theme, suffix);
+      });
+    });
+  }
+}
 
 /**
  * Registers the catch-all `/api` glob route used by the theme audits. The
