@@ -14,6 +14,8 @@
 
 /* --- Tokens --- */
 :root {
+  /* Dark theme (default) */
+  --color-bg-body: #070d0b;
   --color-bg-canvas: #0b1110;
   --color-bg-surface: #13201d;
   --color-bg-surface-hover: #1a2e29;
@@ -25,10 +27,24 @@
   --color-border-subtle: #1e332d;
   --color-accent: #16a34a;
   --color-accent-hover: #15803d;
+  --color-accent-strong: #22c55e;
   --color-accent-glow: rgba(22, 163, 74, 0.15);
   --color-success: #22c55e;
   --color-warning: #f59e0b;
   --color-tutorial: #a855f7;
+
+  /* Header surface (theme-aware) */
+  --color-header-bg: rgba(11, 17, 16, 0.85);
+
+  /* Ambient page glows (body::before) */
+  --glow-1: rgba(22, 163, 74, 0.1);
+  --glow-2: rgba(22, 163, 74, 0.07);
+  --glow-3: rgba(22, 163, 74, 0.06);
+  --divider-accent: rgba(22, 163, 74, 0.15);
+
+  /* Brand glow shadows (theme-aware intensity) */
+  --shadow-accent-soft: rgba(22, 163, 74, 0.25);
+  --shadow-accent-strong: rgba(22, 163, 74, 0.35);
 
   --font-display: 'Chillax', system-ui, -apple-system, sans-serif;
   --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -49,6 +65,48 @@
   --glass-border-hover: rgba(255, 255, 255, 0.1);
   --glass-blur: blur(20px);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+
+  color-scheme: dark;
+}
+
+/* --- Light theme (matches apps/web sam-light palette, WCAG AA verified) --- */
+:root[data-theme='light'] {
+  --color-bg-body: #e6ede8;
+  --color-bg-canvas: #eef3ef;
+  --color-bg-surface: #f8fbf8;
+  --color-bg-surface-hover: #e8f1ea;
+  --color-bg-inset: #e2ebe4;
+  --color-fg-primary: #11271d;
+  --color-fg-muted: #45584f;
+  --color-fg-dim: #4e6158;
+  --color-border: #bcd0c3;
+  --color-border-subtle: #ccdcd2;
+  --color-accent: #166534;
+  --color-accent-hover: #14532d;
+  --color-accent-strong: #15803d;
+  --color-accent-glow: rgba(21, 128, 61, 0.18);
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-tutorial: #9333ea;
+
+  --color-header-bg: rgba(248, 251, 248, 0.85);
+
+  --glow-1: rgba(22, 163, 74, 0.07);
+  --glow-2: rgba(22, 163, 74, 0.05);
+  --glow-3: rgba(22, 163, 74, 0.04);
+  --divider-accent: rgba(21, 128, 61, 0.35);
+
+  --shadow-accent-soft: rgba(21, 128, 61, 0.18);
+  --shadow-accent-strong: rgba(21, 128, 61, 0.28);
+
+  /* Light glassmorphism */
+  --glass-bg: rgba(248, 251, 248, 0.6);
+  --glass-bg-subtle: rgba(248, 251, 248, 0.4);
+  --glass-border: rgba(17, 39, 29, 0.22);
+  --glass-border-hover: rgba(17, 39, 29, 0.34);
+  --glass-shadow: 0 8px 32px rgba(16, 40, 28, 0.1);
+
+  color-scheme: light;
 }
 
 /* --- Reset --- */
@@ -71,11 +129,12 @@ html {
 
 body {
   font-family: var(--font-body);
-  background-color: #070d0b;
+  background-color: var(--color-bg-body);
   color: var(--color-fg-primary);
   line-height: 1.6;
   overflow-x: hidden;
   position: relative;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 body::before {
@@ -83,9 +142,9 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 20% 15%, rgba(22, 163, 74, 0.1) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 50%, rgba(22, 163, 74, 0.07) 0%, transparent 50%),
-    radial-gradient(ellipse 70% 35% at 40% 85%, rgba(22, 163, 74, 0.06) 0%, transparent 40%);
+    radial-gradient(ellipse 80% 50% at 20% 15%, var(--glow-1) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 50%, var(--glow-2) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 35% at 40% 85%, var(--glow-3) 0%, transparent 40%);
   pointer-events: none;
   z-index: 0;
 }
@@ -165,7 +224,7 @@ a:hover {
   border: none;
   height: 1px;
   margin: 0;
-  background: linear-gradient(90deg, transparent 0%, var(--color-border-subtle) 20%, rgba(22, 163, 74, 0.15) 50%, var(--color-border-subtle) 80%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-border-subtle) 20%, var(--divider-accent) 50%, var(--color-border-subtle) 80%, transparent 100%);
 }
 
 /* --- Animations --- */

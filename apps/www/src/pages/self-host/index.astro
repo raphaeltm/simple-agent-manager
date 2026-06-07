@@ -1455,4 +1455,41 @@ const cfOptionalPermissions = [
     .sh-nav { flex-wrap: wrap; }
     .sh-nav-help { order: 3; width: 100%; text-align: center; }
   }
+
+  /* --- Light-mode accent softening (dark green glows washed out on light bg) --- */
+  :global(html[data-theme='light']) .sh-callout-info {
+    background: rgba(21, 128, 61, 0.07);
+    border-color: rgba(21, 128, 61, 0.28);
+  }
+  :global(html[data-theme='light']) .sh-field input:focus,
+  :global(html[data-theme='light']) .sh-field textarea:focus {
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+  }
+  :global(html[data-theme='light']) .sh-btn-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft);
+  }
+  :global(html[data-theme='light']) .sh-access-edit {
+    background: rgba(21, 128, 61, 0.14);
+  }
+  :global(html[data-theme='light']) .sh-secret-box {
+    background: rgba(21, 128, 61, 0.06);
+    border-color: rgba(21, 128, 61, 0.3);
+  }
+  :global(html[data-theme='light']) .sh-why {
+    box-shadow:
+      inset 0 0 20px -6px rgba(21, 128, 61, 0.06),
+      inset 0 -34px 44px -30px rgba(21, 128, 61, 0.18);
+  }
+  :global(html[data-theme='light']) .sh-why::after {
+    background: linear-gradient(90deg, transparent 0%, rgba(21, 128, 61, 0.3) 50%, transparent 100%);
+  }
+  :global(html[data-theme='light']) .sh-why[open] {
+    border-color: rgba(21, 128, 61, 0.28);
+    box-shadow:
+      inset 0 0 22px -6px rgba(21, 128, 61, 0.08),
+      inset 0 -40px 52px -30px rgba(21, 128, 61, 0.24);
+  }
+  :global(html[data-theme='light']) .sh-why[open]::after {
+    background: linear-gradient(90deg, transparent 0%, rgba(21, 128, 61, 0.45) 50%, transparent 100%);
+  }
 </style>

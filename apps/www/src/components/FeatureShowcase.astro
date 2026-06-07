@@ -241,7 +241,8 @@ let rowIndex = 0;
     padding: 48px 20px 18px;
     font-size: 0.875rem;
     line-height: 1.4;
-    color: var(--color-fg-primary);
+    /* Sits over a screenshot beneath a dark scrim — keep text light in both themes */
+    color: #eef5f2;
     background: linear-gradient(
       to top,
       rgba(8, 14, 12, 0.92) 0%,
@@ -266,5 +267,28 @@ let rowIndex = 0;
       transform: none;
       padding: 40px 16px 14px;
     }
+  }
+
+  :global(html[data-theme='light']) .spotlight-glow {
+    background: radial-gradient(
+      ellipse at center,
+      rgba(21, 128, 61, 0.14) 0%,
+      rgba(21, 128, 61, 0.05) 45%,
+      transparent 72%
+    );
+  }
+
+  :global(html[data-theme='light']) .spotlight-frame {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 40px rgba(21, 128, 61, 0.06),
+      0 0 90px rgba(21, 128, 61, 0.03);
+  }
+
+  :global(html[data-theme='light']) .spotlight:hover .spotlight-frame {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 60px rgba(21, 128, 61, 0.1),
+      0 0 120px rgba(21, 128, 61, 0.05);
   }
 </style>

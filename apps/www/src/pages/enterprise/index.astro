@@ -563,4 +563,20 @@ const pillars = [
   .comp-table tbody tr:hover {
     background: var(--glass-bg-subtle);
   }
+
+  :global(html[data-theme='light']) .ent-hero-glow {
+    background: radial-gradient(ellipse, rgba(21, 128, 61, 0.08) 0%, transparent 70%);
+  }
+
+  :global(html[data-theme='light']) .btn-ent-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft);
+  }
+
+  :global(html[data-theme='light']) .btn-ent-primary:hover {
+    box-shadow: 0 0 30px var(--shadow-accent-strong);
+  }
+
+  :global(html[data-theme='light']) .pain-icon {
+    background: rgba(21, 128, 61, 0.1);
+  }
 </style>

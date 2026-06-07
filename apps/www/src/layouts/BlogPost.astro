@@ -362,10 +362,71 @@ const formattedDate = date.toLocaleDateString('en-US', {
     color: #ffd1d1;
   }
 
+  :global(html[data-theme='light']) .post-body :global(.mermaid-error) {
+    color: #b91c1c;
+  }
+
   .post-body :global(.mermaid-error pre) {
     margin-top: 12px;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  /* ---- Light-mode mermaid surfaces (match marketing light palette) ---- */
+  :global(html[data-theme='light']) .post-body :global(.mermaid-shell) {
+    border-color: rgba(21, 128, 61, 0.22);
+    background:
+      radial-gradient(circle at top left, rgba(21, 128, 61, 0.08), transparent 32%),
+      linear-gradient(180deg, #f4f8f5, #eef3ef);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      0 18px 40px rgba(16, 40, 28, 0.12);
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-chrome) {
+    border-bottom-color: rgba(21, 128, 61, 0.16);
+    background: linear-gradient(180deg, rgba(17, 39, 29, 0.03), transparent);
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-eyebrow) {
+    color: #15803d;
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-reset),
+  :global(html[data-theme='light']) .post-body :global(.mermaid-expand) {
+    border-color: rgba(21, 128, 61, 0.28);
+    background: rgba(248, 251, 248, 0.9);
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-expand) {
+    background: rgba(21, 128, 61, 0.1);
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-reset:hover),
+  :global(html[data-theme='light']) .post-body :global(.mermaid-reset:focus-visible),
+  :global(html[data-theme='light']) .post-body :global(.mermaid-expand:hover),
+  :global(html[data-theme='light']) .post-body :global(.mermaid-expand:focus-visible) {
+    border-color: rgba(21, 128, 61, 0.5);
+    background: rgba(21, 128, 61, 0.16);
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-surface) {
+    background:
+      linear-gradient(rgba(21, 128, 61, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(21, 128, 61, 0.06) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen) {
+    border-color: rgba(21, 128, 61, 0.3);
+    background:
+      radial-gradient(circle at top left, rgba(21, 128, 61, 0.1), transparent 28%),
+      linear-gradient(180deg, #f4f8f5, #e8efe9);
+  }
+
+  :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child) {
+    border-color: rgba(21, 128, 61, 0.16);
+    background: rgba(248, 251, 248, 0.82);
   }
 
   :global(body.mermaid-fullscreen-open) {
@@ -485,6 +546,11 @@ const formattedDate = date.toLocaleDateString('en-US', {
       padding: 8px 12px;
       font-size: 0.78rem;
       background: rgba(7, 11, 10, 0.78);
+    }
+
+    :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen .mermaid-reset),
+    :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen .mermaid-expand) {
+      background: rgba(248, 251, 248, 0.92);
     }
 
     .post-body :global(.mermaid-shell.is-fullscreen .mermaid-surface),

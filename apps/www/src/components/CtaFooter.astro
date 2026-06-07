@@ -132,6 +132,26 @@ const currentYear = new Date().getFullYear();
     border-color: var(--glass-border-hover);
   }
 
+  :global(html[data-theme='light']) .cta-content {
+    box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 70px rgba(21, 128, 61, 0.06);
+  }
+
+  :global(html[data-theme='light']) .btn-cta-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft), 0 0 60px var(--color-accent-glow);
+  }
+
+  :global(html[data-theme='light']) .btn-cta-primary:hover {
+    box-shadow: 0 0 30px var(--shadow-accent-strong), 0 0 80px var(--color-accent-glow);
+  }
+
+  :global(html[data-theme='light']) .btn-cta-secondary {
+    border-color: var(--color-border);
+  }
+
+  :global(html[data-theme='light']) .btn-cta-secondary:hover {
+    border-color: var(--color-accent);
+  }
+
   /* Footer */
   .footer {
     border-top: 1px solid var(--color-border-subtle);

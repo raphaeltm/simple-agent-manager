@@ -140,6 +140,10 @@ const phases = [
     border: 2px solid var(--color-fg-dim);
   }
 
+  :global(html[data-theme='light']) .timeline-dot.complete {
+    box-shadow: 0 0 8px var(--shadow-accent-soft), 0 0 16px var(--color-accent-glow);
+  }
+
   .timeline-line {
     width: 1px;
     flex: 1;
