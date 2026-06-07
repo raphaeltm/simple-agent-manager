@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,7 @@ function makeSweepDb(opts: {
   const usersQueue = [...opts.usersQueue];
   const projectsQueue = [...(opts.projectsQueue ?? [])];
   const deletedConditions: unknown[] = [];
+  const installationsWhere: unknown[] = [];
   const db = {
     select: () => {
       let table: unknown;
@@ -49,7 +51,12 @@ function makeSweepDb(opts: {
           table = t;
           return builder;
         },
-        where: () => builder,
+        where: (cond: unknown) => {
+          if (table === schema.githubInstallations) {
+            installationsWhere.push(cond);
+          }
+          return builder;
+        },
         orderBy: () => builder,
         limit: () => {
           if (table === schema.githubInstallations) {
@@ -73,7 +80,7 @@ function makeSweepDb(opts: {
       },
     }),
   } as never;
-  return { db, deletedConditions };
+  return { db, deletedConditions, installationsWhere };
 }
 
 function personalRow(overrides: Record<string, unknown> = {}) {
@@ -232,6 +239,21 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     // Batch filled to the requested limit -> more personal rows may remain.
     expect(summary.hasMore).toBe(true);
     expect(summary.nextCursor).toBe('rowY');
+  });
+
+  it('only ever queries personal rows — org installations are excluded by the SQL filter, so they are never fetched or deleted', async () => {
+    // The sweep never re-checks account_type in code; org rows are kept safe purely
+    // by the `account_type = 'personal'` WHERE filter on the batch query. This asserts
+    // that filter is actually applied so a future refactor cannot silently start
+    // sweeping (and deleting) organization installation rows.
+    const { db, installationsWhere } = makeSweepDb({ installations: [], usersQueue: [] });
+
+    await bulkSweepMismatchedPersonalInstallations(db, env);
+
+    expect(installationsWhere).toHaveLength(1);
+    expect(installationsWhere[0]).toEqual(
+      eq(schema.githubInstallations.accountType, 'personal')
+    );
   });
 
   it('is a no-op with an empty summary when no personal rows remain', async () => {
