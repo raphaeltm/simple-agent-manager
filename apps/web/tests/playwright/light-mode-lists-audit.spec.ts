@@ -114,7 +114,9 @@ const taskEvents = Array.from({ length: 12 }, (_, index) => ({
   fromStatus: index === 0 ? null : 'in_progress',
   toStatus: index === 0 ? 'queued' : index % 2 === 0 ? 'in_progress' : 'completed',
   note: index === 0 ? 'C'.repeat(260) : 'Status transition note.',
-  createdAt: NOW - index * 120_000,
+  // ISO string — matches the API contract (TaskEvent.createdAt: string). A raw
+  // epoch number here makes formatDate() call .trim() on a number and crash.
+  createdAt: new Date(NOW - index * 120_000).toISOString(),
 }));
 
 const siblingTasks = Array.from({ length: 8 }, (_, index) => ({
@@ -185,6 +187,10 @@ async function visitAndCapture(page: Page, path: string, name: string, theme: 'd
   await page.goto(path);
   await expectTheme(page, theme);
   await page.waitForTimeout(700);
+  // Guard against the ErrorBoundary false-pass: a crashed page keeps the seeded
+  // theme attribute and has no overflow, so expectTheme + assertNoOverflow both
+  // pass on the error screen. Fail loudly if the boundary rendered.
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await screenshot(page, name);
   await assertNoOverflow(page);
 }

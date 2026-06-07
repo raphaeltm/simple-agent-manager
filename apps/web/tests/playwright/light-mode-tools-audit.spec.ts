@@ -67,6 +67,10 @@ async function visitAndCapture(page: Page, path: string, name: string, theme: 'd
   await page.goto(path);
   await expectTheme(page, theme);
   await page.waitForTimeout(700);
+  // Guard against the ErrorBoundary false-pass: a crashed page keeps the seeded
+  // theme attribute and has no overflow, so expectTheme + assertNoOverflow both
+  // pass on the error screen. Fail loudly if the boundary rendered.
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await screenshot(page, name);
   await assertNoOverflow(page);
 }

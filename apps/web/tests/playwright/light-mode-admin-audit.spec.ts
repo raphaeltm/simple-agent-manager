@@ -177,6 +177,10 @@ async function setupMocks(page: Page) {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/trial-status') return respond(200, { isTrial: false });
+    // AppShell mounts the sidebar project list on every protected route; without
+    // this mock listProjects() returns the catch-all {} and SidebarProjectList
+    // crashes on projects.length, falsely passing the audit via the error boundary.
+    if (path === '/api/projects') return respond(200, { projects: [], total: 0 });
     if (path === '/api/notifications/unread-count') return respond(200, { count: 0 });
     if (path === '/api/notifications')
       return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
@@ -203,6 +207,10 @@ async function visitAndCapture(page: Page, path: string, name: string, theme: 'd
   await page.goto(path);
   await expectTheme(page, theme);
   await page.waitForTimeout(700);
+  // Guard against the ErrorBoundary false-pass: a crashed page keeps the seeded
+  // theme attribute and has no overflow, so expectTheme + assertNoOverflow both
+  // pass on the error screen. Fail loudly if the boundary rendered.
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await screenshot(page, name);
   await assertNoOverflow(page);
 }
