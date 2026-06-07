@@ -79,12 +79,12 @@ export function Tools() {
               <div className="flex items-center justify-between">
                 <div
                   className={`w-10 h-10 rounded-[10px] flex items-center justify-center
-                    ${isAvailable ? 'bg-accent/10 text-accent' : 'bg-white/[0.04] text-fg-muted'}`}
+                    ${isAvailable ? 'bg-accent/10 text-accent' : 'bg-inset text-fg-muted'}`}
                 >
                   {tool.icon}
                 </div>
                 {!isAvailable && (
-                  <span className="text-[11px] font-medium text-fg-muted bg-white/[0.05] px-2 py-0.5 rounded-md uppercase tracking-wide">
+                  <span className="text-[11px] font-medium text-fg-muted bg-inset px-2 py-0.5 rounded-md uppercase tracking-wide">
                     Coming soon
                   </span>
                 )}

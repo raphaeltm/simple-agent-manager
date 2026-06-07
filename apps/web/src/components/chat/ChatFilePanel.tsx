@@ -273,7 +273,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     <>
       {/* Backdrop — visible only on desktop */}
       <div
-        className="hidden md:block fixed inset-0 bg-black/20 z-40"
+        className="hidden md:block fixed inset-0 glass-backdrop-dim z-40"
         onClick={onClose}
         aria-hidden
       />

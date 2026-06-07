@@ -279,7 +279,7 @@ export function AdminComputeQuotas() {
 
       {/* Edit User Quota Modal */}
       {editUserId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center glass-backdrop-dim">
           <Card className="w-full max-w-md mx-4">
             <div className="p-6">
               <CardTitle>Edit User Quota</CardTitle>

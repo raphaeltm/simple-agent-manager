@@ -163,7 +163,7 @@ export function ToolsCli() {
 
         <a
           href={getCliDownloadUrl(primary.os, primary.arch)}
-          className="flex items-center justify-center gap-2.5 w-full py-3 px-5 bg-accent text-black font-semibold text-[15px] border-none rounded-lg no-underline transition-opacity duration-150 hover:opacity-90"
+          className="flex items-center justify-center gap-2.5 w-full py-3 px-5 bg-accent text-fg-on-accent font-semibold text-[15px] border-none rounded-lg no-underline transition-opacity duration-150 hover:opacity-90"
         >
           <Download size={18} />
           Download for {primary.label}
@@ -188,7 +188,7 @@ export function ToolsCli() {
                 <a
                   key={`${p.os}-${p.arch}`}
                   href={getCliDownloadUrl(p.os, p.arch)}
-                  className="flex items-center gap-2 px-3.5 py-2.5 bg-white/[0.03] border border-border-default rounded-lg text-fg-primary text-sm no-underline transition-colors duration-150 hover:border-accent"
+                  className="flex items-center gap-2 px-3.5 py-2.5 bg-inset border border-border-default rounded-lg text-fg-primary text-sm no-underline transition-colors duration-150 hover:border-accent"
                 >
                   <Download size={14} className="text-fg-muted" />
                   {p.label}
