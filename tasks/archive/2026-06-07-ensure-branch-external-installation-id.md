@@ -15,12 +15,12 @@
 
 ## Checklist
 
-- [ ] Load the GitHub installation row in `ensureBranchExistsOnRemote()` using the DB row id from `state.config.installationId` and `state.userId`.
-- [ ] Pass `getExternalInstallationId(installation)` to `ensureBranchExists()`.
-- [ ] Keep missing/invalid installation lookup best-effort and logged so workspace creation behavior remains non-blocking.
-- [ ] Update `ensure-branch-on-remote.test.ts` to provide a realistic D1 mock.
-- [ ] Add a regression assertion that a DB ULID in config results in the external numeric GitHub installation id being passed to `ensureBranchExists()`.
-- [ ] Run focused tests and API validation.
+- [x] Load the GitHub installation row in `ensureBranchExistsOnRemote()` using the DB row id from `state.config.installationId` and `state.userId`.
+- [x] Pass `getExternalInstallationId(installation)` to `ensureBranchExists()`.
+- [x] Keep missing/invalid installation lookup best-effort and logged so workspace creation behavior remains non-blocking.
+- [x] Update `ensure-branch-on-remote.test.ts` to provide a realistic D1 mock.
+- [x] Add a regression assertion that a DB ULID in config results in the external numeric GitHub installation id being passed to `ensureBranchExists()`.
+- [x] Run focused tests and API validation.
 
 ## Acceptance Criteria
 

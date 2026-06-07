@@ -84,6 +84,27 @@ describe('ensureBranchExists', () => {
     );
   });
 
+  it('uses the provided external GitHub installation id when minting the token', async () => {
+    const fetchMock = setupFetch(
+      Response.json({ name: 'feature-branch' }),
+    );
+
+    const result = await ensureBranchExists(
+      '987654321', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
+    );
+
+    expect(result).toBe(true);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.github.com/app/installations/987654321/access_tokens',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('01KTDBROW000000000000000001'),
+      expect.anything(),
+    );
+  });
+
   it('creates branch from default branch when it does not exist', async () => {
     const fetchMock = setupFetch(
       new Response(null, { status: 404 }),
