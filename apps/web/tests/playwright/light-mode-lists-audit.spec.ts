@@ -150,6 +150,9 @@ async function setupMocks(page: Page) {
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
+    if (path === '/api/notifications/unread-count') return respond(200, { count: 0 });
+    if (path === '/api/notifications')
+      return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/agents') return respond(200, []);
     if (path.startsWith('/api/credentials')) return respond(200, []);

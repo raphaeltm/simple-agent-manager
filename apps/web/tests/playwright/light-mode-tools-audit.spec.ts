@@ -44,6 +44,14 @@ async function setupMocks(page: Page) {
     if (path === '/api/agents') return respond(200, []);
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
+    if (path === '/api/projects') return respond(200, { projects: [], total: 0 });
+    if (path === '/api/chats' || path === '/api/chats/recent')
+      return respond(200, { sessions: [], total: 0 });
+    if (path === '/api/nodes') return respond(200, []);
+    if (path === '/api/trial-status') return respond(200, { isTrial: false });
+    if (path === '/api/notifications/unread-count') return respond(200, { count: 0 });
+    if (path === '/api/notifications')
+      return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
 
     return respond(200, {});
   });

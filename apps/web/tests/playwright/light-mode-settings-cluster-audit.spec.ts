@@ -272,6 +272,8 @@ async function setupMocks(page: Page) {
     if (path === '/api/github/repositories') return respond(200, { repositories });
     if (path === '/api/notifications/preferences') return respond(200, notificationPreferences);
     if (path === '/api/notifications/unread-count') return respond(200, { count: 0 });
+    if (path === '/api/notifications')
+      return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
     if (path === '/api/usage/compute') return respond(200, computeUsage);
     if (path === '/api/usage/quota') return respond(200, quotaStatus);
     if (path === '/api/usage/ai/budget') return respond(200, aiBudget);
