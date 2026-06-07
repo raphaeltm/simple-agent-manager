@@ -26,13 +26,24 @@ const mocks = vi.hoisted(() => ({
   createNodeRecord: vi.fn(),
   provisionNode: vi.fn(),
   startTaskRunnerDO: vi.fn(),
+  // Downstream submit/run boundaries — mocked so the happy-path tests can prove
+  // the gate passes THROUGH to provisioning (rule 35 vertical slice: mock at
+  // system boundaries, exercise the real route + real gate helper).
+  createSession: vi.fn(),
+  persistMessage: vi.fn(),
+  recordActivityEvent: vi.fn(),
+  stopSession: vi.fn(),
+  resolveCredentialSource: vi.fn(),
+  generateTaskTitle: vi.fn(),
+  getTaskTitleConfig: vi.fn(),
+  enrichMessageWithMentions: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: any, next: any) => next()),
   requireApproved: () => vi.fn((c: any, next: any) => next()),
-  getAuth: () => ({ user: { id: 'user-1' } }),
+  getAuth: () => ({ user: { id: 'user-1', name: 'User One', email: 'user-1@example.com' } }),
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
@@ -51,6 +62,22 @@ vi.mock('../../../src/services/nodes', () => ({
 }));
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: mocks.startTaskRunnerDO,
+}));
+vi.mock('../../../src/services/project-data', () => ({
+  createSession: mocks.createSession,
+  persistMessage: mocks.persistMessage,
+  recordActivityEvent: mocks.recordActivityEvent,
+  stopSession: mocks.stopSession,
+}));
+vi.mock('../../../src/services/provider-credentials', () => ({
+  resolveCredentialSource: mocks.resolveCredentialSource,
+}));
+vi.mock('../../../src/services/task-title', () => ({
+  generateTaskTitle: mocks.generateTaskTitle,
+  getTaskTitleConfig: mocks.getTaskTitleConfig,
+}));
+vi.mock('../../../src/services/mention-enrichment', () => ({
+  enrichMessageWithMentions: mocks.enrichMessageWithMentions,
 }));
 
 const INSTALLATION_ROW = {
@@ -96,9 +123,23 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   let whereResponses: unknown[][];
   let limitResponses: unknown[][];
   const mockEnv = {
-    DATABASE: {} as D1Database,
+    // `prepare` backs the optimistic-lock UPDATE in tasks/run.ts (line 191),
+    // which bypasses Drizzle and hits the raw D1 binding. The run happy-path
+    // test needs `meta.changes === 1` so the task transition is accepted.
+    DATABASE: {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({ run: vi.fn(() => Promise.resolve({ meta: { changes: 1 } })) })),
+      })),
+    } as unknown as D1Database,
     BASE_DOMAIN: 'sammy.party',
   } as Env;
+
+  // ExecutionContext stub — submit.ts records a best-effort activity event via
+  // `c.executionCtx.waitUntil` (line 399), so the happy-path request must carry one.
+  const mockExecutionCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -127,9 +168,24 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
     mocks.requireOwnedProject.mockResolvedValue(makeProject());
-    mocks.requireOwnedTask.mockResolvedValue({ id: 'task-1', status: 'ready' });
+    mocks.requireOwnedTask.mockResolvedValue({
+      id: 'task-1',
+      status: 'ready',
+      title: 'Task One',
+      description: 'do the work',
+    });
     mocks.createNodeRecord.mockResolvedValue({ id: 'node-1' });
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+
+    // Downstream submit/run boundaries — default to success so the happy-path
+    // tests reach provisioning. Each is mocked at its system boundary (rule 35).
+    mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user' });
+    mocks.getTaskTitleConfig.mockReturnValue({});
+    mocks.generateTaskTitle.mockResolvedValue('Task title');
+    mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Do the thing' });
+    mocks.createSession.mockResolvedValue('sess-1');
+    mocks.persistMessage.mockResolvedValue(undefined);
+    mocks.recordActivityEvent.mockResolvedValue(undefined);
   });
 
   function buildApp(): Hono<{ Bindings: Env }> {
@@ -213,6 +269,30 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
+  it('task submit: gate passes and the Task Runner is started when access is intact', async () => {
+    // submit.ts post-gate db sequence: installation lookup (.limit, gate) ->
+    // user githubId lookup (.limit). Downstream submission boundaries are mocked
+    // (rule 35) so the request reaches startTaskRunnerDO.
+    limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
+    limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
+    mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
+
+    await buildApp().request('/api/projects/proj-1/tasks/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Do the thing' }),
+    }, mockEnv, mockExecutionCtx);
+
+    // Gate ran (user OAuth token + external installation id) BEFORE provisioning.
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      expect.objectContaining({ flow: 'project-access', userId: 'user-1', repository: 'acme/allowed-private' })
+    );
+    // Gate allowed the request through to Task Runner provisioning.
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalled();
+  });
+
   // ---------------------------------------------------------------------------
   // Task run: POST /api/projects/:projectId/tasks/:taskId/run
   // ---------------------------------------------------------------------------
@@ -260,5 +340,34 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       message: 'GitHub repository access has changed; repository ID no longer matches',
     });
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+  });
+
+  it('task run: gate passes and the Task Runner is started when access is intact', async () => {
+    // run.ts post-gate db sequence adds the user githubId lookup (.limit) after
+    // the installation lookup. The optimistic-lock UPDATE goes through the raw
+    // DATABASE.prepare mock (meta.changes === 1). createSession + startTaskRunnerDO
+    // are mocked at their boundaries (rule 35) so the request reaches provisioning.
+    whereResponses.push([]); // no task dependencies
+    limitResponses.push([{ id: 'cred-1' }]); // cloud-provider credential present
+    limitResponses.push([makeProject()]); // project load
+    limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
+    limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
+    mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
+
+    const res = await buildApp().request('/api/projects/proj-1/tasks/task-1/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }, mockEnv);
+
+    expect(res.status).toBe(202);
+    // Gate ran (user OAuth token + external installation id) BEFORE provisioning.
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      expect.objectContaining({ flow: 'project-access', userId: 'user-1', repository: 'acme/allowed-private' })
+    );
+    // Gate allowed the request through to Task Runner provisioning.
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalled();
   });
 });

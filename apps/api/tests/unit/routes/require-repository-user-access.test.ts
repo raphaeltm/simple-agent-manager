@@ -81,6 +81,31 @@ describe('requireRepositoryUserAccess', () => {
     expect(mocks.getUserInstallationRepositories).not.toHaveBeenCalled();
   });
 
+  it('still runs the gate for a legacy project whose repoProvider is null (falsy guard does not skip)', async () => {
+    // The guard skips only EXPLICIT non-github providers (`repoProvider &&
+    // repoProvider !== 'github'`). A null/undefined repoProvider is a legacy
+    // github-backed project and MUST still be intersected — never silently
+    // skipped (that would reopen the spawn leak this gate closes).
+    mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
+    mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
+
+    await expect(
+      requireRepositoryUserAccess(
+        ctx,
+        makeDb([INSTALLATION_ROW]),
+        makeProject({ repoProvider: null as unknown as schema.Project['repoProvider'], githubRepoId: 42 }),
+        'user-1'
+      )
+    ).resolves.toBeUndefined();
+
+    // The intersection source WAS consulted — the gate ran, it was not skipped.
+    expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      expect.objectContaining({ userId: 'user-1', repository: 'acme/allowed-private' })
+    );
+  });
+
   it('fails fast with 403 when the user has no GitHub token — before any repo query', async () => {
     mocks.getGitHubUserAccessToken.mockResolvedValue(null);
 

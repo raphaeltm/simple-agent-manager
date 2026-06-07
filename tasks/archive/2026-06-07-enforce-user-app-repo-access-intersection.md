@@ -137,9 +137,15 @@ intersection logic in one place.
 - [x] Regression test: project-create repo **list** is the strict intersection —
       app-installation repo the user cannot see is excluded
       (`project-github-access-routes.test.ts`, existing).
-- [x] Helper unit test (`require-repository-user-access.test.ts`, 8 tests):
-      non-github skips gate; null user token → 403; full fallback-branch coverage.
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
+- [x] Helper unit test (`require-repository-user-access.test.ts`, 9 tests):
+      non-github skips gate; null `repoProvider` STILL runs gate (falsy guard does
+      not skip a legacy github project); null user token → 403; full
+      fallback-branch coverage.
+- [x] Route-level happy-path symmetry (`spawn-repo-access-gate.test.ts`, 7 tests):
+      task submit + task run each assert the gate is consulted (user∩app) AND
+      `startTaskRunnerDO` is reached when access is intact — matching the
+      workspace-create happy-path assertion.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 
 ## Acceptance Criteria
 
