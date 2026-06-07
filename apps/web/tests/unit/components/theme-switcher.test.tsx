@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeSwitcher } from '../../../src/components/ThemeSwitcher';
-import { ThemeProvider } from '../../../src/contexts/ThemeContext';
+import { THEME_STORAGE_KEY, ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 function installMatchMedia(prefersDark: boolean) {
   const mql = {
@@ -64,7 +64,7 @@ describe('ThemeSwitcher', () => {
     renderSwitcher();
     await user.click(screen.getByRole('button', { name: 'Light' }));
     expect(attr()).toBe('sam-light');
-    expect(localStorage.getItem('sam-theme')).toBe('light');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
     expect(screen.getByRole('button', { name: 'Light' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -73,7 +73,7 @@ describe('ThemeSwitcher', () => {
     renderSwitcher();
     await user.click(screen.getByRole('button', { name: 'Dark' }));
     expect(attr()).toBe('sam');
-    expect(localStorage.getItem('sam-theme')).toBe('dark');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
     expect(screen.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -85,7 +85,7 @@ describe('ThemeSwitcher', () => {
     expect(attr()).toBe('sam-light');
 
     await user.click(screen.getByRole('button', { name: 'System' }));
-    expect(localStorage.getItem('sam-theme')).toBe('system');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('system');
     // OS prefers dark in this suite → resolves to sam.
     expect(attr()).toBe('sam');
     expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-pressed', 'true');

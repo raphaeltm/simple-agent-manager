@@ -91,7 +91,10 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
       <button
         ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 text-fg-muted bg-transparent border-none cursor-pointer p-1"
+        aria-label="User menu"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        className="flex items-center justify-center gap-2 text-fg-muted bg-transparent border-none cursor-pointer p-1 min-h-[44px] min-w-[44px]"
       >
         {avatarElement}
         {!compact && (

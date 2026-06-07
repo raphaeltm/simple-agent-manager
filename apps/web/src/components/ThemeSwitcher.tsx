@@ -38,10 +38,10 @@ export const ThemeSwitcher: FC<{ className?: string }> = ({ className }) => {
             type="button"
             onClick={() => setTheme(value)}
             aria-pressed={active}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-sm border px-2 py-2 text-xs font-medium transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
+            className={`flex flex-1 flex-col items-center justify-center gap-1 rounded-sm border px-1 py-2 text-xs font-medium transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
               active
                 ? 'bg-accent text-fg-on-accent border-accent'
-                : 'border-border-default text-fg-secondary hover:bg-surface-secondary'
+                : 'border-border-default text-fg-muted hover:bg-surface-hover hover:text-fg-primary'
             }`}
           >
             <Icon size={16} aria-hidden="true" />

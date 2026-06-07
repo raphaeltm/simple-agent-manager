@@ -184,6 +184,35 @@ describe('ThemeProvider / useTheme', () => {
     expect(media.listenerCount).toBe(0);
   });
 
+  it('re-subscribes to the OS preference when returning to system mode', () => {
+    const media = installMatchMedia(true);
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(media.listenerCount).toBe(1);
+
+    // Leave system mode for an explicit preference — listener detaches.
+    act(() => {
+      result.current.setTheme('dark');
+    });
+    expect(media.listenerCount).toBe(0);
+    expect(currentAttribute()).toBe('sam');
+
+    // Return to system mode — exactly one listener must be re-attached
+    // (no leaks from the previous subscription).
+    act(() => {
+      result.current.setTheme('system');
+    });
+    expect(media.listenerCount).toBe(1);
+    expect(result.current.resolvedTheme).toBe('dark'); // OS still prefers dark
+
+    // A live OS change after re-subscribing must update the resolved theme.
+    act(() => {
+      media.setPrefersDark(false);
+    });
+    expect(result.current.resolvedTheme).toBe('light');
+    expect(result.current.isDark).toBe(false);
+    expect(currentAttribute()).toBe('sam-light');
+  });
+
   it('useTheme throws when used outside a ThemeProvider', () => {
     expect(() => renderHook(() => useTheme())).toThrow(
       /useTheme must be used within a ThemeProvider/,

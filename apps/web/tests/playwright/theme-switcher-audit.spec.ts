@@ -1,6 +1,12 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, screenshot, seedTheme } from './audit-helpers';
+import {
+  assertNoOverflow,
+  assertThemeButtonsNotClipped,
+  expectTheme,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Three-Way Theme Switcher Visual Audit
@@ -82,10 +88,8 @@ async function setupApiMocks(page: Page) {
   });
 }
 
-async function expectResolved(page: Page, effective: 'dark' | 'light') {
-  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
-  expect(attr).toBe(effective === 'dark' ? 'sam' : 'sam-light');
-}
+// Resolved-theme assertion is shared with the rest of the audit suite.
+const expectResolved = expectTheme;
 
 // ---------------------------------------------------------------------------
 // Desktop — AppShell sidebar footer
@@ -115,6 +119,8 @@ test.describe('Theme Switcher — Desktop sidebar footer', () => {
 
       await screenshot(page, `theme-switcher-desktop-${seed}${seed === 'system' ? `-os-${prefersDark ? 'dark' : 'light'}` : ''}`);
       await assertNoOverflow(page);
+      // C1 regression: "System" must not clip inside the 220px sidebar.
+      await assertThemeButtonsNotClipped(page);
     });
   }
 

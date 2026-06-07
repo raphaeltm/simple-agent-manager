@@ -55,6 +55,29 @@ export async function assertNoOverflow(page: Page) {
 }
 
 /**
+ * Regression guard for the "System" label clipping inside the narrow (220px)
+ * desktop sidebar. Document-level overflow checks do NOT catch a label that is
+ * truncated *within* its own button — the button stays inside the viewport while
+ * its text is clipped. This asserts every option button in the Theme group fully
+ * contains its content (scrollWidth must not exceed clientWidth).
+ */
+export async function assertThemeButtonsNotClipped(page: Page) {
+  const clipped = await page.evaluate(() => {
+    const group = document.querySelector('[role="group"][aria-label="Theme"]');
+    if (!group) return ['MISSING_GROUP'];
+    const offenders: string[] = [];
+    for (const btn of Array.from(group.querySelectorAll('button'))) {
+      // +1 tolerance for sub-pixel rounding.
+      if (btn.scrollWidth > btn.clientWidth + 1) {
+        offenders.push(`${btn.textContent?.trim() ?? '?'}: ${btn.scrollWidth}>${btn.clientWidth}`);
+      }
+    }
+    return offenders;
+  });
+  expect(clipped).toEqual([]);
+}
+
+/**
  * Seeds the theme before the app boots by writing the `sam-theme` localStorage
  * key. The ThemeContext reads this on mount and applies `data-ui-theme` on the
  * `<html>` element.
