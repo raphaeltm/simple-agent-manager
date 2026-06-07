@@ -458,7 +458,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                     onClick={() => setEditProfileOpen(true)}
                     disabled={submitting}
                     aria-label="Edit profile settings"
-                    className="shrink-0 p-1.5 border border-[rgba(34,197,94,0.10)] rounded-sm bg-[rgba(8,15,12,0.5)] text-fg-muted hover:text-fg-primary cursor-pointer disabled:opacity-50"
+                    className="shrink-0 p-1.5 border border-[rgba(34,197,94,0.10)] rounded-sm bg-inset text-fg-muted hover:text-fg-primary cursor-pointer disabled:opacity-50"
                   >
                     <Settings size={14} />
                   </button>

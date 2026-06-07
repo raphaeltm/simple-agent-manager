@@ -167,7 +167,7 @@ function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceRes
         <span
           id={tooltipId}
           role="tooltip"
-          className="rounded-sm glass-surface bg-[rgba(8,15,12,0.94)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
+          className="rounded-sm glass-surface bg-[var(--sam-tooltip-bg)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
           style={{
             fontSize: 'var(--sam-type-caption-size)',
             lineHeight: 'var(--sam-type-caption-line-height)',
@@ -285,7 +285,7 @@ export function SessionHeader({
   return (
     <div
       className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : ' rounded-b-2xl after:content-[\'\'] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10'}`}
-      style={{ backgroundColor: 'rgba(8, 15, 12, 0.68)', boxShadow: hasContentBelow ? '0 4px 24px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
+      style={{ boxShadow: hasContentBelow ? '0 4px 24px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
     >
       <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">

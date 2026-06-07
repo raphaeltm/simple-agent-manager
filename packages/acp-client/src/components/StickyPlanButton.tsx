@@ -32,10 +32,10 @@ export const StickyPlanButton: React.FC<StickyPlanButtonProps> = ({ plan, onClic
         fontWeight: 500,
         borderRadius: 8,
         border: '1px solid rgba(34, 197, 94, 0.25)',
-        backgroundColor: 'rgba(8, 15, 12, 0.55)',
+        backgroundColor: 'var(--sam-glass-bg-modal)',
         backdropFilter: 'blur(16px) saturate(1.35)',
         WebkitBackdropFilter: 'blur(16px) saturate(1.35)',
-        color: '#e6f2ee',
+        color: 'var(--sam-color-fg-primary)',
         cursor: 'pointer',
         transition: 'all 0.15s ease',
         boxShadow: inProgress
@@ -65,7 +65,7 @@ export const StickyPlanButton: React.FC<StickyPlanButtonProps> = ({ plan, onClic
           backgroundColor: allDone
             ? 'rgba(34, 197, 94, 0.2)'
             : 'rgba(34, 197, 94, 0.12)',
-          color: allDone ? '#4ade80' : '#e6f2ee',
+          color: allDone ? '#4ade80' : 'var(--sam-color-fg-primary)',
         }}
       >
         {completed}/{total}

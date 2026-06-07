@@ -66,7 +66,7 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
         className="glass-surface glass-composited mx-3 mt-2 px-4 py-2 rounded-xl border"
         style={{
           borderColor: 'rgba(34, 197, 94, 0.12)',
-          background: 'linear-gradient(135deg, rgba(22, 163, 74, 0.08), rgba(8, 15, 12, 0.65))',
+          background: 'linear-gradient(135deg, rgba(22, 163, 74, 0.08), var(--sam-glass-bg-surface))',
           boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25), 0 6px 12px -2px rgba(34, 197, 94, 0.15)',
         }}
       >

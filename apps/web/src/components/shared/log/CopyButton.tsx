@@ -34,7 +34,7 @@ export const CopyButton: FC<CopyButtonProps> = ({ getText, label, testId, varian
   );
 
   const baseClasses =
-    'p-2.5 rounded-sm border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-fg';
+    'p-2.5 rounded-sm border border-[rgba(34,197,94,0.10)] bg-inset text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-fg';
 
   if (variant === 'inline') {
     return (

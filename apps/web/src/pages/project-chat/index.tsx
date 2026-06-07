@@ -119,7 +119,7 @@ export function ProjectChat() {
                   value={state.searchQuery}
                   onChange={(e) => state.setSearchQuery(e.target.value)}
                   placeholder="Search chats..."
-                  className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-[rgba(34,197,94,0.1)] bg-[rgba(10,15,13,0.4)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-[rgba(34,197,94,0.3)] focus:shadow-[0_0_12px_rgba(22,163,74,0.06)] transition-all"
+                  className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-[rgba(34,197,94,0.1)] bg-[var(--sam-form-bg)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-[rgba(34,197,94,0.3)] focus:shadow-[0_0_12px_rgba(22,163,74,0.06)] transition-all"
                 />
                 {state.searchQuery && (
                   <button

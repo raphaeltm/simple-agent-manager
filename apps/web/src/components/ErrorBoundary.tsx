@@ -72,7 +72,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </button>
             <button
               onClick={this.handleGoHome}
-              className="min-h-12 px-6 bg-[rgba(8,15,12,0.5)] text-fg-primary border border-[rgba(34,197,94,0.10)] rounded-lg text-base font-semibold cursor-pointer"
+              className="min-h-12 px-6 bg-inset text-fg-primary border border-[rgba(34,197,94,0.10)] rounded-lg text-base font-semibold cursor-pointer"
             >
               Go Home
             </button>

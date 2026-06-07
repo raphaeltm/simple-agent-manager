@@ -58,7 +58,7 @@ export function Landing() {
           {AGENTS.map((name) => (
             <span
               key={name}
-              className="px-2.5 py-0.5 rounded-full bg-[rgba(8,15,12,0.5)] border border-[rgba(34,197,94,0.10)] text-xs font-medium"
+              className="px-2.5 py-0.5 rounded-full bg-inset border border-[rgba(34,197,94,0.10)] text-xs font-medium"
             >
               {name}
             </span>

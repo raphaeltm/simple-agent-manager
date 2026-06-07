@@ -25,7 +25,7 @@ export const NodeVMNode: FC<NodeProps> = ({ data }) => {
   const dotClass = healthColor[d.healthStatus ?? ''] ?? 'bg-fg-muted';
 
   return (
-    <div className="rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] px-3 py-2 min-w-[180px] max-w-[220px]">
+    <div className="rounded-lg border border-[rgba(34,197,94,0.10)] bg-surface px-3 py-2 min-w-[180px] max-w-[220px]">
       <Handle type="target" position={Position.Top} className="!bg-success !w-2 !h-2" />
 
       <div className="flex items-center gap-2 mb-1">

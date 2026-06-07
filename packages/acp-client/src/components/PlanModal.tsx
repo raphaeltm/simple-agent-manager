@@ -51,7 +51,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          backgroundColor: 'var(--sam-glass-backdrop-dim)',
           backdropFilter: 'blur(4px)',
           WebkitBackdropFilter: 'blur(4px)',
           transition: 'opacity 0.15s',
@@ -69,7 +69,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
             maxWidth: 480,
             width: '100%',
             outline: 'none',
-            backgroundColor: 'rgba(8, 15, 12, 0.55)',
+            backgroundColor: 'var(--sam-glass-bg-modal)',
             backdropFilter: 'blur(24px) saturate(1.35)',
             WebkitBackdropFilter: 'blur(24px) saturate(1.35)',
             border: '1px solid rgba(34, 197, 94, 0.12)',
@@ -92,8 +92,8 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
                 <path d="M9 11l3 3L22 4" />
                 <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
               </svg>
-              <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e6f2ee', margin: 0 }}>Plan</h3>
-              <span style={{ fontSize: '0.75rem', color: '#9fb7ae' }}>{completed} of {total} complete</span>
+              <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)', margin: 0 }}>Plan</h3>
+              <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>{completed} of {total} complete</span>
             </div>
             <button
               type="button"
@@ -103,7 +103,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
                 borderRadius: 6,
                 border: 'none',
                 background: 'transparent',
-                color: '#9fb7ae',
+                color: 'var(--sam-color-fg-muted)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -140,7 +140,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
                   />
                   <span
                     style={{
-                      color: entry.status === 'completed' ? '#9fb7ae' : '#e6f2ee',
+                      color: entry.status === 'completed' ? 'var(--sam-color-fg-muted)' : 'var(--sam-color-fg-primary)',
                       textDecoration: entry.status === 'completed' ? 'line-through' : 'none',
                       opacity: entry.status === 'completed' ? 0.7 : 1,
                     }}
