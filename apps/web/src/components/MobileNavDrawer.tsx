@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { ThemeSwitcher } from './ThemeSwitcher';
+
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
@@ -310,6 +312,11 @@ export function MobileNavDrawer({
             )}
           </div>
         </nav>
+
+        {/* Theme switcher */}
+        <div className="border-t border-border-default px-5 py-3">
+          <ThemeSwitcher />
+        </div>
 
         {/* Sign out */}
         <div className="border-t border-border-default py-2">

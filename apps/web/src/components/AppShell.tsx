@@ -17,6 +17,7 @@ import { OnboardingProvider } from './onboarding';
 import { ChoosePathWizard } from './onboarding/choose-path/ChoosePathWizard';
 import { RecentChatsDropdown } from './RecentChatsDropdown';
 import { SidebarProjectList } from './SidebarProjectList';
+import { ThemeSwitcher } from './ThemeSwitcher';
 
 interface AppShellContextValue {
   setProjectName: (name: string | undefined) => void;
@@ -262,22 +263,27 @@ export function AppShell({ children }: AppShellProps) {
           projectListSection={desktopProjectListSection}
         />
         {user && (
-          <div className="mt-auto p-3 border-t border-[var(--sam-glass-border-color)] bg-[var(--sam-chrome-footer-bg)] flex items-center gap-2">
-            {avatarElement}
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">
-                {user.name || user.email}
-              </div>
+          <div className="mt-auto border-t border-[var(--sam-glass-border-color)] bg-[var(--sam-chrome-footer-bg)]">
+            <div className="px-3 pt-3">
+              <ThemeSwitcher />
             </div>
-            <button
-              onClick={handleSignOut}
-              aria-label="Sign out"
-              className="bg-transparent border-none text-fg-muted cursor-pointer p-1 text-xs hover:text-danger-fg transition-colors"
-            >
-              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+            <div className="p-3 flex items-center gap-2">
+              {avatarElement}
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">
+                  {user.name || user.email}
+                </div>
+              </div>
+              <button
+                onClick={handleSignOut}
+                aria-label="Sign out"
+                className="bg-transparent border-none text-fg-muted cursor-pointer p-1 text-xs hover:text-danger-fg transition-colors"
+              >
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
       </aside>
