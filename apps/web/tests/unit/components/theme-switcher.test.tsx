@@ -59,44 +59,39 @@ describe('ThemeSwitcher', () => {
     expect(screen.getByRole('button', { name: 'Light' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('selecting Light applies sam-light and persists', async () => {
+  // Select an option and assert it became the active, persisted, resolved theme.
+  async function selectAndExpect(
+    label: 'Dark' | 'Light' | 'System',
+    stored: string,
+    resolvedAttr: string,
+  ) {
     const user = userEvent.setup();
-    renderSwitcher();
-    await user.click(screen.getByRole('button', { name: 'Light' }));
-    expect(attr()).toBe('sam-light');
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
-    expect(screen.getByRole('button', { name: 'Light' })).toHaveAttribute('aria-pressed', 'true');
-  });
+    await user.click(screen.getByRole('button', { name: label }));
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe(stored);
+    expect(attr()).toBe(resolvedAttr);
+    expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true');
+  }
 
-  it('selecting Dark applies sam and persists', async () => {
-    const user = userEvent.setup();
+  it.each([
+    { label: 'Light', stored: 'light', resolvedAttr: 'sam-light' },
+    { label: 'Dark', stored: 'dark', resolvedAttr: 'sam' },
+  ] as const)('selecting $label persists $stored and applies $resolvedAttr', async ({ label, stored, resolvedAttr }) => {
     renderSwitcher();
-    await user.click(screen.getByRole('button', { name: 'Dark' }));
-    expect(attr()).toBe('sam');
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
-    expect(screen.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
+    await selectAndExpect(label, stored, resolvedAttr);
   });
 
   it('selecting System resolves via matchMedia and persists', async () => {
-    const user = userEvent.setup();
     renderSwitcher();
     // Start from an explicit choice, then go back to System.
-    await user.click(screen.getByRole('button', { name: 'Light' }));
-    expect(attr()).toBe('sam-light');
-
-    await user.click(screen.getByRole('button', { name: 'System' }));
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('system');
-    // OS prefers dark in this suite → resolves to sam.
-    expect(attr()).toBe('sam');
-    expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-pressed', 'true');
+    await selectAndExpect('Light', 'light', 'sam-light');
+    // OS prefers dark in this suite → System resolves to sam.
+    await selectAndExpect('System', 'system', 'sam');
   });
 
   it('System resolves to light when the OS prefers light', async () => {
     installMatchMedia(false);
-    const user = userEvent.setup();
     renderSwitcher();
-    await user.click(screen.getByRole('button', { name: 'Dark' }));
-    await user.click(screen.getByRole('button', { name: 'System' }));
-    expect(attr()).toBe('sam-light');
+    await selectAndExpect('Dark', 'dark', 'sam');
+    await selectAndExpect('System', 'system', 'sam-light');
   });
 });
