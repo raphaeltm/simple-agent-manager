@@ -40,6 +40,7 @@ vi.mock('../../../src/lib/secrets', () => ({
 // Mock logger
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+  createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
 // Import mocked service after vi.mock

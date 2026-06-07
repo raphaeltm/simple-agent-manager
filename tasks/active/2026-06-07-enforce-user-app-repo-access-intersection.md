@@ -112,33 +112,33 @@ intersection logic in one place.
 
 ## Implementation Checklist
 
-- [ ] Extract `requireGitHubUserAccessToken` from `projects/crud.ts` to
+- [x] Extract `requireGitHubUserAccessToken` from `projects/crud.ts` to
       `projects/_helpers.ts` (export); update `crud.ts` to import it. No behavior
       change.
-- [ ] Add `requireRepositoryUserAccess(c, db, project, userId)` to
+- [x] Add `requireRepositoryUserAccess(c, db, project, userId)` to
       `projects/_helpers.ts` (per Design). Skip non-github `repoProvider`.
-- [ ] Gate `workspaces/crud.ts` POST `/` — call after `requireOwnedProject`
-      (201), before `createNodeRecord` (262)/workspace insert. Remove the now
-      redundant raw installation-ownership query (211-223) only if fully covered
-      by the gate's `requireOwnedInstallation`.
-- [ ] Gate `tasks/submit.ts` POST `/submit` — after `requireOwnedProject` (67),
-      before task insert/`startTaskRunnerDO` (433).
-- [ ] Gate `tasks/run.ts` POST `/:taskId/run` — after project load, before
-      `startTaskRunnerDO` (243).
-- [ ] Behavioral/vertical-slice tests (mirror project-github-access-routes.test):
-  - [ ] Spawn fail-fast: access revoked → `POST /workspaces` returns 403 and
-        `createNodeRecord`/`startTaskRunnerDO` NOT called (assert no
-        node/workspace insert).
-  - [ ] Spawn happy path: user still has access → spawn proceeds.
-  - [ ] `githubRepoId` drift: verified repo id ≠ bound `project.githubRepoId` →
-        403.
-  - [ ] Org sharing preserved: a distinct user with their own access to the same
-        org installation can spawn.
-  - [ ] Same fail-fast assertion for `tasks/submit` and `tasks/run`.
-- [ ] Regression test: project-create repo **list** is the strict intersection —
-      an app-installation repo the user cannot see is excluded (extend
-      `project-repository-access.test.ts` / access-routes test).
-- [ ] Helper unit test: non-github project skips the gate; null user token → 403.
+- [x] Gate `workspaces/crud.ts` POST `/` — call after `requireOwnedProject`,
+      before `createNodeRecord`/workspace insert. Removed the redundant raw
+      installation-ownership query (covered by gate's `requireOwnedInstallation`).
+- [x] Gate `tasks/submit.ts` POST `/submit` — after `requireOwnedProject`,
+      before task insert/`startTaskRunnerDO`.
+- [x] Gate `tasks/run.ts` POST `/:taskId/run` — after project load, before
+      `startTaskRunnerDO`.
+- [x] Behavioral/vertical-slice tests (`spawn-repo-access-gate.test.ts`):
+  - [x] Spawn fail-fast: access revoked → `POST /workspaces` returns 403 and
+        `createNodeRecord` NOT called.
+  - [x] Spawn happy path: user still has access → gate passes, `createNodeRecord`
+        reached.
+  - [x] `githubRepoId` drift: verified repo id ≠ bound `project.githubRepoId` →
+        403 (task run test + helper test).
+  - [x] Org sharing preserved: a distinct user with their own access resolves
+        (helper test).
+  - [x] Same fail-fast assertion for `tasks/submit` and `tasks/run`.
+- [x] Regression test: project-create repo **list** is the strict intersection —
+      app-installation repo the user cannot see is excluded
+      (`project-github-access-routes.test.ts`, existing).
+- [x] Helper unit test (`require-repository-user-access.test.ts`, 8 tests):
+      non-github skips gate; null user token → 403; full fallback-branch coverage.
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 
 ## Acceptance Criteria
