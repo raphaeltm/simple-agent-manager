@@ -38,7 +38,11 @@
 /* Light theme colors — SAM brand (inverted gray scale, green accents) */
 :root[data-theme='light'] {
   --sl-color-accent-low: #dcfce7;
-  --sl-color-accent: #16a34a;
+  /* Darker than the dark-mode accent so inline links and the active TOC entry
+     (Starlight maps both to --sl-color-text-accent → --sl-color-accent) clear
+     WCAG AA on the near-white docs body. #16a34a was only 3.16:1; #166534 (the
+     marketing --color-accent) is 6.84:1 on --sl-color-black #f8fbfa. */
+  --sl-color-accent: #166534;
   --sl-color-accent-high: #14532d;
 
   --sl-color-white: #1a2e29;
