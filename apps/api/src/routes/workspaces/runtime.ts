@@ -731,11 +731,23 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       externalInstallationId: schema.githubInstallations.externalInstallationId,
     })
     .from(schema.githubInstallations)
-    .where(eq(schema.githubInstallations.id, workspace.installationId))
+    .where(
+      and(
+        eq(schema.githubInstallations.id, workspace.installationId),
+        eq(schema.githubInstallations.userId, workspace.userId)
+      )
+    )
     .limit(1);
 
   const installation = installations[0];
   if (!installation) {
+    log.warn('workspace_git_token_installation_owner_mismatch', {
+      workspaceId: workspace.id,
+      projectId: workspace.projectId,
+      installationRowId: workspace.installationId,
+      expectedUserId: workspace.userId,
+      action: 'rejected',
+    });
     throw errors.notFound('GitHub installation');
   }
 
