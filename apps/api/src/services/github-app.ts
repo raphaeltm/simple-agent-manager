@@ -637,6 +637,69 @@ function githubUserTokenHeaders(accessToken: string): HeadersInit {
 
 const DEFAULT_MAX_BRANCHES_PER_REPO = 5000;
 
+export interface GitHubRepositoryMetadata {
+  id: number;
+  nodeId: string | null;
+  fullName: string;
+}
+
+/**
+ * Fetch a repository's stable numeric id, node id, and canonical full name using
+ * an installation token (no user token required). Used to backfill `github_repo_id`
+ * for legacy GitHub-backed projects created before the id was captured.
+ *
+ * Returns `null` when the repository is inaccessible (404 repo deleted/never-installed,
+ * or 403 permission) so callers can fall back to name-based scoping without throwing.
+ * Throws on other unexpected errors (auth/rate-limit) so they surface loudly.
+ *
+ * Pass `installationToken` to reuse an already-minted installation token (the bulk
+ * backfill mints one token per installation and reuses it across that installation's
+ * repos to stay under GitHub's installation-token rate limit). When omitted, a token
+ * is minted on demand.
+ */
+export async function getRepositoryMetadata(
+  installationId: string,
+  owner: string,
+  repo: string,
+  env: Env,
+  installationToken?: string,
+): Promise<GitHubRepositoryMetadata | null> {
+  const token = installationToken ?? (await getInstallationToken(installationId, env)).token;
+
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    },
+  );
+
+  if (response.status === 404 || response.status === 403) {
+    log.warn('github_app.repo_metadata_inaccessible', {
+      installationId,
+      owner,
+      repo,
+      status: response.status,
+    });
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(await readGitHubError(response, `Failed to get repository metadata: ${response.status}`));
+  }
+
+  const data = await readResponseJson(response, repositorySchema, 'github.repository_metadata');
+  return {
+    id: data.id,
+    nodeId: data.node_id ?? null,
+    fullName: data.full_name,
+  };
+}
+
 /**
  * List branches for a repository via an installation token.
  * Paginates through all pages to support repos with many branches.

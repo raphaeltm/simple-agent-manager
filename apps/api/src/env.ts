@@ -119,6 +119,7 @@ export interface Env {
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   MAX_PROJECTS_PER_USER?: string;
   MAX_BRANCHES_PER_REPO?: string;
+  GITHUB_REPO_ID_BACKFILL_BATCH_SIZE?: string; // Max projects healed per bulk backfill invocation (default: 50)
   MAX_TASKS_PER_PROJECT?: string;
   MAX_TASK_DEPENDENCIES_PER_TASK?: string;
   TASK_LIST_DEFAULT_PAGE_SIZE?: string;
