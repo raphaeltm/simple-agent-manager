@@ -13,7 +13,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { resolveLiveWorkspaceForSession } from '../../src/routes/chat';
+import { resolveLiveWorkspaceForSession } from '../../src/routes/chat-workspace-resolver';
 import {
   seedInstallation,
   seedNode,
