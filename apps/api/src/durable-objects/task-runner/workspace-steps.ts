@@ -7,6 +7,7 @@ import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { computeBackoffMs, isTransientError } from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -261,9 +262,19 @@ export async function ensureBranchExistsOnRemote(
   const [owner, repo] = repoParts;
 
   try {
+    const installation = await loadTaskRunnerGitHubInstallation(state, rc);
+    if (!installation) {
+      log.warn('task_runner_do.ensure_branch.installation_not_found', {
+        taskId: state.taskId,
+        installationId: state.config.installationId,
+      });
+      return;
+    }
+
+    const externalInstallationId = getExternalInstallationId(installation);
     const { ensureBranchExists } = await import('../../services/github-app');
     const created = await ensureBranchExists(
-      state.config.installationId,
+      externalInstallationId,
       owner,
       repo,
       state.config.branch,
@@ -290,6 +301,22 @@ export async function ensureBranchExistsOnRemote(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+type TaskRunnerGitHubInstallation = {
+  installationId: string;
+  externalInstallationId: string | null;
+};
+
+async function loadTaskRunnerGitHubInstallation(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+): Promise<TaskRunnerGitHubInstallation | null> {
+  return rc.env.DATABASE.prepare(
+    `SELECT installation_id AS installationId, external_installation_id AS externalInstallationId
+     FROM github_installations
+     WHERE id = ? AND user_id = ?`
+  ).bind(state.config.installationId, state.userId).first<TaskRunnerGitHubInstallation>();
 }
 
 async function createWorkspaceOnVmAgent(
