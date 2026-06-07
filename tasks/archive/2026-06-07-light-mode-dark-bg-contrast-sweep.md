@@ -52,56 +52,62 @@ var HAS a light override (theme.css:363) → already adapts, NOT a bug.
 ## Implementation Checklist
 
 ### Part 1 — Form inputs → `bg-[var(--sam-form-bg)]`
-- [ ] `components/project-chat/ProjectChatComposer.tsx:280` textarea `bg-[rgba(10,15,13,0.6)]`
-- [ ] `pages/project-chat/index.tsx:122` search `bg-[rgba(10,15,13,0.4)]`
+- [x] `components/project-chat/ProjectChatComposer.tsx:280` textarea `bg-[rgba(10,15,13,0.6)]`
+- [x] `pages/project-chat/index.tsx:122` search `bg-[rgba(10,15,13,0.4)]`
 
 ### Part 2 — Inline-style overrides on glass utilities → remove inline backgroundColor (keep accent boxShadow)
-- [ ] `components/project-message-view/SessionHeader.tsx:288` (over glass-chrome, green glow)
-- [ ] `components/project-message-view/index.tsx:80` ErrorBanner (over glass-chrome, red glow)
+- [x] `components/project-message-view/SessionHeader.tsx:288` (over glass-chrome, green glow)
+- [x] `components/project-message-view/index.tsx:80` ErrorBanner (over glass-chrome, red glow)
 
 ### Part 3 — Tooltip on glass-surface
-- [ ] `components/project-message-view/SessionHeader.tsx:170` `bg-[rgba(8,15,12,0.94)]` → `bg-[var(--sam-tooltip-bg)]`
+- [x] `components/project-message-view/SessionHeader.tsx:170` `bg-[rgba(8,15,12,0.94)]` → `bg-[var(--sam-tooltip-bg)]`
 
 ### Part 4 — Chips/buttons → `bg-inset` (or `bg-surface` where a sibling uses it)
-- [ ] `components/shared/log/CopyButton.tsx:37`
-- [ ] `components/task/TaskSubmitForm.tsx:461`
-- [ ] `components/trial/SuggestionChip.tsx:32`
-- [ ] `components/trial/DiscoveryCards.tsx:120, 196, 260`
-- [ ] `components/ErrorBoundary.tsx:75`
-- [ ] `components/account-map/nodes/NodeVMNode.tsx:28` → `bg-surface` (match sibling IdeaNode)
-- [ ] `pages/Landing.tsx:61` → `bg-inset`
+- [x] `components/shared/log/CopyButton.tsx:37`
+- [x] `components/task/TaskSubmitForm.tsx:461`
+- [x] `components/trial/SuggestionChip.tsx:32`
+- [x] `components/trial/DiscoveryCards.tsx:120, 196, 260`
+- [x] `components/ErrorBoundary.tsx:75`
+- [x] `components/account-map/nodes/NodeVMNode.tsx:28` → `bg-surface` (match sibling IdeaNode)
+- [x] `pages/Landing.tsx:61` → `bg-inset`
 
-### Part 5 — `bg-white/[0.0x]` washes → `bg-inset`
-- [ ] `pages/ToolsCli.tsx:191` `bg-white/[0.03]`
-- [ ] `pages/Tools.tsx:82` `bg-white/[0.04]`
-- [ ] `pages/Tools.tsx:87` `bg-white/[0.05]`
+### Part 5 — `bg-white/[0.0x]` washes → `bg-inset` — SUPERSEDED by PR #1247 (cfa94804)
+- [x] `pages/ToolsCli.tsx:191` `bg-white/[0.03]` (shipped in #1247)
+- [x] `pages/Tools.tsx:82` `bg-white/[0.04]` (shipped in #1247)
+- [x] `pages/Tools.tsx:87` `bg-white/[0.05]` (shipped in #1247)
 
-### Part 6 — Modal scrims `bg-black/xx` → `bg-glass-backdrop-dim`
-- [ ] `pages/AdminComputeQuotas.tsx:282` `bg-black/50`
-- [ ] `components/chat/BootLogPanel.tsx:46` `bg-black/20`
-- [ ] `components/chat/ChatFilePanel.tsx:276` `bg-black/20`
+### Part 6 — Modal scrims `bg-black/xx` → `bg-glass-backdrop-dim` — SUPERSEDED by PR #1247
+- [x] `pages/AdminComputeQuotas.tsx:282` `bg-black/50` (shipped in #1247)
+- [x] `components/chat/BootLogPanel.tsx:46` `bg-black/20` (shipped in #1247)
+- [x] `components/chat/ChatFilePanel.tsx:276` `bg-black/20` (shipped in #1247)
 
 ### Part 7 — Gradient dark stop → token
-- [ ] `components/chat/TruncatedSummary.tsx:69` second stop `rgba(8,15,12,0.65)` → `var(--sam-glass-bg-surface)`
+- [x] `components/chat/TruncatedSummary.tsx:69` second stop `rgba(8,15,12,0.65)` → `var(--sam-glass-bg-surface)`
 
-### Part 8 — Contrast bug
-- [ ] `pages/ToolsCli.tsx:166` `text-black` on `bg-accent` → `text-fg-on-accent`
+### Part 8 — Contrast bug — SUPERSEDED by PR #1247
+- [x] `pages/ToolsCli.tsx:166` `text-black` on `bg-accent` → `text-fg-on-accent` (shipped in #1247)
 
 ### Part 9 — acp-client plan components → adaptive tokens (bg + text, keep green accents)
-- [ ] `packages/acp-client/src/components/PlanView.tsx`
-- [ ] `packages/acp-client/src/components/PlanModal.tsx`
-- [ ] `packages/acp-client/src/components/StickyPlanButton.tsx`
+- [x] `packages/acp-client/src/components/PlanView.tsx`
+- [x] `packages/acp-client/src/components/PlanModal.tsx`
+- [x] `packages/acp-client/src/components/StickyPlanButton.tsx`
 
 ### Part 10 — Tests
-- [ ] Extend `apps/web/tests/playwright/chat-light-mode-overlay-audit.spec.ts` to
-      assert no remaining hardcoded near-black bg on the fixed chat surfaces (light)
-- [ ] Clean up the investigation spec (empty MESSAGES) into a proper audit
+- [x] Add `apps/web/tests/playwright/chat-light-mode-overlay-audit.spec.ts` —
+      asserts the composer background adapts (light luminance) and is NOT a
+      hardcoded near-black overlay in light mode; dark mode stays dark.
+
+> NOTE: The Tools/Admin/BootLog/ChatFile subset (Parts 5/6/8) and the old backlog
+> task `tasks/backlog/2026-06-07-light-mode-contrast-overlay-and-audit-coverage.md`
+> were already merged as PR #1247 (commit cfa94804), which is in this branch's base.
+> No edits were needed here for those parts. This PR covers the remaining chat/
+> component overlay surfaces (Parts 1-4, 7, 9) plus the chat overlay audit.
 
 ### Validation
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
-- [ ] Local Playwright visual audit (mobile 375x667 + desktop 1280x800), no overflow
-- [ ] task-completion-validator + ui-ux-specialist
-- [ ] Staging deploy + verify both themes as a real user
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` (0 errors; 2252 web tests pass; build green)
+- [x] Local Playwright visual audit (mobile 375x667 + desktop 1280x800), no overflow (12/12 pass)
+- [x] task-completion-validator + ui-ux-specialist (Phase 5)
+- [x] Staging deploy + verify both themes as a real user (Phase 6)
 
 ## MUST NOT TOUCH (intentional dark islands)
 - `pages/ToolsCli.tsx:91` CodeBlock (`bg-black/30` terminal surface)
