@@ -407,6 +407,70 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
   return c.json({ cleanupAt: result.cleanupAt });
 });
 
+type ChatDb = ReturnType<typeof drizzle<typeof schema>>;
+
+/**
+ * Resolve the live workspace that bridges a chat session to its running VM,
+ * scoped to the owning project AND user.
+ *
+ * Security: the workspace bridge MUST NOT be resolvable by `chatSessionId`
+ * alone. Without project + user scoping, any authenticated caller who supplies
+ * (or guesses/replays) a sessionId belonging to another tenant can drive the
+ * VM agent for a workspace they do not own — an IDOR in the same class as past
+ * cross-tenant leaks. We resolve via the narrowest canonical chat-scoped
+ * identifier (`chatSessionId`) AND enforce ownership in the query WHERE clause
+ * (see .claude/rules/06 canonical session routing, .claude/rules/11 identity
+ * validation). A post-query defence-in-depth assertion rejects any row whose
+ * ownership does not match the caller, guarding against a future WHERE-clause
+ * regression (typo/refactor/ORM bug) per .claude/rules/28.
+ *
+ * Returns null when no matching active workspace exists for this owner.
+ */
+export async function resolveLiveWorkspaceForSession(
+  db: ChatDb,
+  { projectId, sessionId, userId }: { projectId: string; sessionId: string; userId: string }
+): Promise<{ id: string; nodeId: string | null; nodeStatus: string | null } | null> {
+  const [workspace] = await db
+    .select({
+      id: schema.workspaces.id,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
+    .where(
+      and(
+        eq(schema.workspaces.chatSessionId, sessionId),
+        eq(schema.workspaces.projectId, projectId),
+        eq(schema.workspaces.userId, userId),
+        inArray(schema.workspaces.status, ['running', 'recovery'])
+      )
+    )
+    .limit(1);
+
+  if (!workspace) {
+    return null;
+  }
+
+  // Defence-in-depth: reject any row whose ownership doesn't match the caller.
+  if (workspace.userId !== userId || workspace.projectId !== projectId) {
+    log.error('chat: workspace ownership mismatch on session bridge', {
+      sessionId,
+      projectId,
+      userId,
+      workspaceId: workspace.id,
+      rowUserId: workspace.userId,
+      rowProjectId: workspace.projectId,
+      action: 'rejected',
+    });
+    return null;
+  }
+
+  return { id: workspace.id, nodeId: workspace.nodeId, nodeStatus: workspace.nodeStatus };
+}
+
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/prompt
  * Forward a follow-up prompt to the running agent session on the VM.
@@ -426,27 +490,13 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     throw errors.badRequest('content is required');
   }
 
-  // Find the workspace linked to this chat session, joining with nodes
-  // to verify the node is still active. When a node is destroyed (e.g.,
-  // after task timeout), its DNS record is cleaned up but the workspace
-  // may still be marked as 'running' in D1. Without this check, the
-  // request to the VM agent would hit the wildcard DNS record and loop
-  // back to this Worker, producing a confusing 404.
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(
-      and(
-        eq(schema.workspaces.chatSessionId, sessionId),
-        inArray(schema.workspaces.status, ['running', 'recovery'])
-      )
-    )
-    .limit(1);
+  // Find the workspace linked to this chat session, scoped to the owning
+  // project + user (see resolveLiveWorkspaceForSession). The node join also
+  // verifies the node is still active: when a node is destroyed (e.g., after
+  // task timeout), its DNS record is cleaned up but the workspace may still be
+  // marked 'running' in D1. Without this check, the request to the VM agent
+  // would hit the wildcard DNS record and loop back to this Worker (404).
+  const workspace = await resolveLiveWorkspaceForSession(db, { projectId, sessionId, userId });
 
   if (!workspace || !workspace.nodeId) {
     throw errors.notFound('No active workspace found for this session');
@@ -461,13 +511,15 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     );
   }
 
-  // Find the running agent session on that workspace
+  // Find the running agent session on that workspace, scoped to the user
+  // for defence-in-depth (uses idx_agent_sessions_ws_user_status composite index).
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId),
         eq(schema.agentSessions.status, 'running')
       )
     )
@@ -511,22 +563,9 @@ chatRoutes.post('/:sessionId/cancel', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  // Find the workspace linked to this chat session with active node
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(
-      and(
-        eq(schema.workspaces.chatSessionId, sessionId),
-        inArray(schema.workspaces.status, ['running', 'recovery'])
-      )
-    )
-    .limit(1);
+  // Find the workspace linked to this chat session, scoped to the owning
+  // project + user with active node (see resolveLiveWorkspaceForSession).
+  const workspace = await resolveLiveWorkspaceForSession(db, { projectId, sessionId, userId });
 
   if (!workspace || !workspace.nodeId) {
     throw errors.notFound('No active workspace found for this session');

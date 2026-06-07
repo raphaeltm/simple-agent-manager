@@ -7,7 +7,9 @@ import { chatRoutes } from '../../../src/routes/chat';
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
   requireOwnedProject: vi.fn(),
-  cancelAgentSessionOnNode: vi.fn(),
+  sendPromptToAgentOnNode: vi.fn(),
+  enrichMessageWithMentions: vi.fn(),
+  parseOptionalBody: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -67,14 +69,18 @@ vi.mock('../../../src/schemas', () => ({
   CreateChatSessionSchema: {},
   LinkTaskToChatSchema: {},
   SendChatMessageSchema: {},
-  parseOptionalBody: vi.fn(),
+  parseOptionalBody: mocks.parseOptionalBody,
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
-  cancelAgentSessionOnNode: mocks.cancelAgentSessionOnNode,
+  sendPromptToAgentOnNode: mocks.sendPromptToAgentOnNode,
 }));
 
-describe('POST /sessions/:sessionId/cancel', () => {
+vi.mock('../../../src/services/mention-enrichment', () => ({
+  enrichMessageWithMentions: mocks.enrichMessageWithMentions,
+}));
+
+describe('POST /sessions/:sessionId/prompt', () => {
   let app: Hono<{ Bindings: Env }>;
 
   /** Helper to build a drizzle mock that returns workspace + agent session rows. */
@@ -117,9 +123,23 @@ describe('POST /sessions/:sessionId/cancel', () => {
     mocks.drizzle.mockReturnValue({ select: selectMock });
   }
 
+  function postPrompt() {
+    return app.request(
+      '/api/projects/proj-1/sessions/chat-1/prompt',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'hello agent' }),
+      },
+      { DATABASE: {} as D1Database } as Env,
+    );
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireOwnedProject.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
+    mocks.parseOptionalBody.mockResolvedValue({ content: 'hello agent' });
+    mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'hello agent' });
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -132,58 +152,29 @@ describe('POST /sessions/:sessionId/cancel', () => {
     app.route('/api/projects/:projectId/sessions', chatRoutes);
   });
 
-  it('cancels a running prompt successfully', async () => {
+  it('forwards a prompt to the running agent session', async () => {
     setupDrizzle({
       workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
       agentSession: { id: 'agent-sess-1' },
     });
-    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await postPrompt();
 
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.status).toBe('cancelled');
-    expect(body.message).toBe('Prompt cancel signal sent');
-    expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledWith(
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
       'node-1', 'ws-1', 'agent-sess-1',
-      expect.anything(), 'user-1',
+      'hello agent', expect.anything(), 'user-1',
     );
-  });
-
-  it('returns idle status when no prompt is in flight (409)', async () => {
-    setupDrizzle({
-      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
-      agentSession: { id: 'agent-sess-1' },
-    });
-    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 409 });
-
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.status).toBe('idle');
-    expect(body.message).toBe('No prompt in flight to cancel');
   });
 
   it('returns 404 when no active workspace is found', async () => {
     setupDrizzle({ workspace: null, agentSession: null });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await postPrompt();
 
     expect(response.status).toBe(404);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
   it('returns 409 when node is not running', async () => {
@@ -192,13 +183,10 @@ describe('POST /sessions/:sessionId/cancel', () => {
       agentSession: null,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await postPrompt();
 
     expect(response.status).toBe(409);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
   it('returns 404 when no running agent session is found', async () => {
@@ -207,46 +195,35 @@ describe('POST /sessions/:sessionId/cancel', () => {
       agentSession: null,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await postPrompt();
 
     expect(response.status).toBe(404);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
-  it('rejects a workspace row owned by another user (404, no cancel sent)', async () => {
-    // Defence-in-depth: even if a row leaks past the WHERE clause (regression),
-    // a mismatched owner must be rejected and the VM agent never contacted.
+  it('rejects a workspace row owned by another user (404, no prompt sent)', async () => {
+    // Defence-in-depth: a mismatched owner row must be rejected and the VM
+    // agent must never be contacted.
     setupDrizzle({
       workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running', userId: 'attacker' },
       agentSession: { id: 'agent-sess-1' },
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await postPrompt();
 
     expect(response.status).toBe(404);
-    expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
-  it('rejects a workspace row belonging to another project (404, no cancel sent)', async () => {
+  it('rejects a workspace row belonging to another project (404, no prompt sent)', async () => {
     setupDrizzle({
       workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running', projectId: 'other-proj' },
       agentSession: { id: 'agent-sess-1' },
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await postPrompt();
 
     expect(response.status).toBe(404);
-    expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 });
