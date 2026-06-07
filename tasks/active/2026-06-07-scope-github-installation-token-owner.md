@@ -22,6 +22,7 @@
 ## Implementation Checklist
 
 - [x] Add owner scoping to the runtime `git-token` installation lookup using `workspace.userId`.
+- [x] Add a post-query owner check so an unexpected mismatched row still fails before token minting.
 - [x] Log owner-scope validation failures with workspace id, project id, installation row id, and expected user id before rejecting.
 - [x] Add behavioral test: owner-matching installation row mints a token.
 - [x] Add behavioral test: mismatched/absent owner-scoped row returns 404 and does not call `getInstallationToken`.

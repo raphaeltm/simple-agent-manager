@@ -70,7 +70,12 @@ describe('workspace git-token GitHub scoping', () => {
     if (typeof whereClause !== 'object' || whereClause === null) {
       return false;
     }
-    const clause = whereClause as { op?: unknown; left?: unknown; right?: unknown; clauses?: unknown[] };
+    const clause = whereClause as {
+      op?: unknown;
+      left?: unknown;
+      right?: unknown;
+      clauses?: unknown[];
+    };
     if (clause.op === 'eq' && columnName(clause.left) === column && clause.right === expectedValue) {
       return true;
     }
@@ -86,7 +91,13 @@ describe('workspace git-token GitHub scoping', () => {
     ) {
       return [];
     }
-    return [{ installationId: 'user-1:120081765', externalInstallationId: '120081765' }];
+    return [
+      {
+        installationId: 'user-1:120081765',
+        externalInstallationId: '120081765',
+        userId: 'user-1',
+      },
+    ];
   }
 
   beforeEach(() => {
@@ -275,27 +286,38 @@ describe('workspace git-token GitHub scoping', () => {
 
   it('rejects a workspace installation row that is not owned by the workspace user', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-      (whereClause) => {
-        expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
-        expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
-        return [];
-      }
-    );
+    try {
+      limitResponses.push(
+        [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
+        [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
+        (whereClause) => {
+          expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
+          expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+          return [
+            {
+              installationId: 'user-2:120081765',
+              externalInstallationId: '120081765',
+              userId: 'user-2',
+            },
+          ];
+        }
+      );
 
-    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
-    expect(res.status).toBe(404);
-    await expect(res.json()).resolves.toEqual({
-      error: 'NOT_FOUND',
-      message: 'GitHub installation not found',
-    });
-    expect(getInstallationToken).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('workspace_git_token_installation_owner_mismatch')
-    );
-    warnSpy.mockRestore();
+      expect(res.status).toBe(404);
+      await expect(res.json()).resolves.toEqual({
+        error: 'NOT_FOUND',
+        message: 'GitHub installation not found',
+      });
+      expect(getInstallationToken).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('workspace_git_token_installation_owner_mismatch')
+      );
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('"expectedUserId":"user-1"');
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('"actualUserId":"user-2"');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

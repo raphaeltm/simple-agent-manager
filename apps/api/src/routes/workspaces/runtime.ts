@@ -729,6 +729,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     .select({
       installationId: schema.githubInstallations.installationId,
       externalInstallationId: schema.githubInstallations.externalInstallationId,
+      userId: schema.githubInstallations.userId,
     })
     .from(schema.githubInstallations)
     .where(
@@ -746,6 +747,17 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       projectId: workspace.projectId,
       installationRowId: workspace.installationId,
       expectedUserId: workspace.userId,
+      action: 'rejected',
+    });
+    throw errors.notFound('GitHub installation');
+  }
+  if (installation.userId !== workspace.userId) {
+    log.warn('workspace_git_token_installation_owner_mismatch', {
+      workspaceId: workspace.id,
+      projectId: workspace.projectId,
+      installationRowId: workspace.installationId,
+      expectedUserId: workspace.userId,
+      actualUserId: installation.userId,
       action: 'rejected',
     });
     throw errors.notFound('GitHub installation');
@@ -770,10 +782,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   let tokenOptions = null;
   try {
     tokenOptions = await resolveWorkspaceGitHubTokenOptions(db, {
-          workspaceId: workspace.id,
-          userId: workspace.userId,
-          githubRepoId,
-        });
+      workspaceId: workspace.id,
+      userId: workspace.userId,
+      githubRepoId,
+    });
   } catch (err) {
     if (err instanceof GitHubCliPolicyError) {
       throw errors.forbidden('GitHub CLI policy prevents token minting');
