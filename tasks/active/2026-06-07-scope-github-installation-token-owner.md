@@ -27,7 +27,7 @@
 - [x] Add behavioral test: mismatched/absent owner-scoped row returns 404 and does not call `getInstallationToken`.
 - [x] Ensure the test stub proves the query includes both installation row id and owner user id rather than relying on source-text assertions.
 - [x] Re-run focused API tests and relevant quality checks.
-- [ ] Run security-focused review against rules 28 and 11.
+- [x] Run security-focused review against rules 28 and 11.
 
 ## Acceptance Criteria
 
