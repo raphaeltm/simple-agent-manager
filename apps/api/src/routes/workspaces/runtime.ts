@@ -661,12 +661,14 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   let repoProvider = 'github';
   let artifactsRepoId: string | null = null;
   let githubRepoId: number | null = null;
+  let repositoryName: string | null = null;
   if (workspace.projectId) {
     const projectRows = await db
       .select({
         repoProvider: schema.projects.repoProvider,
         artifactsRepoId: schema.projects.artifactsRepoId,
         githubRepoId: schema.projects.githubRepoId,
+        repository: schema.projects.repository,
       })
       .from(schema.projects)
       .where(eq(schema.projects.id, workspace.projectId))
@@ -677,6 +679,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       repoProvider = project.repoProvider || 'github';
       artifactsRepoId = project.artifactsRepoId;
       githubRepoId = project.githubRepoId;
+      repositoryName = project.repository;
     }
   }
 
@@ -709,8 +712,16 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   if (!workspace.installationId) {
     throw errors.notFound('Workspace has no GitHub installation');
   }
-  if (!githubRepoId) {
-    throw errors.forbidden('GitHub repository ID is not verified for this workspace');
+  // Scope the token to a single repo. Prefer the verified numeric repo ID; fall
+  // back to the repository name for legacy projects created before github_repo_id
+  // was backfilled (PR #1236). Both paths scope to exactly one repository, so the
+  // personal-installation leak fix is preserved.
+  const repoShortName =
+    repositoryName && repositoryName.includes('/')
+      ? repositoryName.split('/').pop() ?? null
+      : repositoryName;
+  if (!githubRepoId && !repoShortName) {
+    throw errors.forbidden('GitHub repository is not verified for this workspace');
   }
 
   const installations = await db
@@ -742,7 +753,9 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   }
   const scopedTokenOptions = {
     ...(tokenOptions ?? {}),
-    repositoryIds: [githubRepoId],
+    ...(githubRepoId
+      ? { repositoryIds: [githubRepoId] }
+      : { repositories: [repoShortName as string] }),
   };
   const token = await getInstallationToken(
     getExternalInstallationId(installation),

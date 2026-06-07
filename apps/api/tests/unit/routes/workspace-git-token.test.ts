@@ -75,10 +75,29 @@ describe('workspace git-token GitHub scoping', () => {
     app.route('/ws', runtimeRoutes);
   });
 
-  it('rejects legacy GitHub workspaces without a verified repository id', async () => {
+  it('falls back to repository-name scoping for legacy projects without a repo id', async () => {
     limitResponses.push(
       [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null }]
+      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
+      [{ installationId: 'user-1:120081765', externalInstallationId: '120081765' }]
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositories: ['sam'],
+    });
+    await expect(res.json()).resolves.toEqual({
+      token: 'github-installation-token',
+      expiresAt: '2026-06-06T19:00:00.000Z',
+    });
+  });
+
+  it('rejects GitHub workspaces with neither a repo id nor a repository name', async () => {
+    limitResponses.push(
+      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
+      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: null }]
     );
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
@@ -86,7 +105,7 @@ describe('workspace git-token GitHub scoping', () => {
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({
       error: 'FORBIDDEN',
-      message: 'GitHub repository ID is not verified for this workspace',
+      message: 'GitHub repository is not verified for this workspace',
     });
     expect(getInstallationToken).not.toHaveBeenCalled();
   });
