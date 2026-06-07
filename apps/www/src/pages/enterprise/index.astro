@@ -579,4 +579,18 @@ const pillars = [
   :global(html[data-theme='light']) .pain-icon {
     background: rgba(21, 128, 61, 0.1);
   }
+
+  /* Light mode: faint dividers/header need stronger borders + a distinct
+     header zone on the near-white table surface. */
+  :global(html[data-theme='light']) .comp-table thead {
+    background: var(--color-bg-inset);
+  }
+
+  :global(html[data-theme='light']) .comp-table th {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  :global(html[data-theme='light']) .comp-table td {
+    border-bottom: 1px solid var(--color-border);
+  }
 </style>
