@@ -1492,4 +1492,14 @@ const cfOptionalPermissions = [
   :global(html[data-theme='light']) .sh-why[open]::after {
     background: linear-gradient(90deg, transparent 0%, rgba(21, 128, 61, 0.45) 50%, transparent 100%);
   }
+
+  /* Light mode: inline-code chips sit on near-white surfaces where the inset
+     fill alone is too subtle — a hairline border keeps the chip distinct. */
+  :global(html[data-theme='light']) .sh-lead code,
+  :global(html[data-theme='light']) .sh-callout code,
+  :global(html[data-theme='light']) .sh-microcopy code,
+  :global(html[data-theme='light']) .sh-derived code,
+  :global(html[data-theme='light']) .sh-prereq code {
+    border: 1px solid var(--color-border-subtle);
+  }
 </style>
