@@ -37,6 +37,7 @@ import {
   resolveWorkspaceGitHubTokenOptions,
 } from '../../services/github-cli-policy';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backfill';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
@@ -736,6 +737,22 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   const installation = installations[0];
   if (!installation) {
     throw errors.notFound('GitHub installation');
+  }
+
+  // Lazy self-heal: legacy projects created before the numeric repo id was
+  // captured have github_repo_id = null. Fetch + persist it now, BEFORE policy
+  // resolution, so custom GitHub CLI policies (which require the numeric id) work
+  // and scoping uses the rename-stable repositoryIds path. On any failure we fall
+  // through to the name-based fallback below (no regression).
+  if (!githubRepoId && repositoryName && workspace.projectId) {
+    const backfill = await backfillProjectGithubRepoId(db, c.env, {
+      projectId: workspace.projectId,
+      repository: repositoryName,
+      externalInstallationId: getExternalInstallationId(installation),
+    });
+    if (backfill.githubRepoId) {
+      githubRepoId = backfill.githubRepoId;
+    }
   }
 
   let tokenOptions = null;
