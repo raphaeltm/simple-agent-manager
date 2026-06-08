@@ -341,6 +341,8 @@ func New(cfg *config.Config) (*Server, error) {
 		PromptRetryMaxRetries:   cfg.ACPPromptRetryMaxRetries,
 		PromptRetryInitialDelay: cfg.ACPPromptRetryInitial,
 		PromptRetryMaxDelay:     cfg.ACPPromptRetryMax,
+		RecoveryWatchdogTimeout: cfg.ACPRecoveryWatchdog,
+		RestartDecayWindow:      cfg.ACPRestartDecayWindow,
 		SAMEnvFallback:          cfg.BuildSAMEnvFallback(),
 		HTTPClient:              config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}

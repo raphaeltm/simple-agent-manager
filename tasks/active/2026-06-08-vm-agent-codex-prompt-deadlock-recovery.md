@@ -39,18 +39,18 @@ This task implements SAM idea `01KTK35RWTMAF6ZM169K6TPFPQ`, specifically Revisio
 
 ## Implementation Checklist
 
-- [ ] Add recovery watchdog and restart decay configuration using `DEFAULT_*` constants plus env overrides.
-- [ ] Add `lastCrashTime` to `SessionHost` and replace per-success/per-selection restart reset with time-window decay.
-- [ ] Change `beginCrashRecovery()` to allocate an episode-local `*sync.Once`, capture a once-bound notify helper, arm the watchdog, and return recovery episode data.
-- [ ] Thread the once-bound notify helper through `monitorProcessExit()`, `finishCrashRecoveryFailure()`, max-restart handling, restart failure, rapid-exit failure, and monitor success.
-- [ ] Keep the six normal prompt completion callers unwrapped.
-- [ ] In Branch A of `finishPromptWithError()`, spawn a goroutine that re-acquires `h.mu`, verifies `h.process == proc && crashRecoveryInProgress`, releases `h.mu`, then calls `proc.Stop()` directly.
-- [ ] Implement watchdog timeout cleanup with P3-1 guard as the first action under `h.mu`: return if `!h.crashRecoveryInProgress`; otherwise clear current session, clear crash recovery, set `HostError`, then fire the episode Once with `"error"`.
-- [ ] Make `autoSuspend()` recovery-aware by checking `status == HostStarting || crashRecoveryInProgress` under `h.mu.RLock()` while holding `viewerMu`, then re-arm the idle timer instead of suspending.
-- [ ] Preserve recovered-vs-error mapping by `LoadSession` outcome, and conservatively route Codex recovery to terminal `"error"` until codex `LoadSession` coherence is staging-validated; leave a TODO and PR note.
-- [ ] Add Go tests for Level 1a Stop, independent watchdog, double-fire dedupe, P3-1 timer-after-success race, P3-2 autoSuspend deferral/no deadlock, P3-3 all terminal paths once-only plus later normal prompt, restart decay, unrecoverable disconnect, concurrent Stop/Suspend arm-to-stop, and server stopReason mapping.
-- [ ] Run `go test ./...` and `go vet` from `packages/vm-agent`; fix failures in touched files.
-- [ ] Add bug-fix post-mortem/process-fix content to this task record before archiving.
+- [x] Add recovery watchdog and restart decay configuration using `DEFAULT_*` constants plus env overrides.
+- [x] Add `lastCrashTime` to `SessionHost` and replace per-success/per-selection restart reset with time-window decay.
+- [x] Change `beginCrashRecovery()` to allocate an episode-local `*sync.Once`, capture a once-bound notify helper, arm the watchdog, and return recovery episode data.
+- [x] Thread the once-bound notify helper through `monitorProcessExit()`, `finishCrashRecoveryFailure()`, max-restart handling, restart failure, rapid-exit failure, and monitor success.
+- [x] Keep the six normal prompt completion callers unwrapped.
+- [x] In Branch A of `finishPromptWithError()`, spawn a goroutine that re-acquires `h.mu`, verifies `h.process == proc && crashRecoveryInProgress`, releases `h.mu`, then calls `proc.Stop()` directly.
+- [x] Implement watchdog timeout cleanup with P3-1 guard as the first action under `h.mu`: return if `!h.crashRecoveryInProgress`; otherwise clear current session, clear crash recovery, set `HostError`, then fire the episode Once with `"error"`.
+- [x] Make `autoSuspend()` recovery-aware by checking `status == HostStarting || crashRecoveryInProgress` under `h.mu.RLock()` while holding `viewerMu`, then re-arm the idle timer instead of suspending.
+- [x] Preserve recovered-vs-error mapping by `LoadSession` outcome, and conservatively route Codex recovery to terminal `"error"` until codex `LoadSession` coherence is staging-validated; leave a TODO and PR note.
+- [x] Add Go tests for Level 1a Stop, independent watchdog, double-fire dedupe, P3-1 timer-after-success race, P3-2 autoSuspend deferral/no deadlock, P3-3 all terminal paths once-only plus later normal prompt, restart decay, unrecoverable disconnect, concurrent Stop/Suspend arm-to-stop, and server stopReason mapping.
+- [x] Run `go test ./...` and `go vet` from `packages/vm-agent`; fix failures in touched files.
+- [x] Add bug-fix post-mortem/process-fix content to this task record before archiving.
 
 ## Acceptance Criteria
 
@@ -65,7 +65,29 @@ This task implements SAM idea `01KTK35RWTMAF6ZM169K6TPFPQ`, specifically Revisio
 
 ## Post-Mortem
 
-To be completed before archive.
+### What broke
+
+A recoverable ACP prompt disconnect could arm crash recovery and then return without forcing the still-alive agent process to exit. Because process restart was owned by `monitorProcessExit()` after `process.Wait()`, a hung process left the prompt with no terminal callback.
+
+### Root cause
+
+Crash recovery assumed that an ACP stdio disconnect meant the OS process was already exiting. That assumption was false for Codex hard-disconnect hangs. The recovery code also lacked an episode-local terminal-signal guard, so adding an independent watchdog without dedupe would have introduced conflicting `"recovered"` and `"error"` callbacks.
+
+### Timeline
+
+The original crash-recovery implementation added `LoadSession` recovery for process exits. The bug was discovered from a live Codex debug package where the subprocess stayed alive after `peer disconnected before response`, leaving the task in recovering state indefinitely.
+
+### Why it was not caught
+
+Existing tests covered crash classification, unrecoverable disconnects, rapid exits, and restart budgeting, but not the hung-but-alive process shape where `Wait()` never returns. They also did not simulate watchdog/monitor races or auto-suspend during `HostStarting` recovery.
+
+### Class of bug
+
+Lifecycle handoff race: one goroutine arms state and assumes another goroutine will eventually observe a process transition. Without a bounded independent terminal path and close-once signal, async cleanup/completion paths can silently diverge.
+
+### Process fix
+
+For vm-agent lifecycle changes, regression tests must include at least one fake process whose `Wait()` never returns, plus a race-shaped test where a timeout path fires after the primary recovery path has already cleared recovery state. This task adds those tests directly in `internal/acp`.
 
 ## References
 

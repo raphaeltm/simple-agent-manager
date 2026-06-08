@@ -1,0 +1,306 @@
+package acp
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
+)
+
+type fakeAgentProcess struct {
+	stdin           *io.PipeWriter
+	stdout          *io.PipeReader
+	stderr          io.Reader
+	startedAt       time.Time
+	stopCount       atomic.Int32
+	waitCh          chan struct{}
+	waitErr         error
+	closeWaitOnStop bool
+	recoveryMu      sync.Mutex
+	recoveryNotify  recoveryNotify
+}
+
+func newFakeAgentProcess(startedAt time.Time, closeWaitOnStop bool) (*fakeAgentProcess, *io.PipeReader, *io.PipeWriter) {
+	clientToAgentReader, clientToAgentWriter := io.Pipe()
+	agentToClientReader, agentToClientWriter := io.Pipe()
+	return &fakeAgentProcess{
+		stdin:           clientToAgentWriter,
+		stdout:          agentToClientReader,
+		stderr:          bytes.NewReader(nil),
+		startedAt:       startedAt,
+		waitCh:          make(chan struct{}),
+		closeWaitOnStop: closeWaitOnStop,
+	}, clientToAgentReader, agentToClientWriter
+}
+
+func (p *fakeAgentProcess) Stdin() io.Writer                      { return p.stdin }
+func (p *fakeAgentProcess) Stdout() io.Reader                     { return p.stdout }
+func (p *fakeAgentProcess) Stderr() io.Reader                     { return p.stderr }
+func (p *fakeAgentProcess) StartedAt() time.Time                  { return p.startedAt }
+func (p *fakeAgentProcess) KillContainerProcesses(syscall.Signal) {}
+
+func (p *fakeAgentProcess) Stop() error {
+	p.stopCount.Add(1)
+	if p.closeWaitOnStop {
+		select {
+		case <-p.waitCh:
+		default:
+			close(p.waitCh)
+		}
+	}
+	return nil
+}
+
+func (p *fakeAgentProcess) Wait() error {
+	<-p.waitCh
+	return p.waitErr
+}
+
+func (p *fakeAgentProcess) SetRecoveryNotify(notify recoveryNotify) {
+	p.recoveryMu.Lock()
+	defer p.recoveryMu.Unlock()
+	p.recoveryNotify = notify
+}
+
+func (p *fakeAgentProcess) RecoveryNotify() recoveryNotify {
+	p.recoveryMu.Lock()
+	defer p.recoveryMu.Unlock()
+	return p.recoveryNotify
+}
+
+func serveRecoveryACP(t *testing.T, reader *io.PipeReader, writer *io.PipeWriter) {
+	t.Helper()
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+				return
+			}
+			result := map[string]any{}
+			switch req.Method {
+			case acpsdk.AgentMethodInitialize:
+				result = map[string]any{
+					"protocolVersion": acpsdk.ProtocolVersionNumber,
+					"agentCapabilities": map[string]any{
+						"loadSession": true,
+					},
+					"authMethods": []any{},
+				}
+			case acpsdk.AgentMethodSessionLoad:
+				result = map[string]any{"configOptions": []any{}}
+			default:
+				result = map[string]any{}
+			}
+			resp, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(req.ID),
+				"result":  result,
+			})
+			if err != nil {
+				return
+			}
+			_, _ = writer.Write(append(resp, '\n'))
+		}
+	}()
+}
+
+func TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce(t *testing.T) {
+	host := newRecoveryTestHost(t, 2*time.Second)
+	defer host.Stop()
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
+
+	var startCount atomic.Int32
+	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		startCount.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+
+	completed := make(chan string, 2)
+	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
+
+	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
+
+	select {
+	case reason := <-completed:
+		if reason != crashRecoveredStopReason {
+			t.Fatalf("stopReason = %q, want recovered", reason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for recovery completion")
+	}
+	assertNoSecondCompletion(t, completed)
+	if oldProc.stopCount.Load() != 1 {
+		t.Fatalf("Stop count = %d, want 1", oldProc.stopCount.Load())
+	}
+	if startCount.Load() != 1 {
+		t.Fatalf("restart count = %d, want 1", startCount.Load())
+	}
+}
+
+func TestSessionHost_UnkillableProcessWatchdogSignalsError(t *testing.T) {
+	host := newRecoveryTestHost(t, 20*time.Millisecond)
+	defer host.Stop()
+
+	_, completed, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, false)
+	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
+
+	select {
+	case reason := <-completed:
+		if reason != "error" {
+			t.Fatalf("stopReason = %q, want error", reason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watchdog did not emit terminal error")
+	}
+	assertNoSecondCompletion(t, completed)
+}
+
+func TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess(t *testing.T) {
+	host := newRecoveryTestHost(t, 20*time.Millisecond)
+	defer host.Stop()
+
+	_, completed, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
+	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
+	newProc, _, _ := newFakeAgentProcess(time.Now(), false)
+
+	host.mu.Lock()
+	host.process = newProc
+	host.clearCrashRecoveryLocked()
+	host.status = HostReady
+	host.mu.Unlock()
+
+	time.Sleep(80 * time.Millisecond)
+	host.mu.RLock()
+	gotProcess := host.process
+	host.mu.RUnlock()
+	if gotProcess != newProc {
+		t.Fatal("watchdog nilled or replaced the new process after recovery resolved")
+	}
+	select {
+	case reason := <-completed:
+		t.Fatalf("unexpected completion after resolved recovery: %q", reason)
+	default:
+	}
+}
+
+func TestSessionHost_AutoSuspendDefersDuringStartingRecovery(t *testing.T) {
+	host := newRecoveryTestHost(t, time.Second)
+	host.config.IdleSuspendTimeout = 20 * time.Millisecond
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.status = HostStarting
+	host.crashRecoveryInProgress = true
+	host.mu.Unlock()
+
+	host.viewerMu.Lock()
+	host.suspendTimer = time.AfterFunc(time.Hour, func() {})
+	host.viewerMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		host.autoSuspend()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("autoSuspend deadlocked")
+	}
+
+	host.viewerMu.Lock()
+	timer := host.suspendTimer
+	host.viewerMu.Unlock()
+	if timer == nil {
+		t.Fatal("autoSuspend did not re-arm timer during recovery")
+	}
+	host.mu.RLock()
+	status := host.status
+	inRecovery := host.crashRecoveryInProgress
+	host.mu.RUnlock()
+	if status != HostStarting || !inRecovery {
+		t.Fatalf("autoSuspend killed recovery: status=%s inRecovery=%v", status, inRecovery)
+	}
+}
+
+func TestSessionHost_RestartCountDecayWindow(t *testing.T) {
+	host := newRecoveryTestHost(t, time.Second)
+	defer host.Stop()
+	host.config.RestartDecayWindow = 50 * time.Millisecond
+
+	host.mu.Lock()
+	host.restartCount = 2
+	host.lastCrashTime = time.Now()
+	host.applyRestartDecayLocked()
+	if host.restartCount != 2 {
+		t.Fatalf("restartCount decayed inside window: %d", host.restartCount)
+	}
+	host.lastCrashTime = time.Now().Add(-time.Second)
+	host.applyRestartDecayLocked()
+	if host.restartCount != 0 {
+		t.Fatalf("restartCount = %d, want 0 after decay window", host.restartCount)
+	}
+	host.mu.Unlock()
+}
+
+func newRecoveryTestHost(t *testing.T, watchdog time.Duration) *SessionHost {
+	t.Helper()
+	return NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:               "test-session",
+			WorkspaceID:             "test-workspace",
+			RecoveryWatchdogTimeout: watchdog,
+			RestartDecayWindow:      time.Minute,
+			InitializeTimeoutMs:     500,
+			LoadSessionTimeoutMs:    500,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+}
+
+func armRecoverablePrompt(t *testing.T, host *SessionHost, agentType string, startedAgo time.Duration, waitClosesOnStop bool) (*fakeAgentProcess, chan string, chan error) {
+	t.Helper()
+	proc, _, _ := newFakeAgentProcess(time.Now().Add(-startedAgo), waitClosesOnStop)
+	completed := make(chan string, 2)
+	errs := make(chan error, 2)
+	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
+		completed <- stopReason
+		errs <- promptErr
+	}
+	host.mu.Lock()
+	host.process = proc
+	host.status = HostReady
+	host.agentType = agentType
+	host.sessionID = "acp-session-1"
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+	return proc, completed, errs
+}
+
+func assertNoSecondCompletion(t *testing.T, completed <-chan string) {
+	t.Helper()
+	select {
+	case reason := <-completed:
+		t.Fatalf("unexpected second completion: %q", reason)
+	case <-time.After(80 * time.Millisecond):
+	}
+}

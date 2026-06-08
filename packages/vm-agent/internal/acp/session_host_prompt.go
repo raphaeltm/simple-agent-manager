@@ -416,7 +416,7 @@ func (h *SessionHost) finishPromptCancelled(reqID json.RawMessage, info promptSt
 
 func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
-		agentType, stderr, ok := h.beginCrashRecovery(reqID, info.viewerID)
+		agentType, stderr, proc, _, ok := h.beginCrashRecovery(reqID, info.viewerID)
 		if ok {
 			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)
 			h.reportLifecycle("warn", "ACP agent crashed during prompt; attempting LoadSession recovery", map[string]interface{}{
@@ -426,6 +426,9 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			})
 			h.broadcastAgentStatus(StatusRecovering, agentType, "")
 			h.reportActivity("recovering")
+			if proc != nil {
+				go h.stopCrashedProcessForRecovery(proc)
+			}
 			return
 		}
 		h.finishUnrecoverableCrashPrompt(reqID, info, agentType, stderr, err)
