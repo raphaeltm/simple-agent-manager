@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -207,6 +208,14 @@ type SessionHost struct {
 	// when a user cancel intentionally terminates an agent that lacks native
 	// session/cancel support.
 	intentionalPromptCancelProcessStop bool
+
+	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
+	// makes the agent replay the entire transcript as session/update
+	// notifications; suppressing them here (lock-free, checked in
+	// sessionHostClient.SessionUpdate) prevents the replay from being broadcast
+	// to viewers, buffered for late-join, or re-persisted with fresh UUIDs.
+	// Lock-free atomic so SessionUpdate never blocks on h.mu during a load.
+	replaySuppressed atomic.Bool
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so
