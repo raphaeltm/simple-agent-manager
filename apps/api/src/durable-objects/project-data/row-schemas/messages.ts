@@ -55,7 +55,7 @@ export function parseChatMessageRowCompact(row: unknown): {
 } {
   const r = parseRow(ChatMessageRowSchema, row, 'chat_message');
   const parsed = safeParseJson(r.tool_metadata);
-  const toolMetadata = parsed !== null ? stripToolMetadataContent(parsed) : null;
+  const toolMetadata = parsed === null ? null : stripToolMetadataContent(parsed);
   return {
     id: r.id,
     sessionId: r.session_id,
