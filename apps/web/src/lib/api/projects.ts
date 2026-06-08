@@ -1,10 +1,13 @@
 import type {
+  AddProjectRepositoryRequest,
   CreateProjectRequest,
   DashboardActiveTasksResponse,
   ListProjectsResponse,
   Project,
   ProjectDetailResponse,
+  ProjectRepositoryAccessResponse,
   ProjectRuntimeConfigResponse,
+  SubmoduleDiscoveryResponse,
   UpdateProjectRequest,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
@@ -179,6 +182,46 @@ export async function deleteProjectRuntimeFile(
     {
       method: 'DELETE',
     }
+  );
+}
+
+// =============================================================================
+// Repository Access (additional same-installation repos for workspace tokens)
+// =============================================================================
+
+export async function listProjectRepositories(
+  projectId: string
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(`/api/projects/${projectId}/repository-access`);
+}
+
+export async function addProjectRepository(
+  projectId: string,
+  data: AddProjectRepositoryRequest
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(`/api/projects/${projectId}/repository-access`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeProjectRepository(
+  projectId: string,
+  repoRowId: string
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(
+    `/api/projects/${projectId}/repository-access/${encodeURIComponent(repoRowId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function discoverSubmoduleRepos(
+  projectId: string
+): Promise<SubmoduleDiscoveryResponse> {
+  return request<SubmoduleDiscoveryResponse>(
+    `/api/projects/${projectId}/repository-access/discover`
   );
 }
 

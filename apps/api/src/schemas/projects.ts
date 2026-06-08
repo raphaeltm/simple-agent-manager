@@ -61,3 +61,7 @@ export const UpsertProjectRuntimeFileSchema = v.object({
   content: v.string(),
   isSecret: v.optional(v.boolean()),
 });
+
+export const AddProjectRepositorySchema = v.object({
+  repository: v.string(),
+});

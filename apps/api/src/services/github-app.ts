@@ -778,6 +778,133 @@ export async function getRepositoryMetadata(
   };
 }
 
+/** A submodule entry parsed from a repository's `.gitmodules` file. */
+export interface GitmoduleEntry {
+  /** Submodule path within the parent repo (from `.gitmodules`). */
+  path: string;
+  /** Full repository name parsed from the URL, e.g. "octocat/lib", or null when the
+   *  URL could not be parsed as a GitHub repository (non-GitHub host, malformed). */
+  repository: string | null;
+}
+
+/**
+ * Parse `.gitmodules` content into submodule entries, resolving GitHub repository
+ * full names from each submodule URL. Supports https, ssh, and relative URLs.
+ *
+ * Relative URLs (e.g. `../sibling.git`) resolve against the parent repository's
+ * owner (`parentOwner`), matching git's own relative-submodule resolution against
+ * the configured `origin`.
+ *
+ * Entries whose URL is not a parseable GitHub repository yield `repository: null`
+ * so callers can surface an `unsupported-url` status rather than silently dropping
+ * them.
+ */
+export function parseGitmodules(content: string, parentOwner: string): GitmoduleEntry[] {
+  const entries: GitmoduleEntry[] = [];
+  let currentPath: string | null = null;
+  let currentUrl: string | null = null;
+
+  const flush = () => {
+    if (currentPath && currentUrl) {
+      entries.push({
+        path: currentPath,
+        repository: resolveGitmoduleRepository(currentUrl, parentOwner),
+      });
+    }
+    currentPath = null;
+    currentUrl = null;
+  };
+
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (line.startsWith('[submodule')) {
+      flush();
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim().toLowerCase();
+    const value = line.slice(eq + 1).trim();
+    if (key === 'path') currentPath = value;
+    else if (key === 'url') currentUrl = value;
+  }
+  flush();
+
+  return entries;
+}
+
+/** Resolve a `.gitmodules` URL to a GitHub `owner/repo` full name, or null. */
+function resolveGitmoduleRepository(url: string, parentOwner: string): string | null {
+  const stripGit = (s: string) => s.replace(/\.git$/, '');
+
+  // Relative URL (resolved against origin owner).
+  if (url.startsWith('./') || url.startsWith('../')) {
+    const segments = url.split('/').filter((s) => s && s !== '.');
+    // A relative submodule URL points at a sibling repo: the last segment is the
+    // repo name and `..` climbs out of the parent repo to the owner level.
+    const repoName = stripGit(segments[segments.length - 1] ?? '');
+    if (!repoName) return null;
+    return `${parentOwner}/${repoName}`.toLowerCase();
+  }
+
+  // scp-like ssh URL: git@github.com:owner/repo.git
+  const sshMatch = url.match(/^[^@]+@github\.com:([^/]+)\/(.+)$/);
+  if (sshMatch?.[1] && sshMatch[2]) {
+    return `${sshMatch[1]}/${stripGit(sshMatch[2])}`.toLowerCase();
+  }
+
+  // https/ssh URL with explicit host.
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'github.com') return null;
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const owner = parts[0];
+    const repo = parts[1];
+    if (!owner || !repo) return null;
+    return `${owner}/${stripGit(repo)}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch and parse a repository's `.gitmodules` file via an installation token.
+ * Returns an empty array when the repo has no `.gitmodules` (404). Throws on
+ * unexpected GitHub errors so auth/rate-limit failures surface loudly.
+ */
+export async function getRepositoryGitmodules(
+  installationId: string,
+  owner: string,
+  repo: string,
+  parentOwner: string,
+  env: Env,
+  ref?: string,
+): Promise<GitmoduleEntry[]> {
+  const { token } = await getInstallationToken(installationId, env);
+  const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/.gitmodules${refQuery}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github.raw+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    },
+  );
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(await readGitHubError(response, `Failed to fetch .gitmodules: ${response.status}`));
+  }
+
+  const content = await response.text();
+  return parseGitmodules(content, parentOwner);
+}
+
 /**
  * List branches for a repository via an installation token.
  * Paginates through all pages to support repos with many branches.

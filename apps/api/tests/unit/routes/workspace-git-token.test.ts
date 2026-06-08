@@ -9,6 +9,7 @@ import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
 
 const mocks = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),
+  getUserInstallationRepositories: vi.fn(),
   getGitHubUserAccessTokenForOwner: vi.fn(),
   resolveWorkspaceGitHubTokenOptions: vi.fn(),
   assertRepositoryAccess: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../../../src/routes/workspaces/_helpers', async () => {
 });
 vi.mock('../../../src/services/github-app', () => ({
   getInstallationToken: mocks.getInstallationToken,
+  getUserInstallationRepositories: mocks.getUserInstallationRepositories,
 }));
 vi.mock('../../../src/services/github-user-access-token', () => ({
   getGitHubUserAccessTokenForOwner: mocks.getGitHubUserAccessTokenForOwner,
@@ -64,6 +66,10 @@ vi.mock('../../../src/services/github-repo-id-backfill', () => ({
 describe('workspace git-token GitHub scoping', () => {
   let app: Hono<{ Bindings: Env }>;
   let limitResponses: Array<unknown[] | ((whereClause: unknown) => unknown[])>;
+  // Responses for queries that await `.where()` directly without `.limit()`
+  // (e.g. resolveAdditionalRepositoryIds). Kept separate from limitResponses so
+  // the legacy `.limit(1)` tests are unaffected. Defaults to [] when empty.
+  let whereResponses: Array<unknown[] | ((whereClause: unknown) => unknown[])>;
   const mockEnv = {
     DATABASE: {} as D1Database,
   } as Env;
@@ -142,8 +148,10 @@ describe('workspace git-token GitHub scoping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     limitResponses = [];
+    whereResponses = [];
     mocks.verifyWorkspaceCallbackAuth.mockResolvedValue(undefined);
     mocks.getGitHubUserAccessTokenForOwner.mockResolvedValue('github-user-oauth-token');
+    mocks.getUserInstallationRepositories.mockResolvedValue([]);
     mocks.assertRepositoryAccess.mockResolvedValue({ id: 42, fullName: 'raph/sam' });
     mocks.resolveWorkspaceGitHubTokenOptions.mockResolvedValue(null);
     // Default: self-heal cannot resolve an id (legacy fall-through to name scoping).
@@ -160,18 +168,26 @@ describe('workspace git-token GitHub scoping', () => {
 
     const makeSelectBuilder = () => {
       let whereClause: unknown = null;
+      const resolveQueued = (
+        queue: Array<unknown[] | ((whereClause: unknown) => unknown[])>
+      ): unknown[] => {
+        const response = queue.shift();
+        return typeof response === 'function' ? response(whereClause) : (response ?? []);
+      };
       const builder = {
         from: vi.fn(() => builder),
         where: vi.fn((clause: unknown) => {
           whereClause = clause;
           return builder;
         }),
-        limit: vi.fn(() => {
-          const response = limitResponses.shift();
-          return Promise.resolve(
-            typeof response === 'function' ? response(whereClause) : (response ?? [])
-          );
-        }),
+        limit: vi.fn(() => Promise.resolve(resolveQueued(limitResponses))),
+        // Thenable: queries that await `.where()` directly (no `.limit()`) resolve
+        // from whereResponses. The `.limit()` chains never trigger this because the
+        // builder itself is not awaited — only the Promise returned by `.limit()`.
+        then: (
+          onFulfilled: (value: unknown[]) => unknown,
+          onRejected?: (reason: unknown) => unknown
+        ) => Promise.resolve(resolveQueued(whereResponses)).then(onFulfilled, onRejected),
       };
       return builder;
     };
@@ -397,5 +413,88 @@ describe('workspace git-token GitHub scoping', () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it('mints a token scoped to the primary repo plus accessible additional Repository Access repos', async () => {
+    queueWorkspaceProjectLookup();
+    // Additional Repository Access entries selected in Project Settings.
+    whereResponses.push((whereClause) => {
+      expect(hasEqClause(whereClause, 'project_id', 'proj-1')).toBe(true);
+      expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+      return [
+        { repository: 'acme/shared-lib', githubRepoId: 7 },
+        { repository: 'Acme/Other-Lib', githubRepoId: 8 },
+      ];
+    });
+    // The live user∩app accessible set re-verified at the mint boundary. Note the
+    // casing differs from the stored rows to assert case-insensitive matching, and
+    // ids differ from the stored githubRepoId to assert the live id wins.
+    mocks.getUserInstallationRepositories.mockResolvedValue([
+      { id: 42, nodeId: null, fullName: 'raph/sam', private: true, defaultBranch: 'main' },
+      { id: 70, nodeId: null, fullName: 'Acme/Shared-Lib', private: true, defaultBranch: 'main' },
+      { id: 80, nodeId: null, fullName: 'acme/other-lib', private: true, defaultBranch: 'main' },
+    ]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-oauth-token',
+      '120081765',
+      expect.objectContaining({ flow: 'project-access', userId: 'user-1' })
+    );
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42, 70, 80],
+    });
+  });
+
+  it('excludes additional repos whose access has been revoked from the minted scope', async () => {
+    queueWorkspaceProjectLookup();
+    whereResponses.push([
+      { repository: 'acme/shared-lib', githubRepoId: 7 },
+      { repository: 'acme/revoked-lib', githubRepoId: 9 },
+    ]);
+    // revoked-lib is no longer in the user∩app accessible set → dropped from scope.
+    mocks.getUserInstallationRepositories.mockResolvedValue([
+      { id: 42, nodeId: null, fullName: 'raph/sam', private: true, defaultBranch: 'main' },
+      { id: 70, nodeId: null, fullName: 'acme/shared-lib', private: true, defaultBranch: 'main' },
+    ]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42, 70],
+    });
+  });
+
+  it('degrades to the primary-only scope (never omits scoping) when the accessible set cannot be fetched', async () => {
+    queueWorkspaceProjectLookup();
+    whereResponses.push([{ repository: 'acme/shared-lib', githubRepoId: 7 }]);
+    mocks.getUserInstallationRepositories.mockRejectedValue(new Error('GitHub API unavailable'));
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    // Additional repos degrade to empty; the primary clone scope is preserved and
+    // repositoryIds is never omitted.
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42],
+    });
+  });
+
+  it('deduplicates an additional repo that resolves to the primary repository id', async () => {
+    queueWorkspaceProjectLookup();
+    whereResponses.push([{ repository: 'raph/sam', githubRepoId: 42 }]);
+    mocks.getUserInstallationRepositories.mockResolvedValue([
+      { id: 42, nodeId: null, fullName: 'raph/sam', private: true, defaultBranch: 'main' },
+    ]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42],
+    });
   });
 });

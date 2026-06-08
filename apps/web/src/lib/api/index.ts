@@ -203,16 +203,20 @@ export type { ListPoliciesResponse, ProjectPolicy } from './policies';
 export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
 export type { AccountMapResponse, DevcontainerConfigEntry, DevcontainerConfigsResponse } from './projects';
 export {
+  addProjectRepository,
   createProject,
   deleteProject,
   deleteProjectRuntimeEnvVar,
   deleteProjectRuntimeFile,
+  discoverSubmoduleRepos,
   getAccountMap,
   getProject,
   getProjectRuntimeConfig,
   listActiveTasks,
   listProjectDevcontainerConfigs,
+  listProjectRepositories,
   listProjects,
+  removeProjectRepository,
   updateProject,
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,

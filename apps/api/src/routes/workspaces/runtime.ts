@@ -31,7 +31,7 @@ import {
 } from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
-import { getInstallationToken } from '../../services/github-app';
+import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
 import {
   GitHubCliPolicyError,
   resolveWorkspaceGitHubTokenOptions,
@@ -104,6 +104,98 @@ async function verifyWorkspaceGitHubOwnerAccess(input: {
   }
 
   return verifiedRepo.id;
+}
+
+/**
+ * Resolve numeric repository IDs for a project's additional Repository Access
+ * entries, re-verifying user∩app access at the token-mint boundary. Stored rows
+ * whose access has been revoked (or whose installation no longer exposes them)
+ * are dropped from the scope — an unselected/inaccessible repo simply never makes
+ * it into the minted token's `repository_ids`, so it fails clearly downstream.
+ * Failure to fetch the accessible set returns the empty set rather than throwing,
+ * so the primary-repo token still mints (additional repos degrade, never break
+ * the primary clone).
+ */
+async function resolveAdditionalRepositoryIds(input: {
+  env: Env;
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  workspaceId: string;
+  projectId: string;
+  userId: string;
+  externalInstallationId: string;
+}): Promise<number[]> {
+  const rows = await input.db
+    .select({
+      repository: schema.projectGithubRepositories.repository,
+      githubRepoId: schema.projectGithubRepositories.githubRepoId,
+    })
+    .from(schema.projectGithubRepositories)
+    .where(
+      and(
+        eq(schema.projectGithubRepositories.projectId, input.projectId),
+        eq(schema.projectGithubRepositories.userId, input.userId)
+      )
+    );
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const accessToken = await getGitHubUserAccessTokenForOwner(
+    input.env,
+    input.userId,
+    'workspace-git-token'
+  );
+  if (!accessToken) {
+    log.warn('workspace_git_token_additional_repos_user_access_missing', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      action: 'additional_repos_skipped',
+    });
+    return [];
+  }
+
+  let accessibleById = new Map<string, number>();
+  try {
+    const repositories = await getUserInstallationRepositories(
+      accessToken,
+      input.externalInstallationId,
+      {
+        flow: 'project-access',
+        userId: input.userId,
+        installationId: input.externalInstallationId,
+      }
+    );
+    accessibleById = new Map(repositories.map((r) => [r.fullName.toLowerCase(), r.id]));
+  } catch (err) {
+    log.warn('workspace_git_token_additional_repos_unavailable', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      error: err instanceof Error ? err.message : String(err),
+      action: 'additional_repos_skipped',
+    });
+    return [];
+  }
+
+  const ids: number[] = [];
+  for (const row of rows) {
+    const accessibleId = accessibleById.get(row.repository.toLowerCase());
+    if (accessibleId === undefined) {
+      log.warn('workspace_git_token_additional_repo_access_revoked', {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        userId: input.userId,
+        repository: row.repository,
+        action: 'excluded_from_scope',
+      });
+      continue;
+    }
+    // Prefer the live, rename-stable id from the accessible set. Stored ids can
+    // drift if the repo was deleted/recreated; the live id is authoritative.
+    ids.push(accessibleId);
+  }
+  return ids;
 }
 
 runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
@@ -858,10 +950,25 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     }
     throw err;
   }
+  // Additional Repository Access: same-installation repos selected in Project
+  // Settings. Re-verified at this boundary; revoked/inaccessible entries are
+  // dropped from the scope. Primary repo is always included implicitly.
+  const additionalRepoIds =
+    githubRepoId && workspace.projectId
+      ? await resolveAdditionalRepositoryIds({
+          env: c.env,
+          db,
+          workspaceId: workspace.id,
+          projectId: workspace.projectId,
+          userId: workspace.userId,
+          externalInstallationId: getExternalInstallationId(installation),
+        })
+      : [];
+
   const scopedTokenOptions = {
     ...(tokenOptions ?? {}),
     ...(githubRepoId
-      ? { repositoryIds: [githubRepoId] }
+      ? { repositoryIds: [githubRepoId, ...additionalRepoIds.filter((id) => id !== githubRepoId)] }
       : { repositories: [repoShortName as string] }),
   };
   const token = await getInstallationToken(

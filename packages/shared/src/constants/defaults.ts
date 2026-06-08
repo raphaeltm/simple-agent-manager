@@ -90,6 +90,10 @@ export const DEFAULT_MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES = 128 * 1024;
 /** Default max runtime file path length. Override via MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH env var. */
 export const DEFAULT_MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH = 256;
 
+/** Default max additional same-installation GitHub repositories per project (submodule access).
+ *  Override via MAX_PROJECT_GITHUB_REPOS_PER_PROJECT env var. */
+export const DEFAULT_MAX_PROJECT_GITHUB_REPOS_PER_PROJECT = 20;
+
 /** Maximum workspace name length. */
 export const WORKSPACE_NAME_MAX_LENGTH = 64;
 

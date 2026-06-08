@@ -421,6 +421,47 @@ export const projectRuntimeFiles = sqliteTable(
   })
 );
 
+/** Additional same-installation GitHub repositories a project's workspace tokens
+ *  may access (Codespaces-style "additional repository access"). The primary
+ *  project repository is always included implicitly and is NOT stored here.
+ *  Each row is verified (user∩app access) at add time and re-verified at every
+ *  token mint. Workspace `/git-token` mints scope `repository_ids` to the primary
+ *  repo plus all active rows here, so same-org submodules can be fetched. */
+export const projectGithubRepositories = sqliteTable(
+  'project_github_repositories',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Full repository name, e.g. "octocat/hello-world". */
+    repository: text('repository').notNull(),
+    /** GitHub numeric repo id captured at verification time (rename-stable). */
+    githubRepoId: integer('github_repo_id').notNull(),
+    /** GitHub GraphQL node id (nullable for legacy/edge cases). */
+    githubRepoNodeId: text('github_repo_node_id'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectRepoUnique: uniqueIndex('idx_project_github_repos_project_repo').on(
+      table.projectId,
+      table.repository
+    ),
+    userProjectIdx: index('idx_project_github_repos_user_project').on(
+      table.userId,
+      table.projectId
+    ),
+  })
+);
+
 // =============================================================================
 // Project Deployment Credentials (GCP OIDC for Defang deployments)
 // Note: This table stores GCP WIF configuration (project IDs, service account
@@ -1259,6 +1300,8 @@ export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;
 export type NewProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferInsert;
 export type ProjectRuntimeFile = typeof projectRuntimeFiles.$inferSelect;
 export type NewProjectRuntimeFile = typeof projectRuntimeFiles.$inferInsert;
+export type ProjectGithubRepository = typeof projectGithubRepositories.$inferSelect;
+export type NewProjectGithubRepository = typeof projectGithubRepositories.$inferInsert;
 export type ProfileRuntimeEnvVar = typeof profileRuntimeEnvVars.$inferSelect;
 export type NewProfileRuntimeEnvVar = typeof profileRuntimeEnvVars.$inferInsert;
 export type ProfileRuntimeFile = typeof profileRuntimeFiles.$inferSelect;

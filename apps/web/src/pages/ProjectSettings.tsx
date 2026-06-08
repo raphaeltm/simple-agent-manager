@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
+import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { formatProviderCatalogContext, selectProviderCatalog } from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
@@ -369,6 +370,9 @@ export function ProjectSettings() {
           />
         )}
       </section>
+
+      {/* Repository Access — additional same-installation repos for workspace tokens */}
+      {project && <RepositoryAccessSettings project={project} />}
 
       {/* Workspace Idle Timeout */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">

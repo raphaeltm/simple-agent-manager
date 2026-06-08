@@ -818,6 +818,11 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 		if err != nil {
 			return fmt.Errorf("failed to sanitize repository origin URL: %w: %s", err, strings.TrimSpace(string(output)))
 		}
+
+		// Initialize same-org GitHub submodules using the multi-repo scoped token.
+		// Best-effort: submodule access depends on the project's Repository Access
+		// selection, so failures here must not block the primary clone.
+		initSubmodules(ctx, cfg.WorkspaceDir, cloneToken)
 	}
 
 	// When using a Docker volume, populate it from the host clone. The host clone
@@ -828,6 +833,44 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	}
 
 	return nil
+}
+
+// initSubmodules clones and checks out the repository's GitHub submodules using
+// the multi-repo scoped installation token via an inline `insteadOf` rewrite, so
+// the token is never persisted to `.git/config` or the submodule remotes. It is
+// best-effort: when the repo has no `.gitmodules`, or a submodule points at a
+// repo outside the project's Repository Access selection, the operation is logged
+// and skipped rather than failing the workspace bootstrap. The primary clone has
+// already succeeded by the time this runs.
+func initSubmodules(ctx context.Context, workspaceDir, token string) {
+	gitmodulesPath := filepath.Join(workspaceDir, ".gitmodules")
+	if _, err := os.Stat(gitmodulesPath); err != nil {
+		// No submodules — nothing to do.
+		return
+	}
+
+	args := []string{"-C", workspaceDir}
+	if token != "" {
+		// Rewrite GitHub remote URLs to embed the token only for the duration of
+		// this command. Covers https and scp-like ssh submodule URL forms.
+		tokenHTTPS := fmt.Sprintf("https://x-access-token:%s@github.com/", token)
+		args = append(args,
+			"-c", fmt.Sprintf("url.%s.insteadOf=https://github.com/", tokenHTTPS),
+			"-c", fmt.Sprintf("url.%s.insteadOf=git@github.com:", tokenHTTPS),
+			"-c", fmt.Sprintf("url.%s.insteadOf=ssh://git@github.com/", tokenHTTPS),
+		)
+	}
+	args = append(args, "submodule", "update", "--init", "--recursive")
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("Submodule initialization failed (non-fatal)",
+			"error", err,
+			"output", redactSecret(strings.TrimSpace(string(output)), token))
+		return
+	}
+	slog.Info("Submodules initialized", "workspaceDir", workspaceDir)
 }
 
 // ensureDevcontainerFallback starts a container using the default devcontainer image,

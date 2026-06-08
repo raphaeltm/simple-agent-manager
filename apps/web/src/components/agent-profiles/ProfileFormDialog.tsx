@@ -482,8 +482,11 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                   Project repository token permissions
                 </legend>
                 <p className="m-0 text-xs text-fg-muted">
-                  The token is narrowed to this project repository before each mint. Code contents
-                  must stay readable so the workspace can clone and fetch the repo.
+                  These permissions apply to the project&rsquo;s selected repository set &mdash; the
+                  primary repository plus any additional repositories added under Repository Access
+                  &mdash; not only the primary repo. The token is narrowed to that set before each
+                  mint. Code contents must stay readable so the workspace can clone and fetch the
+                  repositories.
                 </p>
                 {GITHUB_PERMISSION_ROWS.map((row) => (
                   <label

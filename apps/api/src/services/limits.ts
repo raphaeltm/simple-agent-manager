@@ -1,6 +1,7 @@
 import {
   DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE,
   DEFAULT_MAX_NODES_PER_USER,
+  DEFAULT_MAX_PROJECT_GITHUB_REPOS_PER_PROJECT,
   DEFAULT_MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES,
   DEFAULT_MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT,
   DEFAULT_MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES,
@@ -30,6 +31,7 @@ export interface RuntimeLimits {
   maxProjectRuntimeEnvValueBytes: number;
   maxProjectRuntimeFileContentBytes: number;
   maxProjectRuntimeFilePathLength: number;
+  maxProjectGithubReposPerProject: number;
   taskCallbackTimeoutMs: number;
   taskCallbackRetryMaxAttempts: number;
 }
@@ -57,6 +59,7 @@ export function getRuntimeLimits(env: {
   MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES?: string;
   MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES?: string;
   MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH?: string;
+  MAX_PROJECT_GITHUB_REPOS_PER_PROJECT?: string;
   TASK_CALLBACK_TIMEOUT_MS?: string;
   TASK_CALLBACK_RETRY_MAX_ATTEMPTS?: string;
 }): RuntimeLimits {
@@ -103,6 +106,10 @@ export function getRuntimeLimits(env: {
     maxProjectRuntimeFilePathLength: parsePositiveInt(
       env.MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH,
       DEFAULT_MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH
+    ),
+    maxProjectGithubReposPerProject: parsePositiveInt(
+      env.MAX_PROJECT_GITHUB_REPOS_PER_PROJECT,
+      DEFAULT_MAX_PROJECT_GITHUB_REPOS_PER_PROJECT
     ),
     taskCallbackTimeoutMs: parsePositiveInt(
       env.TASK_CALLBACK_TIMEOUT_MS,
