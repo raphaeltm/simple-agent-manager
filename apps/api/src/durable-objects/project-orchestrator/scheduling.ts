@@ -144,6 +144,7 @@ interface DispatchableTaskRow {
   user_id: string;
   project_id: string;
   output_branch: string | null;
+  agent_profile_hint: string | null;
   dispatch_depth: number;
   priority: number;
 }
@@ -162,7 +163,7 @@ async function autoDispatchSchedulableTasks(
 ): Promise<void> {
   // Re-read task states from D1 (fresh after recompute)
   const schedulableResult = await env.DATABASE.prepare(
-    `SELECT id, title, description, user_id, project_id, output_branch, dispatch_depth, priority
+    `SELECT id, title, description, user_id, project_id, output_branch, agent_profile_hint, dispatch_depth, priority
      FROM tasks
      WHERE mission_id = ? AND scheduler_state = 'schedulable' AND status = 'queued'
      ORDER BY priority DESC, created_at ASC
@@ -295,6 +296,7 @@ async function autoDispatchSchedulableTasks(
         workspaceProfile: resolvedWorkspaceProfile,
         devcontainerConfigName: resolvedDevcontainerConfig,
         cloudProvider: resolvedProvider,
+        agentProfileHint: task.agent_profile_hint ?? null,
         projectScaling: {
           taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
           maxWorkspacesPerNode: projectRow.max_workspaces_per_node ?? null,

@@ -28,6 +28,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
@@ -266,6 +267,13 @@ export async function submitTriggeredTask(
 
   // Start TaskRunner DO
   try {
+    await requireRepositoryOwnerAccess(
+      env,
+      db,
+      project,
+      input.userId,
+      `trigger-${input.triggeredBy}`
+    );
     await startTaskRunnerDO(env, {
       taskId,
       projectId: input.projectId,

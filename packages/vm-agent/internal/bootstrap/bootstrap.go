@@ -2096,8 +2096,8 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	// initial GH_TOKEN has expired. The wrapper fetches a fresh token from the
 	// git credential helper (which calls back to the VM agent for a new token).
 	if err := installGhWrapper(ctx, cfg, containerID); err != nil {
-		// Non-fatal: gh still works with the static GH_TOKEN from /etc/sam/env,
-		// just won't auto-refresh for long sessions.
+		// Non-fatal: git clone/fetch still use the credential helper. Direct gh
+		// invocations may lack GH_TOKEN until shell startup fallback runs.
 		slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
 	}
 
@@ -2176,9 +2176,9 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
 	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
-	// like host.docker.internal or 172.17.0.1. This is acceptable because the
-	// credential endpoint is only bound to the VM host, and each request is
-	// authenticated via the callback token.
+	// like host.docker.internal or 172.17.0.1. The helper deliberately does not
+	// carry the durable workspace callback token; it asks the VM agent to perform
+	// the control-plane token exchange using its in-memory workspace callback.
 	scheme := "http"
 	curlTLSFlag := ""
 	if cfg.TLSEnabled {
@@ -2213,7 +2213,6 @@ resolve_gateway() {
 request_credentials() {
   target="$1"
   curl -fsS --max-time 5%s \
-    -H "Authorization: Bearer %s" \
     "%s://${target}:%d/git-credential%s"
 }
 
@@ -2226,7 +2225,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, curlTLSFlag, cfg.CallbackToken, scheme, cfg.Port, query), nil
+`, curlTLSFlag, scheme, cfg.Port, query), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2703,18 +2702,15 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 
 // buildSAMEnvScript generates a shell script that exports SAM platform metadata
 // as environment variables. Only non-empty values are included.
-// When githubToken is non-empty, it is exported as GH_TOKEN so that the
-// gh CLI and other GitHub API consumers work out of the box. GH_TOKEN is
-// preferred over GITHUB_TOKEN because the gh CLI gives it higher precedence
-// and GITHUB_TOKEN can interfere with `gh auth login`.
-func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
+// GitHub credentials are intentionally resolved on demand via the credential
+// helper/gh wrapper rather than persisted as static GH_TOKEN exports.
+func buildSAMEnvScript(cfg *config.Config, _ string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
 	type envEntry struct {
 		key, value string
 	}
 	entries := []envEntry{
-		{"GH_TOKEN", strings.TrimSpace(githubToken)},
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
@@ -2758,14 +2754,14 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 // buildSAMStaticEnv returns a shell-quoted env file (POSIX single-quoting via
 // shellSingleQuote) for /etc/sam/env. Format: export KEY='value'.
 // Parsed by ReadContainerEnvFiles (parseEnvExportLines) for ACP sessions.
-func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
+// GH_TOKEN is excluded so ACP sessions fetch a fresh scoped token at startup.
+func buildSAMStaticEnv(cfg *config.Config, _ string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
 	type envEntry struct {
 		key, value string
 	}
 	entries := []envEntry{
-		{"GH_TOKEN", strings.TrimSpace(githubToken)},
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
@@ -2794,7 +2790,8 @@ func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
 // ensureSAMEnvironment injects SAM platform metadata as environment variables into
 // the devcontainer. Variables are written to /etc/profile.d/sam-env.sh (sourced by
 // login/interactive shells) and /etc/sam/env (for non-shell consumers).
-// When githubToken is non-empty, it is exported as GH_TOKEN for gh CLI usage.
+// GitHub tokens are resolved on demand; githubToken is accepted for legacy call
+// sites but is not persisted into either environment file.
 func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken string) error {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {

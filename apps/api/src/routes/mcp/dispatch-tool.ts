@@ -22,6 +22,7 @@ import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -572,6 +573,13 @@ export async function handleDispatchTask(
     .limit(1);
 
   try {
+    await requireRepositoryOwnerAccess(
+      env,
+      db,
+      project,
+      tokenData.userId,
+      'mcp-dispatch'
+    );
     await startTaskRunnerDO(env, {
       taskId,
       projectId: tokenData.projectId,

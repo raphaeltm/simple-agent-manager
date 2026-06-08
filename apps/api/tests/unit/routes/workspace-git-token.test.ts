@@ -9,7 +9,9 @@ import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
 
 const mocks = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),
+  getGitHubUserAccessTokenForOwner: vi.fn(),
   resolveWorkspaceGitHubTokenOptions: vi.fn(),
+  assertRepositoryAccess: vi.fn(),
   verifyWorkspaceCallbackAuth: vi.fn(),
   backfillProjectGithubRepoId: vi.fn(),
   and: vi.fn((...clauses: unknown[]) => ({ op: 'and', clauses })),
@@ -36,6 +38,12 @@ vi.mock('../../../src/routes/workspaces/_helpers', async () => {
 });
 vi.mock('../../../src/services/github-app', () => ({
   getInstallationToken: mocks.getInstallationToken,
+}));
+vi.mock('../../../src/services/github-user-access-token', () => ({
+  getGitHubUserAccessTokenForOwner: mocks.getGitHubUserAccessTokenForOwner,
+}));
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  assertRepositoryAccess: mocks.assertRepositoryAccess,
 }));
 vi.mock('../../../src/services/github-cli-policy', () => {
   class GitHubCliPolicyError extends Error {
@@ -76,7 +84,11 @@ describe('workspace git-token GitHub scoping', () => {
       right?: unknown;
       clauses?: unknown[];
     };
-    if (clause.op === 'eq' && columnName(clause.left) === column && clause.right === expectedValue) {
+    if (
+      clause.op === 'eq' &&
+      columnName(clause.left) === column &&
+      clause.right === expectedValue
+    ) {
       return true;
     }
     return Array.isArray(clause.clauses)
@@ -100,10 +112,39 @@ describe('workspace git-token GitHub scoping', () => {
     ];
   }
 
+  function workspaceRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'ws-1',
+      installationId: 'inst-row-111',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      ...overrides,
+    };
+  }
+
+  function githubProjectRow(overrides: Record<string, unknown> = {}) {
+    return {
+      repoProvider: 'github',
+      artifactsRepoId: null,
+      githubRepoId: 42,
+      repository: 'raph/sam',
+      ...overrides,
+    };
+  }
+
+  function queueWorkspaceProjectLookup(
+    projectOverrides: Record<string, unknown> = {},
+    installationLookup: (whereClause: unknown) => unknown[] = installationRowsOnlyWhenOwnerScoped
+  ) {
+    limitResponses.push([workspaceRow()], [githubProjectRow(projectOverrides)], installationLookup);
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     limitResponses = [];
     mocks.verifyWorkspaceCallbackAuth.mockResolvedValue(undefined);
+    mocks.getGitHubUserAccessTokenForOwner.mockResolvedValue('github-user-oauth-token');
+    mocks.assertRepositoryAccess.mockResolvedValue({ id: 42, fullName: 'raph/sam' });
     mocks.resolveWorkspaceGitHubTokenOptions.mockResolvedValue(null);
     // Default: self-heal cannot resolve an id (legacy fall-through to name scoping).
     mocks.backfillProjectGithubRepoId.mockResolvedValue({
@@ -127,7 +168,9 @@ describe('workspace git-token GitHub scoping', () => {
         }),
         limit: vi.fn(() => {
           const response = limitResponses.shift();
-          return Promise.resolve(typeof response === 'function' ? response(whereClause) : (response ?? []));
+          return Promise.resolve(
+            typeof response === 'function' ? response(whereClause) : (response ?? [])
+          );
         }),
       };
       return builder;
@@ -148,17 +191,25 @@ describe('workspace git-token GitHub scoping', () => {
   });
 
   it('falls back to repository-name scoping for legacy projects without a repo id', async () => {
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
     expect(res.status).toBe(200);
+    expect(mocks.getGitHubUserAccessTokenForOwner).toHaveBeenCalledWith(
+      mockEnv,
+      'user-1',
+      'workspace-git-token'
+    );
+    expect(mocks.assertRepositoryAccess).toHaveBeenCalledWith(
+      'github-user-oauth-token',
+      '120081765',
+      'raph/sam',
+      'user-1',
+      'project-access'
+    );
     expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
-      repositories: ['sam'],
+      repositoryIds: [42],
     });
     await expect(res.json()).resolves.toEqual({
       token: 'github-installation-token',
@@ -168,8 +219,8 @@ describe('workspace git-token GitHub scoping', () => {
 
   it('rejects GitHub workspaces with neither a repo id nor a repository name', async () => {
     limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: null }]
+      [workspaceRow()],
+      [githubProjectRow({ githubRepoId: null, repository: null })]
     );
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
@@ -183,11 +234,7 @@ describe('workspace git-token GitHub scoping', () => {
   });
 
   it('mints GitHub installation tokens scoped to the verified repository id', async () => {
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42 }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup();
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -201,6 +248,53 @@ describe('workspace git-token GitHub scoping', () => {
     });
   });
 
+  it('denies and does not mint when the workspace owner has no GitHub OAuth token', async () => {
+    mocks.getGitHubUserAccessTokenForOwner.mockResolvedValue(null);
+    queueWorkspaceProjectLookup();
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'FORBIDDEN',
+      message: 'GitHub user token unavailable',
+    });
+    expect(mocks.assertRepositoryAccess).not.toHaveBeenCalled();
+    expect(mocks.backfillProjectGithubRepoId).not.toHaveBeenCalled();
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('denies and does not mint when user-context repo access no longer includes the repo', async () => {
+    mocks.assertRepositoryAccess.mockRejectedValue(
+      Object.assign(new Error('Repository is not accessible through the selected installation'), {
+        statusCode: 403,
+        error: 'FORBIDDEN',
+      })
+    );
+    queueWorkspaceProjectLookup();
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    expect(mocks.backfillProjectGithubRepoId).not.toHaveBeenCalled();
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('denies and does not mint when user-context repo id drifts from the project binding', async () => {
+    mocks.assertRepositoryAccess.mockResolvedValue({ id: 99, fullName: 'raph/sam-renamed' });
+    queueWorkspaceProjectLookup();
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'FORBIDDEN',
+      message: 'GitHub repository access has changed; repository ID no longer matches',
+    });
+    expect(mocks.backfillProjectGithubRepoId).not.toHaveBeenCalled();
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
   it('self-heals a legacy project: persists the numeric id and scopes the token to repositoryIds', async () => {
     mocks.backfillProjectGithubRepoId.mockResolvedValue({
       status: 'backfilled',
@@ -208,11 +302,7 @@ describe('workspace git-token GitHub scoping', () => {
       githubRepoNodeId: 'R_42',
       fullName: 'raph/sam',
     });
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -236,11 +326,7 @@ describe('workspace git-token GitHub scoping', () => {
       githubRepoNodeId: 'R_77',
       fullName: 'raph/sam',
     });
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -266,11 +352,7 @@ describe('workspace git-token GitHub scoping', () => {
         return null;
       }
     );
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -287,21 +369,17 @@ describe('workspace git-token GitHub scoping', () => {
   it('rejects a workspace installation row that is not owned by the workspace user', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      limitResponses.push(
-        [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-        [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-        (whereClause) => {
-          expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
-          expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
-          return [
-            {
-              installationId: 'user-2:120081765',
-              externalInstallationId: '120081765',
-              userId: 'user-2',
-            },
-          ];
-        }
-      );
+      queueWorkspaceProjectLookup({}, (whereClause) => {
+        expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
+        expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+        return [
+          {
+            installationId: 'user-2:120081765',
+            externalInstallationId: '120081765',
+            userId: 'user-2',
+          },
+        ];
+      });
 
       const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 

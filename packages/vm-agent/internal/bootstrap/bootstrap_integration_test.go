@@ -514,14 +514,20 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 		t.Fatalf("script not executable: %v\n%s", err, string(out))
 	}
 
-	// Verify: script contains expected token and port
+	// Verify: hardened script uses the local /git-credential exchange and does
+	// NOT embed the durable callback token (the helper asks the VM agent to
+	// perform the control-plane token exchange via its in-memory workspace
+	// callback instead of carrying a reusable bearer in the on-disk script).
 	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "cat", installPath).CombinedOutput()
 	if err != nil {
 		t.Fatalf("cat script: %v\n%s", err, string(out))
 	}
 	scriptContent := string(out)
-	if !strings.Contains(scriptContent, "test-cred-token-abc") {
-		t.Fatal("script missing callback token")
+	if strings.Contains(scriptContent, "test-cred-token-abc") {
+		t.Fatal("script must NOT embed the reusable callback token")
+	}
+	if !strings.Contains(scriptContent, "/git-credential") {
+		t.Fatal("script missing /git-credential local exchange endpoint")
 	}
 	if !strings.Contains(scriptContent, "9999") {
 		t.Fatal("script missing port")

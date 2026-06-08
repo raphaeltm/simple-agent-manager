@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +27,7 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		workspaceID = strings.TrimSpace(s.routedWorkspaceID(r))
 	}
 
-	if !s.isValidCallbackAuth(r, workspaceID) {
+	if !isAuthorizedGitCredentialRequest(s, r, workspaceID) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -114,7 +115,7 @@ func (s *Server) fetchGitTokenResponseForWorkspace(ctx context.Context, workspac
 		return nil, fmt.Errorf("git-token: read response body: %w", err)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("git-token endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("git-token endpoint returned HTTP %d (response body %d bytes)", res.StatusCode, len(body))
 	}
 
 	var payload gitTokenResponse
@@ -133,6 +134,34 @@ func bearerTokenFromHeader(authHeader string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+}
+
+func isLocalGitCredentialExchange(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+func isAuthorizedGitCredentialRequest(s *Server, r *http.Request, workspaceID string) bool {
+	if bearerTokenFromHeader(r.Header.Get("Authorization")) != "" {
+		return s.isValidCallbackAuth(r, workspaceID)
+	}
+	return isLocalGitCredentialExchange(r) && isPrimaryWorkspaceGitCredentialRequest(s, workspaceID)
+}
+
+func isPrimaryWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
+	requestedWorkspaceID := strings.TrimSpace(workspaceID)
+	primaryWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
+	if requestedWorkspaceID == "" {
+		requestedWorkspaceID = primaryWorkspaceID
+	}
+	return primaryWorkspaceID != "" && requestedWorkspaceID == primaryWorkspaceID
 }
 
 func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {

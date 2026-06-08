@@ -30,6 +30,7 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
+import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
 import { generateBranchName } from '../../../services/branch-name';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
@@ -342,6 +343,13 @@ export async function dispatchTask(
     .limit(1);
 
   try {
+    await requireRepositoryOwnerAccess(
+      env,
+      db,
+      project,
+      ctx.userId,
+      'sam-session-dispatch'
+    );
     await startTaskRunnerDO(env, {
       taskId,
       projectId: input.projectId,

@@ -22,9 +22,28 @@ import {
   stopAgentSessionOnNode,
   suspendAgentSessionOnNode,
 } from '../../services/node-agent';
+import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import { assertNodeOperational,getOwnedNode, getOwnedWorkspace } from './_helpers';
 
 const agentSessionRoutes = new Hono<{ Bindings: Env }>();
+
+async function requireWorkspaceAgentGitHubAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspace: schema.Workspace,
+  userId: string
+): Promise<void> {
+  if (!workspace.projectId) return;
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, workspace.projectId), eq(schema.projects.userId, userId)))
+    .limit(1);
+  if (!project) {
+    throw errors.notFound('Project');
+  }
+  await requireRepositoryOwnerAccess(env, db, project, userId, 'workspace-agent-session');
+}
 
 // Auth applied per-route (NOT via use('/*', ...)) to prevent middleware leakage
 // to other subrouters (lifecycle, runtime) mounted at the same base path.
@@ -68,6 +87,7 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'create agent session');
+  await requireWorkspaceAgentGitHubAccess(c.env, db, workspace, userId);
 
   const existingRunning = await db
     .select({ id: schema.agentSessions.id })

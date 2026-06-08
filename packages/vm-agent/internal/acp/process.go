@@ -34,7 +34,7 @@ const (
 //
 // Both are parsed by parseEnvExportLines which handles both quoting styles.
 var samEnvFiles = []string{
-	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.) — single-quoted
+	"/etc/sam/env",         // SAM platform vars (SAM_WORKSPACE_ID, etc.) — single-quoted
 	"/etc/sam/project-env", // Project-specific vars configured by the user — single-quoted
 }
 

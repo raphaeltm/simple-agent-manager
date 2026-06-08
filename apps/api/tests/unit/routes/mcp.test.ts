@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
+import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
 
 vi.mock('../../../src/services/agent-profiles', () => ({
@@ -11,6 +12,10 @@ vi.mock('../../../src/services/agent-profiles', () => ({
   listProfiles: vi.fn(),
   resolveAgentProfile: vi.fn().mockResolvedValue(null),
   updateProfile: vi.fn(),
+}));
+
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock KV namespace
@@ -1128,6 +1133,26 @@ describe('MCP Routes', () => {
       expect(data.url).toContain('app.example.com');
       expect(data.url).toContain('proj-456');
       expect(data.message).toContain('dispatched successfully');
+    });
+
+    it('should reject dispatch before provisioning when GitHub owner access is revoked', async () => {
+      setupHappyPathMocks();
+      vi.mocked(projectHelpers.requireRepositoryOwnerAccess)
+        .mockRejectedValueOnce(new Error('Repository access is no longer available'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build the notification system' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Repository access is no longer available');
+      const preflightCall = vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mock.calls[0]!;
+      expect(preflightCall[3]).toBe('user-789');
+      expect(preflightCall[4]).toBe('mcp-dispatch');
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
     });
 
     it('should use explicit branch parameter when provided', async () => {

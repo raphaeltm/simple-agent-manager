@@ -11,7 +11,10 @@ import {
   type GitHubRepositoryAccess,
 } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
-import { getGitHubUserAccessToken } from '../../services/github-user-access-token';
+import {
+  getGitHubUserAccessToken,
+  getGitHubUserAccessTokenForOwner,
+} from '../../services/github-user-access-token';
 
 export function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -220,16 +223,12 @@ export async function assertRepositoryAccess(
   userId: string,
   flow: 'project-access' | 'branches' = 'project-access'
 ): Promise<GitHubRepositoryAccess> {
-  const repositories = await getUserInstallationRepositories(
-    accessToken,
-    installationExternalId,
-    {
-      flow,
-      userId,
-      installationId: installationExternalId,
-      repository,
-    }
-  );
+  const repositories = await getUserInstallationRepositories(accessToken, installationExternalId, {
+    flow,
+    userId,
+    installationId: installationExternalId,
+    repository,
+  });
   const normalizedRepository = repository.toLowerCase();
   const matchedRepo = repositories.find(
     (repo) => repo.fullName.toLowerCase() === normalizedRepository
@@ -282,8 +281,11 @@ export async function requireRepositoryUserAccess(
 ): Promise<void> {
   // Artifacts-backed (non-github) projects have no GitHub installation to
   // intersect against — they are out of scope for this gate.
-  if (project.repoProvider && project.repoProvider !== 'github') {
+  if (project.repoProvider === 'artifacts') {
     return;
+  }
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    throw errors.forbidden('Unsupported repository provider');
   }
 
   const installation = await requireOwnedInstallation(db, project.installationId, userId);
@@ -296,8 +298,37 @@ export async function requireRepositoryUserAccess(
     userId
   );
   if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
-    throw errors.forbidden(
-      'GitHub repository access has changed; repository ID no longer matches'
-    );
+    throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');
+  }
+}
+
+export async function requireRepositoryOwnerAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  project: schema.Project,
+  userId: string,
+  flow = 'owner-preflight'
+): Promise<void> {
+  if (project.repoProvider === 'artifacts') {
+    return;
+  }
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    throw errors.forbidden('Unsupported repository provider');
+  }
+
+  const installation = await requireOwnedInstallation(db, project.installationId, userId);
+  const externalInstallationId = getExternalInstallationId(installation);
+  const accessToken = await getGitHubUserAccessTokenForOwner(env, userId, flow);
+  if (!accessToken) {
+    throw errors.forbidden('GitHub user token unavailable');
+  }
+  const verifiedRepo = await assertRepositoryAccess(
+    accessToken,
+    externalInstallationId,
+    project.repository,
+    userId
+  );
+  if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
+    throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');
   }
 }

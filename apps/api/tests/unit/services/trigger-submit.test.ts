@@ -43,6 +43,10 @@ vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 let ulidCounter = 0;
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => `ULID${String(++ulidCounter).padStart(6, '0')}`,
@@ -79,6 +83,8 @@ vi.mock('drizzle-orm', () => ({
   sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
 }));
 
+import * as projectHelpers from '../../../src/routes/projects/_helpers';
+import * as taskRunnerDo from '../../../src/services/task-runner-do';
 import type { SubmitTriggeredTaskInput } from '../../../src/services/trigger-submit';
 
 const defaultInput: SubmitTriggeredTaskInput = {
@@ -95,6 +101,36 @@ const defaultInput: SubmitTriggeredTaskInput = {
   triggerName: 'Daily Review',
 };
 
+function triggerProjectRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'project-1',
+    userId: 'user-1',
+    name: 'Test Project',
+    repository: 'user/repo',
+    installationId: 'install-1',
+    defaultBranch: 'main',
+    defaultVmSize: null,
+    defaultAgentType: null,
+    defaultWorkspaceProfile: null,
+    defaultProvider: null,
+    defaultLocation: null,
+    taskExecutionTimeoutMs: null,
+    maxWorkspacesPerNode: null,
+    nodeCpuThresholdPercent: null,
+    nodeMemoryThresholdPercent: null,
+    warmNodeTimeoutMs: null,
+    ...overrides,
+  };
+}
+
+function queueTriggerSubmitLookups(project = triggerProjectRow()) {
+  mockSelectResult.push(
+    [project],
+    [{ id: 'cred-1' }], // credential
+    [{ githubId: '123', name: 'User', email: 'user@test.com' }] // user
+  );
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -108,28 +144,7 @@ describe('submitTriggeredTask', () => {
 
   it('creates a task with trigger metadata fields', async () => {
     // Setup mock DB responses: project, credential, user
-    mockSelectResult.push(
-      [{ // project
-        id: 'project-1',
-        userId: 'user-1',
-        name: 'Test Project',
-        repository: 'user/repo',
-        installationId: 'install-1',
-        defaultBranch: 'main',
-        defaultVmSize: null,
-        defaultAgentType: null,
-        defaultWorkspaceProfile: null,
-        defaultProvider: null,
-        defaultLocation: null,
-        taskExecutionTimeoutMs: null,
-        maxWorkspacesPerNode: null,
-        nodeCpuThresholdPercent: null,
-        nodeMemoryThresholdPercent: null,
-        warmNodeTimeoutMs: null,
-      }],
-      [{ id: 'cred-1' }], // credential
-      [{ githubId: '123', name: 'User', email: 'user@test.com' }], // user
-    );
+    queueTriggerSubmitLookups();
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     const result = await submitTriggeredTask({} as any, defaultInput);
@@ -170,28 +185,7 @@ describe('submitTriggeredTask', () => {
       defaultProfileId: 'profile-1',
     });
     skillMocks.parseSkillResourceRequirementsJson.mockReturnValueOnce({ cpu: 4 });
-    mockSelectResult.push(
-      [{
-        id: 'project-1',
-        userId: 'user-1',
-        name: 'Test Project',
-        repository: 'user/repo',
-        installationId: 'install-1',
-        defaultBranch: 'main',
-        defaultVmSize: null,
-        defaultAgentType: null,
-        defaultWorkspaceProfile: null,
-        defaultProvider: null,
-        defaultLocation: null,
-        taskExecutionTimeoutMs: null,
-        maxWorkspacesPerNode: null,
-        nodeCpuThresholdPercent: null,
-        nodeMemoryThresholdPercent: null,
-        warmNodeTimeoutMs: null,
-      }],
-      [{ id: 'cred-1' }],
-      [{ githubId: '123', name: 'User', email: 'user@test.com' }],
-    );
+    queueTriggerSubmitLookups();
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     await submitTriggeredTask({} as any, { ...defaultInput, skillId: 'triage' });
@@ -221,14 +215,32 @@ describe('submitTriggeredTask', () => {
   });
 
   it('throws when user has no cloud provider credentials', async () => {
-    mockSelectResult.push(
-      [{ id: 'project-1', repository: 'user/repo', installationId: 'i1', defaultBranch: 'main' }],
-      [], // no credentials
-    );
+    mockSelectResult.push([triggerProjectRow({ installationId: 'i1' })], []); // no credentials
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
       'no cloud provider credentials'
     );
+  });
+
+  it('blocks before provisioning when trigger submit GitHub owner access is revoked', async () => {
+    queueTriggerSubmitLookups();
+    vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mockRejectedValueOnce(
+      new Error('Repository access is no longer available')
+    );
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
+      'Repository access is no longer available'
+    );
+
+    expect(projectHelpers.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ id: 'project-1', repository: 'user/repo' }),
+      'user-1',
+      'trigger-cron'
+    );
+    expect(taskRunnerDo.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 });

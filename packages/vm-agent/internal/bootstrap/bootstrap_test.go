@@ -165,7 +165,6 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	}
 
 	required := []string{
-		`Authorization: Bearer callback-token-123`,
 		`http://${target}:8080/git-credential`,
 		"host.docker.internal",
 		"172.17.0.1",
@@ -174,6 +173,15 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	for _, fragment := range required {
 		if !strings.Contains(script, fragment) {
 			t.Fatalf("expected script to contain %q", fragment)
+		}
+	}
+	forbidden := []string{
+		"callback-token-123",
+		"Authorization: Bearer",
+	}
+	for _, fragment := range forbidden {
+		if strings.Contains(script, fragment) {
+			t.Fatalf("credential helper must not contain durable callback token fragment %q", fragment)
 		}
 	}
 
@@ -201,7 +209,6 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	}
 
 	required := []string{
-		`Authorization: Bearer callback-token-tls`,
 		`https://${target}:8443/git-credential`,
 		" -k",
 		"host.docker.internal",
@@ -211,6 +218,15 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	for _, fragment := range required {
 		if !strings.Contains(script, fragment) {
 			t.Fatalf("expected TLS script to contain %q", fragment)
+		}
+	}
+	forbidden := []string{
+		"callback-token-tls",
+		"Authorization: Bearer",
+	}
+	for _, fragment := range forbidden {
+		if strings.Contains(script, fragment) {
+			t.Fatalf("credential helper must not contain durable callback token fragment %q", fragment)
 		}
 	}
 
@@ -501,7 +517,7 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	}
 }
 
-func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
+func TestBuildSAMEnvScriptOmitsStaticGitHubToken(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -513,9 +529,9 @@ func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "ghs_test_token_abc123")
 
-	want := `export GH_TOKEN='ghs_test_token_abc123'`
-	if !strings.Contains(script, want) {
-		t.Errorf("script missing %q\ngot:\n%s", want, script)
+	forbidden := `export GH_TOKEN='ghs_test_token_abc123'`
+	if strings.Contains(script, forbidden) || strings.Contains(script, "ghs_test_token_abc123") {
+		t.Errorf("script should not persist static GH_TOKEN, got:\n%s", script)
 	}
 
 	// Other SAM vars should still be present.
@@ -534,9 +550,8 @@ func TestBuildSAMEnvScriptTrimsGitHubTokenWhitespace(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "  ghs_token  ")
 
-	want := `export GH_TOKEN='ghs_token'`
-	if !strings.Contains(script, want) {
-		t.Errorf("expected trimmed token in script, got:\n%s", script)
+	if strings.Contains(script, "ghs_token") {
+		t.Errorf("script should not persist static GH_TOKEN, got:\n%s", script)
 	}
 }
 
@@ -577,7 +592,6 @@ func TestBuildSAMStaticEnv(t *testing.T) {
 	env := buildSAMStaticEnv(cfg, "ghs_token")
 
 	for _, want := range []string{
-		`export GH_TOKEN='ghs_token'`,
 		`export SAM_API_URL='https://api.example.com'`,
 		`export SAM_BRANCH='main'`,
 		`export SAM_NODE_ID='node-456'`,
@@ -588,6 +602,9 @@ func TestBuildSAMStaticEnv(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("static env missing %q\ngot:\n%s", want, env)
 		}
+	}
+	if strings.Contains(env, "GH_TOKEN") || strings.Contains(env, "ghs_token") {
+		t.Errorf("static env should not persist GH_TOKEN, got:\n%s", env)
 	}
 }
 
@@ -1144,9 +1161,8 @@ func TestBuildSAMStaticEnvShellInjection(t *testing.T) {
 	if !strings.Contains(env, "'`id`'") {
 		t.Errorf("expected single-quoted backtick value, got:\n%s", env)
 	}
-	// Token with injection should also be single-quoted
-	if !strings.Contains(env, `'token$(cat /etc/passwd)'`) {
-		t.Errorf("expected single-quoted token with injection payload, got:\n%s", env)
+	if strings.Contains(env, "token$(cat /etc/passwd)") || strings.Contains(env, "GH_TOKEN") {
+		t.Errorf("static env should not persist GH_TOKEN, got:\n%s", env)
 	}
 }
 
@@ -2545,8 +2561,11 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if !strings.HasPrefix(string(content), "#!/bin/sh") {
 		t.Fatal("expected script to start with #!/bin/sh")
 	}
-	if !strings.Contains(string(content), "test-token") {
-		t.Fatal("expected script to contain callback token")
+	if !strings.Contains(string(content), "/git-credential") {
+		t.Fatal("expected script to call local git-credential endpoint")
+	}
+	if strings.Contains(string(content), "test-token") {
+		t.Fatal("credential helper must not contain callback token")
 	}
 }
 
@@ -2582,8 +2601,8 @@ func TestWriteCredentialHelperToHostReplacesExistingRegularFile(t *testing.T) {
 	if strings.Contains(string(content), "stale-helper") {
 		t.Fatal("expected stale helper content to be replaced")
 	}
-	if !strings.Contains(string(content), "fresh-token") {
-		t.Fatal("expected replacement helper to contain fresh token")
+	if strings.Contains(string(content), "fresh-token") {
+		t.Fatal("replacement helper must not contain callback token")
 	}
 }
 

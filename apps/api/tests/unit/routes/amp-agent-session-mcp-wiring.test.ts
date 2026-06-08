@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
+import * as projectHelpers from '../../../src/routes/projects/_helpers';
 
 const { createAgentSessionOnNodeMock, storeMcpTokenMock, revokeMcpTokenMock } = vi.hoisted(() => ({
   createAgentSessionOnNodeMock: vi.fn(async () => undefined),
@@ -43,6 +44,10 @@ vi.mock('../../../src/services/node-agent', () => ({
   suspendAgentSessionOnNode: vi.fn(),
 }));
 
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 let testWorkspaceRow: Record<string, unknown> = {
   id: 'workspace-123',
   userId: 'user-123',
@@ -74,6 +79,15 @@ const agentSessionRow = {
   errorMessage: null,
 };
 
+const projectRow = {
+  id: 'project-123',
+  userId: 'user-123',
+  repository: 'octo/repo',
+  installationId: 'install-123',
+  repoProvider: 'github',
+  githubRepoId: 123,
+};
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => {
     let selectCount = 0;
@@ -85,7 +99,12 @@ vi.mock('drizzle-orm/d1', () => ({
             where: () => {
               if (selectCount === 1) return { limit: () => Promise.resolve([testWorkspaceRow]) };
               if (selectCount === 2) return { limit: () => Promise.resolve([nodeRow]) };
-              if (selectCount === 3) return Promise.resolve([]);
+              if (selectCount === 3 && testWorkspaceRow.projectId) {
+                return { limit: () => Promise.resolve([projectRow]) };
+              }
+              if (selectCount === 3 || (selectCount === 4 && testWorkspaceRow.projectId)) {
+                return Promise.resolve([]);
+              }
               return { limit: () => Promise.resolve([agentSessionRow]) };
             },
           }),
@@ -226,5 +245,33 @@ describe('Amp project-chat MCP wiring', () => {
       null,
       undefined,
     );
+  });
+
+  it('blocks before direct agent-session provisioning when GitHub owner access is revoked', async () => {
+    vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mockRejectedValueOnce(
+      new AppError(403, 'Repository access is no longer available', 'GITHUB_REPOSITORY_ACCESS_DENIED'),
+    );
+
+    const app = await createTestApp();
+    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+    }, {
+      DATABASE: {},
+      KV: {},
+      BASE_DOMAIN: 'example.com',
+    });
+
+    expect(res.status).toBe(403);
+    expect(projectHelpers.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ id: 'project-123', repository: 'octo/repo' }),
+      'user-123',
+      'workspace-agent-session',
+    );
+    expect(storeMcpTokenMock).not.toHaveBeenCalled();
+    expect(createAgentSessionOnNodeMock).not.toHaveBeenCalled();
   });
 });

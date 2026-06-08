@@ -16,6 +16,7 @@ import {
   stopWorkspaceOnNode,
 } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
+import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
   getOwnedNode,
@@ -26,6 +27,25 @@ import {
 } from './_helpers';
 
 const lifecycleRoutes = new Hono<{ Bindings: Env }>();
+
+async function requireWorkspaceRestartGitHubAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspace: schema.Workspace,
+  userId: string,
+  flow: string
+): Promise<void> {
+  if (!workspace.projectId) return;
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, workspace.projectId), eq(schema.projects.userId, userId)))
+    .limit(1);
+  if (!project) {
+    throw errors.notFound('Project');
+  }
+  await requireRepositoryOwnerAccess(env, db, project, userId, flow);
+}
 
 // --- User-authenticated lifecycle routes ---
 
@@ -131,6 +151,7 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'restart workspace');
+  await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-restart');
 
   // Cancel any pending auto-deletion before restarting
   try {
@@ -197,6 +218,7 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'rebuild workspace');
+  await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-rebuild');
 
   // Clear previous error state and boot logs before starting new provisioning
   await db
