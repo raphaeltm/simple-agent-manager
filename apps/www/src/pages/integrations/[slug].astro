@@ -20,7 +20,7 @@ const related = getRelated(integration);
 
 const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
 const siteUrl = `https://www.${baseDomain}`;
-const appUrl = `https://app.${baseDomain}`;
+const getStartedUrl = 'https://www.simple-agent-manager.org/self-host/';
 
 const breadcrumbJsonLd = {
   '@context': 'https://schema.org',
@@ -100,7 +100,7 @@ const useCaseIcons = [
         <h1 class="detail-title animate-on-scroll">{integration.tagline}</h1>
         <p class="detail-subtitle animate-on-scroll">{integration.description}</p>
         <div class="hero-actions animate-on-scroll">
-          <a href={appUrl} class="btn-hero btn-hero-primary">
+          <a href={getStartedUrl} class="btn-hero btn-hero-primary">
             Get Started with {integration.shortName || integration.name}
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </a>
@@ -249,7 +249,7 @@ const useCaseIcons = [
             Self-host on low-cost Cloudflare Workers. Bring your own cloud. Your agents, your code.
           </p>
           <div class="cta-actions">
-            <a href={appUrl} class="btn-cta btn-cta-primary">
+            <a href={getStartedUrl} class="btn-cta btn-cta-primary">
               Get Started
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </a>

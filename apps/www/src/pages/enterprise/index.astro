@@ -3,8 +3,7 @@ import Base from '../../layouts/Base.astro';
 import Header from '../../components/Header.astro';
 import CtaFooter from '../../components/CtaFooter.astro';
 
-const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
-const appUrl = `https://app.${baseDomain}`;
+const getStartedUrl = 'https://www.simple-agent-manager.org/self-host/';
 
 const pillars = [
   {
@@ -80,7 +79,7 @@ const pillars = [
           without giving up sovereignty over their infrastructure or data.
         </p>
         <div class="ent-hero-actions animate-on-scroll">
-          <a href={appUrl} class="btn-ent btn-ent-primary">
+          <a href={getStartedUrl} class="btn-ent btn-ent-primary">
             Get Started
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </a>
