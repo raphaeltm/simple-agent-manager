@@ -17,13 +17,13 @@ The same slice also has a prohibited source-contract test, `apps/api/tests/unit/
 
 ## Implementation Checklist
 
-- [ ] Split `row-schemas.ts` into domain-focused parser modules under a `row-schemas/` directory while preserving the existing import path through a thin `row-schemas.ts` barrel.
-- [ ] Keep each new production source module under the repository file-size ceiling.
-- [ ] Remove the unjustified file-size exception from the production source.
-- [ ] Preserve all existing named exports from `./row-schemas` so consumers do not need widespread import churn.
-- [ ] Replace `project-data-session-validation.test.ts` source-contract assertions with behavioral tests that instantiate `ProjectData` and exercise WebSocket `message.send` validation.
-- [ ] Add or preserve behavioral coverage for `persistMessageBatch` rejecting stopped sessions without relying on source text.
-- [ ] Run focused API lint/typecheck/tests for the touched Durable Object modules.
+- [x] Split `row-schemas.ts` into domain-focused parser modules under a `row-schemas/` directory while preserving the existing import path through a thin `row-schemas.ts` barrel.
+- [x] Keep each new production source module under the repository file-size ceiling.
+- [x] Remove the unjustified file-size exception from the production source.
+- [x] Preserve all existing named exports from `./row-schemas` so consumers do not need widespread import churn.
+- [x] Replace `project-data-session-validation.test.ts` source-contract assertions with behavioral tests that instantiate `ProjectData` and exercise WebSocket `message.send` validation.
+- [x] Add or preserve behavioral coverage for `persistMessageBatch` rejecting stopped sessions without relying on source text.
+- [x] Run focused API lint/typecheck/tests for the touched Durable Object modules.
 - [ ] Run broader repository validation required by `/do` before PR.
 
 ## Acceptance Criteria
