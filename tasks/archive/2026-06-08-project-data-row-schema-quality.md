@@ -24,7 +24,19 @@ The same slice also has a prohibited source-contract test, `apps/api/tests/unit/
 - [x] Replace `project-data-session-validation.test.ts` source-contract assertions with behavioral tests that instantiate `ProjectData` and exercise WebSocket `message.send` validation.
 - [x] Add or preserve behavioral coverage for `persistMessageBatch` rejecting stopped sessions without relying on source text.
 - [x] Run focused API lint/typecheck/tests for the touched Durable Object modules.
-- [ ] Run broader repository validation required by `/do` before PR.
+- [x] Run broader repository validation required by `/do` before PR.
+
+## Verification
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/row-schemas.test.ts tests/unit/durable-objects/project-data-session-validation.test.ts`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+- `pnpm quality:source-contract-tests`
+- `find apps/api/src/durable-objects/project-data -type f -name '*.ts' -print0 | xargs -0 wc -l`
 
 ## Acceptance Criteria
 
