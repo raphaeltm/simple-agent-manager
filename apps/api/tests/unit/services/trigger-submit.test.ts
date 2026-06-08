@@ -83,6 +83,8 @@ vi.mock('drizzle-orm', () => ({
   sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
 }));
 
+import * as projectHelpers from '../../../src/routes/projects/_helpers';
+import * as taskRunnerDo from '../../../src/services/task-runner-do';
 import type { SubmitTriggeredTaskInput } from '../../../src/services/trigger-submit';
 
 const defaultInput: SubmitTriggeredTaskInput = {
@@ -234,5 +236,46 @@ describe('submitTriggeredTask', () => {
     await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
       'no cloud provider credentials'
     );
+  });
+
+  it('blocks before provisioning when trigger submit GitHub owner access is revoked', async () => {
+    mockSelectResult.push(
+      [{
+        id: 'project-1',
+        userId: 'user-1',
+        name: 'Test Project',
+        repository: 'user/repo',
+        installationId: 'install-1',
+        defaultBranch: 'main',
+        defaultVmSize: null,
+        defaultAgentType: null,
+        defaultWorkspaceProfile: null,
+        defaultProvider: null,
+        defaultLocation: null,
+        taskExecutionTimeoutMs: null,
+        maxWorkspacesPerNode: null,
+        nodeCpuThresholdPercent: null,
+        nodeMemoryThresholdPercent: null,
+        warmNodeTimeoutMs: null,
+      }],
+      [{ id: 'cred-1' }],
+      [{ githubId: '123', name: 'User', email: 'user@test.com' }],
+    );
+    vi.mocked(projectHelpers.requireRepositoryOwnerAccess)
+      .mockRejectedValueOnce(new Error('Repository access is no longer available'));
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
+      'Repository access is no longer available'
+    );
+
+    expect(projectHelpers.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ id: 'project-1', repository: 'user/repo' }),
+      'user-1',
+      'trigger-cron',
+    );
+    expect(taskRunnerDo.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 });

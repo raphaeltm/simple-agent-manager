@@ -52,6 +52,7 @@ vi.mock('../../src/db/schema', () => ({
 }));
 
 vi.mock('../../src/lib/logger', () => ({
+  createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
 

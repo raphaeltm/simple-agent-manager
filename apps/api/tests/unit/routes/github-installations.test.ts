@@ -533,6 +533,7 @@ describe('GitHub App installation sharing', () => {
       tokenPresent: false,
       tokenType: null,
       scopes: [],
+      flow: 'request',
     });
     expect(mocks.log.info).toHaveBeenCalledWith('github.installation_callback.token_status', {
       userId: 'user-1',
@@ -553,6 +554,7 @@ describe('GitHub App installation sharing', () => {
       userId: 'user-1',
       tokenPresent: false,
       error: 'BetterAuth unavailable',
+      flow: 'request',
     });
     expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.token_status', {
       userId: 'user-1',
@@ -1180,6 +1182,7 @@ describe('GitHub App installation sharing', () => {
       tokenPresent: true,
       tokenType: 'bearer',
       scopes: ['read:user', 'repo'],
+      flow: 'request',
     });
     expectTokenNotLogged('github-user-token');
   });

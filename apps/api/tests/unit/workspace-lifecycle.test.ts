@@ -250,6 +250,40 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
 });
 
 // ============================================================================
+// /restart and /rebuild Routes — GitHub Owner Access Preflight
+// ============================================================================
+
+describe('/restart and /rebuild routes — GitHub owner access preflight', () => {
+  const restartHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/restart'");
+  const restartHandlerEnd = routeSource.indexOf("lifecycleRoutes.post('/:id/rebuild'");
+  const restartHandler = routeSource.slice(restartHandlerStart, restartHandlerEnd);
+
+  const rebuildHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/rebuild'");
+  const rebuildHandlerEnd = routeSource.indexOf("lifecycleRoutes.get('/:id/events'");
+  const rebuildHandler = routeSource.slice(rebuildHandlerStart, rebuildHandlerEnd);
+
+  it('checks GitHub owner access before restart provisioning reaches the VM agent', () => {
+    const preflightIdx = restartHandler.indexOf('requireWorkspaceRestartGitHubAccess');
+    const nodeAgentIdx = restartHandler.indexOf('restartWorkspaceOnNode');
+
+    expect(preflightIdx).toBeGreaterThan(-1);
+    expect(nodeAgentIdx).toBeGreaterThan(-1);
+    expect(preflightIdx).toBeLessThan(nodeAgentIdx);
+    expect(restartHandler).toContain("'workspace-restart'");
+  });
+
+  it('checks GitHub owner access before rebuild provisioning reaches the VM agent', () => {
+    const preflightIdx = rebuildHandler.indexOf('requireWorkspaceRestartGitHubAccess');
+    const nodeAgentIdx = rebuildHandler.indexOf('rebuildWorkspaceOnNode');
+
+    expect(preflightIdx).toBeGreaterThan(-1);
+    expect(nodeAgentIdx).toBeGreaterThan(-1);
+    expect(preflightIdx).toBeLessThan(nodeAgentIdx);
+    expect(rebuildHandler).toContain("'workspace-rebuild'");
+  });
+});
+
+// ============================================================================
 // /provisioning-failed Route — Inline DO Notification (TDF-5)
 // ============================================================================
 

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   resolveCredentialSource: vi.fn(),
   resolveAgentProfile: vi.fn(),
   generateTaskTitle: vi.fn(),
+  requireRepositoryOwnerAccess: vi.fn(),
   startTaskRunnerDO: vi.fn(),
 }));
 
@@ -36,6 +37,10 @@ vi.mock('../../../src/services/task-title', () => ({
 
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: mocks.startTaskRunnerDO,
+}));
+
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: mocks.requireRepositoryOwnerAccess,
 }));
 
 vi.mock('../../../src/lib/ulid', () => ({
@@ -111,6 +116,7 @@ describe('SAM dispatch_task taskMode visibility', () => {
     mocks.resolveAgentProfile.mockResolvedValue(null);
     mocks.resolveCredentialSource.mockResolvedValue({ source: 'user', credential: { id: 'cred-1' } });
     mocks.generateTaskTitle.mockResolvedValue('Generated task title');
+    mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.createSession.mockResolvedValue('session-1');
     mocks.persistMessage.mockResolvedValue('message-1');
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
@@ -152,5 +158,26 @@ describe('SAM dispatch_task taskMode visibility', () => {
         taskMode: 'task',
       }),
     );
+  });
+
+  it('blocks before provisioning when SAM-session GitHub owner access is revoked', async () => {
+    mocks.requireRepositoryOwnerAccess.mockRejectedValueOnce(
+      new Error('Repository access is no longer available'),
+    );
+
+    const result = await dispatchTask(
+      { projectId: 'proj-1', description: 'Build the feature', taskMode: 'task' },
+      buildCtx(),
+    ) as { error?: string };
+
+    expect(result.error).toContain('Repository access is no longer available');
+    expect(mocks.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ id: 'proj-1', repository: 'owner/repo' }),
+      'user-1',
+      'sam-session-dispatch',
+    );
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 });
