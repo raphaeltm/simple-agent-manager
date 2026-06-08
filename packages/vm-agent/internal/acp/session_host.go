@@ -195,6 +195,7 @@ type SessionHost struct {
 	acpConn        *acpsdk.ClientSideConnection
 	agentType      string
 	sessionID      acpsdk.SessionId
+	configOptions  []acpsdk.SessionConfigOption
 	restartCount   int
 	permissionMode string
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
@@ -668,8 +669,8 @@ func phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// applySessionSettings calls SetSessionModel and SetSessionMode on the ACP
-// connection. Both calls are non-fatal.
+// applySessionSettings calls SetSessionConfigOption for the model and
+// SetSessionMode on the ACP connection. Both calls are non-fatal.
 func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) {
 	if settings == nil || h.acpConn == nil || h.sessionID == "" {
 		return
@@ -686,24 +687,9 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 		// which are exclusive to OpenCode + proxy paths. For non-opencode agents,
 		// OpencodeProvider remains empty and this branch is not taken.
 		if settings.OpencodeProvider == "platform" {
-			slog.Info("ACP: skipping SetSessionModel for platform proxy (model set in config)", "model", settings.Model)
+			slog.Info("ACP: skipping session model config option for platform proxy (model set in config)", "model", settings.Model)
 		} else {
-			slog.Info("ACP: setting session model", "model", settings.Model)
-			if _, err := h.acpConn.UnstableSetSessionModel(ctx, acpsdk.UnstableSetSessionModelRequest{
-				SessionId: h.sessionID,
-				ModelId:   acpsdk.UnstableModelId(settings.Model),
-			}); err != nil {
-				slog.Warn("ACP SetSessionModel failed (non-fatal)", "model", settings.Model, "error", err)
-				h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
-					"model": settings.Model,
-					"error": err.Error(),
-				})
-			} else {
-				slog.Info("ACP: session model set", "model", settings.Model)
-				h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
-					"model": settings.Model,
-				})
-			}
+			h.applySessionModelConfigOption(ctx, settings.Model)
 		}
 	}
 
@@ -731,6 +717,54 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 			}
 		}
 	}
+}
+
+func (h *SessionHost) applySessionModelConfigOption(ctx context.Context, model string) {
+	modelConfigID, ok := findModelConfigOptionID(h.configOptions)
+	if !ok {
+		slog.Warn("ACP session model config option unavailable (non-fatal)", "model", model)
+		h.reportLifecycle("warn", "ACP session model config option unavailable", map[string]interface{}{
+			"model": model,
+		})
+		return
+	}
+
+	slog.Info("ACP: setting session model config option", "model", model, "configId", string(modelConfigID))
+	resp, err := h.acpConn.SetSessionConfigOption(ctx, acpsdk.SetSessionConfigOptionRequest{
+		ValueId: &acpsdk.SetSessionConfigOptionValueId{
+			SessionId: h.sessionID,
+			ConfigId:  modelConfigID,
+			Value:     acpsdk.SessionConfigValueId(model),
+		},
+	})
+	if err != nil {
+		slog.Warn("ACP SetSessionConfigOption failed (non-fatal)", "model", model, "configId", string(modelConfigID), "error", err)
+		h.reportLifecycle("warn", "ACP session model config option failed", map[string]interface{}{
+			"model":    model,
+			"configId": string(modelConfigID),
+			"error":    err.Error(),
+		})
+		return
+	}
+
+	h.configOptions = resp.ConfigOptions
+	slog.Info("ACP: session model config option set", "model", model, "configId", string(modelConfigID))
+	h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
+		"model":    model,
+		"configId": string(modelConfigID),
+	})
+}
+
+func findModelConfigOptionID(options []acpsdk.SessionConfigOption) (acpsdk.SessionConfigId, bool) {
+	for _, option := range options {
+		if option.Select == nil || option.Select.Category == nil {
+			continue
+		}
+		if *option.Select.Category == acpsdk.SessionConfigOptionCategoryModel {
+			return option.Select.Id, true
+		}
+	}
+	return "", false
 }
 
 // ensureAgentInstalled checks if the ACP adapter binary exists and installs it

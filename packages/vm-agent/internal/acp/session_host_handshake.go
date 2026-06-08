@@ -111,7 +111,7 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 		"previousAcpSessionID": previousAcpSessionID,
 	})
 	h.reportEvent("info", "agent.load_session", "Restoring previous conversation", map[string]interface{}{"previousAcpSessionID": previousAcpSessionID})
-	_, loadErr := h.acpConn.LoadSession(loadCtx, acpsdk.LoadSessionRequest{
+	loadResp, loadErr := h.acpConn.LoadSession(loadCtx, acpsdk.LoadSessionRequest{
 		SessionId:  acpsdk.SessionId(previousAcpSessionID),
 		Cwd:        h.config.ContainerWorkDir,
 		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
@@ -134,6 +134,7 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	}
 
 	h.sessionID = acpsdk.SessionId(previousAcpSessionID)
+	h.configOptions = loadResp.ConfigOptions
 	slog.Info("ACP: LoadSession succeeded", "sessionID", previousAcpSessionID)
 	h.reportLifecycle("info", "ACP LoadSession succeeded", map[string]interface{}{
 		"agentType":    agentType,
@@ -164,6 +165,7 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 	}
 	cancel()
 	h.sessionID = sessResp.SessionId
+	h.configOptions = sessResp.ConfigOptions
 	slog.Info("ACP: NewSession succeeded", "sessionID", string(h.sessionID))
 	h.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{
 		"agentType":    agentType,

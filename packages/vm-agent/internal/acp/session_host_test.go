@@ -2601,6 +2601,58 @@ func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
 	host.Stop()
 }
 
+func TestFindModelConfigOptionID(t *testing.T) {
+	t.Parallel()
+
+	modelCategory := acpsdk.SessionConfigOptionCategoryModel
+	modeCategory := acpsdk.SessionConfigOptionCategoryMode
+
+	tests := []struct {
+		name    string
+		options []acpsdk.SessionConfigOption
+		want    acpsdk.SessionConfigId
+		wantOK  bool
+	}{
+		{
+			name: "finds model select option",
+			options: []acpsdk.SessionConfigOption{
+				{Select: &acpsdk.SessionConfigOptionSelect{Id: "mode", Category: &modeCategory}},
+				{Select: &acpsdk.SessionConfigOptionSelect{Id: "model", Category: &modelCategory}},
+			},
+			want:   "model",
+			wantOK: true,
+		},
+		{
+			name: "ignores uncategorized select option",
+			options: []acpsdk.SessionConfigOption{
+				{Select: &acpsdk.SessionConfigOptionSelect{Id: "model"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "ignores boolean model option",
+			options: []acpsdk.SessionConfigOption{
+				{Boolean: &acpsdk.SessionConfigOptionBoolean{Id: "model", Category: &modelCategory}},
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := findModelConfigOptionID(tt.options)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Fatalf("id = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestInjectAgentCredential_OpenCodeProviderEnvVarOverrides(t *testing.T) {
 	t.Parallel()
 
