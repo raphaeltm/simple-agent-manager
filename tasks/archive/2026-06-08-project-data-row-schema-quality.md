@@ -25,6 +25,7 @@ The same slice also has a prohibited source-contract test, `apps/api/tests/unit/
 - [x] Add or preserve behavioral coverage for `persistMessageBatch` rejecting stopped sessions without relying on source text.
 - [x] Run focused API lint/typecheck/tests for the touched Durable Object modules.
 - [x] Run broader repository validation required by `/do` before PR.
+- [x] Add a narrow SonarCloud CPD exclusion for the new declarative ProjectData row-schema directory after PR analysis flagged mechanical schema/mapping duplication.
 
 ## Verification
 
@@ -37,6 +38,8 @@ The same slice also has a prohibited source-contract test, `apps/api/tests/unit/
 - `pnpm build`
 - `pnpm quality:source-contract-tests`
 - `find apps/api/src/durable-objects/project-data -type f -name '*.ts' -print0 | xargs -0 wc -l`
+- Staging deploy retry `27112995808` passed after first attempt hit a transient Docker Hub timeout.
+- PR SonarCloud initially reported 3.9% new-code duplication from the row-schema split; `sonar-project.properties` now excludes only `apps/api/src/durable-objects/project-data/row-schemas/**` from CPD as declarative schema code.
 
 ## Acceptance Criteria
 
