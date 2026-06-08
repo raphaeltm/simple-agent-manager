@@ -1,5 +1,6 @@
 import type {
   AddProjectRepositoryRequest,
+  AvailableRepositoriesResponse,
   CreateProjectRequest,
   DashboardActiveTasksResponse,
   ListProjectsResponse,
@@ -76,7 +77,9 @@ export interface AccountMapResponse {
   }>;
 }
 
-export async function getAccountMap(options?: { activeOnly?: boolean }): Promise<AccountMapResponse> {
+export async function getAccountMap(options?: {
+  activeOnly?: boolean;
+}): Promise<AccountMapResponse> {
   const params = new URLSearchParams();
   if (options?.activeOnly === false) {
     params.set('activeOnly', 'false');
@@ -222,6 +225,14 @@ export async function discoverSubmoduleRepos(
 ): Promise<SubmoduleDiscoveryResponse> {
   return request<SubmoduleDiscoveryResponse>(
     `/api/projects/${projectId}/repository-access/discover`
+  );
+}
+
+export async function listAvailableRepositories(
+  projectId: string
+): Promise<AvailableRepositoriesResponse> {
+  return request<AvailableRepositoriesResponse>(
+    `/api/projects/${projectId}/repository-access/available`
   );
 }
 

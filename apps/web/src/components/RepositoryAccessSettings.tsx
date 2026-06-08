@@ -14,6 +14,7 @@ import {
   listProjectRepositories,
   removeProjectRepository,
 } from '../lib/api';
+import { RepositoryAccessCombobox } from './RepositoryAccessCombobox';
 
 const STATUS_META: Record<ProjectRepositoryStatus, { label: string; tone: string; title: string }> =
   {
@@ -70,7 +71,6 @@ export function RepositoryAccessSettings({ project }: { project: Project }) {
   const [loading, setLoading] = useState(true);
   const [primaryRepository, setPrimaryRepository] = useState(project.repository);
   const [repositories, setRepositories] = useState<ProjectRepository[]>([]);
-  const [repoInput, setRepoInput] = useState('');
   const [adding, setAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
@@ -110,7 +110,6 @@ export function RepositoryAccessSettings({ project }: { project: Project }) {
       const response = await addProjectRepository(projectId, { repository: trimmed });
       setPrimaryRepository(response.primaryRepository);
       setRepositories(response.repositories);
-      setRepoInput('');
       // Reflect the new membership in any visible discovery suggestions.
       setSuggestions((prev) =>
         prev.map((s) =>
@@ -206,33 +205,12 @@ export function RepositoryAccessSettings({ project }: { project: Project }) {
             <h3 className="sam-type-card-title m-0 text-fg-primary">Additional Repositories</h3>
 
             <div className="flex gap-2 items-end flex-wrap">
-              <div className="flex-1 min-w-0">
-                <label className="block text-xs text-fg-muted mb-0.5" htmlFor="repo-access-input">
-                  Repository (owner/repo)
-                </label>
-                <input
-                  id="repo-access-input"
-                  type="text"
-                  aria-label="Additional repository"
-                  placeholder="octocat/shared-lib"
-                  value={repoInput}
-                  onChange={(event) => setRepoInput(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') void handleAdd(repoInput);
-                  }}
-                  className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
-                />
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleAdd(repoInput)}
-                loading={adding}
-                disabled={adding || !repoInput.trim()}
-                style={{ minHeight: '36px' }}
-              >
-                Add
-              </Button>
+              <RepositoryAccessCombobox
+                projectId={projectId}
+                disabled={adding}
+                adding={adding}
+                onAdd={handleAdd}
+              />
             </div>
 
             {repositories.length === 0 ? (

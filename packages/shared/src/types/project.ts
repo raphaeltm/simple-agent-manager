@@ -96,7 +96,10 @@ export interface ProjectDetail extends Project {
 }
 
 export interface ProjectDetailResponse extends Project {
-  summary: Omit<ProjectSummary, 'id' | 'name' | 'repository' | 'githubRepoId' | 'defaultBranch' | 'status' | 'createdAt'>;
+  summary: Omit<
+    ProjectSummary,
+    'id' | 'name' | 'repository' | 'githubRepoId' | 'defaultBranch' | 'status' | 'createdAt'
+  >;
 }
 
 export interface CreateProjectRequest {
@@ -236,6 +239,23 @@ export interface SubmoduleSuggestion {
 
 export interface SubmoduleDiscoveryResponse {
   suggestions: SubmoduleSuggestion[];
+}
+
+/** A repository the user can grant to the project, drawn from the live
+ *  user∩app installation intersection. Excludes the primary repository and
+ *  repositories already added to the project's repository-access set. */
+export interface AvailableRepository {
+  /** Full repository name, e.g. "octocat/hello-world". */
+  repository: string;
+  githubRepoId: number;
+  githubRepoNodeId: string | null;
+  /** Whether the repository is private (for display). */
+  private: boolean;
+}
+
+export interface AvailableRepositoriesResponse {
+  /** Repositories selectable for this project, sorted by full name. */
+  repositories: AvailableRepository[];
 }
 
 /** Configurable defaults for Artifacts-backed projects (Constitution Principle XI). */

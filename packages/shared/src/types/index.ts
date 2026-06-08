@@ -83,6 +83,8 @@ export type { LocationInfo, ProviderCatalog, ProviderCatalogResponse, SizeInfo }
 // Project
 export type {
   AddProjectRepositoryRequest,
+  AvailableRepositoriesResponse,
+  AvailableRepository,
   CreateProjectRequest,
   ListProjectsResponse,
   Project,

@@ -1,4 +1,6 @@
 import type {
+  AvailableRepositoriesResponse,
+  AvailableRepository,
   ProjectRepository,
   ProjectRepositoryAccessResponse,
   ProjectRepositoryStatus,
@@ -258,6 +260,59 @@ repositoryAccessRoutes.delete('/:id/repository-access/:repoRowId', async (c) => 
     primaryRepository: project.repository,
     repositories: rows.map((row) => toRepositoryResponse(row, 'active')),
   };
+  return c.json(response);
+});
+
+/** GET /:id/repository-access/available — list installation repos selectable for this project.
+ *  Returns the live user∩app intersection minus the primary repository and any
+ *  repositories already added to the project's repository-access set. */
+repositoryAccessRoutes.get('/:id/repository-access/available', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const project = await requireOwnedProject(db, projectId, userId);
+
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    throw errors.badRequest('Repository access is only supported for GitHub-backed projects');
+  }
+
+  const installation = await requireOwnedInstallation(db, project.installationId, userId);
+  const externalInstallationId = getExternalInstallationId(installation);
+  const accessToken = await requireGitHubUserAccessToken(c, userId);
+  const repositories: GitHubRepositoryAccess[] = await getUserInstallationRepositories(
+    accessToken,
+    externalInstallationId,
+    {
+      flow: 'project-access',
+      userId,
+      installationId: externalInstallationId,
+      repository: project.repository,
+    }
+  );
+
+  const addedRows = await db
+    .select({ repository: schema.projectGithubRepositories.repository })
+    .from(schema.projectGithubRepositories)
+    .where(
+      and(
+        eq(schema.projectGithubRepositories.projectId, project.id),
+        eq(schema.projectGithubRepositories.userId, userId)
+      )
+    );
+  const excluded = new Set(addedRows.map((r) => r.repository.toLowerCase()));
+  excluded.add(normalizeRepository(project.repository).toLowerCase());
+
+  const available: AvailableRepository[] = repositories
+    .filter((repo) => !excluded.has(repo.fullName.toLowerCase()))
+    .map((repo) => ({
+      repository: repo.fullName,
+      githubRepoId: repo.id,
+      githubRepoNodeId: repo.nodeId,
+      private: repo.private,
+    }))
+    .sort((a, b) => a.repository.localeCompare(b.repository));
+
+  const response: AvailableRepositoriesResponse = { repositories: available };
   return c.json(response);
 });
 

@@ -1,4 +1,11 @@
-export type { AdminErrorsFilter, AdminLogQueryParams, AIProxyConfigResponse, BillingMode, CostByModel, CostSummaryResponse } from './admin';
+export type {
+  AdminErrorsFilter,
+  AdminLogQueryParams,
+  AIProxyConfigResponse,
+  BillingMode,
+  CostByModel,
+  CostSummaryResponse,
+} from './admin';
 export type {
   AiUsageByDay,
   AiUsageByModel,
@@ -98,8 +105,19 @@ export {
 export { getCurrentUser } from './auth';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
-export type { CredentialValidationResponse, GcpProject, GcpSetupRequest, GcpSetupResponse } from './credentials';
-export { createCredential, deleteCredential, listCredentials, validateAgentCredential, validateCredential } from './credentials';
+export type {
+  CredentialValidationResponse,
+  GcpProject,
+  GcpSetupRequest,
+  GcpSetupResponse,
+} from './credentials';
+export {
+  createCredential,
+  deleteCredential,
+  listCredentials,
+  validateAgentCredential,
+  validateCredential,
+} from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
 export type { ProjectDeploymentGcpResponse } from './deployment';
 export {
@@ -138,7 +156,12 @@ export {
   removeWorktree,
   uploadSessionFiles,
 } from './files';
-export { getGitHubInstallUrl, listBranches, listGitHubInstallations, listRepositories } from './github';
+export {
+  getGitHubInstallUrl,
+  listBranches,
+  listGitHubInstallations,
+  listRepositories,
+} from './github';
 export {
   addObservation,
   createKnowledgeEntity,
@@ -201,7 +224,11 @@ export {
 } from './notifications';
 export type { ListPoliciesResponse, ProjectPolicy } from './policies';
 export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
-export type { AccountMapResponse, DevcontainerConfigEntry, DevcontainerConfigsResponse } from './projects';
+export type {
+  AccountMapResponse,
+  DevcontainerConfigEntry,
+  DevcontainerConfigsResponse,
+} from './projects';
 export {
   addProjectRepository,
   createProject,
@@ -213,6 +240,7 @@ export {
   getProject,
   getProjectRuntimeConfig,
   listActiveTasks,
+  listAvailableRepositories,
   listProjectDevcontainerConfigs,
   listProjectRepositories,
   listProjects,
@@ -288,7 +316,14 @@ export {
   testTrigger,
   updateTrigger,
 } from './triggers';
-export { fetchComputeUsage, fetchUserAiBudget, fetchUserAiUsage, fetchUserQuotaStatus, resetUserAiBudget, updateUserAiBudget } from './usage';
+export {
+  fetchComputeUsage,
+  fetchUserAiBudget,
+  fetchUserAiUsage,
+  fetchUserQuotaStatus,
+  resetUserAiBudget,
+  updateUserAiBudget,
+} from './usage';
 export {
   createAgentSession,
   createWorkspace,
