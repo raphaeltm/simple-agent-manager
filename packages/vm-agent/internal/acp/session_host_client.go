@@ -40,6 +40,16 @@ func (c *sessionHostClient) signalProcessed() {
 func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.SessionNotification) error {
 	defer c.signalProcessed()
 
+	// Suppress transcript replay emitted during an ACP LoadSession. LoadSession
+	// (triggered by cancel/crash restart) replays the whole conversation as
+	// session/update notifications; broadcasting or re-persisting them causes the
+	// browser to visibly replay the conversation and the control plane to store
+	// duplicate messages with fresh UUIDs. The early return is placed after the
+	// signalProcessed defer so orderedPipe's serialization ordering is preserved.
+	if c.host.replaySuppressed.Load() {
+		return nil
+	}
+
 	data, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "session/update",
