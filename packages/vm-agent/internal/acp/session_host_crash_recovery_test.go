@@ -180,6 +180,11 @@ func TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess(t *testing.
 	_, completed, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
 	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
 	newProc, _, _ := newFakeAgentProcess(time.Now(), false)
+	notify := host.process.RecoveryNotify()
+	if notify == nil {
+		t.Fatal("recovery notify was not armed")
+	}
+	notify(crashRecoveredStopReason, nil)
 
 	host.mu.Lock()
 	host.process = newProc
@@ -196,9 +201,13 @@ func TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess(t *testing.
 	}
 	select {
 	case reason := <-completed:
-		t.Fatalf("unexpected completion after resolved recovery: %q", reason)
+		if reason != crashRecoveredStopReason {
+			t.Fatalf("stopReason = %q, want recovered", reason)
+		}
 	default:
+		t.Fatal("missing monitor-success completion before watchdog fired")
 	}
+	assertNoSecondCompletion(t, completed)
 }
 
 func TestSessionHost_AutoSuspendDefersDuringStartingRecovery(t *testing.T) {
@@ -259,6 +268,57 @@ func TestSessionHost_RestartCountDecayWindow(t *testing.T) {
 		t.Fatalf("restartCount = %d, want 0 after decay window", host.restartCount)
 	}
 	host.mu.Unlock()
+}
+
+func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T) {
+	host := newRecoveryTestHost(t, time.Second)
+	defer host.Stop()
+
+	_, completed, errs := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
+	agentType, _, _, notify, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	if !ok {
+		t.Fatal("beginCrashRecovery failed")
+	}
+	if agentType != "claude-code" {
+		t.Fatalf("agentType = %q, want claude-code", agentType)
+	}
+	host.mu.Lock()
+	snapshot := host.crashRecoverySnapshotLocked()
+	host.mu.Unlock()
+
+	host.finishCrashRecoveryFailure(snapshot, "rapid exit", errors.New("rapid exit"), notify)
+	host.finishCrashRecoveryFailure(snapshot, "max restarts", errors.New("max restarts"), notify)
+	host.finishCrashRecoveryFailure(snapshot, "restart failed", errors.New("restart failed"), notify)
+	notify(crashRecoveredStopReason, nil)
+	host.finishCrashRecoveryFailure(snapshot, "watchdog", errors.New("watchdog"), notify)
+
+	select {
+	case reason := <-completed:
+		if reason != "error" {
+			t.Fatalf("first recovery stopReason = %q, want error", reason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing recovery completion")
+	}
+	select {
+	case err := <-errs:
+		if err == nil || err.Error() != "rapid exit" {
+			t.Fatalf("first recovery err = %v, want rapid exit", err)
+		}
+	default:
+		t.Fatal("missing recovery error")
+	}
+	assertNoSecondCompletion(t, completed)
+
+	host.notifyPromptComplete("end_turn", nil)
+	select {
+	case reason := <-completed:
+		if reason != "end_turn" {
+			t.Fatalf("later normal stopReason = %q, want end_turn", reason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("normal prompt completion was swallowed by recovery once")
+	}
 }
 
 func newRecoveryTestHost(t *testing.T, watchdog time.Duration) *SessionHost {
