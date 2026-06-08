@@ -2096,8 +2096,8 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	// initial GH_TOKEN has expired. The wrapper fetches a fresh token from the
 	// git credential helper (which calls back to the VM agent for a new token).
 	if err := installGhWrapper(ctx, cfg, containerID); err != nil {
-		// Non-fatal: gh still works with the static GH_TOKEN from /etc/sam/env,
-		// just won't auto-refresh for long sessions.
+		// Non-fatal: git clone/fetch still use the credential helper. Direct gh
+		// invocations may lack GH_TOKEN until shell startup fallback runs.
 		slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
 	}
 
