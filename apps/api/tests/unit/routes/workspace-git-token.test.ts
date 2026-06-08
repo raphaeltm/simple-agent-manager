@@ -84,7 +84,11 @@ describe('workspace git-token GitHub scoping', () => {
       right?: unknown;
       clauses?: unknown[];
     };
-    if (clause.op === 'eq' && columnName(clause.left) === column && clause.right === expectedValue) {
+    if (
+      clause.op === 'eq' &&
+      columnName(clause.left) === column &&
+      clause.right === expectedValue
+    ) {
       return true;
     }
     return Array.isArray(clause.clauses)
@@ -106,6 +110,33 @@ describe('workspace git-token GitHub scoping', () => {
         userId: 'user-1',
       },
     ];
+  }
+
+  function workspaceRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'ws-1',
+      installationId: 'inst-row-111',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      ...overrides,
+    };
+  }
+
+  function githubProjectRow(overrides: Record<string, unknown> = {}) {
+    return {
+      repoProvider: 'github',
+      artifactsRepoId: null,
+      githubRepoId: 42,
+      repository: 'raph/sam',
+      ...overrides,
+    };
+  }
+
+  function queueWorkspaceProjectLookup(
+    projectOverrides: Record<string, unknown> = {},
+    installationLookup: (whereClause: unknown) => unknown[] = installationRowsOnlyWhenOwnerScoped
+  ) {
+    limitResponses.push([workspaceRow()], [githubProjectRow(projectOverrides)], installationLookup);
   }
 
   beforeEach(() => {
@@ -137,7 +168,9 @@ describe('workspace git-token GitHub scoping', () => {
         }),
         limit: vi.fn(() => {
           const response = limitResponses.shift();
-          return Promise.resolve(typeof response === 'function' ? response(whereClause) : (response ?? []));
+          return Promise.resolve(
+            typeof response === 'function' ? response(whereClause) : (response ?? [])
+          );
         }),
       };
       return builder;
@@ -158,11 +191,7 @@ describe('workspace git-token GitHub scoping', () => {
   });
 
   it('falls back to repository-name scoping for legacy projects without a repo id', async () => {
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -190,8 +219,8 @@ describe('workspace git-token GitHub scoping', () => {
 
   it('rejects GitHub workspaces with neither a repo id nor a repository name', async () => {
     limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: null }]
+      [workspaceRow()],
+      [githubProjectRow({ githubRepoId: null, repository: null })]
     );
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
@@ -205,11 +234,7 @@ describe('workspace git-token GitHub scoping', () => {
   });
 
   it('mints GitHub installation tokens scoped to the verified repository id', async () => {
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup();
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -225,11 +250,7 @@ describe('workspace git-token GitHub scoping', () => {
 
   it('denies and does not mint when the workspace owner has no GitHub OAuth token', async () => {
     mocks.getGitHubUserAccessTokenForOwner.mockResolvedValue(null);
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup();
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -250,11 +271,7 @@ describe('workspace git-token GitHub scoping', () => {
         error: 'FORBIDDEN',
       })
     );
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup();
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -265,11 +282,7 @@ describe('workspace git-token GitHub scoping', () => {
 
   it('denies and does not mint when user-context repo id drifts from the project binding', async () => {
     mocks.assertRepositoryAccess.mockResolvedValue({ id: 99, fullName: 'raph/sam-renamed' });
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup();
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -289,11 +302,7 @@ describe('workspace git-token GitHub scoping', () => {
       githubRepoNodeId: 'R_42',
       fullName: 'raph/sam',
     });
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -317,11 +326,7 @@ describe('workspace git-token GitHub scoping', () => {
       githubRepoNodeId: 'R_77',
       fullName: 'raph/sam',
     });
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -347,11 +352,7 @@ describe('workspace git-token GitHub scoping', () => {
         return null;
       }
     );
-    limitResponses.push(
-      [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-      [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: null, repository: 'raph/sam' }],
-      installationRowsOnlyWhenOwnerScoped
-    );
+    queueWorkspaceProjectLookup({ githubRepoId: null });
 
     const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
@@ -368,21 +369,17 @@ describe('workspace git-token GitHub scoping', () => {
   it('rejects a workspace installation row that is not owned by the workspace user', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      limitResponses.push(
-        [{ id: 'ws-1', installationId: 'inst-row-111', projectId: 'proj-1', userId: 'user-1' }],
-        [{ repoProvider: 'github', artifactsRepoId: null, githubRepoId: 42, repository: 'raph/sam' }],
-        (whereClause) => {
-          expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
-          expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
-          return [
-            {
-              installationId: 'user-2:120081765',
-              externalInstallationId: '120081765',
-              userId: 'user-2',
-            },
-          ];
-        }
-      );
+      queueWorkspaceProjectLookup({}, (whereClause) => {
+        expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
+        expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+        return [
+          {
+            installationId: 'user-2:120081765',
+            externalInstallationId: '120081765',
+            userId: 'user-2',
+          },
+        ];
+      });
 
       const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 

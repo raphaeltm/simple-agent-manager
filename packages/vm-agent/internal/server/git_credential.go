@@ -115,7 +115,7 @@ func (s *Server) fetchGitTokenResponseForWorkspace(ctx context.Context, workspac
 		return nil, fmt.Errorf("git-token: read response body: %w", err)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("git-token endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("git-token endpoint returned HTTP %d (response body %d bytes)", res.StatusCode, len(body))
 	}
 
 	var payload gitTokenResponse
@@ -152,7 +152,16 @@ func isAuthorizedGitCredentialRequest(s *Server, r *http.Request, workspaceID st
 	if bearerTokenFromHeader(r.Header.Get("Authorization")) != "" {
 		return s.isValidCallbackAuth(r, workspaceID)
 	}
-	return isLocalGitCredentialExchange(r)
+	return isLocalGitCredentialExchange(r) && isPrimaryWorkspaceGitCredentialRequest(s, workspaceID)
+}
+
+func isPrimaryWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
+	requestedWorkspaceID := strings.TrimSpace(workspaceID)
+	primaryWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
+	if requestedWorkspaceID == "" {
+		requestedWorkspaceID = primaryWorkspaceID
+	}
+	return primaryWorkspaceID != "" && requestedWorkspaceID == primaryWorkspaceID
 }
 
 func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,6 +114,76 @@ func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.
 	}
 	if got := rec.Body.String(); !strings.Contains(got, "password=ghs_test_token") {
 		t.Fatalf("expected credential response, got:\n%s", got)
+	}
+}
+
+func TestHandleGitCredentialRejectsLocalExchangeForNonPrimaryWorkspace(t *testing.T) {
+	t.Parallel()
+
+	var controlPlaneCalled atomic.Bool
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		controlPlaneCalled.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer controlPlane.Close()
+
+	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	req.RemoteAddr = "172.17.0.2:52144"
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if controlPlaneCalled.Load() {
+		t.Fatal("control plane should not be called for bearerless local exchange targeting another workspace")
+	}
+}
+
+func TestHandleGitCredentialAllowsBearerForNonPrimaryWorkspace(t *testing.T) {
+	t.Parallel()
+
+	var requestedAuth string
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"ghs_secondary_token","expiresAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer controlPlane.Close()
+
+	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	req.RemoteAddr = "172.17.0.2:52144"
+	req.Header.Set("Authorization", "Bearer secondary-callback-token")
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if requestedAuth != "Bearer secondary-callback-token" {
+		t.Fatalf("expected control plane to receive secondary callback token, got %q", requestedAuth)
+	}
+}
+
+func newTwoWorkspaceGitCredentialServer(controlPlaneURL string) *Server {
+	return &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlaneURL,
+			WorkspaceID:     "ws-primary",
+			CallbackToken:   "primary-callback-token",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-secondary": {
+				ID:            "ws-secondary",
+				CallbackToken: "secondary-callback-token",
+			},
+		},
 	}
 }
 

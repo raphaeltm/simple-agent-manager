@@ -223,16 +223,12 @@ export async function assertRepositoryAccess(
   userId: string,
   flow: 'project-access' | 'branches' = 'project-access'
 ): Promise<GitHubRepositoryAccess> {
-  const repositories = await getUserInstallationRepositories(
-    accessToken,
-    installationExternalId,
-    {
-      flow,
-      userId,
-      installationId: installationExternalId,
-      repository,
-    }
-  );
+  const repositories = await getUserInstallationRepositories(accessToken, installationExternalId, {
+    flow,
+    userId,
+    installationId: installationExternalId,
+    repository,
+  });
   const normalizedRepository = repository.toLowerCase();
   const matchedRepo = repositories.find(
     (repo) => repo.fullName.toLowerCase() === normalizedRepository
@@ -285,8 +281,11 @@ export async function requireRepositoryUserAccess(
 ): Promise<void> {
   // Artifacts-backed (non-github) projects have no GitHub installation to
   // intersect against — they are out of scope for this gate.
-  if (project.repoProvider && project.repoProvider !== 'github') {
+  if (project.repoProvider === 'artifacts') {
     return;
+  }
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    throw errors.forbidden('Unsupported repository provider');
   }
 
   const installation = await requireOwnedInstallation(db, project.installationId, userId);
@@ -299,9 +298,7 @@ export async function requireRepositoryUserAccess(
     userId
   );
   if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
-    throw errors.forbidden(
-      'GitHub repository access has changed; repository ID no longer matches'
-    );
+    throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');
   }
 }
 
@@ -312,8 +309,11 @@ export async function requireRepositoryOwnerAccess(
   userId: string,
   flow = 'owner-preflight'
 ): Promise<void> {
-  if (project.repoProvider && project.repoProvider !== 'github') {
+  if (project.repoProvider === 'artifacts') {
     return;
+  }
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    throw errors.forbidden('Unsupported repository provider');
   }
 
   const installation = await requireOwnedInstallation(db, project.installationId, userId);
@@ -329,8 +329,6 @@ export async function requireRepositoryOwnerAccess(
     userId
   );
   if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
-    throw errors.forbidden(
-      'GitHub repository access has changed; repository ID no longer matches'
-    );
+    throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');
   }
 }
