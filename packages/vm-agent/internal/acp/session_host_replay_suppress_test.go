@@ -14,6 +14,43 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 )
 
+// newReplaySuppressTestHost builds a SessionHost wired to the given reporter with
+// the buffer/viewer sizing shared by every test in this file.
+func newReplaySuppressTestHost(reporter *mockMessageReporter) *SessionHost {
+	return NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+}
+
+// agentMessageNotification builds a session/update notification carrying a single
+// agent message-chunk with the given text.
+func agentMessageNotification(sessionID acpsdk.SessionId, text string) acpsdk.SessionNotification {
+	return acpsdk.SessionNotification{
+		SessionId: sessionID,
+		Update: acpsdk.SessionUpdate{
+			AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
+				Content: acpsdk.ContentBlock{
+					Text: &acpsdk.ContentBlockText{Text: text},
+				},
+			},
+		},
+	}
+}
+
+// bufferedMessageCount returns the number of messages held in the late-join
+// broadcast buffer under the appropriate lock.
+func bufferedMessageCount(host *SessionHost) int {
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+	return len(host.messageBuf)
+}
+
 // TestSessionUpdate_ReplaySuppressedGate verifies the single choke point in
 // sessionHostClient.SessionUpdate: when replaySuppressed is set, a session/update
 // notification is neither buffered for late-join viewers (broadcastMessage ->
@@ -38,39 +75,19 @@ func TestSessionUpdate_ReplaySuppressedGate(t *testing.T) {
 			t.Parallel()
 
 			reporter := &mockMessageReporter{}
-			host := NewSessionHost(SessionHostConfig{
-				GatewayConfig: GatewayConfig{
-					SessionID:       "test-session",
-					WorkspaceID:     "test-workspace",
-					MessageReporter: reporter,
-				},
-				MessageBufferSize: 100,
-				ViewerSendBuffer:  32,
-			})
+			host := newReplaySuppressTestHost(reporter)
 			defer host.Stop()
 
 			host.replaySuppressed.Store(tc.suppressed)
 
 			client := &sessionHostClient{host: host}
-			notif := acpsdk.SessionNotification{
-				SessionId: "acp-sess",
-				Update: acpsdk.SessionUpdate{
-					AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
-						Content: acpsdk.ContentBlock{
-							Text: &acpsdk.ContentBlockText{Text: "assistant response"},
-						},
-					},
-				},
-			}
+			notif := agentMessageNotification("acp-sess", "assistant response")
 
 			if err := client.SessionUpdate(context.Background(), notif); err != nil {
 				t.Fatalf("SessionUpdate: %v", err)
 			}
 
-			host.bufMu.RLock()
-			bufLen := len(host.messageBuf)
-			host.bufMu.RUnlock()
-			if bufLen != tc.wantBuffered {
+			if bufLen := bufferedMessageCount(host); bufLen != tc.wantBuffered {
 				t.Fatalf("buffered messages = %d, want %d", bufLen, tc.wantBuffered)
 			}
 
@@ -146,16 +163,7 @@ func (a *loadReplayFakeAgent) Serve() {
 }
 
 func (a *loadReplayFakeAgent) writeReplayNotification(seq int) {
-	notif := acpsdk.SessionNotification{
-		SessionId: a.sessionID,
-		Update: acpsdk.SessionUpdate{
-			AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
-				Content: acpsdk.ContentBlock{
-					Text: &acpsdk.ContentBlockText{Text: fmt.Sprintf("replayed-%d", seq)},
-				},
-			},
-		},
-	}
+	notif := agentMessageNotification(a.sessionID, fmt.Sprintf("replayed-%d", seq))
 	params, err := json.Marshal(notif)
 	if err != nil {
 		a.t.Errorf("marshal replay notification: %v", err)
@@ -199,15 +207,7 @@ func TestTryLoadPreviousACPSession_SuppressesReplayThenResumes(t *testing.T) {
 	const prevSessionID = "acp-prev-session"
 
 	reporter := &mockMessageReporter{}
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			SessionID:       "test-session",
-			WorkspaceID:     "test-workspace",
-			MessageReporter: reporter,
-		},
-		MessageBufferSize: 100,
-		ViewerSendBuffer:  32,
-	})
+	host := newReplaySuppressTestHost(reporter)
 	t.Cleanup(host.Stop)
 
 	clientToAgentReader, clientToAgentWriter := io.Pipe()
@@ -257,10 +257,7 @@ func TestTryLoadPreviousACPSession_SuppressesReplayThenResumes(t *testing.T) {
 	// The notification barrier guarantees every replayed update emitted before
 	// the load response was processed while LoadSession blocked (replaySuppressed
 	// still true). None should have leaked into the viewer buffer or persistence.
-	host.bufMu.RLock()
-	bufLen := len(host.messageBuf)
-	host.bufMu.RUnlock()
-	if bufLen != 0 {
+	if bufLen := bufferedMessageCount(host); bufLen != 0 {
 		t.Fatalf("replayed updates leaked into broadcast buffer: got %d buffered, want 0", bufLen)
 	}
 	if got := len(reporter.Messages()); got != 0 {
@@ -274,24 +271,12 @@ func TestTryLoadPreviousACPSession_SuppressesReplayThenResumes(t *testing.T) {
 
 	// A post-load session/update (genuine agent output after resume) must flow
 	// through both the broadcast buffer and the message reporter.
-	postLoad := acpsdk.SessionNotification{
-		SessionId: acpsdk.SessionId(prevSessionID),
-		Update: acpsdk.SessionUpdate{
-			AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
-				Content: acpsdk.ContentBlock{
-					Text: &acpsdk.ContentBlockText{Text: "post-load reply"},
-				},
-			},
-		},
-	}
+	postLoad := agentMessageNotification(acpsdk.SessionId(prevSessionID), "post-load reply")
 	if err := (&sessionHostClient{host: host}).SessionUpdate(context.Background(), postLoad); err != nil {
 		t.Fatalf("post-load SessionUpdate: %v", err)
 	}
 
-	host.bufMu.RLock()
-	bufLen = len(host.messageBuf)
-	host.bufMu.RUnlock()
-	if bufLen != 1 {
+	if bufLen := bufferedMessageCount(host); bufLen != 1 {
 		t.Fatalf("post-load update not broadcast: got %d buffered, want 1", bufLen)
 	}
 	msgs := reporter.Messages()
