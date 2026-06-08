@@ -275,7 +275,7 @@ export async function retrySubtask(
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
-      agentProfileHint: null,
+      agentProfileHint: resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: original.projectTaskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: original.projectMaxWorkspacesPerNode ?? null,

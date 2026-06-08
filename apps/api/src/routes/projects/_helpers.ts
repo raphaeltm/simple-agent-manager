@@ -11,7 +11,10 @@ import {
   type GitHubRepositoryAccess,
 } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
-import { getGitHubUserAccessToken } from '../../services/github-user-access-token';
+import {
+  getGitHubUserAccessToken,
+  getGitHubUserAccessTokenForOwner,
+} from '../../services/github-user-access-token';
 
 export function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -289,6 +292,36 @@ export async function requireRepositoryUserAccess(
   const installation = await requireOwnedInstallation(db, project.installationId, userId);
   const externalInstallationId = getExternalInstallationId(installation);
   const accessToken = await requireGitHubUserAccessToken(c, userId);
+  const verifiedRepo = await assertRepositoryAccess(
+    accessToken,
+    externalInstallationId,
+    project.repository,
+    userId
+  );
+  if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
+    throw errors.forbidden(
+      'GitHub repository access has changed; repository ID no longer matches'
+    );
+  }
+}
+
+export async function requireRepositoryOwnerAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  project: schema.Project,
+  userId: string,
+  flow = 'owner-preflight'
+): Promise<void> {
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    return;
+  }
+
+  const installation = await requireOwnedInstallation(db, project.installationId, userId);
+  const externalInstallationId = getExternalInstallationId(installation);
+  const accessToken = await getGitHubUserAccessTokenForOwner(env, userId, flow);
+  if (!accessToken) {
+    throw errors.forbidden('GitHub user token unavailable');
+  }
   const verifiedRepo = await assertRepositoryAccess(
     accessToken,
     externalInstallationId,

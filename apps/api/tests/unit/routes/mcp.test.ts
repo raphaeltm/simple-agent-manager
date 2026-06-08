@@ -13,6 +13,10 @@ vi.mock('../../../src/services/agent-profiles', () => ({
   updateProfile: vi.fn(),
 }));
 
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),

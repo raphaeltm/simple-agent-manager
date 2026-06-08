@@ -38,12 +38,14 @@ import {
 } from '../../services/github-cli-policy';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backfill';
+import { getGitHubUserAccessTokenForOwner } from '../../services/github-user-access-token';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
+import { assertRepositoryAccess } from '../projects/_helpers';
 import { getWorkspaceRuntimeAssets, safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
@@ -54,6 +56,55 @@ const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set([
 ]);
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
+
+async function verifyWorkspaceGitHubOwnerAccess(input: {
+  env: Env;
+  workspaceId: string;
+  projectId: string | null;
+  userId: string;
+  repository: string;
+  externalInstallationId: string;
+  githubRepoId: number | null;
+}): Promise<number> {
+  const accessToken = await getGitHubUserAccessTokenForOwner(
+    input.env,
+    input.userId,
+    'workspace-git-token'
+  );
+  if (!accessToken) {
+    log.warn('workspace_git_token_user_access_missing', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('GitHub user token unavailable');
+  }
+
+  const verifiedRepo = await assertRepositoryAccess(
+    accessToken,
+    input.externalInstallationId,
+    input.repository,
+    input.userId,
+    'project-access'
+  );
+
+  if (input.githubRepoId !== null && verifiedRepo.id !== input.githubRepoId) {
+    log.warn('workspace_git_token_repo_id_drift', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      expectedRepoId: input.githubRepoId,
+      verifiedRepoId: verifiedRepo.id,
+      action: 'rejected',
+    });
+    throw errors.forbidden(
+      'GitHub repository access has changed; repository ID no longer matches'
+    );
+  }
+
+  return verifiedRepo.id;
+}
 
 runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
   const workspaceId = c.req.param('id');
@@ -763,6 +814,20 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     throw errors.notFound('GitHub installation');
   }
 
+  if (!repositoryName) {
+    throw errors.forbidden('GitHub repository is not verified for this workspace');
+  }
+
+  const verifiedRepoId = await verifyWorkspaceGitHubOwnerAccess({
+    env: c.env,
+    workspaceId: workspace.id,
+    projectId: workspace.projectId,
+    userId: workspace.userId,
+    repository: repositoryName,
+    externalInstallationId: getExternalInstallationId(installation),
+    githubRepoId,
+  });
+
   // Lazy self-heal: legacy projects created before the numeric repo id was
   // captured have github_repo_id = null. Fetch + persist it now, BEFORE policy
   // resolution, so custom GitHub CLI policies (which require the numeric id) work
@@ -778,6 +843,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       githubRepoId = backfill.githubRepoId;
     }
   }
+  githubRepoId ??= verifiedRepoId;
 
   let tokenOptions = null;
   try {

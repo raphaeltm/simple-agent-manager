@@ -325,6 +325,7 @@ export async function handleRetrySubtask(
     outputBranch: branchName,
     requestedVmSize: resolvedVmSize,
     requestedVmSizeSource: vmSizeSource,
+    agentProfileHint: childTask.agentProfileHint,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     createdBy: tokenData.userId,
     createdAt: now,
@@ -403,6 +404,7 @@ export async function handleRetrySubtask(
       cloudProvider: resolvedProvider,
       model: null,
       permissionMode: null,
+      agentProfileHint: childTask.agentProfileHint ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
         maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

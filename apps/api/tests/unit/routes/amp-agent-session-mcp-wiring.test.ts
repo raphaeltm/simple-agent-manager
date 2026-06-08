@@ -43,6 +43,10 @@ vi.mock('../../../src/services/node-agent', () => ({
   suspendAgentSessionOnNode: vi.fn(),
 }));
 
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 let testWorkspaceRow: Record<string, unknown> = {
   id: 'workspace-123',
   userId: 'user-123',
@@ -74,6 +78,15 @@ const agentSessionRow = {
   errorMessage: null,
 };
 
+const projectRow = {
+  id: 'project-123',
+  userId: 'user-123',
+  repository: 'octo/repo',
+  installationId: 'install-123',
+  repoProvider: 'github',
+  githubRepoId: 123,
+};
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => {
     let selectCount = 0;
@@ -85,7 +98,12 @@ vi.mock('drizzle-orm/d1', () => ({
             where: () => {
               if (selectCount === 1) return { limit: () => Promise.resolve([testWorkspaceRow]) };
               if (selectCount === 2) return { limit: () => Promise.resolve([nodeRow]) };
-              if (selectCount === 3) return Promise.resolve([]);
+              if (selectCount === 3 && testWorkspaceRow.projectId) {
+                return { limit: () => Promise.resolve([projectRow]) };
+              }
+              if (selectCount === 3 || (selectCount === 4 && testWorkspaceRow.projectId)) {
+                return Promise.resolve([]);
+              }
               return { limit: () => Promise.resolve([agentSessionRow]) };
             },
           }),

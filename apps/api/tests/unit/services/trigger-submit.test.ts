@@ -43,6 +43,10 @@ vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 let ulidCounter = 0;
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => `ULID${String(++ulidCounter).padStart(6, '0')}`,

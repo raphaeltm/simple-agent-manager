@@ -19,15 +19,15 @@ This is security-sensitive credential work. The PR must be draft or clearly mark
 
 ## Implementation Checklist
 
-- [ ] Add a callback-safe final GitHub access verifier for `/git-token` that fails closed when the owner OAuth token is missing/revoked, repo is not visible, installation is inaccessible, or repo ID drift is detected.
-- [ ] Ensure `/git-token` calls the verifier before `backfillProjectGithubRepoId()`, `resolveWorkspaceGitHubTokenOptions()`, or `getInstallationToken()`.
-- [ ] Preserve Artifacts/non-GitHub behavior explicitly.
-- [ ] Add safe structured logs for denied token mint attempts without raw tokens.
-- [ ] Stop embedding durable workspace callback token literals in generated git credential helper scripts.
-- [ ] Reduce static `GH_TOKEN` persistence and make ACP startup prefer a fresh scoped token over any stale env-file value.
-- [ ] Add defense-in-depth preflight checks for restart/rebuild, MCP dispatch, SAM-session dispatch, triggers, webhooks, and direct agent-session start where current code still lacks them.
-- [ ] Fix profile policy propagation gaps in retry, MCP orchestration replacement, project orchestrator scheduling, and task run paths.
-- [ ] Add/extend required API and VM-agent tests, including negative tests that assert `getInstallationToken()` is not called.
+- [x] Add a callback-safe final GitHub access verifier for `/git-token` that fails closed when the owner OAuth token is missing/revoked, repo is not visible, installation is inaccessible, or repo ID drift is detected.
+- [x] Ensure `/git-token` calls the verifier before `backfillProjectGithubRepoId()`, `resolveWorkspaceGitHubTokenOptions()`, or `getInstallationToken()`.
+- [x] Preserve Artifacts/non-GitHub behavior explicitly.
+- [x] Add safe structured logs for denied token mint attempts without raw tokens.
+- [x] Stop embedding durable workspace callback token literals in generated git credential helper scripts.
+- [x] Reduce static `GH_TOKEN` persistence and make ACP startup prefer a fresh scoped token over any stale env-file value.
+- [x] Add defense-in-depth preflight checks for restart/rebuild, MCP dispatch, SAM-session dispatch, triggers, webhooks, and direct agent-session start where current code still lacks them.
+- [x] Fix profile policy propagation gaps in retry, MCP orchestration replacement, project orchestrator scheduling, and task run paths.
+- [x] Add/extend required API and VM-agent tests, including negative tests that assert `getInstallationToken()` is not called.
 - [ ] Run local quality gates and security-focused review.
 - [ ] Deploy through GitHub Actions staging only and verify workspace clone/git/gh flows plus denied behavior; document exact evidence in the draft PR.
 

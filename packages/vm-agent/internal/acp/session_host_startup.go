@@ -86,7 +86,8 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 		}
 	}
 
-	if h.config.GitTokenFetcher != nil && !hasEnvVar(envVars, "GH_TOKEN") {
+	if h.config.GitTokenFetcher != nil {
+		envVars = removeEnvVar(envVars, "GH_TOKEN")
 		if token, err := h.config.GitTokenFetcher(ctx); err == nil && token != "" {
 			envVars = append(envVars, "GH_TOKEN="+token)
 			slog.Info("Injected GH_TOKEN via runtime fetch", "workspaceId", h.config.WorkspaceID)
@@ -96,6 +97,17 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 		}
 	}
 	return envVars
+}
+
+func removeEnvVar(envVars []string, key string) []string {
+	prefix := key + "="
+	filtered := envVars[:0]
+	for _, entry := range envVars {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func (h *SessionHost) trackCredentialInjection(info agentCommandInfo, cred *agentCredential) {

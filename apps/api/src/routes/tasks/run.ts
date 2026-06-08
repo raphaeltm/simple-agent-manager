@@ -269,9 +269,10 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       workspaceProfile,
       devcontainerConfigName,
       cloudProvider: provider,
-      // Agent profile resolution is not supported on the kanban Run path — tasks
-      // re-run with project defaults. Profile support (model, permissionMode,
-      // systemPromptAppend) deferred to a future PR.
+      agentProfileHint: task.agentProfileHint ?? null,
+      // Full profile resolution is not supported on the kanban Run path, but the
+      // persisted profile hint must still reach TaskRunner so workspace
+      // GitHub-token minting can enforce profile SAM platform policy.
       model: null,
       permissionMode: null,
       projectScaling: {

@@ -185,6 +185,40 @@ func TestSAMEnvFallbackMerge(t *testing.T) {
 	assertEnvContains(t, merged, "SAM_PROJECT_ID", "proj-789")
 }
 
+func TestResolveAgentEnvVarsPrefersFreshGitTokenOverStaleEnv(t *testing.T) {
+	t.Parallel()
+
+	host := &SessionHost{
+		config: SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				WorkspaceID:    "ws-123",
+				SAMEnvFallback: []string{"GH_TOKEN=stale-static-token", "SAM_WORKSPACE_ID=ws-123"},
+				GitTokenFetcher: func(context.Context) (string, error) {
+					return "fresh-scoped-token", nil
+				},
+			},
+		},
+	}
+
+	envVars := host.resolveAgentEnvVars(context.Background(), "missing-container")
+
+	if hasEnvEntry(envVars, "GH_TOKEN=stale-static-token") {
+		t.Fatalf("stale static GH_TOKEN should not be preserved: %v", envVars)
+	}
+	if !hasEnvEntry(envVars, "GH_TOKEN=fresh-scoped-token") {
+		t.Fatalf("fresh runtime GH_TOKEN missing: %v", envVars)
+	}
+}
+
+func hasEnvEntry(envVars []string, want string) bool {
+	for _, entry := range envVars {
+		if entry == want {
+			return true
+		}
+	}
+	return false
+}
+
 // cutString is a test helper matching strings.Cut behavior.
 func cutString(s, sep string) (string, string, bool) {
 	for i := 0; i <= len(s)-len(sep); i++ {

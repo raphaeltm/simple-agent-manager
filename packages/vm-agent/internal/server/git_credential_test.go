@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -76,6 +77,42 @@ func TestHandleGitCredentialSuccess(t *testing.T) {
 	want := "protocol=https\nhost=github.com\nusername=x-access-token\npassword=ghs_test_token\n\n"
 	if got != want {
 		t.Fatalf("unexpected body:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.T) {
+	t.Parallel()
+
+	var requestedAuth string
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"ghs_test_token","expiresAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlane.URL,
+			WorkspaceID:     "ws-123",
+			CallbackToken:   "callback-token",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential", nil)
+	req.RemoteAddr = "172.17.0.2:52144"
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if requestedAuth != "Bearer callback-token" {
+		t.Fatalf("expected VM agent to use in-memory callback token, got %q", requestedAuth)
+	}
+	if got := rec.Body.String(); !strings.Contains(got, "password=ghs_test_token") {
+		t.Fatalf("expected credential response, got:\n%s", got)
 	}
 }
 
