@@ -55,7 +55,7 @@ export function ProjectChat() {
       {/* Desktop sidebar                                                    */}
       {/* ================================================================== */}
       {!isMobile && (
-        <div className="w-72 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col">
+        <div className="relative z-20 w-72 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col">
           {/* Sidebar header: project name + action buttons */}
           <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
             <span className="text-sm font-semibold text-fg-primary truncate flex-1">
@@ -194,7 +194,7 @@ export function ProjectChat() {
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {/* Mobile header bar */}
         {isMobile && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
+          <div className="relative z-20 shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
             <button
               type="button"
               onClick={() => navigate(`/projects/${state.projectId}/settings`)}

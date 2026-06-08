@@ -236,7 +236,7 @@ export function AppShell({ children }: AppShellProps) {
     <OnboardingProvider>
     <ChoosePathWizard />
     <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 1fr', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
-      <aside className="glass-panel-container glass-composited flex flex-col glass-chrome border-y-0 border-l-0 overflow-y-auto" style={{ gridRow: '1' }}>
+      <aside className="relative z-30 glass-panel-container glass-composited flex flex-col glass-chrome border-y-0 border-l-0 overflow-y-auto" style={{ gridRow: '1' }}>
         <div className="p-4 border-b border-border-default flex items-center justify-between">
           <img src="/sam-head.png" alt="SAM" className="h-6 w-6 object-contain" />
           <div className="flex items-center gap-1">
