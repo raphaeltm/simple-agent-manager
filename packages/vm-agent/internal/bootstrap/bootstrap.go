@@ -2790,7 +2790,8 @@ func buildSAMStaticEnv(cfg *config.Config, _ string) string {
 // ensureSAMEnvironment injects SAM platform metadata as environment variables into
 // the devcontainer. Variables are written to /etc/profile.d/sam-env.sh (sourced by
 // login/interactive shells) and /etc/sam/env (for non-shell consumers).
-// When githubToken is non-empty, it is exported as GH_TOKEN for gh CLI usage.
+// GitHub tokens are resolved on demand; githubToken is accepted for legacy call
+// sites but is not persisted into either environment file.
 func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken string) error {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {
