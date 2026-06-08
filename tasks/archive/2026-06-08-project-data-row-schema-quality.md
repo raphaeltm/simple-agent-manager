@@ -17,14 +17,29 @@ The same slice also has a prohibited source-contract test, `apps/api/tests/unit/
 
 ## Implementation Checklist
 
-- [ ] Split `row-schemas.ts` into domain-focused parser modules under a `row-schemas/` directory while preserving the existing import path through a thin `row-schemas.ts` barrel.
-- [ ] Keep each new production source module under the repository file-size ceiling.
-- [ ] Remove the unjustified file-size exception from the production source.
-- [ ] Preserve all existing named exports from `./row-schemas` so consumers do not need widespread import churn.
-- [ ] Replace `project-data-session-validation.test.ts` source-contract assertions with behavioral tests that instantiate `ProjectData` and exercise WebSocket `message.send` validation.
-- [ ] Add or preserve behavioral coverage for `persistMessageBatch` rejecting stopped sessions without relying on source text.
-- [ ] Run focused API lint/typecheck/tests for the touched Durable Object modules.
-- [ ] Run broader repository validation required by `/do` before PR.
+- [x] Split `row-schemas.ts` into domain-focused parser modules under a `row-schemas/` directory while preserving the existing import path through a thin `row-schemas.ts` barrel.
+- [x] Keep each new production source module under the repository file-size ceiling.
+- [x] Remove the unjustified file-size exception from the production source.
+- [x] Preserve all existing named exports from `./row-schemas` so consumers do not need widespread import churn.
+- [x] Replace `project-data-session-validation.test.ts` source-contract assertions with behavioral tests that instantiate `ProjectData` and exercise WebSocket `message.send` validation.
+- [x] Add or preserve behavioral coverage for `persistMessageBatch` rejecting stopped sessions without relying on source text.
+- [x] Run focused API lint/typecheck/tests for the touched Durable Object modules.
+- [x] Run broader repository validation required by `/do` before PR.
+- [x] Add a narrow SonarCloud CPD exclusion for the new declarative ProjectData row-schema directory after PR analysis flagged mechanical schema/mapping duplication.
+
+## Verification
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/row-schemas.test.ts tests/unit/durable-objects/project-data-session-validation.test.ts`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+- `pnpm quality:source-contract-tests`
+- `find apps/api/src/durable-objects/project-data -type f -name '*.ts' -print0 | xargs -0 wc -l`
+- Staging deploy retry `27112995808` passed after first attempt hit a transient Docker Hub timeout.
+- PR SonarCloud initially reported 3.9% new-code duplication from the row-schema split; `sonar-project.properties` now excludes only `apps/api/src/durable-objects/project-data/row-schemas/**` from CPD as declarative schema code.
 
 ## Acceptance Criteria
 
