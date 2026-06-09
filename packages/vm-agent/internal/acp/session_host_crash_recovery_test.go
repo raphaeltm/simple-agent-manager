@@ -293,6 +293,100 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	expectCompletion(t, completed, "end_turn", time.Second, "normal prompt completion was swallowed by recovery once")
 }
 
+// TestSessionHost_CodexCrashRecovery_ReportsTerminalError proves the Codex
+// conservatism invariant (resumeShouldReportTerminalErrorLocked): even when the
+// LoadSession-based restart succeeds, Codex recovery is routed to a terminal
+// "error" rather than "recovered" until resume coherence is validated. The long
+// watchdog isolates this from the watchdog path so the only way to reach "error"
+// is through the successful-restart branch of monitorProcessExit.
+func TestSessionHost_CodexCrashRecovery_ReportsTerminalError(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
+
+	var startCount atomic.Int32
+	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		startCount.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+
+	completed := make(chan string, 2)
+	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+	go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
+
+	finishWithPeerDisconnect(host)
+
+	expectCompletion(t, completed, "error", 2*time.Second, "codex recovery did not report terminal error")
+	assertNoSecondCompletion(t, completed)
+	if startCount.Load() != 1 {
+		t.Fatalf("restart count = %d, want 1 (LoadSession restart must run before the terminal error)", startCount.Load())
+	}
+}
+
+// TestSessionHost_CrashRecovery_MaxRestartExhausted proves that exceeding the
+// restart budget while a crash recovery episode is in flight resolves the
+// stranded prompt to a terminal "error" instead of leaving it recovering. No
+// restart is attempted once the budget is exhausted.
+func TestSessionHost_CrashRecovery_MaxRestartExhausted(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+	host.config.MaxRestartAttempts = 1
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
+	host.mu.Lock()
+	host.restartCount = 1
+	host.mu.Unlock()
+
+	var startCount atomic.Int32
+	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		startCount.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+
+	completed := make(chan string, 2)
+	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
+
+	finishWithPeerDisconnect(host)
+
+	expectCompletion(t, completed, "error", 2*time.Second, "max-restart exhaustion did not report terminal error")
+	assertNoSecondCompletion(t, completed)
+	if startCount.Load() != 0 {
+		t.Fatalf("restart attempted despite exhausted budget: startCount=%d", startCount.Load())
+	}
+}
+
+// TestSessionHost_CrashRecovery_RestartFails proves that when the recovery
+// restart itself fails to spawn a new agent process, the stranded prompt is
+// resolved to a terminal "error" rather than hanging in recovering state.
+func TestSessionHost_CrashRecovery_RestartFails(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
+
+	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		return nil, errors.New("spawn failed")
+	}
+
+	completed := make(chan string, 2)
+	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
+
+	finishWithPeerDisconnect(host)
+
+	expectCompletion(t, completed, "error", 2*time.Second, "failed restart did not report terminal error")
+	assertNoSecondCompletion(t, completed)
+}
+
 func newRecoveryTestHost(t *testing.T, watchdog time.Duration) *SessionHost {
 	t.Helper()
 	return NewSessionHost(SessionHostConfig{
