@@ -204,14 +204,14 @@ export const integrations: Integration[] = [
     categoryLabel: 'AI Coding Agents',
     tagline: 'Run OpenCode agents with any inference provider',
     description:
-      "OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using Scaleway, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.",
+      "OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.",
     color: '#6366F1',
     logoPath: '/images/integrations/sst.svg',
     seoTitle: 'Run OpenCode with Any AI Provider | SAM',
     seoDescription:
       'Run OpenCode agents on your cloud with any inference provider — Scaleway, Google Vertex, Anthropic, or custom endpoints. SAM handles VM provisioning and agent lifecycle.',
     features: [
-      { title: 'Provider Flexibility', description: 'Use any OpenAI-compatible inference provider — Scaleway, Google Vertex, Anthropic, or your own endpoint.' },
+      { title: 'Provider Flexibility', description: 'Use SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or your own OpenAI-compatible endpoint.' },
       { title: 'Open Source', description: 'OpenCode is fully open source (from SST), so you can audit, modify, and extend the agent to fit your needs.' },
       { title: 'Lightweight Footprint', description: 'Minimal resource requirements mean you can run more OpenCode instances on smaller VMs.' },
       { title: 'Scaleway Native', description: 'First-class integration with Scaleway\'s inference API — a natural pairing with SAM\'s Scaleway cloud provider support.' },
@@ -228,7 +228,7 @@ export const integrations: Integration[] = [
       { title: 'Custom model experimentation', description: 'Test different models and providers by swapping OpenCode\'s inference backend without changing your workflow.' },
     ],
     faq: [
-      { question: 'What inference providers work with OpenCode?', answer: 'OpenCode supports Scaleway, Google Vertex AI, Anthropic, and any OpenAI-compatible endpoint. Configure the provider in your project settings.' },
+      { question: 'What inference providers work with OpenCode?', answer: 'OpenCode supports SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex AI, Anthropic, and OpenAI-compatible or custom endpoints. Configure the provider in your project settings.' },
       { question: 'Is OpenCode the same as OpenAI Codex?', answer: 'No — OpenCode is a separate open-source project from SST. It\'s a different agent that happens to support multiple AI providers including (but not limited to) OpenAI-compatible APIs.' },
       { question: 'Can I use my own fine-tuned models?', answer: 'Yes — if your model is served via an OpenAI-compatible API endpoint, OpenCode can use it. Point the inference URL to your custom endpoint.' },
     ],

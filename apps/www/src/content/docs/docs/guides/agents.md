@@ -50,10 +50,10 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 | Property | Value |
 |----------|-------|
 | **Provider** | OpenCode (SST) |
-| **API Key** | Uses Scaleway credentials (`SCW_SECRET_KEY`) |
-| **Get a Key** | [Scaleway Console](https://console.scaleway.com/iam/api-keys) |
+| **Inference Providers** | SAM Platform (Workers AI), Scaleway, OpenCode Managed, Google Vertex, OpenAI-compatible, Anthropic, custom |
+| **API Key** | Varies by selected provider |
 
-OpenCode uses Scaleway's Generative APIs for inference. If you already have a Scaleway cloud provider credential configured, OpenCode can use that — no separate API key required.
+OpenCode can use SAM Platform inference without a user API key, or it can use a user-selected inference provider. If you select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
 
 ### Amp
 
