@@ -79,7 +79,7 @@ function renderIdeasPage() {
   return render(
     <MemoryRouter>
       <IdeasPage />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -117,11 +117,13 @@ describe('IdeasPage', () => {
   it('shows empty state when no ideas exist', async () => {
     renderIdeasPage();
     expect(
-      await screen.findByText('Ideas emerge from your conversations. Start chatting to explore new ideas.'),
+      await screen.findByText(
+        'Ideas emerge from your conversations. Start chatting to explore new ideas.'
+      )
     ).toBeInTheDocument();
   });
 
-  it('displays ideas grouped by status', async () => {
+  it('loads only draft ideas and renders them as a single list', async () => {
     mocks.listProjectTasks.mockResolvedValue({
       tasks: [
         makeTask({ id: '1', title: 'Explore caching', status: 'draft' }),
@@ -133,10 +135,15 @@ describe('IdeasPage', () => {
     renderIdeasPage();
 
     expect(await screen.findByText('Explore caching')).toBeInTheDocument();
-    expect(screen.getByText('Build auth flow')).toBeInTheDocument();
+    expect(screen.queryByText('Build auth flow')).not.toBeInTheDocument();
 
-    expect(screen.getAllByText('Exploring').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Executing').length).toBeGreaterThan(0);
+    expect(screen.getByRole('list', { name: 'Ideas being refined' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Exploring/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(mocks.listProjectTasks).toHaveBeenCalledWith(
+      'proj-test',
+      expect.objectContaining({ status: 'draft' })
+    );
   });
 
   it('filters ideas by search query', async () => {
@@ -159,26 +166,6 @@ describe('IdeasPage', () => {
     expect(screen.getByText('Build auth flow')).toBeInTheDocument();
   });
 
-  it('filters ideas by status', async () => {
-    const user = userEvent.setup();
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [
-        makeTask({ id: '1', title: 'Draft idea', status: 'draft' }),
-        makeTask({ id: '2', title: 'Running idea', status: 'in_progress' }),
-      ],
-      nextCursor: null,
-    });
-
-    renderIdeasPage();
-    await screen.findByText('Draft idea');
-
-    const statusSelect = screen.getByRole('combobox');
-    await user.selectOptions(statusSelect, 'executing');
-
-    expect(screen.queryByText('Draft idea')).not.toBeInTheDocument();
-    expect(screen.getByText('Running idea')).toBeInTheDocument();
-  });
-
   it('shows session count per idea', async () => {
     mocks.listProjectTasks.mockResolvedValue({
       tasks: [makeTask({ id: 'task-1', title: 'Idea with sessions', status: 'draft' })],
@@ -186,8 +173,28 @@ describe('IdeasPage', () => {
     });
     mocks.listChatSessions.mockResolvedValue({
       sessions: [
-        { id: 's1', taskId: 'task-1', topic: 'Session 1', status: 'active', messageCount: 5, startedAt: Date.now(), endedAt: null, createdAt: Date.now(), workspaceId: null },
-        { id: 's2', taskId: 'task-1', topic: 'Session 2', status: 'active', messageCount: 3, startedAt: Date.now(), endedAt: null, createdAt: Date.now(), workspaceId: null },
+        {
+          id: 's1',
+          taskId: 'task-1',
+          topic: 'Session 1',
+          status: 'active',
+          messageCount: 5,
+          startedAt: Date.now(),
+          endedAt: null,
+          createdAt: Date.now(),
+          workspaceId: null,
+        },
+        {
+          id: 's2',
+          taskId: 'task-1',
+          topic: 'Session 2',
+          status: 'active',
+          messageCount: 3,
+          startedAt: Date.now(),
+          endedAt: null,
+          createdAt: Date.now(),
+          workspaceId: null,
+        },
       ],
       total: 2,
     });
@@ -213,23 +220,6 @@ describe('IdeasPage', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-test/ideas/idea-3');
   });
 
-  it('expands a collapsed group when clicked', async () => {
-    const user = userEvent.setup();
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: 'done-1', title: 'Completed idea', status: 'completed' })],
-      nextCursor: null,
-    });
-
-    renderIdeasPage();
-
-    const doneBtn = await screen.findByRole('button', { name: /Done/i });
-    expect(screen.queryByText('Completed idea')).not.toBeInTheDocument();
-
-    await user.click(doneBtn);
-
-    expect(screen.getByText('Completed idea')).toBeInTheDocument();
-  });
-
   it('shows filtered empty state when search has no matches', async () => {
     const user = userEvent.setup();
     mocks.listProjectTasks.mockResolvedValue({
@@ -248,7 +238,14 @@ describe('IdeasPage', () => {
 
   it('displays idea creation time', async () => {
     mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: '1', title: 'Timed idea', status: 'draft', createdAt: new Date().toISOString() })],
+      tasks: [
+        makeTask({
+          id: '1',
+          title: 'Timed idea',
+          status: 'draft',
+          createdAt: new Date().toISOString(),
+        }),
+      ],
       nextCursor: null,
     });
 
@@ -282,17 +279,29 @@ describe('IdeasPage', () => {
     expect(manualCard).not.toHaveTextContent('AUTO');
   });
 
-  it('shows timeline accent border for status groups', async () => {
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: '1', title: 'My idea', status: 'draft' })],
-      nextCursor: null,
-    });
+  it('loads additional draft idea pages when the API returns a cursor', async () => {
+    mocks.listProjectTasks
+      .mockResolvedValueOnce({
+        tasks: [makeTask({ id: 'page-1', title: 'First page idea', status: 'draft' })],
+        nextCursor: 'page-1',
+      })
+      .mockResolvedValueOnce({
+        tasks: [makeTask({ id: 'page-2', title: 'Second page idea', status: 'draft' })],
+        nextCursor: null,
+      });
 
     renderIdeasPage();
-    await screen.findByText('My idea');
 
-    const section = screen.getByText('My idea').closest('button')?.parentElement;
-    expect(section).toBeTruthy();
-    expect(section?.className).toContain('border-l-2');
+    expect(await screen.findByText('First page idea')).toBeInTheDocument();
+    expect(screen.getByText('Second page idea')).toBeInTheDocument();
+    expect(mocks.listProjectTasks).toHaveBeenCalledTimes(2);
+    expect(mocks.listProjectTasks).toHaveBeenNthCalledWith(
+      2,
+      'proj-test',
+      expect.objectContaining({
+        status: 'draft',
+        cursor: 'page-1',
+      })
+    );
   });
 });
