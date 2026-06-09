@@ -184,7 +184,8 @@ test.describe('Skills List audit', () => {
     await page.getByRole('button', { name: 'New Skill' }).click();
     await expect(page.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
     await page.getByLabel('Name').fill('Audit Skill');
-    await page.getByLabel('Resource Requirements JSON').fill('{"minVcpu":2,"minMemoryGb":4}');
+    await page.getByLabel('Min vCPUs').fill('2');
+    await page.getByLabel('Min Memory (GB)').fill('4');
     await screenshot(page, `skills-create-dialog-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     await assertNoOverflow(page);
   });
