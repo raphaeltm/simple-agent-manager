@@ -5,7 +5,7 @@ vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => `mock-ulid-${++ulidCounter}`,
 }));
 
-import { resolveSkillProfile } from '../../../src/services/skills';
+import { deleteSkill, resolveSkillProfile, updateSkill } from '../../../src/services/skills';
 
 function createMockDB() {
   const queryResults: unknown[] = [];
@@ -182,5 +182,34 @@ describe('resolveSkillProfile', () => {
     expect(resolved.skillName).toBe('ship-it');
     // skillHint preserves the raw lookup value the caller supplied.
     expect(resolved.skillHint).toBe('ship-it');
+  });
+});
+
+describe('builtin skill guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ulidCounter = 0;
+  });
+
+  it('rejects updateSkill on a builtin skill with a 403 before issuing any write', async () => {
+    const db = createMockDB();
+    db._pushResult([makeSkill({ isBuiltin: 1 })]); // getSkill lookup
+    db.update = vi.fn();
+
+    await expect(
+      updateSkill(db, 'project-1', 'skill-1', 'user-1', { name: 'renamed' })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleteSkill on a builtin skill with a 403 before issuing any write', async () => {
+    const db = createMockDB();
+    db._pushResult([makeSkill({ isBuiltin: 1 })]); // getSkill lookup
+    db.delete = vi.fn();
+
+    await expect(
+      deleteSkill(db, 'project-1', 'skill-1', 'user-1')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.delete).not.toHaveBeenCalled();
   });
 });

@@ -289,6 +289,16 @@ describe('MCP Skill Tools', () => {
       expect(result.error!.message).toContain('already exists');
     });
 
+    it('returns INVALID_PARAMS for 400 validation error', async () => {
+      const err = new Error('Invalid agent type: bad-type') as Error & { statusCode: number };
+      err.statusCode = 400;
+      vi.mocked(skillService.createSkill).mockRejectedValue(err);
+
+      const result = await handleCreateSkill(1, { name: 'my-skill', agentType: 'bad-type' }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('Invalid agent type');
+    });
+
     it('returns INTERNAL_ERROR for unexpected service failures', async () => {
       vi.mocked(skillService.createSkill).mockRejectedValue(new Error('DB timeout'));
       const result = await handleCreateSkill(1, { name: 'my-skill' }, tokenData, mockEnv);
@@ -386,6 +396,19 @@ describe('MCP Skill Tools', () => {
       expect(result.error!.message).toContain('Invalid agent type');
     });
 
+    it('returns INVALID_PARAMS for 403 builtin-skill guard', async () => {
+      const err = new Error('Builtin skills cannot be modified') as Error & { statusCode: number };
+      err.statusCode = 403;
+      vi.mocked(skillService.updateSkill).mockRejectedValue(err);
+
+      const result = await handleUpdateSkill(1, {
+        skillId: 'skill-1',
+        name: 'new-name',
+      }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('Builtin skills cannot be modified');
+    });
+
     it('returns INTERNAL_ERROR for unexpected service failures', async () => {
       vi.mocked(skillService.updateSkill).mockRejectedValue(new Error('DB timeout'));
       const result = await handleUpdateSkill(1, {
@@ -444,6 +467,16 @@ describe('MCP Skill Tools', () => {
         'skill-1',
         tokenData.userId,
       );
+    });
+
+    it('returns INVALID_PARAMS for 403 builtin-skill guard', async () => {
+      const err = new Error('Builtin skills cannot be deleted') as Error & { statusCode: number };
+      err.statusCode = 403;
+      vi.mocked(skillService.deleteSkill).mockRejectedValue(err);
+
+      const result = await handleDeleteSkill(1, { skillId: 'skill-1' }, tokenData, mockEnv);
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('Builtin skills cannot be deleted');
     });
 
     it('returns INTERNAL_ERROR for unexpected service failures', async () => {

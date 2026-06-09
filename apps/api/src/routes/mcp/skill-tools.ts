@@ -198,6 +198,7 @@ export async function handleUpdateSkill(
     log.info('mcp.update_skill', {
       skillId,
       projectId: tokenData.projectId,
+      userId: tokenData.userId,
       updatedFields: Object.keys(body),
     });
 
@@ -217,7 +218,7 @@ export async function handleUpdateSkill(
     if (status === 404) {
       return jsonRpcError(requestId, INVALID_PARAMS, `Skill not found: ${skillId}`);
     }
-    if (status === 400 || status === 409) {
+    if (status === 400 || status === 403 || status === 409) {
       return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
     }
     log.error('mcp.update_skill_failed', { skillId, projectId: tokenData.projectId, error: String(err) });
@@ -259,6 +260,9 @@ export async function handleDeleteSkill(
     const status = (err as { statusCode?: number }).statusCode;
     if (status === 404) {
       return jsonRpcError(requestId, INVALID_PARAMS, `Skill not found: ${skillId}`);
+    }
+    if (status === 403) {
+      return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
     }
     log.error('mcp.delete_skill_failed', { skillId, projectId: tokenData.projectId, error: String(err) });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to delete skill: ${(err as Error).message}`);
