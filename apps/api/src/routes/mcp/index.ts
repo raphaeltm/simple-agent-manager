@@ -100,18 +100,18 @@ import {
   handleUpdateAgentProfile,
 } from './profile-tools';
 import {
+  handleGetSessionMessages,
+  handleListSessions,
+  handleSearchMessages,
+  handleUpdateSessionTopic,
+} from './session-tools';
+import {
   handleCreateSkill,
   handleDeleteSkill,
   handleGetSkill,
   handleListSkills,
   handleUpdateSkill,
 } from './skill-tools';
-import {
-  handleGetSessionMessages,
-  handleListSessions,
-  handleSearchMessages,
-  handleUpdateSessionTopic,
-} from './session-tools';
 import {
   handleCompleteTask,
   handleGetTaskDetails,
