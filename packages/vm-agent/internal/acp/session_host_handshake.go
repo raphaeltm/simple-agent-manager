@@ -102,6 +102,17 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 		return false, fmt.Errorf("agent %s does not support LoadSession", agentType)
 	}
 
+	// Suppress the transcript replay that LoadSession emits as session/update
+	// notifications. The flag is checked lock-free in sessionHostClient.SessionUpdate.
+	// Scope it to the end of this function (covering applySessionSettings's RPC
+	// round-trips) so the replay window stays closed past the LoadSession response,
+	// which the orderedPipe delivers without waiting on the final replayed update.
+	// Accepted tradeoff: any genuine session/update the agent emits while
+	// applySessionSettings runs (e.g. a SetSessionConfigOption/SetSessionMode
+	// acknowledgement) is also suppressed. Tested agents do not do this.
+	h.replaySuppressed.Store(true)
+	defer h.replaySuppressed.Store(false)
+
 	loadCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
