@@ -150,6 +150,8 @@ async function setupApiMocks(
         if (skillsError) return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
         return respond(200, { items: skills });
       }
+      if (subPath.includes('/runtime/env-vars')) return respond(200, { envVars: [] });
+      if (subPath.includes('/runtime/files')) return respond(200, { files: [] });
       return respond(200, MOCK_PROJECT);
     }
 
@@ -226,5 +228,110 @@ test.describe('Skills List audit', () => {
     // Uncheck exclusive node — max co-tenants re-enabled
     await exclusiveNode.uncheck();
     await expect(maxCoTenants).toBeEnabled();
+  });
+
+  test('edit dialog populates structured fields from existing skill JSON', async ({ page }) => {
+    await setupApiMocks(page, { skills: NORMAL_SKILLS });
+    // Navigate directly with ?edit= param to open the edit dialog
+    await page.goto(`/projects/${MOCK_PROJECT.id}/skills?edit=skill-implementation`);
+    await expect(page.getByRole('heading', { name: 'Edit Skill' })).toBeVisible();
+    // Wait for the edit form to populate (skill data loaded from props)
+    await expect(page.getByLabel('Name')).toHaveValue('Implementation Sweep');
+
+    // Verify deserialized field values from {"minVcpu":4,"minMemoryGb":8,"minDiskGb":64}
+    expect(await page.getByLabel('Min vCPUs').inputValue()).toBe('4');
+    expect(await page.getByLabel('Min Memory (GB)').inputValue()).toBe('8');
+    expect(await page.getByLabel('Min Disk (GB)').inputValue()).toBe('64');
+    await expect(page.getByLabel('Exclusive Node')).not.toBeChecked();
+  });
+
+  test('submit serializes structured fields to JSON and omits empty fields', async ({ page }) => {
+    let capturedPayload: Record<string, unknown> | null = null;
+
+    await setupApiMocks(page, { skills: [] });
+    // Intercept skill creation API call to capture the payload
+    await page.route('**/api/projects/*/skills', async (route) => {
+      if (route.request().method() === 'POST') {
+        capturedPayload = route.request().postDataJSON() as Record<string, unknown>;
+        return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'new-skill', ...capturedPayload }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto(`/projects/${MOCK_PROJECT.id}/skills`);
+    await page.getByRole('button', { name: 'New Skill' }).click();
+    await expect(page.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
+
+    // Fill only some resource fields (leave Min Disk and Max Co-tenants empty)
+    await page.getByLabel('Name').fill('Test Skill');
+    await page.getByLabel('Min vCPUs').fill('2');
+    await page.getByLabel('Min Memory (GB)').fill('4');
+    // Min Disk left empty, Exclusive Node unchecked, Max Co-tenants left empty
+
+    await page.getByRole('button', { name: 'Create Skill' }).click();
+
+    // Wait for the API call to be captured
+    await expect.poll(() => capturedPayload).not.toBeNull();
+
+    // Verify the serialized JSON: only filled fields present, empty fields omitted
+    const resourceJson = capturedPayload!.resourceRequirementsJson as string;
+    expect(resourceJson).toBeTruthy();
+    const parsed = JSON.parse(resourceJson);
+    expect(parsed).toEqual({ minVcpu: 2, minMemoryGb: 4 });
+    // Verify no extra keys (minDiskGb, exclusiveNode, maxCoTenants should be absent)
+    expect(parsed).not.toHaveProperty('minDiskGb');
+    expect(parsed).not.toHaveProperty('exclusiveNode');
+    expect(parsed).not.toHaveProperty('maxCoTenants');
+  });
+
+  test('submit with exclusive node omits maxCoTenants from JSON', async ({ page }) => {
+    let capturedPayload: Record<string, unknown> | null = null;
+
+    await setupApiMocks(page, { skills: [] });
+    await page.route('**/api/projects/*/skills', async (route) => {
+      if (route.request().method() === 'POST') {
+        capturedPayload = route.request().postDataJSON() as Record<string, unknown>;
+        return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'new-skill', ...capturedPayload }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto(`/projects/${MOCK_PROJECT.id}/skills`);
+    await page.getByRole('button', { name: 'New Skill' }).click();
+
+    await page.getByLabel('Name').fill('Exclusive Skill');
+    await page.getByLabel('Min vCPUs').fill('8');
+    await page.getByLabel('Exclusive Node').check();
+
+    await page.getByRole('button', { name: 'Create Skill' }).click();
+    await expect.poll(() => capturedPayload).not.toBeNull();
+
+    const parsed = JSON.parse(capturedPayload!.resourceRequirementsJson as string);
+    expect(parsed).toEqual({ minVcpu: 8, exclusiveNode: true });
+    expect(parsed).not.toHaveProperty('maxCoTenants');
+  });
+
+  test('submit with all fields empty sends null resourceRequirementsJson', async ({ page }) => {
+    let capturedPayload: Record<string, unknown> | null = null;
+
+    await setupApiMocks(page, { skills: [] });
+    await page.route('**/api/projects/*/skills', async (route) => {
+      if (route.request().method() === 'POST') {
+        capturedPayload = route.request().postDataJSON() as Record<string, unknown>;
+        return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'new-skill', ...capturedPayload }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto(`/projects/${MOCK_PROJECT.id}/skills`);
+    await page.getByRole('button', { name: 'New Skill' }).click();
+    await page.getByLabel('Name').fill('Empty Resources Skill');
+    // Leave all resource fields empty
+
+    await page.getByRole('button', { name: 'Create Skill' }).click();
+    await expect.poll(() => capturedPayload).not.toBeNull();
+
+    // When all resource fields are empty, resourceRequirementsJson should be null
+    expect(capturedPayload!.resourceRequirementsJson).toBeNull();
   });
 });
