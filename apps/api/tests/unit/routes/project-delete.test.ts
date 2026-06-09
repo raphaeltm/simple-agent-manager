@@ -145,10 +145,10 @@ describe('DELETE /api/projects/:id', () => {
     expect(response.status).toBe(200);
 
     // With tasks: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
-    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + update:workspaces(1) + projects(1) = 9
-    // (9 statements because update is also in batch now)
+    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
+    // projectGithubRepositories(1) + projects(1) = 9
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(8);
+    expect(deleteOps.length).toBe(9);
   });
 
   it('skips task grandchild cleanup when no tasks exist', async () => {
@@ -161,9 +161,10 @@ describe('DELETE /api/projects/:id', () => {
 
     expect(response.status).toBe(200);
 
-    // Without tasks: tasks(1) + runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + projects(1) = 5
+    // Without tasks: tasks(1) + runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
+    // projectGithubRepositories(1) + projects(1) = 6
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(5);
+    expect(deleteOps.length).toBe(6);
   });
 
   it('nullifies workspace project_id in the batch', async () => {
@@ -200,8 +201,9 @@ describe('DELETE /api/projects/:id', () => {
     expect(response.status).toBe(200);
 
     // All mutations should be collected and passed to batch
-    // With 1 task: 3 grandchild + 4 child + 1 update + 1 project = 9
-    expect(batchedStatements.length).toBe(9);
+    // With 1 task: 3 grandchild + 5 child (tasks, env, files, profiles, githubRepos)
+    // + 1 update + 1 project = 10
+    expect(batchedStatements.length).toBe(10);
   });
 
   it('calls requireOwnedProject for authorization', async () => {
@@ -248,8 +250,9 @@ describe('DELETE /api/projects/:id', () => {
     expect(response.status).toBe(200);
 
     // With 1 task: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
-    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + projects(1) = 8
+    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
+    // projectGithubRepositories(1) + projects(1) = 9
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(8);
+    expect(deleteOps.length).toBe(9);
   });
 });
