@@ -48,6 +48,7 @@ Reliability and product experience improvements:
 - Voice input and text-to-speech playback.
 - In-app notifications.
 - Usage visibility for compute and SAM-managed AI.
+- Per-user API tokens, compute quotas, and activity/audit visibility.
 
 ## Planned: Additional Workspace Capabilities
 
@@ -66,10 +67,7 @@ Future workspace expansion:
 Support for teams and organizations:
 
 - Team management.
-- Per-user API tokens.
-- Usage quotas and limits.
 - Billing integration.
-- Audit logging.
 
 ## Planned: Enterprise Features
 
