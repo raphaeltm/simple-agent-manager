@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   addProjectRepository: vi.fn(),
   removeProjectRepository: vi.fn(),
   discoverSubmoduleRepos: vi.fn(),
+  listAvailableRepositories: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -20,6 +21,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   addProjectRepository: mocks.addProjectRepository,
   removeProjectRepository: mocks.removeProjectRepository,
   discoverSubmoduleRepos: mocks.discoverSubmoduleRepos,
+  listAvailableRepositories: mocks.listAvailableRepositories,
 }));
 
 const mockToast = vi.hoisted(() => ({
@@ -79,6 +81,8 @@ describe('RepositoryAccessSettings', () => {
       primaryRepository: 'raph/sam',
       repositories: [],
     });
+    // The combobox lazy-loads the user∩app intersection on first open.
+    mocks.listAvailableRepositories.mockResolvedValue({ repositories: [] });
   });
 
   it('renders nothing for non-GitHub-backed projects', () => {
@@ -134,7 +138,7 @@ describe('RepositoryAccessSettings', () => {
     expect(screen.getByText('access revoked')).toBeInTheDocument();
   });
 
-  it('adds a repository via the input and reflects the updated set', async () => {
+  it('adds a repository via the combobox and reflects the updated set', async () => {
     mocks.addProjectRepository.mockResolvedValue({
       primaryRepository: 'raph/sam',
       repositories: [makeRepo({ id: 'r1', repository: 'acme/new-lib' })],
@@ -145,7 +149,8 @@ describe('RepositoryAccessSettings', () => {
 
     const input = screen.getByLabelText('Additional repository') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '  acme/new-lib  ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    // Pressing Enter commits the typed owner/repo as a manual entry.
+    fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
       expect(mocks.addProjectRepository).toHaveBeenCalledWith('proj-1', {
@@ -156,21 +161,20 @@ describe('RepositoryAccessSettings', () => {
     await waitFor(() => {
       expect(screen.getByText('acme/new-lib')).toBeInTheDocument();
     });
-    // Input cleared after a successful add.
+    // Combobox clears its query after a successful add.
     expect(input.value).toBe('');
   });
 
-  it('rejects an empty repository submission without calling the API', async () => {
+  it('ignores an empty repository submission without calling the API', async () => {
     render(<RepositoryAccessSettings project={makeProject()} />);
     await waitFor(() => expect(mocks.listProjectRepositories).toHaveBeenCalled());
 
     const input = screen.getByLabelText('Additional repository') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '   ' } });
-    // Enter submits the value too.
     fireEvent.keyDown(input, { key: 'Enter' });
 
+    // The combobox does not commit blank/whitespace-only input.
     expect(mocks.addProjectRepository).not.toHaveBeenCalled();
-    expect(mockToast.error).toHaveBeenCalledWith('Repository is required');
   });
 
   it('surfaces the API error message when an add fails', async () => {
@@ -183,7 +187,7 @@ describe('RepositoryAccessSettings', () => {
 
     const input = screen.getByLabelText('Additional repository');
     fireEvent.change(input, { target: { value: 'acme/forbidden' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith(

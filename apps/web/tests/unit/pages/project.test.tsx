@@ -31,6 +31,9 @@ const mocks = vi.hoisted(() => ({
   getProviderCatalog: vi.fn(),
   listCredentials: vi.fn(),
   listAgentProfiles: vi.fn(),
+  listProjectRepositories: vi.fn(),
+  discoverSubmoduleRepos: vi.fn(),
+  listAvailableRepositories: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -61,6 +64,9 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProviderCatalog: mocks.getProviderCatalog,
   listCredentials: mocks.listCredentials,
   listAgentProfiles: mocks.listAgentProfiles,
+  listProjectRepositories: mocks.listProjectRepositories,
+  discoverSubmoduleRepos: mocks.discoverSubmoduleRepos,
+  listAvailableRepositories: mocks.listAvailableRepositories,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -153,6 +159,13 @@ describe('Project page', () => {
       },
     ]);
     mocks.listWorkspaces.mockResolvedValue([]);
+    // RepositoryAccessSettings (rendered in the settings tab) lazy-loads these.
+    mocks.listProjectRepositories.mockResolvedValue({
+      primaryRepository: 'acme/repo-one',
+      repositories: [],
+    });
+    mocks.discoverSubmoduleRepos.mockResolvedValue({ suggestions: [] });
+    mocks.listAvailableRepositories.mockResolvedValue({ repositories: [] });
     mocks.getProjectRuntimeConfig.mockResolvedValue({
       envVars: [],
       files: [],
