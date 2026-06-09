@@ -51,7 +51,7 @@
     "lucide-react": "1.8.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "20.5.2",
+    "@commitlint/cli": "21.0.2",
     "@commitlint/config-conventional": "20.5.3",
     "@types/iarna__toml": "2.0.5",
     "@types/node": "catalog:",
