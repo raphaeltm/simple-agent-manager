@@ -8,12 +8,12 @@ import (
 )
 
 // monitorProcessExit detects agent crashes and attempts restart.
-func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
+func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
 	err := process.Wait()
 
 	time.Sleep(100 * time.Millisecond)
 	stderrOutput := redactAgentDiagnosticText(h.getAndClearStderr())
-	uptime := time.Since(process.startTime)
+	uptime := time.Since(process.StartedAt())
 	exitInfo := agentExitInfo(err)
 	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))
 
@@ -28,6 +28,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	h.intentionalPromptCancelProcessStop = false
 	previousAcpSessionID := string(h.sessionID)
 	crashRecovery := h.crashRecoverySnapshotLocked()
+	recoveryNotify := process.RecoveryNotify()
 	h.mu.Unlock()
 
 	if isRapidExit && !intentionalPromptCancel {
@@ -58,16 +59,18 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		h.statusErr = errMsg
 		h.mu.Unlock()
-		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg))
+		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg), recoveryNotify)
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
 		return
 	}
 
 	maxRestarts := h.maxRestartAttempts()
 	if !intentionalPromptCancel {
+		h.applyRestartDecayLocked()
 		h.restartCount++
+		h.lastCrashTime = time.Now()
 		if h.restartCount > maxRestarts {
-			h.handleMaxRestartsExceededLocked(agentType, stderrOutput, maxRestarts, crashRecovery)
+			h.handleMaxRestartsExceededLocked(agentType, stderrOutput, maxRestarts, crashRecovery, recoveryNotify)
 			return
 		}
 	}
@@ -94,22 +97,42 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	if intentionalPromptCancel || crashRecovery.inProgress {
 		loadSessionID = previousAcpSessionID
 	}
-	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery) {
+	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {
 		return
 	}
-	if crashRecovery.inProgress {
-		h.clearCrashRecoveryLocked()
+	if !crashRecovery.inProgress {
+		// Normal (non-recovery) restart succeeded.
+		h.mu.Unlock()
+		h.broadcastAgentStatus(StatusReady, agentType, "")
+		return
+	}
+
+	// Crash-recovery restart succeeded. Clear the recovery episode state now
+	// that a healthy process is installed, so the watchdog short-circuits and
+	// never tears down the freshly-restarted process. The terminal-error
+	// decision below intentionally keys off agentType via
+	// resumeShouldReportTerminalErrorLocked, NOT off crashRecoveryInProgress,
+	// so clearing the flag here cannot accidentally make the Codex branch
+	// unreachable.
+	h.clearCrashRecoveryLocked()
+	if h.resumeShouldReportTerminalErrorLocked(agentType) {
+		message := fmt.Sprintf("Agent %s LoadSession recovery needs staging validation before being reported as recovered", agentType)
+		h.status = HostError
+		h.statusErr = message
+		h.mu.Unlock()
+		h.finishCrashRecoveryFailure(crashRecovery, message, fmt.Errorf("%s", message), recoveryNotify)
+		h.broadcastAgentStatus(StatusError, agentType, message)
+		h.reportActivity("error")
+		return
 	}
 	h.mu.Unlock()
 
-	if crashRecovery.inProgress {
-		h.broadcastAgentStatus(StatusRecovered, agentType, "")
-		h.broadcastAgentCrashReport(h.crashReport(crashRecovery, true, ""))
-		h.notifyPromptComplete(crashRecoveredStopReason, nil)
-		h.reportActivity("idle")
-		return
+	h.broadcastAgentStatus(StatusRecovered, agentType, "")
+	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, true, ""))
+	if recoveryNotify != nil {
+		recoveryNotify(crashRecoveredStopReason, nil)
 	}
-	h.broadcastAgentStatus(StatusReady, agentType, "")
+	h.reportActivity("idle")
 }
 
 func agentExitInfo(err error) string {
@@ -141,7 +164,23 @@ func (h *SessionHost) maxRestartAttempts() int {
 	return 3
 }
 
-func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput string, maxRestarts int, crashRecovery crashRecoverySnapshot) {
+func (h *SessionHost) applyRestartDecayLocked() {
+	if h.lastCrashTime.IsZero() {
+		return
+	}
+	if time.Since(h.lastCrashTime) > h.restartDecayWindow() {
+		h.restartCount = 0
+	}
+}
+
+func (h *SessionHost) resumeShouldReportTerminalErrorLocked(agentType string) bool {
+	// TODO: empirically validate codex-acp LoadSession coherence on staging. Until
+	// that round-trip proves coherent, report Codex disconnect recovery as a
+	// terminal task error instead of a possibly misleading "recovered".
+	return agentType == "openai-codex"
+}
+
+func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput string, maxRestarts int, crashRecovery crashRecoverySnapshot, notify recoveryNotify) {
 	slog.Error("Agent exceeded max restart attempts", "maxRestarts", maxRestarts)
 	h.clearCurrentAgentSessionLocked()
 	if crashRecovery.inProgress {
@@ -154,12 +193,12 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	}
 	h.statusErr = crashMsg
 	h.mu.Unlock()
-	h.finishCrashRecoveryFailure(crashRecovery, crashMsg, fmt.Errorf("%s", crashMsg))
+	h.finishCrashRecoveryFailure(crashRecovery, crashMsg, fmt.Errorf("%s", crashMsg), notify)
 	h.broadcastAgentStatus(StatusError, agentType, crashMsg)
 	h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
 }
 
-func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string, crashRecovery crashRecoverySnapshot) bool {
+func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string, crashRecovery crashRecoverySnapshot, notify recoveryNotify) bool {
 	var err error
 	if crashRecovery.inProgress {
 		err = h.startAgentForCrashRecovery(ctx, agentType, cred, settings, previousAcpSessionID)
@@ -174,7 +213,7 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		}
 		h.mu.Unlock()
 		slog.Error("Agent restart failed", "error", err)
-		h.finishCrashRecoveryFailure(crashRecovery, err.Error(), err)
+		h.finishCrashRecoveryFailure(crashRecovery, err.Error(), err, notify)
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return false
@@ -184,10 +223,12 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 	return true
 }
 
-func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnapshot, message string, err error) {
+func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnapshot, message string, err error, notify recoveryNotify) {
 	if !crashRecovery.inProgress {
 		return
 	}
 	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, message))
-	h.notifyPromptComplete("error", err)
+	if notify != nil {
+		notify("error", err)
+	}
 }

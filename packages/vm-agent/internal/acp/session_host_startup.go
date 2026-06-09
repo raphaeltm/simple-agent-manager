@@ -400,7 +400,10 @@ func (h *SessionHost) writeVibeStartupConfig(ctx context.Context, startup *agent
 	slog.Info("Wrote Vibe config.toml", "activeModel", activeModel, "mcpServers", len(h.config.McpServers))
 }
 
-func (h *SessionHost) startAgentProcess(startup *agentStartup) (*AgentProcess, error) {
+func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, error) {
+	if h.config.StartProcess != nil {
+		return h.config.StartProcess(startup)
+	}
 	return StartProcess(ProcessConfig{
 		ContainerID:   startup.containerID,
 		ContainerUser: h.config.ContainerUser,
@@ -411,7 +414,7 @@ func (h *SessionHost) startAgentProcess(startup *agentStartup) (*AgentProcess, e
 	})
 }
 
-func (h *SessionHost) attachACPConnection(process *AgentProcess) {
+func (h *SessionHost) attachACPConnection(process agentProcess) {
 	processedCh := make(chan struct{}, 1)
 	client := &sessionHostClient{host: h, processedCh: processedCh}
 

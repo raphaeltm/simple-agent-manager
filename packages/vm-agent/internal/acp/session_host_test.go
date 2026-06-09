@@ -811,7 +811,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 
-	if _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
+	if _, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
 		t.Fatal("beginCrashRecovery succeeded without LoadSession support")
 	}
 
@@ -819,7 +819,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
-	agentType, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	agentType, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
 	if !ok {
 		t.Fatal("beginCrashRecovery failed with LoadSession support")
 	}
@@ -1032,6 +1032,9 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 		startTime: time.Now(),
 		waitDone:  make(chan struct{}),
 	}
+	process.SetRecoveryNotify(func(stopReason string, promptErr error) {
+		host.notifyPromptComplete(stopReason, promptErr)
+	})
 
 	host.mu.Lock()
 	host.process = process
@@ -1201,7 +1204,8 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 	process := host.process
 	intentionalStop := host.intentionalPromptCancelProcessStop
 	host.mu.RUnlock()
-	if process == nil || !process.stopped {
+	agentProc, ok := process.(*AgentProcess)
+	if process == nil || !ok || !agentProc.stopped {
 		t.Fatal("expected control-plane cancel to stop the agent process")
 	}
 	if !intentionalStop {

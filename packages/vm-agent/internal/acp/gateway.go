@@ -171,6 +171,12 @@ type GatewayConfig struct {
 	PromptRetryMaxDelay time.Duration
 	// PromptRetrySleeper is injectable for tests. Nil uses time.Sleep with context cancellation.
 	PromptRetrySleeper func(context.Context, time.Duration) error
+	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
+	// Zero uses DefaultRecoveryWatchdogTimeout.
+	RecoveryWatchdogTimeout time.Duration
+	// RestartDecayWindow resets restartCount after this quiet period. Zero uses
+	// DefaultRestartDecayWindow.
+	RestartDecayWindow time.Duration
 	// TabLastPromptStore persists the last user prompt to SQLite for session discoverability.
 	TabLastPromptStore TabLastPromptUpdater
 	// SessionLastPromptManager persists the last user prompt in the in-memory session manager.

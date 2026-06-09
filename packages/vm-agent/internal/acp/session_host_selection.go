@@ -77,7 +77,6 @@ func (h *SessionHost) beginAgentSelection(agentType string) (previousAgentSelect
 		h.stopCurrentAgentLocked()
 	}
 	h.agentType = agentType
-	h.restartCount = 0
 	h.status = HostStarting
 	h.statusErr = ""
 	h.resetStderrBuffer()

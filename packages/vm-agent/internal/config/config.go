@@ -35,6 +35,16 @@ const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/typescript-nod
 // when a repo has no devcontainer config. Override via DEFAULT_DEVCONTAINER_CONFIG_PATH env var.
 const DefaultDevcontainerConfigPath = "/etc/sam/default-devcontainer.json"
 
+const (
+	// DefaultACPRecoveryWatchdogTimeout bounds crash recovery after an ACP
+	// disconnect. Override via DEFAULT_RECOVERY_WATCHDOG_TIMEOUT.
+	DefaultACPRecoveryWatchdogTimeout = 2 * time.Minute
+
+	// DefaultACPRestartDecayWindow is the quiet period after which restartCount
+	// resets. Override via DEFAULT_RESTART_DECAY_WINDOW.
+	DefaultACPRestartDecayWindow = 5 * time.Minute
+)
+
 // Config holds all configuration values for the VM Agent.
 type Config struct {
 	// Server settings
@@ -110,6 +120,8 @@ type Config struct {
 	ACPPromptRetryMaxRetries int           // Retryable transient provider prompt errors after initial attempt (default: 2)
 	ACPPromptRetryInitial    time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
 	ACPPromptRetryMax        time.Duration // Max backoff for transient provider prompt retries (default: 2m)
+	ACPRecoveryWatchdog      time.Duration // Max crash recovery duration before terminal error (default: 2m)
+	ACPRestartDecayWindow    time.Duration // Quiet period before restartCount decays (default: 5m)
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
@@ -320,6 +332,8 @@ func Load() (*Config, error) {
 		ACPPromptRetryMaxRetries: getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
 		ACPPromptRetryInitial:    getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
 		ACPPromptRetryMax:        getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
+		ACPRecoveryWatchdog:      getEnvDuration("DEFAULT_RECOVERY_WATCHDOG_TIMEOUT", DefaultACPRecoveryWatchdogTimeout),
+		ACPRestartDecayWindow:    getEnvDuration("DEFAULT_RESTART_DECAY_WINDOW", DefaultACPRestartDecayWindow),
 		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),

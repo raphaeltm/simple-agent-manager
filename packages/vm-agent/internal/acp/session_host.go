@@ -46,6 +46,14 @@ const (
 	// when InitTimeoutMs is not configured. Matches the default for ACP_INIT_TIMEOUT_MS.
 	DefaultACPInitTimeout = 30 * time.Second
 
+	// DefaultRecoveryWatchdogTimeout bounds crash recovery after an ACP stdio
+	// disconnect so a leaked process monitor cannot strand the prompt forever.
+	DefaultRecoveryWatchdogTimeout = 2 * time.Minute
+
+	// DefaultRestartDecayWindow is the quiet period after which restartCount is
+	// reset before counting a new unexpected agent exit.
+	DefaultRestartDecayWindow = 5 * time.Minute
+
 	// defaultControlPlaneHTTPTimeout is the safety-net HTTP client timeout
 	// used when no HTTPClient is injected via GatewayConfig. Production code
 	// injects a client via config.NewControlPlaneClient(cfg.HTTPCallbackTimeout);
@@ -156,6 +164,10 @@ type SessionHostConfig struct {
 	// SDK's concurrent goroutine dispatch from reordering streaming tokens.
 	// Override via ACP_NOTIF_SERIALIZE_TIMEOUT. Default: 5s.
 	NotifSerializeTimeout time.Duration
+
+	// StartProcess is an internal test hook. Production code leaves it nil and
+	// uses StartProcess via startAgentProcess.
+	StartProcess func(*agentStartup) (agentProcess, error)
 }
 
 // BufferedMessage holds a single message in the replay buffer.
@@ -191,12 +203,13 @@ type SessionHost struct {
 
 	// Agent state (guarded by mu)
 	mu             sync.RWMutex
-	process        *AgentProcess
+	process        agentProcess
 	acpConn        *acpsdk.ClientSideConnection
 	agentType      string
 	sessionID      acpsdk.SessionId
 	configOptions  []acpsdk.SessionConfigOption
 	restartCount   int
+	lastCrashTime  time.Time
 	permissionMode string
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
 	// handling can decide whether a process crash is recoverable.
@@ -414,7 +427,7 @@ func (h *SessionHost) DetachViewer(viewerID string) {
 // autoSuspend is called by the suspend timer. It re-checks conditions before
 // suspending to avoid interrupting work that started after the timer was set.
 func (h *SessionHost) autoSuspend() {
-	// Re-check conditions under lock: no viewers and not prompting.
+	// Re-check conditions under lock: no viewers and not prompting/recovering.
 	// Hold viewerMu across both checks to prevent races with DetachViewer.
 	h.viewerMu.Lock()
 	h.suspendTimer = nil // Timer has fired, clear reference.
@@ -424,9 +437,9 @@ func (h *SessionHost) autoSuspend() {
 		return
 	}
 
-	// Check prompting status while still holding viewerMu to prevent race
+	// Check prompting/recovery status while still holding viewerMu to prevent race
 	// where a viewer detaches and also tries to start a timer.
-	if h.IsPrompting() {
+	if h.isPromptingOrRecovering() {
 		// Re-arm the timer without releasing the lock.
 		if h.suspendTimer == nil {
 			h.suspendTimer = time.AfterFunc(h.config.IdleSuspendTimeout, func() {
@@ -434,7 +447,7 @@ func (h *SessionHost) autoSuspend() {
 			})
 		}
 		h.viewerMu.Unlock()
-		slog.Info("SessionHost: auto-suspend deferred (prompt in progress)", "sessionID", h.config.SessionID)
+		slog.Info("SessionHost: auto-suspend deferred (prompt/recovery in progress)", "sessionID", h.config.SessionID)
 		return
 	}
 	h.viewerMu.Unlock()
@@ -581,7 +594,7 @@ func (h *SessionHost) SignalProcess(sig syscall.Signal) {
 		return
 	}
 
-	process.killContainerProcesses(sig)
+	process.KillContainerProcesses(sig)
 	slog.Info("SignalProcess: sent signal to agent process", "signal", sig, "agentType", h.AgentType())
 }
 
@@ -787,7 +800,7 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 }
 
 // monitorStderr reads the agent's stderr and collects it for error reporting.
-func (h *SessionHost) monitorStderr(process *AgentProcess) {
+func (h *SessionHost) monitorStderr(process agentProcess) {
 	scanner := bufio.NewScanner(process.Stderr())
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -939,6 +952,12 @@ func (h *SessionHost) IsPrompting() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.status == HostPrompting
+}
+
+func (h *SessionHost) isPromptingOrRecovering() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress
 }
 
 // OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.

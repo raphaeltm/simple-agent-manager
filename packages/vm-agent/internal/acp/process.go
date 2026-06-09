@@ -177,6 +177,8 @@ type AgentProcess struct {
 	stopTimeout     time.Duration
 	mu              sync.Mutex
 	stopped         bool
+	recoveryMu      sync.Mutex
+	recoveryNotify  recoveryNotify
 
 	// envFilePath is the tmpfs-backed file containing secret env vars.
 	// Cleaned up after the process exits (in Wait) rather than immediately

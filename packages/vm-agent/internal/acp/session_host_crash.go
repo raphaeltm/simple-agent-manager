@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -63,19 +65,32 @@ func redactAgentDiagnosticText(text string) string {
 	return redacted
 }
 
+type recoveryNotify func(stopReason string, err error)
+
 // beginCrashRecovery attempts to start LoadSession-based recovery after an agent crash.
-// Returns (agentType, redactedStderr, recoveryStarted). agentType and stderr are returned
-// even when recovery is unavailable so the caller can use them without re-acquiring locks.
-func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, string, bool) {
+// Returns recovery episode state when recovery is available. agentType and stderr are
+// returned even when recovery is unavailable so the caller can use them without
+// re-acquiring locks.
+func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, string, agentProcess, recoveryNotify, bool) {
 	stderr := redactAgentDiagnosticText(h.peekStderr())
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	agentType := h.agentType
 	if h.sessionID == "" || !h.agentSupportsLoadSession || agentType == "" {
-		return agentType, stderr, false
+		return agentType, stderr, nil, nil, false
 	}
 
+	once := &sync.Once{}
+	notify := func(stopReason string, err error) {
+		once.Do(func() {
+			h.notifyPromptComplete(stopReason, err)
+		})
+	}
+	process := h.process
+	if process != nil {
+		process.SetRecoveryNotify(notify)
+	}
 	h.crashRecoveryInProgress = true
 	h.crashStderr = stderr
 	h.crashAgentType = agentType
@@ -83,7 +98,8 @@ func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string)
 	h.crashPromptViewerID = viewerID
 	h.status = HostStarting
 	h.statusErr = ""
-	return agentType, stderr, true
+	h.armCrashRecoveryWatchdogLocked(notify)
+	return agentType, stderr, process, notify, true
 }
 
 type crashRecoverySnapshot struct {
@@ -110,6 +126,86 @@ func (h *SessionHost) clearCrashRecoveryLocked() {
 	h.crashAgentType = ""
 	h.crashPromptReqID = nil
 	h.crashPromptViewerID = ""
+}
+
+func (h *SessionHost) recoveryWatchdogTimeout() time.Duration {
+	if h.config.RecoveryWatchdogTimeout > 0 {
+		return h.config.RecoveryWatchdogTimeout
+	}
+	return DefaultRecoveryWatchdogTimeout
+}
+
+func (h *SessionHost) restartDecayWindow() time.Duration {
+	if h.config.RestartDecayWindow > 0 {
+		return h.config.RestartDecayWindow
+	}
+	return DefaultRestartDecayWindow
+}
+
+func (h *SessionHost) armCrashRecoveryWatchdogLocked(notify recoveryNotify) {
+	timeout := h.recoveryWatchdogTimeout()
+	if timeout <= 0 {
+		return
+	}
+	go h.watchCrashRecovery(timeout, notify)
+}
+
+func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryNotify) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-h.ctx.Done():
+		return
+	case <-timer.C:
+	}
+
+	message := fmt.Sprintf("Agent crash recovery timed out after %s", timeout)
+	err := fmt.Errorf("%s", message)
+
+	h.mu.Lock()
+	if !h.crashRecoveryInProgress {
+		h.mu.Unlock()
+		return
+	}
+	snapshot := h.crashRecoverySnapshotLocked()
+	process := h.process
+	h.clearCurrentAgentSessionLocked()
+	h.clearCrashRecoveryLocked()
+	h.status = HostError
+	h.statusErr = message
+	h.mu.Unlock()
+
+	if process != nil {
+		go func() {
+			if stopErr := process.Stop(); stopErr != nil {
+				slog.Warn("Recovery watchdog failed to stop agent process", "error", stopErr)
+			}
+		}()
+	}
+
+	h.finishCrashRecoveryFailure(snapshot, message, err, notify)
+	h.broadcastAgentStatus(StatusError, snapshot.agentType, message)
+	h.reportActivity("error")
+}
+
+func (h *SessionHost) stopCrashedProcessForRecovery(proc agentProcess) {
+	h.mu.Lock()
+	if h.process != proc || !h.crashRecoveryInProgress {
+		h.mu.Unlock()
+		return
+	}
+	h.mu.Unlock()
+
+	// We deliberately drop h.mu before calling proc.Stop() so a potentially
+	// long Stop() does not block readers of h.mu. This opens a benign TOCTOU
+	// window: monitorProcessExit may restart the agent and replace h.process
+	// between the unlock and Stop(). That is safe because we act on the
+	// captured `proc` (the old, crashed process) rather than h.process, and
+	// AgentProcess.Stop() is idempotent on an already-stopped/exited process.
+	if err := proc.Stop(); err != nil {
+		slog.Warn("Failed to stop crashed ACP agent process for recovery", "error", err)
+	}
 }
 
 func (h *SessionHost) crashReport(snapshot crashRecoverySnapshot, recovered bool, recoveryErr string) AgentCrashReportMessage {
