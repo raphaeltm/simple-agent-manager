@@ -136,16 +136,9 @@ func TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce(t *testing.T) {
 	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
 	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
 
-	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
+	finishWithPeerDisconnect(host)
 
-	select {
-	case reason := <-completed:
-		if reason != crashRecoveredStopReason {
-			t.Fatalf("stopReason = %q, want recovered", reason)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for recovery completion")
-	}
+	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "timed out waiting for recovery completion")
 	assertNoSecondCompletion(t, completed)
 	if oldProc.stopCount.Load() != 1 {
 		t.Fatalf("Stop count = %d, want 1", oldProc.stopCount.Load())
@@ -160,16 +153,9 @@ func TestSessionHost_UnkillableProcessWatchdogSignalsError(t *testing.T) {
 	defer host.Stop()
 
 	_, completed, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, false)
-	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
+	finishWithPeerDisconnect(host)
 
-	select {
-	case reason := <-completed:
-		if reason != "error" {
-			t.Fatalf("stopReason = %q, want error", reason)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("watchdog did not emit terminal error")
-	}
+	expectCompletion(t, completed, "error", time.Second, "watchdog did not emit terminal error")
 	assertNoSecondCompletion(t, completed)
 }
 
@@ -178,7 +164,7 @@ func TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess(t *testing.
 	defer host.Stop()
 
 	_, completed, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
-	host.finishPromptWithError(context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, errors.New("peer disconnected before response"))
+	finishWithPeerDisconnect(host)
 	newProc, _, _ := newFakeAgentProcess(time.Now(), false)
 	notify := host.process.RecoveryNotify()
 	if notify == nil {
@@ -292,14 +278,7 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	notify(crashRecoveredStopReason, nil)
 	host.finishCrashRecoveryFailure(snapshot, "watchdog", errors.New("watchdog"), notify)
 
-	select {
-	case reason := <-completed:
-		if reason != "error" {
-			t.Fatalf("first recovery stopReason = %q, want error", reason)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("missing recovery completion")
-	}
+	expectCompletion(t, completed, "error", time.Second, "missing recovery completion")
 	select {
 	case err := <-errs:
 		if err == nil || err.Error() != "rapid exit" {
@@ -311,14 +290,7 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	assertNoSecondCompletion(t, completed)
 
 	host.notifyPromptComplete("end_turn", nil)
-	select {
-	case reason := <-completed:
-		if reason != "end_turn" {
-			t.Fatalf("later normal stopReason = %q, want end_turn", reason)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("normal prompt completion was swallowed by recovery once")
-	}
+	expectCompletion(t, completed, "end_turn", time.Second, "normal prompt completion was swallowed by recovery once")
 }
 
 func newRecoveryTestHost(t *testing.T, watchdog time.Duration) *SessionHost {
@@ -362,5 +334,31 @@ func assertNoSecondCompletion(t *testing.T, completed <-chan string) {
 	case reason := <-completed:
 		t.Fatalf("unexpected second completion: %q", reason)
 	case <-time.After(80 * time.Millisecond):
+	}
+}
+
+// finishWithPeerDisconnect simulates the hard ACP stdio disconnect that the
+// recovery path is designed to survive: the prompt fails because the peer
+// vanished mid-response.
+func finishWithPeerDisconnect(host *SessionHost) {
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+		errors.New("peer disconnected before response"),
+	)
+}
+
+// expectCompletion blocks until a completion reason arrives and asserts it
+// matches want, failing with timeoutMsg if the recovery path never reports.
+func expectCompletion(t *testing.T, completed <-chan string, want string, timeout time.Duration, timeoutMsg string) {
+	t.Helper()
+	select {
+	case reason := <-completed:
+		if reason != want {
+			t.Fatalf("stopReason = %q, want %q", reason, want)
+		}
+	case <-time.After(timeout):
+		t.Fatal(timeoutMsg)
 	}
 }

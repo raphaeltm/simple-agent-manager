@@ -35,8 +35,12 @@ func TestBootMessageReporterWorkspaceIDRequiresRealWorkspace(t *testing.T) {
 	}
 }
 
-func TestTaskCompletionCallbackTreatsPromptCancellationAsAwaitingFollowup(t *testing.T) {
-	t.Parallel()
+// runTaskCompletionCallback invokes a single task-completion callback against a
+// stub control plane and returns the JSON body the control plane received. It
+// centralizes the httptest server + Server fixture so individual stop-reason
+// mapping tests assert only on the resulting callback body.
+func runTaskCompletionCallback(t *testing.T, mode string, stopReason string, callbackErr error) map[string]interface{} {
+	t.Helper()
 
 	var body map[string]interface{}
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,9 +64,16 @@ func TestTaskCompletionCallbackTreatsPromptCancellationAsAwaitingFollowup(t *tes
 		"project-1",
 		"task-a",
 		"workspace-a",
-		config.TaskModeConversation,
+		mode,
 	)
-	callback("cancelled", context.Canceled)
+	callback(stopReason, callbackErr)
+	return body
+}
+
+func TestTaskCompletionCallbackTreatsPromptCancellationAsAwaitingFollowup(t *testing.T) {
+	t.Parallel()
+
+	body := runTaskCompletionCallback(t, config.TaskModeConversation, "cancelled", context.Canceled)
 
 	if body["toStatus"] != nil {
 		t.Fatalf("toStatus = %v, want no terminal task status", body["toStatus"])
@@ -75,31 +86,7 @@ func TestTaskCompletionCallbackTreatsPromptCancellationAsAwaitingFollowup(t *tes
 func TestTaskCompletionCallbackTreatsCrashRecoveryAsAwaitingFollowup(t *testing.T) {
 	t.Parallel()
 
-	var body map[string]interface{}
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode callback body: %v", err)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(controlPlane.Close)
-
-	s := &Server{
-		config:        &config.Config{HTTPCallbackTimeout: 0},
-		callbackToken: "node-token",
-		workspaces: map[string]*WorkspaceRuntime{
-			"workspace-a": {ID: "workspace-a", CallbackToken: "workspace-token-a"},
-		},
-	}
-
-	callback := s.makeTaskCompletionCallback(
-		controlPlane.URL,
-		"project-1",
-		"task-a",
-		"workspace-a",
-		config.TaskModeTask,
-	)
-	callback("recovered", nil)
+	body := runTaskCompletionCallback(t, config.TaskModeTask, "recovered", nil)
 
 	if body["toStatus"] != nil {
 		t.Fatalf("toStatus = %v, want no terminal task status", body["toStatus"])
@@ -112,31 +99,7 @@ func TestTaskCompletionCallbackTreatsCrashRecoveryAsAwaitingFollowup(t *testing.
 func TestTaskCompletionCallbackTreatsErrorStopReasonAsTerminalFailure(t *testing.T) {
 	t.Parallel()
 
-	var body map[string]interface{}
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode callback body: %v", err)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(controlPlane.Close)
-
-	s := &Server{
-		config:        &config.Config{HTTPCallbackTimeout: 0},
-		callbackToken: "node-token",
-		workspaces: map[string]*WorkspaceRuntime{
-			"workspace-a": {ID: "workspace-a", CallbackToken: "workspace-token-a"},
-		},
-	}
-
-	callback := s.makeTaskCompletionCallback(
-		controlPlane.URL,
-		"project-1",
-		"task-a",
-		"workspace-a",
-		config.TaskModeTask,
-	)
-	callback("error", errors.New("recovery failed"))
+	body := runTaskCompletionCallback(t, config.TaskModeTask, "error", errors.New("recovery failed"))
 
 	if body["toStatus"] != "failed" {
 		t.Fatalf("toStatus = %v, want failed", body["toStatus"])
