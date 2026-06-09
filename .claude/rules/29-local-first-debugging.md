@@ -109,10 +109,11 @@ This wastes staging quota, wastes CI minutes, wastes your budget, and frequently
 
 1. **Query staging infrastructure directly via the Cloudflare API.** Before reading logs, before changing code, use `CF_TOKEN` to check the actual state: query D1 for data/migration status, read KV for feature flags, check DNS records. This takes seconds and often reveals the issue immediately. See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
 2. **Identify the layer that's failing.** Is it the browser? API Worker? Durable Object? VM agent? Cloud-init? Agent subprocess inside the container?
-3. **Pull logs for that layer before changing anything.** (Sources below.)
-4. **Read the logs in full** — not just the first error line. The root cause is often several messages before the visible symptom.
-5. **Form a hypothesis grounded in a specific log line or CF API query result.** If you can't quote a log line or query result that justifies your next change, you are still guessing.
-6. **Only then change code.**
+3. **Preserve the exact user-visible symptom while checking evidence.** If D1/logs do not show the object or event the user saw, do not dismiss the observation; investigate client state, polling, rendering, cache, and optimistic-update paths as separate hypotheses. See `.claude/rules/39-debug-before-redesign.md`.
+4. **Pull logs for that layer before changing anything.** (Sources below.)
+5. **Read the logs in full** — not just the first error line. The root cause is often several messages before the visible symptom.
+6. **Form a hypothesis grounded in a specific log line or CF API query result.** If you can't quote a log line or query result that justifies your next change, you are still guessing.
+7. **Only then change code.**
 
 ### Where the Logs Actually Live
 
