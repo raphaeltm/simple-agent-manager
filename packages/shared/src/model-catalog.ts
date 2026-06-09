@@ -26,8 +26,15 @@ export interface ModelGroup {
 
 const CLAUDE_MODELS: ModelGroup[] = [
   {
+    label: 'Claude 5 (Frontier)',
+    models: [
+      { id: 'claude-fable-5', name: 'Claude Fable 5', group: 'Claude 5 (Frontier)' },
+    ],
+  },
+  {
     label: 'Claude 4 (Latest)',
     models: [
+      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', group: 'Claude 4 (Latest)' },
       { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', group: 'Claude 4 (Latest)' },
       { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', group: 'Claude 4 (Latest)' },
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', group: 'Claude 4 (Latest)' },
@@ -59,16 +66,6 @@ const CODEX_MODELS: ModelGroup[] = [
       { id: 'gpt-5.4', name: 'GPT-5.4', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', group: 'GPT-5 (Latest)' },
       { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', group: 'GPT-5 (Latest)' },
-    ],
-  },
-  {
-    label: 'GPT-5 (Older)',
-    models: [
-      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', group: 'GPT-5 (Older)' },
-      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', group: 'GPT-5 (Older)' },
-      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', group: 'GPT-5 (Older)' },
-      { id: 'gpt-5-mini', name: 'GPT-5 Mini', group: 'GPT-5 (Older)' },
     ],
   },
   {
@@ -76,6 +73,16 @@ const CODEX_MODELS: ModelGroup[] = [
     models: [
       { id: 'o4-mini', name: 'O4 Mini', group: 'Reasoning' },
       { id: 'o3', name: 'O3', group: 'Reasoning' },
+    ],
+  },
+  {
+    label: 'GPT-5 (Legacy)',
+    models: [
+      { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex (sunset)', group: 'GPT-5 (Legacy)' },
+      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex (sunset)', group: 'GPT-5 (Legacy)' },
+      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', group: 'GPT-5 (Legacy)' },
+      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', group: 'GPT-5 (Legacy)' },
+      { id: 'gpt-5-mini', name: 'GPT-5 Mini', group: 'GPT-5 (Legacy)' },
     ],
   },
   {
@@ -130,6 +137,13 @@ const MISTRAL_MODELS: ModelGroup[] = [
 
 const GEMINI_MODELS: ModelGroup[] = [
   {
+    label: 'Gemini 3 (Latest)',
+    models: [
+      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', group: 'Gemini 3 (Latest)' },
+      { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', group: 'Gemini 3 (Latest)' },
+    ],
+  },
+  {
     label: 'Gemini 2.5',
     models: [
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', group: 'Gemini 2.5' },
@@ -137,9 +151,9 @@ const GEMINI_MODELS: ModelGroup[] = [
     ],
   },
   {
-    label: 'Gemini 2.0',
+    label: 'Gemini 2.0 (Legacy)',
     models: [
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', group: 'Gemini 2.0' },
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', group: 'Gemini 2.0 (Legacy)' },
     ],
   },
 ];
