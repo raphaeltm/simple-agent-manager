@@ -124,18 +124,7 @@ func TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce(t *testing.T) {
 	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
 
 	var startCount atomic.Int32
-	host.config.ContainerResolver = func() (string, error) { return "container", nil }
-	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
-		startCount.Add(1)
-		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
-		serveRecoveryACP(t, reader, writer)
-		return proc, nil
-	}
-
-	completed := make(chan string, 2)
-	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
-	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
-
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", countingSpawn(t, &startCount))
 	finishWithPeerDisconnect(host)
 
 	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "timed out waiting for recovery completion")
@@ -306,18 +295,7 @@ func TestSessionHost_CodexCrashRecovery_ReportsTerminalError(t *testing.T) {
 	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
 
 	var startCount atomic.Int32
-	host.config.ContainerResolver = func() (string, error) { return "container", nil }
-	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
-		startCount.Add(1)
-		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
-		serveRecoveryACP(t, reader, writer)
-		return proc, nil
-	}
-
-	completed := make(chan string, 2)
-	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
-	go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
-
+	completed := startRecoveryMonitor(t, host, oldProc, "openai-codex", countingSpawn(t, &startCount))
 	finishWithPeerDisconnect(host)
 
 	expectCompletion(t, completed, "error", 2*time.Second, "codex recovery did not report terminal error")
@@ -342,18 +320,7 @@ func TestSessionHost_CrashRecovery_MaxRestartExhausted(t *testing.T) {
 	host.mu.Unlock()
 
 	var startCount atomic.Int32
-	host.config.ContainerResolver = func() (string, error) { return "container", nil }
-	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
-		startCount.Add(1)
-		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
-		serveRecoveryACP(t, reader, writer)
-		return proc, nil
-	}
-
-	completed := make(chan string, 2)
-	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
-	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
-
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", countingSpawn(t, &startCount))
 	finishWithPeerDisconnect(host)
 
 	expectCompletion(t, completed, "error", 2*time.Second, "max-restart exhaustion did not report terminal error")
@@ -372,15 +339,9 @@ func TestSessionHost_CrashRecovery_RestartFails(t *testing.T) {
 
 	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
 
-	host.config.ContainerResolver = func() (string, error) { return "container", nil }
-	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", func(*agentStartup) (agentProcess, error) {
 		return nil, errors.New("spawn failed")
-	}
-
-	completed := make(chan string, 2)
-	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
-	go host.monitorProcessExit(context.Background(), oldProc, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
-
+	})
 	finishWithPeerDisconnect(host)
 
 	expectCompletion(t, completed, "error", 2*time.Second, "failed restart did not report terminal error")
@@ -401,6 +362,32 @@ func newRecoveryTestHost(t *testing.T, watchdog time.Duration) *SessionHost {
 		MessageBufferSize: 100,
 		ViewerSendBuffer:  32,
 	})
+}
+
+// countingSpawn returns a StartProcess hook that increments startCount and
+// spins up a fresh fake agent serving the recovery ACP handshake on each call.
+func countingSpawn(t *testing.T, startCount *atomic.Int32) func(*agentStartup) (agentProcess, error) {
+	t.Helper()
+	return func(*agentStartup) (agentProcess, error) {
+		startCount.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+}
+
+// startRecoveryMonitor wires the container resolver, restart-spawn hook, and a
+// completion channel onto host, then drives monitorProcessExit for oldProc in a
+// goroutine. It returns the buffered completion channel the restart path reports
+// through.
+func startRecoveryMonitor(t *testing.T, host *SessionHost, oldProc *fakeAgentProcess, agentType string, startProcess func(*agentStartup) (agentProcess, error)) chan string {
+	t.Helper()
+	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	host.config.StartProcess = startProcess
+	completed := make(chan string, 2)
+	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+	go host.monitorProcessExit(context.Background(), oldProc, agentType, &agentCredential{credentialKind: "api-key"}, nil)
+	return completed
 }
 
 func armRecoverablePrompt(t *testing.T, host *SessionHost, agentType string, startedAgo time.Duration, waitClosesOnStop bool) (*fakeAgentProcess, chan string, chan error) {
