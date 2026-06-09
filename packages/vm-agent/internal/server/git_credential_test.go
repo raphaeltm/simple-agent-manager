@@ -117,13 +117,21 @@ func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.
 	}
 }
 
-func TestHandleGitCredentialRejectsLocalExchangeForNonPrimaryWorkspace(t *testing.T) {
+// TestHandleGitCredentialAllowsLocalExchangeForRegisteredSecondaryWorkspace
+// verifies that a bearerless loopback request for a SECONDARY workspace that is
+// registered in the runtime map is authorized and exchanges using that
+// workspace's own callback token. All workspaces running on the node are treated
+// equally — there is no longer a primary-only gate.
+func TestHandleGitCredentialAllowsLocalExchangeForRegisteredSecondaryWorkspace(t *testing.T) {
 	t.Parallel()
 
-	var controlPlaneCalled atomic.Bool
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		controlPlaneCalled.Store(true)
-		w.WriteHeader(http.StatusOK)
+	var requestedPath string
+	var requestedAuth string
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"ghs_secondary_token","expiresAt":"2026-01-01T00:00:00Z"}`))
 	}))
 	defer controlPlane.Close()
 
@@ -135,11 +143,47 @@ func TestHandleGitCredentialRejectsLocalExchangeForNonPrimaryWorkspace(t *testin
 	rec := httptest.NewRecorder()
 	s.handleGitCredential(rec, req)
 
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if requestedPath != "/api/workspaces/ws-secondary/git-token" {
+		t.Fatalf("expected exchange for ws-secondary, got path %q", requestedPath)
+	}
+	if requestedAuth != "Bearer secondary-callback-token" {
+		t.Fatalf("expected secondary workspace callback token, got %q", requestedAuth)
+	}
+	if got := rec.Body.String(); !strings.Contains(got, "password=ghs_secondary_token") {
+		t.Fatalf("expected credential response, got:\n%s", got)
+	}
+}
+
+// TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace verifies
+// that a bearerless loopback request for a workspace id that is NOT registered
+// on the node (not primary, not in the runtime map) is rejected with 401 and
+// never reaches the control plane.
+func TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace(t *testing.T) {
+	t.Parallel()
+
+	var controlPlaneCalled atomic.Bool
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		controlPlaneCalled.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer controlPlane.Close()
+
+	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-unknown", nil)
+	req.RemoteAddr = "172.17.0.2:52144"
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
 	if controlPlaneCalled.Load() {
-		t.Fatal("control plane should not be called for bearerless local exchange targeting another workspace")
+		t.Fatal("control plane should not be called for an unregistered workspace")
 	}
 }
 

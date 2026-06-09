@@ -152,16 +152,31 @@ func isAuthorizedGitCredentialRequest(s *Server, r *http.Request, workspaceID st
 	if bearerTokenFromHeader(r.Header.Get("Authorization")) != "" {
 		return s.isValidCallbackAuth(r, workspaceID)
 	}
-	return isLocalGitCredentialExchange(r) && isPrimaryWorkspaceGitCredentialRequest(s, workspaceID)
+	return isLocalGitCredentialExchange(r) && isKnownWorkspaceGitCredentialRequest(s, workspaceID)
 }
 
-func isPrimaryWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
+// isKnownWorkspaceGitCredentialRequest authorizes a bearerless loopback credential
+// exchange for ANY workspace currently running on this node — the node's primary
+// workspace and every secondary workspace registered in the runtime map are treated
+// equally. The control-plane exchange still returns a tightly scoped (per-workspace,
+// single-repo, ~1h, owner-scoped) token, so equal treatment here does not widen the
+// blast radius: it only lets each running workspace refresh its own token over the
+// loopback interface. An empty workspace id defaults to the node's primary so the
+// single-workspace host path is unchanged.
+func isKnownWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
 	requestedWorkspaceID := strings.TrimSpace(workspaceID)
 	primaryWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
 	if requestedWorkspaceID == "" {
 		requestedWorkspaceID = primaryWorkspaceID
 	}
-	return primaryWorkspaceID != "" && requestedWorkspaceID == primaryWorkspaceID
+	if requestedWorkspaceID == "" {
+		return false
+	}
+	if primaryWorkspaceID != "" && requestedWorkspaceID == primaryWorkspaceID {
+		return true
+	}
+	_, ok := s.getWorkspaceRuntime(requestedWorkspaceID)
+	return ok
 }
 
 func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {
