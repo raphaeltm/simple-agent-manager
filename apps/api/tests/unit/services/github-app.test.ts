@@ -463,64 +463,45 @@ describe('verifyWebhookSignature', () => {
 });
 
 describe('parseGitmodules', () => {
-  it('resolves https GitHub submodule URLs to lowercased owner/repo and strips .git', () => {
-    const content = [
-      '[submodule "lib"]',
-      '\tpath = vendor/lib',
-      '\turl = https://github.com/Acme/Shared-Lib.git',
-    ].join('\n');
-
-    expect(parseGitmodules(content, 'acme')).toEqual([
-      { path: 'vendor/lib', repository: 'acme/shared-lib' },
-    ]);
-  });
-
-  it('resolves scp-like ssh submodule URLs (git@github.com:owner/repo.git)', () => {
-    const content = [
-      '[submodule "lib"]',
-      '\tpath = vendor/lib',
-      '\turl = git@github.com:Acme/Shared-Lib.git',
-    ].join('\n');
-
-    expect(parseGitmodules(content, 'acme')).toEqual([
-      { path: 'vendor/lib', repository: 'acme/shared-lib' },
-    ]);
-  });
-
-  it('resolves relative submodule URLs against the parent owner', () => {
-    const content = [
-      '[submodule "sibling"]',
-      '\tpath = sibling',
-      '\turl = ../sibling-repo.git',
-    ].join('\n');
-
-    expect(parseGitmodules(content, 'Acme')).toEqual([
-      { path: 'sibling', repository: 'acme/sibling-repo' },
-    ]);
-  });
-
-  it('returns repository: null for non-GitHub hosts (unsupported-url surface)', () => {
-    const content = [
-      '[submodule "external"]',
-      '\tpath = external',
-      '\turl = https://gitlab.com/acme/external.git',
-    ].join('\n');
-
-    expect(parseGitmodules(content, 'acme')).toEqual([
-      { path: 'external', repository: null },
-    ]);
-  });
-
-  it('returns repository: null for a malformed URL', () => {
-    const content = [
-      '[submodule "broken"]',
-      '\tpath = broken',
-      '\turl = not a url',
-    ].join('\n');
-
-    expect(parseGitmodules(content, 'acme')).toEqual([
-      { path: 'broken', repository: null },
-    ]);
+  it.each([
+    {
+      name: 'resolves https GitHub submodule URLs to lowercased owner/repo and strips .git',
+      url: 'https://github.com/Acme/Shared-Lib.git',
+      path: 'vendor/lib',
+      owner: 'acme',
+      expected: { path: 'vendor/lib', repository: 'acme/shared-lib' },
+    },
+    {
+      name: 'resolves scp-like ssh submodule URLs (git@github.com:owner/repo.git)',
+      url: 'git@github.com:Acme/Shared-Lib.git',
+      path: 'vendor/lib',
+      owner: 'acme',
+      expected: { path: 'vendor/lib', repository: 'acme/shared-lib' },
+    },
+    {
+      name: 'resolves relative submodule URLs against the parent owner',
+      url: '../sibling-repo.git',
+      path: 'sibling',
+      owner: 'Acme',
+      expected: { path: 'sibling', repository: 'acme/sibling-repo' },
+    },
+    {
+      name: 'returns repository: null for non-GitHub hosts (unsupported-url surface)',
+      url: 'https://gitlab.com/acme/external.git',
+      path: 'external',
+      owner: 'acme',
+      expected: { path: 'external', repository: null },
+    },
+    {
+      name: 'returns repository: null for a malformed URL',
+      url: 'not a url',
+      path: 'broken',
+      owner: 'acme',
+      expected: { path: 'broken', repository: null },
+    },
+  ])('$name', ({ url, path, owner, expected }) => {
+    const content = ['[submodule "entry"]', `\tpath = ${path}`, `\turl = ${url}`].join('\n');
+    expect(parseGitmodules(content, owner)).toEqual([expected]);
   });
 
   it('parses multiple submodule entries and preserves order', () => {

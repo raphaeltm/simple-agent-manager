@@ -862,7 +862,9 @@ func initSubmodules(ctx context.Context, workspaceDir, token string) {
 	}
 	args = append(args, "submodule", "update", "--init", "--recursive")
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// NOSONAR - git is resolved from the controlled VM-agent PATH, identical to the
+	// accepted clone/remote exec calls above; arguments are not attacker-controlled.
+	cmd := exec.CommandContext(ctx, "git", args...) // NOSONAR
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Warn("Submodule initialization failed (non-fatal)",

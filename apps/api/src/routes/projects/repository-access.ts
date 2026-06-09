@@ -9,7 +9,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { and, count, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -85,6 +85,34 @@ async function tryGetAccessibleRepoNames(
     });
     return null;
   }
+}
+
+/**
+ * Resolve the owned GitHub-backed project plus its external installation id for a
+ * repository-access route. Throws a 400 (with the caller-supplied message) for
+ * non-GitHub projects. Shared by the `available` and `discover` handlers.
+ */
+async function resolveGitHubProjectContext(
+  c: Context<{ Bindings: Env }>,
+  nonGithubMessage: string
+): Promise<{
+  userId: string;
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  project: schema.Project;
+  externalInstallationId: string;
+}> {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id') ?? '';
+  const db = drizzle(c.env.DATABASE, { schema });
+  const project = await requireOwnedProject(db, projectId, userId);
+
+  if (project.repoProvider && project.repoProvider !== 'github') {
+    throw errors.badRequest(nonGithubMessage);
+  }
+
+  const installation = await requireOwnedInstallation(db, project.installationId, userId);
+  const externalInstallationId = getExternalInstallationId(installation);
+  return { userId, db, project, externalInstallationId };
 }
 
 /** GET /:id/repository-access — list additional repositories with live status. */
@@ -267,17 +295,10 @@ repositoryAccessRoutes.delete('/:id/repository-access/:repoRowId', async (c) => 
  *  Returns the live user∩app intersection minus the primary repository and any
  *  repositories already added to the project's repository-access set. */
 repositoryAccessRoutes.get('/:id/repository-access/available', async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireOwnedProject(db, projectId, userId);
-
-  if (project.repoProvider && project.repoProvider !== 'github') {
-    throw errors.badRequest('Repository access is only supported for GitHub-backed projects');
-  }
-
-  const installation = await requireOwnedInstallation(db, project.installationId, userId);
-  const externalInstallationId = getExternalInstallationId(installation);
+  const { userId, db, project, externalInstallationId } = await resolveGitHubProjectContext(
+    c,
+    'Repository access is only supported for GitHub-backed projects'
+  );
   const accessToken = await requireGitHubUserAccessToken(c, userId);
   const repositories: GitHubRepositoryAccess[] = await getUserInstallationRepositories(
     accessToken,
@@ -318,17 +339,10 @@ repositoryAccessRoutes.get('/:id/repository-access/available', async (c) => {
 
 /** GET /:id/repository-access/discover — suggest repos from the primary repo's `.gitmodules`. */
 repositoryAccessRoutes.get('/:id/repository-access/discover', async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireOwnedProject(db, projectId, userId);
-
-  if (project.repoProvider && project.repoProvider !== 'github') {
-    throw errors.badRequest('Submodule discovery is only supported for GitHub-backed projects');
-  }
-
-  const installation = await requireOwnedInstallation(db, project.installationId, userId);
-  const externalInstallationId = getExternalInstallationId(installation);
+  const { userId, db, project, externalInstallationId } = await resolveGitHubProjectContext(
+    c,
+    'Submodule discovery is only supported for GitHub-backed projects'
+  );
   const [parentOwner, parentRepo] = project.repository.split('/');
   if (!parentOwner || !parentRepo) {
     throw errors.badRequest('Project repository is malformed');

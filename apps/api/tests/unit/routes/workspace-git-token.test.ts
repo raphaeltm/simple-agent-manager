@@ -184,7 +184,7 @@ describe('workspace git-token GitHub scoping', () => {
         // Thenable: queries that await `.where()` directly (no `.limit()`) resolve
         // from whereResponses. The `.limit()` chains never trigger this because the
         // builder itself is not awaited — only the Promise returned by `.limit()`.
-        then: (
+        then: ( // NOSONAR - intentional thenable mirroring drizzle's awaitable query builder.
           onFulfilled: (value: unknown[]) => unknown,
           onRejected?: (reason: unknown) => unknown
         ) => Promise.resolve(resolveQueued(whereResponses)).then(onFulfilled, onRejected),
