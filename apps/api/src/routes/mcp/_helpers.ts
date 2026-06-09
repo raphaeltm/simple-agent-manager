@@ -305,5 +305,42 @@ export async function resolveSessionId(env: Env, workspaceId: string): Promise<s
   }
 }
 
+// ─── Shared CRUD error mapping ──────────────────────────────────────────────
+
+/**
+ * Map service-layer errors to JSON-RPC responses. Shared by profile-tools and skill-tools
+ * to avoid duplicating the same status-code switch in every handler.
+ *
+ * @param notFoundMessage - message returned for 404 errors
+ * @param fallbackPrefix - prefix for the generic error message (e.g., "Failed to get skill")
+ * @param logTag - structured log tag (e.g., "mcp.get_skill_failed")
+ * @param logCtx - extra fields for the structured log entry
+ */
+export function mapServiceError(
+  requestId: string | number | null,
+  err: unknown,
+  opts: {
+    notFoundMessage?: string;
+    fallbackPrefix: string;
+    logTag: string;
+    logCtx?: Record<string, unknown>;
+    clientErrorCodes?: number[];
+  },
+): JsonRpcResponse {
+  const status = (err as { statusCode?: number }).statusCode;
+  const message = (err as Error).message;
+
+  if (opts.notFoundMessage && status === 404) {
+    return jsonRpcError(requestId, INVALID_PARAMS, opts.notFoundMessage);
+  }
+  const clientCodes = opts.clientErrorCodes ?? [400, 403, 409];
+  if (status && clientCodes.includes(status)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, message);
+  }
+
+  log.error(opts.logTag, { ...opts.logCtx, error: String(err) });
+  return jsonRpcError(requestId, INTERNAL_ERROR, `${opts.fallbackPrefix}: ${message}`);
+}
+
 // Re-export tool definitions from dedicated file
 export { MCP_TOOLS } from './tool-definitions';

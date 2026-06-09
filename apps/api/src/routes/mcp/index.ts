@@ -106,6 +106,13 @@ import {
   handleUpdateSessionTopic,
 } from './session-tools';
 import {
+  handleCreateSkill,
+  handleDeleteSkill,
+  handleGetSkill,
+  handleListSkills,
+  handleUpdateSkill,
+} from './skill-tools';
+import {
   handleCompleteTask,
   handleGetTaskDetails,
   handleListTasks,
@@ -340,6 +347,17 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleRemoveProfileEnvVar(requestId, toolArgs, tokenData, c.env));
         case 'list_profile_env_vars':
           return c.json(await handleListProfileEnvVars(requestId, toolArgs, tokenData, c.env));
+        // ─── Skill tools ──────────────────────────────────────────────
+        case 'list_skills':
+          return c.json(await handleListSkills(requestId, toolArgs, tokenData, c.env));
+        case 'get_skill':
+          return c.json(await handleGetSkill(requestId, toolArgs, tokenData, c.env));
+        case 'create_skill':
+          return c.json(await handleCreateSkill(requestId, toolArgs, tokenData, c.env));
+        case 'update_skill':
+          return c.json(await handleUpdateSkill(requestId, toolArgs, tokenData, c.env));
+        case 'delete_skill':
+          return c.json(await handleDeleteSkill(requestId, toolArgs, tokenData, c.env));
         // ─── Onboarding tools ─────────────────────────────────────────
         case 'get_repo_setup_guide':
           // Synchronous — no async I/O needed for static content

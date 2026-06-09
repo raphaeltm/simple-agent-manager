@@ -3,69 +3,9 @@
  *
  * Lets agents manage reusable agent profile configurations for their project.
  */
+import { SHARED_CONFIG_FIELD_PROPERTIES, VALID_VALUES_HINT } from './tool-definitions-shared-fields';
 
-/** Shared property schemas for profile fields used by both create and update tools. */
-const PROFILE_FIELD_PROPERTIES = {
-  description: {
-    type: 'string',
-    description: 'Human-readable description of the profile\'s purpose',
-  },
-  agentType: {
-    type: 'string',
-    description: 'Agent type (e.g., claude-code, codex). Defaults to project default.',
-  },
-  model: {
-    type: 'string',
-    description: 'Model identifier override. Omit to use the project or platform default.',
-  },
-  permissionMode: {
-    type: 'string',
-    description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
-  },
-  systemPromptAppend: {
-    type: 'string',
-    description: 'Text appended to the agent\'s system prompt',
-  },
-  maxTurns: {
-    type: 'number',
-    description: 'Maximum conversation turns',
-  },
-  timeoutMinutes: {
-    type: 'number',
-    description: 'Task timeout in minutes',
-  },
-  vmSizeOverride: {
-    type: 'string',
-    description: 'VM size override: small, medium, large',
-  },
-  provider: {
-    type: 'string',
-    description: 'Cloud provider: hetzner, scaleway, gcp',
-  },
-  vmLocation: {
-    type: 'string',
-    description: 'VM location/region for the provider',
-  },
-  workspaceProfile: {
-    type: 'string',
-    description: 'Workspace profile: full, lightweight',
-  },
-  devcontainerConfigName: {
-    type: 'string',
-    description: 'Devcontainer config name (subdirectory under .devcontainer/). Omit for auto-discover default.',
-  },
-  taskMode: {
-    type: 'string',
-    description: 'Default task mode for this profile. Most profiles should use "task" or leave this unset; "conversation" requires active lifecycle management.',
-  },
-} as const;
-
-/** Shared valid-values hint appended to create and update tool descriptions. */
-const VALID_VALUES_HINT =
-  'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
-  'Valid vmSize values: small, medium, large. ' +
-  'Valid taskMode values: task, conversation. ' +
-  'Valid workspaceProfile values: full, lightweight.';
+const PROFILE_FIELD_PROPERTIES = SHARED_CONFIG_FIELD_PROPERTIES;
 
 export const PROFILE_TOOLS = [
   {

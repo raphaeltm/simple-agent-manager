@@ -19,13 +19,13 @@ SAM has HTTP API routes and services for project skills, but agents using the SA
 
 ## Implementation Checklist
 
-- [ ] Add MCP skill tool definitions for `list_skills`, `get_skill`, `create_skill`, `update_skill`, and `delete_skill`.
-- [ ] Add MCP skill handlers that call existing skill service functions using the MCP token project/user scope.
-- [ ] Wire the skill tools into `apps/api/src/routes/mcp/index.ts` dispatch and `MCP_TOOLS`.
-- [ ] Cover create/update field extraction for all skill/profile override fields, including `resourceRequirementsJson` and `defaultProfileId`.
-- [ ] Add focused unit tests for skill MCP handlers covering happy paths, validation errors, not-found/conflict handling, and service call payloads.
-- [ ] Add or update MCP registration tests so `tools/list` exposes the new skill tools.
-- [ ] Run focused API tests, then broader API validation for the changed package.
+- [x] Add MCP skill tool definitions for `list_skills`, `get_skill`, `create_skill`, `update_skill`, and `delete_skill`.
+- [x] Add MCP skill handlers that call existing skill service functions using the MCP token project/user scope.
+- [x] Wire the skill tools into `apps/api/src/routes/mcp/index.ts` dispatch and `MCP_TOOLS`.
+- [x] Cover create/update field extraction for all skill/profile override fields, including `resourceRequirementsJson` and `defaultProfileId`.
+- [x] Add focused unit tests for skill MCP handlers covering happy paths, validation errors, not-found/conflict handling, and service call payloads.
+- [x] Add or update MCP registration tests so `tools/list` exposes the new skill tools.
+- [x] Run focused API tests, then broader API validation for the changed package.
 
 ## Acceptance Criteria
 

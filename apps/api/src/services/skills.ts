@@ -170,6 +170,7 @@ export async function updateSkill(
   body: UpdateSkillRequest
 ): Promise<AgentSkill> {
   const skill = await getSkill(db, projectId, skillId, userId);
+  if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be modified');
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
@@ -205,7 +206,8 @@ export async function updateSkill(
 }
 
 export async function deleteSkill(db: Db, projectId: string, skillId: string, userId: string): Promise<void> {
-  await getSkill(db, projectId, skillId, userId);
+  const skill = await getSkill(db, projectId, skillId, userId);
+  if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be deleted');
   await db
     .delete(schema.skills)
     .where(and(eq(schema.skills.id, skillId), eq(schema.skills.projectId, projectId)));

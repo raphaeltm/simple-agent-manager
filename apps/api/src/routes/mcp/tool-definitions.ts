@@ -21,6 +21,7 @@ export { POLICY_TOOLS } from './tool-definitions-policy-tools';
 export { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 export { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
 export { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
+export { SKILL_TOOLS } from './tool-definitions-skill-tools';
 export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
@@ -34,6 +35,7 @@ import { POLICY_TOOLS } from './tool-definitions-policy-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
+import { SKILL_TOOLS } from './tool-definitions-skill-tools';
 import { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
@@ -47,6 +49,7 @@ export const MCP_TOOLS = [
   ...ORCHESTRATION_TOOLS,
   ...TRIGGER_TOOLS,
   ...PROFILE_TOOLS,
+  ...SKILL_TOOLS,
   ...KNOWLEDGE_TOOLS,
   ...MISSION_TOOLS,
   ...ORCHESTRATOR_LIFECYCLE_TOOLS,
