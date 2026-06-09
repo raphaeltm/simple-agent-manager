@@ -169,8 +169,8 @@ importers:
         specifier: 3.1033.0
         version: 3.1033.0
       '@cloudflare/sandbox':
-        specifier: ^0.9.2
-        version: 0.9.2(@xterm/xterm@5.5.0)
+        specifier: ^0.12.1
+        version: 0.12.1(@xterm/xterm@5.5.0)
       '@hono/node-server':
         specifier: 1.19.9
         version: 1.19.9(hono@4.12.14)
@@ -1208,8 +1208,8 @@ packages:
   '@chevrotain/utils@12.0.0':
     resolution: {integrity: sha512-lB59uJoaGIfOOL9knQqQRfhl9g7x8/wqFkp13zTdkRu1huG9kg6IJs1O8hqj9rs6h7orGxHJUKb+mX3rPbWGhA==}
 
-  '@cloudflare/containers@0.3.3':
-    resolution: {integrity: sha512-ZSXmArCoo5bVTp8pGAJdl5WKmwtZDcffJqr4JcZEbSmMIFjU+AlBqgysuxXMgu03Rp239cOdqerbjK7H0K2krQ==}
+  '@cloudflare/containers@0.3.7':
+    resolution: {integrity: sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw==}
 
   '@cloudflare/kv-asset-handler@0.4.2':
     resolution: {integrity: sha512-SIOD2DxrRRwQ+jgzlXCqoEFiKOFqaPjhnNTGKXSRLvp1HiOvapLaFG2kEr9dYQTYe8rKrd9uvDUzmAITeNyaHQ==}
@@ -1219,8 +1219,8 @@ packages:
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
 
-  '@cloudflare/sandbox@0.9.2':
-    resolution: {integrity: sha512-rQJVG79kxrU87yExXMw4edEzZfe0geYTAIqaFabAzpnAxtnMHTLswxB/hZ3hKLBE27BEUB/FXSdkBllrn6TnDQ==}
+  '@cloudflare/sandbox@0.12.1':
+    resolution: {integrity: sha512-P1ZmNDLYtuEY1ZUcAx0OgTol98VqS617LGd4nf1RTOjSV2yHLDAp59NI36/gg3/pxkHPgmAEyFIjH/ie8FoA7g==}
     peerDependencies:
       '@openai/agents': ^0.3.3
       '@opencode-ai/sdk': ^1.1.40
@@ -4554,8 +4554,8 @@ packages:
   caniuse-lite@1.0.30001766:
     resolution: {integrity: sha512-4C0lfJ0/YPjJQHagaE9x2Elb69CIqEPZeG0anQt9SIvIoOH4a4uaRl73IavyO+0qZh6MDLH//DrXThEYKHkmYA==}
 
-  capnweb@0.6.1:
-    resolution: {integrity: sha512-fmhV26QPd1ewf5R74h55oVZnGwIcSaRMzbfLQUy8+zOBjuTmT3KXoT8wxHvnp1m9Ht9BoUUS5ZwNLoVLfQTyBg==}
+  capnweb@0.8.0:
+    resolution: {integrity: sha512-BK/TuXUiyfLSKsmjojn70yN7oYG/JJzoURZ3tckjg5Zj2KcygPm0A5jyOlswK7SYB4f0Gh9tt+RZ132b80iLfA==}
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -5971,6 +5971,10 @@ packages:
 
   hono@4.12.14:
     resolution: {integrity: sha512-am5zfg3yu6sqn5yjKBNqhnTX7Cv+m00ox+7jbaKkrLMRJ4rAdldd1xPd/JzbBWspqaQv6RSTrgFN95EsfhC+7w==}
+    engines: {node: '>=16.9.0'}
+
+  hono@4.12.25:
+    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
     engines: {node: '>=16.9.0'}
 
   hosted-git-info@7.0.2:
@@ -9868,18 +9872,18 @@ snapshots:
 
   '@chevrotain/utils@12.0.0': {}
 
-  '@cloudflare/containers@0.3.3': {}
+  '@cloudflare/containers@0.3.7': {}
 
   '@cloudflare/kv-asset-handler@0.4.2': {}
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
-  '@cloudflare/sandbox@0.9.2(@xterm/xterm@5.5.0)':
+  '@cloudflare/sandbox@0.12.1(@xterm/xterm@5.5.0)':
     dependencies:
-      '@cloudflare/containers': 0.3.3
+      '@cloudflare/containers': 0.3.7
       aws4fetch: 1.0.20
-      capnweb: 0.6.1
-      hono: 4.12.14
+      capnweb: 0.8.0
+      hono: 4.12.25
     optionalDependencies:
       '@xterm/xterm': 5.5.0
 
@@ -13162,7 +13166,7 @@ snapshots:
 
   caniuse-lite@1.0.30001766: {}
 
-  capnweb@0.6.1: {}
+  capnweb@0.8.0: {}
 
   ccount@2.0.1: {}
 
@@ -14964,6 +14968,8 @@ snapshots:
       hono: 4.12.14
 
   hono@4.12.14: {}
+
+  hono@4.12.25: {}
 
   hosted-git-info@7.0.2:
     dependencies:
