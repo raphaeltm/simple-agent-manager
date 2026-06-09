@@ -342,6 +342,12 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('add_profile_env_var');
       expect(toolNames).toContain('remove_profile_env_var');
       expect(toolNames).toContain('list_profile_env_vars');
+      // Skill tools
+      expect(toolNames).toContain('list_skills');
+      expect(toolNames).toContain('get_skill');
+      expect(toolNames).toContain('create_skill');
+      expect(toolNames).toContain('update_skill');
+      expect(toolNames).toContain('delete_skill');
       // Orchestrator lifecycle tools
       expect(toolNames).toContain('get_orchestrator_status');
       expect(toolNames).toContain('get_scheduling_queue');
@@ -349,7 +355,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('resume_mission');
       expect(toolNames).toContain('cancel_mission');
       expect(toolNames).toContain('override_task_state');
-      expect(body.result.tools).toHaveLength(84);
+      expect(body.result.tools).toHaveLength(89);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
