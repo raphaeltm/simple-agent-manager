@@ -21,7 +21,7 @@
     "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx'"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "0.21.0",
+    "@agentclientprotocol/sdk": "0.25.0",
     "prism-react-renderer": "catalog:",
     "react-markdown": "catalog:",
     "react-virtuoso": "catalog:",

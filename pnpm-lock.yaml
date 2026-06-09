@@ -470,8 +470,8 @@ importers:
   packages/acp-client:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: 0.21.0
-        version: 0.21.0(zod@4.4.3)
+        specifier: 0.25.0
+        version: 0.25.0(zod@4.4.3)
       prism-react-renderer:
         specifier: 'catalog:'
         version: 2.4.1(react@19.1.0)
@@ -713,8 +713,8 @@ packages:
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
 
-  '@agentclientprotocol/sdk@0.21.0':
-    resolution: {integrity: sha512-ONj+Q8qOdNQp5XbH5jnMwzT9IKZJsSN0p0lkceS4GtUtNOPVLpNzSS8gqQdGMKfBvA0ESbkL8BTaSN1Rc9miEw==}
+  '@agentclientprotocol/sdk@0.25.0':
+    resolution: {integrity: sha512-wU1VgXNtMvdVotX49txc3WJUDV+/QbLpsgjMvFhlRmp37osdLbI7L7y+iwAlQATwfjLxcv1r1p3ZxZBcXlGhcQ==}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -8995,7 +8995,7 @@ snapshots:
 
   '@adobe/css-tools@4.4.4': {}
 
-  '@agentclientprotocol/sdk@0.21.0(zod@4.4.3)':
+  '@agentclientprotocol/sdk@0.25.0(zod@4.4.3)':
     dependencies:
       zod: 4.4.3
 
