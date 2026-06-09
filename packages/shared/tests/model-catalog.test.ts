@@ -8,8 +8,8 @@ describe('model-catalog', () => {
     it('returns grouped models for claude-code', () => {
       const groups = getModelGroupsForAgent('claude-code');
       expect(groups.length).toBeGreaterThanOrEqual(2);
-      expect(groups[0]!.label).toContain('Claude 4');
-      expect(groups[0]!.models.length).toBeGreaterThanOrEqual(4);
+      expect(groups[0]!.label).toContain('Claude');
+      expect(groups[0]!.models.length).toBeGreaterThanOrEqual(1);
     });
 
     it('returns grouped models for openai-codex', () => {
@@ -30,7 +30,9 @@ describe('model-catalog', () => {
     it('returns grouped models for google-gemini', () => {
       const groups = getModelGroupsForAgent('google-gemini');
       expect(groups.length).toBeGreaterThanOrEqual(1);
-      expect(groups[0]!.models.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
+      const allModels = groups.flatMap((g) => g.models);
+      expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
     });
 
     it('returns empty array for unknown agent type', () => {
@@ -45,7 +47,9 @@ describe('model-catalog', () => {
   describe('getModelsForAgent', () => {
     it('returns flat list of models for claude-code', () => {
       const models = getModelsForAgent('claude-code');
-      expect(models.length).toBeGreaterThanOrEqual(7);
+      expect(models.length).toBeGreaterThanOrEqual(9);
+      expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-7')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-4-6')).toBe(true);
     });
