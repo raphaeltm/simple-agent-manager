@@ -25,6 +25,7 @@ import {
   jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
+  mapServiceError,
   type McpTokenData,
 } from './_helpers';
 
@@ -74,8 +75,11 @@ export async function handleListAgentProfiles(
       }],
     });
   } catch (err) {
-    log.error('mcp.list_agent_profiles_failed', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to list profiles: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      fallbackPrefix: 'Failed to list profiles',
+      logTag: 'mcp.list_agent_profiles_failed',
+      logCtx: { projectId: tokenData.projectId },
+    });
   }
 }
 
@@ -120,12 +124,12 @@ export async function handleGetAgentProfile(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Agent profile not found: ${profileId}`);
-    }
-    log.error('mcp.get_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get profile: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      notFoundMessage: `Agent profile not found: ${profileId}`,
+      fallbackPrefix: 'Failed to get profile',
+      logTag: 'mcp.get_agent_profile_failed',
+      logCtx: { profileId, projectId: tokenData.projectId },
+    });
   }
 }
 
@@ -168,12 +172,12 @@ export async function handleCreateAgentProfile(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 400 || status === 409) {
-      return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
-    }
-    log.error('mcp.create_agent_profile_failed', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create profile: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      fallbackPrefix: 'Failed to create profile',
+      logTag: 'mcp.create_agent_profile_failed',
+      logCtx: { projectId: tokenData.projectId },
+      clientErrorCodes: [400, 409],
+    });
   }
 }
 
@@ -218,15 +222,12 @@ export async function handleUpdateAgentProfile(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Agent profile not found: ${profileId}`);
-    }
-    if (status === 400 || status === 409) {
-      return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
-    }
-    log.error('mcp.update_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to update profile: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      notFoundMessage: `Agent profile not found: ${profileId}`,
+      fallbackPrefix: 'Failed to update profile',
+      logTag: 'mcp.update_agent_profile_failed',
+      logCtx: { profileId, projectId: tokenData.projectId },
+    });
   }
 }
 
@@ -261,12 +262,12 @@ export async function handleDeleteAgentProfile(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Agent profile not found: ${profileId}`);
-    }
-    log.error('mcp.delete_agent_profile_failed', { profileId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to delete profile: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      notFoundMessage: `Agent profile not found: ${profileId}`,
+      fallbackPrefix: 'Failed to delete profile',
+      logTag: 'mcp.delete_agent_profile_failed',
+      logCtx: { profileId, projectId: tokenData.projectId },
+    });
   }
 }
 

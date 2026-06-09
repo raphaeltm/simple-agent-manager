@@ -2,6 +2,8 @@
  * MCP skill tools — CRUD operations for project-scoped skills.
  *
  * Wires MCP handlers to existing service functions in services/skills.ts.
+ * Reuses extractProfileFields for the shared field subset and mapServiceError
+ * for error mapping to avoid duplicating patterns from profile-tools.
  */
 import type { CreateSkillRequest, UpdateSkillRequest } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
@@ -11,33 +13,26 @@ import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import * as skillService from '../../services/skills';
 import {
-  INTERNAL_ERROR,
-  INVALID_PARAMS,
-  jsonRpcError,
   type JsonRpcResponse,
+  jsonRpcError,
   jsonRpcSuccess,
+  INVALID_PARAMS,
+  mapServiceError,
   type McpTokenData,
 } from './_helpers';
+import { extractProfileFields } from './profile-tools';
 
-/** Extract optional skill fields from MCP params — shared by create and update handlers. */
-export function extractSkillFields(params: Record<string, unknown>): Omit<UpdateSkillRequest, 'name'> {
-  const fields: Omit<UpdateSkillRequest, 'name'> = {};
-  if (typeof params.description === 'string') fields.description = params.description;
-  if (typeof params.agentType === 'string') fields.agentType = params.agentType;
-  if (typeof params.model === 'string') fields.model = params.model;
-  if (typeof params.permissionMode === 'string') fields.permissionMode = params.permissionMode;
-  if (typeof params.systemPromptAppend === 'string') fields.systemPromptAppend = params.systemPromptAppend;
-  if (typeof params.maxTurns === 'number') fields.maxTurns = params.maxTurns;
-  if (typeof params.timeoutMinutes === 'number') fields.timeoutMinutes = params.timeoutMinutes;
-  if (typeof params.vmSizeOverride === 'string') fields.vmSizeOverride = params.vmSizeOverride;
-  if (typeof params.provider === 'string') fields.provider = params.provider;
-  if (typeof params.vmLocation === 'string') fields.vmLocation = params.vmLocation;
-  if (typeof params.workspaceProfile === 'string') fields.workspaceProfile = params.workspaceProfile;
-  if (typeof params.devcontainerConfigName === 'string') fields.devcontainerConfigName = params.devcontainerConfigName;
-  if (typeof params.taskMode === 'string') fields.taskMode = params.taskMode;
+/** Extract skill-specific fields that go beyond the shared profile fields. */
+function extractSkillExtraFields(params: Record<string, unknown>): Partial<UpdateSkillRequest> {
+  const fields: Partial<UpdateSkillRequest> = {};
   if (typeof params.resourceRequirementsJson === 'string') fields.resourceRequirementsJson = params.resourceRequirementsJson;
   if (typeof params.defaultProfileId === 'string') fields.defaultProfileId = params.defaultProfileId;
   return fields;
+}
+
+/** Extract all optional skill fields from MCP params — shared profile fields + skill-specific extras. */
+export function extractSkillFields(params: Record<string, unknown>): Omit<UpdateSkillRequest, 'name'> {
+  return { ...extractProfileFields(params), ...extractSkillExtraFields(params) };
 }
 
 export async function handleListSkills(
@@ -67,8 +62,11 @@ export async function handleListSkills(
       }],
     });
   } catch (err) {
-    log.error('mcp.list_skills_failed', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to list skills: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      fallbackPrefix: 'Failed to list skills',
+      logTag: 'mcp.list_skills_failed',
+      logCtx: { projectId: tokenData.projectId },
+    });
   }
 }
 
@@ -115,12 +113,12 @@ export async function handleGetSkill(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Skill not found: ${skillId}`);
-    }
-    log.error('mcp.get_skill_failed', { skillId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get skill: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      notFoundMessage: `Skill not found: ${skillId}`,
+      fallbackPrefix: 'Failed to get skill',
+      logTag: 'mcp.get_skill_failed',
+      logCtx: { skillId, projectId: tokenData.projectId },
+    });
   }
 }
 
@@ -163,12 +161,12 @@ export async function handleCreateSkill(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 400 || status === 409) {
-      return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
-    }
-    log.error('mcp.create_skill_failed', { projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create skill: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      fallbackPrefix: 'Failed to create skill',
+      logTag: 'mcp.create_skill_failed',
+      logCtx: { projectId: tokenData.projectId },
+      clientErrorCodes: [400, 409],
+    });
   }
 }
 
@@ -214,15 +212,12 @@ export async function handleUpdateSkill(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Skill not found: ${skillId}`);
-    }
-    if (status === 400 || status === 403 || status === 409) {
-      return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
-    }
-    log.error('mcp.update_skill_failed', { skillId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to update skill: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      notFoundMessage: `Skill not found: ${skillId}`,
+      fallbackPrefix: 'Failed to update skill',
+      logTag: 'mcp.update_skill_failed',
+      logCtx: { skillId, projectId: tokenData.projectId },
+    });
   }
 }
 
@@ -257,14 +252,11 @@ export async function handleDeleteSkill(
       }],
     });
   } catch (err) {
-    const status = (err as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Skill not found: ${skillId}`);
-    }
-    if (status === 403) {
-      return jsonRpcError(requestId, INVALID_PARAMS, (err as Error).message);
-    }
-    log.error('mcp.delete_skill_failed', { skillId, projectId: tokenData.projectId, error: String(err) });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to delete skill: ${(err as Error).message}`);
+    return mapServiceError(requestId, err, {
+      notFoundMessage: `Skill not found: ${skillId}`,
+      fallbackPrefix: 'Failed to delete skill',
+      logTag: 'mcp.delete_skill_failed',
+      logCtx: { skillId, projectId: tokenData.projectId },
+    });
   }
 }
