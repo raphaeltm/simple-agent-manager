@@ -148,6 +148,14 @@ func TestSessionHost_UnkillableProcessWatchdogSignalsError(t *testing.T) {
 	assertNoSecondCompletion(t, completed)
 }
 
+// TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess isolates the
+// watchdog-vs-success race by manually injecting the state monitorProcessExit
+// would install on a successful restart (new process, cleared recovery flag,
+// HostReady), rather than running the full restart path. This lets the test use
+// a 20ms watchdog and deterministically assert the watchdog short-circuits on
+// the cleared flag without nil-ing the freshly-installed process. The full
+// monitorProcessExit restart path is exercised by
+// TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce.
 func TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess(t *testing.T) {
 	host := newRecoveryTestHost(t, 20*time.Millisecond)
 	defer host.Stop()

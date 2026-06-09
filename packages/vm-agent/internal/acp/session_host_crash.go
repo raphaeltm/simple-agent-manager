@@ -197,6 +197,12 @@ func (h *SessionHost) stopCrashedProcessForRecovery(proc agentProcess) {
 	}
 	h.mu.Unlock()
 
+	// We deliberately drop h.mu before calling proc.Stop() so a potentially
+	// long Stop() does not block readers of h.mu. This opens a benign TOCTOU
+	// window: monitorProcessExit may restart the agent and replace h.process
+	// between the unlock and Stop(). That is safe because we act on the
+	// captured `proc` (the old, crashed process) rather than h.process, and
+	// AgentProcess.Stop() is idempotent on an already-stopped/exited process.
 	if err := proc.Stop(); err != nil {
 		slog.Warn("Failed to stop crashed ACP agent process for recovery", "error", err)
 	}

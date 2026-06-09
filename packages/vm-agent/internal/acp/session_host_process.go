@@ -100,10 +100,22 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {
 		return
 	}
-	if crashRecovery.inProgress {
-		h.clearCrashRecoveryLocked()
+	if !crashRecovery.inProgress {
+		// Normal (non-recovery) restart succeeded.
+		h.mu.Unlock()
+		h.broadcastAgentStatus(StatusReady, agentType, "")
+		return
 	}
-	if crashRecovery.inProgress && h.resumeShouldReportTerminalErrorLocked(agentType) {
+
+	// Crash-recovery restart succeeded. Clear the recovery episode state now
+	// that a healthy process is installed, so the watchdog short-circuits and
+	// never tears down the freshly-restarted process. The terminal-error
+	// decision below intentionally keys off agentType via
+	// resumeShouldReportTerminalErrorLocked, NOT off crashRecoveryInProgress,
+	// so clearing the flag here cannot accidentally make the Codex branch
+	// unreachable.
+	h.clearCrashRecoveryLocked()
+	if h.resumeShouldReportTerminalErrorLocked(agentType) {
 		message := fmt.Sprintf("Agent %s LoadSession recovery needs staging validation before being reported as recovered", agentType)
 		h.status = HostError
 		h.statusErr = message
@@ -115,16 +127,12 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	}
 	h.mu.Unlock()
 
-	if crashRecovery.inProgress {
-		h.broadcastAgentStatus(StatusRecovered, agentType, "")
-		h.broadcastAgentCrashReport(h.crashReport(crashRecovery, true, ""))
-		if recoveryNotify != nil {
-			recoveryNotify(crashRecoveredStopReason, nil)
-		}
-		h.reportActivity("idle")
-		return
+	h.broadcastAgentStatus(StatusRecovered, agentType, "")
+	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, true, ""))
+	if recoveryNotify != nil {
+		recoveryNotify(crashRecoveredStopReason, nil)
 	}
-	h.broadcastAgentStatus(StatusReady, agentType, "")
+	h.reportActivity("idle")
 }
 
 func agentExitInfo(err error) string {
