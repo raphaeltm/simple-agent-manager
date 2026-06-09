@@ -1,30 +1,18 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+
+import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data Factories
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  userId: 'user-test-1',
+  sessionId: 'session-test-1',
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+});
 
 function makeProject(overrides: Record<string, unknown> = {}) {
   return {
@@ -99,6 +87,19 @@ const ACTIVE_REPOSITORIES = [
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
+const MOCK_CATALOG = {
+  catalogs: [
+    {
+      provider: 'hetzner',
+      sizes: {
+        small: { vcpu: 2, ramGb: 4, price: '$4.51/mo' },
+        medium: { vcpu: 4, ramGb: 8, price: '$8.21/mo' },
+        large: { vcpu: 8, ramGb: 16, price: '$15.90/mo' },
+      },
+    },
+  ],
+};
+
 async function setupMocks(
   page: Page,
   options: {
@@ -118,105 +119,57 @@ async function setupMocks(
     localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true')
   );
 
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const method = route.request().method();
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  // Exact-path fixtures for top-level collection endpoints.
+  const exactFixtures: Record<string, unknown> = {
+    '/api/dashboard/active-tasks': { tasks: [] },
+    '/api/agents': { agents: [] },
+    '/api/credentials/agent': { credentials: [] },
+    '/api/providers/catalog': MOCK_CATALOG,
+    '/api/projects': { projects: [project] },
+  };
 
-    if (path.includes('/api/auth/')) {
-      return respond(200, MOCK_USER);
-    }
-    if (path.startsWith('/api/notifications')) {
-      return respond(200, { notifications: [], unreadCount: 0 });
-    }
-    if (path === '/api/dashboard/active-tasks') {
-      return respond(200, { tasks: [] });
-    }
-    if (path.startsWith('/api/github')) {
-      return respond(200, []);
-    }
-    if (path === '/api/agents') {
-      return respond(200, { agents: [] });
-    }
-    if (path === '/api/credentials/agent') {
-      return respond(200, { credentials: [] });
-    }
-    if (path.startsWith('/api/credentials')) {
-      return respond(200, [{ provider: 'hetzner', connected: true, id: 'cred-1' }]);
-    }
-    if (path.startsWith('/api/nodes/catalog') || path === '/api/providers/catalog') {
-      return respond(200, {
-        catalogs: [
-          {
-            provider: 'hetzner',
-            sizes: {
-              small: { vcpu: 2, ramGb: 4, price: '$4.51/mo' },
-              medium: { vcpu: 4, ramGb: 8, price: '$8.21/mo' },
-              large: { vcpu: 8, ramGb: 16, price: '$15.90/mo' },
-            },
-          },
-        ],
-      });
-    }
-    if (path.startsWith('/api/nodes')) {
-      return respond(200, { nodes: [] });
-    }
-    if (path === '/api/projects' && method === 'GET') {
-      return respond(200, { projects: [project] });
+  // Prefix fixtures, evaluated top-down (first match wins). Order matters:
+  // `/api/nodes/catalog` precedes `/api/nodes`, and `/api/credentials/agent`
+  // is resolved by the exact table above before the broader credentials prefix.
+  const prefixFixtures: Array<[string, unknown]> = [
+    ['/api/auth/', MOCK_USER],
+    ['/api/notifications', { notifications: [], unreadCount: 0 }],
+    ['/api/github', []],
+    ['/api/nodes/catalog', MOCK_CATALOG],
+    ['/api/credentials', [{ provider: 'hetzner', connected: true, id: 'cred-1' }]],
+    ['/api/nodes', { nodes: [] }],
+  ];
+
+  await setupAuditRoutes(page, (path, respond) => {
+    if (path in exactFixtures) return respond(200, exactFixtures[path]);
+    for (const [prefix, body] of prefixFixtures) {
+      if (path.startsWith(prefix)) return respond(200, body);
     }
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] ?? '';
-
       if (subPath === '/repository-access/available') {
-        if (options.availableError) {
-          return respond(500, { error: 'boom' });
-        }
-        return respond(200, { repositories: available });
+        return options.availableError
+          ? respond(500, { error: 'boom' })
+          : respond(200, { repositories: available });
       }
       if (subPath === '/repository-access') {
-        return respond(200, {
-          primaryRepository: project.repository,
-          repositories,
-        });
+        return respond(200, { primaryRepository: project.repository, repositories });
       }
-      if (subPath === '/repository-access/discover') {
-        return respond(200, { suggestions: [] });
-      }
-      if (subPath === '/runtime-config') {
-        return respond(200, { envVars: [], files: [] });
-      }
-      if (subPath.startsWith('/sessions')) {
-        return respond(200, { sessions: [], total: 0 });
-      }
-      if (subPath.startsWith('/tasks')) {
-        return respond(200, { tasks: [], nextCursor: null });
-      }
-      if (subPath.startsWith('/agent-profiles')) {
-        return respond(200, []);
-      }
-      if (subPath === '/credentials') {
-        return respond(200, { credentials: [] });
-      }
-      if (subPath.startsWith('/deployment')) {
-        return respond(404, { error: 'Not found' });
-      }
-      if (method === 'PATCH') {
-        return respond(200, project);
-      }
-      if (!subPath || subPath === '/') {
-        return respond(200, project);
-      }
+      if (subPath === '/repository-access/discover') return respond(200, { suggestions: [] });
+      if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
+      if (subPath.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
+      if (subPath.startsWith('/tasks')) return respond(200, { tasks: [], nextCursor: null });
+      if (subPath.startsWith('/agent-profiles')) return respond(200, []);
+      if (subPath === '/credentials') return respond(200, { credentials: [] });
+      if (subPath.startsWith('/deployment')) return respond(404, { error: 'Not found' });
+      // Project detail (GET) and settings save (PATCH) both echo the project.
+      return respond(200, project);
     }
 
-    if (path.endsWith('/health')) {
-      return respond(200, { status: 'ok' });
-    }
-
-    return respond(200, {});
+    if (path.endsWith('/health')) return respond(200, { status: 'ok' });
+    return undefined;
   });
 }
 
@@ -235,30 +188,9 @@ async function openCombobox(page: Page) {
   await page.waitForTimeout(400);
 }
 
-async function screenshot(page: Page, name: string) {
-  // The SAM app shell scrolls inside an inner container, so the document never
-  // scrolls and `fullPage` only captures the page top. Scroll the combobox into
-  // the inner container's viewport and capture the viewport region instead so
-  // the Repository Access surface (and any open dropdown overlay) is visible.
-  await page.getByLabel('Additional repository').scrollIntoViewIfNeeded();
-  await page.waitForTimeout(500);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-  });
-}
-
-async function assertNoOverflow(page: Page) {
-  const result = await page.evaluate(() => ({
-    docOverflow: document.documentElement.scrollWidth > window.innerWidth,
-    bodyOverflow: document.body.scrollWidth > window.innerWidth,
-    docWidth: document.documentElement.scrollWidth,
-    viewportWidth: window.innerWidth,
-  }));
-  expect(
-    result.docOverflow,
-    `Document scrollWidth (${result.docWidth}) exceeds viewport (${result.viewportWidth})`
-  ).toBe(false);
-  expect(result.bodyOverflow).toBe(false);
+async function typeInCombobox(page: Page, value: string) {
+  await page.getByLabel('Additional repository').fill(value);
+  await page.waitForTimeout(200);
 }
 
 // ===========================================================================
@@ -296,8 +228,7 @@ test.describe('RepositoryAccess combobox — Mobile (375x667)', () => {
     await setupMocks(page, { available: AVAILABLE_FEW });
     await goToSettings(page);
     await openCombobox(page);
-    await page.getByLabel('Additional repository').fill('other/repo');
-    await page.waitForTimeout(200);
+    await typeInCombobox(page, 'other/repo');
     await expect(page.getByText('other/repo')).toBeVisible();
     await screenshot(page, 'repo-access-manual-entry-mobile');
     await assertNoOverflow(page);
@@ -360,8 +291,7 @@ test.describe('RepositoryAccess combobox — Desktop (1280x800)', () => {
     await setupMocks(page, { available: AVAILABLE_FEW });
     await goToSettings(page);
     await openCombobox(page);
-    await page.getByLabel('Additional repository').fill('bet');
-    await page.waitForTimeout(200);
+    await typeInCombobox(page, 'bet');
     await expect(page.getByText('acme/beta')).toBeVisible();
     await expect(page.getByText('acme/alpha')).not.toBeVisible();
     await screenshot(page, 'repo-access-filtered-desktop');
