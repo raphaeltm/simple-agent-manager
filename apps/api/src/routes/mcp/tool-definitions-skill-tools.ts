@@ -4,61 +4,11 @@
  * Lets agents manage reusable, project-scoped skills. Skills are a profile-override
  * layer: skill fields override the resolved agent profile when a task runs the skill.
  */
+import { SHARED_CONFIG_FIELD_PROPERTIES, VALID_VALUES_HINT } from './tool-definitions-shared-fields';
 
-/** Shared property schemas for skill fields used by both create and update tools. */
+/** Skill field properties = shared config fields + skill-specific extras. */
 const SKILL_FIELD_PROPERTIES = {
-  description: {
-    type: 'string',
-    description: 'Human-readable description of the skill\'s purpose',
-  },
-  agentType: {
-    type: 'string',
-    description: 'Agent type (e.g., claude-code, codex). Defaults to project default.',
-  },
-  model: {
-    type: 'string',
-    description: 'Model identifier override. Omit to use the resolved profile or platform default.',
-  },
-  permissionMode: {
-    type: 'string',
-    description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
-  },
-  systemPromptAppend: {
-    type: 'string',
-    description: 'Text appended to the agent\'s system prompt (combined with the resolved profile\'s append)',
-  },
-  maxTurns: {
-    type: 'number',
-    description: 'Maximum conversation turns',
-  },
-  timeoutMinutes: {
-    type: 'number',
-    description: 'Task timeout in minutes',
-  },
-  vmSizeOverride: {
-    type: 'string',
-    description: 'VM size override: small, medium, large',
-  },
-  provider: {
-    type: 'string',
-    description: 'Cloud provider: hetzner, scaleway, gcp',
-  },
-  vmLocation: {
-    type: 'string',
-    description: 'VM location/region for the provider',
-  },
-  workspaceProfile: {
-    type: 'string',
-    description: 'Workspace profile: full, lightweight',
-  },
-  devcontainerConfigName: {
-    type: 'string',
-    description: 'Devcontainer config name (subdirectory under .devcontainer/). Omit for auto-discover default.',
-  },
-  taskMode: {
-    type: 'string',
-    description: 'Default task mode for this skill. Most skills should use "task" or leave this unset; "conversation" requires active lifecycle management.',
-  },
+  ...SHARED_CONFIG_FIELD_PROPERTIES,
   resourceRequirementsJson: {
     type: 'string',
     description: 'JSON object string describing resource requirements for this skill. Must parse to a JSON object.',
@@ -68,13 +18,6 @@ const SKILL_FIELD_PROPERTIES = {
     description: 'Agent profile ID this skill resolves against by default. Must reference an accessible agent profile.',
   },
 } as const;
-
-/** Shared valid-values hint appended to create and update tool descriptions. */
-const VALID_VALUES_HINT =
-  'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
-  'Valid vmSize values: small, medium, large. ' +
-  'Valid taskMode values: task, conversation. ' +
-  'Valid workspaceProfile values: full, lightweight.';
 
 export const SKILL_TOOLS = [
   {
