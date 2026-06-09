@@ -205,4 +205,26 @@ test.describe('Skills List audit', () => {
     await screenshot(page, `skills-list-error-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     await assertNoOverflow(page);
   });
+
+  test('exclusive node checkbox disables max co-tenants', async ({ page }) => {
+    await openSkillsPage(page, { skills: [] });
+    await page.getByRole('button', { name: 'New Skill' }).click();
+    await expect(page.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
+
+    const maxCoTenants = page.getByLabel('Max Co-tenants');
+    const exclusiveNode = page.getByLabel('Exclusive Node');
+
+    // Initially enabled with "Default" placeholder
+    await expect(maxCoTenants).toBeEnabled();
+    await maxCoTenants.fill('3');
+    expect(await maxCoTenants.inputValue()).toBe('3');
+
+    // Check exclusive node — max co-tenants becomes disabled and cleared
+    await exclusiveNode.check();
+    await expect(maxCoTenants).toBeDisabled();
+
+    // Uncheck exclusive node — max co-tenants re-enabled
+    await exclusiveNode.uncheck();
+    await expect(maxCoTenants).toBeEnabled();
+  });
 });
