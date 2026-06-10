@@ -485,7 +485,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     expect(mockSignOut).toHaveBeenCalled();
   });
 
-  it('Create Node navigates to the nodes page', async () => {
+  it('Go to Nodes navigates to the nodes page', async () => {
     mockPathname = '/dashboard';
     renderPalette();
     const input = screen.getByRole('combobox');
@@ -494,7 +494,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
       expect(screen.getByText('Navigation')).toBeInTheDocument();
     });
 
-    fireEvent.change(input, { target: { value: 'create node' } });
+    fireEvent.change(input, { target: { value: 'go to nodes' } });
 
     await waitFor(() => {
       expect(screen.getAllByRole('option').length).toBeGreaterThan(0);

@@ -278,7 +278,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       },
       {
         id: 'action-create-node',
-        label: 'Create Node',
+        label: 'Go to Nodes',
         action: () => navigate('/nodes'),
         icon: <Server size={14} />,
       },
@@ -703,7 +703,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                     }
                     onClick={() => executeResult(result)}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
-                    className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors duration-100 ${
+                    className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors duration-100 ${
                       isSelected ? 'bg-[rgba(34,197,94,0.06)]' : 'bg-transparent'
                     }`}
                   >
