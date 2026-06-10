@@ -351,7 +351,7 @@ export function HierarchyModal({
             }}
           />
           {filterMatchIds && (
-            <div className="mt-1" style={{ fontSize: 10, color: 'var(--sam-color-fg-muted)' }}>
+            <div className="mt-1" role="status" aria-live="polite" style={{ fontSize: 10, color: 'var(--sam-color-fg-muted)' }}>
               {filterMatchIds.size} match{filterMatchIds.size !== 1 ? 'es' : ''}
             </div>
           )}

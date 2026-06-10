@@ -8,7 +8,6 @@ export interface HierarchyNode {
     title: string;
     status: string;
     blocked: boolean;
-    agentType?: string;
   };
   children: HierarchyNode[];
   sessionId: string | null;
