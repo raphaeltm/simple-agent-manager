@@ -704,6 +704,8 @@ export const nodes = sqliteTable(
     warmSince: text('warm_since'),
     /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
     credentialSource: text('credential_source').default('user'),
+    /** 'workspace' = ephemeral task/dev node (default); 'deployment' = long-lived app-hosting node. */
+    nodeRole: text('node_role').notNull().default('workspace'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()

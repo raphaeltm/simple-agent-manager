@@ -152,6 +152,7 @@ export async function selectNodeForTaskRun(
         and(
           eq(schema.nodes.userId, userId),
           eq(schema.nodes.status, 'running'),
+          eq(schema.nodes.nodeRole, 'workspace'),
           isNotNull(schema.nodes.warmSince)
         )
       );
@@ -219,11 +220,11 @@ export async function selectNodeForTaskRun(
     }
   }
 
-  // Get all running nodes for this user
+  // Get all running nodes for this user (deployment-role nodes excluded — not eligible for task placement)
   const nodes = await db
     .select()
     .from(schema.nodes)
-    .where(and(eq(schema.nodes.userId, userId), eq(schema.nodes.status, 'running')));
+    .where(and(eq(schema.nodes.userId, userId), eq(schema.nodes.status, 'running'), eq(schema.nodes.nodeRole, 'workspace')));
 
   if (nodes.length === 0) {
     return null;

@@ -239,7 +239,8 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
     .from(schema.nodes)
     .where(and(
       eq(schema.nodes.userId, userId),
-      inArray(schema.nodes.status, ['running', 'creating', 'recovery'])
+      inArray(schema.nodes.status, ['running', 'creating', 'recovery']),
+      eq(schema.nodes.nodeRole, 'workspace')
     ));
   const userNodeCountVal = userNodeCount?.count ?? 0;
 

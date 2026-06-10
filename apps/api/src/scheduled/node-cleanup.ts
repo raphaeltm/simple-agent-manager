@@ -154,6 +154,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      WHERE n.warm_since IS NOT NULL
        AND n.warm_since < ?
        AND n.status = 'running'
+       AND n.node_role = 'workspace'
      GROUP BY n.id, n.user_id, n.warm_since`
   ).bind(staleThreshold).all<{
     id: string;
@@ -236,6 +237,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE t.auto_provisioned_node_id IS NOT NULL
        AND n.status NOT IN ('stopped', 'deleted')
+       AND n.node_role = 'workspace'
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at`
   ).bind(lifetimeThreshold).all<{
@@ -290,6 +292,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'stopped'
+       AND n.node_role = 'workspace'
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at`
   ).bind(stoppedHandoffThreshold).all<{
@@ -424,6 +427,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     `SELECT n.id, n.user_id, n.status, n.updated_at, n.warm_since
      FROM nodes n
      WHERE n.status = 'running'
+       AND n.node_role = 'workspace'
        AND n.warm_since IS NULL
        AND n.updated_at < ?
        AND NOT EXISTS (

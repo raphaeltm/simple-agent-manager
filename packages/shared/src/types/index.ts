@@ -63,6 +63,7 @@ export type {
   NodeLogSource,
   NodeMetrics,
   NodeResponse,
+  NodeRole,
   NodeStatus,
   NodeSystemInfo,
   PortsResponse,

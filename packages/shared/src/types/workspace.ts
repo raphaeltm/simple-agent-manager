@@ -20,6 +20,13 @@ export type WorkspaceStatus =
 export type VMSize = 'small' | 'medium' | 'large';
 
 /**
+ * Node role determines lifecycle behavior:
+ * - 'workspace': Ephemeral task/dev node. Subject to warm-pool, cron sweep, max lifetime.
+ * - 'deployment': Long-lived app-hosting node. Exempt from all ephemeral lifecycle machinery.
+ */
+export type NodeRole = 'workspace' | 'deployment';
+
+/**
  * VM location identifier. Widened to string to support all providers:
  * - Hetzner: 'fsn1', 'nbg1', 'hel1', 'ash', 'hil'
  * - Scaleway: 'fr-par-1', 'nl-ams-1', 'pl-waw-1', etc.
@@ -42,6 +49,7 @@ export interface Node {
   healthStatus?: NodeHealthStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  nodeRole: NodeRole;
   providerInstanceId: string | null;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
@@ -66,6 +74,7 @@ export interface NodeResponse {
   cloudProvider?: CredentialProvider | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  nodeRole: NodeRole;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   heartbeatStaleAfterSeconds?: number;

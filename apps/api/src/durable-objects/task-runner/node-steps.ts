@@ -201,7 +201,7 @@ export async function handleNodeProvisioning(
   // Check user node limit
   const maxNodes = parseEnvInt(rc.env.MAX_NODES_PER_USER, 10);
   const countResult = await rc.env.DATABASE.prepare(
-    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')`
+    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace'`
   )
     .bind(state.userId)
     .first<{ c: number }>();
@@ -504,7 +504,7 @@ async function tryClaimWarmNode(
 
   const warmNodes = await rc.env.DATABASE.prepare(
     `SELECT id, vm_size, vm_location FROM nodes
-     WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL`
+     WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'`
   )
     .bind(state.userId)
     .all<{ id: string; vm_size: string; vm_location: string }>();
@@ -589,7 +589,7 @@ async function findNodeWithCapacity(
 
   const nodes = await rc.env.DATABASE.prepare(
     `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
-     WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy'`
+     WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'`
   )
     .bind(state.userId)
     .all<{
