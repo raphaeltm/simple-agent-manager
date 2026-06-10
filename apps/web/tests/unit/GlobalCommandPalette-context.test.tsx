@@ -22,6 +22,10 @@ vi.mock('../../src/components/AuthProvider', () => ({
   useAuth: () => ({ isSuperadmin: false }),
 }));
 
+vi.mock('../../src/contexts/ThemeContext', () => ({
+  useTheme: () => ({ theme: 'dark', resolvedTheme: 'dark', isDark: true, setTheme: vi.fn() }),
+}));
+
 vi.mock('../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/lib/api')>()),
   listProjects: vi.fn().mockResolvedValue({

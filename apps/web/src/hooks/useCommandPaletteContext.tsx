@@ -1,10 +1,17 @@
 import {
   Activity,
+  Bell,
+  Brain,
+  Clock,
   Eye,
+  FolderOpen,
   Lightbulb,
   MessageSquare,
   Monitor,
+  Plus,
   Settings,
+  UserCog,
+  Zap,
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -14,7 +21,7 @@ import type { SessionSummaryItem } from '../lib/api';
 
 // ── Configurable limits ──
 
-const DEFAULT_MAX_CONTEXT_RESULTS = 10;
+const DEFAULT_MAX_CONTEXT_RESULTS = 20;
 
 const MAX_CONTEXT_RESULTS = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_CONTEXT_RESULTS ||
@@ -112,6 +119,64 @@ export function useCommandPaletteContext({
         label: `${prefix}Go to Settings`,
         icon: <Settings size={14} />,
         action: () => navigate(`/projects/${projectId}/settings`),
+      },
+      {
+        id: 'ctx-project-library',
+        label: `${prefix}Go to Library`,
+        icon: <FolderOpen size={14} />,
+        action: () => navigate(`/projects/${projectId}/library`),
+      },
+      {
+        id: 'ctx-project-agent-context',
+        label: `${prefix}Go to Agent Context`,
+        icon: <Brain size={14} />,
+        action: () => navigate(`/projects/${projectId}/agent-context`),
+      },
+      {
+        id: 'ctx-project-notifications',
+        label: `${prefix}Go to Notifications`,
+        icon: <Bell size={14} />,
+        action: () => navigate(`/projects/${projectId}/notifications`),
+      },
+      {
+        id: 'ctx-project-triggers',
+        label: `${prefix}Go to Triggers`,
+        icon: <Clock size={14} />,
+        action: () => navigate(`/projects/${projectId}/triggers`),
+      },
+      {
+        id: 'ctx-project-profiles',
+        label: `${prefix}Go to Profiles`,
+        icon: <UserCog size={14} />,
+        action: () => navigate(`/projects/${projectId}/profiles`),
+      },
+      {
+        id: 'ctx-project-skills',
+        label: `${prefix}Go to Skills`,
+        icon: <Zap size={14} />,
+        action: () => navigate(`/projects/${projectId}/skills`),
+      },
+    );
+
+    // ── Project-scoped create actions ──
+    actions.push(
+      {
+        id: 'ctx-create-trigger',
+        label: `${prefix}Create Trigger`,
+        icon: <Plus size={14} />,
+        action: () => navigate(`/projects/${projectId}/triggers?edit=new`),
+      },
+      {
+        id: 'ctx-create-profile',
+        label: `${prefix}Create Profile`,
+        icon: <Plus size={14} />,
+        action: () => navigate(`/projects/${projectId}/profiles?edit=new`),
+      },
+      {
+        id: 'ctx-create-skill',
+        label: `${prefix}Create Skill`,
+        icon: <Plus size={14} />,
+        action: () => navigate(`/projects/${projectId}/skills?edit=new`),
       },
     );
 
