@@ -503,4 +503,44 @@ describe('GlobalCommandPalette — Context Awareness', () => {
 
     expect(mockNavigate).toHaveBeenCalledWith('/nodes');
   });
+
+  // ── Top-level navigation items (Map, Tools) ──
+
+  it('Map navigates to the account map page', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'map' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/account-map');
+  });
+
+  it('Tools navigates to the tools page', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'tools' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/tools');
+  });
 });

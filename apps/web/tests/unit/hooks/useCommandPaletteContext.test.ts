@@ -176,14 +176,21 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('My Project: Go to Skills');
   });
 
-  it('"Go to Library" navigates to the project library route', () => {
+  it.each([
+    ['ctx-project-library', '/projects/p1/library'],
+    ['ctx-project-agent-context', '/projects/p1/agent-context'],
+    ['ctx-project-notifications', '/projects/p1/notifications'],
+    ['ctx-project-triggers', '/projects/p1/triggers'],
+    ['ctx-project-profiles', '/projects/p1/profiles'],
+    ['ctx-project-skills', '/projects/p1/skills'],
+  ])('%s navigates to %s', (id, expectedPath) => {
     mockPathname = '/projects/p1/chat';
     const { result } = renderContextHook();
 
-    const action = result.current.contextActions.find((a) => a.id === 'ctx-project-library');
+    const action = result.current.contextActions.find((a) => a.id === id);
     action?.action();
 
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/library');
+    expect(mockNavigate).toHaveBeenCalledWith(expectedPath);
   });
 
   // ── Create quick actions (?edit=new opens the create modal) ──
