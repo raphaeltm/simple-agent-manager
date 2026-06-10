@@ -23,3 +23,27 @@ export function getStatusConfig(status: string) {
 export function getStatusColorVar(status: string) {
   return STATUS_CONFIG[status]?.colorVar ?? 'var(--sam-color-fg-muted)';
 }
+
+/** Shared style for status badge pills (used in card + children group). */
+export function statusBadgeStyle(colorVar: string): React.CSSProperties {
+  return {
+    fontSize: 9,
+    padding: '0 4px',
+    background: `color-mix(in srgb, ${colorVar} 15%, transparent)`,
+    color: colorVar,
+  };
+}
+
+/** Shared style for icon-only buttons (close, back, expand/collapse). */
+export const iconButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  minHeight: 44,
+  minWidth: 44,
+  borderRadius: 6,
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--sam-color-fg-muted)',
+  cursor: 'pointer',
+  padding: 0,
+};

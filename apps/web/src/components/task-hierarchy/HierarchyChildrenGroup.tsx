@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import type { HierarchyNode } from './buildHierarchyTree';
 import { containsFocus } from './buildHierarchyTree';
 import { HierarchyTreeNode } from './HierarchyTreeNode';
-import { getStatusColorVar } from './statusConfig';
+import { getStatusColorVar, statusBadgeStyle } from './statusConfig';
 import { TreeConnector } from './TreeConnector';
 
 /** Max children shown before collapsing into "Show N more". */
@@ -107,12 +107,7 @@ export function HierarchyChildrenGroup({
                   <span
                     key={status}
                     className="rounded-full font-semibold"
-                    style={{
-                      fontSize: 9,
-                      padding: '0 4px',
-                      background: `color-mix(in srgb, ${getStatusColorVar(status)} 15%, transparent)`,
-                      color: getStatusColorVar(status),
-                    }}
+                    style={statusBadgeStyle(getStatusColorVar(status))}
                   >
                     {count}
                   </span>

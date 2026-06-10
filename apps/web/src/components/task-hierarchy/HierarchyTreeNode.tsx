@@ -5,6 +5,7 @@ import type { HierarchyNode } from './buildHierarchyTree';
 import { hasMatchingDescendant } from './buildHierarchyTree';
 import { HierarchyChildrenGroup, MAX_INDENT } from './HierarchyChildrenGroup';
 import { HierarchyNodeCard } from './HierarchyNodeCard';
+import { iconButtonStyle } from './statusConfig';
 import { TreeConnector } from './TreeConnector';
 
 /** Gap between sibling nodes in px. */
@@ -59,18 +60,7 @@ export function HierarchyTreeNode({
               type="button"
               onClick={() => toggleExpanded(node.task.id)}
               className="flex items-center justify-center shrink-0"
-              style={{
-                width: 20,
-                height: 20,
-                minWidth: 44,
-                minHeight: 44,
-                borderRadius: 4,
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--sam-color-fg-muted)',
-                cursor: 'pointer',
-                padding: 0,
-              }}
+              style={{ ...iconButtonStyle, width: 20, height: 20, borderRadius: 4 }}
               aria-label={effectiveChildrenVisible ? 'Collapse subtasks' : 'Expand subtasks'}
               aria-expanded={effectiveChildrenVisible}
             >

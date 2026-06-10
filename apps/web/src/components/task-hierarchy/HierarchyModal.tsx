@@ -14,7 +14,7 @@ import {
   getAncestorPath,
 } from './buildHierarchyTree';
 import { HierarchyTreeNode } from './HierarchyTreeNode';
-import { getStatusColorVar, getStatusConfig } from './statusConfig';
+import { getStatusColorVar, getStatusConfig, iconButtonStyle } from './statusConfig';
 
 // ─── Status summary bar ────────────────────────────────────────────────
 
@@ -240,18 +240,7 @@ export function HierarchyModal({
           type="button"
           onClick={onClose}
           className="flex items-center justify-center shrink-0"
-          style={{
-            width: 28,
-            height: 28,
-            minHeight: 44,
-            minWidth: 44,
-            borderRadius: 6,
-            background: 'transparent',
-            border: '1px solid var(--sam-color-border-default)',
-            color: 'var(--sam-color-fg-muted)',
-            cursor: 'pointer',
-            padding: 0,
-          }}
+          style={{ ...iconButtonStyle, border: '1px solid var(--sam-color-border-default)' }}
           aria-label="Close hierarchy"
         >
           <ArrowLeft size={14} />
@@ -268,18 +257,7 @@ export function HierarchyModal({
           type="button"
           onClick={onClose}
           className="flex items-center justify-center shrink-0"
-          style={{
-            width: 28,
-            height: 28,
-            minHeight: 44,
-            minWidth: 44,
-            borderRadius: 6,
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--sam-color-fg-muted)',
-            cursor: 'pointer',
-            padding: 0,
-          }}
+          style={iconButtonStyle}
           aria-label="Close"
         >
           <X size={14} />

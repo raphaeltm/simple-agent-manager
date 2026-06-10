@@ -1,6 +1,6 @@
 import { formatRelativeTime } from '../../lib/time-utils';
 import type { HierarchyNode } from './buildHierarchyTree';
-import { getStatusConfig } from './statusConfig';
+import { getStatusConfig, statusBadgeStyle } from './statusConfig';
 
 export function HierarchyNodeCard({
   node,
@@ -105,11 +105,7 @@ export function HierarchyNodeCard({
         >
           <span
             className="inline-block px-1 rounded-full font-semibold uppercase"
-            style={{
-              fontSize: 9,
-              background: `color-mix(in srgb, ${statusCfg.colorVar} 15%, transparent)`,
-              color: statusCfg.colorVar,
-            }}
+            style={statusBadgeStyle(statusCfg.colorVar)}
           >
             {statusCfg.label}
           </span>
