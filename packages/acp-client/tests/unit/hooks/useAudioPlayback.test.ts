@@ -128,6 +128,7 @@ describe('useAudioPlayback', () => {
   });
 
   it('falls back to browser speech synthesis when server TTS fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(synthesizeResponse({ message: 'quota exceeded' }, 429));
     const { result } = renderHook(() =>
       useAudioPlayback({
@@ -144,6 +145,7 @@ describe('useAudioPlayback', () => {
     await waitFor(() => expect(result.current.state).toBe('playing'));
     expect(result.current.error).toBe('quota exceeded');
     expect(result.current.lastError).toBe('quota exceeded');
+    expect(consoleError).toHaveBeenCalledWith('TTS playback error:', 'quota exceeded');
     expect(speechSynthesisMock.cancel).toHaveBeenCalled();
     expect(speechSynthesisMock.speak).toHaveBeenCalledWith(expect.objectContaining({
       text: 'Read  and markdown',
