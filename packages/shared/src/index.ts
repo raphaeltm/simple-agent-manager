@@ -15,3 +15,6 @@ export * from './vm-agent-contract';
 
 // Trial Onboarding (types + Valibot schemas)
 export * from './trial';
+
+// Deployment Manifest (Zod schemas + validation)
+export * from './deployment-manifest';
