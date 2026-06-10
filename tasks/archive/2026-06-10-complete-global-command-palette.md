@@ -53,25 +53,25 @@ navigation surface — purely additive, no refactoring.
 ## Implementation Checklist
 
 ### GlobalCommandPalette.tsx
-- [ ] Add icon imports: `Map`, `Wrench`, plus quick-action/deep-link icons
-- [ ] Import `signOut` from `../lib/auth` and `useTheme` from `../contexts/ThemeContext`
-- [ ] Call `useTheme()` in component body
-- [ ] Add `Map` and `Tools` to the base `navigationItems` array
-- [ ] Add 6 `Settings: X` deep-links to `navigationItems` (always available)
-- [ ] Add 11 `Admin: X` deep-links to `navigationItems` inside the `isSuperadmin` block
-- [ ] Add `Create Node`, `Sign Out`, `Toggle Theme` to `actionItems` with correct deps
-- [ ] Update `actionItems` useMemo dependency array (navigate, isDark, setTheme)
+- [x] Add icon imports: `Map`, `Wrench`, plus quick-action/deep-link icons
+- [x] Import `signOut` from `../lib/auth` and `useTheme` from `../contexts/ThemeContext`
+- [x] Call `useTheme()` in component body
+- [x] Add `Map` and `Tools` to the base `navigationItems` array
+- [x] Add 6 `Settings: X` deep-links to `navigationItems` (always available)
+- [x] Add 11 `Admin: X` deep-links to `navigationItems` inside the `isSuperadmin` block
+- [x] Add `Create Node`, `Sign Out`, `Toggle Theme` to `actionItems` with correct deps
+- [x] Update `actionItems` useMemo dependency array (navigate, isDark, setTheme)
 
 ### useCommandPaletteContext.tsx
-- [ ] Add icon imports: `FolderOpen`, `Brain`, `Bell`, `Clock`, `UserCog`, `Zap`, `Plus`
-- [ ] Add 6 project context actions (Library, Agent Context, Notifications, Triggers, Profiles, Skills)
-- [ ] Add 3 create quick actions (Create Trigger/Profile/Skill) → `?edit=new`
-- [ ] Bump `DEFAULT_MAX_CONTEXT_RESULTS` so new items aren't sliced out
+- [x] Add icon imports: `FolderOpen`, `Brain`, `Bell`, `Clock`, `UserCog`, `Zap`, `Plus`
+- [x] Add 6 project context actions (Library, Agent Context, Notifications, Triggers, Profiles, Skills)
+- [x] Add 3 create quick actions (Create Trigger/Profile/Skill) → `?edit=new`
+- [x] Bump `DEFAULT_MAX_CONTEXT_RESULTS` so new items aren't sliced out
 
 ### Verification
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
-- [ ] Local Playwright visual audit (mobile 375x667 + desktop 1280x800)
-- [ ] task-completion-validator passes
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
+- [x] Local Playwright visual audit (mobile 375x667 + desktop 1280x800)
+- [x] task-completion-validator passes
 
 ## Acceptance Criteria
 
