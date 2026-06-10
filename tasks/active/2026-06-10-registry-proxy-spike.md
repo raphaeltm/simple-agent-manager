@@ -27,10 +27,14 @@ cache) speaking the docker registry v2 protocol, so that:
       the proxy while passing through signed storage redirect URLs — unit tested
 - [x] Streaming request bodies can be forwarded (requires `duplex: 'half'` — found by
       test failure, see Findings)
-- [ ] Real `docker push` / `docker pull` works end-to-end through `wrangler dev`
-      against a local `registry:2` upstream (in progress)
-- [ ] Prefix enforcement rejects a second project's token pushing to the first
-      project's namespace, via real docker CLI
+- [x] Real `docker push` / `docker pull` works end-to-end through `wrangler dev`
+      against a local `registry:2` upstream — VALIDATED 2026-06-10 with docker
+      CLI 29.5.3 (login, push, pull, full blob-upload session through rewritten
+      Locations)
+- [x] Prefix enforcement rejects cross-project access via real docker CLI —
+      project-A creds pushing to `proj-projectb/...` → 403; pushing outside any
+      `proj-` namespace → 403; project-B creds pulling project-A's image → 403;
+      unknown token login → 401; `_catalog` denied through proxy
 - [ ] NOT locally testable: Workers edge request-body size limit vs monolithic layer
       PATCH uploads (100MB free/pro, 200MB business, 500MB enterprise). Must be
       validated on a deployed Worker later. Documented in library.
@@ -44,8 +48,10 @@ cache) speaking the docker registry v2 protocol, so that:
 - [x] `src/index.ts` — /token issuance (namespace clamping) + /v2/* enforcement
       (defense-in-depth namespace check from verified claims) + proxying
 - [x] Unit + vertical-slice tests (46 passing)
-- [ ] Local docker push/pull experiment via wrangler dev + registry:2
-- [ ] Record findings in library (`/research/app-deployment/11-experiment-log.md`)
+- [x] Local docker push/pull experiment via wrangler dev + registry:2 — all
+      positive and negative checks passed (see Findings + library experiment log)
+- [x] Record findings in library (`/research/app-deployment/11-experiment-log.md`,
+      file `01KTSY3S5TG4Q9BWQ9W24Y5GDB`)
 
 ## Findings
 
@@ -55,6 +61,14 @@ cache) speaking the docker registry v2 protocol, so that:
   Node/undici (and is required by the fetch spec). Fixed in
   `src/upstream.ts:buildUpstreamRequest()`; caught by a unit test before any
   manual experiment.
+- **Live experiment (2026-06-10)**: real docker CLI against `wrangler dev` +
+  local `registry:2` upstream. Login/push/pull all work; cross-project push,
+  out-of-namespace push, cross-project pull, unknown-token login, and catalog
+  access all rejected. Full table in the library experiment log
+  (`/research/app-deployment/11-experiment-log.md`).
+- **Edge body limit remains the open risk**: docker uploads each layer as one
+  PATCH; Workers caps request bodies at 100/200/500MB by plan. Not testable in
+  `wrangler dev` — validate first when this deploys.
 
 ## Production Notes (Out of Spike Scope)
 
