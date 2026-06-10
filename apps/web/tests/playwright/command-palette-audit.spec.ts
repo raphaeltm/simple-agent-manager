@@ -143,52 +143,72 @@ async function gotoApp(page: Page, path: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared scenario bodies — each is run once per viewport (mobile + desktop).
+// Keeping the bodies here (rather than copy-pasted into both describe blocks)
+// avoids duplicated audit logic.
+// ---------------------------------------------------------------------------
+
+async function auditGlobalCommands(page: Page, suffix: string) {
+  await setupMocks(page);
+  await gotoApp(page, '/dashboard');
+  await openPalette(page);
+  await screenshot(page, `command-palette-global-${suffix}`);
+  await assertNoOverflow(page);
+}
+
+async function auditContextActions(page: Page, suffix: string) {
+  await setupMocks(page);
+  await gotoApp(page, '/projects/proj-test-1/chat');
+  await openPalette(page);
+  await expect(page.locator('#gcp-category-Context')).toBeVisible();
+  await screenshot(page, `command-palette-context-${suffix}`);
+  await assertNoOverflow(page);
+}
+
+async function auditLongProjectName(page: Page, suffix: string) {
+  await setupMocks(page, { projects: LONG_TEXT_PROJECTS });
+  await gotoApp(page, '/projects/proj-test-1/chat');
+  await openPalette(page);
+  await screenshot(page, `command-palette-long-text-${suffix}`);
+  await assertNoOverflow(page);
+}
+
+async function auditManyChats(page: Page, suffix: string) {
+  await setupMocks(page, { chats: MANY_CHATS });
+  await gotoApp(page, '/projects/proj-test-1/chat');
+  await openPalette(page);
+  await screenshot(page, `command-palette-many-chats-${suffix}`);
+  await assertNoOverflow(page);
+}
+
+async function auditFilteredQuery(page: Page, query: string, screenshotName: string) {
+  await setupMocks(page);
+  await gotoApp(page, '/dashboard');
+  await openPalette(page);
+  await page.fill('[role="combobox"]', query);
+  await page.waitForTimeout(200);
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+}
+
+// ---------------------------------------------------------------------------
 // Tests — Mobile (default project: 375x667)
 // ---------------------------------------------------------------------------
 
 test.describe('Command Palette — Mobile', () => {
-  test('global commands on dashboard (superadmin)', async ({ page }) => {
-    await setupMocks(page);
-    await gotoApp(page, '/dashboard');
-    await openPalette(page);
-    await screenshot(page, 'command-palette-global-mobile');
-    await assertNoOverflow(page);
-  });
+  test('global commands on dashboard (superadmin)', ({ page }) =>
+    auditGlobalCommands(page, 'mobile'));
 
-  test('context actions inside a project', async ({ page }) => {
-    await setupMocks(page);
-    await gotoApp(page, '/projects/proj-test-1/chat');
-    await openPalette(page);
-    await expect(page.locator('#gcp-category-Context')).toBeVisible();
-    await screenshot(page, 'command-palette-context-mobile');
-    await assertNoOverflow(page);
-  });
+  test('context actions inside a project', ({ page }) =>
+    auditContextActions(page, 'mobile'));
 
-  test('long project name does not overflow', async ({ page }) => {
-    await setupMocks(page, { projects: LONG_TEXT_PROJECTS });
-    await gotoApp(page, '/projects/proj-test-1/chat');
-    await openPalette(page);
-    await screenshot(page, 'command-palette-long-text-mobile');
-    await assertNoOverflow(page);
-  });
+  test('long project name does not overflow', ({ page }) =>
+    auditLongProjectName(page, 'mobile'));
 
-  test('many chats', async ({ page }) => {
-    await setupMocks(page, { chats: MANY_CHATS });
-    await gotoApp(page, '/projects/proj-test-1/chat');
-    await openPalette(page);
-    await screenshot(page, 'command-palette-many-chats-mobile');
-    await assertNoOverflow(page);
-  });
+  test('many chats', ({ page }) => auditManyChats(page, 'mobile'));
 
-  test('filtered query (settings)', async ({ page }) => {
-    await setupMocks(page);
-    await gotoApp(page, '/dashboard');
-    await openPalette(page);
-    await page.fill('[role="combobox"]', 'settings');
-    await page.waitForTimeout(200);
-    await screenshot(page, 'command-palette-filtered-mobile');
-    await assertNoOverflow(page);
-  });
+  test('filtered query (settings)', ({ page }) =>
+    auditFilteredQuery(page, 'settings', 'command-palette-filtered-mobile'));
 });
 
 // ---------------------------------------------------------------------------
@@ -198,46 +218,17 @@ test.describe('Command Palette — Mobile', () => {
 test.describe('Command Palette — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
-  test('global commands on dashboard (superadmin)', async ({ page }) => {
-    await setupMocks(page);
-    await gotoApp(page, '/dashboard');
-    await openPalette(page);
-    await screenshot(page, 'command-palette-global-desktop');
-    await assertNoOverflow(page);
-  });
+  test('global commands on dashboard (superadmin)', ({ page }) =>
+    auditGlobalCommands(page, 'desktop'));
 
-  test('context actions inside a project', async ({ page }) => {
-    await setupMocks(page);
-    await gotoApp(page, '/projects/proj-test-1/chat');
-    await openPalette(page);
-    await expect(page.locator('#gcp-category-Context')).toBeVisible();
-    await screenshot(page, 'command-palette-context-desktop');
-    await assertNoOverflow(page);
-  });
+  test('context actions inside a project', ({ page }) =>
+    auditContextActions(page, 'desktop'));
 
-  test('long project name does not overflow', async ({ page }) => {
-    await setupMocks(page, { projects: LONG_TEXT_PROJECTS });
-    await gotoApp(page, '/projects/proj-test-1/chat');
-    await openPalette(page);
-    await screenshot(page, 'command-palette-long-text-desktop');
-    await assertNoOverflow(page);
-  });
+  test('long project name does not overflow', ({ page }) =>
+    auditLongProjectName(page, 'desktop'));
 
-  test('many chats', async ({ page }) => {
-    await setupMocks(page, { chats: MANY_CHATS });
-    await gotoApp(page, '/projects/proj-test-1/chat');
-    await openPalette(page);
-    await screenshot(page, 'command-palette-many-chats-desktop');
-    await assertNoOverflow(page);
-  });
+  test('many chats', ({ page }) => auditManyChats(page, 'desktop'));
 
-  test('filtered query (admin)', async ({ page }) => {
-    await setupMocks(page);
-    await gotoApp(page, '/dashboard');
-    await openPalette(page);
-    await page.fill('[role="combobox"]', 'admin');
-    await page.waitForTimeout(200);
-    await screenshot(page, 'command-palette-filtered-admin-desktop');
-    await assertNoOverflow(page);
-  });
+  test('filtered query (admin)', ({ page }) =>
+    auditFilteredQuery(page, 'admin', 'command-palette-filtered-admin-desktop'));
 });
