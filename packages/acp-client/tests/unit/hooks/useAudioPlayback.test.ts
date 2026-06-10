@@ -48,7 +48,10 @@ function synthesizeResponse(body: Record<string, unknown>, status = 200): Respon
 }
 
 function audioResponse(status = 200): Response {
-  return new Response(new Blob(['audio-bytes'], { type: 'audio/mpeg' }), { status });
+  return new Response(new TextEncoder().encode('audio-bytes'), {
+    status,
+    headers: { 'Content-Type': 'audio/mpeg' },
+  });
 }
 
 function mockServerTtsSuccess() {
