@@ -18,12 +18,28 @@ vi.mock('react-router', async () => {
   };
 });
 
+// ── Auth / theme / signOut mocks — mutable so tests can vary them ──
+
+let mockIsSuperadmin = false;
+const mockSetTheme = vi.fn();
+let mockIsDark = true;
+const mockSignOut = vi.fn();
+
 vi.mock('../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ isSuperadmin: false }),
+  useAuth: () => ({ isSuperadmin: mockIsSuperadmin }),
 }));
 
 vi.mock('../../src/contexts/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'dark', resolvedTheme: 'dark', isDark: true, setTheme: vi.fn() }),
+  useTheme: () => ({
+    theme: mockIsDark ? 'dark' : 'light',
+    resolvedTheme: mockIsDark ? 'dark' : 'light',
+    isDark: mockIsDark,
+    setTheme: mockSetTheme,
+  }),
+}));
+
+vi.mock('../../src/lib/auth', () => ({
+  signOut: () => mockSignOut(),
 }));
 
 vi.mock('../../src/lib/api', async (importOriginal) => ({
@@ -104,7 +120,11 @@ function renderPalette(onClose = vi.fn()) {
 describe('GlobalCommandPalette — Context Awareness', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    mockSetTheme.mockClear();
+    mockSignOut.mockClear();
     mockPathname = '/dashboard';
+    mockIsSuperadmin = false;
+    mockIsDark = true;
   });
 
   // ── No context on dashboard ──
@@ -347,5 +367,140 @@ describe('GlobalCommandPalette — Context Awareness', () => {
 
     // All existing categories should still be present
     expect(screen.getByText('Navigation')).toBeInTheDocument();
+  });
+
+  // ── Settings deep-links (always available) ──
+
+  it('shows Settings deep-links for all users', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'settings' } });
+
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels.some((l) => l?.includes('Settings: Cloud Provider'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: GitHub'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: API Tokens'))).toBe(true);
+  });
+
+  // ── Admin deep-links (superadmin-gated) ──
+
+  it('hides Admin deep-links for non-superadmins', async () => {
+    mockIsSuperadmin = false;
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'admin' } });
+
+    const labels = screen.queryAllByRole('option').map((o) => o.textContent);
+    expect(labels.some((l) => l?.includes('Admin'))).toBe(false);
+  });
+
+  it('shows Admin deep-links for superadmins', async () => {
+    mockIsSuperadmin = true;
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'admin' } });
+
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels.some((l) => l?.includes('Admin: Users'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Admin: Logs'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Admin: Costs'))).toBe(true);
+  });
+
+  // ── Quick actions: Toggle Theme + Sign Out ──
+
+  it('Toggle Theme switches to light when currently dark', async () => {
+    mockIsDark = true;
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'toggle theme' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockSetTheme).toHaveBeenCalledWith('light');
+  });
+
+  it('Toggle Theme switches to dark when currently light', async () => {
+    mockIsDark = false;
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'toggle theme' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockSetTheme).toHaveBeenCalledWith('dark');
+  });
+
+  it('Sign Out invokes signOut', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'sign out' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockSignOut).toHaveBeenCalled();
+  });
+
+  it('Create Node navigates to the nodes page', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'create node' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/nodes');
   });
 });

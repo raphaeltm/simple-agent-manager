@@ -163,6 +163,64 @@ describe('useCommandPaletteContext', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/ideas');
   });
 
+  it('exposes the full set of project-scoped navigation actions', () => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const labels = result.current.contextActions.map((a) => a.label);
+    expect(labels).toContain('My Project: Go to Library');
+    expect(labels).toContain('My Project: Go to Agent Context');
+    expect(labels).toContain('My Project: Go to Notifications');
+    expect(labels).toContain('My Project: Go to Triggers');
+    expect(labels).toContain('My Project: Go to Profiles');
+    expect(labels).toContain('My Project: Go to Skills');
+  });
+
+  it('"Go to Library" navigates to the project library route', () => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const action = result.current.contextActions.find((a) => a.id === 'ctx-project-library');
+    action?.action();
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/library');
+  });
+
+  // ── Create quick actions (?edit=new opens the create modal) ──
+
+  it('Create Trigger navigates with the ?edit=new query string', () => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const action = result.current.contextActions.find((a) => a.id === 'ctx-create-trigger');
+    expect(action?.label).toBe('My Project: Create Trigger');
+    action?.action();
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/triggers?edit=new');
+  });
+
+  it('Create Profile navigates with the ?edit=new query string', () => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const action = result.current.contextActions.find((a) => a.id === 'ctx-create-profile');
+    expect(action?.label).toBe('My Project: Create Profile');
+    action?.action();
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/profiles?edit=new');
+  });
+
+  it('Create Skill navigates with the ?edit=new query string', () => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const action = result.current.contextActions.find((a) => a.id === 'ctx-create-skill');
+    expect(action?.label).toBe('My Project: Create Skill');
+    action?.action();
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/skills?edit=new');
+  });
+
   // ── Context Actions: Session Scope ──
 
   it('shows "Go to Workspace" when session has workspaceId', () => {
