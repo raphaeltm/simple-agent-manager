@@ -1,5 +1,5 @@
 import { Dialog } from '@simple-agent-manager/ui';
-import { AlertCircle, ArrowLeft, CheckCircle2, CirclePause, Loader2, X, XCircle } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatSessionListItem } from '../../lib/api';
@@ -14,45 +14,7 @@ import {
   getAncestorPath,
 } from './buildHierarchyTree';
 import { HierarchyTreeNode } from './HierarchyTreeNode';
-
-// ─── Status helpers ────────────────────────────────────────────────────
-
-const STATUS_ICON_MAP: Record<string, typeof CheckCircle2> = {
-  completed: CheckCircle2,
-  in_progress: Loader2,
-  failed: XCircle,
-  cancelled: XCircle,
-  queued: CirclePause,
-  delegated: Loader2,
-  ready: CirclePause,
-  draft: CirclePause,
-};
-
-const STATUS_COLOR_MAP: Record<string, string> = {
-  completed: 'var(--sam-color-success)',
-  in_progress: 'var(--sam-color-success)',
-  failed: 'var(--sam-color-danger)',
-  cancelled: 'var(--sam-color-danger)',
-  queued: 'var(--sam-color-warning)',
-  delegated: 'var(--sam-color-info)',
-  ready: 'var(--sam-color-warning)',
-  draft: 'var(--sam-color-fg-muted)',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  completed: 'completed',
-  in_progress: 'running',
-  failed: 'failed',
-  cancelled: 'cancelled',
-  queued: 'queued',
-  delegated: 'delegated',
-  ready: 'ready',
-  draft: 'draft',
-};
-
-function getStatusColor(status: string) {
-  return STATUS_COLOR_MAP[status] ?? 'var(--sam-color-fg-muted)';
-}
+import { getStatusColorVar, getStatusConfig } from './statusConfig';
 
 // ─── Status summary bar ────────────────────────────────────────────────
 
@@ -72,18 +34,18 @@ function StatusSummaryBar({ tree }: { tree: HierarchyNode }) {
       {Object.entries(counts)
         .sort(([, a], [, b]) => b - a)
         .map(([status, count]) => {
-          const Icon = STATUS_ICON_MAP[status] ?? AlertCircle;
-          const color = getStatusColor(status);
+          const cfg = getStatusConfig(status);
+          const Icon = cfg.icon;
           return (
             <span
               key={status}
               className="flex items-center gap-1"
-              style={{ color }}
+              style={{ color: cfg.colorVar }}
             >
               <Icon size={10} />
               <span className="font-semibold">{count}</span>
               <span style={{ color: 'var(--sam-color-fg-muted)' }}>
-                {STATUS_LABELS[status] ?? status}
+                {cfg.label.toLowerCase() || status}
               </span>
             </span>
           );
@@ -129,7 +91,7 @@ function AncestorBreadcrumbs({
             </span>
           );
         }
-        const color = getStatusColor(item.task.status);
+        const color = getStatusColorVar(item.task.status);
         const hasSession = item.sessionId != null;
         return (
           <span key={item.task.id} className="flex items-center gap-0.5">

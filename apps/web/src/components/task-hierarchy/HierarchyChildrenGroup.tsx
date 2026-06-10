@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import type { HierarchyNode } from './buildHierarchyTree';
 import { containsFocus } from './buildHierarchyTree';
 import { HierarchyTreeNode } from './HierarchyTreeNode';
+import { getStatusColorVar } from './statusConfig';
 import { TreeConnector } from './TreeConnector';
 
 /** Max children shown before collapsing into "Show N more". */
@@ -11,20 +12,6 @@ const INITIALLY_VISIBLE = 5;
 
 /** Max connector depth — beyond this, show depth badge instead of connector. */
 export const MAX_INDENT = 5;
-
-function getStatusColorVar(status: string) {
-  const colorMap: Record<string, string> = {
-    completed: 'var(--sam-color-success)',
-    in_progress: 'var(--sam-color-success)',
-    failed: 'var(--sam-color-danger)',
-    cancelled: 'var(--sam-color-danger)',
-    queued: 'var(--sam-color-warning)',
-    delegated: 'var(--sam-color-info)',
-    ready: 'var(--sam-color-warning)',
-    draft: 'var(--sam-color-fg-muted)',
-  };
-  return colorMap[status] ?? 'var(--sam-color-fg-muted)';
-}
 
 export function HierarchyChildrenGroup({
   nodes,
