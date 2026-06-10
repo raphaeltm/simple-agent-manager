@@ -62,6 +62,8 @@ export function HierarchyTreeNode({
               style={{
                 width: 20,
                 height: 20,
+                minWidth: 44,
+                minHeight: 44,
                 borderRadius: 4,
                 border: 'none',
                 background: 'transparent',
@@ -83,6 +85,7 @@ export function HierarchyTreeNode({
               compact={compact}
               depthBadge={showDepthBadge ? depth : undefined}
               isFilterMatch={filterMatchIds?.has(node.task.id) ?? false}
+              ariaExpanded={hasChildren ? effectiveChildrenVisible : undefined}
             />
           </div>
         </div>

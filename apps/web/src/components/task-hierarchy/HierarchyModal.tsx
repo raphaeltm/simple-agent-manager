@@ -54,15 +54,6 @@ function getStatusColor(status: string) {
   return STATUS_COLOR_MAP[status] ?? 'var(--sam-color-fg-muted)';
 }
 
-// ─── Terminal status check for polling ──────────────────────────────────
-
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
-
-function hasNonTerminalTask(node: HierarchyNode): boolean {
-  if (!TERMINAL_STATUSES.has(node.task.status)) return true;
-  return node.children.some(hasNonTerminalTask);
-}
-
 // ─── Status summary bar ────────────────────────────────────────────────
 
 function StatusSummaryBar({ tree }: { tree: HierarchyNode }) {
@@ -176,8 +167,6 @@ function AncestorBreadcrumbs({
 
 // ─── Main modal ────────────────────────────────────────────────────────
 
-const POLL_INTERVAL = 3000;
-
 export function HierarchyModal({
   isOpen,
   onClose,
@@ -197,7 +186,6 @@ export function HierarchyModal({
   const [collapseState, setCollapseState] = useState<Map<string, boolean>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
-  const [, forceUpdate] = useState(0);
 
   // Build tree from live data
   const treeResult = useMemo(
@@ -258,17 +246,6 @@ export function HierarchyModal({
     if (!isOpen) hasScrolledRef.current = false;
   }, [isOpen]);
 
-  // Poll for updates while modal is open and tasks are non-terminal
-  useEffect(() => {
-    if (!isOpen || !tree) return;
-    if (!hasNonTerminalTask(tree)) return;
-
-    const interval = setInterval(() => {
-      forceUpdate((n) => n + 1);
-    }, POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [isOpen, tree]);
-
   // Filter
   const displayTree = useMemo(() => {
     if (!tree || !filter.trim()) return tree;
@@ -318,7 +295,7 @@ export function HierarchyModal({
           <ArrowLeft size={14} />
         </button>
         <div className="flex-1">
-          <div className="text-sm font-semibold" style={{ color: 'var(--sam-color-fg-primary)' }}>
+          <div id="dialog-title" className="text-sm font-semibold" style={{ color: 'var(--sam-color-fg-primary)' }}>
             Task Hierarchy
           </div>
           <div style={{ fontSize: 11, color: 'var(--sam-color-fg-muted)' }}>
@@ -365,7 +342,7 @@ export function HierarchyModal({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             aria-label="Filter tasks"
-            className="w-full rounded-md text-xs outline-none"
+            className="w-full rounded-md text-xs outline-none focus-visible:ring-2 focus-visible:ring-[var(--sam-color-accent-primary)]"
             style={{
               padding: '6px 10px',
               background: 'var(--sam-color-bg-inset)',
@@ -385,7 +362,7 @@ export function HierarchyModal({
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg" stickyHeader={stickyHeader}>
-      <div ref={scrollRef}>
+      <div ref={scrollRef} role="tree" aria-label="Task hierarchy">
         {displayTree && (
           <HierarchyTreeNode
             node={displayTree}

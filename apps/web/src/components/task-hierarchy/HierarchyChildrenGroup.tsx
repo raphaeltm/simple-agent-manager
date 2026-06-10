@@ -73,7 +73,7 @@ export function HierarchyChildrenGroup({
   const showConnectors = depth <= MAX_INDENT;
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" role="group">
       {visibleChildren.map((child, i) => {
         const isLastVisible = i === visibleChildren.length - 1;
         const isLast = isLastVisible && !hasMore;

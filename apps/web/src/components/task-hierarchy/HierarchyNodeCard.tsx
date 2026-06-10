@@ -28,6 +28,7 @@ export function HierarchyNodeCard({
   compact,
   depthBadge,
   isFilterMatch,
+  ariaExpanded,
 }: {
   node: HierarchyNode;
   isFocus: boolean;
@@ -35,6 +36,7 @@ export function HierarchyNodeCard({
   compact?: boolean;
   depthBadge?: number;
   isFilterMatch?: boolean;
+  ariaExpanded?: boolean;
 }) {
   const statusCfg = getStatusConfig(node.task.status);
   const StatusIcon = statusCfg.icon;
@@ -52,6 +54,7 @@ export function HierarchyNodeCard({
       title={isDisabled ? 'Task is queued — no session yet' : node.task.title}
       role="treeitem"
       aria-selected={isFocus}
+      aria-expanded={ariaExpanded}
       aria-label={`${node.task.title}, ${statusCfg.label}${isFocus ? ', current task' : ''}${isDisabled ? ', no session available' : ''}`}
       className={`
         flex items-center gap-2 w-full text-left transition-all duration-150 rounded-lg
@@ -65,6 +68,7 @@ export function HierarchyNodeCard({
         ${isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}
       `}
       style={{
+        minHeight: 44,
         borderColor: isFocus
           ? 'var(--sam-color-accent-primary)'
           : isFilterMatch
