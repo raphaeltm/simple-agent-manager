@@ -1,0 +1,140 @@
+import { ChevronDown } from 'lucide-react';
+import { useMemo, useState } from 'react';
+
+import type { HierarchyNode } from './buildHierarchyTree';
+import { containsFocus } from './buildHierarchyTree';
+import { HierarchyTreeNode } from './HierarchyTreeNode';
+import { TreeConnector } from './TreeConnector';
+
+/** Max children shown before collapsing into "Show N more". */
+const INITIALLY_VISIBLE = 5;
+
+/** Max connector depth — beyond this, show depth badge instead of connector. */
+export const MAX_INDENT = 5;
+
+function getStatusColorVar(status: string) {
+  const colorMap: Record<string, string> = {
+    completed: 'var(--sam-color-success)',
+    in_progress: 'var(--sam-color-success)',
+    failed: 'var(--sam-color-danger)',
+    cancelled: 'var(--sam-color-danger)',
+    queued: 'var(--sam-color-warning)',
+    delegated: 'var(--sam-color-info)',
+    ready: 'var(--sam-color-warning)',
+    draft: 'var(--sam-color-fg-muted)',
+  };
+  return colorMap[status] ?? 'var(--sam-color-fg-muted)';
+}
+
+export function HierarchyChildrenGroup({
+  children,
+  focusTaskId,
+  onNavigate,
+  depth,
+  filterMatchIds,
+  isExpanded,
+  toggleExpanded,
+}: {
+  children: HierarchyNode[];
+  focusTaskId: string;
+  onNavigate: (sessionId: string) => void;
+  depth: number;
+  filterMatchIds: Set<string> | null;
+  isExpanded: (taskId: string) => boolean;
+  toggleExpanded: (taskId: string) => void;
+}) {
+  const needsCollapse = children.length > INITIALLY_VISIBLE + 2;
+  const [showAll, setShowAll] = useState(!needsCollapse);
+
+  const visibleChildren = useMemo(() => {
+    if (showAll) return children;
+    const first = children.slice(0, INITIALLY_VISIBLE);
+    const firstIds = new Set(first.map((c) => c.task.id));
+    const extra = children
+      .slice(INITIALLY_VISIBLE)
+      .filter((c) => containsFocus(c, focusTaskId));
+    return [...first, ...extra.filter((c) => !firstIds.has(c.task.id))];
+  }, [children, showAll, focusTaskId]);
+
+  const hiddenCount = showAll ? 0 : children.length - visibleChildren.length;
+  const hasMore = !showAll && hiddenCount > 0;
+
+  const statusSummary = useMemo(() => {
+    if (showAll || hiddenCount === 0) return null;
+    const visibleIds = new Set(visibleChildren.map((c) => c.task.id));
+    const hidden = children.filter((c) => !visibleIds.has(c.task.id));
+    const counts: Record<string, number> = {};
+    for (const c of hidden) {
+      counts[c.task.status] = (counts[c.task.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [children, visibleChildren, showAll, hiddenCount]);
+
+  const showConnectors = depth <= MAX_INDENT;
+
+  return (
+    <div className="flex flex-col">
+      {visibleChildren.map((child, i) => {
+        const isLastVisible = i === visibleChildren.length - 1;
+        const isLast = isLastVisible && !hasMore;
+        return (
+          <HierarchyTreeNode
+            key={child.task.id}
+            node={child}
+            focusTaskId={focusTaskId}
+            onNavigate={onNavigate}
+            depth={depth}
+            isLast={isLast}
+            filterMatchIds={filterMatchIds}
+            isExpanded={isExpanded}
+            toggleExpanded={toggleExpanded}
+          />
+        );
+      })}
+      {hasMore && (
+        <div className="flex items-start">
+          {showConnectors && <TreeConnector isLast branchY={14} />}
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 flex-1"
+            style={{
+              border: '1px dashed var(--sam-color-border-default)',
+              background: 'transparent',
+              color: 'var(--sam-color-fg-muted)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'var(--sam-color-accent-primary)';
+              e.currentTarget.style.color = 'var(--sam-color-fg-primary)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--sam-color-border-default)';
+              e.currentTarget.style.color = 'var(--sam-color-fg-muted)';
+            }}
+          >
+            <ChevronDown size={12} />
+            <span>Show {hiddenCount} more</span>
+            {statusSummary && (
+              <span className="flex gap-0.5 ml-1">
+                {Object.entries(statusSummary).map(([status, count]) => (
+                  <span
+                    key={status}
+                    className="rounded-full font-semibold"
+                    style={{
+                      fontSize: 9,
+                      padding: '0 4px',
+                      background: `color-mix(in srgb, ${getStatusColorVar(status)} 15%, transparent)`,
+                      color: getStatusColorVar(status),
+                    }}
+                  >
+                    {count}
+                  </span>
+                ))}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -22,6 +22,7 @@ export function SessionList({
   onFork,
   taskInfoMap,
   searchQuery = '',
+  onShowHierarchy,
 }: {
   /** Sessions to display (already filtered to the visible bucket, e.g. recent or stale). */
   sessions: ChatSessionListItem[];
@@ -34,6 +35,7 @@ export function SessionList({
   taskTitleMap?: Map<string, string>;
   taskInfoMap: Map<string, TaskInfo>;
   searchQuery?: string;
+  onShowHierarchy?: (taskId: string) => void;
 }) {
   const roots = useMemo(
     () => buildSessionTree(sessions, taskInfoMap, { allSessions }),
@@ -51,6 +53,7 @@ export function SessionList({
           onFork={onFork}
           taskInfoMap={taskInfoMap}
           searchQuery={searchQuery}
+          onShowHierarchy={onShowHierarchy}
         />
       ))}
     </>

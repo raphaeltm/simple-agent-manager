@@ -201,6 +201,7 @@ export function SessionHeader({
   lineageText,
   sourceContext,
   hasContentBelow = false,
+  onShowHierarchy,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -222,6 +223,8 @@ export function SessionHeader({
   sourceContext?: SessionSourceContext;
   /** When true, suppress bottom rounding and glow (content follows below). */
   hasContentBelow?: boolean;
+  /** Open hierarchy modal for the given task. */
+  onShowHierarchy?: (taskId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -565,7 +568,7 @@ export function SessionHeader({
             </div>
           )}
 
-          {sourceContext && <SessionSourceContextRow projectId={projectId} sourceContext={sourceContext} />}
+          {sourceContext && <SessionSourceContextRow projectId={projectId} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />}
 
           {/* Action buttons — wraps on narrow viewports */}
           <div className="flex flex-wrap items-center gap-1.5">

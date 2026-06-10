@@ -1,10 +1,11 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, List, Search, Settings, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ProjectMessageView } from '../../components/project-message-view';
+import { HierarchyModal } from '../../components/task-hierarchy';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { ChatInput } from './ChatInput';
@@ -21,6 +22,19 @@ export function ProjectChat() {
   const navigate = useNavigate();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
+  const [hierarchyTaskId, setHierarchyTaskId] = useState<string | null>(null);
+
+  const handleShowHierarchy = useCallback((taskId: string) => {
+    setHierarchyTaskId(taskId);
+  }, []);
+
+  const handleHierarchyNavigate = useCallback(
+    (sessionId: string) => {
+      setHierarchyTaskId(null);
+      state.handleSelect(sessionId);
+    },
+    [state],
+  );
   const activeSessionId = state.sessionId ?? '';
   const starterPrompts = useMemo(() => {
     const repoLabel = state.project?.repository || state.project?.name || 'this repo';
@@ -147,6 +161,7 @@ export function ProjectChat() {
                 taskTitleMap={state.taskTitleMap}
                 taskInfoMap={state.taskInfoMap}
                 searchQuery={state.searchQuery}
+                onShowHierarchy={handleShowHierarchy}
               />
               {state.filteredStale.length > 0 && (
                 <>
@@ -315,6 +330,7 @@ export function ProjectChat() {
               closeError={state.closeError}
               agentProfiles={state.agentProfiles}
               slashCommands={state.slashCommands}
+              onShowHierarchy={handleShowHierarchy}
             />
           </div>
         )}
@@ -336,6 +352,7 @@ export function ProjectChat() {
           onRefresh={() => void state.loadSessions()}
           taskTitleMap={state.taskTitleMap}
           taskInfoMap={state.taskInfoMap}
+          onShowHierarchy={handleShowHierarchy}
         />
       )}
 
@@ -344,6 +361,18 @@ export function ProjectChat() {
         <BootLogPanel
           logs={state.bootLogs}
           onClose={() => state.setBootLogPanelOpen(false)}
+        />
+      )}
+
+      {/* Task hierarchy modal */}
+      {hierarchyTaskId && (
+        <HierarchyModal
+          isOpen
+          onClose={() => setHierarchyTaskId(null)}
+          focusTaskId={hierarchyTaskId}
+          taskInfoMap={state.taskInfoMap}
+          sessions={state.sessions}
+          onNavigate={handleHierarchyNavigate}
         />
       )}
     </div>

@@ -30,7 +30,7 @@ export { chatMessagesToConversationItems, groupMessages } from './types';
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
-  projectId, lc, onSessionMutated, onRetry, onFork, sourceContext,
+  projectId, lc, onSessionMutated, onRetry, onFork, sourceContext, onShowHierarchy,
 }: {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
@@ -38,6 +38,7 @@ function FloatingHeader({
   onRetry?: () => void;
   onFork?: () => void;
   sourceContext?: SessionSourceContext;
+  onShowHierarchy?: (taskId: string) => void;
 }) {
   if (!lc.session) return null;
   return (
@@ -60,6 +61,7 @@ function FloatingHeader({
         lineageText={sourceContext?.lineageText}
         sourceContext={sourceContext}
         hasContentBelow={!!lc.taskEmbed?.errorMessage}
+        onShowHierarchy={onShowHierarchy}
       />
       {lc.taskEmbed?.errorMessage && (
         <ErrorBanner message={lc.taskEmbed.errorMessage} />
@@ -140,6 +142,8 @@ interface ProjectMessageViewProps {
   agentProfiles?: AgentProfile[];
   /** Slash commands available for follow-up prompt autocomplete. */
   slashCommands?: SlashCommand[];
+  /** Open hierarchy modal for the given task. */
+  onShowHierarchy?: (taskId: string) => void;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -155,6 +159,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   closeError,
   agentProfiles = [],
   slashCommands = [],
+  onShowHierarchy,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -277,7 +282,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
         <div className="flex-1 min-h-0 flex flex-col relative">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
           <div className="flex flex-1 items-center justify-center pt-14">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
@@ -286,7 +291,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
           <div className="flex-1 min-h-0">
             <Virtuoso
               ref={virtuosoRef}

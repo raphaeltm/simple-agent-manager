@@ -6,6 +6,11 @@ interface DialogProps {
   onClose: () => void;
   children: ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg';
+  /**
+   * Optional sticky header content rendered above the scrollable body.
+   * When provided, the header stays fixed while children scroll independently.
+   */
+  stickyHeader?: ReactNode;
 }
 
 const maxWidthClasses: Record<NonNullable<DialogProps['maxWidth']>, string> = {
@@ -14,7 +19,7 @@ const maxWidthClasses: Record<NonNullable<DialogProps['maxWidth']>, string> = {
   lg: 'max-w-xl',
 };
 
-export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogProps) {
+export function Dialog({ isOpen, onClose, children, maxWidth = 'md', stickyHeader }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,6 +59,11 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
         tabIndex={-1}
         className={`glass-panel-container glass-composited relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg glass-modal shadow-overlay ${maxWidthClasses[maxWidth]}`}
       >
+        {stickyHeader && (
+          <div className="flex-shrink-0">
+            {stickyHeader}
+          </div>
+        )}
         <div className="overflow-y-auto p-6 flex-1">
           {children}
         </div>

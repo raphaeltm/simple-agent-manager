@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, EyeOff, Network } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import { hasHierarchy } from '../../components/task-hierarchy';
 import { SessionItem } from './SessionItem';
 import type { SessionTreeNode } from './sessionTree';
 import { treeHasMatchingDescendant } from './sessionTree';
@@ -29,6 +30,7 @@ export function SessionTreeItem({
   taskInfoMap,
   searchQuery = '',
   defaultExpanded,
+  onShowHierarchy,
 }: {
   node: SessionTreeNode;
   selectedSessionId: string | null;
@@ -37,6 +39,7 @@ export function SessionTreeItem({
   taskInfoMap: Map<string, TaskInfo>;
   searchQuery?: string;
   defaultExpanded?: boolean;
+  onShowHierarchy?: (taskId: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
 
@@ -130,9 +133,36 @@ export function SessionTreeItem({
     </button>
   ) : null;
 
+  const showHierarchyButton =
+    onShowHierarchy && node.session.taskId && hasHierarchy(node.session.taskId, taskInfoMap);
+
   // Build badge content
   const badge = (
     <>
+      {showHierarchyButton && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShowHierarchy(node.session.taskId!);
+          }}
+          title="View task hierarchy"
+          aria-label="View task hierarchy"
+          className="inline-flex items-center justify-center shrink-0 bg-transparent border cursor-pointer p-0 transition-all duration-150"
+          style={{
+            width: 18,
+            height: 18,
+            minWidth: 44,
+            minHeight: 44,
+            borderRadius: 4,
+            borderColor: 'var(--sam-color-info)',
+            color: 'var(--sam-color-info)',
+            background: 'color-mix(in srgb, var(--sam-color-info) 10%, transparent)',
+          }}
+        >
+          <Network size={11} />
+        </button>
+      )}
       {node.isContextAnchor && (
         <span
           className="inline-flex items-center gap-0.5"
@@ -224,6 +254,7 @@ export function SessionTreeItem({
               onFork={onFork}
               taskInfoMap={taskInfoMap}
               searchQuery={searchQuery}
+              onShowHierarchy={onShowHierarchy}
             />
           ))}
         </div>

@@ -21,6 +21,7 @@ export function MobileSessionDrawer({
   onRefresh,
   taskTitleMap = new Map(),
   taskInfoMap = new Map(),
+  onShowHierarchy,
 }: {
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
@@ -33,6 +34,7 @@ export function MobileSessionDrawer({
   onRefresh?: () => void;
   taskTitleMap?: Map<string, string>;
   taskInfoMap?: Map<string, TaskInfo>;
+  onShowHierarchy?: (taskId: string) => void;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -174,6 +176,7 @@ export function MobileSessionDrawer({
             taskTitleMap={taskTitleMap}
             taskInfoMap={taskInfoMap}
             searchQuery={mobileSearch}
+            onShowHierarchy={onShowHierarchy}
           />
           {filteredS.length > 0 && (
             <>

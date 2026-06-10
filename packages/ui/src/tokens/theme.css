@@ -148,6 +148,9 @@
   --sam-color-purple: #c084fc;
   --sam-color-warning-surface: #2e2a1f;
 
+  /* Task hierarchy tree connector */
+  --sam-color-tree-connector: #3d6e5c;
+
   /* Admin analytics chart tokens.
      Dark defaults match the pre-light slice colors; light overrides below
      darken non-green series so bars/lines remain legible on light surfaces. */
@@ -354,6 +357,9 @@
   --sam-color-info-fg: #1d4ed8;
   --sam-color-purple: #7c3aed;
   --sam-color-warning-surface: #fdf6e9;
+
+  /* Task hierarchy tree connector */
+  --sam-color-tree-connector: #6b9e88;
 
   /* Admin analytics chart tokens — contrast checked on #f8fbf8 surfaces:
      series-2 #2563eb 5.27:1, series-3 #7c3aed 4.81:1,

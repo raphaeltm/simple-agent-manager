@@ -1,4 +1,4 @@
-import { GitFork, Hash, Tag } from 'lucide-react';
+import { GitFork, Hash, Network, Tag } from 'lucide-react';
 import { Link } from 'react-router';
 
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
@@ -7,9 +7,11 @@ import { CopyableId } from './CopyableId';
 export function SessionSourceContextRow({
   projectId,
   sourceContext,
+  onShowHierarchy,
 }: {
   projectId: string;
   sourceContext: SessionSourceContext;
+  onShowHierarchy?: (taskId: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
@@ -38,6 +40,18 @@ export function SessionSourceContextRow({
         <CopyableId label="Parent task" value={sourceContext.parentTaskId} icon={<Tag size={9} />} />
         {sourceContext.parentSessionId && (
           <CopyableId label="Parent session" value={sourceContext.parentSessionId} icon={<Hash size={9} />} />
+        )}
+        {onShowHierarchy && (
+          <button
+            type="button"
+            onClick={() => onShowHierarchy(sourceContext.parentTaskId)}
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors duration-150 bg-transparent border-none cursor-pointer"
+            style={{ color: 'var(--sam-color-info)' }}
+            title="View task hierarchy"
+          >
+            <Network size={9} />
+            Hierarchy
+          </button>
         )}
       </div>
     </div>
