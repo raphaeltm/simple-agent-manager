@@ -1,71 +1,23 @@
-import { useCallback, useEffect,useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AcpErrorCode } from '../errors';
 import { errorCodeFromCloseCode, errorCodeFromMessage, getErrorMeta } from '../errors';
 import { maybeJsonRecord } from '../runtime-validation';
-import type { AgentSessionStatus, AgentStatusMessage, LifecycleEventCallback,SessionStateMessage } from '../transport/types';
+import type { AgentStatusMessage, LifecycleEventCallback, SessionStateMessage } from '../transport/types';
 import type { AcpTransport } from '../transport/websocket';
 import { createAcpWebSocketTransport } from '../transport/websocket';
+import {
+  addJitter,
+  classifyCloseCode,
+  DEFAULT_RECONNECT_DELAY_MS,
+  DEFAULT_RECONNECT_MAX_DELAY_MS,
+  DEFAULT_RECONNECT_TIMEOUT_MS,
+  mapAgentStatusToSessionState,
+  safeHost,
+} from './useAcpSession.helpers';
 
-/** Default reconnection delay in ms */
-const DEFAULT_RECONNECT_DELAY_MS = 1000;
-/** Default total reconnection timeout in ms */
-const DEFAULT_RECONNECT_TIMEOUT_MS = 60000;
-/** Default maximum reconnection delay cap in ms */
-const DEFAULT_RECONNECT_MAX_DELAY_MS = 16000;
-
-/**
- * Add ±25% jitter to a delay value to prevent thundering-herd reconnections
- * when many clients lose connectivity simultaneously (e.g., server restart).
- */
-export function addJitter(delayMs: number): number {
-  // jitter range: [0.75 * delay, 1.25 * delay]
-  const jitterFactor = 0.75 + Math.random() * 0.5;
-  return Math.round(delayMs * jitterFactor);
-}
-
-/**
- * Classify a WebSocket close code to determine reconnection strategy.
- *
- * Returns:
- * - 'no-reconnect': The close was clean or the server explicitly rejected us.
- *    Do not reconnect (e.g., auth failure, policy violation).
- * - 'immediate': A transient issue where immediate reconnect is appropriate
- *    (e.g., going-away during server restart, abnormal closure).
- * - 'backoff': An unexpected close where exponential backoff should apply
- *    (e.g., unknown codes, internal errors, service restart).
- */
-export type CloseCodeStrategy = 'no-reconnect' | 'immediate' | 'backoff';
-
-export function classifyCloseCode(code: number | undefined): CloseCodeStrategy {
-  if (code === undefined) return 'backoff';
-  switch (code) {
-    // 1000: Normal closure — the server intentionally closed the connection
-    case 1000:
-      return 'no-reconnect';
-    // 1001: Going away — server shutting down or navigating away; retry quickly
-    case 1001:
-      return 'immediate';
-    // 1008: Policy violation — auth failure, bad token; don't retry
-    case 1008:
-      return 'no-reconnect';
-    // 1011: Unexpected condition — server error; back off
-    case 1011:
-      return 'backoff';
-    // 4000: Our custom heartbeat timeout code; retry with backoff
-    case 4000:
-      return 'backoff';
-    // 4001: Custom code — auth expired/invalid; retry with backoff (fresh token via resolver)
-    case 4001:
-      return 'backoff';
-    // 1006: Abnormal closure (no close frame) — network drop; retry immediately
-    case 1006:
-      return 'immediate';
-    default:
-      // Unknown codes: use backoff as the safe default
-      return 'backoff';
-  }
-}
+export { addJitter, classifyCloseCode };
+export type { CloseCodeStrategy } from './useAcpSession.helpers';
 
 /** ACP session state machine */
 export type AcpSessionState =
@@ -154,15 +106,6 @@ export interface AcpSessionHandle {
   connected: boolean;
   /** Manually trigger a reconnection attempt */
   reconnect: () => void;
-}
-
-/** Extract host from a WebSocket URL for safe logging (no tokens) */
-function safeHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return 'unknown';
-  }
 }
 
 /**
@@ -267,17 +210,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   // Map VM Agent status to session state
   const handleAgentStatus = useCallback((msg: AgentStatusMessage) => {
-    const statusMap: Record<AgentSessionStatus, AcpSessionState> = {
-      starting: 'initializing',
-      installing: 'initializing',
-      ready: 'ready',
-      error: 'error',
-      restarting: 'initializing',
-      recovering: 'initializing',
-      recovered: 'ready',
-    };
-
-    const newState = statusMap[msg.status] || 'error';
+    const newState = mapAgentStatusToSessionState(msg.status);
     setState(newState);
     setAgentType(msg.agentType);
 

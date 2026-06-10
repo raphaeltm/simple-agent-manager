@@ -47,15 +47,21 @@ Passing typecheck and unit tests is not enough when the core modules are this la
 
 ## Implementation Checklist
 
-- [ ] Extract ACP session close-code/reconnect helpers and session-state mapping helpers out of `useAcpSession.ts` without changing its public API.
-- [ ] Extract ACP message update parsing/reducer helpers out of `useAcpMessages.ts`, using runtime guard functions for supported ACP payload shapes instead of broad in-branch casts.
-- [ ] Remove forbidden non-null assertions and formatting drift from the hook slice.
-- [ ] Add focused behavioral tests for `useAudioPlayback` covering server TTS success, cached replay, abort/stop cleanup, server failure fallback to browser speech synthesis, playback rate, seek, skip, and cleanup on unmount.
-- [ ] Add direct tests for `usePrefersReducedMotion` covering no `matchMedia`, initial match state, and media-query change events.
-- [ ] Keep exported hook APIs stable.
-- [ ] Run `pnpm --filter @simple-agent-manager/acp-client lint`.
-- [ ] Run `pnpm --filter @simple-agent-manager/acp-client typecheck`.
-- [ ] Run `pnpm --filter @simple-agent-manager/acp-client test`.
+- [x] Extract ACP session close-code/reconnect helpers and session-state mapping helpers out of `useAcpSession.ts` without changing its public API.
+- [x] Extract ACP message update parsing/reducer helpers out of `useAcpMessages.ts`, using runtime guard functions for supported ACP payload shapes instead of broad in-branch casts.
+- [x] Remove forbidden non-null assertions and formatting drift from the hook slice.
+- [x] Add focused behavioral tests for `useAudioPlayback` covering server TTS success, cached replay, abort/stop cleanup, server failure fallback to browser speech synthesis, playback rate, seek, skip, and cleanup on unmount.
+- [x] Add direct tests for `usePrefersReducedMotion` covering no `matchMedia`, initial match state, and media-query change events.
+- [x] Keep exported hook APIs stable.
+- [x] Run `pnpm --filter @simple-agent-manager/acp-client lint`.
+- [x] Run `pnpm --filter @simple-agent-manager/acp-client typecheck`.
+- [x] Run `pnpm --filter @simple-agent-manager/acp-client test`.
+
+## Validation Evidence
+
+- `pnpm --filter @simple-agent-manager/acp-client lint` exits 0. The changed hook files have no lint warnings; 16 pre-existing warnings remain in component/transport files outside this spot-check slice.
+- `pnpm --filter @simple-agent-manager/acp-client typecheck` passes.
+- `pnpm --filter @simple-agent-manager/acp-client test` passes with 25 test files and 440 tests.
 
 ## Acceptance Criteria
 
