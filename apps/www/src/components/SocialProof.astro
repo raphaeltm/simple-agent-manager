@@ -14,45 +14,55 @@
           </svg>
           <span>Claude Code</span>
         </div>
-        <span class="proof-divider">+</span>
-        <div class="proof-item">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <rect width="128" height="128" rx="16" fill="#000"/>
-            <circle cx="64" cy="64" r="32" fill="white"/>
-          </svg>
-          <span>OpenAI Codex</span>
+        <div class="proof-group">
+          <span class="proof-divider">+</span>
+          <div class="proof-item">
+            <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+              <rect width="128" height="128" rx="16" fill="#000"/>
+              <circle cx="64" cy="64" r="32" fill="white"/>
+            </svg>
+            <span>OpenAI Codex</span>
+          </div>
         </div>
-        <span class="proof-divider">+</span>
-        <div class="proof-item">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <rect width="128" height="128" rx="16" fill="#4285F4"/>
-            <path d="M64 38L88 76H40Z" fill="white"/>
-          </svg>
-          <span>Gemini CLI</span>
+        <div class="proof-group">
+          <span class="proof-divider">+</span>
+          <div class="proof-item">
+            <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+              <rect width="128" height="128" rx="16" fill="#4285F4"/>
+              <path d="M64 38L88 76H40Z" fill="white"/>
+            </svg>
+            <span>Gemini CLI</span>
+          </div>
         </div>
-        <span class="proof-divider">+</span>
-        <div class="proof-item">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <rect width="128" height="128" rx="16" fill="#FF6B35"/>
-            <path d="M40 84L64 44L88 84Z" fill="white"/>
-          </svg>
-          <span>Mistral Vibe</span>
+        <div class="proof-group">
+          <span class="proof-divider">+</span>
+          <div class="proof-item">
+            <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+              <rect width="128" height="128" rx="16" fill="#FF6B35"/>
+              <path d="M40 84L64 44L88 84Z" fill="white"/>
+            </svg>
+            <span>Mistral Vibe</span>
+          </div>
         </div>
-        <span class="proof-divider">+</span>
-        <div class="proof-item">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <rect width="128" height="128" rx="16" fill="#6366F1"/>
-            <path d="M40 64H88M64 40V88" stroke="white" stroke-width="8" stroke-linecap="round"/>
-          </svg>
-          <span>OpenCode</span>
+        <div class="proof-group">
+          <span class="proof-divider">+</span>
+          <div class="proof-item">
+            <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+              <rect width="128" height="128" rx="16" fill="#6366F1"/>
+              <path d="M40 64H88M64 40V88" stroke="white" stroke-width="8" stroke-linecap="round"/>
+            </svg>
+            <span>OpenCode</span>
+          </div>
         </div>
-        <span class="proof-divider">+</span>
-        <div class="proof-item">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
-            <rect width="128" height="128" rx="16" fill="#5B5BD6"/>
-            <path d="M36 88L64 36L92 88H78L72 76H56L50 88H36Z" fill="white"/>
-          </svg>
-          <span>Amp</span>
+        <div class="proof-group">
+          <span class="proof-divider">+</span>
+          <div class="proof-item">
+            <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+              <rect width="128" height="128" rx="16" fill="#5B5BD6"/>
+              <path d="M36 88L64 36L92 88H78L72 76H56L50 88H36Z" fill="white"/>
+            </svg>
+            <span>Amp</span>
+          </div>
         </div>
       </div>
       <div class="proof-badges">
@@ -92,20 +102,33 @@
     }
   }
 
+  /* Let this strip use more width than the default container so the
+     agent list and badges fit on a single line on large screens. */
+  .social-proof .container {
+    max-width: 1480px;
+  }
+
   .proof-label {
     font-family: var(--font-mono);
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--color-fg-dim);
+    flex-shrink: 0;
   }
 
   .proof-logos {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px 16px;
     flex-wrap: wrap;
     justify-content: center;
+  }
+
+  .proof-group {
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
 
   .proof-item {
@@ -115,6 +138,7 @@
     font-size: 0.875rem;
     color: var(--color-fg-muted);
     font-weight: 500;
+    white-space: nowrap;
   }
 
   .proof-divider {
@@ -125,6 +149,9 @@
   .proof-badges {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    flex-shrink: 0;
   }
 
   .badge {
@@ -138,5 +165,6 @@
     padding: 4px 12px;
     border-radius: 100px;
     letter-spacing: 0.02em;
+    white-space: nowrap;
   }
 </style>
