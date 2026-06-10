@@ -51,6 +51,7 @@ export function HierarchyNodeCard({
       disabled={isDisabled}
       title={isDisabled ? 'Task is queued — no session yet' : node.task.title}
       role="treeitem"
+      aria-selected={isFocus}
       aria-label={`${node.task.title}, ${statusCfg.label}${isFocus ? ', current task' : ''}${isDisabled ? ', no session available' : ''}`}
       className={`
         flex items-center gap-2 w-full text-left transition-all duration-150 rounded-lg

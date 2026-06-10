@@ -27,7 +27,7 @@ function getStatusColorVar(status: string) {
 }
 
 export function HierarchyChildrenGroup({
-  children,
+  nodes,
   focusTaskId,
   onNavigate,
   depth,
@@ -35,7 +35,7 @@ export function HierarchyChildrenGroup({
   isExpanded,
   toggleExpanded,
 }: {
-  children: HierarchyNode[];
+  nodes: HierarchyNode[];
   focusTaskId: string;
   onNavigate: (sessionId: string) => void;
   depth: number;
@@ -43,32 +43,32 @@ export function HierarchyChildrenGroup({
   isExpanded: (taskId: string) => boolean;
   toggleExpanded: (taskId: string) => void;
 }) {
-  const needsCollapse = children.length > INITIALLY_VISIBLE + 2;
+  const needsCollapse = nodes.length > INITIALLY_VISIBLE + 2;
   const [showAll, setShowAll] = useState(!needsCollapse);
 
   const visibleChildren = useMemo(() => {
-    if (showAll) return children;
-    const first = children.slice(0, INITIALLY_VISIBLE);
+    if (showAll) return nodes;
+    const first = nodes.slice(0, INITIALLY_VISIBLE);
     const firstIds = new Set(first.map((c) => c.task.id));
-    const extra = children
+    const extra = nodes
       .slice(INITIALLY_VISIBLE)
       .filter((c) => containsFocus(c, focusTaskId));
     return [...first, ...extra.filter((c) => !firstIds.has(c.task.id))];
-  }, [children, showAll, focusTaskId]);
+  }, [nodes, showAll, focusTaskId]);
 
-  const hiddenCount = showAll ? 0 : children.length - visibleChildren.length;
+  const hiddenCount = showAll ? 0 : nodes.length - visibleChildren.length;
   const hasMore = !showAll && hiddenCount > 0;
 
   const statusSummary = useMemo(() => {
     if (showAll || hiddenCount === 0) return null;
     const visibleIds = new Set(visibleChildren.map((c) => c.task.id));
-    const hidden = children.filter((c) => !visibleIds.has(c.task.id));
+    const hidden = nodes.filter((c) => !visibleIds.has(c.task.id));
     const counts: Record<string, number> = {};
     for (const c of hidden) {
       counts[c.task.status] = (counts[c.task.status] ?? 0) + 1;
     }
     return counts;
-  }, [children, visibleChildren, showAll, hiddenCount]);
+  }, [nodes, visibleChildren, showAll, hiddenCount]);
 
   const showConnectors = depth <= MAX_INDENT;
 

@@ -1,2 +1,2 @@
-export { HierarchyModal } from './HierarchyModal';
 export { hasHierarchy } from './buildHierarchyTree';
+export { HierarchyModal } from './HierarchyModal';

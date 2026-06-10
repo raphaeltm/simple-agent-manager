@@ -1,10 +1,10 @@
+import { Dialog } from '@simple-agent-manager/ui';
 import { AlertCircle, ArrowLeft, CheckCircle2, CirclePause, Loader2, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatSessionListItem } from '../../lib/api';
-import { Dialog } from '@simple-agent-manager/ui';
 import type { TaskInfo } from '../../pages/project-chat/useTaskGroups';
-
+import type { HierarchyNode } from './buildHierarchyTree';
 import {
   buildHierarchyTree,
   collectMatchIds,
@@ -13,7 +13,6 @@ import {
   filterTree,
   getAncestorPath,
 } from './buildHierarchyTree';
-import type { HierarchyNode } from './buildHierarchyTree';
 import { HierarchyTreeNode } from './HierarchyTreeNode';
 
 // ─── Status helpers ────────────────────────────────────────────────────

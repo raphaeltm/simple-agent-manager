@@ -1,8 +1,8 @@
 import { ChevronDown, ChevronRight, EyeOff, Network } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import { hasHierarchy } from '../../components/task-hierarchy';
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import { SessionItem } from './SessionItem';
 import type { SessionTreeNode } from './sessionTree';
 import { treeHasMatchingDescendant } from './sessionTree';

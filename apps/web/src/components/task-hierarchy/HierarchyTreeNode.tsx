@@ -90,7 +90,7 @@ export function HierarchyTreeNode({
         {effectiveChildrenVisible && hasChildren && (
           <div style={{ marginLeft: 10 }}>
             <HierarchyChildrenGroup
-              children={node.children}
+              nodes={node.children}
               focusTaskId={focusTaskId}
               onNavigate={onNavigate}
               depth={depth + 1}
