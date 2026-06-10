@@ -1,0 +1,27 @@
+# SPIKE: SAM container-registry proxy (registry v2 protocol).
+# Accepts project-scoped SAM tokens, enforces a per-project repository-path
+# prefix, and swaps in the upstream registry credential server-side.
+# NOT wired into the deploy pipeline yet — local `wrangler dev` only.
+#
+# NOTE: [env.*] sections are NOT checked in (repo-wide rule). If/when this
+# worker ships, scripts/deploy/sync-wrangler-config.ts must learn about it.
+name = "sam-registry-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Upstream registry the proxy fronts. Local experiment: a `registry:2`
+# container. Production: https://registry.cloudflare.com
+UPSTREAM_REGISTRY_URL = "http://localhost:5000"
+# Service name embedded in the token-auth challenge.
+REGISTRY_SERVICE = "sam-registry-proxy"
+# Token TTL (seconds) for issued registry JWTs.
+TOKEN_TTL_SECONDS = "1800"
+
+# Secrets (set via `wrangler secret put` / .dev.vars for local dev):
+# TOKEN_SIGNING_SECRET   — HS256 secret for issued registry JWTs
+# DEV_PROJECT_TOKENS     — SPIKE ONLY: JSON map of { "<samToken>": "<projectId>" }.
+#                          Production replaces this with SAM API token validation.
+# UPSTREAM_USERNAME      — optional upstream Basic credential (CF-minted in prod)
+# UPSTREAM_PASSWORD      — optional upstream Basic credential
