@@ -117,6 +117,30 @@ function renderPalette(onClose = vi.fn()) {
   };
 }
 
+// Waits for the palette to finish its async fetches (Navigation always renders),
+// then types `query` into the combobox. Returns the input for further interaction.
+async function openAndFilter(query: string) {
+  const input = screen.getByRole('combobox');
+  await waitFor(() => {
+    expect(screen.getByText('Navigation')).toBeInTheDocument();
+  });
+  fireEvent.change(input, { target: { value: query } });
+  return input;
+}
+
+// Filters to `query`, waits for at least one matching option, then presses Enter
+// to execute the top result.
+async function filterAndExecute(query: string) {
+  const input = await openAndFilter(query);
+  await waitFor(() => {
+    expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+  });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
+const optionLabels = () =>
+  screen.getAllByRole('option').map((o) => o.textContent);
+
 describe('GlobalCommandPalette — Context Awareness', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
@@ -374,15 +398,9 @@ describe('GlobalCommandPalette — Context Awareness', () => {
   it('shows Settings deep-links for all users', async () => {
     mockPathname = '/dashboard';
     renderPalette();
-    const input = screen.getByRole('combobox');
+    await openAndFilter('settings');
 
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'settings' } });
-
-    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    const labels = optionLabels();
     expect(labels.some((l) => l?.includes('Settings: Cloud Provider'))).toBe(true);
     expect(labels.some((l) => l?.includes('Settings: GitHub'))).toBe(true);
     expect(labels.some((l) => l?.includes('Settings: API Tokens'))).toBe(true);
@@ -394,13 +412,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     mockIsSuperadmin = false;
     mockPathname = '/dashboard';
     renderPalette();
-    const input = screen.getByRole('combobox');
-
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'admin' } });
+    await openAndFilter('admin');
 
     const labels = screen.queryAllByRole('option').map((o) => o.textContent);
     expect(labels.some((l) => l?.includes('Admin'))).toBe(false);
@@ -410,137 +422,47 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     mockIsSuperadmin = true;
     mockPathname = '/dashboard';
     renderPalette();
-    const input = screen.getByRole('combobox');
+    await openAndFilter('admin');
 
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'admin' } });
-
-    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    const labels = optionLabels();
     expect(labels.some((l) => l?.includes('Admin: Users'))).toBe(true);
     expect(labels.some((l) => l?.includes('Admin: Logs'))).toBe(true);
     expect(labels.some((l) => l?.includes('Admin: Costs'))).toBe(true);
   });
 
-  // ── Quick actions: Toggle Theme + Sign Out ──
+  // ── Quick actions: Toggle Theme ──
 
-  it('Toggle Theme switches to light when currently dark', async () => {
-    mockIsDark = true;
+  it.each([
+    [true, 'light'],
+    [false, 'dark'],
+  ])('Toggle Theme switches theme when currently dark=%s', async (isDark, expected) => {
+    mockIsDark = isDark;
     mockPathname = '/dashboard';
     renderPalette();
-    const input = screen.getByRole('combobox');
+    await filterAndExecute('toggle theme');
 
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'toggle theme' } });
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(mockSetTheme).toHaveBeenCalledWith('light');
-  });
-
-  it('Toggle Theme switches to dark when currently light', async () => {
-    mockIsDark = false;
-    mockPathname = '/dashboard';
-    renderPalette();
-    const input = screen.getByRole('combobox');
-
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'toggle theme' } });
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(mockSetTheme).toHaveBeenCalledWith('dark');
+    expect(mockSetTheme).toHaveBeenCalledWith(expected);
   });
 
   it('Sign Out invokes signOut', async () => {
     mockPathname = '/dashboard';
     renderPalette();
-    const input = screen.getByRole('combobox');
-
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'sign out' } });
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    await filterAndExecute('sign out');
 
     expect(mockSignOut).toHaveBeenCalled();
   });
 
-  it('Go to Nodes navigates to the nodes page', async () => {
+  // ── Navigation targets (Go to Nodes, Map, Tools) ──
+
+  it.each([
+    ['go to nodes', '/nodes'],
+    ['map', '/account-map'],
+    ['tools', '/tools'],
+  ])('"%s" navigates to %s', async (query, expectedPath) => {
     mockPathname = '/dashboard';
     renderPalette();
-    const input = screen.getByRole('combobox');
+    await filterAndExecute(query);
 
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'go to nodes' } });
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(mockNavigate).toHaveBeenCalledWith('/nodes');
-  });
-
-  // ── Top-level navigation items (Map, Tools) ──
-
-  it('Map navigates to the account map page', async () => {
-    mockPathname = '/dashboard';
-    renderPalette();
-    const input = screen.getByRole('combobox');
-
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'map' } });
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(mockNavigate).toHaveBeenCalledWith('/account-map');
-  });
-
-  it('Tools navigates to the tools page', async () => {
-    mockPathname = '/dashboard';
-    renderPalette();
-    const input = screen.getByRole('combobox');
-
-    await waitFor(() => {
-      expect(screen.getByText('Navigation')).toBeInTheDocument();
-    });
-
-    fireEvent.change(input, { target: { value: 'tools' } });
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
-    });
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    expect(mockNavigate).toHaveBeenCalledWith('/tools');
+    expect(mockNavigate).toHaveBeenCalledWith(expectedPath);
   });
 });

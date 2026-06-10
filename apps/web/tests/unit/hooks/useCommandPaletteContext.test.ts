@@ -195,37 +195,19 @@ describe('useCommandPaletteContext', () => {
 
   // ── Create quick actions (?edit=new opens the create modal) ──
 
-  it('Create Trigger navigates with the ?edit=new query string', () => {
+  it.each([
+    ['ctx-create-trigger', 'My Project: Create Trigger', '/projects/p1/triggers?edit=new'],
+    ['ctx-create-profile', 'My Project: Create Profile', '/projects/p1/profiles?edit=new'],
+    ['ctx-create-skill', 'My Project: Create Skill', '/projects/p1/skills?edit=new'],
+  ])('%s navigates with the ?edit=new query string', (id, label, expectedPath) => {
     mockPathname = '/projects/p1/chat';
     const { result } = renderContextHook();
 
-    const action = result.current.contextActions.find((a) => a.id === 'ctx-create-trigger');
-    expect(action?.label).toBe('My Project: Create Trigger');
+    const action = result.current.contextActions.find((a) => a.id === id);
+    expect(action?.label).toBe(label);
     action?.action();
 
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/triggers?edit=new');
-  });
-
-  it('Create Profile navigates with the ?edit=new query string', () => {
-    mockPathname = '/projects/p1/chat';
-    const { result } = renderContextHook();
-
-    const action = result.current.contextActions.find((a) => a.id === 'ctx-create-profile');
-    expect(action?.label).toBe('My Project: Create Profile');
-    action?.action();
-
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/profiles?edit=new');
-  });
-
-  it('Create Skill navigates with the ?edit=new query string', () => {
-    mockPathname = '/projects/p1/chat';
-    const { result } = renderContextHook();
-
-    const action = result.current.contextActions.find((a) => a.id === 'ctx-create-skill');
-    expect(action?.label).toBe('My Project: Create Skill');
-    action?.action();
-
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/skills?edit=new');
+    expect(mockNavigate).toHaveBeenCalledWith(expectedPath);
   });
 
   // ── Context Actions: Session Scope ──
