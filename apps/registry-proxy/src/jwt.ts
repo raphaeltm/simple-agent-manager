@@ -25,7 +25,9 @@ function base64UrlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  // Base64 padding is at most 2 chars; the bounded quantifier avoids
+  // super-linear regex backtracking (SonarCloud S5852).
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/={1,2}$/, '');
 }
 
 function base64UrlDecode(value: string): Uint8Array {

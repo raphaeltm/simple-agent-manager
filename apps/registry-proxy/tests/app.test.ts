@@ -9,7 +9,7 @@ import { signRegistryToken, type RegistryTokenClaims } from '../src/jwt';
 const SECRET = 'test-signing-secret';
 
 const ENV: Env = {
-  UPSTREAM_REGISTRY_URL: 'http://upstream.local:5000',
+  UPSTREAM_REGISTRY_URL: 'https://upstream.local:5000',
   REGISTRY_SERVICE: 'sam-registry-proxy',
   TOKEN_TTL_SECONDS: '1800',
   TOKEN_SIGNING_SECRET: SECRET,
@@ -166,7 +166,7 @@ describe('/v2 data path', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const upstreamReq = fetchMock.mock.calls[0][0] as Request;
-    expect(upstreamReq.url).toBe('http://upstream.local:5000/v2/proj-proja/app/manifests/latest');
+    expect(upstreamReq.url).toBe('https://upstream.local:5000/v2/proj-proja/app/manifests/latest');
     expect(upstreamReq.headers.get('authorization')).toBe(`Basic ${btoa('cf-user:cf-pass')}`);
   });
 
@@ -175,7 +175,7 @@ describe('/v2 data path', () => {
       new Response(null, {
         status: 202,
         headers: {
-          Location: 'http://upstream.local:5000/v2/proj-proja/app/blobs/uploads/uuid-1?_state=xyz',
+          Location: 'https://upstream.local:5000/v2/proj-proja/app/blobs/uploads/uuid-1?_state=xyz',
           'Docker-Upload-UUID': 'uuid-1',
         },
       })

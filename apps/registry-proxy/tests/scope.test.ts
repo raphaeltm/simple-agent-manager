@@ -51,50 +51,17 @@ describe('parseV2Path', () => {
     expect(parseV2Path('/v2/_catalog')).toEqual({ kind: 'catalog' });
   });
 
-  it('parses manifest paths for repositories containing slashes', () => {
-    expect(parseV2Path('/v2/proj-abc/my/app/manifests/latest')).toEqual({
-      kind: 'repository',
-      repository: 'proj-abc/my/app',
-      resource: 'manifests/latest',
-    });
-  });
-
-  it('parses blob paths', () => {
-    expect(parseV2Path('/v2/proj-abc/app/blobs/sha256:deadbeef')).toEqual({
-      kind: 'repository',
-      repository: 'proj-abc/app',
-      resource: 'blobs/sha256:deadbeef',
-    });
-  });
-
-  it('parses blob upload session paths', () => {
-    expect(parseV2Path('/v2/proj-abc/app/blobs/uploads/')).toEqual({
-      kind: 'repository',
-      repository: 'proj-abc/app',
-      resource: 'blobs/uploads/',
-    });
-    expect(parseV2Path('/v2/proj-abc/app/blobs/uploads/some-uuid')).toEqual({
-      kind: 'repository',
-      repository: 'proj-abc/app',
-      resource: 'blobs/uploads/some-uuid',
-    });
-  });
-
-  it('parses tags list paths', () => {
-    expect(parseV2Path('/v2/proj-abc/app/tags/list')).toEqual({
-      kind: 'repository',
-      repository: 'proj-abc/app',
-      resource: 'tags/list',
-    });
-  });
-
-  it('uses the LAST resource segment when a repo name contains a resource word', () => {
-    // A repository literally named "proj-abc/blobs" pulling a manifest
-    expect(parseV2Path('/v2/proj-abc/blobs/manifests/latest')).toEqual({
-      kind: 'repository',
-      repository: 'proj-abc/blobs',
-      resource: 'manifests/latest',
-    });
+  // Table-driven: [description, path, expected repository, expected resource]
+  it.each([
+    ['manifest path with slash-containing repo', '/v2/proj-abc/my/app/manifests/latest', 'proj-abc/my/app', 'manifests/latest'],
+    ['blob path', '/v2/proj-abc/app/blobs/sha256:deadbeef', 'proj-abc/app', 'blobs/sha256:deadbeef'],
+    ['blob upload session start', '/v2/proj-abc/app/blobs/uploads/', 'proj-abc/app', 'blobs/uploads/'],
+    ['blob upload session continuation', '/v2/proj-abc/app/blobs/uploads/some-uuid', 'proj-abc/app', 'blobs/uploads/some-uuid'],
+    ['tags list path', '/v2/proj-abc/app/tags/list', 'proj-abc/app', 'tags/list'],
+    // Uses the LAST resource segment: a repo literally named "proj-abc/blobs"
+    ['repo name containing a resource word', '/v2/proj-abc/blobs/manifests/latest', 'proj-abc/blobs', 'manifests/latest'],
+  ])('parses %s', (_description, path, repository, resource) => {
+    expect(parseV2Path(path)).toEqual({ kind: 'repository', repository, resource });
   });
 
   it('returns unknown for unparseable paths', () => {

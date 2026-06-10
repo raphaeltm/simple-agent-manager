@@ -43,7 +43,7 @@ describe('registry token sign/verify', () => {
     const tampered = btoa(JSON.stringify(decoded))
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
-      .replace(/=+$/, '');
+      .replace(/={1,2}$/, '');
     expect(await verifyRegistryToken(`${header}.${tampered}.${sig}`, SECRET)).toBeNull();
   });
 
