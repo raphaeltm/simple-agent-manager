@@ -23,7 +23,38 @@ import { renderCompose } from '../services/compose-renderer';
 // =============================================================================
 
 /** Max single-service constraint for slice 2. */
-const MAX_SERVICES_SLICE_2 = 1;
+export const MAX_SERVICES_SLICE_2 = 1;
+
+/**
+ * Validate a manifest against slice 2 constraints.
+ * Returns null if valid, or an error response object if invalid.
+ */
+export function validateSlice2Constraints(manifest: {
+  services: Record<string, { env: Record<string, unknown> }>;
+}): { error: string; message: string } | null {
+  // Enforce single-service constraint
+  const serviceCount = Object.keys(manifest.services).length;
+  if (serviceCount > MAX_SERVICES_SLICE_2) {
+    return {
+      error: 'MULTI_SERVICE_NOT_SUPPORTED',
+      message: `Multi-service manifests are not yet supported. This manifest defines ${serviceCount} services, but only ${MAX_SERVICES_SLICE_2} is allowed. Multi-service support arrives in a future update.`,
+    };
+  }
+
+  // Reject secret references
+  for (const [svcName, svc] of Object.entries(manifest.services)) {
+    for (const [envKey, envVal] of Object.entries(svc.env)) {
+      if (typeof envVal === 'object' && envVal !== null && 'secret' in envVal) {
+        return {
+          error: 'SECRETS_NOT_SUPPORTED',
+          message: `Secret references are not yet supported. Service "${svcName}" env var "${envKey}" references secret "${(envVal as { secret: string }).secret}". Use a literal string value instead, or wait for secret management in a future update.`,
+        };
+      }
+    }
+  }
+
+  return null;
+}
 
 /**
  * Load an environment row and verify it belongs to the project.
@@ -100,31 +131,10 @@ deploymentReleaseRoutes.post(
 
     const manifest = result.manifest;
 
-    // Phase 2: Enforce single-service constraint (slice 2)
-    const serviceCount = Object.keys(manifest.services).length;
-    if (serviceCount > MAX_SERVICES_SLICE_2) {
-      return c.json(
-        {
-          error: 'MULTI_SERVICE_NOT_SUPPORTED',
-          message: `Multi-service manifests are not yet supported. This manifest defines ${serviceCount} services, but only ${MAX_SERVICES_SLICE_2} is allowed. Multi-service support arrives in a future update.`,
-        },
-        400,
-      );
-    }
-
-    // Phase 3: Reject secret references (secret store not yet implemented)
-    for (const [svcName, svc] of Object.entries(manifest.services)) {
-      for (const [envKey, envVal] of Object.entries(svc.env)) {
-        if (typeof envVal === 'object' && envVal !== null && 'secret' in envVal) {
-          return c.json(
-            {
-              error: 'SECRETS_NOT_SUPPORTED',
-              message: `Secret references are not yet supported. Service "${svcName}" env var "${envKey}" references secret "${envVal.secret}". Use a literal string value instead, or wait for secret management in a future update.`,
-            },
-            400,
-          );
-        }
-      }
+    // Phase 2+3: Enforce slice 2 constraints (single-service, no secrets)
+    const constraintError = validateSlice2Constraints(manifest);
+    if (constraintError) {
+      return c.json(constraintError, 400);
     }
 
     // Determine next version number
