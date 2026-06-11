@@ -23,6 +23,7 @@ import (
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
@@ -93,6 +94,9 @@ type Server struct {
 	callbackToken       string
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
+
+	// Deployment mode — set via SetDeployEngine() when Role=deployment
+	deployEngine *deploy.Engine
 }
 
 type cachedWorktreeList struct {
@@ -519,6 +523,12 @@ func New(cfg *config.Config) (*Server, error) {
 // agent errors (crashes, stderr) are reported to the control plane.
 func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 	s.acpConfig.BootLog = reporter
+}
+
+// SetDeployEngine wires the deployment engine into the server for heartbeat reporting
+// and pull-based release channel. Only used in deployment mode.
+func (s *Server) SetDeployEngine(engine *deploy.Engine) {
+	s.deployEngine = engine
 }
 
 // GetBootLogBroadcaster returns the broadcaster for a specific workspace.

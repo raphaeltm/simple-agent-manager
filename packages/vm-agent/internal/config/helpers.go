@@ -212,23 +212,25 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Positive integer fields
-	if c.SessionMaxCount < 1 {
-		errs = append(errs, fmt.Errorf("SESSION_MAX_COUNT must be > 0, got %d", c.SessionMaxCount))
-	}
-	if c.DefaultRows < 1 {
-		errs = append(errs, fmt.Errorf("DEFAULT_ROWS must be > 0, got %d", c.DefaultRows))
-	}
-	if c.DefaultCols < 1 {
-		errs = append(errs, fmt.Errorf("DEFAULT_COLS must be > 0, got %d", c.DefaultCols))
-	}
+	// Workspace-specific validations (skip in deployment mode)
+	if !c.IsDeploymentMode() {
+		if c.SessionMaxCount < 1 {
+			errs = append(errs, fmt.Errorf("SESSION_MAX_COUNT must be > 0, got %d", c.SessionMaxCount))
+		}
+		if c.DefaultRows < 1 {
+			errs = append(errs, fmt.Errorf("DEFAULT_ROWS must be > 0, got %d", c.DefaultRows))
+		}
+		if c.DefaultCols < 1 {
+			errs = append(errs, fmt.Errorf("DEFAULT_COLS must be > 0, got %d", c.DefaultCols))
+		}
 
-	// WebSocket buffer sizes
-	if c.WSReadBufferSize < 1 {
-		errs = append(errs, fmt.Errorf("WS_READ_BUFFER_SIZE must be > 0, got %d", c.WSReadBufferSize))
-	}
-	if c.WSWriteBufferSize < 1 {
-		errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
+		// WebSocket buffer sizes
+		if c.WSReadBufferSize < 1 {
+			errs = append(errs, fmt.Errorf("WS_READ_BUFFER_SIZE must be > 0, got %d", c.WSReadBufferSize))
+		}
+		if c.WSWriteBufferSize < 1 {
+			errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
+		}
 	}
 
 	return errors.Join(errs...)

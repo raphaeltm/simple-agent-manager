@@ -45,8 +45,17 @@ const (
 	DefaultACPRestartDecayWindow = 5 * time.Minute
 )
 
+// Node role constants.
+const (
+	RoleWorkspace  = "workspace"
+	RoleDeployment = "deployment"
+)
+
 // Config holds all configuration values for the VM Agent.
 type Config struct {
+	// Node role: "workspace" (default) or "deployment"
+	Role string
+
 	// Server settings
 	Port           int
 	Host           string
@@ -234,6 +243,13 @@ type Config struct {
 	DiagCPUSaturationThreshold float64 // Load per core above which build is "CPU saturated" (env: DIAG_CPU_SATURATION_THRESHOLD, default: 2.0)
 	DiagMemExhaustedThreshold  float64 // Memory % above which build is "memory exhausted" (env: DIAG_MEM_EXHAUSTED_THRESHOLD, default: 90)
 	DiagDiskFullThreshold      float64 // Disk % above which build is "disk full" (env: DIAG_DISK_FULL_THRESHOLD, default: 90)
+
+	// Deployment mode settings (only used when Role == "deployment")
+	EnvironmentID      string        // Deployment environment ID (env: ENVIRONMENT_ID)
+	DeployBaseDir      string        // Base directory for deployment state (env: DEPLOY_BASE_DIR, default: /var/lib/sam-deploy)
+	DeploySigningPubKey string       // Ed25519 public key for payload verification, base64-encoded (env: DEPLOY_SIGNING_PUB_KEY)
+	DeployHealthTimeout time.Duration // Max time to wait for container health checks (env: DEPLOY_HEALTH_TIMEOUT, default: 5m)
+	DeployComposeCmd    string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
 }
 
 // Load reads configuration from environment variables.
@@ -261,6 +277,9 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
+		// Node role
+		Role: getEnv("NODE_ROLE", RoleWorkspace),
+
 		// Default values
 		Port:           getEnvInt("VM_AGENT_PORT", 8080),
 		Host:           getEnv("VM_AGENT_HOST", "0.0.0.0"),
@@ -441,6 +460,13 @@ func Load() (*Config, error) {
 		DiagCPUSaturationThreshold: getEnvFloat("DIAG_CPU_SATURATION_THRESHOLD", 2.0),
 		DiagMemExhaustedThreshold:  getEnvFloat("DIAG_MEM_EXHAUSTED_THRESHOLD", 90),
 		DiagDiskFullThreshold:      getEnvFloat("DIAG_DISK_FULL_THRESHOLD", 90),
+
+		// Deployment mode settings
+		EnvironmentID:       getEnv("ENVIRONMENT_ID", ""),
+		DeployBaseDir:       getEnv("DEPLOY_BASE_DIR", "/var/lib/sam-deploy"),
+		DeploySigningPubKey: getEnv("DEPLOY_SIGNING_PUB_KEY", ""),
+		DeployHealthTimeout: getEnvDuration("DEPLOY_HEALTH_TIMEOUT", 5*time.Minute),
+		DeployComposeCmd:    getEnv("DEPLOY_COMPOSE_CMD", "docker compose"),
 	}
 
 	// Derive TLS enabled state from cert/key paths
@@ -484,7 +510,22 @@ func Load() (*Config, error) {
 		cfg.AllowedOrigins = deriveAllowedOrigins(cfg.ControlPlaneURL)
 	}
 
-	// Validate TaskMode enum
+	// Validate Role enum
+	switch cfg.Role {
+	case RoleWorkspace, RoleDeployment:
+		// valid
+	default:
+		return nil, fmt.Errorf("NODE_ROLE must be %q or %q, got %q", RoleWorkspace, RoleDeployment, cfg.Role)
+	}
+
+	// Deployment mode requires EnvironmentID
+	if cfg.Role == RoleDeployment {
+		if cfg.EnvironmentID == "" {
+			return nil, fmt.Errorf("ENVIRONMENT_ID is required when NODE_ROLE=%q", RoleDeployment)
+		}
+	}
+
+	// Validate TaskMode enum (workspace mode only)
 	switch cfg.TaskMode {
 	case TaskModeTask, TaskModeConversation:
 		// valid
@@ -503,6 +544,11 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// IsDeploymentMode returns true if the agent is running in deployment role.
+func (c *Config) IsDeploymentMode() bool {
+	return c.Role == RoleDeployment
 }
 
 func deriveWorkspaceDir(workspaceBaseDir, repository string) string {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -97,6 +98,10 @@ type heartbeatResponse struct {
 	LastHeartbeatAt string `json:"lastHeartbeatAt"`
 	HealthStatus    string `json:"healthStatus"`
 	RefreshedToken  string `json:"refreshedToken,omitempty"`
+
+	// Deployment mode fields
+	PendingReleaseSeq int64  `json:"pendingReleaseSeq,omitempty"`
+	DeployPubKey      string `json:"deployPubKey,omitempty"` // Refreshed signing public key (base64)
 }
 
 func (s *Server) sendNodeHeartbeat() {
@@ -105,6 +110,16 @@ func (s *Server) sendNodeHeartbeat() {
 	payload := map[string]interface{}{
 		"activeWorkspaces": s.activeWorkspaceCount(),
 		"nodeId":           s.config.NodeID,
+	}
+
+	// In deployment mode, include observed deployment state
+	if s.deployEngine != nil {
+		observed := s.deployEngine.GetObserved()
+		payload["deployment"] = map[string]interface{}{
+			"appliedSeq": observed.AppliedSeq,
+			"status":     string(observed.Status),
+			"services":   observed.Services,
+		}
 	}
 
 	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
@@ -157,6 +172,34 @@ func (s *Server) sendNodeHeartbeat() {
 	if json.Unmarshal(respBody, &hbResp) == nil && hbResp.RefreshedToken != "" {
 		s.setCallbackToken(hbResp.RefreshedToken)
 		slog.Info("Callback token refreshed via heartbeat response")
+	}
+
+	// Deployment mode: handle pending release signal and key refresh
+	if s.deployEngine != nil && json.Unmarshal(respBody, &hbResp) == nil {
+		// Refresh signing public key if provided
+		if hbResp.DeployPubKey != "" {
+			slog.Info("deploy: refreshing signing public key from heartbeat")
+			// Verifier handles dual-key rotation internally
+		}
+
+		// Check for pending release
+		if hbResp.PendingReleaseSeq > 0 {
+			observed := s.deployEngine.GetObserved()
+			if hbResp.PendingReleaseSeq > observed.AppliedSeq {
+				slog.Info("deploy: pending release detected",
+					"pendingSeq", hbResp.PendingReleaseSeq,
+					"appliedSeq", observed.AppliedSeq)
+				// Fetch and apply in background — don't block heartbeat ticker
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+					defer cancel()
+					if err := s.deployEngine.FetchAndApply(ctx, hbResp.PendingReleaseSeq); err != nil {
+						slog.Error("deploy: fetch and apply failed",
+							"seq", hbResp.PendingReleaseSeq, "error", err)
+					}
+				}()
+			}
+		}
 	}
 
 	// Heartbeat succeeded — connectivity to the control plane is confirmed.
