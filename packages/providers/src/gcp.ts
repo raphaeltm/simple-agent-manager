@@ -2,8 +2,28 @@ import type { VMSize } from '@simple-agent-manager/shared';
 
 import { CLOUDFLARE_IPV4_RANGES } from './cloudflare-ranges';
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, ProviderErrorCategory, SizeConfig, VMConfig, VMInstance } from './types';
-import { ProviderError } from './types';
+import type {
+  LocationMeta,
+  Provider,
+  ProviderErrorCategory,
+  SizeConfig,
+  VMConfig,
+  VMInstance,
+  VolumeAttachmentConfig,
+  VolumeCapabilities,
+  VolumeConfig,
+  VolumeDetachConfig,
+  VolumeInstance,
+  VolumeListConfig,
+  VolumeLookupConfig,
+  VolumeResizeConfig,
+} from './types';
+import {
+  ProviderError,
+  SAM_VOLUME_FILESYSTEM_FORMAT,
+  SAM_VOLUME_FSTAB_OPTIONS,
+  SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+} from './types';
 import {
   type GcpInstancePayload,
   type GcpNetworkInterfacePayload,
@@ -115,6 +135,19 @@ const LOCATION_METADATA: Record<string, LocationMeta> = {
   'asia-northeast1-a': { name: 'Tokyo', country: 'JP' },
 };
 
+const GCP_VOLUME_CAPABILITIES: VolumeCapabilities = {
+  supported: false,
+  growOnlyResize: true,
+  requiresSameLocation: true,
+  defaultFormat: SAM_VOLUME_FILESYSTEM_FORMAT,
+  lifecycle: {
+    filesystem: SAM_VOLUME_FILESYSTEM_FORMAT,
+    mountPathTemplate: SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+    fstabOptions: SAM_VOLUME_FSTAB_OPTIONS,
+  },
+  notes: ['GCP first-class persistent disk operations are not implemented in this provider package yet.'],
+};
+
 /** Map GCP instance status to SAM VMStatus */
 function mapGcpStatus(status: string): VMInstance['status'] {
   switch (status) {
@@ -162,6 +195,7 @@ export class GcpProvider implements Provider {
   readonly locations = GCP_LOCATIONS;
   readonly locationMetadata = LOCATION_METADATA;
   readonly sizes = SIZE_MAP;
+  readonly volumeCapabilities = GCP_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
   constructor(
@@ -480,6 +514,34 @@ export class GcpProvider implements Provider {
     return true;
   }
 
+  createVolume(_config: VolumeConfig): Promise<VolumeInstance> {
+    return Promise.reject(this.unsupportedVolumeOperation('createVolume'));
+  }
+
+  attachVolume(_config: VolumeAttachmentConfig): Promise<VolumeInstance> {
+    return Promise.reject(this.unsupportedVolumeOperation('attachVolume'));
+  }
+
+  detachVolume(_config: VolumeDetachConfig): Promise<VolumeInstance | null> {
+    return Promise.reject(this.unsupportedVolumeOperation('detachVolume'));
+  }
+
+  resizeVolume(_config: VolumeResizeConfig): Promise<VolumeInstance> {
+    return Promise.reject(this.unsupportedVolumeOperation('resizeVolume'));
+  }
+
+  deleteVolume(_config: VolumeLookupConfig): Promise<void> {
+    return Promise.reject(this.unsupportedVolumeOperation('deleteVolume'));
+  }
+
+  getVolume(_config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+    return Promise.reject(this.unsupportedVolumeOperation('getVolume'));
+  }
+
+  listVolumes(_config: VolumeListConfig): Promise<VolumeInstance[]> {
+    return Promise.reject(this.unsupportedVolumeOperation('listVolumes'));
+  }
+
   /**
    * Find a GCP instance by numeric ID or name across all configured zones.
    */
@@ -546,6 +608,15 @@ export class GcpProvider implements Provider {
   private isToleratedZoneListError(err: unknown): boolean {
     return err instanceof ProviderError
       && (err.statusCode === 404 || err.statusCode === 503);
+  }
+
+  private unsupportedVolumeOperation(operation: string): ProviderError {
+    return new ProviderError(
+      this.name,
+      undefined,
+      `GCP provider does not support volume operation ${operation}`,
+      { category: 'invalid_config' },
+    );
   }
 
   /** Extract zone from a machineType URL like zones/us-central1-a/machineTypes/e2-standard-2 */

@@ -5,7 +5,32 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, ProviderErrorCategory, ProviderErrorContext, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import {
+  labelsToScalewayTags,
+  scalewayTagsToLabels,
+} from './scaleway-tags';
+import {
+  SCALEWAY_VOLUME_CAPABILITIES,
+  ScalewayVolumeClient,
+} from './scaleway-volumes';
+import type {
+  LocationMeta,
+  Provider,
+  ProviderErrorCategory,
+  ProviderErrorContext,
+  SizeConfig,
+  VMConfig,
+  VMInstance,
+  VMStatus,
+  VolumeAttachmentConfig,
+  VolumeCapabilities,
+  VolumeConfig,
+  VolumeDetachConfig,
+  VolumeInstance,
+  VolumeListConfig,
+  VolumeLookupConfig,
+  VolumeResizeConfig,
+} from './types';
 import { ProviderError } from './types';
 import {
   parseProviderJson,
@@ -116,12 +141,14 @@ export class ScalewayProvider implements Provider {
   readonly locations: readonly string[] = SCALEWAY_LOCATIONS;
   readonly locationMetadata: Readonly<Record<string, LocationMeta>> = SCALEWAY_LOCATION_META;
   readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly volumeCapabilities: VolumeCapabilities = SCALEWAY_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
   private readonly secretKey: string;
   private readonly projectId: string;
   private readonly zone: string;
   private readonly imageName: string;
+  private readonly volumeClient: ScalewayVolumeClient;
 
   constructor(
     secretKey: string,
@@ -134,6 +161,11 @@ export class ScalewayProvider implements Provider {
     this.zone = zone || DEFAULT_SCALEWAY_ZONE;
     this.defaultLocation = this.zone;
     this.imageName = imageName || DEFAULT_SCALEWAY_IMAGE_NAME;
+    this.volumeClient = new ScalewayVolumeClient(
+      this.secretKey,
+      this.projectId,
+      (err) => this.mapProviderError(err),
+    );
   }
 
   /**
@@ -157,7 +189,7 @@ export class ScalewayProvider implements Provider {
     const imageId = await this.resolveImageId(location, config.image);
 
     // Convert labels to tags: ["key=value", ...]
-    const tags = this.labelsToTags(config.labels || {});
+    const tags = labelsToScalewayTags(config.labels || {});
 
     // Step 1: Create server (stopped)
     const createResponse = await providerFetch(
@@ -327,7 +359,7 @@ export class ScalewayProvider implements Provider {
     const params = new URLSearchParams();
     if (labels) {
       // Scaleway filters by individual tags — use the first label as primary filter
-      const tags = this.labelsToTags(labels);
+      const tags = labelsToScalewayTags(labels);
       for (const tag of tags) {
         params.append('tags', tag);
       }
@@ -387,6 +419,34 @@ export class ScalewayProvider implements Provider {
       },
     );
     return true;
+  }
+
+  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+    return this.volumeClient.createVolume(config);
+  }
+
+  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
+    return this.volumeClient.attachVolume(config);
+  }
+
+  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
+    return this.volumeClient.detachVolume(config);
+  }
+
+  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
+    return this.volumeClient.resizeVolume(config);
+  }
+
+  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
+    await this.volumeClient.deleteVolume(config);
+  }
+
+  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+    return this.volumeClient.getVolume(config);
+  }
+
+  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
+    return this.volumeClient.listVolumes(config);
   }
 
   /**
@@ -489,8 +549,17 @@ export class ScalewayProvider implements Provider {
       status: this.mapStatus(server.state),
       serverType: server.commercial_type,
       createdAt: server.creation_date,
-      labels: this.tagsToLabels(server.tags || []),
+      labels: scalewayTagsToLabels(server.tags || []),
     };
+  }
+
+  private mapProviderError(err: unknown): unknown {
+    if (!(err instanceof ProviderError)) return err;
+    return new ProviderError(this.name, err.statusCode, err.message, {
+      cause: err,
+      providerCode: err.providerCode,
+      category: classifyScalewayError(err.statusCode, err.providerCode, err.message),
+    });
   }
 
   private mapStatus(scalewayState: string): VMStatus {
@@ -509,20 +578,4 @@ export class ScalewayProvider implements Provider {
     }
   }
 
-  /** Convert Record<string, string> labels to Scaleway tag array: ["key=value", ...] */
-  private labelsToTags(labels: Record<string, string>): string[] {
-    return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  /** Convert Scaleway tag array back to Record<string, string> labels */
-  private tagsToLabels(tags: string[]): Record<string, string> {
-    const labels: Record<string, string> = {};
-    for (const tag of tags) {
-      const eqIndex = tag.indexOf('=');
-      if (eqIndex > 0) {
-        labels[tag.slice(0, eqIndex)] = tag.slice(eqIndex + 1);
-      }
-    }
-    return labels;
-  }
 }

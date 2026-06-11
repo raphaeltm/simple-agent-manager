@@ -2,13 +2,40 @@ import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
 import { providerFetch } from './provider-fetch';
-import type { LocationMeta, Provider, ProviderErrorCategory, ProviderLogger, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
-import { noopProviderLogger, ProviderError } from './types';
+import type {
+  LocationMeta,
+  Provider,
+  ProviderErrorCategory,
+  ProviderLogger,
+  SizeConfig,
+  VMConfig,
+  VMInstance,
+  VMStatus,
+  VolumeAttachmentConfig,
+  VolumeCapabilities,
+  VolumeConfig,
+  VolumeDetachConfig,
+  VolumeInstance,
+  VolumeListConfig,
+  VolumeLookupConfig,
+  VolumeResizeConfig,
+  VolumeStatus,
+} from './types';
+import {
+  noopProviderLogger,
+  ProviderError,
+  SAM_VOLUME_FILESYSTEM_FORMAT,
+  SAM_VOLUME_FSTAB_OPTIONS,
+  SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+} from './types';
 import {
   type HetznerServerPayload,
+  type HetznerVolumePayload,
   parseProviderJson,
   validateHetznerServerResponse,
   validateHetznerServersResponse,
+  validateHetznerVolumeResponse,
+  validateHetznerVolumesResponse,
 } from './validation';
 
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
@@ -28,6 +55,24 @@ export const DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS = 15_000;
 export const DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS = 120_000;
 export const DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS = 10;
 export const DEFAULT_CAPACITY_RETRY_BUDGET_MS = 300_000;
+export const HETZNER_VOLUME_MIN_SIZE_GB = 10;
+export const HETZNER_VOLUME_MAX_SIZE_GB = 10_000;
+export const HETZNER_MAX_VOLUMES_PER_SERVER = 16;
+
+const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
+  supported: true,
+  minSizeGb: HETZNER_VOLUME_MIN_SIZE_GB,
+  maxSizeGb: HETZNER_VOLUME_MAX_SIZE_GB,
+  growOnlyResize: true,
+  requiresSameLocation: true,
+  maxAttachedVolumesPerServer: HETZNER_MAX_VOLUMES_PER_SERVER,
+  defaultFormat: SAM_VOLUME_FILESYSTEM_FORMAT,
+  lifecycle: {
+    filesystem: SAM_VOLUME_FILESYSTEM_FORMAT,
+    mountPathTemplate: SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+    fstabOptions: SAM_VOLUME_FSTAB_OPTIONS,
+  },
+};
 
 export interface HetznerProviderRuntimeOptions {
   capacityRetryMaxAttempts?: number;
@@ -148,6 +193,7 @@ export class HetznerProvider implements Provider {
   readonly locations: readonly string[] = HETZNER_LOCATIONS;
   readonly locationMetadata: Readonly<Record<string, LocationMeta>> = HETZNER_LOCATION_META;
   readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly volumeCapabilities: VolumeCapabilities = HETZNER_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
   private readonly apiToken: string;
@@ -419,6 +465,183 @@ export class HetznerProvider implements Provider {
     return true;
   }
 
+  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+    this.validateRequestedVolumeSize(config.sizeGb);
+
+    let response: Response;
+    try {
+      response = await providerFetch(this.name, `${HETZNER_API_URL}/volumes`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: config.name,
+          size: config.sizeGb,
+          location: config.location,
+          format: config.format ?? SAM_VOLUME_FILESYSTEM_FORMAT,
+          labels: config.labels || {},
+        }),
+      });
+    } catch (err) {
+      throw this.mapProviderError(err);
+    }
+
+    const data = validateHetznerVolumeResponse(
+      await parseProviderJson(response, this.name, 'createVolume'),
+      'createVolume',
+    );
+    return this.mapVolumeToInstance(data.volume);
+  }
+
+  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
+    await providerFetch(
+      this.name,
+      `${HETZNER_API_URL}/volumes/${config.volumeId}/actions/attach`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          server: Number(config.serverId),
+          automount: false,
+        }),
+      },
+    );
+
+    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    if (!volume) {
+      throw new ProviderError(this.name, 404, `Hetzner volume ${config.volumeId} not found after attach`, {
+        category: 'invalid_config',
+      });
+    }
+    return volume;
+  }
+
+  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
+    try {
+      await providerFetch(
+        this.name,
+        `${HETZNER_API_URL}/volumes/${config.volumeId}/actions/detach`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+      );
+    } catch (err) {
+      if (err instanceof ProviderError && err.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+
+    return this.getVolume({ volumeId: config.volumeId, location: config.location });
+  }
+
+  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
+    this.validateRequestedVolumeSize(config.sizeGb);
+    const currentSizeGb = config.currentSizeGb ?? await this.getCurrentVolumeSize(config);
+    if (config.sizeGb < currentSizeGb) {
+      throw new ProviderError(
+        this.name,
+        undefined,
+        `Cannot shrink Hetzner volume ${config.volumeId} from ${currentSizeGb}GB to ${config.sizeGb}GB`,
+        { category: 'invalid_config' },
+      );
+    }
+
+    await providerFetch(
+      this.name,
+      `${HETZNER_API_URL}/volumes/${config.volumeId}/actions/resize`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ size: config.sizeGb }),
+      },
+    );
+
+    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    if (!volume) {
+      throw new ProviderError(this.name, 404, `Hetzner volume ${config.volumeId} not found after resize`, {
+        category: 'invalid_config',
+      });
+    }
+    return volume;
+  }
+
+  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
+    try {
+      await providerFetch(this.name, `${HETZNER_API_URL}/volumes/${config.volumeId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      });
+    } catch (err) {
+      if (err instanceof ProviderError && err.statusCode === 404) {
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+    try {
+      const response = await providerFetch(this.name, `${HETZNER_API_URL}/volumes/${config.volumeId}`, {
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      });
+
+      const data = validateHetznerVolumeResponse(
+        await parseProviderJson(response, this.name, 'getVolume'),
+        'getVolume',
+      );
+      return this.mapVolumeToInstance(data.volume);
+    } catch (err) {
+      if (err instanceof ProviderError && err.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
+    const labelParts: string[] = [];
+    if (config.labels) {
+      for (const [key, value] of Object.entries(config.labels)) {
+        labelParts.push(`${key}=${value}`);
+      }
+    }
+
+    const params = new URLSearchParams({ location: config.location });
+    if (labelParts.length > 0) {
+      params.set('label_selector', labelParts.join(','));
+    }
+
+    const response = await providerFetch(this.name, `${HETZNER_API_URL}/volumes?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${this.apiToken}`,
+      },
+    });
+
+    const data = validateHetznerVolumesResponse(
+      await parseProviderJson(response, this.name, 'listVolumes'),
+      'listVolumes',
+    );
+    return data.volumes.map((volume) => this.mapVolumeToInstance(volume));
+  }
+
   private mapServerToVMInstance(server: HetznerServerPayload): VMInstance {
     return {
       id: String(server.id),
@@ -429,6 +652,69 @@ export class HetznerProvider implements Provider {
       createdAt: server.created,
       labels: server.labels,
     };
+  }
+
+  private mapVolumeToInstance(volume: HetznerVolumePayload): VolumeInstance {
+    return {
+      id: String(volume.id),
+      name: volume.name,
+      sizeGb: volume.size,
+      location: volume.location.name,
+      status: this.mapVolumeStatus(volume.status),
+      ...(volume.server ? { attachedServerId: String(volume.server.id) } : {}),
+      ...(volume.linux_device ? { linuxDevice: volume.linux_device } : {}),
+      createdAt: volume.created,
+      labels: volume.labels,
+    };
+  }
+
+  private mapVolumeStatus(status: string): VolumeStatus {
+    switch (status) {
+      case 'creating':
+        return 'creating';
+      case 'available':
+        return 'available';
+      default:
+        return 'unknown';
+    }
+  }
+
+  private validateRequestedVolumeSize(sizeGb: number): void {
+    if (!Number.isInteger(sizeGb) || sizeGb < HETZNER_VOLUME_MIN_SIZE_GB) {
+      throw new ProviderError(
+        this.name,
+        undefined,
+        `Hetzner volume size must be an integer >= ${HETZNER_VOLUME_MIN_SIZE_GB}GB`,
+        { category: 'invalid_config' },
+      );
+    }
+    if (sizeGb > HETZNER_VOLUME_MAX_SIZE_GB) {
+      throw new ProviderError(
+        this.name,
+        undefined,
+        `Hetzner volume size must be <= ${HETZNER_VOLUME_MAX_SIZE_GB}GB`,
+        { category: 'invalid_config' },
+      );
+    }
+  }
+
+  private async getCurrentVolumeSize(config: VolumeResizeConfig): Promise<number> {
+    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    if (!volume) {
+      throw new ProviderError(this.name, 404, `Hetzner volume ${config.volumeId} not found`, {
+        category: 'invalid_config',
+      });
+    }
+    return volume.sizeGb;
+  }
+
+  private mapProviderError(err: unknown): unknown {
+    if (!(err instanceof ProviderError)) return err;
+    return new ProviderError(this.name, err.statusCode, err.message, {
+      cause: err,
+      providerCode: err.providerCode,
+      category: classifyHetznerError(err.statusCode, err.providerCode, err.message),
+    });
   }
 
   private mapStatus(hetznerStatus: string): VMStatus {
