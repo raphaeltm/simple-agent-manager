@@ -45,6 +45,7 @@ import { ProjectSkills } from './pages/ProjectSkills';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
+import { ChatTimelinePrototype } from './pages/chat-timeline-prototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
@@ -92,6 +93,7 @@ export default function App() {
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
+                <Route path="/prototype/chat-timeline" element={<ChatTimelinePrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
