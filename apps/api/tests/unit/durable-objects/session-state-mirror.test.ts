@@ -13,10 +13,26 @@ import * as sessionState from '../../../src/durable-objects/project-data/session
 // Minimal SqlStorage mock backed by better-sqlite3-compatible in-memory store
 // ---------------------------------------------------------------------------
 
+const HEALABLE_STATES = ['prompting', 'error', 'recovering'];
+
+function makeStateRow(overrides: Partial<Record<string, unknown>> & { session_id: string }) {
+  return {
+    activity: 'idle', activity_at: Date.now(), prompt_started_at: null,
+    agent_type: null, restart_count: 0, status_error: null,
+    current_plan_json: null, plan_updated_at: null, last_stop_reason: null,
+    ...overrides,
+  };
+}
+
+function findHealableRows(rows: Record<string, unknown>[], cutoff: number) {
+  return rows.filter(
+    r => HEALABLE_STATES.includes(r.activity as string) && (r.activity_at as number) < cutoff
+  );
+}
+
 function createMockSql() {
   const tables: Record<string, Record<string, unknown>[]> = {};
 
-  // Minimal SQL parser that handles our specific queries
   const exec = vi.fn((query: string, ...params: unknown[]) => {
     const q = query.trim().replace(/\s+/g, ' ');
 
@@ -54,34 +70,18 @@ function createMockSql() {
           existing.plan_updated_at = params[3];
         }
       } else {
-        // New row
         if (!tables.session_state) tables.session_state = [];
         if (q.includes('current_plan_json')) {
-          tables.session_state.push({
-            session_id: params[0],
-            activity: 'idle',
-            activity_at: params[1],
-            current_plan_json: params[2],
-            plan_updated_at: params[3],
-            prompt_started_at: null,
-            agent_type: null,
-            restart_count: 0,
-            status_error: null,
-            last_stop_reason: null,
-          });
+          tables.session_state.push(makeStateRow({
+            session_id: params[0] as string, activity_at: params[1],
+            current_plan_json: params[2], plan_updated_at: params[3],
+          }));
         } else {
-          tables.session_state.push({
-            session_id: params[0],
-            activity: params[1],
-            activity_at: params[2],
-            prompt_started_at: params[3],
-            agent_type: params[4],
-            restart_count: params[5] ?? 0,
-            status_error: params[6],
-            current_plan_json: null,
-            plan_updated_at: null,
-            last_stop_reason: null,
-          });
+          tables.session_state.push(makeStateRow({
+            session_id: params[0] as string, activity: params[1], activity_at: params[2],
+            prompt_started_at: params[3], agent_type: params[4],
+            restart_count: params[5] ?? 0, status_error: params[6],
+          }));
         }
       }
       return { toArray: () => [] };
@@ -106,14 +106,9 @@ function createMockSql() {
           row.status_error = params[1];
         }
       } else if (q.includes("activity = 'idle'") && q.includes('activity_at < ?')) {
-        // Bulk reconcile — heals prompting, error, and recovering states
-        const healable = ['prompting', 'error', 'recovering'];
-        const cutoff = params[1] as number;
-        for (const row of tables.session_state) {
-          if (healable.includes(row.activity as string) && (row.activity_at as number) < cutoff) {
-            row.activity = 'idle';
-            row.activity_at = params[0];
-          }
+        for (const row of findHealableRows(tables.session_state, params[1] as number)) {
+          row.activity = 'idle';
+          row.activity_at = params[0];
         }
       }
       return { toArray: () => [] };
@@ -128,12 +123,7 @@ function createMockSql() {
         return { toArray: () => row ? [row] : [] };
       }
       if (q.includes("activity IN ('prompting', 'error', 'recovering')") && q.includes('activity_at < ?')) {
-        const healable = ['prompting', 'error', 'recovering'];
-        const cutoff = params[0] as number;
-        const rows = tables.session_state.filter(
-          r => healable.includes(r.activity as string) && (r.activity_at as number) < cutoff
-        );
-        return { toArray: () => rows };
+        return { toArray: () => findHealableRows(tables.session_state, params[0] as number) };
       }
     }
 
@@ -268,33 +258,12 @@ describe('Session State Mirror — vertical slice', () => {
 
   describe('Staleness reconciliation', () => {
     it('heals stuck prompting sessions past the threshold', () => {
-      // Session stuck in prompting for 10 minutes
-      sql._tables.session_state!.push({
-        session_id: 'stuck-sess',
-        activity: 'prompting',
-        activity_at: Date.now() - 10 * 60 * 1000, // 10 min ago
-        prompt_started_at: Date.now() - 10 * 60 * 1000,
-        agent_type: 'claude-code',
-        restart_count: 0,
-        status_error: null,
-        current_plan_json: null,
-        plan_updated_at: null,
-        last_stop_reason: null,
-      });
-
-      // Another session that's still fresh (1 min ago)
-      sql._tables.session_state!.push({
-        session_id: 'fresh-sess',
-        activity: 'prompting',
-        activity_at: Date.now() - 1 * 60 * 1000, // 1 min ago
-        prompt_started_at: Date.now() - 1 * 60 * 1000,
-        agent_type: 'claude-code',
-        restart_count: 0,
-        status_error: null,
-        current_plan_json: null,
-        plan_updated_at: null,
-        last_stop_reason: null,
-      });
+      const tenMinAgo = Date.now() - 10 * 60 * 1000;
+      const oneMinAgo = Date.now() - 1 * 60 * 1000;
+      sql._tables.session_state!.push(
+        makeStateRow({ session_id: 'stuck-sess', activity: 'prompting', activity_at: tenMinAgo, prompt_started_at: tenMinAgo, agent_type: 'claude-code' }),
+        makeStateRow({ session_id: 'fresh-sess', activity: 'prompting', activity_at: oneMinAgo, prompt_started_at: oneMinAgo, agent_type: 'claude-code' }),
+      );
 
       const healed = sessionState.reconcileStaleActivity(sql as unknown as SqlStorage, 5 * 60 * 1000);
 
@@ -308,36 +277,19 @@ describe('Session State Mirror — vertical slice', () => {
     });
 
     it('returns empty array when no sessions are stale', () => {
-      sql._tables.session_state!.push({
-        session_id: 'active-sess',
-        activity: 'prompting',
-        activity_at: Date.now() - 1000, // 1 second ago
-        prompt_started_at: Date.now() - 1000,
-        agent_type: null,
-        restart_count: 0,
-        status_error: null,
-        current_plan_json: null,
-        plan_updated_at: null,
-        last_stop_reason: null,
-      });
+      const oneSecAgo = Date.now() - 1000;
+      sql._tables.session_state!.push(
+        makeStateRow({ session_id: 'active-sess', activity: 'prompting', activity_at: oneSecAgo, prompt_started_at: oneSecAgo }),
+      );
 
       const healed = sessionState.reconcileStaleActivity(sql as unknown as SqlStorage);
       expect(healed).toEqual([]);
     });
 
     it('does not heal idle or stopped sessions', () => {
-      sql._tables.session_state!.push({
-        session_id: 'idle-old',
-        activity: 'idle',
-        activity_at: Date.now() - 30 * 60 * 1000, // 30 min ago
-        prompt_started_at: null,
-        agent_type: null,
-        restart_count: 0,
-        status_error: null,
-        current_plan_json: null,
-        plan_updated_at: null,
-        last_stop_reason: null,
-      });
+      sql._tables.session_state!.push(
+        makeStateRow({ session_id: 'idle-old', activity: 'idle', activity_at: Date.now() - 30 * 60 * 1000 }),
+      );
 
       const healed = sessionState.reconcileStaleActivity(sql as unknown as SqlStorage, 5 * 60 * 1000);
       expect(healed).toEqual([]);
