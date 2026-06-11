@@ -7,7 +7,7 @@
  * and doc 06 rendering rules.
  */
 
-import type { DeploymentManifest } from '@simple-agent-manager/shared';
+import type { DeploymentManifest, EnvValue } from '@simple-agent-manager/shared';
 import { stringify } from 'yaml';
 
 // =============================================================================
@@ -21,10 +21,57 @@ export interface ComposeRenderContext {
   volumeRoot?: string;
   /** Default memory limit (MB) when manifest omits resources. Default: 256 */
   defaultMemoryLimitMb?: number;
+  /**
+   * Resolved secret values keyed by secret name.
+   * Required when the manifest contains `{ secret: "name" }` env references.
+   * Values are injected into the rendered Compose — never persisted in D1.
+   */
+  resolvedSecrets?: Record<string, string>;
 }
 
 const DEFAULT_VOLUME_ROOT = '/mnt/data/volumes';
 const DEFAULT_MEMORY_LIMIT_MB = 256;
+
+// =============================================================================
+// Secret resolution
+// =============================================================================
+
+/**
+ * Collect all secret names referenced in the manifest.
+ */
+export function collectSecretNames(manifest: DeploymentManifest): string[] {
+  const names = new Set<string>();
+  for (const svc of Object.values(manifest.services)) {
+    for (const val of Object.values(svc.env)) {
+      if (typeof val === 'object' && val !== null && 'secret' in val) {
+        names.add((val as { secret: string }).secret);
+      }
+    }
+  }
+  return Array.from(names).sort();
+}
+
+/**
+ * Resolve an env value: literal strings pass through, secret refs are looked up.
+ * Throws if a referenced secret is missing from the resolved map.
+ */
+function resolveEnvValue(
+  _key: string,
+  val: EnvValue,
+  resolvedSecrets: Record<string, string>,
+  missingSecrets: Set<string>,
+): string | undefined {
+  if (typeof val === 'string') {
+    return val;
+  }
+  // Secret reference
+  const secretName = val.secret;
+  if (secretName in resolvedSecrets) {
+    return resolvedSecrets[secretName];
+  }
+  missingSecrets.add(secretName);
+  return undefined;
+}
 
 // =============================================================================
 // Render
@@ -39,17 +86,23 @@ const DEFAULT_MEMORY_LIMIT_MB = 256;
  * - Restart policy (unless-stopped)
  * - Default per-service memory limits when omitted
  * - Container labels (sam.environmentId, sam.releaseId, sam.service)
- * - Resolved secret env values (deferred — secrets rejected at validation in this slice)
+ * - Resolved secret env values injected from ctx.resolvedSecrets
+ *
+ * Throws if any secret reference cannot be resolved (fail-fast, doc 07).
  */
 export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderContext): string {
   const volumeRoot = ctx.volumeRoot ?? DEFAULT_VOLUME_ROOT;
   const defaultMemMb = ctx.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB;
+  const resolvedSecrets = ctx.resolvedSecrets ?? {};
 
   // Build the Compose document as a plain object, then stringify via yaml library.
   const doc: Record<string, unknown> = {};
 
   // -- services --
   const services: Record<string, Record<string, unknown>> = {};
+
+  // Collect all missing secrets across all services for a single error message
+  const missingSecrets = new Set<string>();
 
   for (const [name, svc] of Object.entries(manifest.services)) {
     const service: Record<string, unknown> = {};
@@ -62,12 +115,14 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
       service.command = svc.command;
     }
 
-    // Environment — only literal strings (secret refs rejected at validation)
+    // Environment — resolve literal strings and secret references
     if (Object.keys(svc.env).length > 0) {
       const env: Record<string, string> = {};
       for (const [key, val] of Object.entries(svc.env)) {
-        // At this point, val is always a string (secret refs rejected earlier)
-        env[key] = val as string;
+        const resolved = resolveEnvValue(key, val, resolvedSecrets, missingSecrets);
+        if (resolved !== undefined) {
+          env[key] = resolved;
+        }
       }
       service.environment = env;
     }
@@ -102,6 +157,15 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
     service.networks = ['sam-internal'];
 
     services[name] = service;
+  }
+
+  // Fail fast if any secrets are missing (doc 07)
+  if (missingSecrets.size > 0) {
+    const names = Array.from(missingSecrets).sort();
+    throw new Error(
+      `Missing secrets for render: ${names.join(', ')}. ` +
+      `Set these secrets on the environment before creating a release.`,
+    );
   }
 
   doc.services = services;
