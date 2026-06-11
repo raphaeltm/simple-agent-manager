@@ -73,9 +73,9 @@ vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
       focusTaskId: string;
     }) => (
       isOpen ? (
-        <div role="dialog" aria-label="Task hierarchy" data-focus-task-id={focusTaskId}>
+        <dialog open aria-label="Task hierarchy" data-focus-task-id={focusTaskId}>
           Task hierarchy for {focusTaskId}
-        </div>
+        </dialog>
       ) : null
     ),
   };

@@ -271,12 +271,27 @@ async function assertHierarchyButtonOpensModal(page: Page) {
   await expect(page.getByRole('dialog', { name: /Task hierarchy/i })).toBeVisible();
 }
 
+async function verifyOlderHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+  await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
+  await page.goto('/projects/proj-1');
+  await page.waitForTimeout(1500);
+  await assertChatPageRendered(page);
+  if (openSidebar) {
+    await openMobileSidebar(page);
+  }
+  await expandOlderBucket(page);
+  await assertSessionVisible(page, 'MCP child dispatch');
+  await assertHierarchyButtonOpensModal(page);
+  await assertNoOverflow(page);
+  await screenshot(page, screenshotName);
+}
+
 // ---------------------------------------------------------------------------
 // Mobile tests (375x667 default from config)
 // ---------------------------------------------------------------------------
 
 test.describe('Nested session sidebar — Mobile', () => {
-  test.beforeEach((_, testInfo) => {
+  test.beforeEach(({}, testInfo) => {
     test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'Mobile audit runs only on the iPhone SE project');
   });
 
@@ -317,16 +332,7 @@ test.describe('Nested session sidebar — Mobile', () => {
   });
 
   test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
-    await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await expandOlderBucket(page);
-    await assertSessionVisible(page, 'MCP child dispatch');
-    await assertHierarchyButtonOpensModal(page);
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-stale-hierarchy-mobile');
+    await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-mobile', true);
   });
 });
 
@@ -336,7 +342,7 @@ test.describe('Nested session sidebar — Mobile', () => {
 
 test.describe('Nested session sidebar — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
-  test.beforeEach((_, testInfo) => {
+  test.beforeEach(({}, testInfo) => {
     test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'Desktop audit runs only on the desktop project');
   });
 
@@ -362,14 +368,6 @@ test.describe('Nested session sidebar — Desktop', () => {
   });
 
   test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
-    await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await expandOlderBucket(page);
-    await assertSessionVisible(page, 'MCP child dispatch');
-    await assertHierarchyButtonOpensModal(page);
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-stale-hierarchy-desktop');
+    await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-desktop');
   });
 });
