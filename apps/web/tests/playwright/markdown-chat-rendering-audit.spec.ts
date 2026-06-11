@@ -318,8 +318,52 @@ async function assertMermaidRendering(page: Page, screenshotName: string) {
   await page.getByRole('button', { name: 'Expand Mermaid diagram' }).click();
   const fullscreen = page.getByTestId('mermaid-diagram-fullscreen');
   await expect(fullscreen).toBeVisible();
-  await expect(page.locator('[data-testid="mermaid-diagram-fullscreen-svg"] svg')).toBeVisible();
+  const fullscreenViewport = page.getByTestId('mermaid-diagram-fullscreen-svg');
+  const fullscreenSvg = page.locator('[data-testid="mermaid-diagram-fullscreen-svg"] svg');
+  await expect(fullscreenSvg).toBeVisible();
   await page.getByRole('button', { name: 'Reset diagram view' }).last().click();
+  const viewBoxBeforePinch = await fullscreenSvg.getAttribute('viewBox');
+  const viewportBox = await fullscreenViewport.boundingBox();
+  if (!viewportBox) {
+    throw new Error('Expected fullscreen Mermaid viewport to have a bounding box');
+  }
+  await fullscreenViewport.dispatchEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 101,
+    pointerType: 'touch',
+    clientX: viewportBox.x + viewportBox.width * 0.35,
+    clientY: viewportBox.y + viewportBox.height * 0.5,
+  });
+  await fullscreenViewport.dispatchEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 102,
+    pointerType: 'touch',
+    clientX: viewportBox.x + viewportBox.width * 0.65,
+    clientY: viewportBox.y + viewportBox.height * 0.5,
+  });
+  await fullscreenViewport.dispatchEvent('pointermove', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 102,
+    pointerType: 'touch',
+    clientX: viewportBox.x + viewportBox.width * 0.78,
+    clientY: viewportBox.y + viewportBox.height * 0.5,
+  });
+  await expect.poll(() => fullscreenSvg.getAttribute('viewBox')).not.toBe(viewBoxBeforePinch);
+  await fullscreenViewport.dispatchEvent('pointerup', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 101,
+    pointerType: 'touch',
+  });
+  await fullscreenViewport.dispatchEvent('pointerup', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 102,
+    pointerType: 'touch',
+  });
   await screenshot(page, `${screenshotName}-fullscreen`);
   await assertNoOverflow(page);
 

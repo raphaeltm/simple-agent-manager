@@ -131,6 +131,23 @@ function parseViewBox(svg: SVGSVGElement | null): [number, number, number, numbe
   return values as [number, number, number, number];
 }
 
+function getPointerDistance(
+  first: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number },
+) {
+  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
+function getPointerCenter(
+  first: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number },
+) {
+  return {
+    clientX: (first.clientX + second.clientX) / 2,
+    clientY: (first.clientY + second.clientY) / 2,
+  };
+}
+
 function IconButton({
   label,
   onClick,
@@ -165,12 +182,23 @@ function MermaidViewport({
   resetToken: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    viewBox: [number, number, number, number];
-  } | null>(null);
+  const activePointersRef = useRef(new Map<number, { clientX: number; clientY: number }>());
+  const gestureRef = useRef<
+    | {
+        type: 'pan';
+        pointerId: number;
+        startX: number;
+        startY: number;
+        viewBox: [number, number, number, number];
+      }
+    | {
+        type: 'pinch';
+        startDistance: number;
+        startCenter: { clientX: number; clientY: number };
+        viewBox: [number, number, number, number];
+      }
+    | null
+  >(null);
   const baseViewBoxRef = useRef<[number, number, number, number] | null>(null);
 
   const reset = useCallback(() => {
@@ -218,8 +246,32 @@ function MermaidViewport({
     const svgElement = getSvgFromContainer(containerRef.current);
     const viewBox = parseViewBox(svgElement);
     if (!viewBox) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic events and some older touch implementations can reject capture.
+      // The gesture still works as long as subsequent pointer events reach us.
+    }
+    activePointersRef.current.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+
+    const pointers = Array.from(activePointersRef.current.values());
+    if (pointers.length >= 2) {
+      const [first, second] = pointers;
+      if (!first || !second) return;
+      gestureRef.current = {
+        type: 'pinch',
+        startDistance: Math.max(getPointerDistance(first, second), 1),
+        startCenter: getPointerCenter(first, second),
+        viewBox,
+      };
+      return;
+    }
+
+    gestureRef.current = {
+      type: 'pan',
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -228,20 +280,61 @@ function MermaidViewport({
   };
 
   const pan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
     const svgElement = getSvgFromContainer(containerRef.current);
     const rect = containerRef.current?.getBoundingClientRect();
-    if (!drag || !svgElement || !rect) return;
-    const [x, y, width, height] = drag.viewBox;
-    const dx = ((event.clientX - drag.startX) / Math.max(rect.width, 1)) * width;
-    const dy = ((event.clientY - drag.startY) / Math.max(rect.height, 1)) * height;
+    const gesture = gestureRef.current;
+    if (!gesture || !svgElement || !rect || !activePointersRef.current.has(event.pointerId)) return;
+
+    activePointersRef.current.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+
+    if (gesture.type === 'pinch') {
+      const pointers = Array.from(activePointersRef.current.values());
+      if (pointers.length < 2) return;
+      const [first, second] = pointers;
+      if (!first || !second) return;
+      const [x, y, width, height] = gesture.viewBox;
+      const currentDistance = Math.max(getPointerDistance(first, second), 1);
+      const scale = gesture.startDistance / currentDistance;
+      const nextWidth = width * scale;
+      const nextHeight = height * scale;
+      const pointerX = (gesture.startCenter.clientX - rect.left) / Math.max(rect.width, 1);
+      const pointerY = (gesture.startCenter.clientY - rect.top) / Math.max(rect.height, 1);
+      const nextX = x + (width - nextWidth) * pointerX;
+      const nextY = y + (height - nextHeight) * pointerY;
+      svgElement.setAttribute('viewBox', `${nextX} ${nextY} ${nextWidth} ${nextHeight}`);
+      return;
+    }
+
+    if (gesture.pointerId !== event.pointerId) return;
+    const [x, y, width, height] = gesture.viewBox;
+    const dx = ((event.clientX - gesture.startX) / Math.max(rect.width, 1)) * width;
+    const dy = ((event.clientY - gesture.startY) / Math.max(rect.height, 1)) * height;
     svgElement.setAttribute('viewBox', `${x - dx} ${y - dy} ${width} ${height}`);
   };
 
   const endPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId === event.pointerId) {
-      dragRef.current = null;
+    activePointersRef.current.delete(event.pointerId);
+    const pointers = Array.from(activePointersRef.current.entries());
+    if (pointers.length === 1) {
+      const remainingPointer = pointers[0];
+      if (!remainingPointer) return;
+      const [pointerId, pointer] = remainingPointer;
+      const viewBox = parseViewBox(getSvgFromContainer(containerRef.current));
+      if (viewBox && pointer) {
+        gestureRef.current = {
+          type: 'pan',
+          pointerId,
+          startX: pointer.clientX,
+          startY: pointer.clientY,
+          viewBox,
+        };
+        return;
+      }
     }
+    gestureRef.current = null;
   };
 
   return (

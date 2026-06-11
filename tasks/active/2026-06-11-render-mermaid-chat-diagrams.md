@@ -28,17 +28,17 @@ Project chat renders fenced `mermaid` code blocks as syntax-highlighted code ins
 - [x] Add unit tests for Mermaid rendering, error handling, `<pre>` unwrapping, streaming deferral, non-Mermaid code regressions, inline code, language-less code, and SVG sanitization.
 - [x] Add/extend Playwright visual audit coverage through the real project chat route for normal, long/wide, invalid, and fullscreen Mermaid diagrams on mobile and desktop.
 - [x] Run package/app quality checks and required Playwright visual audit; inspect screenshots for nonblank SVGs, no viewport overflow, usable controls, and fullscreen behavior.
-- [ ] Run specialist review before PR: `task-completion-validator`, `ui-ux-specialist`, `security-auditor`, `constitution-validator`, and `test-engineer`.
+- [x] Run specialist review before PR: `task-completion-validator`, `ui-ux-specialist`, `security-auditor`, `constitution-validator`, and `test-engineer`.
 
 ## Acceptance Criteria
 
-- [ ] A completed project chat message with a valid fenced `mermaid` block renders a sanitized SVG diagram, not highlighted source.
-- [ ] Streaming/incomplete Mermaid does not show transient parser errors, repeatedly churn expensive renders, or destabilize layout.
-- [ ] Fullscreen/expanded mode supports pan, zoom, reset, copy source, Escape close, close button, mobile touch use, and focus return.
-- [ ] Invalid diagrams fail gracefully with a compact error state and access to source.
-- [ ] Existing markdown behavior for file links, tables, lists, task lists, code blocks, inline code, TTS actions, animated text, and message styling remains intact.
-- [ ] SVG sanitization strips scripts, event handlers, dangerous URLs, and unsafe HTML while preserving legitimate Mermaid v11 labels.
-- [ ] Playwright screenshots verify mobile and desktop project chat have no horizontal viewport overflow, nonblank diagrams, and usable fullscreen controls.
+- [x] A completed project chat message with a valid fenced `mermaid` block renders a sanitized SVG diagram, not highlighted source.
+- [x] Streaming/incomplete Mermaid does not show transient parser errors, repeatedly churn expensive renders, or destabilize layout.
+- [x] Fullscreen/expanded mode supports pan, zoom, reset, copy source, Escape close, close button, mobile touch use, and focus return.
+- [x] Invalid diagrams fail gracefully with a compact error state and access to source.
+- [x] Existing markdown behavior for file links, tables, lists, task lists, code blocks, inline code, TTS actions, animated text, and message styling remains intact.
+- [x] SVG sanitization strips scripts, event handlers, dangerous URLs, and unsafe HTML while preserving legitimate Mermaid v11 labels.
+- [x] Playwright screenshots verify mobile and desktop project chat have no horizontal viewport overflow, nonblank diagrams, and usable fullscreen controls.
 
 ## References
 
