@@ -81,6 +81,31 @@ async function requireOwnedEnvironment(
   return rows[0];
 }
 
+/**
+ * Load a release row and verify it belongs to the environment.
+ */
+async function requireOwnedRelease(
+  db: ReturnType<typeof drizzle>,
+  releaseId: string,
+  envId: string,
+) {
+  const rows = await db
+    .select()
+    .from(schema.deploymentReleases)
+    .where(
+      and(
+        eq(schema.deploymentReleases.id, releaseId),
+        eq(schema.deploymentReleases.environmentId, envId),
+      ),
+    )
+    .limit(1);
+
+  if (rows.length === 0) {
+    throw errors.notFound('Deployment release');
+  }
+  return rows[0]!;
+}
+
 // =============================================================================
 // Routes
 // =============================================================================
@@ -233,23 +258,8 @@ deploymentReleaseRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
     await requireOwnedEnvironment(db, envId, projectId);
+    const row = await requireOwnedRelease(db, releaseId, envId);
 
-    const rows = await db
-      .select()
-      .from(schema.deploymentReleases)
-      .where(
-        and(
-          eq(schema.deploymentReleases.id, releaseId),
-          eq(schema.deploymentReleases.environmentId, envId),
-        ),
-      )
-      .limit(1);
-
-    if (rows.length === 0) {
-      throw errors.notFound('Deployment release');
-    }
-
-    const row = rows[0]!;
     return c.json({
       ...row,
       manifest: JSON.parse(row.manifest),
@@ -273,23 +283,9 @@ deploymentReleaseRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
     await requireOwnedEnvironment(db, envId, projectId);
+    const row = await requireOwnedRelease(db, releaseId, envId);
 
-    const rows = await db
-      .select()
-      .from(schema.deploymentReleases)
-      .where(
-        and(
-          eq(schema.deploymentReleases.id, releaseId),
-          eq(schema.deploymentReleases.environmentId, envId),
-        ),
-      )
-      .limit(1);
-
-    if (rows.length === 0) {
-      throw errors.notFound('Deployment release');
-    }
-
-    const manifest = JSON.parse(rows[0]!.manifest);
+    const manifest = JSON.parse(row.manifest);
     const composeYaml = renderCompose(manifest, {
       environmentId: envId,
       releaseId,
