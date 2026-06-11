@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionResponse } from '../../src/lib/api';
-import { getSessionSourceContext, isRetryOrFork } from '../../src/pages/project-chat/lineageUtils';
-import {
-  buildSessionTree,
-  type SessionTreeNode,
-  treeHasMatchingDescendant,
-} from '../../src/pages/project-chat/sessionTree';
+import { getLineageText, getSessionSourceContext, isRetryOrFork } from '../../src/pages/project-chat/lineageUtils';
 import type { TaskInfo } from '../../src/pages/project-chat/useTaskGroups';
 
 // ---------------------------------------------------------------------------
@@ -35,8 +30,9 @@ function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
     parentTaskId: null,
     status: 'in_progress',
     blocked: false,
-    triggeredBy: 'mcp', // default to agent-dispatched subtasks for nesting tests
+    triggeredBy: 'mcp',
     dispatchDepth: 0,
+    taskMode: 'task',
     ...overrides,
   };
 }
@@ -61,145 +57,33 @@ function makeRetryFixture(
   };
 }
 
-/** Collect all node ids from a forest (pre-order). */
-function collectIds(nodes: SessionTreeNode[]): string[] {
-  const out: string[] = [];
-  const walk = (n: SessionTreeNode) => {
-    out.push(n.session.id);
-    n.children.forEach(walk);
-  };
-  nodes.forEach(walk);
-  return out;
-}
-
-/** Find a node anywhere in the forest by session id. */
-function findNode(nodes: SessionTreeNode[], id: string): SessionTreeNode | undefined {
-  for (const n of nodes) {
-    if (n.session.id === id) return n;
-    const found = findNode(n.children, id);
-    if (found) return found;
-  }
-  return undefined;
-}
-
 // ---------------------------------------------------------------------------
-// Basic structure
+// isRetryOrFork — classification logic
 // ---------------------------------------------------------------------------
 
-describe('buildSessionTree — basic structure', () => {
-  it('returns depth-0 roots for standalone (no task) sessions', () => {
-    const sessions = [makeSession({ id: 's1' }), makeSession({ id: 's2' })];
-    const roots = buildSessionTree(sessions, new Map());
-    expect(roots).toHaveLength(2);
-    expect(roots[0]!.depth).toBe(0);
-    expect(roots[0]!.children).toHaveLength(0);
-    expect(roots[0]!.isContextAnchor).toBe(false);
-    expect(roots[0]!.totalDescendants).toBe(0);
+describe('isRetryOrFork — classification logic', () => {
+  it('treats triggeredBy=mcp as subtask (not retry/fork)', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'mcp', dispatchDepth: 1 }))).toBe(false);
   });
 
-  it('links a single child to its parent (depth 1) for agent-dispatched subtasks', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', triggeredBy: 'mcp' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP' }),
-      makeSession({ id: 'sC', taskId: 'tC' }),
-    ];
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sP');
-    expect(roots[0]!.children).toHaveLength(1);
-    expect(roots[0]!.children[0]!.session.id).toBe('sC');
-    expect(roots[0]!.children[0]!.depth).toBe(1);
+  it('treats triggeredBy=user with dispatchDepth=0 as retry/fork', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'user', dispatchDepth: 0 }))).toBe(true);
   });
 
-  it('supports arbitrary depth (grandchild, great-grandchild)', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['t1', makeTaskInfo({ id: 't1', parentTaskId: null })],
-      ['t2', makeTaskInfo({ id: 't2', parentTaskId: 't1' })],
-      ['t3', makeTaskInfo({ id: 't3', parentTaskId: 't2' })],
-      ['t4', makeTaskInfo({ id: 't4', parentTaskId: 't3' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 's1', taskId: 't1' }),
-      makeSession({ id: 's2', taskId: 't2' }),
-      makeSession({ id: 's3', taskId: 't3' }),
-      makeSession({ id: 's4', taskId: 't4' }),
-    ];
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(1);
-
-    const s4 = findNode(roots, 's4')!;
-    expect(s4).toBeDefined();
-    expect(s4.depth).toBe(3);
-    expect(findNode(roots, 's3')!.depth).toBe(2);
-    expect(findNode(roots, 's2')!.depth).toBe(1);
-    expect(findNode(roots, 's1')!.depth).toBe(0);
+  it('treats triggeredBy=user with dispatchDepth>0 as subtask (fallback for legacy data)', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'user', dispatchDepth: 1 }))).toBe(false);
   });
 
-  it('supports 5+ levels deep without data loss', () => {
-    const tasks = new Map<string, TaskInfo>();
-    const sessions: ChatSessionResponse[] = [];
-    for (let i = 1; i <= 6; i++) {
-      tasks.set(`t${i}`, makeTaskInfo({
-        id: `t${i}`,
-        parentTaskId: i === 1 ? null : `t${i - 1}`,
-      }));
-      sessions.push(makeSession({ id: `s${i}`, taskId: `t${i}` }));
-    }
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(1);
-    expect(findNode(roots, 's6')!.depth).toBe(5);
-    expect(collectIds(roots)).toEqual(['s1', 's2', 's3', 's4', 's5', 's6']);
+  it('treats triggeredBy=cron as retry/fork when dispatchDepth=0', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'cron', dispatchDepth: 0 }))).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Retry/fork flattening
+// getSessionSourceContext — lineage metadata for header display
 // ---------------------------------------------------------------------------
 
-describe('buildSessionTree — retry/fork flattening', () => {
-  it('flattens user-triggered retries to root level with lineage text', () => {
-    const { tasks, sessions } = makeRetryFixture([
-      { taskId: 'tR1', sessionId: 'sR1', startedAt: 2000 },
-      { taskId: 'tR2', sessionId: 'sR2', startedAt: 3000 },
-    ]);
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(3);
-    const retryNode = findNode(roots, 'sR1')!;
-    expect(retryNode.depth).toBe(0);
-    expect(retryNode.lineageText).toContain('attempt');
-  });
-
-  it('shows fork lineage text for a single derived session', () => {
-    const { tasks, sessions } = makeRetryFixture([
-      { taskId: 'tF', sessionId: 'sF', startedAt: 2000 },
-    ]);
-
-    const roots = buildSessionTree(sessions, tasks);
-    const forkNode = findNode(roots, 'sF')!;
-    expect(forkNode.lineageText).toContain('⑂');
-  });
-
-  it('assigns attempt numbers for multiple retries', () => {
-    const { tasks, sessions } = makeRetryFixture([
-      { taskId: 'tR1', sessionId: 'sR1', startedAt: 2000 },
-      { taskId: 'tR2', sessionId: 'sR2', startedAt: 3000 },
-    ]);
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(3);
-    const r1 = findNode(roots, 'sR1')!;
-    const r2 = findNode(roots, 'sR2')!;
-    expect(r1.lineageText).toBe('↩ attempt 2');
-    expect(r2.lineageText).toBe('↩ attempt 3');
-  });
-
+describe('getSessionSourceContext', () => {
   it('builds source context for user-triggered derived sessions', () => {
     const { tasks, sessions } = makeRetryFixture([
       { taskId: 'tF', sessionId: 'sF', startedAt: 2000 },
@@ -230,367 +114,47 @@ describe('buildSessionTree — retry/fork flattening', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Context anchors
+// getLineageText — retry/fork subtitle text
 // ---------------------------------------------------------------------------
 
-describe('buildSessionTree — context anchors (stale ancestors)', () => {
-  it('lifts a stopped parent as a context anchor when its subtask child is visible', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, status: 'completed' })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', triggeredBy: 'mcp' })],
+describe('getLineageText', () => {
+  it('shows fork lineage text for a single derived session', () => {
+    const { tasks, sessions } = makeRetryFixture([
+      { taskId: 'tF', sessionId: 'sF', startedAt: 2000 },
     ]);
-    const stoppedParent = makeSession({ id: 'sP', taskId: 'tP', status: 'stopped' });
-    const activeChild = makeSession({ id: 'sC', taskId: 'tC' });
 
-    const roots = buildSessionTree([activeChild], tasks, { allSessions: [stoppedParent, activeChild] });
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sP');
-    expect(roots[0]!.isContextAnchor).toBe(true);
-    expect(roots[0]!.children[0]!.session.id).toBe('sC');
-    expect(roots[0]!.children[0]!.isContextAnchor).toBe(false);
+    expect(getLineageText('tF', tasks, sessions)).toContain('⑂');
   });
 
-  it('lifts a grandparent anchor so a grandchild stays visible', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tGP', makeTaskInfo({ id: 'tGP', parentTaskId: null, status: 'completed' })],
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: 'tGP', status: 'completed' })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', status: 'in_progress' })],
+  it('assigns attempt numbers for multiple retries', () => {
+    const { tasks, sessions } = makeRetryFixture([
+      { taskId: 'tR1', sessionId: 'sR1', startedAt: 2000 },
+      { taskId: 'tR2', sessionId: 'sR2', startedAt: 3000 },
     ]);
-    const gp = makeSession({ id: 'sGP', taskId: 'tGP', status: 'stopped' });
-    const p = makeSession({ id: 'sP', taskId: 'tP', status: 'stopped' });
-    const c = makeSession({ id: 'sC', taskId: 'tC' });
 
-    const roots = buildSessionTree([c], tasks, { allSessions: [gp, p, c] });
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sGP');
-    expect(roots[0]!.isContextAnchor).toBe(true);
-    expect(roots[0]!.children[0]!.session.id).toBe('sP');
-    expect(roots[0]!.children[0]!.isContextAnchor).toBe(true);
-    expect(roots[0]!.children[0]!.children[0]!.session.id).toBe('sC');
-    expect(roots[0]!.children[0]!.children[0]!.isContextAnchor).toBe(false);
+    expect(getLineageText('tR1', tasks, sessions)).toBe('↩ attempt 2');
+    expect(getLineageText('tR2', tasks, sessions)).toBe('↩ attempt 3');
   });
 
-  it('does NOT create anchors when allSessions is not provided', () => {
+  it('returns undefined for agent-dispatched subtasks', () => {
     const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', triggeredBy: 'mcp' })],
-    ]);
-    const c = makeSession({ id: 'sC', taskId: 'tC' });
-
-    const roots = buildSessionTree([c], tasks);
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sC');
-    expect(roots[0]!.isContextAnchor).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Siblings, multiple roots, ordering
-// ---------------------------------------------------------------------------
-
-describe('buildSessionTree — siblings and ordering', () => {
-  it('groups multiple agent-dispatched siblings under the same parent', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tC1', makeTaskInfo({ id: 'tC1', parentTaskId: 'tP', status: 'completed' })],
-      ['tC2', makeTaskInfo({ id: 'tC2', parentTaskId: 'tP', status: 'in_progress' })],
-      ['tC3', makeTaskInfo({ id: 'tC3', parentTaskId: 'tP', status: 'in_progress' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
-      makeSession({ id: 'sC1', taskId: 'tC1', startedAt: 1100 }),
-      makeSession({ id: 'sC2', taskId: 'tC2', startedAt: 1200 }),
-      makeSession({ id: 'sC3', taskId: 'tC3', startedAt: 1300 }),
-    ];
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.children).toHaveLength(3);
-    expect(roots[0]!.totalDescendants).toBe(3);
-    expect(roots[0]!.completedDescendants).toBe(1);
-  });
-
-  it('sorts children by startedAt ascending', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tA', makeTaskInfo({ id: 'tA', parentTaskId: 'tP' })],
-      ['tB', makeTaskInfo({ id: 'tB', parentTaskId: 'tP' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
-      makeSession({ id: 'sA', taskId: 'tA', startedAt: 1200 }),
-      makeSession({ id: 'sB', taskId: 'tB', startedAt: 1100 }),
-    ];
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots[0]!.children.map((c) => c.session.id)).toEqual(['sB', 'sA']);
-  });
-
-  it('promotes orphan children (parent not in either list) to roots', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tMissing' })],
-    ]);
-    const roots = buildSessionTree([makeSession({ id: 'sC', taskId: 'tC' })], tasks);
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sC');
-  });
-
-  it('keeps no-taskId sessions as independent roots', () => {
-    const sessions = [
-      makeSession({ id: 's1', taskId: null }),
-      makeSession({ id: 's2', taskId: null }),
-    ];
-    const roots = buildSessionTree(sessions, new Map());
-    expect(roots).toHaveLength(2);
-    expect(roots.every((r) => !r.isContextAnchor)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Descendant aggregates
-// ---------------------------------------------------------------------------
-
-describe('buildSessionTree — descendant aggregates', () => {
-  it('computes totalDescendants across all levels', () => {
-    const parents = [null, 't1', 't2', 't2'];
-    const tasks = new Map<string, TaskInfo>();
-    const sessions: ChatSessionResponse[] = [];
-    parents.forEach((parentTaskId, index) => {
-      const ordinal = index + 1;
-      const taskId = `t${ordinal}`;
-      tasks.set(taskId, makeTaskInfo({ id: taskId, parentTaskId }));
-      sessions.push(makeSession({ id: `s${ordinal}`, taskId }));
-    });
-
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots[0]!.totalDescendants).toBe(3); // s2, s3, s4
-    expect(findNode(roots, 's2')!.totalDescendants).toBe(2); // s3, s4
-  });
-
-  it('computes completedDescendants from terminal task status', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tA', makeTaskInfo({ id: 'tA', parentTaskId: 'tP', status: 'completed' })],
-      ['tB', makeTaskInfo({ id: 'tB', parentTaskId: 'tP', status: 'completed' })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', status: 'in_progress' })],
+      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
+      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', triggeredBy: 'mcp', dispatchDepth: 1 })],
     ]);
     const sessions = [
       makeSession({ id: 'sP', taskId: 'tP' }),
-      makeSession({ id: 'sA', taskId: 'tA' }),
-      makeSession({ id: 'sB', taskId: 'tB' }),
       makeSession({ id: 'sC', taskId: 'tC' }),
     ];
-    const roots = buildSessionTree(sessions, tasks);
-    expect(roots[0]!.totalDescendants).toBe(3);
-    expect(roots[0]!.completedDescendants).toBe(2);
-  });
-});
 
-// ---------------------------------------------------------------------------
-// Edge cases
-// ---------------------------------------------------------------------------
-
-describe('buildSessionTree — edge cases', () => {
-  it('empty input yields empty forest', () => {
-    expect(buildSessionTree([], new Map())).toEqual([]);
+    expect(getLineageText('tC', tasks, sessions)).toBeUndefined();
   });
 
-  it('handles a cycle in taskInfoMap without infinite loop', () => {
+  it('returns undefined for standalone tasks', () => {
     const tasks = new Map<string, TaskInfo>([
-      ['t1', makeTaskInfo({ id: 't1', parentTaskId: 't2' })],
-      ['t2', makeTaskInfo({ id: 't2', parentTaskId: 't1' })],
+      ['solo', makeTaskInfo({ id: 'solo', parentTaskId: null })],
     ]);
-    const sessions = [
-      makeSession({ id: 's1', taskId: 't1' }),
-      makeSession({ id: 's2', taskId: 't2' }),
-    ];
-    const roots = buildSessionTree(sessions, tasks);
-    const ids = collectIds(roots);
-    expect(ids).toContain('s1');
-    expect(ids).toContain('s2');
-  });
-});
+    const sessions = [makeSession({ id: 's1', taskId: 'solo' })];
 
-// ---------------------------------------------------------------------------
-// Search matching
-// ---------------------------------------------------------------------------
-
-describe('treeHasMatchingDescendant', () => {
-  it('returns true when a descendant topic matches', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', topic: 'Parent chat' }),
-      makeSession({ id: 'sC', taskId: 'tC', topic: 'Fix login bug' }),
-    ];
-    const roots = buildSessionTree(sessions, tasks);
-    expect(treeHasMatchingDescendant(roots[0]!, 'login', tasks)).toBe(true);
-    expect(treeHasMatchingDescendant(roots[0]!, 'nomatch', tasks)).toBe(false);
-  });
-
-  it('matches on task title too', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null })],
-      ['tC', makeTaskInfo({ id: 'tC', parentTaskId: 'tP', title: 'Refactor auth module' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', topic: 'Parent' }),
-      makeSession({ id: 'sC', taskId: 'tC', topic: 'Some chat' }),
-    ];
-    const roots = buildSessionTree(sessions, tasks);
-    expect(treeHasMatchingDescendant(roots[0]!, 'auth', tasks)).toBe(true);
-  });
-
-  it('searches recursively through deep descendants', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['t1', makeTaskInfo({ id: 't1', parentTaskId: null })],
-      ['t2', makeTaskInfo({ id: 't2', parentTaskId: 't1' })],
-      ['t3', makeTaskInfo({ id: 't3', parentTaskId: 't2' })],
-    ]);
-    const sessions = [
-      makeSession({ id: 's1', taskId: 't1', topic: 'Top' }),
-      makeSession({ id: 's2', taskId: 't2', topic: 'Middle' }),
-      makeSession({ id: 's3', taskId: 't3', topic: 'Deep match here' }),
-    ];
-    const roots = buildSessionTree(sessions, tasks);
-    expect(treeHasMatchingDescendant(roots[0]!, 'match', tasks)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Regression: root ordering with anchors, and self-referential cycles
-// ---------------------------------------------------------------------------
-
-describe('buildSessionTree — root ordering with multiple anchor roots', () => {
-  it('orders anchor roots by position of their first visible descendant', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tpA', makeTaskInfo({ id: 'tpA', parentTaskId: null })],
-      ['tcA', makeTaskInfo({ id: 'tcA', parentTaskId: 'tpA' })],
-      ['tpB', makeTaskInfo({ id: 'tpB', parentTaskId: null })],
-      ['tcB', makeTaskInfo({ id: 'tcB', parentTaskId: 'tpB' })],
-    ]);
-    const parentA = makeSession({ id: 'pA', taskId: 'tpA', topic: 'Stale A' });
-    const childA = makeSession({ id: 'cA', taskId: 'tcA', topic: 'Active A' });
-    const parentB = makeSession({ id: 'pB', taskId: 'tpB', topic: 'Stale B' });
-    const childB = makeSession({ id: 'cB', taskId: 'tcB', topic: 'Active B' });
-
-    const roots = buildSessionTree([childB, childA], tasks, {
-      allSessions: [parentA, childA, parentB, childB],
-    });
-
-    expect(roots).toHaveLength(2);
-    expect(roots[0]!.session.id).toBe('pB');
-    expect(roots[1]!.session.id).toBe('pA');
-    expect(roots[0]!.isContextAnchor).toBe(true);
-    expect(roots[1]!.isContextAnchor).toBe(true);
-  });
-});
-
-describe('buildSessionTree — self-referential cycle safety', () => {
-  it('handles a task whose parentTaskId references itself without infinite loop', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tSelf', makeTaskInfo({ id: 'tSelf', parentTaskId: 'tSelf' })],
-    ]);
-    const session = makeSession({ id: 'sSelf', taskId: 'tSelf', topic: 'Self loop' });
-
-    const roots = buildSessionTree([session], tasks, { allSessions: [session] });
-
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sSelf');
-    expect(roots[0]!.children).toEqual([]);
-  });
-
-  it('handles a two-node mutual-parent cycle without infinite loop', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tA', makeTaskInfo({ id: 'tA', parentTaskId: 'tB' })],
-      ['tB', makeTaskInfo({ id: 'tB', parentTaskId: 'tA' })],
-    ]);
-    const a = makeSession({ id: 'sA', taskId: 'tA' });
-    const b = makeSession({ id: 'sB', taskId: 'tB' });
-
-    const roots = buildSessionTree([a, b], tasks);
-
-    const ids = collectIds(roots);
-    expect(ids).toContain('sA');
-    expect(ids).toContain('sB');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// isRetryOrFork classification
-// ---------------------------------------------------------------------------
-
-describe('isRetryOrFork — classification logic', () => {
-  it('treats triggeredBy=mcp as subtask (not retry/fork)', () => {
-    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'mcp', dispatchDepth: 1 }))).toBe(false);
-  });
-
-  it('treats triggeredBy=user with dispatchDepth=0 as retry/fork', () => {
-    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'user', dispatchDepth: 0 }))).toBe(true);
-  });
-
-  it('treats triggeredBy=user with dispatchDepth>0 as subtask (fallback for legacy data)', () => {
-    // This is the bug scenario: MCP-dispatched tasks that have triggeredBy='user'
-    // because the backend INSERT was missing the triggered_by column
-    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'user', dispatchDepth: 1 }))).toBe(false);
-  });
-
-  it('treats triggeredBy=cron as retry/fork when dispatchDepth=0', () => {
-    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'cron', dispatchDepth: 0 }))).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Regression: subtasks with wrong triggeredBy but correct dispatchDepth
-// ---------------------------------------------------------------------------
-
-describe('buildSessionTree — dispatchDepth fallback for legacy subtasks', () => {
-  it('nests subtasks with triggeredBy=user but dispatchDepth>0 as children (not roots)', () => {
-    // Simulates the bug: MCP dispatch_task was not setting triggered_by='mcp',
-    // so subtasks had triggeredBy='user' but dispatchDepth=1+
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user', dispatchDepth: 0 })],
-      ['tC1', makeTaskInfo({ id: 'tC1', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 1 })],
-      ['tC2', makeTaskInfo({ id: 'tC2', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 1 })],
-      ['tC3', makeTaskInfo({ id: 'tC3', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 1 })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
-      makeSession({ id: 'sC1', taskId: 'tC1', startedAt: 1100 }),
-      makeSession({ id: 'sC2', taskId: 'tC2', startedAt: 1200 }),
-      makeSession({ id: 'sC3', taskId: 'tC3', startedAt: 1300 }),
-    ];
-
-    const roots = buildSessionTree(sessions, tasks);
-    // All subtasks should be nested under the parent, not promoted to root
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.session.id).toBe('sP');
-    expect(roots[0]!.children).toHaveLength(3);
-    // No lineage text (not retries/forks)
-    expect(roots[0]!.children[0]!.lineageText).toBeUndefined();
-  });
-
-  it('still promotes genuine user retries (dispatchDepth=0) to root level', () => {
-    const tasks = new Map<string, TaskInfo>([
-      ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user', dispatchDepth: 0 })],
-      ['tR1', makeTaskInfo({ id: 'tR1', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 0 })],
-      ['tR2', makeTaskInfo({ id: 'tR2', parentTaskId: 'tP', triggeredBy: 'user', dispatchDepth: 0 })],
-    ]);
-    const sessions = [
-      makeSession({ id: 'sP', taskId: 'tP', startedAt: 1000 }),
-      makeSession({ id: 'sR1', taskId: 'tR1', startedAt: 2000 }),
-      makeSession({ id: 'sR2', taskId: 'tR2', startedAt: 3000 }),
-    ];
-
-    const roots = buildSessionTree(sessions, tasks);
-    // Retries should be promoted to root level
-    expect(roots).toHaveLength(3);
-    const r1 = findNode(roots, 'sR1')!;
-    const r2 = findNode(roots, 'sR2')!;
-    expect(r1.depth).toBe(0);
-    expect(r2.depth).toBe(0);
-    expect(r1.lineageText).toContain('attempt');
-    expect(r2.lineageText).toContain('attempt');
+    expect(getLineageText('solo', tasks, sessions)).toBeUndefined();
   });
 });

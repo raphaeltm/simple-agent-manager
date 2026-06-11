@@ -63,7 +63,7 @@ Run Playwright screenshots at both viewports:
 - Mobile: 375x667
 - Desktop: 1280x800
 
-Check for: overflow, clipping, text wrapping, touch targets (44px+ min), empty states, long content handling.
+Check for: overflow, clipping, text wrapping, interactive element usability, empty states, long content handling.
 
 Save screenshots to `.codex/tmp/playwright-screenshots/`.
 

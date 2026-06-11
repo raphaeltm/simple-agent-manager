@@ -47,7 +47,7 @@ For each screenshot, verify:
 3. **No off-screen elements** — nothing pushed beyond viewport edges by long content
 4. **Proper text wrapping** — long titles/descriptions wrap cleanly, no single-word lines unless unavoidable
 5. **Consistent spacing** — margins, padding, and gaps match the design system rhythm
-6. **Touch target size** — interactive elements are at least 44x44px on mobile (56px preferred for primary actions)
+6. **Interactive elements are reasonably clickable/tappable** — compact, information-dense controls are preferred; do NOT demand enlarged touch targets or mandate minimum pixel sizes
 7. **Visual hierarchy** — headings, labels, and body text use the correct typography scale
 8. **Dark mode compatibility** — if the app supports dark mode, screenshots should verify both themes or the active theme
 9. **Empty state quality** — empty states show helpful messaging, not blank space or broken layouts

@@ -274,29 +274,27 @@ export function HierarchyModal({
         <AncestorBreadcrumbs ancestors={ancestors} onNavigate={onNavigate} />
       )}
 
-      {totalNodes > 5 && (
-        <div className="mt-2">
-          <input
-            type="text"
-            placeholder="Filter tasks..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            aria-label="Filter tasks"
-            className="w-full rounded-md text-xs outline-none focus-visible:ring-2 focus-visible:ring-[var(--sam-color-accent-primary)]"
-            style={{
-              padding: '6px 10px',
-              background: 'var(--sam-color-bg-inset)',
-              border: '1px solid var(--sam-color-border-default)',
-              color: 'var(--sam-color-fg-primary)',
-            }}
-          />
-          {filterMatchIds && (
-            <div className="mt-1" role="status" aria-live="polite" style={{ fontSize: 10, color: 'var(--sam-color-fg-muted)' }}>
-              {filterMatchIds.size} match{filterMatchIds.size !== 1 ? 'es' : ''}
-            </div>
-          )}
-        </div>
-      )}
+      <div className="mt-2">
+        <input
+          type="text"
+          placeholder="Filter tasks..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          aria-label="Filter tasks"
+          className="w-full rounded-md text-xs outline-none focus-visible:ring-2 focus-visible:ring-[var(--sam-color-accent-primary)]"
+          style={{
+            padding: '6px 10px',
+            background: 'var(--sam-color-bg-inset)',
+            border: '1px solid var(--sam-color-border-default)',
+            color: 'var(--sam-color-fg-primary)',
+          }}
+        />
+        {filterMatchIds && (
+          <div className="mt-1" role="status" aria-live="polite" style={{ fontSize: 10, color: 'var(--sam-color-fg-muted)' }}>
+            {filterMatchIds.size} match{filterMatchIds.size !== 1 ? 'es' : ''}
+          </div>
+        )}
+      </div>
     </div>
   );
 

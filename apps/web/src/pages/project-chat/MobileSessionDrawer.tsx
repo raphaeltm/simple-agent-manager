@@ -19,7 +19,6 @@ export function MobileSessionDrawer({
   realtimeDegraded = false,
   isRefreshing = false,
   onRefresh,
-  taskTitleMap = new Map(),
   taskInfoMap = new Map(),
   onShowHierarchy,
 }: {
@@ -32,7 +31,6 @@ export function MobileSessionDrawer({
   realtimeDegraded?: boolean;
   isRefreshing?: boolean;
   onRefresh?: () => void;
-  taskTitleMap?: Map<string, string>;
   taskInfoMap?: Map<string, TaskInfo>;
   onShowHierarchy: (taskId: string) => void;
 }) {
@@ -169,13 +167,10 @@ export function MobileSessionDrawer({
         <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
           <SessionList
             sessions={filteredR}
-            allSessions={sessions}
             selectedSessionId={selectedSessionId}
             onSelect={onSelect}
             onFork={onFork}
-            taskTitleMap={taskTitleMap}
             taskInfoMap={taskInfoMap}
-            searchQuery={mobileSearch}
             onShowHierarchy={onShowHierarchy}
           />
           {filteredS.length > 0 && (
@@ -191,13 +186,10 @@ export function MobileSessionDrawer({
               {showOlder && (
                 <SessionList
                   sessions={filteredS}
-                  allSessions={sessions}
                   selectedSessionId={selectedSessionId}
                   onSelect={onSelect}
                   onFork={onFork}
-                  taskTitleMap={taskTitleMap}
                   taskInfoMap={taskInfoMap}
-                  searchQuery={mobileSearch}
                   onShowHierarchy={onShowHierarchy}
                 />
               )}
