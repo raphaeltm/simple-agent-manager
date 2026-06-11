@@ -429,7 +429,7 @@ export class ProjectData extends DurableObject<Env> {
           'SELECT chat_session_id FROM acp_sessions WHERE id = ?', healedId,
         ).toArray()[0];
         const healedChatId = (healedRow?.chat_session_id as string | undefined) ?? healedId;
-        this.broadcastEvent('session.activity', { sessionId: healedChatId, activity: 'idle' }, healedChatId);
+        this.broadcastEvent('session.activity', { sessionId: healedChatId, activity: 'idle', promptStartedAt: null }, healedChatId);
       }
     } catch (err) {
       log.error('alarm.stale_activity_reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });

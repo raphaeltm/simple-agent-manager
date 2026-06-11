@@ -52,7 +52,7 @@ describe('reconcileStaleActivity', () => {
   });
 
   it('heals stale error sessions', () => {
-    upsertActivityState(sql, 'sess-error', { activity: 'error' as 'idle' });
+    upsertActivityState(sql, 'sess-error', { activity: 'error' });
     vi.setSystemTime(now + FIVE_MINUTES + 1000);
     const healed = reconcileStaleActivity(sql);
     expect(healed).toContain('sess-error');
@@ -60,7 +60,7 @@ describe('reconcileStaleActivity', () => {
   });
 
   it('heals stale recovering sessions', () => {
-    upsertActivityState(sql, 'sess-recover', { activity: 'recovering' as 'idle' });
+    upsertActivityState(sql, 'sess-recover', { activity: 'recovering' });
     vi.setSystemTime(now + FIVE_MINUTES + 1000);
     const healed = reconcileStaleActivity(sql);
     expect(healed).toContain('sess-recover');
@@ -86,8 +86,8 @@ describe('reconcileStaleActivity', () => {
 
   it('heals multiple stale states in one call', () => {
     upsertActivityState(sql, 'sess-p', { activity: 'prompting' });
-    upsertActivityState(sql, 'sess-e', { activity: 'error' as 'idle' });
-    upsertActivityState(sql, 'sess-r', { activity: 'recovering' as 'idle' });
+    upsertActivityState(sql, 'sess-e', { activity: 'error' });
+    upsertActivityState(sql, 'sess-r', { activity: 'recovering' });
     upsertActivityState(sql, 'sess-ok', { activity: 'idle' });
 
     vi.setSystemTime(now + FIVE_MINUTES + 1000);
