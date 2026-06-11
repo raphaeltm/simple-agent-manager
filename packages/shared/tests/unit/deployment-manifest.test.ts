@@ -28,6 +28,30 @@ function validManifest(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
+/** A valid digest-pinned image reference for test services. */
+function validImage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    registry: 'r.io',
+    repository: 'app',
+    digest: 'sha256:' + 'a'.repeat(64),
+    ...overrides,
+  };
+}
+
+/**
+ * A full manifest whose single "web" service is merged with the given fields.
+ * Use `manifestOverrides` to replace top-level fields (volumes, routes, ...).
+ */
+function webServiceManifest(
+  service: Record<string, unknown>,
+  manifestOverrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return validManifest({
+    services: { web: { image: validImage(), volumes: [], ...service } },
+    ...manifestOverrides,
+  });
+}
+
 function expectErrors(input: unknown): ManifestError[] {
   const result = validateManifest(input);
   expect(result.success).toBe(false);
@@ -67,7 +91,7 @@ describe('valid manifests', () => {
           worker: {
             image: { registry: 'r.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
             env: { QUEUE: 'default' },
-            volumes: [{ name: 'scratch', mountPath: '/tmp/work' }],
+            volumes: [{ name: 'scratch', mountPath: '/var/work' }],
           },
         },
         volumes: { scratch: {} },
@@ -149,100 +173,41 @@ describe('valid manifests', () => {
 
 describe('image digest enforcement', () => {
   it('rejects a mutable tag instead of a digest', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'latest' },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ digest: 'latest' }) }));
     expect(errors.some((e) => e.message.includes('sha256') && e.message.includes('Mutable tags'))).toBe(true);
   });
 
   it('rejects a digest with wrong prefix', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'md5:' + 'a'.repeat(64) },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ image: validImage({ digest: 'md5:' + 'a'.repeat(64) }) }),
     );
     expect(errors.some((e) => e.message.includes('sha256'))).toBe(true);
   });
 
   it('rejects a digest with too few hex characters', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:abcd' },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ digest: 'sha256:abcd' }) }));
     expect(errors.some((e) => e.message.includes('sha256'))).toBe(true);
   });
 
   it('rejects a digest with uppercase hex', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'A'.repeat(64) },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ image: validImage({ digest: 'sha256:' + 'A'.repeat(64) }) }),
     );
     expect(errors.some((e) => e.message.includes('sha256'))).toBe(true);
   });
 
   it('rejects a tag-style reference (no digest at all)', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'v1.2.3' },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ digest: 'v1.2.3' }) }));
     expect(errors.some((e) => e.message.includes('sha256'))).toBe(true);
   });
 
   it('rejects empty registry', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: '', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ registry: '' }) }));
     expect(errors.some((e) => e.message.includes('Registry'))).toBe(true);
   });
 
   it('rejects empty repository', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: '', digest: 'sha256:' + 'a'.repeat(64) },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ repository: '' }) }));
     expect(errors.some((e) => e.message.includes('Repository'))).toBe(true);
   });
 });
@@ -254,60 +219,24 @@ describe('image digest enforcement', () => {
 describe('secret references', () => {
   it('rejects inline secret values (object without "secret" key)', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            env: { DB_URL: { value: 'postgres://user:pass@host/db' } },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ env: { DB_URL: { value: 'postgres://user:pass@host/db' } } }),
     );
     expect(errors.length).toBeGreaterThan(0);
   });
 
   it('rejects secret names with invalid characters', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            env: { KEY: { secret: 'has spaces' } },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ env: { KEY: { secret: 'has spaces' } } }));
     expect(errors.some((e) => e.message.includes('Secret name'))).toBe(true);
   });
 
   it('rejects empty secret name', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            env: { KEY: { secret: '' } },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ env: { KEY: { secret: '' } } }));
     expect(errors.some((e) => e.message.includes('Secret name'))).toBe(true);
   });
 
   it('rejects secret ref with extra fields (strict)', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            env: { KEY: { secret: 'name', extra: 'field' } },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ env: { KEY: { secret: 'name', extra: 'field' } } }),
     );
     expect(errors.length).toBeGreaterThan(0);
   });
@@ -320,15 +249,10 @@ describe('secret references', () => {
 describe('volume enforcement', () => {
   it('rejects host path bind mounts (string-style volume)', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            volumes: [{ name: '/host/path', mountPath: '/data' }],
-          },
-        },
-        volumes: {},
-      }),
+      webServiceManifest(
+        { volumes: [{ name: '/host/path', mountPath: '/data' }] },
+        { volumes: {} },
+      ),
     );
     // /host/path won't match the volume name regex
     expect(errors.some((e) => e.message.includes('Volume name'))).toBe(true);
@@ -336,45 +260,27 @@ describe('volume enforcement', () => {
 
   it('rejects volumes with invalid names', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            volumes: [{ name: 'Has_Uppercase', mountPath: '/data' }],
-          },
-        },
-      }),
+      webServiceManifest({ volumes: [{ name: 'Has_Uppercase', mountPath: '/data' }] }),
     );
     expect(errors.some((e) => e.message.includes('Volume name'))).toBe(true);
   });
 
   it('rejects service volume referencing undeclared volume', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            volumes: [{ name: 'missing-vol', mountPath: '/data' }],
-          },
-        },
-        volumes: {},
-        routes: [{ service: 'web', port: 80, mode: 'public' }],
-      }),
+      webServiceManifest(
+        { volumes: [{ name: 'missing-vol', mountPath: '/data' }] },
+        { volumes: {} },
+      ),
     );
     expect(errors.some((e) => e.path.includes('volumes') && e.message.includes('missing-vol'))).toBe(true);
   });
 
   it('rejects empty mount path', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            volumes: [{ name: 'data', mountPath: '' }],
-          },
-        },
-        volumes: { data: {} },
-      }),
+      webServiceManifest(
+        { volumes: [{ name: 'data', mountPath: '' }] },
+        { volumes: { data: {} } },
+      ),
     );
     expect(errors.some((e) => e.message.includes('Mount path'))).toBe(true);
   });
@@ -461,116 +367,44 @@ describe('hook cross-references', () => {
 
 describe('dangerous Compose-isms', () => {
   it('rejects "build" at service level with friendly message', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          build: { context: '.' },
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ build: { context: '.' } }));
     expect(errors.some((e) => e.path === 'services.web.build' && e.message.includes('prebuilt'))).toBe(true);
   });
 
   it('rejects "privileged" at service level', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          privileged: true,
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ privileged: true }));
     expect(errors.some((e) => e.path === 'services.web.privileged' && e.message.includes('not allowed'))).toBe(true);
   });
 
   it('rejects "network_mode" at service level', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          network_mode: 'host',
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ network_mode: 'host' }));
     expect(errors.some((e) => e.path === 'services.web.network_mode')).toBe(true);
   });
 
   it('rejects "ports" at service level', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          ports: ['8080:80'],
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ ports: ['8080:80'] }));
     expect(errors.some((e) => e.path === 'services.web.ports' && e.message.includes('routes'))).toBe(true);
   });
 
   it('rejects "devices" at service level', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          devices: ['/dev/sda:/dev/xvdc:rwm'],
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ devices: ['/dev/sda:/dev/xvdc:rwm'] }));
     expect(errors.some((e) => e.path === 'services.web.devices')).toBe(true);
   });
 
   it('rejects "cap_add" at service level', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          cap_add: ['SYS_ADMIN'],
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ cap_add: ['SYS_ADMIN'] }));
     expect(errors.some((e) => e.path === 'services.web.cap_add')).toBe(true);
   });
 
   it('rejects "env_file" at service level', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          env_file: ['.env'],
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ env_file: ['.env'] }));
     expect(errors.some((e) => e.path === 'services.web.env_file' && e.message.includes('secret'))).toBe(true);
   });
 
   it('rejects multiple dangerous fields and reports all', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          privileged: true,
-          cap_add: ['NET_ADMIN'],
-          network_mode: 'host',
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(
+      webServiceManifest({ privileged: true, cap_add: ['NET_ADMIN'], network_mode: 'host' }),
+    );
     expect(errors.length).toBeGreaterThanOrEqual(3);
     const paths = errors.map((e) => e.path);
     expect(paths).toContain('services.web.privileged');
@@ -592,30 +426,12 @@ describe('unknown field rejection (strict)', () => {
   });
 
   it('rejects unknown service-level fields (not in dangerous list)', () => {
-    const errors = expectErrors({
-      version: 1,
-      services: {
-        web: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-          restart: 'always',
-        },
-      },
-      routes: [{ service: 'web', port: 80, mode: 'public' }],
-    });
+    const errors = expectErrors(webServiceManifest({ restart: 'always' }));
     expect(errors.length).toBeGreaterThan(0);
   });
 
   it('rejects unknown image fields', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64), tag: 'latest' },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ tag: 'latest' }) }));
     expect(errors.length).toBeGreaterThan(0);
   });
 
@@ -687,11 +503,7 @@ describe('service name validation', () => {
   it('rejects service names with uppercase', () => {
     const errors = expectErrors({
       version: 1,
-      services: {
-        WebApp: {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-        },
-      },
+      services: { WebApp: { image: validImage() } },
       routes: [{ service: 'WebApp', port: 80, mode: 'public' }],
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -700,11 +512,7 @@ describe('service name validation', () => {
   it('rejects service names starting with hyphen', () => {
     const errors = expectErrors({
       version: 1,
-      services: {
-        '-web': {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-        },
-      },
+      services: { '-web': { image: validImage() } },
       routes: [{ service: '-web', port: 80, mode: 'public' }],
     });
     expect(errors.length).toBeGreaterThan(0);
@@ -713,11 +521,7 @@ describe('service name validation', () => {
   it('accepts service names with hyphens', () => {
     expectSuccess({
       version: 1,
-      services: {
-        'my-web-app': {
-          image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-        },
-      },
+      services: { 'my-web-app': { image: validImage() } },
       routes: [{ service: 'my-web-app', port: 80, mode: 'public' }],
     });
   });
@@ -729,46 +533,20 @@ describe('service name validation', () => {
 
 describe('resource limits', () => {
   it('rejects zero memory limit', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            resources: { memoryLimitMb: 0, cpuLimit: 1 },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ resources: { memoryLimitMb: 0, cpuLimit: 1 } }));
     expect(errors.some((e) => e.message.includes('positive'))).toBe(true);
   });
 
   it('rejects negative cpu limit', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            resources: { memoryLimitMb: 512, cpuLimit: -1 },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ resources: { memoryLimitMb: 512, cpuLimit: -1 } }),
     );
     expect(errors.some((e) => e.message.includes('positive'))).toBe(true);
   });
 
   it('rejects fractional memory limit', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            resources: { memoryLimitMb: 512.5, cpuLimit: 1 },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ resources: { memoryLimitMb: 512.5, cpuLimit: 1 } }),
     );
     expect(errors.length).toBeGreaterThan(0);
   });
@@ -781,30 +559,14 @@ describe('resource limits', () => {
 describe('health check', () => {
   it('rejects invalid port', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            healthCheck: { path: '/health', port: 70000, expectedStatus: 200 },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ healthCheck: { path: '/health', port: 70000, expectedStatus: 200 } }),
     );
     expect(errors.length).toBeGreaterThan(0);
   });
 
   it('rejects invalid HTTP status code', () => {
     const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'sha256:' + 'a'.repeat(64) },
-            healthCheck: { path: '/health', port: 8080, expectedStatus: 999 },
-            volumes: [],
-          },
-        },
-      }),
+      webServiceManifest({ healthCheck: { path: '/health', port: 8080, expectedStatus: 999 } }),
     );
     expect(errors.length).toBeGreaterThan(0);
   });
@@ -827,16 +589,7 @@ describe('error format', () => {
   });
 
   it('provides path context for nested errors', () => {
-    const errors = expectErrors(
-      validManifest({
-        services: {
-          web: {
-            image: { registry: 'r.io', repository: 'app', digest: 'bad' },
-            volumes: [],
-          },
-        },
-      }),
-    );
+    const errors = expectErrors(webServiceManifest({ image: validImage({ digest: 'bad' }) }));
     const digestError = errors.find((e) => e.message.includes('sha256'));
     expect(digestError).toBeDefined();
     expect(digestError!.path).toContain('services');
