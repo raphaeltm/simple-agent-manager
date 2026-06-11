@@ -8,7 +8,7 @@
  * Auth: session cookie + project ownership.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import * as v from 'valibot';
@@ -19,6 +19,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
+import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
 import { encrypt } from '../services/encryption';
 
@@ -30,8 +31,15 @@ import { encrypt } from '../services/encryption';
 const SECRET_NAME_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 const SetSecretSchema = v.object({
-  value: v.pipe(v.string('value is required'), v.minLength(1, 'value must not be empty')),
+  value: v.pipe(
+    v.string('value is required'),
+    v.minLength(1, 'value must not be empty'),
+    v.maxLength(65_536, 'value must not exceed 64 KiB'),
+  ),
 });
+
+/** Configurable upper bound on secrets per environment (default 100). */
+const DEFAULT_MAX_SECRETS_PER_ENVIRONMENT = 100;
 
 // =============================================================================
 // Helpers
@@ -90,6 +98,7 @@ deploymentSecretRoutes.put(
   '/:projectId/environments/:envId/secrets/:name',
   requireAuth(),
   requireApproved(),
+  (c, next) => rateLimitCredentialUpdate(c.env)(c, next),
   jsonValidator(SetSecretSchema),
   async (c) => {
     const projectId = c.req.param('projectId');
@@ -105,6 +114,36 @@ deploymentSecretRoutes.put(
       throw errors.badRequest(
         'Secret name must be 1-128 alphanumeric, hyphen, or underscore characters',
       );
+    }
+
+    // Enforce max secrets per environment (only when creating, not updating)
+    const maxSecrets = Number.parseInt(
+      c.env.MAX_SECRETS_PER_ENVIRONMENT ?? '', 10,
+    ) || DEFAULT_MAX_SECRETS_PER_ENVIRONMENT;
+
+    const existingSecret = await db
+      .select({ id: schema.deploymentSecrets.id })
+      .from(schema.deploymentSecrets)
+      .where(
+        and(
+          eq(schema.deploymentSecrets.environmentId, envId),
+          eq(schema.deploymentSecrets.name, name),
+        ),
+      )
+      .limit(1);
+
+    if (existingSecret.length === 0) {
+      // New secret — enforce per-environment cap
+      const [row] = await db
+        .select({ total: count() })
+        .from(schema.deploymentSecrets)
+        .where(eq(schema.deploymentSecrets.environmentId, envId));
+
+      if ((row?.total ?? 0) >= maxSecrets) {
+        throw errors.badRequest(
+          `Environment secret limit reached (${maxSecrets}). Delete unused secrets before adding new ones.`,
+        );
+      }
     }
 
     const { value } = c.req.valid('json');

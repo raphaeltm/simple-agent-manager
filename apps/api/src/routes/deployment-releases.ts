@@ -346,11 +346,19 @@ deploymentReleaseRoutes.get(
       getEncryptionKey(c.env),
     );
 
-    const composeYaml = renderCompose(manifest, {
-      environmentId: envId,
-      releaseId,
-      resolvedSecrets,
-    });
+    let composeYaml: string;
+    try {
+      composeYaml = renderCompose(manifest, {
+        environmentId: envId,
+        releaseId,
+        resolvedSecrets,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('Missing secrets')) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
 
     return c.text(composeYaml, 200, {
       'Content-Type': 'text/yaml; charset=utf-8',
