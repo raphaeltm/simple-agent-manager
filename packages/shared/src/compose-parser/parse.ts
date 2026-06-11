@@ -10,9 +10,13 @@
 import { parse as parseYaml } from 'yaml';
 
 import {
+  DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS,
+  DEFAULT_SERVICE_CPU_LIMIT,
+  DEFAULT_SERVICE_MEMORY_LIMIT_MB,
   DENIED_SERVICE_FIELDS,
   DENIED_TOP_LEVEL_FIELDS,
   DOCKER_SOCKET_PATHS,
+  MAX_PRE_FLIGHT_TIMEOUT_SECONDS,
   SERVICE_ALLOWED,
   TOP_LEVEL_ALLOWED,
   TOP_LEVEL_IGNORED,
@@ -840,7 +844,7 @@ function parseHooks(
 
   const service = hook['service'] as string | undefined;
   const command = hook['command'] as string[] | undefined;
-  const timeoutSeconds = (hook['timeoutSeconds'] as number | undefined) ?? 300;
+  const timeoutSeconds = (hook['timeoutSeconds'] as number | undefined) ?? DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS;
 
   if (!service || typeof service !== 'string') {
     errors.push({
@@ -858,7 +862,7 @@ function parseHooks(
     return undefined;
   }
 
-  if (typeof timeoutSeconds !== 'number' || timeoutSeconds < 1 || timeoutSeconds > 3600) {
+  if (typeof timeoutSeconds !== 'number' || timeoutSeconds < 1 || timeoutSeconds > MAX_PRE_FLIGHT_TIMEOUT_SECONDS) {
     errors.push({
       path: 'x-sam-pre-flight.timeoutSeconds',
       message: 'Pre-flight hook timeoutSeconds must be between 1 and 3600.',
@@ -955,11 +959,11 @@ function parseResources(
   // If only one is set, still return it — but the manifest schema requires both,
   // so we fill in defaults
   if (memoryLimitMb !== undefined) {
-    return { memoryLimitMb, cpuLimit: cpuLimit ?? 1 };
+    return { memoryLimitMb, cpuLimit: cpuLimit ?? DEFAULT_SERVICE_CPU_LIMIT };
   }
 
   if (cpuLimit !== undefined) {
-    return { memoryLimitMb: memoryLimitMb ?? 512, cpuLimit };
+    return { memoryLimitMb: memoryLimitMb ?? DEFAULT_SERVICE_MEMORY_LIMIT_MB, cpuLimit };
   }
 
   return undefined;

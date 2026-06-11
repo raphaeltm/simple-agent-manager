@@ -1219,4 +1219,140 @@ x-sam-routes:
     mode: public
 `, 'volumes.mydata');
   });
+
+  it('depends_on is accepted but not extracted (ordering is informational)', () => {
+    const manifest = expectSuccess(`
+services:
+  web:
+    image: nginx
+    depends_on:
+      - db
+  db:
+    image: postgres:16
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    // depends_on passes the allowlist but produces no output — by design,
+    // the manifest schema has no ordering field. depends_on is accepted
+    // so existing compose files work without removal.
+    expect(manifest.services['web']).toBeDefined();
+    expect(manifest.services['db']).toBeDefined();
+  });
+
+  it('defaults memoryLimitMb when only cpus is set', () => {
+    const manifest = expectSuccess(`
+services:
+  web:
+    image: nginx
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    expect(manifest.services['web']!.resources).toEqual({
+      memoryLimitMb: 512,
+      cpuLimit: 2,
+    });
+  });
+
+  it('rejects pre-flight timeoutSeconds out of range', () => {
+    expectErrorAt(`
+services:
+  web:
+    image: nginx
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+x-sam-pre-flight:
+  service: web
+  command: ["echo"]
+  timeoutSeconds: 9999
+`, 'x-sam-pre-flight.timeoutSeconds');
+  });
+
+  it('rejects tmpfs volume type in long syntax', () => {
+    expectErrorAt(`
+services:
+  web:
+    image: nginx
+    volumes:
+      - type: tmpfs
+        target: /tmp/data
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`, 'services.web.volumes[0]');
+  });
+
+  it('handles numeric port spec in ports array', () => {
+    const manifest = expectSuccess(`
+services:
+  web:
+    image: nginx
+    ports:
+      - 8080
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    expect(manifest.routes).toContainEqual({ service: 'web', port: 8080, mode: 'public' });
+  });
+
+  it('handles port with protocol suffix (80/tcp)', () => {
+    const manifest = expectSuccess(`
+services:
+  web:
+    image: nginx
+    ports:
+      - "80/tcp"
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    // Explicit x-sam-routes already covers port 80, so no duplicate
+    const port80 = manifest.routes.filter((r) => r.port === 80);
+    expect(port80).toHaveLength(1);
+  });
+
+  it('handles boolean environment values', () => {
+    const manifest = expectSuccess(`
+services:
+  web:
+    image: nginx
+    environment:
+      DEBUG: true
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    expect(manifest.services['web']!.env['DEBUG']).toBe('true');
+  });
+
+  it('handles environment list with key-only entries (host inherit)', () => {
+    const manifest = expectSuccess(`
+services:
+  web:
+    image: nginx
+    environment:
+      - PATH
+      - FOO=bar
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    // PATH without = is skipped (host-inherit), FOO=bar is kept
+    expect(manifest.services['web']!.env).toEqual({ FOO: 'bar' });
+  });
 });

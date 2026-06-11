@@ -109,3 +109,12 @@ export const DENIED_TOP_LEVEL_FIELDS: Record<string, string> = {
 // =============================================================================
 
 export const DOCKER_SOCKET_PATHS = ['/var/run/docker.sock', '/run/docker.sock'];
+
+// =============================================================================
+// Parser defaults — exported so callers can override via env vars
+// =============================================================================
+
+export const DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS = 300;
+export const MAX_PRE_FLIGHT_TIMEOUT_SECONDS = 3600;
+export const DEFAULT_SERVICE_MEMORY_LIMIT_MB = 512;
+export const DEFAULT_SERVICE_CPU_LIMIT = 1;
