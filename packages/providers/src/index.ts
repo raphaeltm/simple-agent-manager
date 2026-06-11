@@ -61,13 +61,15 @@ export {
 } from './hetzner';
 export {
   classifyScalewayError,
-  SCALEWAY_DEFAULT_VOLUME_IOPS,
   SCALEWAY_LOCATIONS,
+  ScalewayProvider,
+} from './scaleway';
+export {
+  SCALEWAY_DEFAULT_VOLUME_IOPS,
   SCALEWAY_MAX_VOLUMES_PER_SERVER,
   SCALEWAY_VOLUME_MAX_SIZE_GB,
   SCALEWAY_VOLUME_MIN_SIZE_GB,
-  ScalewayProvider,
-} from './scaleway';
+} from './scaleway-volumes';
 
 /**
  * Create a provider instance from explicit configuration.
