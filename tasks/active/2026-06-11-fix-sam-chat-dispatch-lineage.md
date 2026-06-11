@@ -31,15 +31,15 @@ Tasks dispatched from SAM chat sessions (`sam-session` DO tool) never get `paren
 
 ## Implementation Checklist
 
-- [ ] Add `parentTaskId` to SAM dispatch tool schema and `DispatchTaskInput`
-- [ ] When `parentTaskId` provided, look up parent task to get its `dispatch_depth`
-- [ ] Set `parent_task_id` and `dispatch_depth = parent.dispatch_depth + 1` in INSERT
-- [ ] When no `parentTaskId`, keep current behavior (`dispatch_depth = 0`, no parent)
-- [ ] Validate parent task exists and belongs to same project + user
-- [ ] Keep `triggered_by = 'mcp'` (already correct for subtask classification)
-- [ ] Write vertical slice test: SAM dispatch with parentTaskId -> verify task row has correct lineage
-- [ ] Write regression test: dispatch lifecycle -> list tasks -> verify taskInfoMap has hierarchy
-- [ ] Update comment at top of file (remove "no parent task or depth constraints")
+- [x] Add `parentTaskId` to SAM dispatch tool schema and `DispatchTaskInput`
+- [x] When `parentTaskId` provided, look up parent task to get its `dispatch_depth`
+- [x] Set `parent_task_id` and `dispatch_depth = parent.dispatch_depth + 1` in INSERT
+- [x] When no `parentTaskId`, keep current behavior (`dispatch_depth = 0`, no parent)
+- [x] Validate parent task exists and belongs to same project + user
+- [x] Keep `triggered_by = 'mcp'` (already correct for subtask classification)
+- [x] Write vertical slice test: SAM dispatch with parentTaskId -> verify task row has correct lineage
+- [x] Write regression test: dispatch lifecycle -> list tasks -> verify taskInfoMap has hierarchy
+- [x] Update comment at top of file (remove "no parent task or depth constraints")
 
 ## Acceptance Criteria
 
