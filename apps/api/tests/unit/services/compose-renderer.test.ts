@@ -5,10 +5,10 @@
  * parsed structure (rule 02: Template Output Verification).
  */
 import type { DeploymentManifest } from '@simple-agent-manager/shared';
-import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
-import { renderCompose, type ComposeRenderContext } from '../../../src/services/compose-renderer';
+import { type ComposeRenderContext,renderCompose } from '../../../src/services/compose-renderer';
 
 // =============================================================================
 // Helpers

@@ -8,8 +8,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { signCallbackToken } from '../../src/services/jwt';
-
 // Unique IDs to avoid cross-test contamination
 const P = `deploy-${Date.now()}`;
 const USER_ID = `${P}-user`;
