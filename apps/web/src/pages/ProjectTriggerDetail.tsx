@@ -86,6 +86,7 @@ export function ProjectTriggerDetail() {
   const [loading, setLoading] = useState(true);
   const [execLoading, setExecLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [nextExecutionCursor, setNextExecutionCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -103,20 +104,22 @@ export function ProjectTriggerDetail() {
     }
   }, [projectId, triggerId]);
 
-  const loadExecutions = useCallback(async (offset = 0) => {
+  const loadExecutions = useCallback(async (cursor: string | null = null) => {
     if (!triggerId) return;
+    const offset = cursor ? Number.parseInt(cursor, 10) : 0;
     setExecLoading(true);
     try {
       const resp = await listTriggerExecutions(projectId, triggerId, {
         limit: EXECUTIONS_PER_PAGE,
-        offset,
+        offset: Number.isFinite(offset) ? offset : 0,
       });
-      if (offset === 0) {
-        setExecutions(resp.executions);
-      } else {
+      if (cursor) {
         setExecutions((prev) => [...prev, ...resp.executions]);
+      } else {
+        setExecutions(resp.executions);
       }
-      setHasMore(resp.executions.length === EXECUTIONS_PER_PAGE);
+      setNextExecutionCursor(resp.nextCursor ?? null);
+      setHasMore(Boolean(resp.nextCursor));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load executions');
     } finally {
@@ -125,8 +128,8 @@ export function ProjectTriggerDetail() {
   }, [projectId, triggerId, toast]);
 
   useEffect(() => {
-    void loadTrigger();
-    void loadExecutions(0);
+    loadTrigger().catch(() => undefined);
+    loadExecutions(null).catch(() => undefined);
   }, [loadTrigger, loadExecutions]);
 
   const handleRunNow = useCallback(async () => {
@@ -134,8 +137,8 @@ export function ProjectTriggerDetail() {
     try {
       await runTrigger(projectId, triggerId);
       toast.success('Trigger fired');
-      void loadTrigger();
-      void loadExecutions(0);
+      loadTrigger().catch(() => undefined);
+      loadExecutions(null).catch(() => undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
     }
@@ -148,7 +151,7 @@ export function ProjectTriggerDetail() {
       const data: UpdateTriggerRequest = { status: newStatus };
       await updateTrigger(projectId, triggerId, data);
       toast.success(newStatus === 'active' ? 'Trigger resumed' : 'Trigger paused');
-      void loadTrigger();
+      loadTrigger().catch(() => undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update trigger');
     }
@@ -202,6 +205,16 @@ export function ProjectTriggerDetail() {
   }
 
   const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
+  const handleLoadMore = () => {
+    loadExecutions(nextExecutionCursor).catch(() => undefined);
+  };
+  const handleExecutionsMutated = () => {
+    loadExecutions(null).catch(() => undefined);
+  };
+  const handleFormSaved = () => {
+    loadTrigger().catch(() => undefined);
+    loadExecutions(null).catch(() => undefined);
+  };
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -331,10 +344,10 @@ export function ProjectTriggerDetail() {
           executions={executions}
           loading={execLoading}
           hasMore={hasMore}
-          onLoadMore={() => void loadExecutions(executions.length)}
+          onLoadMore={handleLoadMore}
           projectId={projectId}
           triggerId={triggerId!}
-          onMutated={() => void loadExecutions(0)}
+          onMutated={handleExecutionsMutated}
         />
       </div>
 
@@ -372,7 +385,7 @@ export function ProjectTriggerDetail() {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         editTrigger={trigger}
-        onSaved={() => { void loadTrigger(); void loadExecutions(0); }}
+        onSaved={handleFormSaved}
       />
 
       {/* Delete confirmation */}

@@ -127,6 +127,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
   const toast = useToast();
   const { projectId } = useProjectContext();
   const templateRef = useRef<HTMLTextAreaElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const isEdit = Boolean(editTrigger);
 
   // Form state
@@ -160,6 +161,17 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       void listAgentProfiles(projectId).then(setProfiles).catch(() => setProfiles([]));
     }
   }, [open, projectId]);
+
+  useEffect(() => {
+    if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    return () => {
+      returnFocusRef.current?.focus();
+      returnFocusRef.current = null;
+    };
+  }, [open]);
 
   // Reset form when trigger changes or panel opens
   useEffect(() => {
@@ -311,22 +323,20 @@ export const TriggerForm: FC<TriggerFormProps> = ({
     ? 'When {{github.actor}} comments {{github.comment}} on {{github.repository}}#{{github.number}}, decide whether to start the requested SAM task.'
     : 'Review all open pull requests and summarize their status. Current time: {{schedule.time}}';
 
+  if (!open) return null;
+
   return createPortal(
     <>
       {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
+      <div
+        className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
       {/* Drawer panel */}
       <div
-        className={`fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
+        className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
         style={{ width: 'min(560px, 95vw)' }}
         role="dialog"
         aria-modal="true"

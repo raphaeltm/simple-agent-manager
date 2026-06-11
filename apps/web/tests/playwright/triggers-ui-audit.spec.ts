@@ -1,41 +1,45 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test,type TestInfo } from '@playwright/test';
+
+import { assertNoOverflow, jsonResponse, makeMockUser } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+  sessionId: 'session-test-1',
+  userId: 'user-test-1',
+});
 
 const MOCK_PROJECT = {
   id: 'proj-test-1',
   name: 'Test Project',
+  description: null,
   repository: 'testuser/test-repo',
   defaultBranch: 'main',
   userId: 'user-test-1',
+  installationId: 'inst-1',
   githubInstallationId: 'inst-1',
+  repoProvider: 'github',
+  status: 'active',
   defaultVmSize: null,
+  defaultAgentType: null,
+  defaultWorkspaceProfile: null,
+  defaultProvider: null,
+  defaultLocation: null,
+  agentDefaults: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
+  summary: {
+    activeWorkspaceCount: 0,
+    activeSessionCount: 0,
+    lastActivityAt: null,
+    taskCountsByStatus: {},
+    linkedWorkspaces: 0,
+  },
 };
 
 interface TriggerOverrides {
@@ -199,6 +203,18 @@ const NORMAL_EXECUTIONS = [
   }),
 ];
 
+const STUCK_EXECUTIONS = [
+  makeExecution({
+    id: 'ex-stuck',
+    status: 'queued',
+    scheduledAt: '2026-03-20T09:00:00Z',
+    startedAt: null,
+    completedAt: null,
+    taskId: null,
+  }),
+  makeExecution({ id: 'ex-complete', status: 'completed', taskId: 'task-1' }),
+];
+
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
@@ -208,19 +224,20 @@ async function setupApiMocks(page: Page, options: {
   triggerDetail?: ReturnType<typeof makeTrigger> | null;
   executions?: ReturnType<typeof makeExecution>[];
   triggersError?: boolean;
+  executionCleanupError?: boolean;
 } = {}) {
   const {
     triggers = NORMAL_TRIGGERS,
     triggerDetail = null,
     executions = NORMAL_EXECUTIONS,
     triggersError = false,
+    executionCleanupError = false,
   } = options;
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const respond = (status: number, body: unknown) => jsonResponse(route, status, body);
 
     // Auth
     if (path.includes('/api/auth/')) {
@@ -238,8 +255,31 @@ async function setupApiMocks(page: Page, options: {
     }
 
     // Notifications
+    if (path === '/api/notifications/ws') {
+      return route.abort('connectionrefused');
+    }
     if (path.startsWith('/api/notifications')) {
       return respond(200, { notifications: [], unreadCount: 0 });
+    }
+
+    // Recent chats
+    if (path === '/api/chats/recent') {
+      return respond(200, { sessions: [], totalActive: 0 });
+    }
+    if (path === '/api/chats') {
+      return respond(200, { sessions: [], total: 0 });
+    }
+
+    // Account map
+    if (path === '/api/account-map') {
+      return respond(200, {
+        projects: [],
+        nodes: [],
+        workspaces: [],
+        sessions: [],
+        tasks: [],
+        relationships: [],
+      });
     }
 
     // Agents
@@ -262,6 +302,11 @@ async function setupApiMocks(page: Page, options: {
         return respond(200, { envVars: [], files: [] });
       }
 
+      // Agent profiles
+      if (subPath === '/agent-profiles') {
+        return respond(200, { items: [] });
+      }
+
       // Sessions
       if (subPath.startsWith('/sessions')) {
         return respond(200, { sessions: [], total: 0 });
@@ -274,6 +319,12 @@ async function setupApiMocks(page: Page, options: {
 
       // Trigger executions
       if (subPath.match(/^\/triggers\/[^/]+\/executions/)) {
+        if (subPath.endsWith('/cleanup') && route.request().method() === 'POST') {
+          if (executionCleanupError) {
+            return respond(500, { error: 'INTERNAL_ERROR', message: 'Cleanup unavailable' });
+          }
+          return respond(200, { cleaned: 1 });
+        }
         return respond(200, { executions, nextCursor: null });
       }
 
@@ -292,12 +343,16 @@ async function setupApiMocks(page: Page, options: {
       }
 
       // Project detail
-      return respond(200, MOCK_PROJECT);
+      if (subPath === '') {
+        return respond(200, MOCK_PROJECT);
+      }
+
+      return respond(404, { error: 'not_found', message: `Unhandled project route: ${subPath}` });
     }
 
     // Projects list
     if (path === '/api/projects') {
-      return respond(200, [MOCK_PROJECT]);
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     }
 
     return route.continue();
@@ -310,17 +365,36 @@ async function setupApiMocks(page: Page, options: {
 
 async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
     fullPage: true,
   });
 }
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
+function requireProject(projectName: string, message: string) {
+  return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
+    test.skip(testInfo.project.name !== projectName, message);
+  };
+}
+
+const mobileOnly = requireProject('iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
+const desktopOnly = requireProject('Desktop (1280x800)', 'desktop audit runs on desktop project only');
+
+async function verifyCleanupFailure(page: Page, screenshotName: string) {
+  await setupApiMocks(page, {
+    triggers: NORMAL_TRIGGERS,
+    triggerDetail: NORMAL_TRIGGERS[0],
+    executions: STUCK_EXECUTIONS,
+    executionCleanupError: true,
+  });
+  await page.goto('/projects/proj-test-1/triggers/trig-1');
+  await page.waitForSelector('text=Daily Code Review');
+  await page.getByRole('button', { name: /clear stuck queued/i }).click();
+  await page.waitForSelector('text=Cleanup unavailable');
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -328,12 +402,13 @@ async function assertNoOverflow(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Triggers List — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  test.beforeEach(mobileOnly);
 
   test('normal data', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
+    await expect(page.getByRole('dialog', { name: /create trigger/i })).toHaveCount(0);
     await screenshot(page, 'triggers-list-normal-mobile');
     await assertNoOverflow(page);
   });
@@ -376,12 +451,13 @@ test.describe('Triggers List — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Triggers List — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  test.beforeEach(desktopOnly);
 
   test('normal data', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
+    await expect(page.getByRole('dialog', { name: /create trigger/i })).toHaveCount(0);
     await screenshot(page, 'triggers-list-normal-desktop');
     await assertNoOverflow(page);
   });
@@ -408,7 +484,7 @@ test.describe('Triggers List — Desktop', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Detail — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  test.beforeEach(mobileOnly);
 
   test('normal data with executions', async ({ page }) => {
     await setupApiMocks(page, {
@@ -433,6 +509,10 @@ test.describe('Trigger Detail — Mobile', () => {
     await screenshot(page, 'trigger-detail-empty-mobile');
     await assertNoOverflow(page);
   });
+
+  test('cleanup failure feedback', async ({ page }) => {
+    await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-mobile');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -440,7 +520,7 @@ test.describe('Trigger Detail — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Detail — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  test.beforeEach(desktopOnly);
 
   test('normal data with execution history', async ({ page }) => {
     await setupApiMocks(page, {
@@ -453,6 +533,10 @@ test.describe('Trigger Detail — Desktop', () => {
     await screenshot(page, 'trigger-detail-normal-desktop');
     await assertNoOverflow(page);
   });
+
+  test('cleanup failure feedback', async ({ page }) => {
+    await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-desktop');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -460,7 +544,7 @@ test.describe('Trigger Detail — Desktop', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Form — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  test.beforeEach(mobileOnly);
 
   test('new trigger form renders', async ({ page }) => {
     await setupApiMocks(page, { triggers: [] });
@@ -489,7 +573,7 @@ test.describe('Trigger Form — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Form — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  test.beforeEach(desktopOnly);
 
   test('new trigger form with all schedule tabs', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });

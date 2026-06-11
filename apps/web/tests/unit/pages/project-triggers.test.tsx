@@ -110,6 +110,9 @@ describe('ProjectTriggers', () => {
         expect(screen.getByText('Daily Sync')).toBeInTheDocument();
       });
       expect(screen.queryByText('Edit Trigger')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /create trigger/i })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/prompt template/i)).not.toBeInTheDocument();
     });
 
     it('clicking header New Trigger button opens form', async () => {
@@ -125,6 +128,27 @@ describe('ProjectTriggers', () => {
         // The form heading "New Trigger" should now appear
         expect(screen.getByRole('heading', { name: /new trigger/i })).toBeInTheDocument();
       });
+    });
+
+    it('removes the form from the accessibility tree and returns focus on close', async () => {
+      const user = userEvent.setup();
+      renderTriggers();
+      await waitFor(() => {
+        expect(screen.getByText('Daily Sync')).toBeInTheDocument();
+      });
+
+      const newTriggerButton = screen.getAllByRole('button', { name: /new trigger/i })[0];
+      await user.click(newTriggerButton);
+      expect(await screen.findByRole('dialog', { name: /create trigger/i })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /close/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /create trigger/i })).not.toBeInTheDocument();
+      });
+      expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/prompt template/i)).not.toBeInTheDocument();
+      expect(newTriggerButton).toHaveFocus();
     });
 
     it('creates a GitHub event trigger from the form', async () => {
