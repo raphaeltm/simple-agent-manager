@@ -8,8 +8,8 @@ import type { DeploymentManifest } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import { collectSecretNames, renderCompose } from '../../../src/services/compose-renderer';
 import type { ComposeRenderContext } from '../../../src/services/compose-renderer';
+import { collectSecretNames, renderCompose } from '../../../src/services/compose-renderer';
 
 // =============================================================================
 // Helpers
