@@ -188,6 +188,35 @@ describe('SAM dispatch_task lineage propagation', () => {
       expect(result.error).toContain('Parent task not found');
     });
 
+    it('returns error when dispatch depth exceeds the limit', async () => {
+      // Default max depth is 3, so parent at depth 3 → child at depth 4 should fail
+      const { ctx } = buildCtx({ id: 'deep-parent', dispatch_depth: 3 });
+
+      const result = await dispatchTask(
+        { projectId: 'proj-1', description: 'Too deep', parentTaskId: 'deep-parent' },
+        ctx,
+      ) as { error?: string };
+
+      expect(result.error).toContain('Dispatch depth limit');
+      expect(result.error).toContain('exceeded');
+      // Ensure no task was actually created (startTaskRunnerDO not called)
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    });
+
+    it('scopes parent lookup to the correct project and user', async () => {
+      const { ctx, bindCalls } = buildCtx({ id: 'parent-task-1', dispatch_depth: 0 });
+
+      await dispatchTask(
+        { projectId: 'proj-1', description: 'Subtask', parentTaskId: 'parent-task-1' },
+        ctx,
+      );
+
+      // The first bind() call is for the parent task SELECT query
+      // It should scope by taskId, projectId, and userId
+      const parentLookupBind = bindCalls[0];
+      expect(parentLookupBind).toEqual(['parent-task-1', 'proj-1', 'user-1']);
+    });
+
     it('sets triggered_by to mcp so isRetryOrFork returns false', async () => {
       const { ctx } = buildCtx({ id: 'parent-task-1', dispatch_depth: 0 });
 
@@ -223,6 +252,25 @@ describe('SAM dispatch_task lineage propagation', () => {
 
       expect(result.parentTaskId).toBeNull();
       expect(result.dispatchDepth).toBe(0);
+    });
+
+    it('treats whitespace-only parentTaskId as absent', async () => {
+      const { ctx } = buildCtx(null);
+
+      const result = await dispatchTask(
+        { projectId: 'proj-1', description: 'Top-level task', parentTaskId: '   ' },
+        ctx,
+      ) as { parentTaskId?: string | null; dispatchDepth?: number };
+
+      expect(result.parentTaskId).toBeNull();
+      expect(result.dispatchDepth).toBe(0);
+
+      // Confirm no parent lookup SELECT was attempted
+      const prepareCalls = (ctx.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mock.calls;
+      const selectCall = prepareCalls.find(
+        (args: unknown[]) => typeof args[0] === 'string' && (args[0] as string).includes('SELECT id, dispatch_depth'),
+      );
+      expect(selectCall).toBeUndefined();
     });
   });
 

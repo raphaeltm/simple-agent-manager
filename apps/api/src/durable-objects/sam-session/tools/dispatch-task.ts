@@ -208,6 +208,16 @@ export async function dispatchTask(
 
     parentTaskId = parentRow.id;
     dispatchDepth = (parentRow.dispatch_depth ?? 0) + 1;
+
+    // Enforce dispatch depth limit (mirrors MCP path in dispatch-tool.ts:234-250)
+    const DEFAULT_DISPATCH_MAX_DEPTH = 3;
+    const effectiveMaxDepth = project.maxDispatchDepth ?? DEFAULT_DISPATCH_MAX_DEPTH;
+    if (dispatchDepth > effectiveMaxDepth) {
+      return {
+        error: `Dispatch depth limit (${effectiveMaxDepth}) exceeded. Current depth: ${parentRow.dispatch_depth ?? 0}, max allowed: ${effectiveMaxDepth}. ` +
+          'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
+      };
+    }
   }
 
   // ── Resolve agent profile ────────────────────────────────────────────
