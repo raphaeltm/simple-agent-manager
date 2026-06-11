@@ -1,4 +1,8 @@
 import { providerFetch } from './provider-fetch';
+import {
+  labelsToScalewayTags,
+  scalewayTagsToLabels,
+} from './scaleway-tags';
 import type {
   VolumeAttachmentConfig,
   VolumeCapabilities,
@@ -81,7 +85,7 @@ export class ScalewayVolumeClient {
             from_empty: {
               size: this.gbToBytes(config.sizeGb),
             },
-            tags: this.labelsToTags(config.labels || {}),
+            tags: labelsToScalewayTags(config.labels || {}),
           }),
         },
       );
@@ -232,7 +236,7 @@ export class ScalewayVolumeClient {
       include_deleted: 'false',
     });
     if (config.labels) {
-      for (const tag of this.labelsToTags(config.labels)) {
+      for (const tag of labelsToScalewayTags(config.labels)) {
         params.append('tags', tag);
       }
     }
@@ -265,7 +269,7 @@ export class ScalewayVolumeClient {
       ...(attachedReference ? { attachedServerId: attachedReference.id } : {}),
       volumeType: volume.type,
       createdAt: volume.created_at,
-      labels: this.tagsToLabels(volume.tags || []),
+      labels: scalewayTagsToLabels(volume.tags || []),
     };
   }
 
@@ -330,18 +334,4 @@ export class ScalewayVolumeClient {
     return sizeBytes / SCALEWAY_BYTES_PER_GB;
   }
 
-  private labelsToTags(labels: Record<string, string>): string[] {
-    return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  private tagsToLabels(tags: string[]): Record<string, string> {
-    const labels: Record<string, string> = {};
-    for (const tag of tags) {
-      const eqIndex = tag.indexOf('=');
-      if (eqIndex > 0) {
-        labels[tag.slice(0, eqIndex)] = tag.slice(eqIndex + 1);
-      }
-    }
-    return labels;
-  }
 }

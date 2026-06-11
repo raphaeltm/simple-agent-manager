@@ -6,6 +6,10 @@ import {
 
 import { providerFetch } from './provider-fetch';
 import {
+  labelsToScalewayTags,
+  scalewayTagsToLabels,
+} from './scaleway-tags';
+import {
   SCALEWAY_VOLUME_CAPABILITIES,
   ScalewayVolumeClient,
 } from './scaleway-volumes';
@@ -185,7 +189,7 @@ export class ScalewayProvider implements Provider {
     const imageId = await this.resolveImageId(location, config.image);
 
     // Convert labels to tags: ["key=value", ...]
-    const tags = this.labelsToTags(config.labels || {});
+    const tags = labelsToScalewayTags(config.labels || {});
 
     // Step 1: Create server (stopped)
     const createResponse = await providerFetch(
@@ -355,7 +359,7 @@ export class ScalewayProvider implements Provider {
     const params = new URLSearchParams();
     if (labels) {
       // Scaleway filters by individual tags — use the first label as primary filter
-      const tags = this.labelsToTags(labels);
+      const tags = labelsToScalewayTags(labels);
       for (const tag of tags) {
         params.append('tags', tag);
       }
@@ -545,7 +549,7 @@ export class ScalewayProvider implements Provider {
       status: this.mapStatus(server.state),
       serverType: server.commercial_type,
       createdAt: server.creation_date,
-      labels: this.tagsToLabels(server.tags || []),
+      labels: scalewayTagsToLabels(server.tags || []),
     };
   }
 
@@ -574,20 +578,4 @@ export class ScalewayProvider implements Provider {
     }
   }
 
-  /** Convert Record<string, string> labels to Scaleway tag array: ["key=value", ...] */
-  private labelsToTags(labels: Record<string, string>): string[] {
-    return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  /** Convert Scaleway tag array back to Record<string, string> labels */
-  private tagsToLabels(tags: string[]): Record<string, string> {
-    const labels: Record<string, string> = {};
-    for (const tag of tags) {
-      const eqIndex = tag.indexOf('=');
-      if (eqIndex > 0) {
-        labels[tag.slice(0, eqIndex)] = tag.slice(eqIndex + 1);
-      }
-    }
-    return labels;
-  }
 }
