@@ -317,10 +317,10 @@ async function verifyOlderHierarchyFlow(page: Page, screenshotName: string, open
 // ---------------------------------------------------------------------------
 
 test.describe('Nested session sidebar — Mobile', () => {
-  test.beforeEach(({ isMobile }, testInfo) => {
+  test.beforeEach(({ browserName }, testInfo) => {
     test.skip(
-      !isMobile || testInfo.project.name !== 'iPhone SE (375x667)',
-      'Mobile audit runs only on the iPhone SE project',
+      testInfo.project.name.includes('Desktop'),
+      `Mobile audit skipped for ${testInfo.project.name} on ${browserName}`,
     );
   });
 
@@ -357,10 +357,10 @@ test.describe('Nested session sidebar — Mobile', () => {
 
 test.describe('Nested session sidebar — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
-  test.beforeEach(({ isMobile }, testInfo) => {
+  test.beforeEach(({ browserName }, testInfo) => {
     test.skip(
-      isMobile || testInfo.project.name !== 'Desktop (1280x800)',
-      'Desktop audit runs only on the desktop project',
+      !testInfo.project.name.includes('Desktop'),
+      `Desktop audit skipped for ${testInfo.project.name} on ${browserName}`,
     );
   });
 
