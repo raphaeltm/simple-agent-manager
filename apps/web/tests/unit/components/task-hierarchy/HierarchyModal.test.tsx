@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ChatSessionListItem } from '../../../../src/lib/api';
 import { HierarchyModal } from '../../../../src/components/task-hierarchy/HierarchyModal';
+import type { ChatSessionListItem } from '../../../../src/lib/api';
 import type { TaskInfo } from '../../../../src/pages/project-chat/useTaskGroups';
 
 function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
