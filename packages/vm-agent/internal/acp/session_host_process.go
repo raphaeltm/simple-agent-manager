@@ -61,6 +61,8 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		h.mu.Unlock()
 		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg), recoveryNotify)
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
+		// Report idle so the browser status bar clears the "prompting" spinner.
+		// The error state is already broadcast via broadcastAgentStatus above.
 		h.reportActivity("idle")
 		return
 	}

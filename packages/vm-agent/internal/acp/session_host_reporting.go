@@ -230,7 +230,7 @@ func (h *SessionHost) reportActivity(activity string) {
 			statusCode, doErr := h.doActivityRequest(url, body, callbackToken)
 			if doErr != nil {
 				if attempt < maxAttempts {
-					slog.Warn("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
+					slog.Info("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
 					time.Sleep(500 * time.Millisecond)
 					continue
 				}
@@ -238,7 +238,7 @@ func (h *SessionHost) reportActivity(activity string) {
 				return
 			}
 			if statusCode >= 500 && attempt < maxAttempts {
-				slog.Warn("reportActivity: server error, retrying", "status", statusCode)
+				slog.Info("reportActivity: server error, retrying", "status", statusCode)
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
