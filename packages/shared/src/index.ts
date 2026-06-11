@@ -18,3 +18,6 @@ export * from './trial';
 
 // Deployment Manifest (Zod schemas + validation)
 export * from './deployment-manifest';
+
+// Compose Parser (Compose YAML → deployment manifest)
+export * from './compose-parser';
