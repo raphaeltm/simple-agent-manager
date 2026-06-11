@@ -13,12 +13,13 @@ import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
-import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
+import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import { deriveSessionState, IDLE_TIMEOUT_MS, VIRTUAL_START } from './types';
 import { useConnectionRecovery } from './useConnectionRecovery';
+import { useSessionActions } from './useSessionActions';
 
 /** Agent activity state derived from message flow (no ACP connection needed). */
 export type AgentActivityState = 'idle' | 'prompting' | 'responding';
@@ -388,129 +389,14 @@ export function useSessionLifecycle(
     };
   }, [session?.status, projectId, sessionId]);
 
-  // ── Send follow-up via REST API ──
-  const handleSendFollowUp = async () => {
-    const trimmed = followUp.trim();
-    if (!trimmed || sendingFollowUp) return;
-
-    setSendingFollowUp(true);
-    setAgentActivity('prompting');
-    try {
-      if (sessionState === 'idle') {
-        resetIdleTimer(projectId, sessionId)
-          .then((result) => {
-            if (result.cleanupAt) {
-              setSession((prev) => {
-                if (!prev) return prev;
-                return { ...prev, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
-              });
-            }
-          })
-          .catch(() => {});
-      }
-
-      // Optimistic user message
-      const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      setMessages((prev) => [...prev, {
-        id: optimisticId,
-        sessionId,
-        role: 'user',
-        content: trimmed,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
-
-      // Persist via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'message.send',
-          sessionId,
-          content: trimmed,
-          role: 'user',
-        }));
-      }
-
-      // For idle sessions, resume first then send the prompt
-      if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
-        recovery.resumeAndSend(trimmed);
-      } else {
-        // Forward prompt to the running agent via REST API
-        try {
-          await sendFollowUpPrompt(projectId, sessionId, trimmed);
-        } catch {
-          // Agent may be offline — message is still persisted via DO.
-          setAgentActivity('idle');
-        }
-      }
-
-      setFollowUp('');
-    } finally {
-      setSendingFollowUp(false);
-    }
-  };
-
-  // Upload files
-  const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
-    setUploading(true);
-    try {
-      const result = await uploadSessionFiles(projectId, sessionId, fileArray);
-      const names = result.files.map((f) => f.name).join(', ');
-      setMessages((prev) => [...prev, {
-        id: `optimistic-upload-${crypto.randomUUID()}`,
-        sessionId,
-        role: 'user' as const,
-        content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
-    } catch (err) {
-      console.error('File upload failed:', err);
-    } finally {
-      setUploading(false);
-    }
-  }, [projectId, sessionId]);
-
-  // Cancel the current in-flight prompt via REST API
-  const cancellingRef = useRef(false);
-  const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle' || cancellingRef.current) return;
-    cancellingRef.current = true;
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch(() => {
-        // Network/server error — keep spinner visible so user can retry
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-      });
-  }, [agentActivity, projectId, sessionId]);
-
-  // Load more (pagination)
-  const loadMore = async () => {
-    if (!hasMore || loadingMore) return;
-    const firstMessage = messages[0];
-    if (!firstMessage) return;
-
-    setLoadingMore(true);
-    try {
-      const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
-      });
-      setMessages((prev) => {
-        const merged = mergeMessages(prev, data.messages, 'prepend');
-        const actualAdded = merged.length - prev.length;
-        setFirstItemIndex((fi) => fi - actualAdded);
-        return merged;
-      });
-      setHasMore(data.hasMore);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
+  // Action handlers (extracted to useSessionActions.ts for file size)
+  const { handleSendFollowUp, handleUploadFiles, handleCancelPrompt, loadMore } = useSessionActions({
+    projectId, sessionId, sessionState, session, agentActivity,
+    followUp, sendingFollowUp, hasMore, loadingMore, messages,
+    setFollowUp, setSendingFollowUp, setUploading, setAgentActivity,
+    setSession, setMessages, setHasMore, setLoadingMore,
+    setFirstItemIndex, wsRef, recovery,
+  });
 
   return {
     session,
