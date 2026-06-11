@@ -271,6 +271,32 @@ async function assertHierarchyButtonOpensModal(page: Page) {
   await expect(page.getByRole('dialog', { name: /Task hierarchy/i })).toBeVisible();
 }
 
+async function verifyNormalHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+  await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
+  await page.goto('/projects/proj-1');
+  await page.waitForTimeout(1500);
+  await assertChatPageRendered(page);
+  if (openSidebar) {
+    await openMobileSidebar(page);
+  }
+  await assertSessionVisible(page, 'Implement authentication');
+  await assertNoOverflow(page);
+  await screenshot(page, screenshotName);
+}
+
+async function verifyDeepHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+  await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
+  await page.goto('/projects/proj-1');
+  await page.waitForTimeout(1500);
+  await assertChatPageRendered(page);
+  if (openSidebar) {
+    await openMobileSidebar(page);
+  }
+  await assertSessionVisible(page, 'Level 0 session');
+  await assertNoOverflow(page);
+  await screenshot(page, screenshotName);
+}
+
 async function verifyOlderHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
   await page.goto('/projects/proj-1');
@@ -291,30 +317,19 @@ async function verifyOlderHierarchyFlow(page: Page, screenshotName: string, open
 // ---------------------------------------------------------------------------
 
 test.describe('Nested session sidebar — Mobile', () => {
-  test.beforeEach(({}, testInfo) => {
-    test.skip(testInfo.project.name !== 'iPhone SE (375x667)', 'Mobile audit runs only on the iPhone SE project');
+  test.beforeEach(({ isMobile }, testInfo) => {
+    test.skip(
+      !isMobile || testInfo.project.name !== 'iPhone SE (375x667)',
+      'Mobile audit runs only on the iPhone SE project',
+    );
   });
 
   test('normal 2-level nesting renders without overflow', async ({ page }) => {
-    await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await assertSessionVisible(page, 'Implement authentication');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-normal-mobile');
+    await verifyNormalHierarchyFlow(page, 'nested-sidebar-normal-mobile', true);
   });
 
   test('deeply nested (L6+) renders without overflow + depth badge visible', async ({ page }) => {
-    await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await assertSessionVisible(page, 'Level 0 session');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-deep-mobile');
+    await verifyDeepHierarchyFlow(page, 'nested-sidebar-deep-mobile', true);
   });
 
   test('stopped ancestors of deep child surface as context anchors', async ({ page }) => {
@@ -342,29 +357,19 @@ test.describe('Nested session sidebar — Mobile', () => {
 
 test.describe('Nested session sidebar — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
-  test.beforeEach(({}, testInfo) => {
-    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'Desktop audit runs only on the desktop project');
+  test.beforeEach(({ isMobile }, testInfo) => {
+    test.skip(
+      isMobile || testInfo.project.name !== 'Desktop (1280x800)',
+      'Desktop audit runs only on the desktop project',
+    );
   });
 
   test('normal 2-level nesting renders without overflow', async ({ page }) => {
-    await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await assertSessionVisible(page, 'Implement authentication');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-normal-desktop');
+    await verifyNormalHierarchyFlow(page, 'nested-sidebar-normal-desktop');
   });
 
   test('deeply nested (L6+) renders without overflow', async ({ page }) => {
-    await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await assertSessionVisible(page, 'Level 0 session');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-deep-desktop');
+    await verifyDeepHierarchyFlow(page, 'nested-sidebar-deep-desktop');
   });
 
   test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
