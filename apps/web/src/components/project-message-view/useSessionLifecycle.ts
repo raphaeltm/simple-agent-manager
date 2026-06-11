@@ -114,6 +114,7 @@ export function useSessionLifecycle(
   // Agent activity state (derived from message flow + server state)
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const verifyAbortRef = useRef<AbortController | null>(null);
 
   // Plan state (from session state mirror)
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
@@ -197,27 +198,37 @@ export function useSessionLifecycle(
       setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
       setPromptStartedAt(activity === 'prompting' ? (promptStartedAt ?? Date.now()) : null);
       clearTimeout(idleTimerRef.current);
+      verifyAbortRef.current?.abort();
+      verifyAbortRef.current = null;
       if (activity === 'prompting') {
         // Safety backstop: if the server never sends "idle" (e.g., crashed or
         // network partition), verify with the DO before decaying to idle.
         // This prevents false idle during long tool calls (npm install, etc.)
         // where no tokens stream for 30+ seconds.
+        const abortController = new AbortController();
+        verifyAbortRef.current = abortController;
         const armVerifyTimer = () => {
           idleTimerRef.current = setTimeout(async () => {
+            if (abortController.signal.aborted) return;
             try {
-              const data = await getChatSession(projectId, sessionId, { limit: 0 });
+              const data = await getChatSession(projectId, sessionId, {
+                limit: 0,
+                signal: abortController.signal,
+              });
+              if (abortController.signal.aborted) return;
               if (data.state?.activity === 'prompting') {
-                // Server confirms still prompting — re-arm the timer
                 armVerifyTimer();
               } else {
-                // Server says idle/stopped/error — decay to idle
                 setAgentActivity('idle');
                 setPromptStartedAt(null);
               }
             } catch {
-              // Network error — decay to idle as safety fallback
-              setAgentActivity('idle');
-              setPromptStartedAt(null);
+              // Network error or abort — decay to idle as safety fallback.
+              // AbortError from session switch is harmless (new session handles its own state).
+              if (!abortController.signal.aborted) {
+                setAgentActivity('idle');
+                setPromptStartedAt(null);
+              }
             }
           }, IDLE_TIMEOUT_MS);
         };
@@ -240,13 +251,18 @@ export function useSessionLifecycle(
   // Reset virtual scroll and idle timer on session change
   useEffect(() => {
     clearTimeout(idleTimerRef.current);
+    verifyAbortRef.current?.abort();
+    verifyAbortRef.current = null;
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
   }, [sessionId]);
 
-  // Cleanup idle timer on unmount
+  // Cleanup idle timer and abort in-flight verify fetches on unmount
   useEffect(() => {
-    return () => clearTimeout(idleTimerRef.current);
+    return () => {
+      clearTimeout(idleTimerRef.current);
+      verifyAbortRef.current?.abort();
+    };
   }, []);
 
   // Hydrate session state from server snapshot
