@@ -84,6 +84,7 @@ function toNodeResponse(node: schema.Node): NodeResponse {
     cloudProvider: (node.cloudProvider as NodeResponse['cloudProvider']) ?? null,
     vmSize: node.vmSize as NodeResponse['vmSize'],
     vmLocation: node.vmLocation as NodeResponse['vmLocation'],
+    nodeRole: (node.nodeRole ?? 'workspace') as NodeResponse['nodeRole'],
     ipAddress: node.ipAddress,
     lastHeartbeatAt: node.lastHeartbeatAt,
     heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
@@ -142,10 +143,18 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     throw errors.badRequest('Node name is required');
   }
 
+  // Only count workspace-role nodes against the user's node quota.
+  // Deployment-role nodes are managed separately and exempt from this limit.
   const existingNodes = await db
     .select({ id: schema.nodes.id })
     .from(schema.nodes)
-    .where(and(eq(schema.nodes.userId, userId), ne(schema.nodes.status, 'deleted')));
+    .where(
+      and(
+        eq(schema.nodes.userId, userId),
+        ne(schema.nodes.status, 'deleted'),
+        eq(schema.nodes.nodeRole, 'workspace')
+      )
+    );
 
   if (existingNodes.length >= limits.maxNodesPerUser) {
     throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
