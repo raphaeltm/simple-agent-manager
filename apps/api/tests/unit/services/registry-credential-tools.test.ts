@@ -142,7 +142,7 @@ describe('handleGetRegistryCredentials', () => {
     );
   });
 
-  it('enforces rate limiting', async () => {
+  it('enforces rate limiting with application error code', async () => {
     const kv = makeKV('10'); // At limit
     const env = makeEnv({ KV: kv });
 
@@ -151,8 +151,10 @@ describe('handleGetRegistryCredentials', () => {
     const result = await handleGetRegistryCredentials('req-1', {}, makeTokenData(), env);
 
     expect(result).toHaveProperty('error');
-    const error = (result as { error: { message: string } }).error;
+    const error = (result as { error: { code: number; message: string } }).error;
     expect(error.message).toContain('rate limit exceeded');
+    // Should use application error code (-32000), not INTERNAL_ERROR (-32603)
+    expect(error.code).toBe(-32000);
     expect(mockMintCredential).not.toHaveBeenCalled();
   });
 
@@ -175,7 +177,7 @@ describe('handleGetRegistryCredentials', () => {
     expect(mockMintCredential).toHaveBeenCalled();
   });
 
-  it('increments rate limit counter after successful mint', async () => {
+  it('increments rate limit counter with time-bucketed key after successful mint', async () => {
     const kv = makeKV('3'); // Under limit
     const env = makeEnv({ KV: kv });
 
@@ -190,11 +192,12 @@ describe('handleGetRegistryCredentials', () => {
 
     await handleGetRegistryCredentials('req-1', {}, makeTokenData(), env);
 
-    expect(kv.put).toHaveBeenCalledWith(
-      'registry-cred-rate:proj-1',
-      '4',
-      { expirationTtl: 300 },
-    );
+    // Key should be time-bucketed: registry-cred-rate:{projectId}:{windowStart}
+    const putCall = kv.put.mock.calls[0];
+    expect(putCall[0]).toMatch(/^registry-cred-rate:proj-1:\d+$/);
+    expect(putCall[1]).toBe('4');
+    // TTL should be windowSeconds + 60 to survive past window boundary
+    expect(putCall[2]).toEqual({ expirationTtl: 360 });
   });
 
   it('returns error when mint fails', async () => {

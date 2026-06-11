@@ -32,6 +32,7 @@ export interface RegistryCredentialResult {
 export interface RegistryCredentialAudit {
   projectId: string;
   userId: string;
+  /** Empty string for project-chat sessions (no task context) */
   taskId: string;
   environment?: string;
   namespace: string;

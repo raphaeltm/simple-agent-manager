@@ -25,10 +25,13 @@ import {
   type McpTokenData,
 } from './_helpers';
 
+/** Application-level error code for rate limiting (matches existing MCP rate limit pattern) */
+const RATE_LIMITED = -32000;
+
 /**
  * Handle the get_registry_credentials MCP tool call.
  *
- * Rate-limited per project using KV-based sliding window.
+ * Rate-limited per project using KV-based fixed-window counter (time-bucketed key).
  */
 export async function handleGetRegistryCredentials(
   requestId: string | number | null,
@@ -63,14 +66,16 @@ export async function handleGetRegistryCredentials(
     }
   }
 
-  // Rate limit: per-project credential minting
+  // Rate limit: per-project credential minting using time-bucketed key (no TTL drift)
   const rateLimit = getRegistryCredentialRateLimit(env);
-  const rateLimitKey = `registry-cred-rate:${projectId}`;
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = Math.floor(now / rateLimit.windowSeconds) * rateLimit.windowSeconds;
+  const rateLimitKey = `registry-cred-rate:${projectId}:${windowStart}`;
   const currentCount = await env.KV.get(rateLimitKey).then((v) => (v ? parseInt(v, 10) : 0));
   if (currentCount >= rateLimit.maxRequests) {
     return jsonRpcError(
       requestId,
-      INTERNAL_ERROR,
+      RATE_LIMITED,
       `Registry credential rate limit exceeded (${rateLimit.maxRequests} per ${rateLimit.windowSeconds}s). Try again later.`,
     );
   }
@@ -84,10 +89,10 @@ export async function handleGetRegistryCredentials(
       environment,
     );
 
-    // Increment rate limit counter
+    // Increment rate limit counter (TTL survives past window boundary for cleanup)
     const newCount = currentCount + 1;
     await env.KV.put(rateLimitKey, String(newCount), {
-      expirationTtl: rateLimit.windowSeconds,
+      expirationTtl: rateLimit.windowSeconds + 60,
     });
 
     const instructions = [
