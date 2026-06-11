@@ -6,7 +6,7 @@
  */
 
 import { validateManifest } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -118,15 +118,17 @@ async function loadResolvedSecrets(
       iv: schema.deploymentSecrets.iv,
     })
     .from(schema.deploymentSecrets)
-    .where(eq(schema.deploymentSecrets.environmentId, envId));
+    .where(
+      and(
+        eq(schema.deploymentSecrets.environmentId, envId),
+        inArray(schema.deploymentSecrets.name, secretNames),
+      ),
+    );
 
-  const resolved: Record<string, string> = {};
-  for (const row of rows) {
-    if (secretNames.includes(row.name)) {
-      resolved[row.name] = await decrypt(row.encryptedValue, row.iv, encryptionKey);
-    }
-  }
-  return resolved;
+  const entries = await Promise.all(
+    rows.map(async (row) => [row.name, await decrypt(row.encryptedValue, row.iv, encryptionKey)] as const),
+  );
+  return Object.fromEntries(entries);
 }
 
 // =============================================================================

@@ -112,31 +112,10 @@ deploymentSecretRoutes.put(
     const { ciphertext, iv } = await encrypt(value, encryptionKey);
     const now = new Date().toISOString();
 
-    // Check if secret already exists (upsert)
-    const existing = await db
-      .select({ id: schema.deploymentSecrets.id })
-      .from(schema.deploymentSecrets)
-      .where(
-        and(
-          eq(schema.deploymentSecrets.environmentId, envId),
-          eq(schema.deploymentSecrets.name, name),
-        ),
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      // Overwrite existing secret
-      await db
-        .update(schema.deploymentSecrets)
-        .set({
-          encryptedValue: ciphertext,
-          iv,
-          updatedAt: now,
-        })
-        .where(eq(schema.deploymentSecrets.id, existing[0]!.id));
-    } else {
-      // Create new secret
-      await db.insert(schema.deploymentSecrets).values({
+    // Upsert: insert or update on (environmentId, name) conflict
+    const result = await db
+      .insert(schema.deploymentSecrets)
+      .values({
         id: ulid(),
         environmentId: envId,
         name,
@@ -144,8 +123,18 @@ deploymentSecretRoutes.put(
         iv,
         createdAt: now,
         updatedAt: now,
-      });
-    }
+      })
+      .onConflictDoUpdate({
+        target: [schema.deploymentSecrets.environmentId, schema.deploymentSecrets.name],
+        set: {
+          encryptedValue: ciphertext,
+          iv,
+          updatedAt: now,
+        },
+      })
+      .returning({ id: schema.deploymentSecrets.id, createdAt: schema.deploymentSecrets.createdAt });
+
+    const created = result[0]?.createdAt === now;
 
     // Mark environment as having updated secrets (stale config detection)
     await touchSecretsTimestamp(db, envId);
@@ -153,10 +142,10 @@ deploymentSecretRoutes.put(
     return c.json(
       {
         name,
-        created: existing.length === 0,
+        created,
         updatedAt: now,
       },
-      existing.length > 0 ? 200 : 201,
+      created ? 201 : 200,
     );
   },
 );
