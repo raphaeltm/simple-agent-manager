@@ -1,7 +1,7 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, List, Search, Settings, X } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ProjectMessageView } from '../../components/project-message-view';
@@ -19,21 +19,33 @@ import { useProjectChatState } from './useProjectChatState';
 
 export function ProjectChat() {
   const isMobile = useIsMobile();
+  const location = useLocation();
   const navigate = useNavigate();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
-  const [hierarchyTaskId, setHierarchyTaskId] = useState<string | null>(null);
+
+  // Derive hierarchy modal state from URL hash (#hierarchy-<taskId>)
+  const hierarchyTaskId = useMemo(() => {
+    const hash = location.hash;
+    if (hash.startsWith('#hierarchy-')) return hash.slice('#hierarchy-'.length);
+    return null;
+  }, [location.hash]);
 
   const handleShowHierarchy = useCallback((taskId: string) => {
-    setHierarchyTaskId(taskId);
-  }, []);
+    navigate(location.pathname + location.search + `#hierarchy-${taskId}`);
+  }, [navigate, location.pathname, location.search]);
+
+  const handleHierarchyClose = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
 
   const handleHierarchyNavigate = useCallback(
     (sessionId: string) => {
-      setHierarchyTaskId(null);
+      // Replace the hierarchy hash entry so Back returns to the graph
+      navigate(-1);
       state.handleSelect(sessionId);
     },
-    [state],
+    [navigate, state],
   );
   const activeSessionId = state.sessionId ?? '';
   const starterPrompts = useMemo(() => {
@@ -154,13 +166,10 @@ export function ProjectChat() {
             <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
               <SessionList
                 sessions={state.filteredRecent}
-                allSessions={state.sessions}
                 selectedSessionId={state.sessionId ?? null}
                 onSelect={state.handleSelect}
                 onFork={state.handleFork}
-                taskTitleMap={state.taskTitleMap}
                 taskInfoMap={state.taskInfoMap}
-                searchQuery={state.searchQuery}
                 onShowHierarchy={handleShowHierarchy}
               />
               {state.filteredStale.length > 0 && (
@@ -176,13 +185,10 @@ export function ProjectChat() {
                   {state.effectiveShowStale && (
                     <SessionList
                       sessions={state.filteredStale}
-                      allSessions={state.sessions}
                       selectedSessionId={state.sessionId ?? null}
                       onSelect={state.handleSelect}
                       onFork={state.handleFork}
-                      taskTitleMap={state.taskTitleMap}
                       taskInfoMap={state.taskInfoMap}
-                      searchQuery={state.searchQuery}
                       onShowHierarchy={handleShowHierarchy}
                     />
                   )}
@@ -351,7 +357,6 @@ export function ProjectChat() {
           realtimeDegraded={state.realtimeDegraded}
           isRefreshing={state.isRefreshing}
           onRefresh={() => void state.loadSessions()}
-          taskTitleMap={state.taskTitleMap}
           taskInfoMap={state.taskInfoMap}
           onShowHierarchy={handleShowHierarchy}
         />
@@ -369,7 +374,7 @@ export function ProjectChat() {
       {hierarchyTaskId && (
         <HierarchyModal
           isOpen
-          onClose={() => setHierarchyTaskId(null)}
+          onClose={handleHierarchyClose}
           focusTaskId={hierarchyTaskId}
           taskInfoMap={state.taskInfoMap}
           sessions={state.sessions}

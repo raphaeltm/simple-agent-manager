@@ -1,59 +1,59 @@
 import { useMemo } from 'react';
 
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
-import { buildSessionTree } from './sessionTree';
+import { getLineageText } from './lineageUtils';
 import { SessionTreeItem } from './SessionTreeItem';
 import type { TaskInfo } from './useTaskGroups';
 
 /**
- * Renders a list of sessions as a hierarchical tree derived from
- * `task.parentTaskId`. Supports arbitrary nesting depth.
+ * Renders a flat list of sessions.
  *
- * When `allSessions` is provided, ancestors that exist in the full session
- * list but NOT in `sessions` (e.g. a stopped/stale parent of a currently
- * active nested session) are lifted in as dimmed "context anchor" rows so
- * the descendant remains visible with its lineage intact.
+ * All tree nesting (expand/collapse, indentation, child rendering) has been
+ * removed. The hierarchy button + modal is now the only way to explore
+ * parent/child relationships.
+ *
+ * Retries and forks get lineage subtitle text via `getLineageText`.
  */
 export function SessionList({
   sessions,
-  allSessions,
   selectedSessionId,
   onSelect,
   onFork,
   taskInfoMap,
-  searchQuery = '',
   onShowHierarchy,
 }: {
-  /** Sessions to display (already filtered to the visible bucket, e.g. recent or stale). */
+  /** Sessions to display (already filtered to the visible bucket). */
   sessions: ChatSessionListItem[];
-  /** Full session list for resolving lineage across buckets (optional). */
-  allSessions?: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
   onFork?: (session: ChatSessionResponse) => void;
-  /** Retained for API compatibility but no longer used directly — titles come from taskInfoMap. */
-  taskTitleMap?: Map<string, string>;
   taskInfoMap: Map<string, TaskInfo>;
-  searchQuery?: string;
   onShowHierarchy: (taskId: string) => void;
 }) {
-  const roots = useMemo(
-    () => buildSessionTree(sessions, taskInfoMap, { allSessions }),
-    [sessions, allSessions, taskInfoMap],
-  );
+  // Pre-compute lineage text for retries/forks
+  const lineageMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of sessions) {
+      if (s.taskId) {
+        const text = getLineageText(s.taskId, taskInfoMap, sessions);
+        if (text) map.set(s.id, text);
+      }
+    }
+    return map;
+  }, [sessions, taskInfoMap]);
 
   return (
     <>
-      {roots.map((root) => (
+      {sessions.map((session) => (
         <SessionTreeItem
-          key={root.session.id}
-          node={root}
+          key={session.id}
+          session={session}
           selectedSessionId={selectedSessionId}
           onSelect={onSelect}
           onFork={onFork}
           taskInfoMap={taskInfoMap}
-          searchQuery={searchQuery}
           onShowHierarchy={onShowHierarchy}
+          lineageText={lineageMap.get(session.id)}
         />
       ))}
     </>
