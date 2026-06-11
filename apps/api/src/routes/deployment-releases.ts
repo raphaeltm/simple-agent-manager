@@ -137,19 +137,28 @@ deploymentReleaseRoutes.post(
 
     const nextVersion = (latestRelease[0]?.version ?? 0) + 1;
 
-    // Insert release
+    // Insert release (catch version collision from concurrent requests)
     const id = ulid();
     const now = new Date().toISOString();
 
-    await db.insert(schema.deploymentReleases).values({
-      id,
-      environmentId: envId,
-      manifest: JSON.stringify(manifest),
-      version: nextVersion,
-      status: 'created',
-      createdBy: userId,
-      createdAt: now,
-    });
+    try {
+      await db.insert(schema.deploymentReleases).values({
+        id,
+        environmentId: envId,
+        manifest: JSON.stringify(manifest),
+        version: nextVersion,
+        status: 'created',
+        createdBy: userId,
+        createdAt: now,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('UNIQUE')) {
+        throw errors.conflict(
+          `Version ${nextVersion} already exists for this environment. Please retry.`,
+        );
+      }
+      throw err;
+    }
 
     return c.json(
       {

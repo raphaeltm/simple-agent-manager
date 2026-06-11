@@ -165,6 +165,44 @@ describe('renderCompose', () => {
     });
   });
 
+  it('renders multiple services with distinct labels', () => {
+    const manifest = makeManifest({
+      services: {
+        web: {
+          image: { registry: 'docker.io', repository: 'app/web', digest: 'sha256:' + 'a'.repeat(64) },
+          env: {},
+          volumes: [],
+        },
+        worker: {
+          image: { registry: 'docker.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
+          env: { QUEUE: 'jobs' },
+          volumes: [],
+        },
+      },
+    });
+    const doc = parse(renderCompose(manifest, CTX));
+    expect(Object.keys(doc.services)).toHaveLength(2);
+    expect(doc.services.web.labels['sam.service']).toBe('web');
+    expect(doc.services.worker.labels['sam.service']).toBe('worker');
+    expect(doc.services.worker.environment).toEqual({ QUEUE: 'jobs' });
+    // Both share the same network
+    expect(doc.services.web.networks).toEqual(['sam-internal']);
+    expect(doc.services.worker.networks).toEqual(['sam-internal']);
+  });
+
+  it('ignores healthCheck field (deferred to future slice)', () => {
+    const manifest = makeManifest();
+    // Cast to add healthCheck which the renderer intentionally ignores
+    (manifest.services.web as Record<string, unknown>).healthCheck = {
+      path: '/health',
+      port: 3000,
+      expectedStatus: 200,
+    };
+    const doc = parse(renderCompose(manifest, CTX));
+    expect(doc.services.web.healthcheck).toBeUndefined();
+    expect(doc.services.web.health_check).toBeUndefined();
+  });
+
   it('round-trips environment values with special characters', () => {
     const manifest = makeManifest();
     manifest.services.web!.env = {
