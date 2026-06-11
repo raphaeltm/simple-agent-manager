@@ -106,7 +106,9 @@ jobs:
         run: |
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
           R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
+          # Pulumi >=3.244 (AWS SDK v2) requires an explicit URL scheme on the S3 endpoint;
+          # a scheme-less endpoint fails with 'unsupported protocol scheme ""'.
+          pulumi login "s3://${BUCKET_NAME}?endpoint=https://${R2_ENDPOINT}&region=auto"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
