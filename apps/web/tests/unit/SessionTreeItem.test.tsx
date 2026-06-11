@@ -51,6 +51,7 @@ function renderItem(
     selectedSessionId?: string | null;
     searchQuery?: string;
     onSelect?: (id: string) => void;
+    onShowHierarchy?: (taskId: string) => void;
     taskInfoMap?: Map<string, TaskInfo>;
     defaultExpanded?: boolean;
   } = {},
@@ -64,6 +65,7 @@ function renderItem(
       taskInfoMap={options.taskInfoMap ?? new Map()}
       searchQuery={options.searchQuery ?? ''}
       defaultExpanded={options.defaultExpanded}
+      onShowHierarchy={options.onShowHierarchy}
     />,
   );
   return { ...utils, onSelect };
@@ -373,5 +375,55 @@ describe('SessionTreeItem — compact expand toggle badge', () => {
 
     // Parent row has 2 descendants. The compact toggle shows "0/2".
     expect(screen.getByText('0/2')).toBeInTheDocument();
+  });
+});
+
+describe('SessionTreeItem — compact hierarchy trigger', () => {
+  it('keeps the hierarchy button compact in dense chat-list rows', async () => {
+    const user = userEvent.setup();
+    const onShowHierarchy = vi.fn();
+    const taskInfoMap = new Map<string, TaskInfo>([
+      ['parent-task', {
+        id: 'parent-task',
+        title: 'Parent task',
+        status: 'in_progress',
+        parentTaskId: null,
+        blocked: false,
+        triggeredBy: 'user',
+        dispatchDepth: 0,
+        taskMode: 'task',
+      }],
+      ['child-task', {
+        id: 'child-task',
+        title: 'Child task',
+        status: 'in_progress',
+        parentTaskId: 'parent-task',
+        blocked: false,
+        triggeredBy: 'mcp',
+        dispatchDepth: 1,
+        taskMode: 'task',
+      }],
+    ]);
+    const node = makeNode({
+      session: makeSession({
+        id: 'child-session',
+        topic: 'Child with lineage',
+        taskId: 'child-task',
+      }),
+    });
+
+    renderItem(node, { taskInfoMap, onShowHierarchy });
+
+    const hierarchyButton = screen.getByRole('button', { name: 'View task hierarchy' });
+    expect(hierarchyButton).toHaveStyle({
+      width: '22px',
+      height: '22px',
+    });
+    expect(hierarchyButton.style.minWidth).toBe('');
+    expect(hierarchyButton.style.minHeight).toBe('');
+
+    await user.click(hierarchyButton);
+
+    expect(onShowHierarchy).toHaveBeenCalledWith('child-task');
   });
 });

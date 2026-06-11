@@ -12,6 +12,8 @@ import type { TaskInfo } from './useTaskGroups';
 const MAX_VISUAL_DEPTH = 5;
 /** Pixels of indent per depth level. */
 const INDENT_PX = 10;
+/** Compact hierarchy trigger size for dense chat-list rows. */
+const HIERARCHY_BUTTON_SIZE_PX = 22;
 
 /**
  * Recursive renderer for a SessionTreeNode.
@@ -150,10 +152,8 @@ export function SessionTreeItem({
           aria-label="View task hierarchy"
           className="inline-flex items-center justify-center shrink-0 bg-transparent border cursor-pointer p-0 transition-all duration-150"
           style={{
-            width: 18,
-            height: 18,
-            minWidth: 44,
-            minHeight: 44,
+            width: HIERARCHY_BUTTON_SIZE_PX,
+            height: HIERARCHY_BUTTON_SIZE_PX,
             borderRadius: 4,
             borderColor: 'var(--sam-color-info)',
             color: 'var(--sam-color-info)',
