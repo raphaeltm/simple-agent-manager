@@ -183,6 +183,7 @@ export function ProjectChat() {
                       taskTitleMap={state.taskTitleMap}
                       taskInfoMap={state.taskInfoMap}
                       searchQuery={state.searchQuery}
+                      onShowHierarchy={handleShowHierarchy}
                     />
                   )}
                 </>

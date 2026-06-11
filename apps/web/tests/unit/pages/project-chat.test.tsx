@@ -1,3 +1,4 @@
+import type { Task } from '@simple-agent-manager/shared';
 import { act,fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +60,26 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   closeConversationTask: mocks.closeConversationTask,
   linkSessionIdea: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/components/task-hierarchy')>();
+  return {
+    ...actual,
+    HierarchyModal: ({
+      isOpen,
+      focusTaskId,
+    }: {
+      isOpen: boolean;
+      focusTaskId: string;
+    }) => (
+      isOpen ? (
+        <dialog open aria-label="Task hierarchy" data-focus-task-id={focusTaskId}>
+          Task hierarchy for {focusTaskId}
+        </dialog>
+      ) : null
+    ),
+  };
+});
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
   VoiceButton: ({
@@ -197,6 +218,46 @@ const TEST_PROVIDER_CATALOG = {
   },
 };
 
+function makeTask(overrides: Partial<Task>): Task {
+  return {
+    id: 'task-1',
+    projectId: PROJECT_ID,
+    userId: 'user-1',
+    parentTaskId: null,
+    workspaceId: null,
+    title: 'Task',
+    description: null,
+    status: 'completed',
+    executionStep: null,
+    priority: 0,
+    taskMode: 'task',
+    dispatchDepth: 0,
+    agentProfileHint: null,
+    skillId: null,
+    skillHint: null,
+    blocked: false,
+    triggeredBy: 'user',
+    triggerId: null,
+    triggerExecutionId: null,
+    requestedVmSize: null,
+    requestedVmSizeSource: null,
+    provisionedVmSize: null,
+    resourceRequirementsJson: null,
+    resourceRequirementsSource: null,
+    resolvedReservationJson: null,
+    placementExplanationJson: null,
+    startedAt: null,
+    completedAt: null,
+    errorMessage: null,
+    outputSummary: null,
+    outputBranch: null,
+    outputPrUrl: null,
+    finalizedAt: null,
+    createdAt: '2026-06-11T00:00:00.000Z',
+    updatedAt: '2026-06-11T00:00:00.000Z',
+    ...overrides,
+  };
+}
 
 function makeAgentProfile(overrides: Record<string, unknown> = {}) {
   return {
@@ -383,6 +444,74 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-2');
     });
+  });
+
+  it('shows and opens hierarchy controls for stale sessions in the Older bucket', async () => {
+    const staleLastMessageAt = Date.now() - (4 * 60 * 60 * 1000);
+    const parentSession = {
+      ...SESSION_2,
+      id: 'stale-parent-session',
+      topic: 'Parent dispatched task',
+      taskId: 'parent-task',
+      startedAt: staleLastMessageAt,
+      endedAt: staleLastMessageAt + 1000,
+      createdAt: staleLastMessageAt,
+      lastMessageAt: staleLastMessageAt,
+    };
+    const childSession = {
+      ...SESSION_2,
+      id: 'stale-child-session',
+      topic: 'Child dispatched task',
+      taskId: 'child-task',
+      startedAt: staleLastMessageAt,
+      endedAt: staleLastMessageAt + 2000,
+      createdAt: staleLastMessageAt,
+      lastMessageAt: staleLastMessageAt,
+    };
+
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [parentSession, childSession],
+      total: 2,
+    });
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [
+        makeTask({
+          id: 'parent-task',
+          title: 'Parent dispatched task',
+          parentTaskId: null,
+          triggeredBy: 'user',
+          dispatchDepth: 0,
+        }),
+        makeTask({
+          id: 'child-task',
+          title: 'Child dispatched task',
+          parentTaskId: 'parent-task',
+          triggeredBy: 'mcp',
+          dispatchDepth: 1,
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Older (2)' })).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText('View task hierarchy')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Older (2)' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Child dispatched task')).toBeInTheDocument();
+    });
+    const hierarchyButtons = await screen.findAllByLabelText('View task hierarchy');
+    expect(hierarchyButtons).toHaveLength(2);
+
+    fireEvent.click(hierarchyButtons[1]);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
+    expect(dialog).toHaveAttribute('data-focus-task-id', 'child-task');
   });
 
   it('gear icon navigates to the project settings page', async () => {

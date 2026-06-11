@@ -15,12 +15,12 @@ The task hierarchy button is missing from project chat sessions shown in the "Ol
 
 ## Implementation Checklist
 
-- [ ] Add `onShowHierarchy={handleShowHierarchy}` to the stale desktop `SessionList` in `apps/web/src/pages/project-chat/index.tsx`.
-- [ ] Add `onShowHierarchy={onShowHierarchy}` to the stale mobile drawer `SessionList` in `apps/web/src/pages/project-chat/MobileSessionDrawer.tsx`.
-- [ ] Add a stale-bucket behavioral regression test with parent/child `taskInfoMap` lineage, old `lastMessageAt`, hierarchy button assertion, and click handler assertion for the correct `taskId`.
-- [ ] Add a process fix so parallel `SessionList` instances cannot silently diverge on this callback again.
-- [ ] Run targeted unit tests and web quality checks.
-- [ ] Run Playwright visual audit at 375x667 and 1280x800 with overflow assertions.
+- [x] Add `onShowHierarchy={handleShowHierarchy}` to the stale desktop `SessionList` in `apps/web/src/pages/project-chat/index.tsx`.
+- [x] Add `onShowHierarchy={onShowHierarchy}` to the stale mobile drawer `SessionList` in `apps/web/src/pages/project-chat/MobileSessionDrawer.tsx`.
+- [x] Add a stale-bucket behavioral regression test with parent/child `taskInfoMap` lineage, old `lastMessageAt`, hierarchy button assertion, and click handler assertion for the correct `taskId`.
+- [x] Add a process fix so parallel `SessionList` instances cannot silently diverge on this callback again.
+- [x] Run targeted unit tests and web quality checks.
+- [x] Run Playwright visual audit at 375x667 and 1280x800 with overflow assertions.
 - [ ] Complete required specialist reviews: task-completion-validator, ui-ux-specialist, test-engineer.
 - [ ] Deploy to staging and verify the hierarchy button appears and opens for a stale dispatched-task session.
 - [ ] Merge after green CI, then monitor production deploy and verify production behavior.

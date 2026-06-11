@@ -47,8 +47,15 @@ const MOCK_PROJECT = {
 };
 
 const NOW = Date.now();
+const STALE_TIME = NOW - (4 * 60 * 60 * 1000);
 
-function makeSession(id: string, taskId: string, topic: string, status = 'active') {
+function makeSession(
+  id: string,
+  taskId: string,
+  topic: string,
+  status = 'active',
+  lastMessageAt = NOW - 30000,
+) {
   return {
     id,
     workspaceId: null,
@@ -56,10 +63,10 @@ function makeSession(id: string, taskId: string, topic: string, status = 'active
     topic,
     status,
     messageCount: 3,
-    startedAt: NOW - 60000,
-    endedAt: status === 'stopped' ? NOW - 30000 : null,
-    createdAt: NOW - 120000,
-    lastMessageAt: NOW - 30000,
+    startedAt: lastMessageAt - 30000,
+    endedAt: status === 'stopped' ? lastMessageAt + 30000 : null,
+    createdAt: lastMessageAt - 90000,
+    lastMessageAt,
     isIdle: false,
     isTerminated: status === 'stopped',
   };
@@ -127,6 +134,31 @@ const STALE_ANCESTOR_TASKS = [
   makeTask('t-gp', 'Original investigation', null, 'completed'),
   makeTask('t-p', 'Follow-up research', 't-gp', 'completed'),
   makeTask('t-c', 'Active deep child', 't-p', 'running'),
+];
+
+// ---------------------------------------------------------------------------
+// Scenario: stale parent/child hierarchy in the Older bucket.
+// This is the exact visual path that lost the hierarchy button.
+// ---------------------------------------------------------------------------
+const STALE_HIERARCHY_SESSIONS = [
+  makeSession(
+    's-stale-parent',
+    't-stale-parent',
+    'Completed parent dispatch with a deliberately long title that wraps cleanly inside the older chat sidebar without pushing action buttons off canvas',
+    'stopped',
+    STALE_TIME,
+  ),
+  makeSession(
+    's-stale-child',
+    't-stale-child',
+    'MCP child dispatch with symbols <>& and enough extra words to stress the compact hierarchy row controls in the Older bucket',
+    'stopped',
+    STALE_TIME + 1000,
+  ),
+];
+const STALE_HIERARCHY_TASKS = [
+  makeTask('t-stale-parent', 'Completed parent dispatch', null, 'completed', 'user'),
+  makeTask('t-stale-child', 'MCP child dispatch', 't-stale-parent', 'completed', 'mcp'),
 ];
 
 type Fixture = {
@@ -225,31 +257,79 @@ async function assertSessionVisible(page: Page, topic: string) {
   expect(visible, `expected session topic "${topic}" to be visible`).toBe(true);
 }
 
+async function expandOlderBucket(page: Page) {
+  const olderButton = page.getByRole('button', { name: /Older \(/ });
+  await expect(olderButton).toBeVisible();
+  await olderButton.click();
+  await page.waitForTimeout(500);
+}
+
+async function assertHierarchyButtonOpensModal(page: Page) {
+  const hierarchyButtons = page.getByRole('button', { name: 'View task hierarchy' });
+  await expect(hierarchyButtons.first()).toBeVisible();
+  await hierarchyButtons.nth(1).click();
+  await expect(page.getByRole('dialog', { name: /Task hierarchy/i })).toBeVisible();
+}
+
+async function verifyNormalHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+  await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
+  await page.goto('/projects/proj-1');
+  await page.waitForTimeout(1500);
+  await assertChatPageRendered(page);
+  if (openSidebar) {
+    await openMobileSidebar(page);
+  }
+  await assertSessionVisible(page, 'Implement authentication');
+  await assertNoOverflow(page);
+  await screenshot(page, screenshotName);
+}
+
+async function verifyDeepHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+  await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
+  await page.goto('/projects/proj-1');
+  await page.waitForTimeout(1500);
+  await assertChatPageRendered(page);
+  if (openSidebar) {
+    await openMobileSidebar(page);
+  }
+  await assertSessionVisible(page, 'Level 0 session');
+  await assertNoOverflow(page);
+  await screenshot(page, screenshotName);
+}
+
+async function verifyOlderHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
+  await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
+  await page.goto('/projects/proj-1');
+  await page.waitForTimeout(1500);
+  await assertChatPageRendered(page);
+  if (openSidebar) {
+    await openMobileSidebar(page);
+  }
+  await expandOlderBucket(page);
+  await assertSessionVisible(page, 'MCP child dispatch');
+  await assertHierarchyButtonOpensModal(page);
+  await assertNoOverflow(page);
+  await screenshot(page, screenshotName);
+}
+
 // ---------------------------------------------------------------------------
 // Mobile tests (375x667 default from config)
 // ---------------------------------------------------------------------------
 
 test.describe('Nested session sidebar — Mobile', () => {
+  test.beforeEach(({ browserName }, testInfo) => {
+    test.skip(
+      testInfo.project.name.includes('Desktop'),
+      `Mobile audit skipped for ${testInfo.project.name} on ${browserName}`,
+    );
+  });
+
   test('normal 2-level nesting renders without overflow', async ({ page }) => {
-    await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await assertSessionVisible(page, 'Implement authentication');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-normal-mobile');
+    await verifyNormalHierarchyFlow(page, 'nested-sidebar-normal-mobile', true);
   });
 
   test('deeply nested (L6+) renders without overflow + depth badge visible', async ({ page }) => {
-    await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await assertSessionVisible(page, 'Level 0 session');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-deep-mobile');
+    await verifyDeepHierarchyFlow(page, 'nested-sidebar-deep-mobile', true);
   });
 
   test('stopped ancestors of deep child surface as context anchors', async ({ page }) => {
@@ -265,6 +345,10 @@ test.describe('Nested session sidebar — Mobile', () => {
     await assertNoOverflow(page);
     await screenshot(page, 'nested-sidebar-stale-ancestor-mobile');
   });
+
+  test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
+    await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-mobile', true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -273,25 +357,22 @@ test.describe('Nested session sidebar — Mobile', () => {
 
 test.describe('Nested session sidebar — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
+  test.beforeEach(({ browserName }, testInfo) => {
+    test.skip(
+      !testInfo.project.name.includes('Desktop'),
+      `Desktop audit skipped for ${testInfo.project.name} on ${browserName}`,
+    );
+  });
 
   test('normal 2-level nesting renders without overflow', async ({ page }) => {
-    await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await openMobileSidebar(page);
-    await assertSessionVisible(page, 'Implement authentication');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-normal-desktop');
+    await verifyNormalHierarchyFlow(page, 'nested-sidebar-normal-desktop');
   });
 
   test('deeply nested (L6+) renders without overflow', async ({ page }) => {
-    await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
-    await page.goto('/projects/proj-1');
-    await page.waitForTimeout(1500);
-    await assertChatPageRendered(page);
-    await assertSessionVisible(page, 'Level 0 session');
-    await assertNoOverflow(page);
-    await screenshot(page, 'nested-sidebar-deep-desktop');
+    await verifyDeepHierarchyFlow(page, 'nested-sidebar-deep-desktop');
+  });
+
+  test('Older bucket stale hierarchy button renders and opens modal', async ({ page }) => {
+    await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-desktop');
   });
 });
