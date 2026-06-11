@@ -71,6 +71,9 @@ export interface Env {
   BETTER_AUTH_SECRET?: string;           // BetterAuth session management
   CREDENTIAL_ENCRYPTION_KEY?: string;    // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string;        // GitHub webhook HMAC verification
+  // Deployment signing keys (Ed25519 — separate from callback JWT)
+  DEPLOY_SIGNING_PRIVATE_KEY?: string;   // Base64-encoded Ed25519 private key for payload signing
+  DEPLOY_SIGNING_PUBLIC_KEY?: string;    // Base64-encoded Ed25519 public key delivered to deployment nodes
   // Pages project name for proxying app.* requests
   PAGES_PROJECT_NAME?: string;
   // Pages project name for proxying www.* requests (marketing site)

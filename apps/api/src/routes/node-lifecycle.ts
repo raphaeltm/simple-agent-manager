@@ -4,7 +4,7 @@
  * These endpoints are called by the VM agent (ready, heartbeat, errors) or
  * the browser (token) and use callback JWT auth rather than user session auth.
  */
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -254,6 +254,39 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
 
   if (tokenNeedsRefresh) {
     response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
+  }
+
+  // Deployment mode: include pending release seq and deploy pub key for deployment nodes
+  if (node.nodeRole === 'deployment' && body.deployment) {
+    const appliedSeq = body.deployment.appliedSeq ?? 0;
+    const envId = body.deployment.environmentId;
+
+    // Find the latest release version for this node's environment
+    if (envId) {
+      try {
+        const latestRelease = await db
+          .select({ version: schema.deploymentReleases.version })
+          .from(schema.deploymentReleases)
+          .where(eq(schema.deploymentReleases.environmentId, envId))
+          .orderBy(desc(schema.deploymentReleases.version))
+          .limit(1);
+
+        if (latestRelease[0] && latestRelease[0].version > appliedSeq) {
+          response.pendingReleaseSeq = latestRelease[0].version;
+        }
+      } catch (err) {
+        log.warn('heartbeat.deploy_release_lookup_failed', {
+          nodeId,
+          environmentId: envId,
+          error: String(err),
+        });
+      }
+    }
+
+    // Include deploy signing public key for key refresh
+    if (c.env.DEPLOY_SIGNING_PUBLIC_KEY) {
+      response.deployPubKey = c.env.DEPLOY_SIGNING_PUBLIC_KEY;
+    }
   }
 
   return c.json(response);

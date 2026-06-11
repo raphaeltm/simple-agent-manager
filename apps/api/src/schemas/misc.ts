@@ -87,10 +87,18 @@ const NodeMetricsSchema = v.object({
   diskPercent: v.optional(v.number()),
 });
 
+const DeploymentStateSchema = v.object({
+  environmentId: v.optional(v.string()),
+  appliedSeq: v.optional(v.number()),
+  status: v.optional(v.string()),
+  services: v.optional(v.unknown()),
+});
+
 export const NodeHeartbeatSchema = v.object({
   activeWorkspaces: v.optional(v.number()),
   nodeId: v.optional(v.string()),
   metrics: v.optional(NodeMetricsSchema),
+  deployment: v.optional(DeploymentStateSchema),
 });
 
 // Node error report — entries are v.unknown() for the same reason as client errors

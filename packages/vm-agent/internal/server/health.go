@@ -116,9 +116,10 @@ func (s *Server) sendNodeHeartbeat() {
 	if s.deployEngine != nil {
 		observed := s.deployEngine.GetObserved()
 		payload["deployment"] = map[string]interface{}{
-			"appliedSeq": observed.AppliedSeq,
-			"status":     string(observed.Status),
-			"services":   observed.Services,
+			"environmentId": s.config.EnvironmentID,
+			"appliedSeq":    observed.AppliedSeq,
+			"status":        string(observed.Status),
+			"services":      observed.Services,
 		}
 	}
 

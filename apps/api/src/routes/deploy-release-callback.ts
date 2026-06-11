@@ -1,0 +1,137 @@
+/**
+ * Deploy release callback route — node fetches signed apply payload.
+ *
+ * Called by the VM agent (deployment mode) to fetch the full signed apply
+ * payload for a specific release sequence. Uses callback JWT auth — this
+ * endpoint MUST be mounted before projectsRoutes to avoid the session auth
+ * middleware leak (see .claude/rules/34-vm-agent-callback-auth.md).
+ */
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { extractBearerToken } from '../lib/auth-helpers';
+import { log } from '../lib/logger';
+import { errors } from '../middleware/error';
+import { renderCompose } from '../services/compose-renderer';
+import { signDeployPayload } from '../services/deploy-signing';
+import { verifyCallbackToken } from '../services/jwt';
+
+const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
+
+/**
+ * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
+ *
+ * Returns a signed apply payload for the requested release sequence.
+ * The node calls this when the heartbeat response includes a
+ * pendingReleaseSeq greater than the node's current applied seq.
+ */
+deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
+  const nodeId = c.req.param('id');
+
+  // Verify callback JWT auth (same pattern as heartbeat/ready)
+  const token = extractBearerToken(c.req.header('Authorization'));
+  const payload = await verifyCallbackToken(token, c.env);
+
+  // Workspace-scoped tokens cannot be used for node-level endpoints
+  if (payload.scope === 'workspace') {
+    log.error('deploy_release.rejected_workspace_scoped_token', {
+      tokenWorkspace: payload.workspace,
+      nodeId,
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Insufficient token scope');
+  }
+
+  if (payload.workspace !== nodeId) {
+    throw errors.unauthorized('Callback token does not match node');
+  }
+
+  // Parse query parameters
+  const seqStr = c.req.query('seq');
+  const environmentId = c.req.query('environmentId');
+
+  if (!seqStr || !environmentId) {
+    throw errors.badRequest('Missing required query parameters: seq, environmentId');
+  }
+
+  const seq = parseInt(seqStr, 10);
+  if (isNaN(seq) || seq <= 0) {
+    throw errors.badRequest('Invalid seq parameter');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  // Verify the environment exists
+  const envRows = await db
+    .select()
+    .from(schema.deploymentEnvironments)
+    .where(eq(schema.deploymentEnvironments.id, environmentId))
+    .limit(1);
+
+  if (envRows.length === 0) {
+    throw errors.notFound('Deployment environment');
+  }
+
+  // Find the release by version (seq) within the environment
+  const releaseRows = await db
+    .select()
+    .from(schema.deploymentReleases)
+    .where(
+      and(
+        eq(schema.deploymentReleases.environmentId, environmentId),
+        eq(schema.deploymentReleases.version, seq),
+      ),
+    )
+    .limit(1);
+
+  if (releaseRows.length === 0) {
+    throw errors.notFound('Deployment release');
+  }
+
+  const release = releaseRows[0]!;
+  const manifest = JSON.parse(release.manifest);
+
+  // Render the Compose YAML from the manifest
+  const composeYaml = renderCompose(manifest, {
+    environmentId,
+    releaseId: release.id,
+  });
+
+  // Build the expiry (1 hour from now)
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+  // Sign the payload with the deploy signing key
+  const signature = await signDeployPayload(
+    {
+      environmentId,
+      nodeId,
+      seq,
+      expiresAt,
+      composeYaml,
+    },
+    c.env,
+  );
+
+  log.info('deploy_release.served', {
+    nodeId,
+    environmentId,
+    seq,
+    releaseId: release.id,
+  });
+
+  return c.json({
+    environmentId,
+    nodeId,
+    seq,
+    expiresAt,
+    composeYaml,
+    signature,
+    registryCredentials: null, // TODO: parallel work — registry credential minting
+  });
+});
+
+export { deployReleaseCallbackRoute };

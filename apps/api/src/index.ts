@@ -62,6 +62,7 @@ import { clientErrorsRoutes } from './routes/client-errors';
 import { codexRefreshRoutes } from './routes/codex-refresh';
 import { credentialsRoutes } from './routes/credentials';
 import { dashboardRoutes } from './routes/dashboard';
+import { deployReleaseCallbackRoute } from './routes/deploy-release-callback';
 import { deploymentEnvironmentRoutes } from './routes/deployment-environments';
 import { deploymentReleaseRoutes } from './routes/deployment-releases';
 import { deviceFlowRoutes } from './routes/device-flow';
@@ -541,6 +542,7 @@ app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
 app.route('/api/nodes', nodesRoutes);
 app.route('/api/nodes', nodeLifecycleRoutes);
+app.route('/api/nodes', deployReleaseCallbackRoute);  // Callback JWT auth — deploy node fetches signed release payload
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
