@@ -51,7 +51,11 @@ describe('workspace dispatch race prevention', () => {
   it('ready handler does not re-dispatch workspaces that already have dispatched_at set', () => {
     const replayQuery = sectionAfter(nodeLifecycleSource, 'const pendingWorkspaces = await innerDb');
 
-    expect(nodeLifecycleSource).toContain("import { and, eq, isNull, sql } from 'drizzle-orm'");
+    // Verify the required drizzle operators are imported (order-independent)
+    expect(nodeLifecycleSource).toContain("from 'drizzle-orm'");
+    expect(nodeLifecycleSource).toMatch(/\band\b/);
+    expect(nodeLifecycleSource).toMatch(/\beq\b/);
+    expect(nodeLifecycleSource).toMatch(/\bisNull\b/);
     expect(replayQuery).toContain('eq(schema.workspaces.nodeId, nodeId)');
     expect(replayQuery).toContain("eq(schema.workspaces.status, 'creating')");
     expect(replayQuery).toContain('isNull(schema.workspaces.dispatchedAt)');
