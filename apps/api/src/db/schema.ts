@@ -1825,3 +1825,68 @@ export const sessionSummaries = sqliteTable(
 
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT ENVIRONMENTS
+// =============================================================================
+
+export const deploymentEnvironments = sqliteTable(
+  'deployment_environments',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('active'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectNameUnique: uniqueIndex('idx_deployment_environments_project_name').on(
+      table.projectId,
+      table.name,
+    ),
+    projectIdIdx: index('idx_deployment_environments_project_id').on(table.projectId),
+  }),
+);
+
+export type DeploymentEnvironmentRow = typeof deploymentEnvironments.$inferSelect;
+export type NewDeploymentEnvironmentRow = typeof deploymentEnvironments.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT RELEASES
+// =============================================================================
+
+export const deploymentReleases = sqliteTable(
+  'deployment_releases',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    manifest: text('manifest').notNull(),
+    version: integer('version').notNull(),
+    status: text('status').notNull().default('created'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    environmentIdIdx: index('idx_deployment_releases_environment_id').on(table.environmentId),
+    envVersionUnique: uniqueIndex('idx_deployment_releases_env_version').on(
+      table.environmentId,
+      table.version,
+    ),
+  }),
+);
+
+export type DeploymentReleaseRow = typeof deploymentReleases.$inferSelect;
+export type NewDeploymentReleaseRow = typeof deploymentReleases.$inferInsert;

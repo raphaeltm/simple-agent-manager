@@ -216,6 +216,9 @@ importers:
       workers-ai-provider:
         specifier: 3.1.11
         version: 3.1.11(@ai-sdk/provider@3.0.8)(ai@6.0.168(zod@4.3.6))
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: 0.14.0
