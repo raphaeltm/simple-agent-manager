@@ -1,9 +1,12 @@
 import { defineConfig } from '@playwright/test';
 
 const isCI = !!process.env.CI;
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:4173';
+const useLocalWebServer =
+  baseURL.startsWith('http://localhost:') || baseURL.startsWith('http://127.0.0.1:');
 
 const sharedUse = {
-  baseURL: 'http://localhost:4173',
+  baseURL,
   trace: 'off' as const,
   screenshot: 'off' as const, // We take manual screenshots
   browserName: 'chromium' as const,
@@ -47,11 +50,13 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: 'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
-    port: 4173,
-    reuseExistingServer: true,
-    timeout: process.env.CI ? 180000 : 60000,
-    cwd: '.',
-  },
+  webServer: useLocalWebServer
+    ? {
+        command: 'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
+        port: 4173,
+        reuseExistingServer: true,
+        timeout: process.env.CI ? 180000 : 60000,
+        cwd: '.',
+      }
+    : undefined,
 });

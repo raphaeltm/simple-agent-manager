@@ -10,6 +10,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./mermaid": {
+      "import": "./dist/mermaid.js",
+      "types": "./dist/mermaid.d.ts"
     }
   },
   "scripts": {
@@ -22,6 +26,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.25.0",
+    "dompurify": "3.4.0",
+    "lucide-react": "catalog:",
+    "mermaid": "11.14.0",
     "prism-react-renderer": "catalog:",
     "react-markdown": "catalog:",
     "react-virtuoso": "catalog:",

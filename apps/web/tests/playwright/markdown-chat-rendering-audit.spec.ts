@@ -114,6 +114,71 @@ const MOCK_MESSAGES = [
   },
 ];
 
+const WIDE_MERMAID_MARKDOWN = [
+  'Architecture diagram:',
+  '',
+  '```mermaid',
+  'flowchart LR',
+  '  Start([User asks for architecture review]) --> Gather[Gather repository context and recent task history]',
+  '  Gather --> Analyze{Can the agent explain the system without a diagram?}',
+  '  Analyze -->|No| Diagram[Render a Mermaid diagram inside the chat bubble]',
+  '  Diagram --> Inspect[Open fullscreen view and inspect pan zoom reset controls]',
+  '  Inspect --> Done([Readable audit trail])',
+  '  Analyze -->|Yes| Done',
+  '```',
+].join('\n');
+
+const INVALID_MERMAID_MARKDOWN = [
+  'Broken diagram:',
+  '',
+  '```mermaid',
+  'flowchart LR',
+  '  A -->',
+  '```',
+].join('\n');
+
+const MERMAID_MESSAGES = [
+  {
+    id: 'msg-user-mermaid',
+    sessionId: SESSION_ID,
+    role: 'user',
+    content: 'Show the architecture as a diagram.',
+    toolMetadata: null,
+    createdAt: Date.now() - 50_000,
+    sequence: 1,
+  },
+  {
+    id: 'msg-assistant-mermaid',
+    sessionId: SESSION_ID,
+    role: 'assistant',
+    content: WIDE_MERMAID_MARKDOWN,
+    toolMetadata: null,
+    createdAt: Date.now() - 20_000,
+    sequence: 2,
+  },
+];
+
+const INVALID_MERMAID_MESSAGES = [
+  {
+    id: 'msg-user-invalid-mermaid',
+    sessionId: SESSION_ID,
+    role: 'user',
+    content: 'Show a broken diagram.',
+    toolMetadata: null,
+    createdAt: Date.now() - 50_000,
+    sequence: 1,
+  },
+  {
+    id: 'msg-assistant-invalid-mermaid',
+    sessionId: SESSION_ID,
+    role: 'assistant',
+    content: INVALID_MERMAID_MARKDOWN,
+    toolMetadata: null,
+    createdAt: Date.now() - 20_000,
+    sequence: 2,
+  },
+];
+
 async function setupMocks(page: Page) {
   await setupProjectChatMocks(page, {
     projectId: PROJECT_ID,
@@ -121,6 +186,22 @@ async function setupMocks(page: Page) {
     session: MOCK_SESSION,
     messages: MOCK_MESSAGES,
   });
+}
+
+async function setupMessages(page: Page, messages: typeof MOCK_MESSAGES) {
+  await setupProjectChatMocks(page, {
+    projectId: PROJECT_ID,
+    project: MOCK_PROJECT,
+    session: MOCK_SESSION,
+    messages,
+  });
+}
+
+async function openChat(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('sam-onboarding-wizard-dismissed-test-user', 'true');
+  });
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 }
 
 async function assertMarkdownRendering(page: Page, screenshotName: string) {
@@ -209,6 +290,99 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
   await assertNoOverflow(page);
 }
 
+async function assertMermaidRendering(page: Page, screenshotName: string) {
+  await openChat(page);
+
+  const diagram = page.getByTestId('mermaid-diagram');
+  await expect(diagram).toBeVisible({ timeout: 15_000 });
+  const svg = page.locator('[data-testid="mermaid-diagram-svg"] svg').first();
+  await expect(svg).toBeVisible({ timeout: 15_000 });
+
+  const svgInfo = await svg.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      text: node.textContent ?? '',
+      width: rect.width,
+      height: rect.height,
+      viewBox: node.getAttribute('viewBox'),
+    };
+  });
+  expect(svgInfo.text).toContain('Render a Mermaid diagram');
+  expect(svgInfo.width).toBeGreaterThan(40);
+  expect(svgInfo.height).toBeGreaterThan(40);
+  expect(svgInfo.viewBox).toBeTruthy();
+
+  await screenshot(page, `${screenshotName}-inline`);
+  await assertNoOverflow(page);
+
+  await page.getByRole('button', { name: 'Expand Mermaid diagram' }).click();
+  const fullscreen = page.getByTestId('mermaid-diagram-fullscreen');
+  await expect(fullscreen).toBeVisible();
+  const fullscreenViewport = page.getByTestId('mermaid-diagram-fullscreen-svg');
+  const fullscreenSvg = page.locator('[data-testid="mermaid-diagram-fullscreen-svg"] svg');
+  await expect(fullscreenSvg).toBeVisible();
+  await page.getByRole('button', { name: 'Reset diagram view' }).last().click();
+  const viewBoxBeforePinch = await fullscreenSvg.getAttribute('viewBox');
+  const viewportBox = await fullscreenViewport.boundingBox();
+  if (!viewportBox) {
+    throw new Error('Expected fullscreen Mermaid viewport to have a bounding box');
+  }
+  await fullscreenViewport.dispatchEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 101,
+    pointerType: 'touch',
+    clientX: viewportBox.x + viewportBox.width * 0.35,
+    clientY: viewportBox.y + viewportBox.height * 0.5,
+  });
+  await fullscreenViewport.dispatchEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 102,
+    pointerType: 'touch',
+    clientX: viewportBox.x + viewportBox.width * 0.65,
+    clientY: viewportBox.y + viewportBox.height * 0.5,
+  });
+  await fullscreenViewport.dispatchEvent('pointermove', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 102,
+    pointerType: 'touch',
+    clientX: viewportBox.x + viewportBox.width * 0.78,
+    clientY: viewportBox.y + viewportBox.height * 0.5,
+  });
+  await expect.poll(() => fullscreenSvg.getAttribute('viewBox')).not.toBe(viewBoxBeforePinch);
+  await fullscreenViewport.dispatchEvent('pointerup', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 101,
+    pointerType: 'touch',
+  });
+  await fullscreenViewport.dispatchEvent('pointerup', {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 102,
+    pointerType: 'touch',
+  });
+  await screenshot(page, `${screenshotName}-fullscreen`);
+  await assertNoOverflow(page);
+
+  await page.keyboard.press('Escape');
+  await expect(fullscreen).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Expand Mermaid diagram' })).toBeFocused();
+}
+
+async function assertInvalidMermaid(page: Page, screenshotName: string) {
+  await openChat(page);
+
+  const error = page.getByTestId('mermaid-diagram-error');
+  await expect(error).toBeVisible({ timeout: 15_000 });
+  await expect(error).toContainText('Mermaid diagram error');
+  await expect(error.getByRole('button', { name: 'Copy source' })).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+}
+
 test.describe('Project Chat Markdown Rendering — Mobile', () => {
   // Pin the mobile viewport so the stored screenshot reflects 375px regardless
   // of which Playwright project runs this block (otherwise the Desktop project
@@ -219,6 +393,16 @@ test.describe('Project Chat Markdown Rendering — Mobile', () => {
     await setupMocks(page);
     await assertMarkdownRendering(page, 'markdown-chat-rendering-mobile');
   });
+
+  test('mermaid diagrams render inline and fullscreen without overflow', async ({ page }) => {
+    await setupMessages(page, MERMAID_MESSAGES);
+    await assertMermaidRendering(page, 'markdown-chat-mermaid-mobile');
+  });
+
+  test('invalid mermaid diagrams fail gracefully', async ({ page }) => {
+    await setupMessages(page, INVALID_MERMAID_MESSAGES);
+    await assertInvalidMermaid(page, 'markdown-chat-mermaid-invalid-mobile');
+  });
 });
 
 test.describe('Project Chat Markdown Rendering — Desktop', () => {
@@ -227,5 +411,15 @@ test.describe('Project Chat Markdown Rendering — Desktop', () => {
   test('lists, tables, and language-less code blocks render correctly', async ({ page }) => {
     await setupMocks(page);
     await assertMarkdownRendering(page, 'markdown-chat-rendering-desktop');
+  });
+
+  test('mermaid diagrams render inline and fullscreen without overflow', async ({ page }) => {
+    await setupMessages(page, MERMAID_MESSAGES);
+    await assertMermaidRendering(page, 'markdown-chat-mermaid-desktop');
+  });
+
+  test('invalid mermaid diagrams fail gracefully', async ({ page }) => {
+    await setupMessages(page, INVALID_MERMAID_MESSAGES);
+    await assertInvalidMermaid(page, 'markdown-chat-mermaid-invalid-desktop');
   });
 });

@@ -52,3 +52,6 @@ export type { UserMessageFadeProps } from './components/UserMessageFade';
 export { UserMessageFade } from './components/UserMessageFade';
 export type { VoiceButtonProps } from './components/VoiceButton';
 export { VoiceButton } from './components/VoiceButton';
+
+// Mermaid utilities
+export { MERMAID_SVG_SANITIZE_CONFIG } from './mermaid';
