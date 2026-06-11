@@ -4,16 +4,16 @@
 
 ## Agent Configuration Cross-Reference
 
-| What                 | Claude Code Location              | Codex Location                                  |
-| -------------------- | --------------------------------- | ----------------------------------------------- |
-| Project instructions | `CLAUDE.md`                       | `AGENTS.md` (this file)                         |
-| Modular rules        | `.claude/rules/*.md`              | Same files (shared)                             |
+| What                 | Claude Code Location              | Codex Location                                     |
+| -------------------- | --------------------------------- | -------------------------------------------------- |
+| Project instructions | `CLAUDE.md`                       | `AGENTS.md` (this file)                            |
+| Modular rules        | `.claude/rules/*.md`              | Same files (shared)                                |
 | Subagents / skills   | `.claude/agents/*/`               | `.agents/skills/*/SKILL.md` + `agents/openai.yaml` |
-| Reference skills     | `.claude/skills/*/SKILL.md`       | `.agents/skills/*/SKILL.md`                     |
-| Slash commands       | `.claude/commands/*.md`           | `.codex/prompts/*.md`                           |
-| Project config       | `.claude/settings.json`           | `.codex/config.toml`                            |
-| Constitution         | `.specify/memory/constitution.md` | Same file                                       |
-| Feature specs        | `specs/`                          | Same directory                                  |
+| Reference skills     | `.claude/skills/*/SKILL.md`       | `.agents/skills/*/SKILL.md`                        |
+| Slash commands       | `.claude/commands/*.md`           | `.codex/prompts/*.md`                              |
+| Project config       | `.claude/settings.json`           | `.codex/config.toml`                               |
+| Constitution         | `.specify/memory/constitution.md` | Same file                                          |
+| Feature specs        | `specs/`                          | Same directory                                     |
 
 ## Skills
 
@@ -24,7 +24,7 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 - `$cloudflare-specialist` — D1, KV, R2, wrangler config review
 - `$constitution-validator` — No hardcoded values compliance
 - `$doc-sync-validator` — Documentation matches code
-- `$env-validator` — GH_ vs GITHUB_ consistency
+- `$env-validator` — GH* vs GITHUB* consistency
 - `$go-specialist` — Go code review (PTY, WebSocket, JWT)
 - `$security-auditor` — Credential safety, OWASP, JWT
 - `$task-completion-validator` — Planned vs actual work validation (mandatory before archive)
@@ -54,16 +54,19 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 
 These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md` and `.claude/rules/*.md`.
 
-| Situation | Do |
-| --------- | -- |
-| Starting SAM-managed work | Call the SAM MCP `get_instructions` tool first and apply returned knowledge and policy directives. |
-| Debugging a live issue Raphaël is seeing | Inspect production evidence first unless the issue is explicitly about staging or a branch verification. Use staging for PR validation and new-change verification. |
-| Debugging staging or deployment behavior | Query Cloudflare state/logs before guessing or redeploying. Staging deploys are slow; CF API checks are fast. |
-| User asks for "subtasks" | Use SAM `dispatch_task` for visible delegated work. |
-| User asks for "local subagents" | Use local Claude/Codex subagents for in-session critique or reasoning, not SAM-dispatched tasks. |
-| Dispatching a SAM task | Verify the task started, the title matches, the requested profile/agent is observable, and critical constraints such as `/do`, branch, `draft PR`, or `do not merge` survived. |
-| Draft PR / do-not-merge request | Preserve the constraint in task state and PR wording. Stop at the draft/open PR unless Raphaël later authorizes readiness or merge. |
-| Incidental bug found | If it is not blocking and not a small adjacent fix, file a backlog task with reproduction/evidence and continue the assigned work. |
+| Situation                                                               | Do                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Starting SAM-managed work                                               | Call the SAM MCP `get_instructions` tool first and apply returned knowledge and policy directives.                                                                                                                                |
+| Debugging a live issue Raphaël is seeing                                | Inspect production evidence first unless the issue is explicitly about staging or a branch verification. Use staging for PR validation and new-change verification.                                                               |
+| Debugging staging or deployment behavior                                | Query Cloudflare state/logs before guessing or redeploying. Staging deploys are slow; CF API checks are fast.                                                                                                                     |
+| User asks for "subtasks"                                                | Use SAM `dispatch_task` for visible delegated work.                                                                                                                                                                               |
+| User asks for "local subagents"                                         | Use local Claude/Codex subagents for in-session critique or reasoning, not SAM-dispatched tasks.                                                                                                                                  |
+| User asks for PR status, PR history, task status, or investigation only | Treat it as read-only by default. Use SAM MCP, GitHub, and local evidence in the current session. Do not create task files, branches, commits, or PRs unless the user asks for code/config changes or durable artifacts.          |
+| Dispatching a SAM task                                                  | Verify the task started, the title matches, the requested profile/agent is observable, and critical constraints such as `/do`, branch, `draft PR`, or `do not merge` survived.                                                    |
+| Retrying or redispatching after a failed SAM task                       | First inspect the failed task/session and check for active duplicate work with the same prompt, branch, or title. Do not blindly submit the same prompt again after no-workspace/startup failures or transient provider failures. |
+| Draft PR / do-not-merge request                                         | Preserve the constraint in task state and PR wording. Stop at the draft/open PR unless Raphaël later authorizes readiness or merge.                                                                                               |
+| Profile/default-profile work                                            | Fresh installs should not seed multiple provider-specific built-in agent profiles. Prefer a setup wizard, templates, or at most one conversational default so users learn profiles intentionally instead of inheriting clutter.   |
+| Incidental bug found                                                    | If it is not blocking and not a small adjacent fix, file a backlog task with reproduction/evidence and continue the assigned work.                                                                                                |
 
 ## Prompts
 

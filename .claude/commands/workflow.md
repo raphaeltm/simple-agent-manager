@@ -35,22 +35,27 @@ The SAM control plane monitors ACP sessions for activity. If your session appear
    # Workflow State
 
    ## Goal
+
    <one-line summary>
 
    ## Subtasks
-   | # | Description | Task ID | Status | Branch | Notes |
-   |---|------------|---------|--------|--------|-------|
-   | 1 | ... | pending | ... | ... | ... |
-   | 2 | ... | pending | ... | ... | ... |
+
+   | #   | Description | Task ID | Status | Branch | Notes |
+   | --- | ----------- | ------- | ------ | ------ | ----- |
+   | 1   | ...         | pending | ...    | ...    | ...   |
+   | 2   | ...         | pending | ...    | ...    | ...   |
 
    ## Dependencies
+
    - Task 2 depends on Task 1
    - Tasks 3 and 4 can run in parallel
 
    ## Poll Count
+
    0
 
    ## Last Poll
+
    (not yet)
    ```
 
@@ -71,6 +76,8 @@ For each subtask that has no unmet dependencies:
 
 3. **Verify dispatch succeeded** — call `get_task_details` on the returned task ID within 10 seconds to confirm it was picked up. If it wasn't, retry once, then report the failure.
 
+   Before retrying the same prompt, inspect the failed task/session and check `list_tasks`/`list_project_agents` for active duplicates with the same title, branch, prompt, or PR. If a duplicate is already running, coordinate with it instead of creating another copy. Do not blindly redispatch after no-workspace/startup failures or transient provider failures.
+
 4. **Call `update_task_status`** after each dispatch: "Dispatched subtask N: <description>"
 
 ---
@@ -78,6 +85,7 @@ For each subtask that has no unmet dependencies:
 ## Phase 3: Foreground Polling Loop (CRITICAL)
 
 This is the most important phase. You MUST poll actively to:
+
 - Keep the session alive (prevent timeout kills)
 - Detect subtask completion and trigger dependent work
 - Report progress to the user
@@ -101,7 +109,8 @@ REPEAT until all subtasks are complete or failed:
        - Call get_peer_agent_output(taskId) to review the result
     6. If any subtask failed:
        - Review the failure via get_task_details
-       - Decide: retry_subtask with adjusted description, or mark as failed
+       - Check for duplicate active work with the same prompt, branch, title, or PR
+       - Decide: retry with adjusted description only after diagnosing the failure, or mark as failed
        - Update .workflow-state.md
     7. If all subtasks are complete: exit loop
     8. If all remaining subtasks are failed and no retries are possible: exit loop
@@ -120,6 +129,7 @@ REPEAT until all subtasks are complete or failed:
 ### What to Do If Context Feels Fuzzy
 
 If after context compaction you're unsure what's happening:
+
 1. Read `.workflow-state.md` — it has the complete state
 2. Call `list_tasks` to see all your subtasks
 3. Call `get_task_details` for each active subtask
@@ -147,22 +157,26 @@ When all subtasks are complete (or all remaining ones have permanently failed):
 ## Handling Common Scenarios
 
 ### Subtask produces a PR that needs to merge before the next step
+
 - After the subtask completes, check if it created a PR via `get_task_details`
 - If the PR is merged, proceed with dependent subtasks
 - If the PR is open, note this in your status update — the dependent subtask should be dispatched to the PR's branch
 
 ### Subtask fails
+
 - Read the failure details via `get_task_details` and `get_peer_agent_output`
 - If it's a transient failure (timeout, resource issue), retry with `retry_subtask`
 - If it's a permanent failure (wrong approach, missing prerequisite), adjust the description and retry, or skip and note in the summary
 - Maximum 2 retries per subtask
 
 ### You're running out of time
+
 - Push all branches, update all task files
 - Call `update_task_status` with current state: what's done, what's in progress, what's remaining
 - Do NOT rush to merge incomplete work
 
 ### A subtask needs input from you
+
 - If a subtask calls `request_human_input`, you'll see a notification
 - Respond via `send_message_to_subtask` with the needed information
 - Resume your polling loop
@@ -174,12 +188,14 @@ When all subtasks are complete (or all remaining ones have permanently failed):
 User: "Refactor the auth middleware and update all routes that use it"
 
 Decomposition:
+
 1. Research current auth middleware usage (subtask)
 2. Implement new auth middleware (subtask, depends on 1)
 3. Update API routes to use new middleware (subtask, depends on 2)
 4. Update tests (subtask, depends on 2 and 3)
 
 Dispatch sequence:
+
 - Dispatch subtask 1 immediately
 - Poll every 300s until subtask 1 completes
 - Dispatch subtask 2 with subtask 1's output as context

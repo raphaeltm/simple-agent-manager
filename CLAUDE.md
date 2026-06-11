@@ -94,13 +94,13 @@ After merging ANY PR to main, agents MUST monitor the Deploy Production workflow
 
 Production data loss is catastrophic and irreversible. Multiple deterministic gates prevent it:
 
-| Gate | Runs in | What it catches |
-|------|---------|----------------|
-| `pnpm quality:migration-safety` | CI (every PR) | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations |
-| `pnpm quality:do-migration-safety` | CI (every PR) | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism) |
-| Pre-migration D1 backup | Deploy pipeline | Creates time-travel bookmark + explicit backup before every migration run |
-| Post-migration row count verification | Deploy pipeline | Compares row counts before/after migrations; **blocks deploy** if >50% data loss detected in any table |
-| D1 Time Travel Restore | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml` |
+| Gate                                  | Runs in         | What it catches                                                                                                                      |
+| ------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm quality:migration-safety`       | CI (every PR)   | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations |
+| `pnpm quality:do-migration-safety`    | CI (every PR)   | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism)                   |
+| Pre-migration D1 backup               | Deploy pipeline | Creates time-travel bookmark + explicit backup before every migration run                                                            |
+| Post-migration row count verification | Deploy pipeline | Compares row counts before/after migrations; **blocks deploy** if >50% data loss detected in any table                               |
+| D1 Time Travel Restore                | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml`                                                        |
 
 **Migration rules:** See `.claude/rules/31-migration-safety.md`. NEVER use `DROP TABLE` on any table with CASCADE children. Use `ALTER TABLE ADD COLUMN` instead of table recreation.
 
@@ -215,6 +215,12 @@ If the bug is blocking the current task or is a small adjacent fix, fix it in th
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
 
 **Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill, then verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
+
+**Read-only investigations**: PR status, PR history, task status, and diagnostic questions are read-only by default. Use SAM MCP, GitHub, logs, and local evidence in the current session. Do not create task files, branches, commits, or PRs unless the user asks for code/config changes or durable artifacts.
+
+**Failed task retries**: Before retrying or redispatching a failed SAM task, inspect the failed task/session and check for active duplicate work with the same prompt, branch, or title. Do not blindly resubmit the same prompt after no-workspace/startup failures or transient provider failures.
+
+**Agent profile defaults**: When changing profile setup or onboarding, fresh installs should not seed multiple provider-specific built-in profiles. Prefer a setup wizard, templates, or at most one conversational default so users learn profiles intentionally instead of inheriting clutter.
 
 **Memory and ideas**: Keep SAM knowledge, ideas, and policies current when human feedback or shipped work changes what future agents should believe. Do not mark ideas complete unless they are merged or otherwise verifiably shipped. See `.claude/rules/38-agent-feedback-and-memory.md`.
 
