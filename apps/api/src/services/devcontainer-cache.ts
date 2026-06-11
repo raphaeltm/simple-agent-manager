@@ -1,8 +1,8 @@
 import type { Env } from '../env';
 import {
+  type CloudflareRegistryMintConfig,
   DEFAULT_CLOUDFLARE_REGISTRY_HOST,
   mintCloudflareRegistryCredentials,
-  type CloudflareRegistryMintConfig,
 } from './cf-registry';
 import { getTimeoutMs } from './fetch-timeout';
 

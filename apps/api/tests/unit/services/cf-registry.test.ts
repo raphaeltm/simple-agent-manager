@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildMintConfigFromEnv,
+  type CloudflareRegistryMintConfig,
   DEFAULT_CLOUDFLARE_REGISTRY_HOST,
   mintCloudflareRegistryCredentials,
-  type CloudflareRegistryMintConfig,
 } from '../../../src/services/cf-registry';
 
 function makeConfig(overrides: Partial<CloudflareRegistryMintConfig> = {}): CloudflareRegistryMintConfig {

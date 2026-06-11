@@ -27,7 +27,6 @@ import {
 } from './_helpers';
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
-import { handleGetRegistryCredentials } from './registry-credential-tools';
 import {
   handleCreateIdea,
   handleFindRelatedIdeas,
@@ -100,6 +99,7 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
+import { handleGetRegistryCredentials } from './registry-credential-tools';
 import {
   handleGetSessionMessages,
   handleListSessions,

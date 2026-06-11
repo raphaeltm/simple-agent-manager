@@ -10,8 +10,8 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
-  DEFAULT_CLOUDFLARE_REGISTRY_HOST,
   buildMintConfigFromEnv,
+  DEFAULT_CLOUDFLARE_REGISTRY_HOST,
   mintCloudflareRegistryCredentials,
 } from './cf-registry';
 

@@ -24,11 +24,11 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 import type { Env } from '../../../src/env';
+import { handleGetRegistryCredentials } from '../../../src/routes/mcp/registry-credential-tools';
 import {
   getRegistryCredentialRateLimit,
   mintProjectRegistryCredential,
 } from '../../../src/services/registry-credentials';
-import { handleGetRegistryCredentials } from '../../../src/routes/mcp/registry-credential-tools';
 
 const mockGetRateLimit = vi.mocked(getRegistryCredentialRateLimit);
 const mockMintCredential = vi.mocked(mintProjectRegistryCredential);
