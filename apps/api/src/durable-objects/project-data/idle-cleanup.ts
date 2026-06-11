@@ -17,6 +17,7 @@ import {
   parseMinEarliest,
   parseWorkspaceActivity,
 } from './row-schemas';
+import { upsertActivityState } from './session-state';
 import { stopSessionInternal } from './sessions';
 import type { Env } from './types';
 
@@ -108,6 +109,9 @@ export async function processExpiredCleanups(
     try {
       // Stop the session in DO SQLite
       stopSessionInternal(sql, entry.sessionId);
+
+      // Clear activity state so the browser status bar reflects idle
+      upsertActivityState(sql, entry.sessionId, { activity: 'idle' });
 
       // Materialize grouped messages (best-effort)
       try {
@@ -246,6 +250,7 @@ export async function checkWorkspaceIdleTimeouts(
       try {
         if (ws.sessionId) {
           stopSessionInternal(sql, ws.sessionId);
+          upsertActivityState(sql, ws.sessionId, { activity: 'idle' });
           try {
             materializeSession(sql, ws.sessionId);
           } catch (e) {

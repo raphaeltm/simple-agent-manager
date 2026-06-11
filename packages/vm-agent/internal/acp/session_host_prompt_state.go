@@ -121,6 +121,7 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(promptID uint64, reason stri
 	})
 	h.broadcastControl(MsgSessionPromptDone, nil)
 	h.broadcastAgentStatus(StatusError, agentType, reason)
+	h.reportActivity("idle")
 }
 
 func (h *SessionHost) setStatus(status SessionHostStatus, errMsg string) {

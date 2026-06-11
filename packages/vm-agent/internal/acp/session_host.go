@@ -644,6 +644,9 @@ func (h *SessionHost) Stop() {
 	// The agent process is dead but the container is still alive.
 	h.syncCredentialOnStop(snap)
 
+	// Report idle to the control plane so the browser status bar clears.
+	h.reportActivity("idle")
+
 	// Cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()
 	if h.suspendTimer != nil {

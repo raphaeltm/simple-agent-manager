@@ -61,6 +61,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		h.mu.Unlock()
 		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg), recoveryNotify)
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
+		h.reportActivity("idle")
 		return
 	}
 

@@ -199,13 +199,31 @@ export function useSessionLifecycle(
       clearTimeout(idleTimerRef.current);
       if (activity === 'prompting') {
         // Safety backstop: if the server never sends "idle" (e.g., crashed or
-        // network partition), fall back to idle after the same timeout used by
-        // the message-based heuristic.
-        idleTimerRef.current = setTimeout(() => {
-          setAgentActivity('idle');
-        }, IDLE_TIMEOUT_MS);
+        // network partition), verify with the DO before decaying to idle.
+        // This prevents false idle during long tool calls (npm install, etc.)
+        // where no tokens stream for 30+ seconds.
+        const armVerifyTimer = () => {
+          idleTimerRef.current = setTimeout(async () => {
+            try {
+              const data = await getChatSession(projectId, sessionId, { limit: 0 });
+              if (data.state?.activity === 'prompting') {
+                // Server confirms still prompting — re-arm the timer
+                armVerifyTimer();
+              } else {
+                // Server says idle/stopped/error — decay to idle
+                setAgentActivity('idle');
+                setPromptStartedAt(null);
+              }
+            } catch {
+              // Network error — decay to idle as safety fallback
+              setAgentActivity('idle');
+              setPromptStartedAt(null);
+            }
+          }, IDLE_TIMEOUT_MS);
+        };
+        armVerifyTimer();
       }
-    }, []),
+    }, [projectId, sessionId]),
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
@@ -219,8 +237,9 @@ export function useSessionLifecycle(
     setSession,
   });
 
-  // Reset virtual scroll on session change
+  // Reset virtual scroll and idle timer on session change
   useEffect(() => {
+    clearTimeout(idleTimerRef.current);
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
   }, [sessionId]);

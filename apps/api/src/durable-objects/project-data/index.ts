@@ -307,7 +307,11 @@ export class ProjectData extends DurableObject<Env> {
     ).toArray()[0];
     const chatSessionId = (acpRow?.chat_session_id as string | undefined) ?? sessionId;
 
-    this.broadcastEvent('session.activity', { sessionId: chatSessionId, activity }, chatSessionId);
+    this.broadcastEvent('session.activity', {
+      sessionId: chatSessionId,
+      activity,
+      promptStartedAt: extra?.promptStartedAt ?? null,
+    }, chatSessionId);
   }
 
   getSessionState(sessionId: string) {

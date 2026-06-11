@@ -117,6 +117,9 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	// Sync refreshed credentials back to the control plane before cleanup.
 	h.syncCredentialOnStop(snap)
 
+	// Report idle to the control plane so the browser status bar clears.
+	h.reportActivity("idle")
+
 	h.cancel()
 
 	h.reportLifecycle("info", "SessionHost suspended", map[string]interface{}{
