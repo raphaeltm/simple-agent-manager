@@ -69,6 +69,22 @@ cache) speaking the docker registry v2 protocol, so that:
 - **Edge body limit remains the open risk**: docker uploads each layer as one
   PATCH; Workers caps request bodies at 100/200/500MB by plan. Not testable in
   `wrangler dev` — validate first when this deploys.
+- **Specialist reviews (2026-06-11)**: security-auditor (conditional pass, 0
+  CRITICAL / 3 HIGH) and cloudflare-specialist (pass for spike). All 3 HIGH
+  security findings fixed in-branch: (1) JWT header `alg` now validated as
+  HS256 in `verifyRegistryToken` (algorithm-confusion guard, tested with
+  `none`/`RS256`/missing-alg forgeries); (2) `iss`/`aud` now verified against
+  expected issuer/audience passed by the caller (mismatch tests added);
+  (3) project IDs lowercase-normalized once at issuance in `resolveProjectId`
+  so `claims.sub` and the namespace can never disagree on case. Also fixed:
+  Basic-auth colon-presence check, TTL bounds (default 1800, clamped to 3600,
+  `'0'`/invalid falls back), `console.error` on invalid `DEV_PROJECT_TOKENS`,
+  shared `TOKEN_ISSUER` constant, CryptoKey caching per secret (CF reviewer
+  HIGH), documented DELETE→push mapping and WHATWG path-normalization
+  assumptions, dot-segment traversal + `%2f` encoding tests. 57 tests passing.
+  Remaining CF-reviewer items are production-gated (vitest-pool-workers
+  migration, real registry.cloudflare.com redirect behavior, body-size cap) —
+  tracked in Production Notes below.
 
 ## Production Notes (Out of Spike Scope)
 

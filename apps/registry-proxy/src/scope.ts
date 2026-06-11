@@ -49,6 +49,11 @@ const REPO_RESOURCES = ['manifests', 'blobs', 'tags', 'referrers'] as const;
  * Parse a /v2/... pathname. Repository names contain slashes, so we locate the
  * last occurrence of a known resource segment and treat everything before it
  * as the repository name.
+ *
+ * Callers must pass `new URL(...).pathname` (WHATWG-normalized): percent
+ * sequences like %2e%2e are NOT decoded into path separators/dot-segments by
+ * the URL parser, and literal `..` segments are collapsed before this function
+ * ever sees them, so traversal cannot move a request out of its namespace.
  */
 export function parseV2Path(pathname: string): ParsedV2Path {
   if (pathname === '/v2' || pathname === '/v2/') {
@@ -74,7 +79,14 @@ export function parseV2Path(pathname: string): ParsedV2Path {
   return { kind: 'unknown' };
 }
 
-/** Map an HTTP method to the registry action it requires. */
+/**
+ * Map an HTTP method to the registry action it requires.
+ *
+ * Deliberate: DELETE maps to 'push' rather than a distinct 'delete' action.
+ * The proxy never grants 'delete' (token issuance filters to pull/push only),
+ * so deletes are gated by push access. If finer-grained delete control is
+ * needed in production, add 'delete' to the grant grammar explicitly.
+ */
 export function requiredAction(method: string): 'pull' | 'push' {
   return method === 'GET' || method === 'HEAD' ? 'pull' : 'push';
 }

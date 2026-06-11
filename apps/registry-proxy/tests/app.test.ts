@@ -56,7 +56,9 @@ describe('GET /token', () => {
     const payload = JSON.parse(
       atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
     ) as RegistryTokenClaims;
-    expect(payload.sub).toBe('ProjA');
+    // Project IDs are lowercase-normalized at issuance (the dev map stores
+    // 'ProjA') so claims.sub and the namespace can never disagree on case.
+    expect(payload.sub).toBe('proja');
     expect(payload.access).toEqual([
       { type: 'repository', name: 'proj-proja/app', actions: ['push', 'pull'] },
     ]);
@@ -74,6 +76,31 @@ describe('GET /token', () => {
       { type: 'repository', name: 'proj-projb/other', actions: [] },
       { type: 'repository', name: 'proj-proja/mine', actions: ['pull'] },
     ]);
+  });
+
+  it('falls back to the default TTL when TOKEN_TTL_SECONDS is zero or invalid', async () => {
+    const res = await app.request('https://proxy.test/token', {
+      headers: { Authorization: basicAuth('sam-token-a') },
+    }, { ...ENV, TOKEN_TTL_SECONDS: '0' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { expires_in: number };
+    expect(body.expires_in).toBe(1800);
+  });
+
+  it('clamps oversized TTLs to the 1 hour maximum', async () => {
+    const res = await app.request('https://proxy.test/token', {
+      headers: { Authorization: basicAuth('sam-token-a') },
+    }, { ...ENV, TOKEN_TTL_SECONDS: '999999' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { expires_in: number };
+    expect(body.expires_in).toBe(3600);
+  });
+
+  it('401s malformed Basic credentials without a colon separator', async () => {
+    const res = await app.request('https://proxy.test/token', {
+      headers: { Authorization: `Basic ${btoa('sam-token-a')}` },
+    }, ENV);
+    expect(res.status).toBe(401);
   });
 
   it('filters unknown actions out of the grant', async () => {
@@ -127,6 +154,30 @@ describe('/v2 data path', () => {
     const res = await app.request('https://proxy.test/v2/proj-projb/victim/manifests/latest', {
       headers: { Authorization: `Bearer ${forged}` },
     }, ENV);
+    expect(res.status).toBe(403);
+  });
+
+  it('403s dot-segment traversal out of the namespace', async () => {
+    const token = await issueToken(['repository:proj-proja/app:pull,push']);
+    // WHATWG URL parsing collapses ../ before path parsing, so this resolves
+    // to proj-projb/victim — which the proja token must not reach.
+    const res = await app.request(
+      'https://proxy.test/v2/proj-proja/app/../../proj-projb/victim/manifests/latest',
+      { headers: { Authorization: `Bearer ${token}` } },
+      ENV
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('403s percent-encoded slash tricks (no double-decode)', async () => {
+    const token = await issueToken(['repository:proj-proja/app:pull,push']);
+    // %2f is NOT decoded into a path separator by the URL parser, so the
+    // repository name simply fails the namespace prefix check.
+    const res = await app.request(
+      'https://proxy.test/v2/proj-projb%2fvictim/manifests/latest',
+      { headers: { Authorization: `Bearer ${token}` } },
+      ENV
+    );
     expect(res.status).toBe(403);
   });
 

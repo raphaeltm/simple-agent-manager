@@ -32,6 +32,13 @@ export interface Env {
   UPSTREAM_PASSWORD?: string;
 }
 
+/** Issuer claim baked into every token; verified again on the data path. */
+const TOKEN_ISSUER = 'sam-registry-proxy';
+
+/** TTL bounds: never issue a non-positive TTL, and cap at 1 hour. */
+const DEFAULT_TOKEN_TTL_SECONDS = 1800;
+const MAX_TOKEN_TTL_SECONDS = 3600;
+
 const app = new Hono<{ Bindings: Env }>();
 
 function unauthorized(c: { req: { url: string } }, env: Env): Response {
@@ -64,8 +71,12 @@ function resolveProjectId(samToken: string, env: Env): string | null {
   }
   try {
     const map = JSON.parse(env.DEV_PROJECT_TOKENS) as Record<string, string>;
-    return map[samToken] ?? null;
-  } catch {
+    const projectId = map[samToken];
+    // Normalize once at issuance so claims.sub and the repository namespace
+    // can never disagree on case.
+    return projectId ? projectId.toLowerCase() : null;
+  } catch (err) {
+    console.error('registry-proxy: DEV_PROJECT_TOKENS is not valid JSON', err);
     return null;
   }
 }
@@ -80,7 +91,13 @@ app.get('/token', async (c) => {
   let samToken: string;
   try {
     const decoded = atob(auth.slice('Basic '.length));
-    samToken = decoded.slice(decoded.indexOf(':') + 1);
+    const colon = decoded.indexOf(':');
+    if (colon === -1) {
+      // Malformed Basic credentials (no user:password separator) — reject
+      // explicitly rather than treating the whole string as a token.
+      return unauthorized(c, env);
+    }
+    samToken = decoded.slice(colon + 1);
   } catch {
     return unauthorized(c, env);
   }
@@ -108,12 +125,15 @@ app.get('/token', async (c) => {
     });
   }
 
-  const ttl = Number.parseInt(env.TOKEN_TTL_SECONDS, 10) || 1800;
+  const parsedTtl = Number.parseInt(env.TOKEN_TTL_SECONDS, 10);
+  const ttl = Number.isFinite(parsedTtl) && parsedTtl > 0
+    ? Math.min(parsedTtl, MAX_TOKEN_TTL_SECONDS)
+    : DEFAULT_TOKEN_TTL_SECONDS;
   const now = Math.floor(Date.now() / 1000);
   const token = await signRegistryToken(
     {
       sub: projectId,
-      iss: 'sam-registry-proxy',
+      iss: TOKEN_ISSUER,
       aud: env.REGISTRY_SERVICE,
       iat: now,
       exp: now + ttl,
@@ -129,7 +149,10 @@ app.all('/v2/*', async (c) => {
   const env = c.env;
   const auth = c.req.header('Authorization') || '';
   const claims = auth.startsWith('Bearer ')
-    ? await verifyRegistryToken(auth.slice('Bearer '.length), env.TOKEN_SIGNING_SECRET)
+    ? await verifyRegistryToken(auth.slice('Bearer '.length), env.TOKEN_SIGNING_SECRET, {
+        issuer: TOKEN_ISSUER,
+        audience: env.REGISTRY_SERVICE,
+      })
     : null;
   if (!claims) {
     return unauthorized(c, env);
