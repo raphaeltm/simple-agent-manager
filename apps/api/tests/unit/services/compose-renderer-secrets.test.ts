@@ -47,6 +47,16 @@ describe('collectSecretNames', () => {
     expect(collectSecretNames(manifest)).toEqual([]);
   });
 
+  it('returns empty array (not throws) when services object is empty', () => {
+    const manifest: DeploymentManifest = {
+      version: 1,
+      services: {},
+      volumes: {},
+      routes: [],
+    };
+    expect(collectSecretNames(manifest)).toEqual([]);
+  });
+
   it('returns sorted unique names from a single service', () => {
     const manifest = makeManifest({
       DB_URL: { secret: 'ZEBRA_SECRET' },
