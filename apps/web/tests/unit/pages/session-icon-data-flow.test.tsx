@@ -21,7 +21,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionListItem, ChatSessionResponse } from '../../../src/lib/api';
 import { SessionItem } from '../../../src/pages/project-chat/SessionItem';
-import type { SessionTreeNode } from '../../../src/pages/project-chat/sessionTree';
 import { SessionTreeItem } from '../../../src/pages/project-chat/SessionTreeItem';
 import type { TaskInfo } from '../../../src/pages/project-chat/useTaskGroups';
 
@@ -53,18 +52,6 @@ function makeListSession(overrides: Partial<ChatSessionListItem> = {}): ChatSess
 /** Simulate a session as returned by the detail endpoint (with optional task embed). */
 function makeDetailSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionResponse {
   return { ...SESSION_DEFAULTS, ...overrides };
-}
-
-/** Wrap a session in a minimal SessionTreeNode. */
-function makeTreeNode(session: ChatSessionListItem): SessionTreeNode {
-  return {
-    session,
-    children: [],
-    depth: 0,
-    isContextAnchor: false,
-    totalDescendants: 0,
-    completedDescendants: 0,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,14 +99,11 @@ describe('Session icon data flow: list session + task status → correct icon', 
 
   for (const { label, taskStatus, sessionStatus, expectedTitle } of cases) {
     it(label, () => {
-      // Simulate API: session has taskId but NO task embed (list endpoint)
       const session = makeListSession({
         taskId: 'task-1',
         status: sessionStatus,
-        // Importantly: no `task` field — this is what the list API returns
       });
 
-      // Simulate API: task list returns status separately
       const taskInfoMap = new Map<string, TaskInfo>([
         ['task-1', {
           id: 'task-1',
@@ -133,25 +117,21 @@ describe('Session icon data flow: list session + task status → correct icon', 
         }],
       ]);
 
-      const node = makeTreeNode(session);
-
       const { container } = render(
         <SessionTreeItem
-          node={node}
+          session={session}
           selectedSessionId={null}
           onSelect={() => {}}
           taskInfoMap={taskInfoMap}
         />,
       );
 
-      // The status icon has a title attribute set to the attention state label
       const iconSpan = container.querySelector(`[title="${expectedTitle}"]`);
       expect(iconSpan, `Expected icon with title="${expectedTitle}" for ${label}`).toBeTruthy();
     });
   }
 
   it('session without task shows correct lifecycle icon', () => {
-    // Conversation session (no task) that is idle
     const session = makeListSession({
       status: 'active',
       isIdle: true,
@@ -160,7 +140,7 @@ describe('Session icon data flow: list session + task status → correct icon', 
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={new Map()}
@@ -193,7 +173,7 @@ describe('Session icon data flow: list session + task status → correct icon', 
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
@@ -211,8 +191,6 @@ describe('Session icon data flow: list session + task status → correct icon', 
 
 describe('Session with existing task embed (detail endpoint)', () => {
   it('preserves task data from detail endpoint without overwriting', () => {
-    // When a session is loaded from the detail endpoint, it already has
-    // the full task embed. The enrichment should NOT overwrite it.
     const session = makeDetailSession({
       taskId: 'task-1',
       status: 'stopped',
@@ -239,7 +217,7 @@ describe('Session with existing task embed (detail endpoint)', () => {
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
@@ -292,9 +270,6 @@ describe('SessionItem renders correct icon for each attention state', () => {
 
 describe('Session mode enrichment: conversation vs task', () => {
   it('conversation-mode session shows MessageSquare icon, not ListTodo', () => {
-    // List endpoint returns a session with taskId but no task embed.
-    // Without enrichment, getSessionMode falls back to "if taskId, return task"
-    // which is wrong for conversation-mode sessions.
     const session = makeListSession({
       taskId: 'task-conv',
       status: 'active',
@@ -315,14 +290,13 @@ describe('Session mode enrichment: conversation vs task', () => {
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
       />,
     );
 
-    // SessionItem renders a mode badge with title="Task" or title="Conversation"
     const modeLabel = container.querySelector('[title="Conversation"]');
     expect(modeLabel, 'Conversation-mode session should have title="Conversation"').toBeTruthy();
   });
@@ -348,7 +322,7 @@ describe('Session mode enrichment: conversation vs task', () => {
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}

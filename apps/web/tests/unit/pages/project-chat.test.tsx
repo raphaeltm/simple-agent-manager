@@ -498,17 +498,22 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Older (2)' })).toBeInTheDocument();
     });
-    expect(screen.queryByLabelText('View task hierarchy')).not.toBeInTheDocument();
+    // Before expanding Older, no hierarchy buttons visible
+    expect(screen.queryByLabelText('Has subtasks')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Subtask')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Older (2)' }));
 
     await waitFor(() => {
       expect(screen.getByText('Child dispatched task')).toBeInTheDocument();
     });
-    const hierarchyButtons = await screen.findAllByLabelText('View task hierarchy');
-    expect(hierarchyButtons).toHaveLength(2);
+    // Parent gets "Has subtasks", child gets "Subtask" (role-differentiated icons)
+    const parentBtn = await screen.findByLabelText('Has subtasks');
+    const childBtn = await screen.findByLabelText('Subtask');
+    expect(parentBtn).toBeInTheDocument();
+    expect(childBtn).toBeInTheDocument();
 
-    fireEvent.click(hierarchyButtons[1]);
+    fireEvent.click(childBtn);
 
     const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
     expect(dialog).toHaveAttribute('data-focus-task-id', 'child-task');
