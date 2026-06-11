@@ -7,9 +7,8 @@
  */
 
 import { DeploymentManifestSchema } from '../deployment-manifest/schema';
-
-import type { ComposeParseError, ComposeResolveResult, ImageResolver, UnresolvedManifest } from './types';
 import { isDigestReference } from './parse';
+import type { ComposeParseError, ComposeResolveResult, ImageResolver, UnresolvedManifest } from './types';
 
 /**
  * Resolve all image references in an UnresolvedManifest from tags to digests,

@@ -9,7 +9,6 @@
 
 import { parse as parseYaml } from 'yaml';
 
-import type { ComposeParseError, ComposeParseResult, UnresolvedImage, UnresolvedManifest, UnresolvedService } from './types';
 import {
   DENIED_SERVICE_FIELDS,
   DENIED_TOP_LEVEL_FIELDS,
@@ -18,6 +17,7 @@ import {
   TOP_LEVEL_ALLOWED,
   TOP_LEVEL_IGNORED,
 } from './constants';
+import type { ComposeParseError, ComposeParseResult, UnresolvedImage, UnresolvedManifest, UnresolvedService } from './types';
 
 // =============================================================================
 // Main entry point

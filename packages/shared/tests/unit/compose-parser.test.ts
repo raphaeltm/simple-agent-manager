@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { parseCompose, resolveManifest, isDigestReference, DENIED_SERVICE_FIELDS, DENIED_TOP_LEVEL_FIELDS } from '../../src/compose-parser';
-import type { ImageResolver, UnresolvedManifest } from '../../src/compose-parser';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { ImageResolver } from '../../src/compose-parser';
+import { DENIED_SERVICE_FIELDS, DENIED_TOP_LEVEL_FIELDS, isDigestReference, parseCompose, resolveManifest } from '../../src/compose-parser';
 
 // =============================================================================
 // Helpers
