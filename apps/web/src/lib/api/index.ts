@@ -119,12 +119,15 @@ export {
   validateCredential,
 } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
-export type { ProjectDeploymentGcpResponse } from './deployment';
+export type { DeploymentSecretEntry, ProjectDeploymentGcpResponse } from './deployment';
 export {
+  deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
   getDeployOAuthResult,
   getProjectDeploymentGcp,
+  listDeploymentSecrets,
   listGcpProjectsForDeploy,
+  setDeploymentSecret,
   setupProjectDeploymentGcp,
 } from './deployment';
 export type {

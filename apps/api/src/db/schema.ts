@@ -1845,6 +1845,7 @@ export const deploymentEnvironments = sqliteTable(
     updatedAt: text('updated_at')
       .notNull()
       .default(sql`(datetime('now'))`),
+    secretsUpdatedAt: text('secrets_updated_at'),
   },
   (table) => ({
     projectNameUnique: uniqueIndex('idx_deployment_environments_project_name').on(
@@ -1857,6 +1858,39 @@ export const deploymentEnvironments = sqliteTable(
 
 export type DeploymentEnvironmentRow = typeof deploymentEnvironments.$inferSelect;
 export type NewDeploymentEnvironmentRow = typeof deploymentEnvironments.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT SECRETS
+// =============================================================================
+
+export const deploymentSecrets = sqliteTable(
+  'deployment_secrets',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    encryptedValue: text('encrypted_value').notNull(),
+    iv: text('iv').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envNameUnique: uniqueIndex('idx_deployment_secrets_env_name').on(
+      table.environmentId,
+      table.name,
+    ),
+    environmentIdIdx: index('idx_deployment_secrets_environment_id').on(table.environmentId),
+  }),
+);
+
+export type DeploymentSecretRow = typeof deploymentSecrets.$inferSelect;
+export type NewDeploymentSecretRow = typeof deploymentSecrets.$inferInsert;
 
 // =============================================================================
 // DEPLOYMENT RELEASES
