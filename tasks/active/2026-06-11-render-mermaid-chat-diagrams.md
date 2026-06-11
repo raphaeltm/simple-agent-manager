@@ -26,8 +26,8 @@ Project chat renders fenced `mermaid` code blocks as syntax-highlighted code ins
 - [x] Add a fixed fullscreen overlay with Escape close, focus return, reset, copy source, pointer/touch pan, wheel/pinch zoom, and mobile-safe layout.
 - [x] Add graceful error state for invalid Mermaid that does not crash the message and allows copying/viewing source.
 - [x] Add unit tests for Mermaid rendering, error handling, `<pre>` unwrapping, streaming deferral, non-Mermaid code regressions, inline code, language-less code, and SVG sanitization.
-- [ ] Add/extend Playwright visual audit coverage through the real project chat route for normal, long/wide, invalid, and fullscreen Mermaid diagrams on mobile and desktop.
-- [ ] Run package/app quality checks and required Playwright visual audit; inspect screenshots for nonblank SVGs, no viewport overflow, usable controls, and fullscreen behavior.
+- [x] Add/extend Playwright visual audit coverage through the real project chat route for normal, long/wide, invalid, and fullscreen Mermaid diagrams on mobile and desktop.
+- [x] Run package/app quality checks and required Playwright visual audit; inspect screenshots for nonblank SVGs, no viewport overflow, usable controls, and fullscreen behavior.
 - [ ] Run specialist review before PR: `task-completion-validator`, `ui-ux-specialist`, `security-auditor`, `constitution-validator`, and `test-engineer`.
 
 ## Acceptance Criteria

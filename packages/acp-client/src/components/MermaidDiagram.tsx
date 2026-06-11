@@ -12,6 +12,7 @@ import {
   useState,
   type WheelEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 const MERMAID_FONT =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -85,6 +86,11 @@ export const MERMAID_SVG_SANITIZE_CONFIG = {
 
 let mermaidInitialized = false;
 let mermaidRenderCounter = 0;
+
+function cleanupMermaidTempElements(diagramId: string) {
+  document.getElementById(diagramId)?.remove();
+  document.getElementById(`d${diagramId}`)?.remove();
+}
 
 async function renderMermaidSvg(code: string, diagramId: string): Promise<string> {
   const mermaidModule = await import('mermaid');
@@ -245,7 +251,16 @@ function MermaidViewport({
       className={`min-w-0 overflow-hidden bg-[#0b1110] ${
         fullscreen ? 'h-full rounded-lg' : 'h-[260px] max-h-[420px] rounded-b-lg'
       }`}
-      style={{ touchAction: 'none' }}
+      style={{
+        touchAction: 'none',
+        minWidth: 0,
+        overflow: 'hidden',
+        backgroundColor: '#0b1110',
+        height: fullscreen ? '100%' : '260px',
+        maxHeight: fullscreen ? undefined : '420px',
+        borderBottomLeftRadius: fullscreen ? undefined : '0.5rem',
+        borderBottomRightRadius: fullscreen ? undefined : '0.5rem',
+      }}
       onWheel={applyZoom}
       onPointerDown={startPan}
       onPointerMove={pan}
@@ -274,17 +289,18 @@ export function MermaidDiagram({ code }: { code: string }) {
     setError(null);
     renderMermaidSvg(code, diagramId)
       .then((sanitizedSvg) => {
+        cleanupMermaidTempElements(diagramId);
         if (!cancelled) setSvg(sanitizedSvg);
       })
       .catch((err: unknown) => {
+        cleanupMermaidTempElements(diagramId);
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to render diagram');
         }
       });
     return () => {
       cancelled = true;
-      document.getElementById(diagramId)?.remove();
-      document.getElementById(`d${diagramId}`)?.remove();
+      cleanupMermaidTempElements(diagramId);
     };
   }, [code, diagramId]);
 
@@ -327,27 +343,112 @@ export function MermaidDiagram({ code }: { code: string }) {
     </>
   );
 
+  const fullscreenOverlay = isFullscreen ? createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mermaid diagram"
+      data-testid="mermaid-diagram-fullscreen"
+      className="fixed inset-0 z-[2147483647] flex flex-col bg-gray-950 text-gray-100"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2147483647,
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: '#030712',
+        color: '#f3f4f6',
+      }}
+    >
+      <div
+        className="flex min-h-14 items-center justify-between gap-3 border-b border-gray-800 px-4 py-2"
+        style={{
+          alignItems: 'center',
+          borderBottom: '1px solid #1f2937',
+          display: 'flex',
+          gap: '0.75rem',
+          justifyContent: 'space-between',
+          minHeight: '3.5rem',
+          padding: '0.5rem 1rem',
+        }}
+      >
+        <div className="min-w-0 text-sm font-medium">Mermaid diagram</div>
+        <div className="flex shrink-0 items-center gap-2" style={{ display: 'flex', flexShrink: 0, gap: '0.5rem' }}>
+          <IconButton label="Copy Mermaid source" onClick={() => copyToClipboard(code)}>
+            <Copy aria-hidden="true" size={16} />
+          </IconButton>
+          <IconButton label="Reset diagram view" onClick={() => setResetToken((value) => value + 1)}>
+            <RotateCcw aria-hidden="true" size={16} />
+          </IconButton>
+          <IconButton label="Close Mermaid diagram" onClick={() => setIsFullscreen(false)}>
+            <X aria-hidden="true" size={16} />
+          </IconButton>
+        </div>
+      </div>
+      <div
+        className="min-h-0 flex-1 p-3 sm:p-4"
+        style={{ flex: 1, minHeight: 0, padding: '0.75rem' }}
+      >
+        <MermaidViewport
+          svg={svg}
+          testId="mermaid-diagram-fullscreen-svg"
+          fullscreen
+          resetToken={resetToken}
+        />
+      </div>
+    </div>,
+    document.body,
+  ) : null;
+
   if (error) {
     return (
       <div
         data-testid="mermaid-diagram-error"
         className="my-2 min-w-0 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-950"
+        style={{
+          backgroundColor: '#2a1215',
+          border: '1px solid #ef4444',
+          color: '#fecaca',
+        }}
       >
-        <div className="font-medium">Mermaid diagram error</div>
-        <div className="mt-1 break-words text-red-800">{error}</div>
+        <div className="font-medium" style={{ color: '#fee2e2', fontWeight: 600 }}>
+          Mermaid diagram error
+        </div>
+        <div className="mt-1 break-words text-red-800" style={{ color: '#fecaca', marginTop: '0.25rem' }}>{error}</div>
         <div className="mt-3 flex items-center gap-2">
           <button
             type="button"
             onClick={() => copyToClipboard(code)}
             className="inline-flex min-h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm text-red-900 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
+            style={{
+              alignItems: 'center',
+              backgroundColor: '#111827',
+              border: '1px solid #ef4444',
+              color: '#fee2e2',
+              display: 'inline-flex',
+              gap: '0.5rem',
+              minHeight: '2.25rem',
+              padding: '0.375rem 0.75rem',
+            }}
           >
             <Copy aria-hidden="true" size={15} />
             Copy source
           </button>
         </div>
         <details className="mt-3">
-          <summary className="cursor-pointer text-red-900">View source</summary>
-          <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-red-950 p-3 text-xs text-red-50">
+          <summary className="cursor-pointer text-red-900" style={{ color: '#fee2e2', cursor: 'pointer' }}>
+            View source
+          </summary>
+          <pre
+            className="mt-2 max-h-48 overflow-auto rounded-md bg-red-950 p-3 text-xs text-red-50"
+            style={{
+              backgroundColor: '#111827',
+              color: '#fee2e2',
+              maxHeight: '12rem',
+              overflow: 'auto',
+              padding: '0.75rem',
+            }}
+          >
             {code}
           </pre>
         </details>
@@ -375,38 +476,7 @@ export function MermaidDiagram({ code }: { code: string }) {
         </div>
       )}
 
-      {isFullscreen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Mermaid diagram"
-          data-testid="mermaid-diagram-fullscreen"
-          className="fixed inset-0 z-[1000] flex flex-col bg-gray-950 text-gray-100"
-        >
-          <div className="flex min-h-14 items-center justify-between gap-3 border-b border-gray-800 px-4 py-2">
-            <div className="min-w-0 text-sm font-medium">Mermaid diagram</div>
-            <div className="flex shrink-0 items-center gap-2">
-              <IconButton label="Copy Mermaid source" onClick={() => copyToClipboard(code)}>
-                <Copy aria-hidden="true" size={16} />
-              </IconButton>
-              <IconButton label="Reset diagram view" onClick={() => setResetToken((value) => value + 1)}>
-                <RotateCcw aria-hidden="true" size={16} />
-              </IconButton>
-              <IconButton label="Close Mermaid diagram" onClick={() => setIsFullscreen(false)}>
-                <X aria-hidden="true" size={16} />
-              </IconButton>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 p-3 sm:p-4">
-            <MermaidViewport
-              svg={svg}
-              testId="mermaid-diagram-fullscreen-svg"
-              fullscreen
-              resetToken={resetToken}
-            />
-          </div>
-        </div>
-      )}
+      {fullscreenOverlay}
     </div>
   );
 }
