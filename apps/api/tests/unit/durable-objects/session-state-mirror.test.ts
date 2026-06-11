@@ -106,10 +106,11 @@ function createMockSql() {
           row.status_error = params[1];
         }
       } else if (q.includes("activity = 'idle'") && q.includes('activity_at < ?')) {
-        // Bulk reconcile
+        // Bulk reconcile — heals prompting, error, and recovering states
+        const healable = ['prompting', 'error', 'recovering'];
         const cutoff = params[1] as number;
         for (const row of tables.session_state) {
-          if (row.activity === 'prompting' && (row.activity_at as number) < cutoff) {
+          if (healable.includes(row.activity as string) && (row.activity_at as number) < cutoff) {
             row.activity = 'idle';
             row.activity_at = params[0];
           }
@@ -126,10 +127,11 @@ function createMockSql() {
         const row = tables.session_state.find(r => r.session_id === params[0]);
         return { toArray: () => row ? [row] : [] };
       }
-      if (q.includes("WHERE activity = 'prompting' AND activity_at < ?")) {
+      if (q.includes("activity IN ('prompting', 'error', 'recovering')") && q.includes('activity_at < ?')) {
+        const healable = ['prompting', 'error', 'recovering'];
         const cutoff = params[0] as number;
         const rows = tables.session_state.filter(
-          r => r.activity === 'prompting' && (r.activity_at as number) < cutoff
+          r => healable.includes(r.activity as string) && (r.activity_at as number) < cutoff
         );
         return { toArray: () => rows };
       }
