@@ -18,6 +18,19 @@ The actual bug: all failure logging in `reportActivity()` was at `slog.Debug` le
 
 When you encounter a feature that "doesn't work" or "is unreliable," you MUST complete these steps **in order** before proposing changes to the architecture:
 
+### Step 0: Preserve the Exact Symptom
+
+Before explaining the problem, restate the user's concrete observation and keep that observation intact while you investigate. Do not normalize it into a nearby backend state or a theory that is easier to prove.
+
+If production records disagree with what the user saw:
+
+1. **Say what is evidence-backed.** Example: "D1 shows one medium node in this window."
+2. **Say what remains unproven.** Example: "That does not explain the second medium node card you saw."
+3. **Keep parallel hypotheses open.** Backend state, UI cache/state, optimistic rendering, polling races, stale client data, and log gaps are distinct explanations.
+4. **Label inferences explicitly.** Do not present a UI rendering or cache artifact as fact until you have traced the client data path.
+
+The goal is not to agree with every remembered detail automatically. The goal is to answer the exact question first, then reconcile the mismatch without arguing the user out of the symptom they reported.
+
 ### Step 1: Measure, Don't Assume
 
 Before claiming any system component is slow, unreliable, or a bottleneck:
@@ -62,6 +75,7 @@ If, after Steps 1-3, you still believe an architectural change is needed, your p
 | Anti-Pattern                                     | Why It's Wrong                                                                 | What to Do Instead                          |
 | ------------------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------- |
 | "The DO path is probably slow"                   | Unmeasured assumption; CF DOs are sub-100ms                                    | Check the logs. If no logs exist, add them. |
+| "The data says you didn't see that"              | Backend state can diverge from what the UI rendered                            | Preserve the reported symptom and trace both backend and client state. |
 | "Let's add a heartbeat/polling mechanism"        | Polling is inferior to event-driven when events already fire at the right time | Fix the event delivery path.                |
 | "Let's add a second WebSocket/channel"           | Adds complexity and state-merging problems                                     | Fix the existing channel.                   |
 | "The system is unreliable, let's add redundancy" | Redundancy hides bugs; it doesn't fix them                                     | Find and fix the bug.                       |
@@ -77,6 +91,7 @@ If, after Steps 1-3, you still believe an architectural change is needed, your p
 
 Before proposing any architectural change to fix a "broken" or "unreliable" feature:
 
+- [ ] Restated the user's exact observed symptom before broadening the diagnosis
 - [ ] Cited specific latency measurements or log lines showing the existing path fails
 - [ ] Traced the complete existing path from origin to destination
 - [ ] Identified the exact point of failure (not "somewhere in the middle")

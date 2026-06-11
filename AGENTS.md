@@ -58,6 +58,7 @@ These are Codex-facing reminders for recurring SAM workflow failures. The durabl
 | --------- | -- |
 | Starting SAM-managed work | Call the SAM MCP `get_instructions` tool first and apply returned knowledge and policy directives. |
 | Debugging a live issue Raphaël is seeing | Inspect production evidence first unless the issue is explicitly about staging or a branch verification. Use staging for PR validation and new-change verification. |
+| User corrects a production/UI diagnosis | Preserve the exact symptom the user observed, separate evidence from inference, and investigate UI/client-state artifacts when backend records disagree. |
 | Debugging staging or deployment behavior | Query Cloudflare state/logs before guessing or redeploying. Staging deploys are slow; CF API checks are fast. |
 | User asks for "subtasks" | Use SAM `dispatch_task` for visible delegated work. |
 | User asks for "local subagents" | Use local Claude/Codex subagents for in-session critique or reasoning, not SAM-dispatched tasks. |
