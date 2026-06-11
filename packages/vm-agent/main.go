@@ -78,16 +78,15 @@ func runDeploymentMode(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Initialize signature verifier (optional — if no key is set, verification is skipped)
-	var verifier *deploy.Verifier
-	if cfg.DeploySigningPubKey != "" {
-		verifier, err = deploy.NewVerifier(cfg.DeploySigningPubKey)
-		if err != nil {
-			slog.Error("Failed to initialize deploy signature verifier", "error", err)
-			os.Exit(1)
-		}
-	} else {
-		slog.Warn("deploy: no signing public key configured, payload verification disabled")
+	// Initialize signature verifier — required for deployment mode
+	if cfg.DeploySigningPubKey == "" {
+		slog.Error("deploy: DEPLOY_SIGNING_PUB_KEY is required in deployment mode")
+		os.Exit(1)
+	}
+	verifier, err := deploy.NewVerifier(cfg.DeploySigningPubKey)
+	if err != nil {
+		slog.Error("Failed to initialize deploy signature verifier", "error", err)
+		os.Exit(1)
 	}
 
 	// Create deploy engine

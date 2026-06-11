@@ -20,9 +20,8 @@ type Engine struct {
 	verifier *Verifier
 	cfg      EngineConfig
 
-	// Apply mutex: only one apply at a time
+	// Apply mutex: only one apply at a time. Use TryLock() to reject concurrent applies.
 	applyMu sync.Mutex
-	applying bool
 
 	// Observed state (thread-safe reads)
 	observedMu sync.RWMutex
@@ -63,6 +62,14 @@ func (e *Engine) SetCallbackToken(token string) {
 	e.cfg.CallbackToken = token
 }
 
+// SetVerifierKey updates the signing public key via the verifier's dual-key rotation.
+func (e *Engine) SetVerifierKey(pubKeyB64 string) error {
+	if e.verifier == nil {
+		return fmt.Errorf("no verifier configured")
+	}
+	return e.verifier.SetCurrentKey(pubKeyB64)
+}
+
 // ReconcileOnStart reads disk state and verifies running containers match.
 // It never recreates containers — it only updates the observed state.
 func (e *Engine) ReconcileOnStart(ctx context.Context) error {
@@ -100,19 +107,11 @@ func (e *Engine) ReconcileOnStart(ctx context.Context) error {
 // Apply executes an apply payload: verify, write to disk, pull, up, health check.
 // Returns an error if the apply is rejected (signature, mutex, etc.) or fails.
 func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
-	// Acquire apply mutex
-	e.applyMu.Lock()
-	if e.applying {
-		e.applyMu.Unlock()
+	// Acquire apply mutex — TryLock rejects concurrent applies immediately
+	if !e.applyMu.TryLock() {
 		return fmt.Errorf("apply in progress")
 	}
-	e.applying = true
-	e.applyMu.Unlock()
-	defer func() {
-		e.applyMu.Lock()
-		e.applying = false
-		e.applyMu.Unlock()
-	}()
+	defer e.applyMu.Unlock()
 
 	// Get current applied seq for verification
 	currentSeq, err := e.disk.CurrentSeq()
@@ -121,10 +120,11 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	}
 
 	// Verify signature and binding constraints
-	if e.verifier != nil {
-		if err := e.verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
-			return fmt.Errorf("payload verification failed: %w", err)
-		}
+	if e.verifier == nil {
+		return fmt.Errorf("no signature verifier configured — refusing to apply unsigned payload")
+	}
+	if err := e.verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
+		return fmt.Errorf("payload verification failed: %w", err)
 	}
 
 	slog.Info("deploy.apply: starting",
@@ -274,10 +274,11 @@ func (e *Engine) FetchAndApply(ctx context.Context, pendingSeq int64) error {
 }
 
 func (e *Engine) fetchRelease(ctx context.Context, seq int64) (*ApplyPayload, error) {
-	url := fmt.Sprintf("%s/api/nodes/%s/deploy-release?seq=%d",
+	url := fmt.Sprintf("%s/api/nodes/%s/deploy-release?seq=%d&environmentId=%s",
 		strings.TrimRight(e.cfg.ControlPlaneURL, "/"),
 		e.cfg.NodeID,
 		seq,
+		e.cfg.EnvironmentID,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -335,7 +336,8 @@ func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...str
 }
 
 func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
-	deadline := time.After(e.cfg.HealthTimeout)
+	deadline := time.NewTimer(e.cfg.HealthTimeout)
+	defer deadline.Stop()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -343,7 +345,7 @@ func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-deadline:
+		case <-deadline.C:
 			return fmt.Errorf("health check timed out after %s", e.cfg.HealthTimeout)
 		case <-ticker.C:
 			services, err := e.inspectServices(ctx, seq)

@@ -65,11 +65,35 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // Verify the environment exists
+  // Look up the node to get its userId for authorization
+  const nodeRows = await db
+    .select({ userId: schema.nodes.userId })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+
+  if (nodeRows.length === 0) {
+    throw errors.notFound('Node');
+  }
+
+  // Verify the environment exists and belongs to the same user as the node
+  // (environment → project → userId must match node → userId)
   const envRows = await db
-    .select()
+    .select({
+      id: schema.deploymentEnvironments.id,
+      projectId: schema.deploymentEnvironments.projectId,
+    })
     .from(schema.deploymentEnvironments)
-    .where(eq(schema.deploymentEnvironments.id, environmentId))
+    .innerJoin(
+      schema.projects,
+      eq(schema.deploymentEnvironments.projectId, schema.projects.id),
+    )
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.projects.userId, nodeRows[0]!.userId),
+      ),
+    )
     .limit(1);
 
   if (envRows.length === 0) {

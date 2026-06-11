@@ -170,17 +170,25 @@ func (s *Server) sendNodeHeartbeat() {
 	}
 
 	var hbResp heartbeatResponse
-	if json.Unmarshal(respBody, &hbResp) == nil && hbResp.RefreshedToken != "" {
+	if err := json.Unmarshal(respBody, &hbResp); err != nil {
+		slog.Warn("Failed to parse heartbeat response", "error", err)
+		return
+	}
+
+	if hbResp.RefreshedToken != "" {
 		s.setCallbackToken(hbResp.RefreshedToken)
 		slog.Info("Callback token refreshed via heartbeat response")
 	}
 
 	// Deployment mode: handle pending release signal and key refresh
-	if s.deployEngine != nil && json.Unmarshal(respBody, &hbResp) == nil {
+	if s.deployEngine != nil {
 		// Refresh signing public key if provided
 		if hbResp.DeployPubKey != "" {
-			slog.Info("deploy: refreshing signing public key from heartbeat")
-			// Verifier handles dual-key rotation internally
+			if err := s.deployEngine.SetVerifierKey(hbResp.DeployPubKey); err != nil {
+				slog.Error("deploy: failed to refresh signing public key", "error", err)
+			} else {
+				slog.Info("deploy: signing public key refreshed from heartbeat")
+			}
 		}
 
 		// Check for pending release

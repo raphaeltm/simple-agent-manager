@@ -61,13 +61,22 @@ export async function signDeployPayload(
     throw new Error('DEPLOY_SIGNING_PRIVATE_KEY is not configured');
   }
 
-  // Decode the base64-encoded Ed25519 private key (64 bytes: 32-byte seed + 32-byte public key)
+  // Decode the base64-encoded Ed25519 private key.
+  // Accepts either 32-byte seed or 64-byte Go format (seed + public key).
   const privateKeyBytes = Uint8Array.from(atob(privateKeyB64), (c) => c.charCodeAt(0));
 
-  // Import the Ed25519 private key for signing
+  if (privateKeyBytes.length !== 32 && privateKeyBytes.length !== 64) {
+    throw new Error(
+      `DEPLOY_SIGNING_PRIVATE_KEY has invalid length: got ${privateKeyBytes.length} bytes, expected 32 (seed) or 64 (seed+pubkey)`,
+    );
+  }
+
+  // WebCrypto Ed25519 raw import expects the 32-byte seed
+  const seed = privateKeyBytes.length === 64 ? privateKeyBytes.slice(0, 32) : privateKeyBytes;
+
   const key = await crypto.subtle.importKey(
     'raw',
-    privateKeyBytes.slice(0, 32), // Ed25519 seed is the first 32 bytes
+    seed,
     { name: 'Ed25519' },
     false,
     ['sign'],

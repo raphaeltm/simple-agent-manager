@@ -7,13 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 )
 
 // Verifier validates signed apply payloads using Ed25519 public keys.
 // It supports dual-key rotation: both the current and previous public key
-// are accepted during a rotation window.
+// are accepted during a rotation window. All methods are goroutine-safe.
 type Verifier struct {
+	mu          sync.RWMutex
 	currentKey  ed25519.PublicKey
 	previousKey ed25519.PublicKey // nil when no rotation in progress
 }
@@ -28,19 +30,21 @@ func NewVerifier(pubKeyB64 string) (*Verifier, error) {
 }
 
 // SetCurrentKey updates the current signing key and moves the old current key
-// to the previous slot for dual-key rotation.
+// to the previous slot for dual-key rotation. Goroutine-safe.
 func (v *Verifier) SetCurrentKey(pubKeyB64 string) error {
 	key, err := decodePublicKey(pubKeyB64)
 	if err != nil {
 		return fmt.Errorf("decode new signing public key: %w", err)
 	}
+	v.mu.Lock()
 	v.previousKey = v.currentKey
 	v.currentKey = key
+	v.mu.Unlock()
 	return nil
 }
 
 // Verify checks the apply payload's signature and all binding constraints.
-// Returns nil if valid, or an error describing the rejection reason.
+// Returns nil if valid, or an error describing the rejection reason. Goroutine-safe.
 func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID string, lastAppliedSeq int64) error {
 	// Check expiry
 	if time.Now().Unix() > payload.ExpiresAt {
@@ -70,11 +74,17 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 
 	canonical := buildSignableBytes(payload)
 
+	// Take read lock to safely access current/previous keys during rotation
+	v.mu.RLock()
+	currentKey := v.currentKey
+	previousKey := v.previousKey
+	v.mu.RUnlock()
+
 	// Try current key first, then previous key (dual-key rotation window)
-	if ed25519.Verify(v.currentKey, canonical, sigBytes) {
+	if ed25519.Verify(currentKey, canonical, sigBytes) {
 		return nil
 	}
-	if v.previousKey != nil && ed25519.Verify(v.previousKey, canonical, sigBytes) {
+	if previousKey != nil && ed25519.Verify(previousKey, canonical, sigBytes) {
 		return nil
 	}
 

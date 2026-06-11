@@ -67,25 +67,21 @@ func TestEngine_ApplyMutex(t *testing.T) {
 	dir := t.TempDir()
 	disk, _ := NewDiskState(dir)
 
-	engine := NewEngine(disk, nil, EngineConfig{
+	pub, priv := generateTestKeys(t)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+	verifier, _ := NewVerifier(pubB64)
+
+	engine := NewEngine(disk, verifier, EngineConfig{
 		EnvironmentID: "env-1",
 		NodeID:        "node-1",
-		ComposeCmd:    "sleep", // Will be "sleep -f pull" which fails, but that's fine
+		ComposeCmd:    "sleep",
 		HealthTimeout: 1 * time.Second,
 	})
 
-	// Manually set the applying flag to simulate an in-progress apply
+	// Hold the mutex to simulate an in-progress apply
 	engine.applyMu.Lock()
-	engine.applying = true
-	engine.applyMu.Unlock()
 
-	payload := &ApplyPayload{
-		EnvironmentID: "env-1",
-		NodeID:        "node-1",
-		Seq:           1,
-		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
-		ComposeYAML:   "compose yaml",
-	}
+	payload := makeTestPayload("env-1", "node-1", 1, "compose yaml", priv)
 
 	ctx := context.Background()
 	err := engine.Apply(ctx, payload)
@@ -93,9 +89,7 @@ func TestEngine_ApplyMutex(t *testing.T) {
 		t.Errorf("expected 'apply in progress' error, got: %v", err)
 	}
 
-	// Reset
-	engine.applyMu.Lock()
-	engine.applying = false
+	// Release the mutex
 	engine.applyMu.Unlock()
 }
 
