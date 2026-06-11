@@ -4,6 +4,7 @@ import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
 
 import { REMARK_PLUGINS } from './markdown-config';
+import { MermaidCodeFallback, MermaidDiagram } from './MermaidDiagram';
 import { MessageActions } from './MessageActions';
 import { TypewriterText } from './TypewriterText';
 
@@ -119,9 +120,12 @@ const SharedLink: Components['a'] = ({ href, children }) => (
 );
 
 /** Build a code component with a configurable inline-code class. */
-function makeCodeComponent(inlineClassName: string): NonNullable<Components['code']> {
+function makeCodeComponent(
+  inlineClassName: string,
+  options: { renderMermaid: boolean } = { renderMermaid: true }
+): NonNullable<Components['code']> {
   const CodeComponent: NonNullable<Components['code']> = ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
+    const match = /language-([^\s]+)/.exec(className || '');
     const code = String(children ?? '').replace(/\n$/, '');
     // A fenced block with no language has no `language-*` class, so the old
     // `!match && !className` test misclassified it as inline and collapsed its
@@ -136,9 +140,21 @@ function makeCodeComponent(inlineClassName: string): NonNullable<Components['cod
       );
     }
     if (match) {
+      const language = (match[1] ?? '').toLowerCase();
+      if (language === 'mermaid') {
+        return (
+          <div className="my-2">
+            {options.renderMermaid ? (
+              <MermaidDiagram code={code} />
+            ) : (
+              <MermaidCodeFallback code={code} />
+            )}
+          </div>
+        );
+      }
       return (
         <div className="my-2">
-          <HighlightedCode code={code} language={match[1] ?? ''} />
+          <HighlightedCode code={code} language={language} />
         </div>
       );
     }
@@ -183,11 +199,12 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  * instead of opening a new browser window.
  */
 function buildAgentMarkdownComponents(
-  onFileClick: (path: string, line?: number | null) => void
+  onFileClick: (path: string, line?: number | null) => void,
+  options: { renderMermaid: boolean } = { renderMermaid: true }
 ): Components {
   return {
     pre: SharedPre,
-    code: makeCodeComponent('bg-gray-100 text-gray-800'),
+    code: makeCodeComponent('bg-gray-100 text-gray-800', options),
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
         const { path, line } = parseFilePathRef(href!);
@@ -223,13 +240,34 @@ function buildAgentMarkdownComponents(
  */
 export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick, bubbleClassName }: MessageBubbleProps) {
   const isUser = role === 'user';
+  const renderMermaid = !streaming && !animated;
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
   const agentComponents = useMemo(
-    () => onFileClick ? buildAgentMarkdownComponents(onFileClick) : AGENT_MARKDOWN_COMPONENTS,
-    [onFileClick]
+    () => {
+      if (onFileClick) {
+        return buildAgentMarkdownComponents(onFileClick, { renderMermaid });
+      }
+      if (!renderMermaid) {
+        return {
+          ...AGENT_MARKDOWN_COMPONENTS,
+          code: makeCodeComponent('bg-gray-100 text-gray-800', { renderMermaid }),
+        };
+      }
+      return AGENT_MARKDOWN_COMPONENTS;
+    },
+    [onFileClick, renderMermaid]
   );
-  const components = isUser ? USER_MARKDOWN_COMPONENTS : agentComponents;
+  const userComponents = useMemo(
+    () => renderMermaid
+      ? USER_MARKDOWN_COMPONENTS
+      : {
+          ...USER_MARKDOWN_COMPONENTS,
+          code: makeCodeComponent('bg-blue-500 text-blue-50', { renderMermaid }),
+        },
+    [renderMermaid]
+  );
+  const components = isUser ? userComponents : agentComponents;
   const showActions = !streaming && !animated && timestamp != null && timestamp > 0;
 
   return (
