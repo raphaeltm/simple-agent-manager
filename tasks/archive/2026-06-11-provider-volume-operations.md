@@ -50,3 +50,32 @@ SAM app deployments need provider-native block volumes as first-class resources 
 - `packages/providers/src/hetzner.ts`
 - `packages/providers/src/scaleway.ts`
 - `.claude/rules/02-quality-gates.md`
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/providers exec vitest run tests/unit/volume-operations.test.ts --reporter verbose` — 13 tests passed.
+- `pnpm --filter @simple-agent-manager/providers typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/providers lint` — passed.
+- `pnpm --filter @simple-agent-manager/providers test` — 15 files, 301 tests passed.
+- `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — passed for the full repo. Existing lint/test warnings from unrelated packages were noisy but non-failing.
+
+## Task Completion Validation Report
+
+**Task**: `tasks/active/2026-06-11-provider-volume-operations.md`  
+**Branch**: `sam/implement-first-class-provider-01ktwd`  
+**Date**: 2026-06-11
+
+### Verdict: PASS
+
+| Check | Status | Issues |
+|-------|--------|--------|
+| A: Research -> Checklist | PASS | All actionable research findings have checklist coverage. |
+| B: Checklist -> Diff | PASS | All checked items map to substantive provider/type/test changes. |
+| C: Criteria -> Tests | PASS | Acceptance criteria are covered by mocked HTTP provider tests and full package/repo checks. |
+| D: UI -> Backend | N/A | No UI changes. |
+| E: Multi-Resource | PASS | Provider operations require explicit `location`; no new nondeterministic `.limit(1)` selector. |
+| F: Vertical Slice | PASS | Library boundary is provider abstraction -> mocked HTTP provider APIs; tests assert exact external payloads. |
+
+### Notes
+
+- Live provider calls were not performed because this is a BYOC provider-library change and the task explicitly scoped tests to mocked HTTP; PR/staging notes should state that no live Hetzner/Scaleway volume creation was verified.
