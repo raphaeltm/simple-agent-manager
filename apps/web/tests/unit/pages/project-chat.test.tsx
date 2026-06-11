@@ -519,6 +519,21 @@ describe('ProjectChat new chat button', () => {
     expect(dialog).toHaveAttribute('data-focus-task-id', 'child-task');
   });
 
+  it('derives hierarchy modal visibility from URL hash (#hierarchy-<taskId>)', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [SESSION_1],
+      total: 1,
+    });
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+
+    // Render with hash in URL — modal should open automatically
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}#hierarchy-task-abc`);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('data-focus-task-id', 'task-abc');
+  });
+
   it('gear icon navigates to the project settings page', async () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     renderProjectChat();

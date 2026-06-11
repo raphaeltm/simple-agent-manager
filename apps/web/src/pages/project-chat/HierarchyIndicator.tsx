@@ -51,7 +51,7 @@ const ROLE_CONFIG = {
   },
   child: {
     icon: GitMerge,
-    color: '#a78bfa',
+    color: 'var(--sam-color-purple, #a78bfa)',
     title: 'Subtask',
     bgAlpha: '10%',
     hoverBgAlpha: '20%',
@@ -99,7 +99,7 @@ export function HierarchyIndicator({
       }}
       title={cfg.title}
       aria-label={cfg.title}
-      className="inline-flex items-center justify-center shrink-0 bg-transparent border cursor-pointer p-0 transition-all duration-150"
+      className="inline-flex items-center justify-center shrink-0 bg-transparent border cursor-pointer p-0 transition-all duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sam-color-focus-ring)]"
       style={{
         width: HIERARCHY_BUTTON_SIZE_PX,
         height: HIERARCHY_BUTTON_SIZE_PX,

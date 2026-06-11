@@ -207,6 +207,21 @@ describe('SessionTreeItem — hierarchy button', () => {
     expect(onShowHierarchy).toHaveBeenCalledWith('child-task');
   });
 
+  it('renders "Has parent & subtasks" button for a mid-chain (both) task', () => {
+    const taskInfoMap = new Map<string, TaskInfo>([
+      ['root', makeTaskInfo({ id: 'root', parentTaskId: null })],
+      ['mid', makeTaskInfo({ id: 'mid', parentTaskId: 'root', triggeredBy: 'mcp', dispatchDepth: 1 })],
+      ['leaf', makeTaskInfo({ id: 'leaf', parentTaskId: 'mid', triggeredBy: 'mcp', dispatchDepth: 2 })],
+    ]);
+
+    renderItem(
+      makeSession({ id: 's1', taskId: 'mid' }),
+      { taskInfoMap, onShowHierarchy: vi.fn() },
+    );
+
+    expect(screen.getByRole('button', { name: 'Has parent & subtasks' })).toBeInTheDocument();
+  });
+
   it('does not render hierarchy button for standalone tasks', () => {
     const taskInfoMap = new Map<string, TaskInfo>([
       ['solo', makeTaskInfo({ id: 'solo' })],
