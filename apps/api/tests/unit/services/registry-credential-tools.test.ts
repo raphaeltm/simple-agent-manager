@@ -177,7 +177,7 @@ describe('handleGetRegistryCredentials', () => {
     expect(mockMintCredential).toHaveBeenCalled();
   });
 
-  it('increments rate limit counter with time-bucketed key after successful mint', async () => {
+  it('increments rate limit counter with time-bucketed key before minting', async () => {
     const kv = makeKV('3'); // Under limit
     const env = makeEnv({ KV: kv });
 
@@ -200,7 +200,22 @@ describe('handleGetRegistryCredentials', () => {
     expect(putCall[2]).toEqual({ expirationTtl: 360 });
   });
 
-  it('returns error when mint fails', async () => {
+  it('increments rate limit counter even when mint fails', async () => {
+    const kv = makeKV('5');
+    const env = makeEnv({ KV: kv });
+
+    mockGetRateLimit.mockReturnValue({ maxRequests: 10, windowSeconds: 300 });
+    mockMintCredential.mockRejectedValue(new Error('CF API timeout'));
+
+    await handleGetRegistryCredentials('req-1', {}, makeTokenData(), env);
+
+    // Counter should still be incremented to prevent unbounded upstream calls
+    const putCall = kv.put.mock.calls[0];
+    expect(putCall[0]).toMatch(/^registry-cred-rate:proj-1:\d+$/);
+    expect(putCall[1]).toBe('6');
+  });
+
+  it('returns generic error when mint fails (no internal details exposed)', async () => {
     const kv = makeKV(null);
     const env = makeEnv({ KV: kv });
 
@@ -211,7 +226,10 @@ describe('handleGetRegistryCredentials', () => {
 
     expect(result).toHaveProperty('error');
     const error = (result as { error: { message: string } }).error;
-    expect(error.message).toContain('CF API timeout');
+    // Should NOT contain internal CF API error details
+    expect(error.message).not.toContain('CF API timeout');
+    // Should return a generic user-facing message
+    expect(error.message).toContain('temporarily unavailable');
   });
 
   it('trims whitespace from environment parameter', async () => {

@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import {
   getRegistryCredentialRateLimit,
   mintProjectRegistryCredential,
@@ -23,6 +24,7 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  sanitizeUserInput,
 } from './_helpers';
 
 /** Application-level error code for rate limiting (matches existing MCP rate limit pattern) */
@@ -40,7 +42,8 @@ export async function handleGetRegistryCredentials(
   env: Env,
 ): Promise<JsonRpcResponse> {
   const { projectId, userId, taskId } = tokenData;
-  const environment = typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
+  const rawEnvironment = typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
+  const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
 
   // If an environment name is provided, verify it exists and belongs to this project
   if (environment) {
@@ -66,7 +69,11 @@ export async function handleGetRegistryCredentials(
     }
   }
 
-  // Rate limit: per-project credential minting using time-bucketed key (no TTL drift)
+  // Rate limit: per-project credential minting using time-bucketed key (no TTL drift).
+  // NOTE: KV does not support atomic read-modify-write. Under high concurrency within
+  // the same time bucket, parallel requests may read the same count and both pass the
+  // gate. This is acceptable for this use case — the overshoot is bounded by concurrency
+  // and the window is wide (300s default). Matches the pattern in _helpers.ts:checkMcpRateLimit.
   const rateLimit = getRegistryCredentialRateLimit(env);
   const now = Math.floor(Date.now() / 1000);
   const windowStart = Math.floor(now / rateLimit.windowSeconds) * rateLimit.windowSeconds;
@@ -80,6 +87,13 @@ export async function handleGetRegistryCredentials(
     );
   }
 
+  // Increment counter BEFORE minting — failed CF API calls still consume quota to prevent
+  // unbounded upstream calls during an incident (increment-first pattern from _helpers.ts)
+  const newCount = currentCount + 1;
+  await env.KV.put(rateLimitKey, String(newCount), {
+    expirationTtl: rateLimit.windowSeconds + 60,
+  });
+
   try {
     const result = await mintProjectRegistryCredential(
       env,
@@ -88,12 +102,6 @@ export async function handleGetRegistryCredentials(
       taskId,
       environment,
     );
-
-    // Increment rate limit counter (TTL survives past window boundary for cleanup)
-    const newCount = currentCount + 1;
-    await env.KV.put(rateLimitKey, String(newCount), {
-      expirationTtl: rateLimit.windowSeconds + 60,
-    });
 
     const instructions = [
       '1. Run: docker login -u <username> -p <password> <registry>',
@@ -123,11 +131,20 @@ export async function handleGetRegistryCredentials(
       ],
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // Log full error server-side for operators; return generic message to agent
+    // to avoid leaking CF API internals, account identifiers, or platform config details
+    const internalMessage = err instanceof Error ? err.message : String(err);
+    log.error('registry_credential_mint_failed', {
+      projectId,
+      userId,
+      taskId,
+      environment,
+      error: internalMessage,
+    });
     return jsonRpcError(
       requestId,
       INTERNAL_ERROR,
-      `Failed to mint registry credentials: ${message}`,
+      'Registry credential minting is temporarily unavailable. Please try again later.',
     );
   }
 }
