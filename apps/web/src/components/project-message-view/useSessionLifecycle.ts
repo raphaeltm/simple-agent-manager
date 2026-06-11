@@ -85,6 +85,13 @@ export function useSessionLifecycle(
   const verifyAbortRef = useRef<AbortController | null>(null);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
+  const clearActivity = () => { setAgentActivity('idle'); setPromptStartedAt(null); };
+  const hydrateState = (s: SessionStateSnapshot | null | undefined) => {
+    if (!s) return;
+    if (s.activity === 'prompting') { setAgentActivity('prompting'); setPromptStartedAt(s.promptStartedAt ?? null); }
+    else if (s.activity === 'idle') setAgentActivity('idle');
+    if (s.currentPlan) setCurrentPlan(s.currentPlan);
+  };
 
   const [filePanel, setFilePanel] = useState<FilePanelState>(null);
 
@@ -130,11 +137,7 @@ export function useSessionLifecycle(
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      if (state) {
-        if (state.activity === 'prompting') { setAgentActivity('prompting'); setPromptStartedAt(state.promptStartedAt ?? null); }
-        else if (state.activity === 'idle') { setAgentActivity('idle'); }
-        if (state.currentPlan) setCurrentPlan(state.currentPlan);
-      }
+      hydrateState(state);
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
@@ -162,14 +165,10 @@ export function useSessionLifecycle(
               if (data.state?.activity === 'prompting') {
                 armVerifyTimer();
               } else {
-                setAgentActivity('idle');
-                setPromptStartedAt(null);
+                clearActivity();
               }
             } catch {
-              if (!abortController.signal.aborted) {
-                setAgentActivity('idle');
-                setPromptStartedAt(null);
-              }
+              if (!abortController.signal.aborted) clearActivity();
             }
           }, IDLE_TIMEOUT_MS);
         };
@@ -209,12 +208,7 @@ export function useSessionLifecycle(
       setMessages(data.messages);
       setHasMore(data.hasMore);
       if (data.session.task) setTaskEmbed(data.session.task);
-      const st = data.state;
-      if (st) {
-        if (st.activity === 'prompting') { setAgentActivity('prompting'); setPromptStartedAt(st.promptStartedAt ?? null); }
-        else if (st.activity === 'idle') setAgentActivity('idle');
-        if (st.currentPlan) setCurrentPlan(st.currentPlan);
-      }
+      hydrateState(data.state);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
