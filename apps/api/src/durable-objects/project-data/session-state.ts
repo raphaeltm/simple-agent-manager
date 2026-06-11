@@ -50,7 +50,7 @@ export function upsertActivityState(
     now,
     promptStartedAt,
     update.agentType ?? null,
-    update.restartCount ?? null,
+    update.restartCount ?? 0,
     update.statusError ?? null,
   );
 }
