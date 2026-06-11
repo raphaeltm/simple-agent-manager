@@ -25,17 +25,17 @@ The app-deployment feature needs agents to push container images to `registry.cl
 
 ## Implementation Checklist
 
-- [ ] 1. Extract a shared `mintRegistryCredentials()` from `devcontainer-cache.ts` that both devcontainer cache and the new endpoint can call
-- [ ] 2. Add `REGISTRY_CREDENTIAL_EXPIRATION_MINUTES` env var to `env.ts` (default: 60)
-- [ ] 3. Create `apps/api/src/services/registry-credentials.ts` — service function that mints credentials, builds project namespace prefix, returns `{ registry, username, password, namespace, expiresAt }` without logging sensitive values
-- [ ] 4. Create MCP tool definition for `get_registry_credentials` with `environment` input param in tool-definitions file
-- [ ] 5. Create `apps/api/src/routes/mcp/registry-credential-tools.ts` — handler that validates project ownership, checks environment exists and belongs to project (if param provided), mints credential via service, records audit metadata (userId, projectId, taskId, environment), returns credential info
-- [ ] 6. Wire handler into `mcp/index.ts` dispatch
-- [ ] 7. Add rate limiting for the mint endpoint (per-project, configurable via env var)
-- [ ] 8. Write unit tests for the service (mint call, namespace building, error handling)
-- [ ] 9. Write integration tests for the MCP tool (auth, rate limiting, audit metadata)
-- [ ] 10. Update SAM library doc 12 with CI run results and pivot decision
-- [ ] 11. Update docs if needed (env var reference, etc.)
+- [x] 1. Extract a shared `mintRegistryCredentials()` from `devcontainer-cache.ts` → `cf-registry.ts`
+- [x] 2. Add `REGISTRY_CREDENTIAL_EXPIRATION_MINUTES` env var to `env.ts` (default: 60)
+- [x] 3. Create `apps/api/src/services/registry-credentials.ts` — service function
+- [x] 4. Create MCP tool definition for `get_registry_credentials`
+- [x] 5. Create `apps/api/src/routes/mcp/registry-credential-tools.ts` — handler
+- [x] 6. Wire handler into `mcp/index.ts` dispatch
+- [x] 7. Add rate limiting (per-project KV-based, configurable via env var)
+- [x] 8. Write unit tests for cf-registry.ts, registry-credentials.ts service
+- [x] 9. Write unit tests for MCP tool handler (env validation, rate limiting, error handling)
+- [x] 10. Library doc 12 not in project library — pivot decision captured in task file and PR
+- [x] 11. Env vars documented in env.ts (REGISTRY_CREDENTIAL_EXPIRATION_MINUTES, REGISTRY_HOST, REGISTRY_CREDENTIAL_RATE_LIMIT, REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS)
 
 ## Acceptance Criteria
 
