@@ -22,6 +22,18 @@ export interface HetznerServerPayload {
   labels: Record<string, string>;
 }
 
+export interface HetznerVolumePayload {
+  id: number;
+  name: string;
+  server: { id: number } | null;
+  created: string;
+  location: { name: string };
+  size: number;
+  linux_device: string | null;
+  labels: Record<string, string>;
+  status: string;
+}
+
 export interface ScalewayServerPayload {
   id: string;
   name: string;
@@ -31,6 +43,20 @@ export interface ScalewayServerPayload {
   commercial_type: string;
   creation_date: string;
   tags: string[];
+}
+
+export interface ScalewayBlockVolumePayload {
+  id: string;
+  name: string;
+  size: number;
+  project_id: string;
+  created_at: string;
+  updated_at: string;
+  references: Array<{ id: string; type: string; status: string }>;
+  status: string;
+  tags: string[];
+  type: string;
+  zone: string;
 }
 
 export interface GcpOperationPayload {
@@ -94,6 +120,30 @@ export function validateHetznerServersResponse(
   };
 }
 
+export function validateHetznerVolumeResponse(
+  payload: unknown,
+  context: string,
+): { volume: HetznerVolumePayload } {
+  const root = expectObject(payload, 'hetzner', context);
+  return {
+    volume: validateHetznerVolume(
+      requireObject(root, 'volume', 'hetzner', context),
+      `${context}.volume`,
+    ),
+  };
+}
+
+export function validateHetznerVolumesResponse(
+  payload: unknown,
+  context: string,
+): { volumes: HetznerVolumePayload[] } {
+  const root = expectObject(payload, 'hetzner', context);
+  const volumes = requireArray(root, 'volumes', 'hetzner', context);
+  return {
+    volumes: volumes.map((volume, index) => validateHetznerVolume(volume, `${context}.volumes[${index}]`)),
+  };
+}
+
 export function validateScalewayServerResponse(
   payload: unknown,
   context: string,
@@ -104,6 +154,25 @@ export function validateScalewayServerResponse(
       requireObject(root, 'server', 'scaleway', context),
       `${context}.server`,
     ),
+  };
+}
+
+export function validateScalewayBlockVolumeResponse(
+  payload: unknown,
+  context: string,
+): { volume: ScalewayBlockVolumePayload } {
+  const volume = validateScalewayBlockVolume(payload, context);
+  return { volume };
+}
+
+export function validateScalewayBlockVolumesResponse(
+  payload: unknown,
+  context: string,
+): { volumes: ScalewayBlockVolumePayload[] } {
+  const root = expectObject(payload, 'scaleway', context);
+  const volumes = requireArray(root, 'volumes', 'scaleway', context);
+  return {
+    volumes: volumes.map((volume, index) => validateScalewayBlockVolume(volume, `${context}.volumes[${index}]`)),
   };
 }
 
@@ -234,6 +303,26 @@ function validateHetznerServer(payload: unknown, context: string): HetznerServer
   };
 }
 
+function validateHetznerVolume(payload: unknown, context: string): HetznerVolumePayload {
+  const volume = expectObject(payload, 'hetzner', context);
+  const location = requireObject(volume, 'location', 'hetzner', context);
+  const server = optionalNullableIdObject(volume, 'server', 'hetzner', context);
+
+  return {
+    id: requireNumber(volume, 'id', 'hetzner', context),
+    name: requireString(volume, 'name', 'hetzner', context),
+    server,
+    created: requireString(volume, 'created', 'hetzner', context),
+    location: {
+      name: requireString(location, 'name', 'hetzner', `${context}.location`),
+    },
+    size: requireNumber(volume, 'size', 'hetzner', context),
+    linux_device: optionalNullableString(volume, 'linux_device', 'hetzner', context),
+    labels: optionalStringRecord(volume, 'labels', 'hetzner', context) ?? {},
+    status: requireString(volume, 'status', 'hetzner', context),
+  };
+}
+
 function validateScalewayServer(payload: unknown, context: string): ScalewayServerPayload {
   const server = expectObject(payload, 'scaleway', context);
   const publicIp = optionalNullableAddress(server, 'public_ip', 'scaleway', context);
@@ -252,6 +341,60 @@ function validateScalewayServer(payload: unknown, context: string): ScalewayServ
     creation_date: requireString(server, 'creation_date', 'scaleway', context),
     tags: requireStringArray(server, 'tags', 'scaleway', context),
   };
+}
+
+function validateScalewayBlockVolume(payload: unknown, context: string): ScalewayBlockVolumePayload {
+  const volume = expectObject(payload, 'scaleway', context);
+  const references = requireArray(volume, 'references', 'scaleway', context).map((reference, index) => {
+    const refObj = expectObject(reference, 'scaleway', `${context}.references[${index}]`);
+    return {
+      id: requireString(refObj, 'id', 'scaleway', `${context}.references[${index}]`),
+      type: requireString(refObj, 'type', 'scaleway', `${context}.references[${index}]`),
+      status: requireString(refObj, 'status', 'scaleway', `${context}.references[${index}]`),
+    };
+  });
+
+  return {
+    id: requireString(volume, 'id', 'scaleway', context),
+    name: requireString(volume, 'name', 'scaleway', context),
+    size: requireNumber(volume, 'size', 'scaleway', context),
+    project_id: requireString(volume, 'project_id', 'scaleway', context),
+    created_at: requireString(volume, 'created_at', 'scaleway', context),
+    updated_at: requireString(volume, 'updated_at', 'scaleway', context),
+    references,
+    status: requireString(volume, 'status', 'scaleway', context),
+    tags: requireStringArray(volume, 'tags', 'scaleway', context),
+    type: requireString(volume, 'type', 'scaleway', context),
+    zone: requireString(volume, 'zone', 'scaleway', context),
+  };
+}
+
+function optionalNullableIdObject(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): { id: number } | null {
+  const value = root[key];
+  if (value === undefined || value === null) return null;
+  const obj = expectObject(value, providerName, `${context}.${key}`);
+  return {
+    id: requireNumber(obj, 'id', providerName, `${context}.${key}`),
+  };
+}
+
+function optionalNullableString(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): string | null {
+  const value = root[key];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw validationError(providerName, `${context}.${key}`, 'expected string or null');
+  }
+  return value;
 }
 
 function optionalGcpOperationError(

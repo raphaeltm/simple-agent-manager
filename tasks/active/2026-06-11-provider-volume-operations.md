@@ -17,27 +17,27 @@ SAM app deployments need provider-native block volumes as first-class resources 
 
 ## Implementation Checklist
 
-- [ ] Add provider-agnostic volume types and lifecycle conventions in `packages/providers/src/types.ts`.
-- [ ] Extend `Provider` with volume capability metadata and operations: create, attach, detach, resize, delete, get, list.
-- [ ] Add validation payload helpers for Hetzner and Scaleway volume responses.
-- [ ] Implement Hetzner volume operations using the Hetzner Cloud Volumes API.
-- [ ] Implement Scaleway volume operations using Block Storage plus Instance attach/detach endpoints.
-- [ ] Surface provider constraints through metadata, including min size, grow-only resize, co-location, attach limit, default format, mount root template, and fstab options.
-- [ ] Ensure shrink requests are rejected in the provider layer before API calls.
-- [ ] Add unit tests with mocked HTTP for exact Hetzner payloads/endpoints, constraints, grow-only rejection, attach limit metadata, and error mapping.
-- [ ] Add unit tests with mocked HTTP for exact Scaleway payloads/endpoints, constraints, grow-only rejection, attach limit metadata, and error mapping.
-- [ ] Run package-level typecheck, lint, and tests.
+- [x] Add provider-agnostic volume types and lifecycle conventions in `packages/providers/src/types.ts`.
+- [x] Extend `Provider` with volume capability metadata and operations: create, attach, detach, resize, delete, get, list.
+- [x] Add validation payload helpers for Hetzner and Scaleway volume responses.
+- [x] Implement Hetzner volume operations using the Hetzner Cloud Volumes API.
+- [x] Implement Scaleway volume operations using Block Storage plus Instance attach/detach endpoints.
+- [x] Surface provider constraints through metadata, including min size, grow-only resize, co-location, attach limit, default format, mount root template, and fstab options.
+- [x] Ensure shrink requests are rejected in the provider layer before API calls.
+- [x] Add unit tests with mocked HTTP for exact Hetzner payloads/endpoints, constraints, grow-only rejection, attach limit metadata, and error mapping.
+- [x] Add unit tests with mocked HTTP for exact Scaleway payloads/endpoints, constraints, grow-only rejection, attach limit metadata, and error mapping.
+- [x] Run package-level typecheck, lint, and tests.
 
 ## Acceptance Criteria
 
-- [ ] `Provider` exposes first-class volume lifecycle operations.
-- [ ] Location/zone is explicit in create, attach/detach, get/list, and resize APIs where provider APIs need it.
-- [ ] Hetzner implementation supports create, attach, detach, resize up only, delete, get, and list using user API token.
-- [ ] Scaleway implementation supports equivalent operations at the current package support level using user secret key and project ID.
-- [ ] Provider constraints are exposed through metadata instead of hardcoded by callers.
-- [ ] Volume lifecycle conventions are encoded in package types/docs for future cloud-init/agent consumers.
-- [ ] Unit tests assert exact provider API payloads and error mapping.
-- [ ] Existing VM provisioning paths are not regressed by provider interface changes.
+- [x] `Provider` exposes first-class volume lifecycle operations.
+- [x] Location/zone is explicit in create, attach/detach, get/list, and resize APIs where provider APIs need it.
+- [x] Hetzner implementation supports create, attach, detach, resize up only, delete, get, and list using user API token.
+- [x] Scaleway implementation supports equivalent operations at the current package support level using user secret key and project ID.
+- [x] Provider constraints are exposed through metadata instead of hardcoded by callers.
+- [x] Volume lifecycle conventions are encoded in package types/docs for future cloud-init/agent consumers.
+- [x] Unit tests assert exact provider API payloads and error mapping.
+- [x] Existing VM provisioning paths are not regressed by provider interface changes.
 
 ## References
 

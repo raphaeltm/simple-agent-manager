@@ -21,8 +21,23 @@ export type {
   VMConfig,
   VMInstance,
   VMStatus,
+  VolumeAttachmentConfig,
+  VolumeCapabilities,
+  VolumeConfig,
+  VolumeDetachConfig,
+  VolumeInstance,
+  VolumeLifecycleConventions,
+  VolumeListConfig,
+  VolumeLookupConfig,
+  VolumeResizeConfig,
+  VolumeStatus,
 } from './types';
-export { ProviderError } from './types';
+export {
+  ProviderError,
+  SAM_VOLUME_FILESYSTEM_FORMAT,
+  SAM_VOLUME_FSTAB_OPTIONS,
+  SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+} from './types';
 
 // Re-export utilities
 export { getTimeoutMs,providerFetch } from './provider-fetch';
@@ -38,10 +53,21 @@ export {
   DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
   DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
   DEFAULT_PLACEMENT_RETRY_DELAY_MS,
+  HETZNER_MAX_VOLUMES_PER_SERVER,
+  HETZNER_VOLUME_MAX_SIZE_GB,
+  HETZNER_VOLUME_MIN_SIZE_GB,
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
-export { classifyScalewayError, SCALEWAY_LOCATIONS,ScalewayProvider } from './scaleway';
+export {
+  classifyScalewayError,
+  SCALEWAY_DEFAULT_VOLUME_IOPS,
+  SCALEWAY_LOCATIONS,
+  SCALEWAY_MAX_VOLUMES_PER_SERVER,
+  SCALEWAY_VOLUME_MAX_SIZE_GB,
+  SCALEWAY_VOLUME_MIN_SIZE_GB,
+  ScalewayProvider,
+} from './scaleway';
 
 /**
  * Create a provider instance from explicit configuration.
