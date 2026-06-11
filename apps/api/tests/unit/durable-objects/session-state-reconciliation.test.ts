@@ -42,30 +42,17 @@ describe('reconcileStaleActivity', () => {
     return row?.activity as string | undefined;
   }
 
-  it('heals stale prompting sessions', () => {
-    upsertActivityState(sql, 'sess-1', { activity: 'prompting' });
-    // Advance past threshold
-    vi.setSystemTime(now + FIVE_MINUTES + 1000);
-    const healed = reconcileStaleActivity(sql);
-    expect(healed).toContain('sess-1');
-    expect(getActivity('sess-1')).toBe('idle');
-  });
-
-  it('heals stale error sessions', () => {
-    upsertActivityState(sql, 'sess-error', { activity: 'error' });
-    vi.setSystemTime(now + FIVE_MINUTES + 1000);
-    const healed = reconcileStaleActivity(sql);
-    expect(healed).toContain('sess-error');
-    expect(getActivity('sess-error')).toBe('idle');
-  });
-
-  it('heals stale recovering sessions', () => {
-    upsertActivityState(sql, 'sess-recover', { activity: 'recovering' });
-    vi.setSystemTime(now + FIVE_MINUTES + 1000);
-    const healed = reconcileStaleActivity(sql);
-    expect(healed).toContain('sess-recover');
-    expect(getActivity('sess-recover')).toBe('idle');
-  });
+  it.each(['prompting', 'error', 'recovering'] as const)(
+    'heals stale %s sessions',
+    (activity) => {
+      const id = `sess-${activity}`;
+      upsertActivityState(sql, id, { activity });
+      vi.setSystemTime(now + FIVE_MINUTES + 1000);
+      const healed = reconcileStaleActivity(sql);
+      expect(healed).toContain(id);
+      expect(getActivity(id)).toBe('idle');
+    },
+  );
 
   it('does not heal idle sessions', () => {
     upsertActivityState(sql, 'sess-idle', { activity: 'idle' });
