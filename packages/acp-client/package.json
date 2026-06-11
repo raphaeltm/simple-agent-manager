@@ -10,6 +10,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./mermaid": {
+      "import": "./dist/mermaid.js",
+      "types": "./dist/mermaid.d.ts"
     }
   },
   "scripts": {

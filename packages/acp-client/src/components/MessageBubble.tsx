@@ -119,10 +119,12 @@ const SharedLink: Components['a'] = ({ href, children }) => (
   </a>
 );
 
+const DEFAULT_CODE_OPTIONS: Readonly<{ renderMermaid: boolean }> = { renderMermaid: true };
+
 /** Build a code component with a configurable inline-code class. */
 function makeCodeComponent(
   inlineClassName: string,
-  options: { renderMermaid: boolean } = { renderMermaid: true }
+  options: Readonly<{ renderMermaid: boolean }> = DEFAULT_CODE_OPTIONS
 ): NonNullable<Components['code']> {
   const CodeComponent: NonNullable<Components['code']> = ({ className, children, ...props }) => {
     const match = /language-([^\s]+)/.exec(className || '');
@@ -200,7 +202,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  */
 function buildAgentMarkdownComponents(
   onFileClick: (path: string, line?: number | null) => void,
-  options: { renderMermaid: boolean } = { renderMermaid: true }
+  options: Readonly<{ renderMermaid: boolean }> = DEFAULT_CODE_OPTIONS
 ): Components {
   return {
     pre: SharedPre,

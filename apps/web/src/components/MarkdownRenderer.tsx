@@ -1,3 +1,4 @@
+import { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { Highlight, themes } from 'prism-react-renderer';
@@ -12,6 +13,8 @@ import {
 } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
 
 // ---------- Mermaid Initialization ----------
 
@@ -47,92 +50,6 @@ function ensureMermaidInit() {
   mermaidInitialized = true;
 }
 
-// ---------- SVG Sanitization Config ----------
-
-/**
- * Explicit allowlists for DOMPurify SVG sanitization.
- * Covers all elements and attributes that Mermaid generates.
- * Defense-in-depth: even though DOMPurify's SVG profile is reasonable,
- * an explicit allowlist prevents future DOMPurify default changes from
- * widening the attack surface.
- */
-export const SVG_SANITIZE_CONFIG = {
-  USE_PROFILES: { svg: true, svgFilters: true },
-  ALLOWED_TAGS: [
-    // SVG structural
-    'svg', 'g', 'defs', 'symbol', 'use', 'title', 'desc',
-    // SVG shapes
-    'path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon',
-    // SVG text
-    'text', 'tspan', 'textPath',
-    // SVG painting / clipping
-    'clipPath', 'mask', 'pattern', 'marker',
-    // SVG gradients
-    'linearGradient', 'radialGradient', 'stop',
-    // SVG filters
-    'filter', 'feBlend', 'feColorMatrix', 'feComposite', 'feFlood',
-    'feGaussianBlur', 'feMerge', 'feMergeNode', 'feOffset',
-    // SVG references
-    'image', 'a',
-    // Mermaid uses inline <style> for diagram themes (accepted trade-off;
-    // CSS injection risk mitigated by CSP headers on the app origin)
-    'style',
-  ],
-  // Mermaid v11 flowchart/graph diagrams render node labels inside
-  // foreignObject with a minimal HTML subtree (div > span.nodeLabel).
-  // Without foreignObject, all flowchart node text is invisible.
-  // These tags are not part of the SVG profile, so ADD_TAGS extends it.
-  // Security: foreignObject switches from SVG to HTML parser, but we
-  // mitigate via (1) only rendering our own Mermaid library output,
-  // (2) Mermaid securityLevel:'strict' prevents user-injected HTML in
-  // diagram source, (3) DOMPurify still strips dangerous elements
-  // (script, img, form, input, iframe, object, embed) and all event
-  // handlers from the HTML subtree, (4) CSP headers block inline scripts.
-  ADD_TAGS: ['foreignObject', 'div', 'span', 'p', 'br'],
-  // Tell DOMPurify that foreignObject is a valid SVG→HTML namespace bridge
-  // (like annotation-xml in MathML). Without this, DOMPurify rejects HTML
-  // elements inside foreignObject because _checkValidNamespace sees an HTML
-  // element with an SVG parent and no integration point.
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
-  ALLOWED_ATTR: [
-    // Core SVG attributes
-    'id', 'class', 'style', 'xmlns', 'xmlns:xlink',
-    // Viewbox / dimensions
-    'viewBox', 'width', 'height', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
-    'cx', 'cy', 'r', 'rx', 'ry',
-    // Path / shape data
-    'd', 'points', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray',
-    'stroke-linecap', 'stroke-linejoin', 'stroke-opacity', 'fill-opacity',
-    'opacity', 'fill-rule', 'clip-rule',
-    // Transforms
-    'transform', 'transform-origin',
-    // Text attributes
-    'text-anchor', 'dominant-baseline', 'alignment-baseline',
-    'font-family', 'font-size', 'font-weight', 'font-style',
-    'letter-spacing', 'text-decoration', 'dx', 'dy',
-    // References / links — URL sanitization (stripping non-local hrefs) is
-    // provided by USE_PROFILES, not this allowlist. xlink:href is deprecated
-    // in SVG 2.0 but still needed for older Mermaid output.
-    'href', 'xlink:href', 'clip-path', 'marker-start', 'marker-mid',
-    'marker-end', 'mask',
-    // Gradient / pattern
-    'offset', 'stop-color', 'stop-opacity', 'gradientTransform',
-    'gradientUnits', 'patternUnits', 'patternTransform',
-    'spreadMethod', 'fx', 'fy',
-    // Filter attributes
-    'in', 'in2', 'result', 'mode', 'stdDeviation', 'flood-color',
-    'flood-opacity', 'color-interpolation-filters',
-    // Marker attributes
-    'markerWidth', 'markerHeight', 'refX', 'refY', 'orient',
-    'markerUnits', 'overflow',
-    // Misc
-    'preserveAspectRatio', 'requiredExtensions', 'systemLanguage',
-    'aria-hidden', 'role', 'tabindex', 'data-testid',
-    'color', 'display', 'visibility',
-  ],
-};
-
 // ---------- Mermaid Diagram Component ----------
 
 let mermaidCounter = 0;
@@ -151,7 +68,8 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
       try {
         const { svg } = await mermaid.render(diagramId, code);
         if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = DOMPurify.sanitize(svg, SVG_SANITIZE_CONFIG);
+          const sanitizedSvg = DOMPurify.sanitize(svg, SVG_SANITIZE_CONFIG) as string;
+          containerRef.current.innerHTML = sanitizedSvg;
         }
       } catch (err) {
         if (!cancelled) {

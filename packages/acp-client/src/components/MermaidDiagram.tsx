@@ -14,6 +14,10 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { MERMAID_SVG_SANITIZE_CONFIG } from '../mermaid';
+
+export { MERMAID_SVG_SANITIZE_CONFIG } from '../mermaid';
+
 const MERMAID_FONT =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
@@ -35,53 +39,6 @@ const MERMAID_THEME_VARIABLES = {
   edgeLabelBackground: '#13201d',
   nodeTextColor: '#e6f2ee',
   fontFamily: MERMAID_FONT,
-};
-
-/**
- * Explicit allowlists for DOMPurify SVG sanitization.
- * Mermaid output is generated from user/agent-controlled markdown, so keep the
- * policy narrow even though Mermaid itself is initialized in strict mode.
- */
-export const MERMAID_SVG_SANITIZE_CONFIG = {
-  USE_PROFILES: { svg: true, svgFilters: true },
-  ALLOWED_TAGS: [
-    'svg', 'g', 'defs', 'symbol', 'use', 'title', 'desc',
-    'path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon',
-    'text', 'tspan', 'textPath',
-    'clipPath', 'mask', 'pattern', 'marker',
-    'linearGradient', 'radialGradient', 'stop',
-    'filter', 'feBlend', 'feColorMatrix', 'feComposite', 'feFlood',
-    'feGaussianBlur', 'feMerge', 'feMergeNode', 'feOffset',
-    'image', 'a',
-    'style',
-  ],
-  ADD_TAGS: ['foreignObject', 'div', 'span', 'p', 'br'],
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
-  ALLOWED_ATTR: [
-    'id', 'class', 'style', 'xmlns', 'xmlns:xlink',
-    'viewBox', 'width', 'height', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
-    'cx', 'cy', 'r', 'rx', 'ry',
-    'd', 'points', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray',
-    'stroke-linecap', 'stroke-linejoin', 'stroke-opacity', 'fill-opacity',
-    'opacity', 'fill-rule', 'clip-rule',
-    'transform', 'transform-origin',
-    'text-anchor', 'dominant-baseline', 'alignment-baseline',
-    'font-family', 'font-size', 'font-weight', 'font-style',
-    'letter-spacing', 'text-decoration', 'dx', 'dy',
-    'href', 'xlink:href', 'clip-path', 'marker-start', 'marker-mid',
-    'marker-end', 'mask',
-    'offset', 'stop-color', 'stop-opacity', 'gradientTransform',
-    'gradientUnits', 'patternUnits', 'patternTransform',
-    'spreadMethod', 'fx', 'fy',
-    'in', 'in2', 'result', 'mode', 'stdDeviation', 'flood-color',
-    'flood-opacity', 'color-interpolation-filters',
-    'markerWidth', 'markerHeight', 'refX', 'refY', 'orient',
-    'markerUnits', 'overflow',
-    'preserveAspectRatio', 'requiredExtensions', 'systemLanguage',
-    'aria-hidden', 'role', 'tabindex', 'data-testid',
-    'color', 'display', 'visibility',
-  ],
 };
 
 let mermaidInitialized = false;
@@ -148,15 +105,17 @@ function getPointerCenter(
   };
 }
 
+interface IconButtonProps {
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly children: ReactNode;
+}
+
 function IconButton({
   label,
   onClick,
   children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+}: IconButtonProps) {
   return (
     <button
       type="button"
@@ -170,17 +129,19 @@ function IconButton({
   );
 }
 
+interface MermaidViewportProps {
+  readonly svg: string;
+  readonly testId: string;
+  readonly fullscreen?: boolean;
+  readonly resetToken: number;
+}
+
 function MermaidViewport({
   svg,
   testId,
   fullscreen = false,
   resetToken,
-}: {
-  svg: string;
-  testId: string;
-  fullscreen?: boolean;
-  resetToken: number;
-}) {
+}: MermaidViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activePointersRef = useRef(new Map<number, { clientX: number; clientY: number }>());
   const gestureRef = useRef<
@@ -364,7 +325,11 @@ function MermaidViewport({
   );
 }
 
-export function MermaidDiagram({ code }: { code: string }) {
+interface MermaidDiagramProps {
+  readonly code: string;
+}
+
+export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const reactId = useId();
   const diagramId = useMemo(
     () => `acp-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}-${++mermaidRenderCounter}`,
@@ -437,8 +402,8 @@ export function MermaidDiagram({ code }: { code: string }) {
   );
 
   const fullscreenOverlay = isFullscreen ? createPortal(
-    <div
-      role="dialog"
+    <dialog
+      open
       aria-modal="true"
       aria-label="Mermaid diagram"
       data-testid="mermaid-diagram-fullscreen"
@@ -450,7 +415,14 @@ export function MermaidDiagram({ code }: { code: string }) {
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: '#030712',
+        border: 'none',
         color: '#f3f4f6',
+        height: 'auto',
+        margin: 0,
+        maxHeight: 'none',
+        maxWidth: 'none',
+        padding: 0,
+        width: 'auto',
       }}
     >
       <div
@@ -489,7 +461,7 @@ export function MermaidDiagram({ code }: { code: string }) {
           resetToken={resetToken}
         />
       </div>
-    </div>,
+    </dialog>,
     document.body,
   ) : null;
 
@@ -574,7 +546,12 @@ export function MermaidDiagram({ code }: { code: string }) {
   );
 }
 
-export function MermaidCodeFallback({ code, style }: { code: string; style?: CSSProperties }) {
+interface MermaidCodeFallbackProps {
+  readonly code: string;
+  readonly style?: CSSProperties;
+}
+
+export function MermaidCodeFallback({ code, style }: MermaidCodeFallbackProps) {
   return (
     <pre
       data-testid="mermaid-code-fallback"
