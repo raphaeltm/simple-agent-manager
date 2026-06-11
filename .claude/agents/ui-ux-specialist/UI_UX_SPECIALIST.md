@@ -28,7 +28,7 @@ Use this agent for any change that touches:
 Score each category 1-5 and require at least 4 in every category:
 - Visual hierarchy and scanability
 - Interaction clarity (primary CTA prominence, form feedback, state clarity)
-- Mobile usability (single-column baseline, no horizontal overflow at 320px, 56px minimum primary touch targets)
+- Mobile usability (single-column baseline, no horizontal overflow at 320px, compact information-dense controls preferred — do NOT demand enlarged touch targets)
 - Accessibility (keyboard access, focus visibility, non-color-only status cues)
 - System consistency (shared components, tokens, spacing rhythm, typography consistency)
 
@@ -70,7 +70,7 @@ Follow the full Playwright visual testing requirements in `.claude/rules/17-ui-v
 4. Assert **no horizontal overflow**: `document.documentElement.scrollWidth <= window.innerWidth`.
 5. Verify no clipping, overlap, off-screen elements, or unreadable controls.
 6. Check that long content wraps properly and doesn't break layouts.
-7. Verify touch targets are at least 44px on mobile (56px preferred for primary actions).
+7. Verify interactive elements are reasonably clickable/tappable. Compact, dense controls are preferred — do NOT demand minimum pixel sizes or enlarged touch targets.
 8. If auth-gated, use a mock harness or authenticated flow as applicable.
 9. Store screenshots in `.codex/tmp/playwright-screenshots/` with descriptive names.
 

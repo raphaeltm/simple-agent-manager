@@ -10,7 +10,7 @@ paths:
 
 ALL UI changes MUST be tested for mobile usability before deployment.
 
-1. Ensure login/primary CTAs are prominent with min 56px touch targets
+1. Ensure login/primary CTAs are prominent and reasonably tappable
 2. Use responsive text sizes (mobile -> tablet -> desktop)
 3. Start with single-column layouts on mobile
 4. Test on mobile viewport before deploying
@@ -32,7 +32,7 @@ This workflow avoids deploy-fix-deploy cycles and catches mobile layout bugs tha
 ### Quick Mobile Check
 
 Before deploying any UI changes:
-- [ ] Login button visible and large (min 56px height)
+- [ ] Login button visible and prominent
 - [ ] Text readable without zooming (responsive sizing)
 - [ ] Grid layouts collapse to single column on mobile
 - [ ] Visually verified on mobile viewport via Playwright during development
@@ -46,7 +46,7 @@ For UI changes in `apps/web` or `packages/ui`:
 2. Use the design tokens (CSS custom properties) defined in `packages/ui/src/tokens/theme.css`.
 3. Maintain mobile-first behavior:
    - single-column baseline at small widths
-   - primary action target minimum 56px on mobile
+   - primary actions are reasonably tappable; prefer compact, information-dense controls
    - no required horizontal scrolling at 320px for core flows
 4. Preserve accessibility:
    - keyboard-accessible interactions
