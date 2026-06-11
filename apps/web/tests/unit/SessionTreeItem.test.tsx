@@ -3,14 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionResponse } from '../../src/lib/api';
-import type { SessionTreeNode } from '../../src/pages/project-chat/sessionTree';
+import { getHierarchyRole } from '../../src/pages/project-chat/HierarchyIndicator';
 import { SessionTreeItem } from '../../src/pages/project-chat/SessionTreeItem';
 import type { TaskInfo } from '../../src/pages/project-chat/useTaskGroups';
 
 // ---------------------------------------------------------------------------
-// Helpers — build a SessionTreeNode graph directly to avoid re-testing the
-// buildSessionTree algorithm here. This test file focuses on the rendering
-// and interaction behavior of SessionTreeItem.
+// Helpers
 // ---------------------------------------------------------------------------
 
 function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionResponse {
@@ -28,402 +26,197 @@ function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionR
   };
 }
 
-function makeNode(overrides: Partial<SessionTreeNode> = {}): SessionTreeNode {
-  const session = overrides.session ?? makeSession();
-  const children = overrides.children ?? [];
-  const totalDescendants =
-    overrides.totalDescendants ??
-    children.reduce((sum, c) => sum + 1 + c.totalDescendants, 0);
+function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
   return {
-    session,
-    children,
-    depth: 0,
-    isContextAnchor: false,
-    totalDescendants,
-    completedDescendants: 0,
+    id: overrides.id ?? 'task-1',
+    title: 'Task',
+    status: 'in_progress',
+    parentTaskId: null,
+    blocked: false,
+    triggeredBy: 'user',
+    dispatchDepth: 0,
+    taskMode: 'task',
     ...overrides,
   };
 }
 
 function renderItem(
-  node: SessionTreeNode,
+  session: ChatSessionResponse,
   options: {
     selectedSessionId?: string | null;
-    searchQuery?: string;
     onSelect?: (id: string) => void;
     onShowHierarchy?: (taskId: string) => void;
     taskInfoMap?: Map<string, TaskInfo>;
-    defaultExpanded?: boolean;
+    lineageText?: string;
   } = {},
 ) {
   const onSelect = options.onSelect ?? vi.fn();
   const utils = render(
     <SessionTreeItem
-      node={node}
+      session={session}
       selectedSessionId={options.selectedSessionId ?? null}
       onSelect={onSelect}
       taskInfoMap={options.taskInfoMap ?? new Map()}
-      searchQuery={options.searchQuery ?? ''}
-      defaultExpanded={options.defaultExpanded}
       onShowHierarchy={options.onShowHierarchy}
+      lineageText={options.lineageText}
     />,
   );
   return { ...utils, onSelect };
 }
 
 // ---------------------------------------------------------------------------
-// C1 regression: initialExpanded must fall through the full chain when
-// hasMatchingDescendant is `false` (not undefined). Top-level parents with
-// children must auto-expand on first render.
+// Flat rendering — sessions render directly without nesting
 // ---------------------------------------------------------------------------
 
-describe('SessionTreeItem — initialExpanded (C1 regression)', () => {
-  it('auto-expands a depth-0 node with children when no search is active', () => {
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Child session' }),
-      depth: 1,
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent session' }),
-      children: [child],
-    });
-    renderItem(parent);
-
-    // Child title must be rendered in the DOM — if the parent stayed
-    // collapsed, the child would not be mounted.
-    expect(screen.getByText('Child session')).toBeInTheDocument();
+describe('SessionTreeItem — flat rendering', () => {
+  it('renders the session topic', () => {
+    renderItem(makeSession({ topic: 'My conversation' }));
+    expect(screen.getByText('My conversation')).toBeInTheDocument();
   });
 
-  it('auto-expands a context anchor so its active descendants are visible', () => {
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Active child' }),
-      depth: 1,
-    });
-    const anchor = makeNode({
-      session: makeSession({ id: 'p', topic: 'Stopped parent' }),
-      isContextAnchor: true,
-      children: [child],
-    });
-    renderItem(anchor);
-
-    expect(screen.getByText('Active child')).toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3a — Expand/collapse toggle button interaction
-// ---------------------------------------------------------------------------
-
-describe('SessionTreeItem — expand/collapse toggle (3a)', () => {
-  it('collapses the subtree when the expand button is clicked', async () => {
-    const user = userEvent.setup();
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Child session' }),
-      depth: 1,
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent session' }),
-      children: [child],
-    });
-    renderItem(parent);
-
-    // Parent starts expanded; child is visible.
-    expect(screen.getByText('Child session')).toBeInTheDocument();
-
-    const toggle = screen.getByRole('button', {
-      name: /Hide \d+ sub-tasks/i,
-    });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-
-    await user.click(toggle);
-
-    // After click, subtree is collapsed.
-    expect(screen.queryByText('Child session')).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /Show \d+ sub-tasks/i }),
-    ).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('re-expands the subtree when the collapsed button is clicked', async () => {
-    const user = userEvent.setup();
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Child session' }),
-      depth: 1,
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent session' }),
-      children: [child],
-    });
-    renderItem(parent, { defaultExpanded: false });
-
-    expect(screen.queryByText('Child session')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /Show \d+ sub-tasks/i }));
-
-    expect(screen.getByText('Child session')).toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3b — Search-driven auto-expand when a descendant matches the query
-// ---------------------------------------------------------------------------
-
-describe('SessionTreeItem — search-driven auto-expand (3b)', () => {
-  it('auto-expands a collapsed subtree when search matches a descendant topic', () => {
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Fix login bug' }),
-      depth: 1,
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent work' }),
-      children: [child],
-    });
-    // Force collapsed default so we know any visibility is search-driven.
-    renderItem(parent, { searchQuery: 'login', defaultExpanded: false });
-
-    expect(screen.getByText('Fix login bug')).toBeInTheDocument();
-  });
-
-  it('leaves non-matching parents in their default state (no auto-expand)', () => {
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Implement feature' }),
-      depth: 1,
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent work' }),
-      children: [child],
-    });
-    renderItem(parent, { searchQuery: 'zzz-nomatch', defaultExpanded: false });
-
-    expect(screen.queryByText('Implement feature')).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3c — User toggle overrides search-driven expansion
-// ---------------------------------------------------------------------------
-
-describe('SessionTreeItem — user toggle overrides search expansion (3c)', () => {
-  it('keeps the subtree collapsed after user clicks to close, even while search matches', async () => {
-    const user = userEvent.setup();
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Fix login bug' }),
-      depth: 1,
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent' }),
-      children: [child],
-    });
-    renderItem(parent, { searchQuery: 'login' });
-
-    // Search has auto-expanded it.
-    expect(screen.getByText('Fix login bug')).toBeInTheDocument();
-
-    // User explicitly collapses.
-    await user.click(screen.getByRole('button', { name: /Hide \d+ sub-tasks/i }));
-
-    // User's explicit collapse must win, even though the search query still
-    // matches a descendant.
-    expect(screen.queryByText('Fix login bug')).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3d — Depth overflow badge renders at depth >= MAX_VISUAL_DEPTH (5)
-// ---------------------------------------------------------------------------
-
-describe('SessionTreeItem — depth overflow badge (3d)', () => {
-  it('renders the L{N+1} badge when the node is at depth 5 or deeper', () => {
-    const deepNode = makeNode({
-      session: makeSession({ id: 'deep', topic: 'Deep node' }),
-      depth: 5,
-    });
-    renderItem(deepNode);
-
-    // depth=5 → badge shows L6
-    expect(screen.getByText('L6')).toBeInTheDocument();
-  });
-
-  it('does not render the depth badge at shallower depths', () => {
-    const shallow = makeNode({
-      session: makeSession({ id: 's', topic: 'Shallow' }),
-      depth: 2,
-    });
-    renderItem(shallow);
-
-    expect(screen.queryByText(/^L\d+$/)).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Accessibility: context anchor aria-label lands on the focusable select
-// button (not on a stray non-focusable div).
-// ---------------------------------------------------------------------------
-
-describe('SessionTreeItem — context anchor accessibility', () => {
-  it('puts the stopped-ancestor annotation on the select button so AT users hear it', () => {
-    const anchor = makeNode({
-      session: makeSession({ id: 'anc', topic: 'Stopped Parent' }),
-      isContextAnchor: true,
-    });
-    renderItem(anchor);
-
-    // The SessionItem select button must have an aria-label that communicates
-    // the anchor status to screen readers, since the visual dim/badge alone
-    // is invisible to assistive tech.
-    const button = screen.getByRole('button', {
-      name: /Stopped Parent.*stopped ancestor/i,
-    });
-    expect(button).toBeInTheDocument();
-  });
-
-  it('does not add an anchor aria-label to non-anchor rows', () => {
-    const normal = makeNode({
-      session: makeSession({ id: 'n', topic: 'Normal session' }),
-    });
-    renderItem(normal);
-
-    expect(
-      screen.queryByRole('button', { name: /stopped ancestor/i }),
-    ).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// onSelect wire-up (finding 5) — clicking the row surfaces the session id
-// ---------------------------------------------------------------------------
-
-describe('SessionTreeItem — select wire-up', () => {
-  it('calls onSelect with the session id when the row button is clicked', async () => {
+  it('calls onSelect with the session id when clicked', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    const node = makeNode({ session: makeSession({ id: 'target', topic: 'Pick me' }) });
-    renderItem(node, { onSelect });
+    renderItem(makeSession({ id: 'target', topic: 'Pick me' }), { onSelect });
 
-    // The row has only one "Pick me" button — the SessionItem select button.
     const row = screen.getByText('Pick me').closest('button');
     expect(row).not.toBeNull();
     await user.click(row!);
 
     expect(onSelect).toHaveBeenCalledWith('target');
   });
-
-  it('clicking a context anchor still calls onSelect (anchors are navigable)', async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    const anchor = makeNode({
-      session: makeSession({ id: 'a', topic: 'Stopped parent' }),
-      isContextAnchor: true,
-    });
-    renderItem(anchor, { onSelect });
-
-    const button = screen.getByRole('button', {
-      name: /Stopped parent.*stopped ancestor/i,
-    });
-    await user.click(button);
-
-    expect(onSelect).toHaveBeenCalledWith('a');
-  });
 });
 
 // ---------------------------------------------------------------------------
-// Hover/selected-state interaction (M3) — selected row must retain its
-// bg-inset background; hover class must not override it via !important.
+// Selected/hover state
 // ---------------------------------------------------------------------------
 
-describe('SessionTreeItem — hover does not erase selected background (M3)', () => {
+describe('SessionTreeItem — hover does not erase selected background', () => {
   it('selected row does not apply the hover override class', () => {
-    const node = makeNode({ session: makeSession({ id: 'x', topic: 'Selected row' }) });
-    const { container } = renderItem(node, { selectedSessionId: 'x' });
-
-    // The row container must not contain the `hover:bg-...` class when
-    // selected — otherwise `!important` would override the inline bg-inset.
-    const html = container.innerHTML;
-    expect(html).not.toMatch(/hover:bg-\[var\(--sam-color-bg-surface-hover\)\]/);
+    const { container } = renderItem(makeSession({ id: 'x', topic: 'Selected row' }), {
+      selectedSessionId: 'x',
+    });
+    expect(container.innerHTML).not.toMatch(/hover:bg-\[var\(--sam-color-bg-surface-hover\)\]/);
   });
 
   it('unselected row still applies the hover override class', () => {
-    const node = makeNode({ session: makeSession({ id: 'x', topic: 'Unselected row' }) });
-    const { container } = renderItem(node, { selectedSessionId: null });
-
+    const { container } = renderItem(makeSession({ id: 'x', topic: 'Unselected row' }), {
+      selectedSessionId: null,
+    });
     expect(container.innerHTML).toMatch(/hover:bg-\[var\(--sam-color-bg-surface-hover\)\]/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// SUB badge label consolidation (M1) — single neutral label, no SUB/NESTED
-// switcheroo that confuses users.
+// Role-differentiated hierarchy icons
 // ---------------------------------------------------------------------------
 
-describe('SessionTreeItem — compact expand toggle badge', () => {
-  it('shows a compact "completed/total" label for parents with children', () => {
-    const grand = makeNode({
-      session: makeSession({ id: 'g', topic: 'Grandchild' }),
-      depth: 2,
-    });
-    const child = makeNode({
-      session: makeSession({ id: 'c', topic: 'Child' }),
-      depth: 1,
-      children: [grand],
-    });
-    const parent = makeNode({
-      session: makeSession({ id: 'p', topic: 'Parent' }),
-      children: [child],
-      completedDescendants: 0,
-    });
-    renderItem(parent);
+describe('getHierarchyRole', () => {
+  it('returns "parent" for a task with MCP children but no parent', () => {
+    const map = new Map<string, TaskInfo>([
+      ['p', makeTaskInfo({ id: 'p', parentTaskId: null })],
+      ['c', makeTaskInfo({ id: 'c', parentTaskId: 'p', triggeredBy: 'mcp', dispatchDepth: 1 })],
+    ]);
+    expect(getHierarchyRole('p', map)).toBe('parent');
+  });
 
-    // Parent row has 2 descendants. The compact toggle shows "0/2".
-    expect(screen.getByText('0/2')).toBeInTheDocument();
+  it('returns "child" for an MCP subtask with no children of its own', () => {
+    const map = new Map<string, TaskInfo>([
+      ['p', makeTaskInfo({ id: 'p', parentTaskId: null })],
+      ['c', makeTaskInfo({ id: 'c', parentTaskId: 'p', triggeredBy: 'mcp', dispatchDepth: 1 })],
+    ]);
+    expect(getHierarchyRole('c', map)).toBe('child');
+  });
+
+  it('returns "both" for a task that is both parent and MCP child', () => {
+    const map = new Map<string, TaskInfo>([
+      ['root', makeTaskInfo({ id: 'root', parentTaskId: null })],
+      ['mid', makeTaskInfo({ id: 'mid', parentTaskId: 'root', triggeredBy: 'mcp', dispatchDepth: 1 })],
+      ['leaf', makeTaskInfo({ id: 'leaf', parentTaskId: 'mid', triggeredBy: 'mcp', dispatchDepth: 2 })],
+    ]);
+    expect(getHierarchyRole('mid', map)).toBe('both');
+  });
+
+  it('returns "none" for a standalone task', () => {
+    const map = new Map<string, TaskInfo>([
+      ['solo', makeTaskInfo({ id: 'solo', parentTaskId: null })],
+    ]);
+    expect(getHierarchyRole('solo', map)).toBe('none');
+  });
+
+  it('returns "none" for a retry/fork (not triggeredBy=mcp)', () => {
+    const map = new Map<string, TaskInfo>([
+      ['p', makeTaskInfo({ id: 'p', parentTaskId: null })],
+      ['r', makeTaskInfo({ id: 'r', parentTaskId: 'p', triggeredBy: 'user', dispatchDepth: 0 })],
+    ]);
+    expect(getHierarchyRole('r', map)).toBe('none');
   });
 });
 
-describe('SessionTreeItem — compact hierarchy trigger', () => {
-  it('keeps the hierarchy button compact in dense chat-list rows', async () => {
+// ---------------------------------------------------------------------------
+// Hierarchy button rendering and interaction
+// ---------------------------------------------------------------------------
+
+describe('SessionTreeItem — hierarchy button', () => {
+  it('renders role-differentiated hierarchy button for a parent task', () => {
+    const taskInfoMap = new Map<string, TaskInfo>([
+      ['parent-task', makeTaskInfo({ id: 'parent-task' })],
+      ['child-task', makeTaskInfo({ id: 'child-task', parentTaskId: 'parent-task', triggeredBy: 'mcp', dispatchDepth: 1 })],
+    ]);
+    const onShowHierarchy = vi.fn();
+
+    renderItem(
+      makeSession({ id: 's1', taskId: 'parent-task' }),
+      { taskInfoMap, onShowHierarchy },
+    );
+
+    const btn = screen.getByRole('button', { name: 'Has subtasks' });
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveStyle({ width: '22px', height: '22px' });
+  });
+
+  it('renders "Subtask" button for a child task', () => {
+    const taskInfoMap = new Map<string, TaskInfo>([
+      ['parent-task', makeTaskInfo({ id: 'parent-task' })],
+      ['child-task', makeTaskInfo({ id: 'child-task', parentTaskId: 'parent-task', triggeredBy: 'mcp', dispatchDepth: 1 })],
+    ]);
+    const onShowHierarchy = vi.fn();
+
+    renderItem(
+      makeSession({ id: 's1', taskId: 'child-task' }),
+      { taskInfoMap, onShowHierarchy },
+    );
+
+    expect(screen.getByRole('button', { name: 'Subtask' })).toBeInTheDocument();
+  });
+
+  it('calls onShowHierarchy with taskId when clicked', async () => {
     const user = userEvent.setup();
     const onShowHierarchy = vi.fn();
     const taskInfoMap = new Map<string, TaskInfo>([
-      ['parent-task', {
-        id: 'parent-task',
-        title: 'Parent task',
-        status: 'in_progress',
-        parentTaskId: null,
-        blocked: false,
-        triggeredBy: 'user',
-        dispatchDepth: 0,
-        taskMode: 'task',
-      }],
-      ['child-task', {
-        id: 'child-task',
-        title: 'Child task',
-        status: 'in_progress',
-        parentTaskId: 'parent-task',
-        blocked: false,
-        triggeredBy: 'mcp',
-        dispatchDepth: 1,
-        taskMode: 'task',
-      }],
+      ['parent-task', makeTaskInfo({ id: 'parent-task' })],
+      ['child-task', makeTaskInfo({ id: 'child-task', parentTaskId: 'parent-task', triggeredBy: 'mcp', dispatchDepth: 1 })],
     ]);
-    const node = makeNode({
-      session: makeSession({
-        id: 'child-session',
-        topic: 'Child with lineage',
-        taskId: 'child-task',
-      }),
-    });
 
-    renderItem(node, { taskInfoMap, onShowHierarchy });
+    renderItem(
+      makeSession({ id: 'child-session', taskId: 'child-task' }),
+      { taskInfoMap, onShowHierarchy },
+    );
 
-    const hierarchyButton = screen.getByRole('button', { name: 'View task hierarchy' });
-    expect(hierarchyButton).toHaveStyle({
-      width: '22px',
-      height: '22px',
-    });
-    expect(hierarchyButton.style.minWidth).toBe('');
-    expect(hierarchyButton.style.minHeight).toBe('');
-
-    await user.click(hierarchyButton);
-
+    await user.click(screen.getByRole('button', { name: 'Subtask' }));
     expect(onShowHierarchy).toHaveBeenCalledWith('child-task');
+  });
+
+  it('does not render hierarchy button for standalone tasks', () => {
+    const taskInfoMap = new Map<string, TaskInfo>([
+      ['solo', makeTaskInfo({ id: 'solo' })],
+    ]);
+
+    renderItem(
+      makeSession({ id: 's1', taskId: 'solo' }),
+      { taskInfoMap, onShowHierarchy: vi.fn() },
+    );
+
+    expect(screen.queryByRole('button', { name: /subtask|has subtasks/i })).not.toBeInTheDocument();
   });
 });
