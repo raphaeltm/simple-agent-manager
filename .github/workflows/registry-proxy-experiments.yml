@@ -1,0 +1,490 @@
+name: Registry Proxy Experiments
+
+on:
+  push:
+    branches:
+      - "sam/registry-proxy-spike-*"
+    paths:
+      - ".github/workflows/registry-proxy-experiments.yml"
+      - "apps/registry-proxy/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  registry-proxy-experiments:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      WORKER_NAME: sam-registry-proxy-exp-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Fixtures ────────────────────────────────────────────────────
+      - name: Generate experiment fixtures
+        run: |
+          set -euo pipefail
+          TOKEN_A=$(openssl rand -hex 16)
+          TOKEN_B=$(openssl rand -hex 16)
+          SIGNING_SECRET=$(openssl rand -hex 24)
+          echo "::add-mask::$TOKEN_A"
+          echo "::add-mask::$TOKEN_B"
+          echo "::add-mask::$SIGNING_SECRET"
+          echo "TOKEN_A=$TOKEN_A" >> "$GITHUB_ENV"
+          echo "TOKEN_B=$TOKEN_B" >> "$GITHUB_ENV"
+          echo "SIGNING_SECRET=$SIGNING_SECRET" >> "$GITHUB_ENV"
+
+          # Tiny FROM-scratch test image
+          DIR=$(mktemp -d)
+          echo "SAM registry proxy experiment $GITHUB_RUN_ID $(date -u +%Y%m%dT%H%M%SZ)" > "$DIR/marker.txt"
+          cat > "$DIR/Dockerfile" <<'EOF'
+          FROM scratch
+          COPY marker.txt /marker.txt
+          EOF
+          docker build -t test-image:exp "$DIR"
+          echo "Test image built"
+
+      # ── Upstream credentials ────────────────────────────────────────
+      - name: Mint upstream registry credentials
+        id: mint_creds
+        run: |
+          set -euo pipefail
+
+          # --- Approach 1: CF REST API (specified in runbook) ---
+          RESP=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"domain":"registry.cloudflare.com","capabilities":["push","pull"],"expiration_minutes":240}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/registries/credentials")
+          HTTP_CODE=$(echo "$RESP" | tail -1)
+          BODY=$(echo "$RESP" | sed '$d')
+          echo "CF API credential mint: HTTP $HTTP_CODE"
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            U=$(echo "$BODY" | jq -r '.result.username // empty')
+            P=$(echo "$BODY" | jq -r '.result.password // empty')
+            if [ -n "$P" ]; then
+              echo "::add-mask::$P"
+              echo "UPSTREAM_USERNAME=$U" >> "$GITHUB_ENV"
+              echo "UPSTREAM_PASSWORD=$P" >> "$GITHUB_ENV"
+              echo "CRED_METHOD=rest-api" >> "$GITHUB_ENV"
+              echo "### Credential mint: REST API succeeded" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          # --- Approach 2: wrangler CLI (proven in devcontainer-cache-experiments) ---
+          echo "REST API returned $HTTP_CODE — trying wrangler CLI fallback"
+          {
+            echo "### Credential mint"
+            echo ""
+            echo "REST API status: $HTTP_CODE"
+            echo '```json'
+            echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cd apps/registry-proxy
+          RAW=$(npx wrangler containers registries credentials registry.cloudflare.com \
+            --push --pull --expiration-minutes 240 --json 2>&1) || true
+          JSON=$(node -e "
+            const raw = process.argv[1];
+            const start = raw.lastIndexOf('{');
+            if (start < 0) { console.error('No JSON in wrangler output'); process.exit(1); }
+            const obj = JSON.parse(raw.slice(start));
+            console.log(JSON.stringify(obj));
+          " "$RAW" 2>/dev/null) || true
+
+          if [ -n "$JSON" ]; then
+            U=$(echo "$JSON" | jq -r '.username // empty')
+            P=$(echo "$JSON" | jq -r '.password // empty')
+            if [ -n "$P" ]; then
+              echo "::add-mask::$P"
+              echo "UPSTREAM_USERNAME=$U" >> "$GITHUB_ENV"
+              echo "UPSTREAM_PASSWORD=$P" >> "$GITHUB_ENV"
+              echo "CRED_METHOD=wrangler-cli" >> "$GITHUB_ENV"
+              echo "Wrangler CLI fallback succeeded" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          # --- Both failed ---
+          {
+            echo ""
+            echo "## BLOCKED: Cannot mint upstream registry credentials"
+            echo ""
+            echo "Neither REST API nor wrangler CLI could mint credentials."
+            echo "The staging environment token likely lacks the containers/registries scope."
+            echo ""
+            echo "Wrangler output (redacted):"
+            echo '```text'
+            echo "$RAW" | head -40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # ── Deploy spike worker ─────────────────────────────────────────
+      - name: Deploy spike worker to workers.dev
+        id: deploy
+        run: |
+          set -euo pipefail
+          cd apps/registry-proxy
+
+          DEPLOY_OUT=$(npx wrangler deploy \
+            --name "$WORKER_NAME" \
+            --var "UPSTREAM_REGISTRY_URL:https://registry.cloudflare.com" \
+            --var "UPSTREAM_ACCOUNT_PREFIX:${CLOUDFLARE_ACCOUNT_ID}" \
+            2>&1) || { echo "$DEPLOY_OUT"; exit 1; }
+          echo "$DEPLOY_OUT"
+
+          WORKER_URL=$(echo "$DEPLOY_OUT" | grep -oP 'https://[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev' | head -1)
+          if [ -z "$WORKER_URL" ]; then
+            echo "::error::Could not extract worker URL from deploy output"
+            exit 1
+          fi
+          echo "WORKER_URL=$WORKER_URL" >> "$GITHUB_ENV"
+
+          # Set secrets (worker must exist first)
+          DEV_TOKENS=$(jq -n --arg ta "$TOKEN_A" --arg tb "$TOKEN_B" \
+            '{($ta): "proj-a", ($tb): "proj-b"}')
+
+          echo "$SIGNING_SECRET"     | npx wrangler secret put TOKEN_SIGNING_SECRET --name "$WORKER_NAME"
+          echo "$DEV_TOKENS"         | npx wrangler secret put DEV_PROJECT_TOKENS   --name "$WORKER_NAME"
+          echo "$UPSTREAM_USERNAME"   | npx wrangler secret put UPSTREAM_USERNAME    --name "$WORKER_NAME"
+          echo "$UPSTREAM_PASSWORD"   | npx wrangler secret put UPSTREAM_PASSWORD    --name "$WORKER_NAME"
+
+          echo "Deployed $WORKER_URL — waiting 15s for secret propagation"
+          sleep 15
+
+          # Healthcheck
+          HC=$(curl -s -o /dev/null -w "%{http_code}" "$WORKER_URL/healthz")
+          echo "Healthcheck: $HC"
+          {
+            echo "### Deploy"
+            echo "- Worker: \`$WORKER_NAME\`"
+            echo "- URL: \`$WORKER_URL\`"
+            echo "- Cred method: $CRED_METHOD"
+            echo "- Healthcheck: $HC"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Test 1: end-to-end push ─────────────────────────────────────
+      - name: "Test 1: End-to-end push (tiny FROM scratch image)"
+        id: test1
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          PROXY_HOST=${WORKER_URL#https://}
+
+          # Docker login
+          echo "$TOKEN_A" | docker login "$PROXY_HOST" -u proj-a --password-stdin 2>&1 | tee /tmp/t1-login.log
+          REF="$PROXY_HOST/proj-a/test:latest"
+          docker tag test-image:exp "$REF"
+          docker push "$REF" 2>&1 | tee /tmp/t1-push.log
+          PUSH_EC=$?
+
+          {
+            echo "### Test 1: End-to-end push"
+            echo "- Exit code: $PUSH_EC"
+            echo '<details><summary>Push log</summary>'
+            echo ""
+            echo '```'
+            cat /tmp/t1-push.log
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $PUSH_EC
+
+      # ── Test 4: pull + redirect behaviour ───────────────────────────
+      - name: "Test 4: Pull + redirect behaviour"
+        id: test4
+        continue-on-error: true
+        if: steps.test1.outcome == 'success'
+        run: |
+          set -euo pipefail
+          PROXY_HOST=${WORKER_URL#https://}
+          REF="$PROXY_HOST/proj-a/test:latest"
+          docker rmi "$REF" 2>/dev/null || true
+
+          docker pull "$REF" 2>&1 | tee /tmp/t4-pull.log
+          PULL_EC=$?
+
+          # Inspect redirect behaviour on a blob GET via curl
+          TOK=$(curl -s -u "proj-a:$TOKEN_A" \
+            "$WORKER_URL/token?service=sam-registry-proxy&scope=repository:proj-a/test:pull" \
+            | jq -r '.token // .access_token')
+
+          MANIFEST=$(curl -s -H "Authorization: Bearer $TOK" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" \
+            "$WORKER_URL/v2/proj-a/test/manifests/latest")
+
+          DIGEST=$(echo "$MANIFEST" | jq -r '(.config.digest // .layers[0].digest // empty)')
+          BLOB_INFO="no digest found"
+          if [ -n "$DIGEST" ]; then
+            curl -s -D /tmp/t4-blob-hdrs.txt -o /dev/null \
+              -w "status=%{http_code} redirect=%{redirect_url}" \
+              -H "Authorization: Bearer $TOK" \
+              "$WORKER_URL/v2/proj-a/test/blobs/$DIGEST" > /tmp/t4-blob-curl.txt 2>&1
+            BLOB_INFO=$(cat /tmp/t4-blob-curl.txt)
+          fi
+
+          {
+            echo "### Test 4: Pull + redirect behaviour"
+            echo "- docker pull exit: $PULL_EC"
+            echo "- Blob digest: \`${DIGEST:-none}\`"
+            echo "- Blob GET: $BLOB_INFO"
+            if [ -f /tmp/t4-blob-hdrs.txt ]; then
+              echo '<details><summary>Blob response headers</summary>'
+              echo ""
+              echo '```http'
+              cat /tmp/t4-blob-hdrs.txt
+              echo '```'
+              echo '</details>'
+            fi
+            echo '<details><summary>Pull log</summary>'
+            echo ""
+            echo '```'
+            cat /tmp/t4-pull.log
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $PULL_EC
+
+      # ── Test 5: cross-project scope enforcement ─────────────────────
+      - name: "Test 5: Cross-project scope enforcement"
+        id: test5
+        continue-on-error: true
+        if: steps.test1.outcome == 'success'
+        run: |
+          set -euo pipefail
+          PROXY_HOST=${WORKER_URL#https://}
+
+          # Token for proj-b requesting access to proj-a's repo
+          TOK_RESP=$(curl -s -u "proj-b:$TOKEN_B" \
+            "$WORKER_URL/token?service=sam-registry-proxy&scope=repository:proj-a/test:pull,push")
+          TOK_B=$(echo "$TOK_RESP" | jq -r '.token // .access_token')
+          ACCESS=$(echo "$TOK_RESP" | jq -c '.access // []' 2>/dev/null || echo '?')
+
+          # curl pull
+          PULL_SC=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TOK_B" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "$WORKER_URL/v2/proj-a/test/manifests/latest")
+
+          # curl push (manifest PUT)
+          PUSH_SC=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TOK_B" \
+            -H "Content-Type: application/vnd.docker.distribution.manifest.v2+json" \
+            -X PUT -d '{}' \
+            "$WORKER_URL/v2/proj-a/test/manifests/xproj")
+
+          # docker push attempt
+          docker logout "$PROXY_HOST" 2>/dev/null || true
+          echo "$TOKEN_B" | docker login "$PROXY_HOST" -u proj-b --password-stdin 2>/dev/null || true
+          docker tag test-image:exp "$PROXY_HOST/proj-a/test:xproj" 2>/dev/null || true
+          DOCKER_PUSH_EC=0
+          docker push "$PROXY_HOST/proj-a/test:xproj" 2>&1 | tee /tmp/t5-push.log || DOCKER_PUSH_EC=$?
+
+          PASS="true"
+          [ "$PULL_SC" = "403" ] || PASS="false"
+          [ "$PUSH_SC" = "403" ] || PASS="false"
+          [ "$DOCKER_PUSH_EC" != "0" ] || PASS="false"
+
+          {
+            echo "### Test 5: Cross-project scope enforcement"
+            echo ""
+            echo "| Operation | Expected | Actual |"
+            echo "|-----------|----------|--------|"
+            echo "| Token access (proj-b → proj-a/test) | empty actions | \`$ACCESS\` |"
+            echo "| curl GET manifest (proj-b token) | 403 | $PULL_SC |"
+            echo "| curl PUT manifest (proj-b token) | 403 | $PUSH_SC |"
+            echo "| docker push (proj-b login) | non-zero exit | exit=$DOCKER_PUSH_EC |"
+            echo ""
+            if [ "$PASS" = "true" ]; then
+              echo "**PASS** — cross-project access correctly denied"
+            else
+              echo "**FAIL** — cross-project access was not fully denied"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Pivot Option 2: blob upload Location passthrough ────────────
+      - name: "Pivot Option 2: Blob upload Location header analysis"
+        id: pivot2
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          TOK=$(curl -s -u "proj-a:$TOKEN_A" \
+            "$WORKER_URL/token?service=sam-registry-proxy&scope=repository:proj-a/test:push,pull" \
+            | jq -r '.token // .access_token')
+
+          # ── A: Initiate blob upload THROUGH the proxy ──
+          echo "=== Via proxy ==="
+          curl -s -D /tmp/p2-proxy-hdrs.txt -o /tmp/p2-proxy-body.txt \
+            -w "\nHTTP %{http_code}\n" \
+            -X POST \
+            -H "Authorization: Bearer $TOK" \
+            "$WORKER_URL/v2/proj-a/test/blobs/uploads/" | tee /tmp/p2-proxy-status.txt
+
+          PROXY_SC=$(grep -oP '\d{3}' /tmp/p2-proxy-status.txt | tail -1)
+          PROXY_LOC=$(grep -i '^location:' /tmp/p2-proxy-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n')
+          PROXY_UUID=$(grep -i '^docker-upload-uuid:' /tmp/p2-proxy-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n')
+
+          # ── B: Initiate blob upload DIRECTLY against upstream ──
+          echo "=== Direct upstream ==="
+          UPSTREAM_AUTH=$(printf '%s:%s' "$UPSTREAM_USERNAME" "$UPSTREAM_PASSWORD" | base64 -w0)
+          curl -s -D /tmp/p2-direct-hdrs.txt -o /tmp/p2-direct-body.txt \
+            -w "\nHTTP %{http_code}\n" \
+            -X POST \
+            -H "Authorization: Basic $UPSTREAM_AUTH" \
+            "https://registry.cloudflare.com/v2/${CLOUDFLARE_ACCOUNT_ID}/proj-a/test/blobs/uploads/" \
+            | tee /tmp/p2-direct-status.txt
+
+          DIRECT_SC=$(grep -oP '\d{3}' /tmp/p2-direct-status.txt | tail -1)
+          DIRECT_LOC=$(grep -i '^location:' /tmp/p2-direct-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n')
+
+          # ── C: Analyse the Location headers ──
+          analyse_location() {
+            local LOC="$1" LABEL="$2"
+            local IS_ABS="no" HOST="" DIFF_HOST="n/a" SELF_AUTH="n/a"
+            if echo "$LOC" | grep -qP '^https?://'; then
+              IS_ABS="yes"
+              HOST=$(echo "$LOC" | sed -E 's|^https?://([^/]+).*|\1|')
+              if [ "$HOST" != "registry.cloudflare.com" ]; then
+                DIFF_HOST="yes ($HOST)"
+                # Test self-authorizing: PATCH with no auth
+                SA_SC=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X PATCH -H "Content-Type: application/octet-stream" \
+                  -d "probe" "$LOC" 2>/dev/null || echo "error")
+                case "$SA_SC" in
+                  202|204) SELF_AUTH="YES (PATCH $SA_SC without auth)" ;;
+                  401|403) SELF_AUTH="no (PATCH $SA_SC — needs auth)" ;;
+                  *)       SELF_AUTH="unclear (PATCH $SA_SC)" ;;
+                esac
+              else
+                DIFF_HOST="no (same host)"
+                SELF_AUTH="n/a — same host, needs auth"
+              fi
+            fi
+            echo "IS_ABS_${LABEL}=$IS_ABS"
+            echo "HOST_${LABEL}=$HOST"
+            echo "DIFF_HOST_${LABEL}=$DIFF_HOST"
+            echo "SELF_AUTH_${LABEL}=$SELF_AUTH"
+          }
+
+          eval "$(analyse_location "$PROXY_LOC" PROXY)"
+          eval "$(analyse_location "$DIRECT_LOC" DIRECT)"
+
+          # ── D: Verdict ──
+          VERDICT="INCONCLUSIVE"
+          if echo "$SELF_AUTH_DIRECT" | grep -qi "^yes"; then
+            VERDICT="VIABLE — upstream returns self-authorizing upload URLs on a different host"
+          elif echo "$SELF_AUTH_PROXY" | grep -qi "^yes"; then
+            VERDICT="VIABLE — proxy-rewritten URLs are self-authorizing"
+          elif echo "$DIFF_HOST_DIRECT" | grep -q "^no"; then
+            VERDICT="NOT VIABLE — upstream Location stays on registry.cloudflare.com (needs auth, subject to 100 MB limit)"
+          fi
+
+          {
+            echo "### Pivot Option 2: Blob upload Location passthrough"
+            echo ""
+            echo "**Most important experiment** — determines whether large layers can bypass the 100 MB CF edge limit."
+            echo ""
+            echo "#### Via Proxy"
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| POST .../blobs/uploads/ | HTTP $PROXY_SC |"
+            echo "| Location | \`${PROXY_LOC:-(empty)}\` |"
+            echo "| Absolute? | $IS_ABS_PROXY |"
+            echo "| Host | \`${HOST_PROXY:-n/a}\` |"
+            echo "| Different host? | $DIFF_HOST_PROXY |"
+            echo "| Self-authorizing? | $SELF_AUTH_PROXY |"
+            echo "| Docker-Upload-UUID | \`${PROXY_UUID:-(empty)}\` |"
+            echo ""
+            echo "#### Direct Upstream (registry.cloudflare.com)"
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| POST .../blobs/uploads/ | HTTP $DIRECT_SC |"
+            echo "| Location | \`${DIRECT_LOC:-(empty)}\` |"
+            echo "| Absolute? | $IS_ABS_DIRECT |"
+            echo "| Host | \`${HOST_DIRECT:-n/a}\` |"
+            echo "| Different host? | $DIFF_HOST_DIRECT |"
+            echo "| Self-authorizing? | $SELF_AUTH_DIRECT |"
+            echo ""
+            echo "#### Verdict: $VERDICT"
+            echo ""
+            echo '<details><summary>Proxy upload response headers</summary>'
+            echo ""
+            echo '```http'
+            cat /tmp/p2-proxy-hdrs.txt 2>/dev/null || echo "(none)"
+            echo '```'
+            echo '</details>'
+            echo '<details><summary>Direct upstream upload response headers</summary>'
+            echo ""
+            echo '```http'
+            cat /tmp/p2-direct-hdrs.txt 2>/dev/null || echo "(none)"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Summary ─────────────────────────────────────────────────────
+      - name: Final summary
+        if: always()
+        run: |
+          {
+            echo "---"
+            echo "### Experiment Run Summary"
+            echo "| Test | Outcome |"
+            echo "|------|---------|"
+            echo "| Credential mint | ${{ steps.mint_creds.outcome }} (${{ env.CRED_METHOD || 'n/a' }}) |"
+            echo "| Deploy | ${{ steps.deploy.outcome }} |"
+            echo "| Test 1 (push) | ${{ steps.test1.outcome }} |"
+            echo "| Test 4 (pull/redirect) | ${{ steps.test4.outcome }} |"
+            echo "| Test 5 (cross-project) | ${{ steps.test5.outcome }} |"
+            echo "| Pivot option 2 | ${{ steps.pivot2.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Teardown (unconditional) ────────────────────────────────────
+      - name: Teardown — delete experiment worker
+        if: always()
+        run: |
+          set -x
+          cd apps/registry-proxy
+          echo "y" | npx wrangler delete --name "$WORKER_NAME" 2>&1 || true
+          sleep 5
+          HC=$(curl -s -o /dev/null -w "%{http_code}" "${WORKER_URL:-https://example.com}/healthz" 2>/dev/null || echo "conn_err")
+          {
+            echo "### Teardown"
+            echo "- Worker \`$WORKER_NAME\` deleted"
+            echo "- Post-delete healthcheck: $HC (expect 404/522/conn_err)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload findings artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-proxy-experiment-${{ github.run_id }}
+          path: |
+            /tmp/t1-*.log
+            /tmp/t4-*.log
+            /tmp/t4-*.txt
+            /tmp/t5-*.log
+            /tmp/p2-*.txt
+          retention-days: 30
+          if-no-files-found: ignore

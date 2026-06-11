@@ -13,6 +13,8 @@ export interface UpstreamConfig {
   upstreamUrl: string;
   username?: string;
   password?: string;
+  /** Prefixed to the repository path for account-scoped registries (e.g., CF account ID). */
+  accountPrefix?: string;
 }
 
 /** Headers we never forward upstream (recomputed by fetch / replaced by us). */
@@ -21,7 +23,14 @@ const HOP_HEADERS = ['host', 'authorization', 'connection', 'keep-alive', 'trans
 export function buildUpstreamRequest(request: Request, config: UpstreamConfig): Request {
   const incoming = new URL(request.url);
   const upstream = new URL(config.upstreamUrl);
-  upstream.pathname = incoming.pathname;
+  // For account-scoped registries (e.g., registry.cloudflare.com/{accountId}/...),
+  // insert the account prefix after /v2/ so the proxy's client-facing namespace
+  // stays clean (proj-a/test) while upstream sees the full path ({accountId}/proj-a/test).
+  if (config.accountPrefix) {
+    upstream.pathname = incoming.pathname.replace(/^\/v2\//, `/v2/${config.accountPrefix}/`);
+  } else {
+    upstream.pathname = incoming.pathname;
+  }
   upstream.search = incoming.search;
 
   const headers = new Headers();
@@ -53,8 +62,17 @@ export function buildUpstreamRequest(request: Request, config: UpstreamConfig): 
  * origin. Absolute Locations pointing elsewhere (e.g. signed R2 blob URLs on
  * redirect responses) are passed through untouched.
  */
-export function rewriteLocation(location: string, upstreamUrl: string, proxyOrigin: string): string {
+export function rewriteLocation(
+  location: string,
+  upstreamUrl: string,
+  proxyOrigin: string,
+  accountPrefix?: string,
+): string {
   if (location.startsWith('/')) {
+    // Strip the account prefix from relative paths so the client sees the proxy namespace.
+    if (accountPrefix) {
+      return location.replace(`/v2/${accountPrefix}/`, '/v2/');
+    }
     return location;
   }
   let parsed: URL;
@@ -65,7 +83,11 @@ export function rewriteLocation(location: string, upstreamUrl: string, proxyOrig
   }
   const upstream = new URL(upstreamUrl);
   if (parsed.host === upstream.host) {
-    return `${proxyOrigin}${parsed.pathname}${parsed.search}`;
+    let pathname = parsed.pathname;
+    if (accountPrefix) {
+      pathname = pathname.replace(`/v2/${accountPrefix}/`, '/v2/');
+    }
+    return `${proxyOrigin}${pathname}${parsed.search}`;
   }
   return location;
 }
@@ -78,7 +100,7 @@ export async function proxyToUpstream(request: Request, config: UpstreamConfig):
   const location = headers.get('location');
   if (location) {
     const proxyOrigin = new URL(request.url).origin;
-    headers.set('location', rewriteLocation(location, config.upstreamUrl, proxyOrigin));
+    headers.set('location', rewriteLocation(location, config.upstreamUrl, proxyOrigin, config.accountPrefix));
   }
   // The upstream's auth challenge must not leak through — the proxy issues its own.
   headers.delete('www-authenticate');

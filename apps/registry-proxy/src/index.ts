@@ -30,6 +30,8 @@ export interface Env {
   DEV_PROJECT_TOKENS?: string;
   UPSTREAM_USERNAME?: string;
   UPSTREAM_PASSWORD?: string;
+  /** Account prefix for account-scoped registries (e.g., CF account ID). */
+  UPSTREAM_ACCOUNT_PREFIX?: string;
 }
 
 /** Issuer claim baked into every token; verified again on the data path. */
@@ -185,6 +187,7 @@ app.all('/v2/*', async (c) => {
     upstreamUrl: env.UPSTREAM_REGISTRY_URL,
     username: env.UPSTREAM_USERNAME,
     password: env.UPSTREAM_PASSWORD,
+    accountPrefix: env.UPSTREAM_ACCOUNT_PREFIX,
   });
 });
 
