@@ -1,10 +1,3 @@
-/**
- * useSessionLifecycle — DO-only session lifecycle for project chat.
- *
- * All messages flow through a single source: the Durable Object WebSocket.
- * Prompts are sent via the REST API (POST /sessions/:sessionId/prompt).
- * Agent state (idle/prompting/responding) is derived from message flow.
- */
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -13,19 +6,19 @@ import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
-import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace } from '../../lib/api';
+import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import { deriveSessionState, IDLE_TIMEOUT_MS, VIRTUAL_START } from './types';
 import { useConnectionRecovery } from './useConnectionRecovery';
-import { useSessionActions } from './useSessionActions';
 
 /** Agent activity state derived from message flow (no ACP connection needed). */
 export type AgentActivityState = 'idle' | 'prompting' | 'responding';
 
+type FilePanelState = { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
+
 export interface UseSessionLifecycleResult {
-  // Session state
   session: ChatSessionResponse | null;
   messages: ChatMessageResponse[];
   hasMore: boolean;
@@ -33,58 +26,36 @@ export interface UseSessionLifecycleResult {
   error: string | null;
   setError: (e: string | null) => void;
   sessionState: SessionState;
-
-  // Task embed
   taskEmbed: ChatSessionResponse['task'] | null;
-
-  // Workspace context
   workspace: WorkspaceResponse | null;
   node: NodeResponse | null;
   detectedPorts: ReturnType<typeof useWorkspacePorts>['ports'];
-
-  // Follow-up state
   followUp: string;
   setFollowUp: (v: string) => void;
   sendingFollowUp: boolean;
   uploading: boolean;
-
-  // Resume state
   isResuming: boolean;
   resumeError: string | null;
-
-  // Connection state
   connectionState: ChatConnectionState;
   showConnectionBanner: boolean;
   retryWs: () => void;
-
-  // Agent activity (derived from message flow + server state)
   agentActivity: AgentActivityState;
   currentPlan: SessionStateSnapshot['currentPlan'];
   promptStartedAt: number | null;
-
-  // Scroll state
   firstItemIndex: number;
   showScrollButton: boolean;
   setShowScrollButton: (v: boolean) => void;
-
-  // Idle timer
   idleCountdownMs: number | null;
-
-  // File panel
-  filePanel: { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
-  setFilePanel: (v: { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null) => void;
+  filePanel: FilePanelState;
+  setFilePanel: (v: FilePanelState) => void;
   handleFileClick: (path: string, line?: number | null) => void;
   handleOpenFileBrowser: () => void;
   handleOpenGitChanges: () => void;
-
-  // Actions
   handleCancelPrompt: () => void;
   handleSendFollowUp: () => Promise<void>;
   handleUploadFiles: (files: FileList | File[]) => Promise<void>;
   loadMore: () => Promise<void>;
   loadingMore: boolean;
-
-  // Misc
   transcribeApiUrl: string;
   wsRef: React.RefObject<WebSocket | null>;
 }
@@ -103,30 +74,19 @@ export function useSessionLifecycle(
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Workspace & node context
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
 
-  // Follow-up input state
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
-
-  // Agent activity state (derived from message flow + server state)
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const verifyAbortRef = useRef<AbortController | null>(null);
-
-  // Plan state (from session state mirror)
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
 
-  // File panel
-  const [filePanel, setFilePanel] = useState<{
-    mode: 'browse' | 'view' | 'diff' | 'git-status';
-    path?: string;
-    line?: number | null;
-  } | null>(null);
+  const [filePanel, setFilePanel] = useState<FilePanelState>(null);
 
   const handleFileClick = useCallback((path: string, line?: number | null) => {
     setFilePanel({ mode: 'view', path, line });
@@ -138,10 +98,8 @@ export function useSessionLifecycle(
     setFilePanel({ mode: 'git-status' });
   }, []);
 
-  // Virtual scroll
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
   const [showScrollButton, setShowScrollButton] = useState(false);
-
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = getTranscribeApiUrl();
 
@@ -153,18 +111,10 @@ export function useSessionLifecycle(
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
-      // Update current plan from incoming plan messages
       if (msg.role === 'plan' && msg.content) {
-        try {
-          const parsed = JSON.parse(msg.content);
-          if (Array.isArray(parsed)) setCurrentPlan(parsed);
-        } catch { /* ignore malformed plan */ }
+        try { const parsed = JSON.parse(msg.content); if (Array.isArray(parsed)) setCurrentPlan(parsed); } catch { /* ignore */ }
       }
-
-      // Derive agent activity from any non-user message (assistant, tool, thinking, plan).
-      // Reset the idle fallback timer on every message role — tool calls and
-      // thinking chunks also indicate the agent is active. The 30s timeout is a
-      // safety net; the primary signal is the server-pushed session.activity event.
+      // Reset idle fallback timer on any non-user message (agent is active)
       if (msg.role !== 'user') {
         setAgentActivity('responding');
         clearTimeout(idleTimerRef.current);
@@ -180,14 +130,9 @@ export function useSessionLifecycle(
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      // Hydrate activity + plan from server state on reconnect
       if (state) {
-        if (state.activity === 'prompting') {
-          setAgentActivity('prompting');
-          setPromptStartedAt(state.promptStartedAt ?? null);
-        } else if (state.activity === 'idle') {
-          setAgentActivity('idle');
-        }
+        if (state.activity === 'prompting') { setAgentActivity('prompting'); setPromptStartedAt(state.promptStartedAt ?? null); }
+        else if (state.activity === 'idle') { setAgentActivity('idle'); }
         if (state.currentPlan) setCurrentPlan(state.currentPlan);
       }
     }, []),
@@ -202,10 +147,7 @@ export function useSessionLifecycle(
       verifyAbortRef.current?.abort();
       verifyAbortRef.current = null;
       if (activity === 'prompting') {
-        // Safety backstop: if the server never sends "idle" (e.g., crashed or
-        // network partition), verify with the DO before decaying to idle.
-        // This prevents false idle during long tool calls (npm install, etc.)
-        // where no tokens stream for 30+ seconds.
+        // Verify with DO before decaying to idle (prevents false idle during long tool calls)
         const abortController = new AbortController();
         verifyAbortRef.current = abortController;
         const armVerifyTimer = () => {
@@ -224,8 +166,6 @@ export function useSessionLifecycle(
                 setPromptStartedAt(null);
               }
             } catch {
-              // Network error or abort — decay to idle as safety fallback.
-              // AbortError from session switch is harmless (new session handles its own state).
               if (!abortController.signal.aborted) {
                 setAgentActivity('idle');
                 setPromptStartedAt(null);
@@ -249,36 +189,15 @@ export function useSessionLifecycle(
     setSession,
   });
 
-  // Reset virtual scroll and idle timer on session change
+  // Reset virtual scroll and idle timer on session change; cleanup on unmount
   useEffect(() => {
     clearTimeout(idleTimerRef.current);
     verifyAbortRef.current?.abort();
     verifyAbortRef.current = null;
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
+    return () => { clearTimeout(idleTimerRef.current); verifyAbortRef.current?.abort(); };
   }, [sessionId]);
-
-  // Cleanup idle timer and abort in-flight verify fetches on unmount
-  useEffect(() => {
-    return () => {
-      clearTimeout(idleTimerRef.current);
-      verifyAbortRef.current?.abort();
-    };
-  }, []);
-
-  // Hydrate session state from server snapshot
-  const hydrateSessionState = useCallback((state: SessionStateSnapshot | null | undefined) => {
-    if (!state) return;
-    if (state.activity === 'prompting') {
-      setAgentActivity('prompting');
-      setPromptStartedAt(state.promptStartedAt ?? null);
-    } else if (state.activity === 'idle') {
-      setAgentActivity('idle');
-    }
-    if (state.currentPlan) {
-      setCurrentPlan(state.currentPlan);
-    }
-  }, []);
 
   // Load session
   const loadSession = useCallback(async () => {
@@ -290,14 +209,18 @@ export function useSessionLifecycle(
       setMessages(data.messages);
       setHasMore(data.hasMore);
       if (data.session.task) setTaskEmbed(data.session.task);
-      // Hydrate activity + plan from persisted session state
-      hydrateSessionState(data.state);
+      const st = data.state;
+      if (st) {
+        if (st.activity === 'prompting') { setAgentActivity('prompting'); setPromptStartedAt(st.promptStartedAt ?? null); }
+        else if (st.activity === 'idle') setAgentActivity('idle');
+        if (st.currentPlan) setCurrentPlan(st.currentPlan);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
       setLoading(false);
     }
-  }, [projectId, sessionId, hydrateSessionState]);
+  }, [projectId, sessionId]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
 
@@ -389,54 +312,141 @@ export function useSessionLifecycle(
     };
   }, [session?.status, projectId, sessionId]);
 
-  // Action handlers (extracted to useSessionActions.ts for file size)
-  const { handleSendFollowUp, handleUploadFiles, handleCancelPrompt, loadMore } = useSessionActions({
-    projectId, sessionId, sessionState, session, agentActivity,
-    followUp, sendingFollowUp, hasMore, loadingMore, messages,
-    setFollowUp, setSendingFollowUp, setUploading, setAgentActivity,
-    setSession, setMessages, setHasMore, setLoadingMore,
-    setFirstItemIndex, wsRef, recovery,
-  });
+  // ── Send follow-up via REST API ──
+  const handleSendFollowUp = async () => {
+    const trimmed = followUp.trim();
+    if (!trimmed || sendingFollowUp) return;
+
+    setSendingFollowUp(true);
+    setAgentActivity('prompting');
+    try {
+      if (sessionState === 'idle') {
+        resetIdleTimer(projectId, sessionId)
+          .then((result) => {
+            if (result.cleanupAt) {
+              setSession((prev) => {
+                if (!prev) return prev;
+                return { ...prev, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+              });
+            }
+          })
+          .catch(() => {});
+      }
+
+      // Optimistic user message
+      const optimisticId = `optimistic-${crypto.randomUUID()}`;
+      setMessages((prev) => [...prev, {
+        id: optimisticId,
+        sessionId,
+        role: 'user',
+        content: trimmed,
+        toolMetadata: null,
+        createdAt: Date.now(),
+      }]);
+
+      // Persist via DO WebSocket
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'message.send',
+          sessionId,
+          content: trimmed,
+          role: 'user',
+        }));
+      }
+
+      // For idle sessions, resume first then send the prompt
+      if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
+        recovery.resumeAndSend(trimmed);
+      } else {
+        // Forward prompt to the running agent via REST API
+        try {
+          await sendFollowUpPrompt(projectId, sessionId, trimmed);
+        } catch {
+          // Agent may be offline — message is still persisted via DO.
+          setAgentActivity('idle');
+        }
+      }
+
+      setFollowUp('');
+    } finally {
+      setSendingFollowUp(false);
+    }
+  };
+
+  // Upload files
+  const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+    setUploading(true);
+    try {
+      const result = await uploadSessionFiles(projectId, sessionId, fileArray);
+      const names = result.files.map((f) => f.name).join(', ');
+      setMessages((prev) => [...prev, {
+        id: `optimistic-upload-${crypto.randomUUID()}`,
+        sessionId,
+        role: 'user' as const,
+        content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
+        toolMetadata: null,
+        createdAt: Date.now(),
+      }]);
+    } catch (err) {
+      console.error('File upload failed:', err);
+    } finally {
+      setUploading(false);
+    }
+  }, [projectId, sessionId]);
+
+  // Cancel the current in-flight prompt via REST API
+  const cancellingRef = useRef(false);
+  const handleCancelPrompt = useCallback(() => {
+    if (agentActivity === 'idle' || cancellingRef.current) return;
+    cancellingRef.current = true;
+    cancelAgentPrompt(projectId, sessionId)
+      .then(() => {
+        setAgentActivity('idle');
+      })
+      .catch(() => {
+        // Network/server error — keep spinner visible so user can retry
+      })
+      .finally(() => {
+        cancellingRef.current = false;
+      });
+  }, [agentActivity, projectId, sessionId]);
+
+  // Load more (pagination)
+  const loadMore = async () => {
+    if (!hasMore || loadingMore) return;
+    const firstMessage = messages[0];
+    if (!firstMessage) return;
+
+    setLoadingMore(true);
+    try {
+      const data = await getChatSession(projectId, sessionId, {
+        before: firstMessage.createdAt,
+      });
+      setMessages((prev) => {
+        const merged = mergeMessages(prev, data.messages, 'prepend');
+        const actualAdded = merged.length - prev.length;
+        setFirstItemIndex((fi) => fi - actualAdded);
+        return merged;
+      });
+      setHasMore(data.hasMore);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return {
-    session,
-    messages,
-    hasMore,
-    loading,
-    error,
-    setError,
-    sessionState,
-    taskEmbed,
-    workspace,
-    node,
-    detectedPorts,
-    followUp,
-    setFollowUp,
-    sendingFollowUp,
-    uploading,
-    isResuming: recovery.isResuming,
-    resumeError: recovery.resumeError,
-    connectionState,
-    showConnectionBanner: recovery.showConnectionBanner,
-    retryWs,
-    agentActivity,
-    currentPlan,
-    promptStartedAt,
-    firstItemIndex,
-    showScrollButton,
-    setShowScrollButton,
+    session, messages, hasMore, loading, error, setError, sessionState, taskEmbed,
+    workspace, node, detectedPorts,
+    followUp, setFollowUp, sendingFollowUp, uploading,
+    isResuming: recovery.isResuming, resumeError: recovery.resumeError,
+    connectionState, showConnectionBanner: recovery.showConnectionBanner, retryWs,
+    agentActivity, currentPlan, promptStartedAt,
+    firstItemIndex, showScrollButton, setShowScrollButton,
     idleCountdownMs: recovery.idleCountdownMs,
-    filePanel,
-    setFilePanel,
-    handleFileClick,
-    handleOpenFileBrowser,
-    handleOpenGitChanges,
-    handleCancelPrompt,
-    handleSendFollowUp,
-    handleUploadFiles,
-    loadMore,
-    loadingMore,
-    transcribeApiUrl,
-    wsRef,
+    filePanel, setFilePanel, handleFileClick, handleOpenFileBrowser, handleOpenGitChanges,
+    handleCancelPrompt, handleSendFollowUp, handleUploadFiles,
+    loadMore, loadingMore, transcribeApiUrl, wsRef,
   };
 }
