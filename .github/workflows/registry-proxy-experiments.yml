@@ -162,8 +162,10 @@ jobs:
           echo "WORKER_URL=$WORKER_URL" >> "$GITHUB_ENV"
 
           # Set secrets (worker must exist first)
+          # Project IDs "a" and "b" — projectNamespace() prepends "proj-"
+          # so namespaces become "proj-a/" and "proj-b/"
           DEV_TOKENS=$(jq -n --arg ta "$TOKEN_A" --arg tb "$TOKEN_B" \
-            '{($ta): "proj-a", ($tb): "proj-b"}')
+            '{($ta): "a", ($tb): "b"}')
 
           echo "$SIGNING_SECRET"     | npx wrangler secret put TOKEN_SIGNING_SECRET --name "$WORKER_NAME"
           echo "$DEV_TOKENS"         | npx wrangler secret put DEV_PROJECT_TOKENS   --name "$WORKER_NAME"
@@ -193,7 +195,7 @@ jobs:
           PROXY_HOST=${WORKER_URL#https://}
 
           # Docker login
-          echo "$TOKEN_A" | docker login "$PROXY_HOST" -u proj-a --password-stdin 2>&1 | tee /tmp/t1-login.log
+          echo "$TOKEN_A" | docker login "$PROXY_HOST" -u a --password-stdin 2>&1 | tee /tmp/t1-login.log
           REF="$PROXY_HOST/proj-a/test:latest"
           docker tag test-image:exp "$REF"
           docker push "$REF" 2>&1 | tee /tmp/t1-push.log
@@ -226,7 +228,7 @@ jobs:
           PULL_EC=$?
 
           # Inspect redirect behaviour on a blob GET via curl
-          TOK=$(curl -s -u "proj-a:$TOKEN_A" \
+          TOK=$(curl -s -u "a:$TOKEN_A" \
             "$WORKER_URL/token?service=sam-registry-proxy&scope=repository:proj-a/test:pull" \
             | jq -r '.token // .access_token')
 
@@ -276,7 +278,7 @@ jobs:
           PROXY_HOST=${WORKER_URL#https://}
 
           # Token for proj-b requesting access to proj-a's repo
-          TOK_RESP=$(curl -s -u "proj-b:$TOKEN_B" \
+          TOK_RESP=$(curl -s -u "b:$TOKEN_B" \
             "$WORKER_URL/token?service=sam-registry-proxy&scope=repository:proj-a/test:pull,push")
           TOK_B=$(echo "$TOK_RESP" | jq -r '.token // .access_token')
           ACCESS=$(echo "$TOK_RESP" | jq -c '.access // []' 2>/dev/null || echo '?')
@@ -296,7 +298,7 @@ jobs:
 
           # docker push attempt
           docker logout "$PROXY_HOST" 2>/dev/null || true
-          echo "$TOKEN_B" | docker login "$PROXY_HOST" -u proj-b --password-stdin 2>/dev/null || true
+          echo "$TOKEN_B" | docker login "$PROXY_HOST" -u b --password-stdin 2>/dev/null || true
           docker tag test-image:exp "$PROXY_HOST/proj-a/test:xproj" 2>/dev/null || true
           DOCKER_PUSH_EC=0
           docker push "$PROXY_HOST/proj-a/test:xproj" 2>&1 | tee /tmp/t5-push.log || DOCKER_PUSH_EC=$?
@@ -328,9 +330,9 @@ jobs:
         id: pivot2
         continue-on-error: true
         run: |
-          set -euo pipefail
+          set -eo pipefail
 
-          TOK=$(curl -s -u "proj-a:$TOKEN_A" \
+          TOK=$(curl -s -u "a:$TOKEN_A" \
             "$WORKER_URL/token?service=sam-registry-proxy&scope=repository:proj-a/test:push,pull" \
             | jq -r '.token // .access_token')
 
@@ -342,9 +344,9 @@ jobs:
             -H "Authorization: Bearer $TOK" \
             "$WORKER_URL/v2/proj-a/test/blobs/uploads/" | tee /tmp/p2-proxy-status.txt
 
-          PROXY_SC=$(grep -oP '\d{3}' /tmp/p2-proxy-status.txt | tail -1)
-          PROXY_LOC=$(grep -i '^location:' /tmp/p2-proxy-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n')
-          PROXY_UUID=$(grep -i '^docker-upload-uuid:' /tmp/p2-proxy-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n')
+          PROXY_SC=$(grep -oP '\d{3}' /tmp/p2-proxy-status.txt | tail -1 || echo "000")
+          PROXY_LOC=$(grep -i '^location:' /tmp/p2-proxy-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n' || true)
+          PROXY_UUID=$(grep -i '^docker-upload-uuid:' /tmp/p2-proxy-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n' || true)
 
           # ── B: Initiate blob upload DIRECTLY against upstream ──
           echo "=== Direct upstream ==="
@@ -356,8 +358,8 @@ jobs:
             "https://registry.cloudflare.com/v2/${CLOUDFLARE_ACCOUNT_ID}/proj-a/test/blobs/uploads/" \
             | tee /tmp/p2-direct-status.txt
 
-          DIRECT_SC=$(grep -oP '\d{3}' /tmp/p2-direct-status.txt | tail -1)
-          DIRECT_LOC=$(grep -i '^location:' /tmp/p2-direct-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n')
+          DIRECT_SC=$(grep -oP '\d{3}' /tmp/p2-direct-status.txt | tail -1 || echo "000")
+          DIRECT_LOC=$(grep -i '^location:' /tmp/p2-direct-hdrs.txt | sed 's/^[^:]*: *//' | tr -d '\r\n' || true)
 
           # ── C: Analyse the Location headers ──
           analyse_location() {
