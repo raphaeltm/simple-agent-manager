@@ -35,7 +35,7 @@ export function SessionList({
   taskTitleMap?: Map<string, string>;
   taskInfoMap: Map<string, TaskInfo>;
   searchQuery?: string;
-  onShowHierarchy?: (taskId: string) => void;
+  onShowHierarchy: (taskId: string) => void;
 }) {
   const roots = useMemo(
     () => buildSessionTree(sessions, taskInfoMap, { allSessions }),
