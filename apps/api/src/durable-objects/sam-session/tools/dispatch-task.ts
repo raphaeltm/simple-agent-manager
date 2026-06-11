@@ -1,9 +1,10 @@
 /**
  * SAM dispatch_task tool — submit a task to a project.
  *
- * Unlike the MCP dispatch_task (which runs within a workspace context with
- * depth tracking and parent task), SAM dispatches on behalf of the user
- * with no parent task or depth constraints.
+ * Supports optional parent-task lineage via the `parentTaskId` input:
+ * when provided, the new task's `parent_task_id` and `dispatch_depth`
+ * are set so the UI groups it as a subtask (same semantics as the
+ * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
 import type {
   CredentialProvider,
@@ -104,6 +105,12 @@ export const dispatchTaskDef: AnthropicToolDef = {
         type: 'string',
         description: 'Mission ID to associate this task with. Use after create_mission.',
       },
+      parentTaskId: {
+        type: 'string',
+        description:
+          'Parent task ID for lineage tracking. When set, the new task is grouped ' +
+          'as a subtask in the UI (sidebar nesting + hierarchy button).',
+      },
     },
     required: ['projectId', 'description'],
   },
@@ -121,6 +128,7 @@ interface DispatchTaskInput {
   agentProfileId?: string;
   skillId?: string;
   missionId?: string;
+  parentTaskId?: string;
 }
 
 export async function dispatchTask(
@@ -180,6 +188,36 @@ export async function dispatchTask(
 
   if (!project) {
     return { error: 'Project not found or not owned by you.' };
+  }
+
+  // ── Resolve parent task lineage ────────────────────────────────────────
+  let parentTaskId: string | null = null;
+  let dispatchDepth = 0;
+
+  if (input.parentTaskId?.trim()) {
+    const parentRow = await env.DATABASE.prepare(
+      `SELECT id, dispatch_depth FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?`,
+    ).bind(input.parentTaskId.trim(), input.projectId, ctx.userId).first<{
+      id: string;
+      dispatch_depth: number;
+    }>();
+
+    if (!parentRow) {
+      return { error: 'Parent task not found or not owned by you in this project.' };
+    }
+
+    parentTaskId = parentRow.id;
+    dispatchDepth = (parentRow.dispatch_depth ?? 0) + 1;
+
+    // Enforce dispatch depth limit (mirrors MCP path in dispatch-tool.ts:234-250)
+    const DEFAULT_DISPATCH_MAX_DEPTH = 3;
+    const effectiveMaxDepth = project.maxDispatchDepth ?? DEFAULT_DISPATCH_MAX_DEPTH;
+    if (dispatchDepth > effectiveMaxDepth) {
+      return {
+        error: `Dispatch depth limit (${effectiveMaxDepth}) exceeded. Current depth: ${parentRow.dispatch_depth ?? 0}, max allowed: ${effectiveMaxDepth}. ` +
+          'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
+      };
+    }
   }
 
   // ── Resolve agent profile ────────────────────────────────────────────
@@ -277,18 +315,18 @@ export async function dispatchTask(
 
   // ── Insert task ────────────────────────────────────────────────────────
   await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description,
+    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
      requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
      created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
+     VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?,
      ?, ?)`,
   ).bind(
-    taskId, input.projectId, ctx.userId,
-    taskTitle, description, priority, branchName,
+    taskId, input.projectId, ctx.userId, parentTaskId,
+    taskTitle, description, priority, dispatchDepth, branchName,
     ctx.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null, resolvedProfile?.skillId ?? null, input.skillId ?? null, input.missionId?.trim() || null,
     resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
@@ -435,6 +473,8 @@ export async function dispatchTask(
     sessionId,
     branchName,
     projectId: input.projectId,
+    parentTaskId,
+    dispatchDepth,
     vmSize: resolvedVmSize,
     taskMode: resolvedTaskMode,
     agentType: resolvedAgentType,
@@ -446,6 +486,8 @@ export async function dispatchTask(
     branchName,
     title: taskTitle,
     status: 'queued',
+    parentTaskId,
+    dispatchDepth,
     taskMode: resolvedTaskMode,
     ...(resolvedTaskMode === 'conversation'
       ? { warning: getConversationTaskModeWarning() }
