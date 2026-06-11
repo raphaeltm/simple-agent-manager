@@ -218,4 +218,20 @@ export const SESSION_IDEA_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'get_registry_credentials',
+    description:
+      'Get short-lived container registry credentials for pushing images to the Cloudflare managed registry. Returns registry host, username, password, project-scoped namespace prefix, and expiry. Use these to `docker login` and push images directly to registry.cloudflare.com. All images MUST be pushed under the returned namespace prefix.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        environment: {
+          type: 'string',
+          description:
+            'Optional deployment environment name (e.g. "staging", "production"). If provided, the environment must exist and be active for the project.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];

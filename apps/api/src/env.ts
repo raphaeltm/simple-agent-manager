@@ -397,6 +397,11 @@ export interface Env {
   DEVCONTAINER_CACHE_REGISTRY_HOST?: string;          // Registry host (default: registry.cloudflare.com)
   DEVCONTAINER_CACHE_REPOSITORY_PREFIX?: string;      // Optional cache repository name prefix
   DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES?: string; // Temporary registry credential TTL
+  // Deployment registry credentials (pivot option 1: server-minted short-lived credentials)
+  REGISTRY_CREDENTIAL_EXPIRATION_MINUTES?: string;   // TTL for minted registry credentials (default: 60)
+  REGISTRY_HOST?: string;                            // Registry host override (default: registry.cloudflare.com)
+  REGISTRY_CREDENTIAL_RATE_LIMIT?: string;           // Max credential mints per project per window (default: 10)
+  REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS?: string;  // Rate limit window in seconds (default: 300)
   // Workspace tool proxy configuration (unified from workspace-mcp)
   WORKSPACE_TOOL_TIMEOUT_MS?: string;             // Timeout for VM agent proxy calls (default: 15000)
   WORKSPACE_TOOL_GITHUB_TIMEOUT_MS?: string;      // Timeout for GitHub API calls (default: 10000)

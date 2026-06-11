@@ -27,6 +27,7 @@ import {
 } from './_helpers';
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
+import { handleGetRegistryCredentials } from './registry-credential-tools';
 import {
   handleCreateIdea,
   handleFindRelatedIdeas,
@@ -293,6 +294,8 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
         case 'get_deployment_credentials':
           return c.json(await handleGetDeploymentCredentials(requestId, tokenData, c.env, rawToken!));
+        case 'get_registry_credentials':
+          return c.json(await handleGetRegistryCredentials(requestId, toolArgs, tokenData, c.env));
         // ─── Workspace tools (unified from workspace-mcp) ──────────────
         case 'get_workspace_info':
           return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));

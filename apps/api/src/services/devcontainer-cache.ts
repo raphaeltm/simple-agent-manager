@@ -1,25 +1,18 @@
 import type { Env } from '../env';
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import {
+  DEFAULT_CLOUDFLARE_REGISTRY_HOST,
+  mintCloudflareRegistryCredentials,
+  type CloudflareRegistryMintConfig,
+} from './cf-registry';
+import { getTimeoutMs } from './fetch-timeout';
 
-const DEFAULT_CLOUDFLARE_REGISTRY_HOST = 'registry.cloudflare.com';
 const DEFAULT_CREDENTIAL_EXPIRATION_MINUTES = 120;
-const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
 export interface DevcontainerCacheCredentials {
   registry: string;
   username: string;
   password: string;
   ref: string;
-}
-
-interface CloudflareRegistryCredentialsResponse {
-  success?: boolean;
-  errors?: Array<{ message?: string }>;
-  result?: {
-    registry_host?: string;
-    username?: string;
-    password?: string;
-  };
 }
 
 interface CacheConfig {
@@ -199,34 +192,15 @@ export function buildCloudflareDevcontainerCacheRef(
   return `${registryHost}/${accountId}/${repositoryName}:${cacheTag(devcontainerConfigName)}`;
 }
 
-async function mintCloudflareRegistryCredentials(config: CacheConfig): Promise<Omit<DevcontainerCacheCredentials, 'ref'>> {
-  const url = `${CLOUDFLARE_API_BASE}/accounts/${config.accountId}/containers/registries/${config.registryHost}/credentials`;
-  const response = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.apiToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      expiration_minutes: config.expirationMinutes,
-      permissions: ['pull', 'push'],
-    }),
-  }, config.timeoutMs);
-
-  const body = await response.json<CloudflareRegistryCredentialsResponse>().catch(() => null);
-  if (!response.ok || !body?.result) {
-    const message = body?.errors?.[0]?.message || `HTTP ${response.status}`;
-    throw new Error(`Cloudflare registry credential mint failed: ${message}`);
-  }
-
-  const registry = (body.result.registry_host || config.registryHost).trim();
-  const username = (body.result.username || '').trim();
-  const password = body.result.password || '';
-  if (!registry || !username || !password) {
-    throw new Error('Cloudflare registry credential response was missing registry, username, or password');
-  }
-
-  return { registry, username, password };
+function toMintConfig(config: CacheConfig): CloudflareRegistryMintConfig {
+  return {
+    accountId: config.accountId,
+    apiToken: config.apiToken,
+    registryHost: config.registryHost,
+    expirationMinutes: config.expirationMinutes,
+    permissions: ['pull', 'push'],
+    timeoutMs: config.timeoutMs,
+  };
 }
 
 export async function getDevcontainerCacheCredentials(
@@ -250,6 +224,6 @@ export async function getDevcontainerCacheCredentials(
     return null;
   }
 
-  const credentials = await mintCloudflareRegistryCredentials(config);
+  const credentials = await mintCloudflareRegistryCredentials(toMintConfig(config));
   return { ...credentials, ref };
 }
