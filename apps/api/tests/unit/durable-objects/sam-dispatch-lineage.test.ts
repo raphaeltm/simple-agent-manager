@@ -55,10 +55,10 @@ vi.mock('../../../src/lib/ulid', () => ({
   ulid: vi.fn(() => `ULID_${++ulidCounter}`),
 }));
 
-import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
-import { buildTaskInfoMap } from '../../../../web/src/pages/project-chat/useTaskGroups';
 import { hasHierarchy } from '../../../../web/src/components/task-hierarchy/buildHierarchyTree';
 import { isRetryOrFork } from '../../../../web/src/pages/project-chat/lineageUtils';
+import { buildTaskInfoMap } from '../../../../web/src/pages/project-chat/useTaskGroups';
+import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
 
 const project = {
   id: 'proj-1',
