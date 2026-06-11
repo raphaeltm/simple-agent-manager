@@ -58,6 +58,12 @@ The compose-parser module (`packages/shared/src/compose-parser/`) shipped with 8
 - [ ] Add port boundary tests (65535 accepted, 65536 rejected)
 - [ ] Add `driver: local` explicitly accepted test
 
+### Documentation / contract clarity (MEDIUM)
+
+- [ ] Add comment in `parseService()` explaining `depends_on` is accepted for Compose compatibility but not extracted (manifest schema has no ordering field)
+- [ ] Rename test "parses multiple services with depends_on (ordering only)" to clarify ordering is not preserved
+- [ ] Add assertion that `depends_on` data does NOT appear in parsed output (documents the contract)
+
 ### Low priority
 
 - [ ] Assert `TOP_LEVEL_IGNORED` fields absent from output
