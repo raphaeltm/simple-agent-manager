@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 
 const mockLimit = vi.fn();
+const mockSignDeployPayload = vi.fn().mockResolvedValue('signed-payload');
 const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
   workspace: 'node-deploy-1',
   type: 'callback',
@@ -28,7 +29,7 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 vi.mock('../../../src/services/deploy-signing', () => ({
-  signDeployPayload: vi.fn().mockResolvedValue('signed-payload'),
+  signDeployPayload: (...args: unknown[]) => mockSignDeployPayload(...args),
 }));
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
@@ -88,6 +89,8 @@ describe('deploy release callback route', () => {
   beforeEach(() => {
     mockLimit.mockReset();
     mockVerifyCallbackToken.mockClear();
+    mockSignDeployPayload.mockClear();
+    mockSignDeployPayload.mockResolvedValue('signed-payload');
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
       type: 'callback',
@@ -138,6 +141,16 @@ describe('deploy release callback route', () => {
     expect(body.composeYaml).not.toContain('9000');
     expect(body.expiresAt).toBe(1_700_000_090);
     expect(body.signature).toEqual(expect.any(String));
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: 'env-1',
+        nodeId: 'node-deploy-1',
+        seq: 7,
+        composeYaml: expect.stringContaining('127.0.0.1:36000:3000'),
+        routes: body.routes,
+      }),
+      expect.anything(),
+    );
     dateNow.mockRestore();
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -158,6 +171,28 @@ describe('deploy release callback route', () => {
       content: '203.0.113.10',
       proxied: false,
     });
+  });
+
+  it('returns conflict before DNS or signing when public routes exist but node IP is not ready', async () => {
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: null }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      message: 'Deployment node does not have an IP address yet; retry after provisioning completes',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockSignDeployPayload).not.toHaveBeenCalled();
   });
 
   it('rejects a release fetch when the environment is assigned to a different node', async () => {

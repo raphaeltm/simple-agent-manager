@@ -31,8 +31,9 @@ const ED25519_PKCS8_SEED_PREFIX = Uint8Array.from([
 /**
  * Build the canonical bytes to sign, matching the Go-side buildSignableBytes().
  *
- * Format: JSON of { environmentId, nodeId, seq, expiresAt, composeHash }
- * where composeHash is SHA-256 of the Compose YAML.
+ * Format: JSON of { environmentId, nodeId, seq, expiresAt, composeHash, routesHash }
+ * where composeHash is SHA-256 of the Compose YAML and routesHash is SHA-256
+ * of the canonical route target JSON.
  */
 async function buildSignableBytes(p: SignablePayload): Promise<Uint8Array> {
   const composeBytes = new TextEncoder().encode(p.composeYaml);

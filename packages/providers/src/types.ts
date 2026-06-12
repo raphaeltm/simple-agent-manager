@@ -326,6 +326,10 @@ export interface GcpProviderConfig {
   firewallSourceRanges?: readonly string[];
   /** TCP ports allowed by the GCP VPC firewall rule for VM agent ingress. */
   agentPorts?: readonly string[];
+  /** Source CIDR ranges allowed by the GCP VPC firewall rule for public app-route ingress. */
+  appRouteSourceRanges?: readonly string[];
+  /** TCP ports allowed by the GCP VPC firewall rule for public app-route ingress. */
+  appRoutePorts?: readonly string[];
 }
 
 /**

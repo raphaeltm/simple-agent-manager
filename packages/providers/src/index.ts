@@ -44,7 +44,15 @@ export { getTimeoutMs,providerFetch } from './provider-fetch';
 
 // Re-export providers and classification functions
 export type { GcpTokenProvider } from './gcp';
-export { classifyGcpError, DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GCP_LOCATIONS,GcpProvider } from './gcp';
+export {
+  classifyGcpError,
+  DEFAULT_GCP_AGENT_PORTS,
+  DEFAULT_GCP_APP_ROUTE_PORTS,
+  DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
+  DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
+  GCP_LOCATIONS,
+  GcpProvider,
+} from './gcp';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   classifyHetznerError,
@@ -109,6 +117,8 @@ export function createProvider(config: ProviderConfig): Provider {
         config.operationPollTimeoutMs,
         config.firewallSourceRanges,
         config.agentPorts,
+        config.appRouteSourceRanges,
+        config.appRoutePorts,
       );
     default: {
       const _exhaustive: never = config;

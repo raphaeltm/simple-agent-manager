@@ -1,6 +1,11 @@
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GcpProvider } from '../../src/gcp';
+import {
+  DEFAULT_GCP_APP_ROUTE_PORTS,
+  DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
+  DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
+  GcpProvider,
+} from '../../src/gcp';
 import type { VMConfig } from '../../src/types';
 import { expectDefined, fetchCall, jsonBody, testCidr, testIpv4 } from './test-helpers';
 
@@ -101,7 +106,11 @@ describe('GcpProvider', () => {
       let capturedBody: string | undefined;
       globalThis.fetch = vi.fn()
         .mockImplementationOnce(async () => {
-          // ensureFirewallRule — 409 already exists
+          // ensure agent firewall rule — 409 already exists
+          return new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 });
+        })
+        .mockImplementationOnce(async () => {
+          // ensure app-route firewall rule — 409 already exists
           return new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 });
         })
         .mockImplementationOnce(async (url: string, init: RequestInit) => {
@@ -145,7 +154,11 @@ describe('GcpProvider', () => {
       let capturedHeaders: HeadersInit | undefined;
       globalThis.fetch = vi.fn()
         .mockImplementationOnce(async () => {
-          // ensureFirewallRule — 409 already exists
+          // ensure agent firewall rule — 409 already exists
+          return new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 });
+        })
+        .mockImplementationOnce(async () => {
+          // ensure app-route firewall rule — 409 already exists
           return new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 });
         })
         .mockImplementationOnce(async (_url: string, init: RequestInit) => {
@@ -178,9 +191,13 @@ describe('GcpProvider', () => {
         undefined,
         [testCidr(10, 0, 0, 0, 8)],
         ['9443'],
+        [testCidr(0, 0, 0, 0, 0)],
+        ['80', '443'],
       );
       const mockFetch = vi.fn()
         .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'firewall-op', status: 'PENDING' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'app-firewall-op', status: 'PENDING' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'create-op', status: 'PENDING' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
@@ -204,11 +221,16 @@ describe('GcpProvider', () => {
       const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
       expect(firewallBody.sourceRanges).toEqual([testCidr(10, 0, 0, 0, 8)]);
       expect(firewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['9443'] }]);
+      const appRouteFirewallBody = jsonBody(fetchCall(mockFetch, 2).init);
+      expect(appRouteFirewallBody.sourceRanges).toEqual([testCidr(0, 0, 0, 0, 0)]);
+      expect(appRouteFirewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['80', '443'] }]);
     });
 
-    it('should default firewall source ranges to Cloudflare IPv4 ranges', async () => {
+    it('should default firewall source ranges to Cloudflare IPv4 ranges and app routes to public HTTP/HTTPS', async () => {
       const mockFetch = vi.fn()
         .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'firewall-op', status: 'PENDING' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'app-firewall-op', status: 'PENDING' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({ name: 'create-op', status: 'PENDING' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
@@ -233,6 +255,9 @@ describe('GcpProvider', () => {
       expect(firewallBody.sourceRanges).toEqual([...DEFAULT_GCP_FIREWALL_SOURCE_RANGES]);
       expect(firewallBody.sourceRanges).toContain(testCidr(173, 245, 48, 0, 20));
       expect(firewallBody.sourceRanges).not.toContain(testCidr(0, 0, 0, 0, 0));
+      const appRouteFirewallBody = jsonBody(fetchCall(mockFetch, 2).init);
+      expect(appRouteFirewallBody.sourceRanges).toEqual([...DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES]);
+      expect(appRouteFirewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: [...DEFAULT_GCP_APP_ROUTE_PORTS] }]);
     });
   });
 

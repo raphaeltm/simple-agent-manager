@@ -93,17 +93,22 @@ export function classifyGcpError(
   return 'unknown';
 }
 
-/** Firewall rule name and config for SAM VM agent inbound access */
-const SAM_FIREWALL_RULE_NAME = 'sam-allow-agent';
+/** Firewall rule names and config for SAM inbound access. */
+const SAM_AGENT_FIREWALL_RULE_NAME = 'sam-allow-agent';
+const SAM_APP_ROUTE_FIREWALL_RULE_NAME = 'sam-allow-app-routes';
 const SAM_NETWORK_TAG = 'sam-agent';
 /** Default ports the VM agent may listen on (8443 with TLS, 8080 without). */
 export const DEFAULT_GCP_AGENT_PORTS = ['8080', '8443'] as const;
+/** Default public ports served directly by deployment-node Caddy app routes. */
+export const DEFAULT_GCP_APP_ROUTE_PORTS = ['80', '443'] as const;
 /**
  * Default GCP project firewall source ranges. These mirror Cloudflare's IPv4
  * edge ranges so the VPC firewall and VM cloud-init firewall both restrict
  * agent ingress to Cloudflare-routed traffic by default.
  */
 export const DEFAULT_GCP_FIREWALL_SOURCE_RANGES = CLOUDFLARE_IPV4_RANGES;
+/** Default source ranges for grey-cloud app routes and HTTP-01 ACME. */
+export const DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES = ['0.0.0.0/0'] as const;
 
 /** GCP machine type mappings for SAM VM sizes */
 const SIZE_MAP: Record<VMSize, SizeConfig> = {
@@ -209,6 +214,8 @@ export class GcpProvider implements Provider {
     private readonly operationPollTimeoutMs: number = 5 * 60 * 1000,
     private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
     private readonly agentPorts: readonly string[] = DEFAULT_GCP_AGENT_PORTS,
+    private readonly appRouteSourceRanges: readonly string[] = DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
+    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS,
   ) {
     this.defaultLocation = defaultZone || 'us-central1-a';
   }
@@ -257,16 +264,17 @@ export class GcpProvider implements Provider {
     throw new ProviderError('gcp', undefined, `GCP operation timed out after ${this.operationPollTimeoutMs}ms`);
   }
 
-  /**
-   * Ensure a firewall rule exists allowing inbound TCP on SAM agent ports.
-   * Idempotent — skips creation if the rule already exists (409).
-   */
-  private async ensureFirewallRule(): Promise<void> {
+  private async ensureFirewallRule(
+    name: string,
+    ports: readonly string[],
+    sourceRanges: readonly string[],
+    description: string,
+  ): Promise<void> {
     const headers = await this.authHeaders();
     const url = `${this.projectUrl()}/global/firewalls`;
 
     const body = {
-      name: SAM_FIREWALL_RULE_NAME,
+      name,
       network: `${this.projectUrl()}/global/networks/default`,
       direction: 'INGRESS',
       priority: 1000,
@@ -274,11 +282,11 @@ export class GcpProvider implements Provider {
       allowed: [
         {
           IPProtocol: 'tcp',
-          ports: [...this.agentPorts],
+          ports: [...ports],
         },
       ],
-      sourceRanges: [...this.firewallSourceRanges],
-      description: 'Allow configured inbound access to SAM VM agent (managed by Simple Agent Manager)',
+      sourceRanges: [...sourceRanges],
+      description,
     };
 
     try {
@@ -299,6 +307,25 @@ export class GcpProvider implements Provider {
       if (err instanceof ProviderError && err.statusCode === 409) return;
       throw err;
     }
+  }
+
+  /**
+   * Ensure firewall rules for both Cloudflare-routed VM-agent traffic and
+   * direct public app-route traffic served by Caddy.
+   */
+  private async ensureFirewallRules(): Promise<void> {
+    await this.ensureFirewallRule(
+      SAM_AGENT_FIREWALL_RULE_NAME,
+      this.agentPorts,
+      this.firewallSourceRanges,
+      'Allow configured inbound access to SAM VM agent (managed by Simple Agent Manager)',
+    );
+    await this.ensureFirewallRule(
+      SAM_APP_ROUTE_FIREWALL_RULE_NAME,
+      this.appRoutePorts,
+      this.appRouteSourceRanges,
+      'Allow public HTTP/HTTPS access to SAM deployment app routes (managed by Simple Agent Manager)',
+    );
   }
 
   /**
@@ -342,8 +369,8 @@ export class GcpProvider implements Provider {
     const machineType = sizeConfig.type;
     const headers = await this.authHeaders();
 
-    // Ensure firewall rule exists before creating VM
-    await this.ensureFirewallRule();
+    // Ensure firewall rules exist before creating VM
+    await this.ensureFirewallRules();
 
     const body = {
       name: config.name,

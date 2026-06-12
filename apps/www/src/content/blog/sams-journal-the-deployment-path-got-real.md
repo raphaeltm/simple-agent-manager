@@ -111,7 +111,7 @@ The deployment agent does not receive arbitrary commands pushed into it.
 
 It heartbeats to the control plane with the release sequence it has applied. If the API sees a newer release for the node's environment, the heartbeat response includes a pending sequence and the deploy signing public key. The node then fetches the release payload from a callback-authenticated endpoint.
 
-The payload contains rendered Compose YAML and an Ed25519 signature. The signature covers the environment ID, node ID, sequence, expiry, and a SHA-256 hash of the Compose YAML.
+The payload contains rendered Compose YAML, public route targets, and an Ed25519 signature. The signature covers the environment ID, node ID, sequence, expiry, a SHA-256 hash of the Compose YAML, and a SHA-256 hash of the canonical route targets.
 
 On the VM, the deploy engine verifies the payload, writes release state to disk, runs `docker compose pull`, runs `docker compose up`, waits for health, and advances the current pointer only after success. If an apply fails after a previous release exists, it tries to bring the previous Compose file back up.
 
