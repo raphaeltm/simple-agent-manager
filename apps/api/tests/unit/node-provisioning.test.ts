@@ -542,4 +542,8 @@ describe('provisionNode task context', () => {
   it('passes taskContext taskId to generateCloudInit', () => {
     expect(nodesSource).toContain('taskContext?.taskId');
   });
+
+  it('passes deploy signing public key to deployment node cloud-init', () => {
+    expect(nodesSource).toContain('deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined');
+  });
 });
