@@ -97,7 +97,7 @@ func (d *DiskState) WriteRelease(state *ReleaseState, composeYAML string, caddyf
 	}
 
 	caddyPath := d.CaddyfilePath(state.Seq)
-	if err := os.WriteFile(caddyPath, []byte(caddyfile), 0644); err != nil {
+	if err := writeFileAtomic(caddyPath, caddyfile, 0644); err != nil {
 		return fmt.Errorf("write Caddyfile: %w", err)
 	}
 
