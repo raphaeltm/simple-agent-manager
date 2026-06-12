@@ -4,9 +4,9 @@
  * Mocks at the Provider boundary with realistic state.
  * Tests the full path: service → Provider interface → D1 state.
  */
-import type { Provider, VolumeCapabilities, VolumeInstance } from '@simple-agent-manager/providers';
+import type { VolumeCapabilities, VolumeInstance } from '@simple-agent-manager/providers';
 import { SAM_VOLUME_MOUNT_PATH_TEMPLATE } from '@simple-agent-manager/providers';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { resolveVolumeMountRoot } from '../../../src/services/deployment-volumes';
 
