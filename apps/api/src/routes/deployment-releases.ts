@@ -12,11 +12,13 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log, serializeError } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
+import { provisionDeploymentNode } from '../services/deployment-provisioning';
 import { decrypt } from '../services/encryption';
 
 // =============================================================================
@@ -243,6 +245,39 @@ deploymentReleaseRoutes.post(
       throw err;
     }
 
+    // Trigger deployment node provisioning if the environment has no node yet.
+    // This is the provisioning trigger: first release → provision node.
+    const envRow = await db
+      .select({ nodeId: schema.deploymentEnvironments.nodeId })
+      .from(schema.deploymentEnvironments)
+      .where(eq(schema.deploymentEnvironments.id, envId))
+      .limit(1);
+
+    let nodeId: string | null = envRow[0]?.nodeId ?? null;
+
+    if (!nodeId) {
+      try {
+        const result = await provisionDeploymentNode(envId, projectId, userId, c.env);
+        if (result) {
+          nodeId = result.nodeId;
+          // Keep the Worker alive while the VM provisions
+          try {
+            c.executionCtx.waitUntil(result.provisioningPromise);
+          } catch {
+            // No execution context in tests
+          }
+        }
+      } catch (err) {
+        // Provisioning failure is non-blocking — the release is still created.
+        // The user can retry by submitting another release.
+        log.error('deployment_release.provisioning_trigger_failed', {
+          envId,
+          releaseId: id,
+          ...serializeError(err),
+        });
+      }
+    }
+
     return c.json(
       {
         id,
@@ -251,6 +286,7 @@ deploymentReleaseRoutes.post(
         status: 'created',
         createdBy: userId,
         createdAt: now,
+        nodeId,
       },
       201,
     );

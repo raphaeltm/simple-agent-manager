@@ -145,6 +145,16 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push(`swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`);
     }
   }
+  if (variables.role !== undefined && variables.role !== '') {
+    if (variables.role !== 'workspace' && variables.role !== 'deployment') {
+      errors.push(`role: must be 'workspace' or 'deployment' (got ${JSON.stringify(variables.role)})`);
+    }
+  }
+  if (variables.environmentId !== undefined && variables.environmentId !== '') {
+    if (!SAFE_ID_RE.test(variables.environmentId)) {
+      errors.push(`environmentId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.environmentId)})`);
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
@@ -196,6 +206,10 @@ export interface CloudInitVariables {
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
   swapSwappiness?: string;
+  /** VM agent role: 'workspace' (default) or 'deployment'. */
+  role?: string;
+  /** Deployment environment ID (required when role='deployment'). */
+  environmentId?: string;
 }
 
 /**
@@ -242,6 +256,8 @@ export function generateCloudInit(
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
+    '{{ role }}': variables.role ?? '',
+    '{{ environment_id }}': variables.environmentId ?? '',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

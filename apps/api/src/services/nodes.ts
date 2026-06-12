@@ -22,6 +22,8 @@ export interface CreateNodeInput {
   vmLocation: string;
   heartbeatStaleAfterSeconds: number;
   cloudProvider?: string;
+  /** 'workspace' (default) or 'deployment'. */
+  nodeRole?: 'workspace' | 'deployment';
 }
 
 export interface ProvisionedNode {
@@ -77,6 +79,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     cloudProvider: input.cloudProvider ?? null,
     healthStatus: 'stale',
     heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
+    nodeRole: input.nodeRole ?? 'workspace',
     createdAt: now,
     updatedAt: now,
   });
@@ -107,6 +110,11 @@ export interface ProvisionTaskContext {
   taskMode?: TaskMode;
 }
 
+/** Deployment node context for cloud-init (sets role=deployment + environmentId). */
+export interface DeploymentProvisionContext {
+  environmentId: string;
+}
+
 export interface ProvisionNodeOptions {
   /**
    * When true, re-throw provider failures (preserving `ProviderError.category` and
@@ -128,6 +136,7 @@ export async function provisionNode(
   env: Env,
   taskContext?: ProvisionTaskContext,
   options?: ProvisionNodeOptions,
+  deploymentContext?: DeploymentProvisionContext,
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -164,6 +173,8 @@ export async function provisionNode(
 
     const callbackToken = await signNodeCallbackToken(node.id, env);
 
+    const isDeploymentNode = !!deploymentContext;
+
     const cloudInit = generateCloudInit({
       nodeId: node.id,
       hostname: `node-${node.id.toLowerCase()}`,
@@ -185,6 +196,8 @@ export async function provisionNode(
       devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
       swapSizeMb: env.SWAP_SIZE_MB,
       swapSwappiness: env.SWAP_SWAPPINESS,
+      role: isDeploymentNode ? 'deployment' : undefined,
+      environmentId: deploymentContext?.environmentId,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -230,11 +243,15 @@ export async function provisionNode(
       return;
     }
 
+    // Deployment nodes use pull-based release channel — no DNS record needed.
+    // Workspace nodes need a backend DNS record for CF-proxied traffic.
     let backendDnsRecordId: string | null = null;
-    try {
-      backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
-    } catch (dnsErr) {
-      log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
+    if (!isDeploymentNode) {
+      try {
+        backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
+      } catch (dnsErr) {
+        log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
+      }
     }
 
     await db

@@ -101,6 +101,8 @@ write_files:
       Environment=TLS_KEY_PATH={{ tls_key_path }}
       Environment=PROVIDER={{ provider }}
       Environment=DEVCONTAINER_CACHE_ENABLED={{ devcontainer_cache_enabled }}
+      Environment=ROLE={{ role }}
+      Environment=ENVIRONMENT_ID={{ environment_id }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
