@@ -46,6 +46,9 @@ func ensureDocker(ctx context.Context) error {
 func ensureCaddy(ctx context.Context) error {
 	if _, err := exec.LookPath("caddy"); err == nil {
 		slog.Info("deploy.runtime: caddy already installed")
+		if err := prepareCaddyPaths(ctx); err != nil {
+			return err
+		}
 		_ = runRuntimeCommand(ctx, "systemctl", "enable", "caddy")
 		_ = runRuntimeCommand(ctx, "systemctl", "reload-or-restart", "caddy")
 		return nil
@@ -61,11 +64,27 @@ curl -fsSL 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmo
 curl -fsSL 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy
+id caddy >/dev/null
+mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
+chown -R caddy:caddy /var/lib/caddy /var/log/caddy
 systemctl enable caddy
 systemctl reload-or-restart caddy
 `
 	if err := runRuntimeShell(ctx, script); err != nil {
 		return fmt.Errorf("install caddy: %w", err)
+	}
+	return nil
+}
+
+func prepareCaddyPaths(ctx context.Context) error {
+	script := `
+set -euo pipefail
+id caddy >/dev/null
+mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
+chown -R caddy:caddy /var/lib/caddy /var/log/caddy
+`
+	if err := runRuntimeShell(ctx, script); err != nil {
+		return fmt.Errorf("prepare caddy paths: %w", err)
 	}
 	return nil
 }
