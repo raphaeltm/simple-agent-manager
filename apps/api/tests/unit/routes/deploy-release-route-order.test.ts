@@ -17,4 +17,10 @@ describe('deployment release callback route ordering', () => {
     expect(deployReleaseIndex).toBeLessThan(nodesIndex);
     expect(nodesIndex).toBeLessThan(nodeLifecycleIndex);
   });
+
+  it('keeps deploy release out of session-auth wildcard middleware', () => {
+    const source = readFileSync(join(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+
+    expect(source).toContain("path.endsWith('/deploy-release')");
+  });
 });
