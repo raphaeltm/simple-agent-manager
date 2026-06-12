@@ -153,6 +153,56 @@ func TestReloadCaddy_ReturnsReloadFailure(t *testing.T) {
 	}
 }
 
+func TestReloadCaddy_RestartsCaddyWhenAdminEndpointIsUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
+	caddyfile := "app.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"
+	if err := disk.WriteRelease(state, "compose", caddyfile); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte(`#!/bin/sh
+echo 'Error: sending configuration to instance: performing request: Post "http://localhost:2019/load": dial tcp [::1]:2019: connect: connection refused' >&2
+exit 1
+`), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+	restartLog := filepath.Join(dir, "restart.log")
+	restartScript := filepath.Join(dir, "restart.sh")
+	if err := os.WriteFile(restartScript, []byte("#!/bin/sh\necho restarted > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write restart script: %v", err)
+	}
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		CaddyfilePath:   filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:  reloadScript,
+		CaddyRestartCmd: restartScript + " " + restartLog,
+	})
+	if err := engine.reloadCaddy(t.Context(), disk.CaddyfilePath(1)); err != nil {
+		t.Fatalf("reloadCaddy: %v", err)
+	}
+
+	active, err := os.ReadFile(engine.cfg.CaddyfilePath)
+	if err != nil {
+		t.Fatalf("read active Caddyfile: %v", err)
+	}
+	if string(active) != caddyfile {
+		t.Fatalf("active Caddyfile mismatch: %q", string(active))
+	}
+	logBytes, err := os.ReadFile(restartLog)
+	if err != nil {
+		t.Fatalf("restart command did not run: %v", err)
+	}
+	if strings.TrimSpace(string(logBytes)) != "restarted" {
+		t.Fatalf("unexpected restart log %q", string(logBytes))
+	}
+}
+
 func TestReloadCaddy_WaitsForReloadCommandToExist(t *testing.T) {
 	dir := t.TempDir()
 	disk, err := NewDiskState(filepath.Join(dir, "state"))

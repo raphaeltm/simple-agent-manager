@@ -40,6 +40,7 @@ type EngineConfig struct {
 	ComposeCmd         string // e.g., "docker compose"
 	CaddyfilePath      string
 	CaddyReloadCmd     string
+	CaddyRestartCmd    string
 	CaddyReadyTimeout  time.Duration
 	CaddyReadyInterval time.Duration
 	HealthTimeout      time.Duration
@@ -57,6 +58,9 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	}
 	if cfg.CaddyReloadCmd == "" {
 		cfg.CaddyReloadCmd = "caddy reload --config {config} --adapter caddyfile"
+	}
+	if cfg.CaddyRestartCmd == "" {
+		cfg.CaddyRestartCmd = "systemctl restart caddy"
 	}
 	if cfg.CaddyReadyTimeout == 0 {
 		cfg.CaddyReadyTimeout = 2 * time.Minute
@@ -407,9 +411,33 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if isCaddyAdminUnavailable(stderr.String()) {
+			if restartErr := e.restartCaddy(ctx); restartErr != nil {
+				return fmt.Errorf("%s: %w (stderr: %s; restart failed: %v)", e.cfg.CaddyReloadCmd, err, stderr.String(), restartErr)
+			}
+			return nil
+		}
 		return fmt.Errorf("%s: %w (stderr: %s)", e.cfg.CaddyReloadCmd, err, stderr.String())
 	}
 	return nil
+}
+
+func (e *Engine) restartCaddy(ctx context.Context) error {
+	parts := strings.Fields(e.cfg.CaddyRestartCmd)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty caddy restart command")
+	}
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w (stderr: %s)", e.cfg.CaddyRestartCmd, err, stderr.String())
+	}
+	return nil
+}
+
+func isCaddyAdminUnavailable(stderr string) bool {
+	return strings.Contains(stderr, "localhost:2019/load") && strings.Contains(stderr, "connection refused")
 }
 
 func (e *Engine) waitForReloadCommand(ctx context.Context, command string) error {
