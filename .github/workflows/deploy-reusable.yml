@@ -45,6 +45,8 @@ jobs:
           HAS_GH_APP_SLUG: ${{ secrets.GH_APP_SLUG != '' }}
           HAS_GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET != '' }}
           HAS_CF_ORIGIN_CA_KEY: ${{ secrets.CF_ORIGIN_CA_KEY != '' }}
+          HAS_DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY != '' }}
+          HAS_DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY != '' }}
         run: |
           MISSING=""
 
@@ -89,6 +91,12 @@ jobs:
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
             echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."
+          fi
+          if [ "$HAS_DEPLOY_SIGNING_PRIVATE_KEY" != "true" ]; then
+            MISSING="$MISSING\n  - secrets.DEPLOY_SIGNING_PRIVATE_KEY"
+          fi
+          if [ "$HAS_DEPLOY_SIGNING_PUBLIC_KEY" != "true" ]; then
+            MISSING="$MISSING\n  - secrets.DEPLOY_SIGNING_PUBLIC_KEY"
           fi
 
           if [ -n "$MISSING" ]; then
@@ -706,6 +714,8 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}
+          DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}
           ANTHROPIC_API_KEY_TRIAL: ${{ secrets.ANTHROPIC_API_KEY_TRIAL }}
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
           GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
