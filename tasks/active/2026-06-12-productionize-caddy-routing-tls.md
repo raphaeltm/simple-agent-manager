@@ -60,7 +60,7 @@ This task productionizes the missing data plane: deployment nodes install Caddy,
 - [x] Add a release-apply vertical slice test with realistic environment, node, release manifest, DNS state, callback payload, and route targets.
 - [x] Add tests proving public routes get DNS + payload route targets while private routes do not.
 - [x] Add tests that would fail if Caddyfile updates are skipped while containers apply successfully.
-- [ ] Run package-level tests for `shared`, `cloud-init`, `api`, and `vm-agent`.
+- [x] Run package-level tests for `shared`, `cloud-init`, `api`, and `vm-agent`.
 
 ### 6. Documentation / Operational Decision Record
 
