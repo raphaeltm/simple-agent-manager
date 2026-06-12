@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,6 +166,117 @@ func TestEngine_ApplyRejectsSequenceReplay(t *testing.T) {
 	err := engine.Apply(ctx, payload)
 	if err == nil {
 		t.Error("expected apply to reject sequence replay")
+	}
+}
+
+func TestEngine_ApplyUpdatesCaddyfileAndReloadsAfterComposeConverges(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+echo "$@" >> "`+composeLog+`"
+case "$*" in
+  *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	reloadLog := filepath.Join(dir, "reload.log")
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte(`#!/bin/sh
+echo "$@" >> "`+reloadLog+`"
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	activeCaddyfile := filepath.Join(dir, "active", "Caddyfile")
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      activeCaddyfile,
+		CaddyReloadCmd:     reloadScript + " {config}",
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "services:\n  web:\n    image: nginx\n    ports:\n      - 127.0.0.1:35000:3000\n",
+		Routes: []RouteTarget{{
+			Hostname:      "r1-web-env.apps.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
+		}},
+	}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	seq, err := disk.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if seq != 1 {
+		t.Fatalf("expected current seq 1, got %d", seq)
+	}
+
+	activeBytes, err := os.ReadFile(activeCaddyfile)
+	if err != nil {
+		t.Fatalf("read active Caddyfile: %v", err)
+	}
+	active := string(activeBytes)
+	if !strings.Contains(active, "r1-web-env.apps.example.com") {
+		t.Fatalf("active Caddyfile missing hostname:\n%s", active)
+	}
+	if !strings.Contains(active, "reverse_proxy 127.0.0.1:35000") {
+		t.Fatalf("active Caddyfile missing upstream:\n%s", active)
+	}
+
+	reloadBytes, err := os.ReadFile(reloadLog)
+	if err != nil {
+		t.Fatalf("reload command was not invoked: %v", err)
+	}
+	if !strings.Contains(string(reloadBytes), activeCaddyfile) {
+		t.Fatalf("reload command did not receive active Caddyfile path: %q", string(reloadBytes))
+	}
+
+	composeBytes, err := os.ReadFile(composeLog)
+	if err != nil {
+		t.Fatalf("compose command was not invoked: %v", err)
+	}
+	composeOutput := string(composeBytes)
+	for _, expected := range []string{"pull", "up -d --remove-orphans", "ps --format json"} {
+		if !strings.Contains(composeOutput, expected) {
+			t.Fatalf("compose log missing %q: %q", expected, composeOutput)
+		}
+	}
+	if strings.Contains(composeOutput, "caddy") {
+		t.Fatalf("compose commands must not restart Caddy: %q", composeOutput)
 	}
 }
 

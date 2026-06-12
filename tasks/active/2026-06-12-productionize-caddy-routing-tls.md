@@ -57,14 +57,14 @@ This task productionizes the missing data plane: deployment nodes install Caddy,
 
 ### 5. Vertical Slice and Regression Tests
 
-- [ ] Add a release-apply vertical slice test with realistic environment, node, release manifest, DNS state, callback payload, and route targets.
+- [x] Add a release-apply vertical slice test with realistic environment, node, release manifest, DNS state, callback payload, and route targets.
 - [x] Add tests proving public routes get DNS + payload route targets while private routes do not.
 - [x] Add tests that would fail if Caddyfile updates are skipped while containers apply successfully.
 - [ ] Run package-level tests for `shared`, `cloud-init`, `api`, and `vm-agent`.
 
 ### 6. Documentation / Operational Decision Record
 
-- [ ] Document the HTTP-01 decision in the task/archive record or relevant operational notes, citing code paths and explicitly noting that DNS-01 would require node-side Cloudflare DNS edit credentials and a custom Caddy build.
+- [x] Document the HTTP-01 decision in the task/archive record or relevant operational notes, citing code paths and explicitly noting that DNS-01 would require node-side Cloudflare DNS edit credentials and a custom Caddy build.
 - [ ] Supersede and close draft PR #1292 after this implementation PR is ready.
 
 ### 7. Mandatory Staging Verification
@@ -88,6 +88,12 @@ This task productionizes the missing data plane: deployment nodes install Caddy,
 5. The implementation remains provider-agnostic: provider operations go through `packages/providers`, and `apps/api` has no provider-specific routing/TLS branches.
 6. Unit, contract, vertical-slice, and Go tests cover the route/DNS/payload/Caddy reload path.
 7. Staging verification proves DNS resolution, TLS handshake, and HTTPS app response on a real deployment node, with cleanup completed.
+
+## Operational Decision: HTTP-01 ACME
+
+SAM app-deployment routes use node-side Caddy with HTTP-01 ACME. The control plane creates exact grey-cloud A records with `upsertAppRouteDNSRecord()` in `apps/api/src/services/dns.ts`, and `deploy-release-callback.ts` ensures those records point at the deployment node before returning the signed payload. The vm-agent then writes a Caddyfile from signed route targets and runs `caddy reload` in `packages/vm-agent/internal/deploy/engine.go`.
+
+DNS-01 is intentionally not used for this implementation. The spike found it would require a custom Caddy build with the Cloudflare DNS module plus a Cloudflare token with DNS edit permissions on the deployment node. HTTP-01 keeps DNS-write authority in the control plane, avoids node-side Cloudflare credentials, and uses standard Caddy.
 
 ## References
 
