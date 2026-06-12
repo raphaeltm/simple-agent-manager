@@ -77,6 +77,7 @@ function env(): Env {
     CF_API_TOKEN: 'cf-token',
     CF_ZONE_ID: 'zone-1',
     DNS_TTL_SECONDS: '120',
+    DEPLOY_PAYLOAD_EXPIRY_SECONDS: '90',
     DEPLOYMENT_ROUTE_PORT_BASE: '36000',
     DEPLOYMENT_ROUTE_PORT_SPAN: '10',
     DEPLOY_SIGNING_PRIVATE_KEY: 'test-private-key',
@@ -96,6 +97,7 @@ describe('deploy release callback route', () => {
   });
 
   it('returns signed route targets, publishes loopback Compose ports, and creates grey-cloud DNS records', async () => {
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     mockLimit
       .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
       .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
@@ -134,7 +136,9 @@ describe('deploy release callback route', () => {
     expect(body.composeYaml).toContain('127.0.0.1:36000:3000');
     expect(body.composeYaml).toContain('127.0.0.1:36001:3001');
     expect(body.composeYaml).not.toContain('9000');
+    expect(body.expiresAt).toBe(1_700_000_090);
     expect(body.signature).toEqual(expect.any(String));
+    dateNow.mockRestore();
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     const firstCreateCall = fetchMock.mock.calls.at(2);
