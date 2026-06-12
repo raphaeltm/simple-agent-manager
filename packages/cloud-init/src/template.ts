@@ -78,6 +78,7 @@ runcmd:
 
   - 'logger -t sam-boot "PHASE START: caddy-setup"'
   - |
+    set -euo pipefail
     ROLE="{{ role }}"
     if [ "$ROLE" = "deployment" ]; then
       logger -t sam-boot "Installing Caddy for deployment node routing"
@@ -92,7 +93,12 @@ runcmd:
         apt-get install -y caddy 2>&1 | logger -t sam-boot
       fi
 
-      chown -R caddy:caddy /var/lib/caddy /var/log/caddy || true
+      if ! id caddy >/dev/null 2>&1; then
+        logger -t sam-boot "ERROR: caddy package did not create caddy user"
+        exit 1
+      fi
+
+      chown -R caddy:caddy /var/lib/caddy /var/log/caddy
       systemctl enable caddy
       systemctl reload-or-restart caddy
       logger -t sam-boot "Caddy ready for deployment node routing"
