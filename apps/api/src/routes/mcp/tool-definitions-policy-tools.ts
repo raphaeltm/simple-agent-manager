@@ -1,6 +1,7 @@
 /**
  * MCP tool definitions for Project Policies (Phase 4: Policy Propagation).
  */
+import { POLICY_CATEGORIES, POLICY_SOURCES } from '@simple-agent-manager/shared';
 
 export const POLICY_TOOLS = [
   {
@@ -15,14 +16,14 @@ export const POLICY_TOOLS = [
         category: {
           type: 'string',
           description: 'Policy category: rule (must follow), constraint (technical limitation), delegation (agent autonomy), preference (soft guidance)',
-          enum: ['rule', 'constraint', 'delegation', 'preference'],
+          enum: [...POLICY_CATEGORIES],
         },
         title: { type: 'string', description: 'Short title summarizing the policy (max 200 chars)' },
         content: { type: 'string', description: 'Full policy content with details and rationale (max 2000 chars)' },
         source: {
           type: 'string',
           description: 'How this policy was created: explicit (human stated it) or inferred (agent deduced from behavior)',
-          enum: ['explicit', 'inferred'],
+          enum: [...POLICY_SOURCES],
         },
         confidence: { type: 'number', description: 'Confidence level 0.0-1.0 (default: 0.8). Use 0.9+ for explicit human statements.' },
       },
@@ -39,7 +40,7 @@ export const POLICY_TOOLS = [
         category: {
           type: 'string',
           description: 'Optional filter by category: rule, constraint, delegation, preference',
-          enum: ['rule', 'constraint', 'delegation', 'preference'],
+          enum: [...POLICY_CATEGORIES],
         },
         includeInactive: { type: 'boolean', description: 'Include deactivated policies (default: false)' },
         limit: { type: 'number', description: 'Max results to return (default: 50)' },
@@ -72,7 +73,7 @@ export const POLICY_TOOLS = [
         category: {
           type: 'string',
           description: 'New category',
-          enum: ['rule', 'constraint', 'delegation', 'preference'],
+          enum: [...POLICY_CATEGORIES],
         },
         active: { type: 'boolean', description: 'Set active/inactive' },
         confidence: { type: 'number', description: 'New confidence level 0.0-1.0' },

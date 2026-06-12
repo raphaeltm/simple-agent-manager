@@ -1,6 +1,7 @@
 /**
  * MCP tool definitions for the Knowledge Graph.
  */
+import { KNOWLEDGE_ENTITY_TYPES, KNOWLEDGE_RELATION_TYPES, KNOWLEDGE_SOURCE_TYPES } from '@simple-agent-manager/shared';
 
 export const KNOWLEDGE_TOOLS = [
   {
@@ -16,14 +17,14 @@ export const KNOWLEDGE_TOOLS = [
         entityType: {
           type: 'string',
           description: 'Type of entity: preference, style, context, expertise, workflow, personality, custom',
-          enum: ['preference', 'style', 'context', 'expertise', 'workflow', 'personality', 'custom'],
+          enum: [...KNOWLEDGE_ENTITY_TYPES],
         },
         observation: { type: 'string', description: 'The fact or observation to store' },
         confidence: { type: 'number', description: 'Confidence level 0.0-1.0 (default: 0.7). Use 0.9+ for explicit user statements.' },
         sourceType: {
           type: 'string',
           description: 'How this was learned: explicit (user said it), inferred (agent deduced), behavioral (observed from actions)',
-          enum: ['explicit', 'inferred', 'behavioral'],
+          enum: [...KNOWLEDGE_SOURCE_TYPES],
         },
       },
       required: ['entityName', 'observation'],
@@ -76,7 +77,7 @@ export const KNOWLEDGE_TOOLS = [
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query text' },
-        entityType: { type: 'string', description: 'Optional filter by entity type' },
+        entityType: { type: 'string', description: 'Optional filter by entity type', enum: [...KNOWLEDGE_ENTITY_TYPES] },
         minConfidence: { type: 'number', description: 'Optional minimum confidence threshold (0.0-1.0)' },
         limit: { type: 'number', description: 'Max results to return (default: 20)' },
       },
@@ -90,7 +91,7 @@ export const KNOWLEDGE_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        entityType: { type: 'string', description: 'Optional filter by entity type' },
+        entityType: { type: 'string', description: 'Optional filter by entity type', enum: [...KNOWLEDGE_ENTITY_TYPES] },
         limit: { type: 'number', description: 'Max entities to return (default: 50)' },
       },
       additionalProperties: false,
@@ -122,7 +123,7 @@ export const KNOWLEDGE_TOOLS = [
         relationType: {
           type: 'string',
           description: 'Type of relation: influences, contradicts, supports, requires, related_to',
-          enum: ['influences', 'contradicts', 'supports', 'requires', 'related_to'],
+          enum: [...KNOWLEDGE_RELATION_TYPES],
         },
         description: { type: 'string', description: 'Optional description of the relation' },
       },
@@ -137,7 +138,7 @@ export const KNOWLEDGE_TOOLS = [
       type: 'object' as const,
       properties: {
         entityName: { type: 'string', description: 'Name of the entity' },
-        relationType: { type: 'string', description: 'Optional filter by relation type' },
+        relationType: { type: 'string', description: 'Optional filter by relation type', enum: [...KNOWLEDGE_RELATION_TYPES] },
       },
       required: ['entityName'],
       additionalProperties: false,
