@@ -1864,6 +1864,9 @@ describe('deployment role support', () => {
     expect(caddyfile.permissions).toBe('0644');
     expect(caddyfile.content).toContain('Managed by SAM deployment agent');
     expect(caddyfile.content).toContain('caddy reload');
+    expect(caddyfile.content).toContain('auto_https off');
+    expect(caddyfile.content).toContain(':80');
+    expect(caddyfile.content).toContain('SAM deployment node awaiting release');
   });
 
   it('guards Caddy installation behind ROLE=deployment', () => {

@@ -148,6 +148,13 @@ write_files:
     content: |
       # Managed by SAM deployment agent.
       # Release applies replace this file and run caddy reload.
+      {
+        auto_https off
+      }
+
+      :80 {
+        respond "SAM deployment node awaiting release" 200
+      }
 
   - path: /etc/workspace/config.json
     content: |
