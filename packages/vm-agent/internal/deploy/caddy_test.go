@@ -44,7 +44,7 @@ func TestGenerateCaddyfile_RoundTripsMultiRouteConfig(t *testing.T) {
 		{Hostname: "r1-web-env123.apps.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
 	}
 
-	caddyfile, err := GenerateCaddyfile(routes)
+	caddyfile, err := GenerateCaddyfile(routes, CaddyfileOptions{})
 	if err != nil {
 		t.Fatalf("GenerateCaddyfile: %v", err)
 	}
@@ -84,6 +84,38 @@ func TestGenerateCaddyfile_RoundTripsMultiRouteConfig(t *testing.T) {
 	}
 }
 
+func TestGenerateCaddyfile_EmitsGlobalOptionsForACME(t *testing.T) {
+	routes := []RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}}
+
+	withOpts, err := GenerateCaddyfile(routes, CaddyfileOptions{
+		ACMEEmail: "ops@example.com",
+		ACMECA:    "https://acme-staging-v02.api.letsencrypt.org/directory",
+	})
+	if err != nil {
+		t.Fatalf("GenerateCaddyfile: %v", err)
+	}
+	if !strings.Contains(withOpts, "\temail ops@example.com\n") {
+		t.Fatalf("expected email directive in global block, got:\n%s", withOpts)
+	}
+	if !strings.Contains(withOpts, "\tacme_ca https://acme-staging-v02.api.letsencrypt.org/directory\n") {
+		t.Fatalf("expected acme_ca directive in global block, got:\n%s", withOpts)
+	}
+	// Global options block must precede the first site block.
+	if optsIdx, siteIdx := strings.Index(withOpts, "email ops@example.com"), strings.Index(withOpts, "app.apps.example.com {"); optsIdx == -1 || siteIdx == -1 || optsIdx > siteIdx {
+		t.Fatalf("global options block must precede site blocks, got:\n%s", withOpts)
+	}
+
+	// No options -> no global block (Caddy defaults apply, no leading "{").
+	noOpts, err := GenerateCaddyfile(routes, CaddyfileOptions{})
+	if err != nil {
+		t.Fatalf("GenerateCaddyfile (no opts): %v", err)
+	}
+	body := strings.TrimPrefix(noOpts, "# Managed by SAM deployment agent.\n")
+	if strings.HasPrefix(strings.TrimSpace(body), "{") {
+		t.Fatalf("expected no global options block when ACME options are empty, got:\n%s", noOpts)
+	}
+}
+
 func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) {
 	dir := t.TempDir()
 	disk, err := NewDiskState(filepath.Join(dir, "state"))
@@ -91,7 +123,7 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("NewDiskState: %v", err)
 	}
 	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
-	caddyfile, err := GenerateCaddyfile([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}})
+	caddyfile, err := GenerateCaddyfile([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}}, CaddyfileOptions{})
 	if err != nil {
 		t.Fatalf("GenerateCaddyfile: %v", err)
 	}
@@ -276,7 +308,7 @@ func TestGenerateCaddyfile_RejectsUnsafeRouteTargets(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := GenerateCaddyfile([]RouteTarget{tc.route}); err == nil {
+			if _, err := GenerateCaddyfile([]RouteTarget{tc.route}, CaddyfileOptions{}); err == nil {
 				t.Fatal("expected invalid route target to be rejected")
 			}
 		})

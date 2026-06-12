@@ -41,6 +41,8 @@ type EngineConfig struct {
 	CaddyfilePath      string
 	CaddyReloadCmd     string
 	CaddyRestartCmd    string
+	ACMEEmail          string // Contact email for the ACME global options block (optional)
+	ACMECA             string // ACME CA directory URL override, e.g. LE staging (optional)
 	CaddyReadyTimeout  time.Duration
 	CaddyReadyInterval time.Duration
 	HealthTimeout      time.Duration
@@ -184,7 +186,10 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	// Write release to disk
-	caddyfile, err := GenerateCaddyfile(payload.Routes)
+	caddyfile, err := GenerateCaddyfile(payload.Routes, CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
 	if err != nil {
 		return fmt.Errorf("generate Caddyfile: %w", err)
 	}

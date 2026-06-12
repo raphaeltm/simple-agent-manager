@@ -96,6 +96,102 @@ SAM app-deployment routes use node-side Caddy with HTTP-01 ACME. The control pla
 
 DNS-01 is intentionally not used for this implementation. The spike found it would require a custom Caddy build with the Cloudflare DNS module plus a Cloudflare token with DNS edit permissions on the deployment node. HTTP-01 keeps DNS-write authority in the control plane, avoids node-side Cloudflare credentials, and uses standard Caddy.
 
+## ATTACK PLAN — Debugging "app unreachable over HTTPS" (added 2026-06-12)
+
+This plan is the result of an end-to-end trace of the deploy apply path. It corrects two
+earlier hypotheses, identifies the real candidate failure points in order, gives the
+distinguishing diagnostic for each, and lists fixes that are correct regardless of which
+candidate is the culprit.
+
+### Corrections to earlier hypotheses
+
+1. **"Docker is absent on deployment nodes" — INVALID on Hetzner (the staging provider).**
+   `packages/shared/src/constants/hetzner.ts` sets `DEFAULT_HETZNER_IMAGE = 'docker-ce'`, a
+   first-party marketplace image with Docker CE + the compose v2 plugin pre-baked. Deployment
+   mode skips `provision.Run` (the only apt-based Docker installer), but on Hetzner Docker is
+   already present, so `docker compose pull/up` should work. (This hypothesis could still bite
+   GCP/Scaleway base images, which install Docker only via the skipped provision step — but
+   staging is Hetzner.)
+
+2. **"A Hetzner cloud firewall blocks :80/:443" — INVALID.** Only `GcpProviderConfig` has
+   firewall fields (`appRoutePorts`, etc.) in `packages/providers/src/types.ts`.
+   `HetznerProviderConfig` has no firewall config and the Hetzner provider creates no cloud
+   firewall, so 80/443 are open at the Hetzner edge.
+
+3. **"`deployment_releases` stuck at `created` proves the apply failed" — MISLEADING.** The
+   `status` column is **write-once**. It is set to `'created'` on insert
+   (`apps/api/src/routes/deployment-releases.ts:235,286`) and **no control-plane code path ever
+   advances it** to `applying`/`applied`/`failed`/`reverted` (verified by grepping all of
+   `apps/api/src`). The node reports observed apply state in each heartbeat body
+   (`body.deployment` from `health.go:sendNodeHeartbeat`), but the heartbeat handler
+   (`apps/api/src/routes/node-lifecycle.ts:262-298`) only reads `appliedSeq` to compute
+   `pendingReleaseSeq` — it never persists the observed status. **So "stuck at `created`" is the
+   default for every release and is NOT evidence of an apply failure.** This is the single
+   biggest observability gap: the control plane has zero persisted view of apply success/failure.
+
+### Verified apply-trigger chain (code paths)
+
+1. Node heartbeats with `body.deployment = {environmentId, appliedSeq, status, services}`
+   (`packages/vm-agent/internal/server/health.go:116-124`). Requires `deployEngine` attached —
+   done in `main.go:runDeploymentMode` via `srv.SetDeployEngine(engine)`.
+2. Control plane resolves env by `deployment_environments.node_id == nodeId`
+   (`node-lifecycle.ts:267-271`) and returns `pendingReleaseSeq = latestRelease.version` when
+   `version > appliedSeq` (`:276-285`), plus `deployPubKey` from `DEPLOY_SIGNING_PUBLIC_KEY`
+   (`:295-296`). **Hard dependency: the environment row's `node_id` must equal this node's id.**
+3. Node: if `pendingReleaseSeq > observed.AppliedSeq`, background `FetchAndApply`
+   (`health.go:184-211`).
+4. `fetchRelease` GETs `/api/nodes/:id/deploy-release?seq=&environmentId=`
+   (`deploy-release-callback.ts:35`). It re-checks `env.node_id == nodeId` AND
+   `project.userId == node.userId` (`:95-102`); **if the manifest has routes and the node has no
+   IP yet it throws 409** (`:135-137`); it upserts grey-cloud DNS (`:139`), renders compose, and
+   returns the signed payload. Any non-200 returns an error to the node **before** `Apply` runs,
+   so `observed.AppliedSeq` stays unchanged and the node retries on the next heartbeat.
+5. `Apply` (`engine.go:~146-229`): nil verifier → "refusing to apply unsigned payload";
+   then `GenerateCaddyfile` → `WriteRelease` → `composePull` → `composeUp` → `waitForHealth` →
+   `reloadCaddy` → `SetCurrent`. Any step failure → `handleApplyFailure` (records
+   `state.ErrorMessage`, sets observed status `failed`/`failed_initial`/`reverted`).
+
+### Candidate failure points — ordered, each with its distinguishing diagnostic
+
+The decisive next step is the **node debug package** (`GET /api/nodes/:id/debug-package`), which
+bundles cloud-init logs, `journalctl -u vm-agent`, `journalctl -u caddy`, `docker ps/logs`, and
+network/iptables state. Pull it once and most of the table below resolves immediately.
+
+| # | Candidate | Distinguishing diagnostic |
+|---|-----------|---------------------------|
+| 1 | **Caddy daemon not running** (caddy-setup cloud-init step failed, or `caddy.service` not enabled/started) | `journalctl -u caddy` empty/failed; `systemctl is-active caddy` != active; `reloadCaddy` would fail with admin-API connection refused → look for `deploy: caddy reload failed` in vm-agent log. **Most likely given prior `:80` "Timeout during connect".** |
+| 2 | **Apply never ran** (env→node binding missing, or fetchRelease 409 because node had no IP) | vm-agent log shows no "deploy: pending release detected" OR repeated `fetch and apply failed` with 409/404. CF: `SELECT node_id FROM deployment_environments WHERE id=…` must equal the node id. |
+| 3 | **ACME HTTP-01 unreachable** (grey-cloud A record missing/wrong IP, or :80 not actually listening) | `dig +short app.<env>.apps.sammy.party` must return the node IP; `curl -v http://<host>/.well-known/acme-challenge/test` must reach Caddy (not time out). caddy log shows ACME order failures. |
+| 4 | **`docker compose` plugin mismatch** (engine hardcodes v2 `"docker compose"`) | `docker compose version` on node; vm-agent log `composePull/Up` exec errors. Low risk on Hetzner `docker-ce` image. |
+| 5 | **waitForHealth timeout** (containers never become healthy) | vm-agent log health-poll timeout; `docker ps` shows unhealthy/restarting containers; `docker logs` for the app container. |
+| 6 | **Caddyfile content invalid** | RULED OUT locally — current generator output passes `caddy validate` and enables auto-HTTPS (tested with Caddy v2.8.4). |
+
+### Fixes that are correct regardless of root cause
+
+1. **Control-plane release-status lifecycle + persisted observed state (TOP observability fix).**
+   Persist `body.deployment` (appliedSeq, status, error) from the heartbeat onto the environment
+   (or a new column) and advance `deployment_releases.status` accordingly. Without this, every
+   failure mode above is invisible from the control plane. *(Larger change: schema migration +
+   heartbeat persistence + status transitions; file as the next implementation slice.)*
+2. **vm-agent deployment-mode error reporting.** `FetchAndApply`/`Apply` failures currently
+   produce a single `slog.Error` and nothing reaches the control plane. Route deploy apply/fetch
+   failures through the existing VM-agent error-report channel
+   (`node-lifecycle.ts` VM error report handler) so they surface in `/admin/errors`.
+3. **Deployment-mode startup preflight logging.** At `runDeploymentMode` start, log
+   availability of `docker`, `docker compose`, and `caddy` (LookPath + `--version`) and whether
+   `caddy.service` is active, so a missing dependency is obvious in the first seconds of the log.
+4. **ACME email + issuer pin in `GenerateCaddyfile`.** Add a global options block with a
+   configurable contact `email` and an optional `acme_ca` override (env-driven), so testing can
+   target the LE **staging** CA and avoid burning prod rate limits, and prod sets a real contact
+   email. Verified locally: both `{ email … }` and `{ email …; acme_ca <staging> }` global blocks
+   pass `caddy validate` on Caddy v2.8.4. (Hardening, not the root-cause fix — current output is
+   already valid.)
+
+### Local replication already done
+- Reproduced current generator output and ran `caddy validate` (Caddy v2.8.4): **valid**, auto-HTTPS
+  enabled on :443, HTTP→HTTPS redirect enabled.
+- Validated the proposed global-options block (email, and email+staging `acme_ca`): both valid.
+
 ## References
 
 - Draft spike: PR #1292 / `tasks/backlog/2026-06-11-caddy-acme-spike.md`

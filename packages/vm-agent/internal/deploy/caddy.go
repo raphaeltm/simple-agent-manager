@@ -11,9 +11,25 @@ import (
 
 var caddyHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 
-func GenerateCaddyfile(routes []RouteTarget) (string, error) {
+// CaddyfileOptions carries node-wide ACME/TLS settings emitted in the Caddy
+// global options block. All fields are optional; when empty, Caddy's defaults
+// apply (auto-HTTPS with the production ACME CA and no contact email).
+type CaddyfileOptions struct {
+	// ACMEEmail is the contact email registered with the ACME CA. Recommended
+	// for production so certificate-expiry and policy notices are deliverable.
+	ACMEEmail string
+	// ACMECA overrides the ACME directory URL (e.g. the Let's Encrypt staging
+	// endpoint) so testing does not consume production issuance rate limits.
+	ACMECA string
+}
+
+func GenerateCaddyfile(routes []RouteTarget, opts CaddyfileOptions) (string, error) {
 	var builder strings.Builder
 	builder.WriteString("# Managed by SAM deployment agent.\n")
+
+	if global := buildGlobalOptionsBlock(opts); global != "" {
+		builder.WriteString(global)
+	}
 
 	ordered := append([]RouteTarget(nil), routes...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -33,6 +49,30 @@ func GenerateCaddyfile(routes []RouteTarget) (string, error) {
 	}
 
 	return builder.String(), nil
+}
+
+// buildGlobalOptionsBlock renders the Caddy global options block for the given
+// ACME settings, or the empty string when no options are set (so Caddy defaults
+// are used). The email and acme_ca directives only accept whitespace-free tokens,
+// which the env-sourced values already are; any internal whitespace is dropped to
+// keep the generated config well-formed.
+func buildGlobalOptionsBlock(opts CaddyfileOptions) string {
+	email := strings.Join(strings.Fields(opts.ACMEEmail), "")
+	ca := strings.Join(strings.Fields(opts.ACMECA), "")
+	if email == "" && ca == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("{\n")
+	if email != "" {
+		b.WriteString(fmt.Sprintf("\temail %s\n", email))
+	}
+	if ca != "" {
+		b.WriteString(fmt.Sprintf("\tacme_ca %s\n", ca))
+	}
+	b.WriteString("}\n")
+	return b.String()
 }
 
 func validateRouteTarget(route RouteTarget) error {
