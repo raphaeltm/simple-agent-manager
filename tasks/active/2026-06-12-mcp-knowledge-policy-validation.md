@@ -18,15 +18,15 @@ This matters because the tools write durable project knowledge and policy. Silen
 
 ## Implementation Checklist
 
-- [ ] Add explicit knowledge MCP validation helpers for enum values, confidence, max lengths, and page limits.
-- [ ] Reject invalid `add_knowledge` confidence/sourceType and preserve defaults only when omitted.
-- [ ] Reject invalid `search_knowledge`, `get_project_knowledge`, `get_relevant_knowledge`, and `get_related` filters/limits instead of broadening or forwarding malformed values.
-- [ ] Reject over-limit `update_knowledge` and `flag_contradiction` content instead of implicit truncation.
-- [ ] Tighten policy `list_policies` filter/pagination validation so invalid filters do not silently broaden lists.
-- [ ] Derive MCP tool-definition enum values from shared constants where practical.
-- [ ] Add focused public route-level MCP tests for required/missing params, invalid enums, confidence bounds, filter broadening prevention, sanitized success arguments, and schema enum parity with shared constants.
+- [x] Add explicit knowledge MCP validation helpers for enum values, confidence, max lengths, and page limits.
+- [x] Reject invalid `add_knowledge` confidence/sourceType and preserve defaults only when omitted.
+- [x] Reject invalid `search_knowledge`, `get_project_knowledge`, `get_relevant_knowledge`, and `get_related` filters/limits instead of broadening or forwarding malformed values.
+- [x] Reject over-limit `update_knowledge` and `flag_contradiction` content instead of implicit truncation.
+- [x] Tighten policy `list_policies` filter/pagination validation so invalid filters do not silently broaden lists.
+- [x] Derive MCP tool-definition enum values from shared constants where practical.
+- [x] Add focused public route-level MCP tests for required/missing params, invalid enums, confidence bounds, filter broadening prevention, sanitized success arguments, and schema enum parity with shared constants.
 - [ ] Run focused route tests plus policy/knowledge related tests.
-- [ ] Run apps/api lint and typecheck commands.
+- [x] Run apps/api lint and typecheck commands.
 - [ ] Complete specialist review required for API/test changes before PR merge.
 - [ ] Deploy and verify staging MCP behavior, or document the exact verified blocker if live MCP endpoint exercise is impossible.
 

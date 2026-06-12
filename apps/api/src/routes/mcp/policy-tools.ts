@@ -3,8 +3,8 @@
  *
  * Phase 4: Policy Propagation
  */
-import type { PolicySource } from '@simple-agent-manager/shared';
-import { isPolicyCategory, isPolicySource, resolvePolicyLimits } from '@simple-agent-manager/shared';
+import type { PolicyCategory, PolicySource } from '@simple-agent-manager/shared';
+import { isPolicyCategory, isPolicySource, POLICY_CATEGORIES, resolvePolicyLimits } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -20,6 +20,24 @@ import {
 
 function getPolicyLimits(env: Env) {
   return resolvePolicyLimits(env);
+}
+
+function validatePageNumber(
+  requestId: string | number | null,
+  value: unknown,
+  fieldName: 'limit' | 'offset',
+  defaultValue: number,
+  maxValue?: number,
+): { ok: true; value: number } | { ok: false; response: JsonRpcResponse } {
+  if (value === undefined) {
+    return { ok: true, value: defaultValue };
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { ok: false, response: jsonRpcError(requestId, INVALID_PARAMS, `${fieldName} must be a number`) };
+  }
+  const rounded = Math.round(value);
+  const minBounded = fieldName === 'offset' ? Math.max(0, rounded) : Math.max(1, rounded);
+  return { ok: true, value: maxValue === undefined ? minBounded : Math.min(minBounded, maxValue) };
 }
 
 export async function handleAddPolicy(
@@ -111,15 +129,21 @@ export async function handleListPolicies(
 ): Promise<JsonRpcResponse> {
   const limits = getPolicyLimits(env);
 
-  const category = typeof params.category === 'string' && isPolicyCategory(params.category)
-    ? params.category
-    : null;
+  let category: PolicyCategory | null = null;
+  if (params.category !== undefined) {
+    if (typeof params.category !== 'string' || !isPolicyCategory(params.category)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `category must be one of: ${POLICY_CATEGORIES.join(', ')}`);
+    }
+    category = params.category;
+  }
 
   const includeInactive = params.includeInactive === true;
-  const limit = typeof params.limit === 'number'
-    ? Math.min(Math.max(1, Math.round(params.limit)), limits.listMaxPageSize)
-    : limits.listPageSize;
-  const offset = typeof params.offset === 'number' ? Math.max(0, Math.round(params.offset)) : 0;
+  const limitResult = validatePageNumber(requestId, params.limit, 'limit', limits.listPageSize, limits.listMaxPageSize);
+  if (!limitResult.ok) return limitResult.response;
+  const offsetResult = validatePageNumber(requestId, params.offset, 'offset', 0);
+  if (!offsetResult.ok) return offsetResult.response;
+  const limit = limitResult.value;
+  const offset = offsetResult.value;
 
   const result = await projectDataService.listPolicies(
     env, tokenData.projectId, category, !includeInactive, limit, offset,

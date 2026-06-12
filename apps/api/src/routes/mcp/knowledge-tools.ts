@@ -1,7 +1,14 @@
 /**
  * MCP Knowledge Graph tool handlers — CRUD, search, and retrieval for project knowledge.
  */
-import { KNOWLEDGE_ENTITY_TYPES, KNOWLEDGE_RELATION_TYPES, KNOWLEDGE_SOURCE_TYPES } from '@simple-agent-manager/shared';
+import {
+  KNOWLEDGE_ENTITY_TYPES,
+  KNOWLEDGE_RELATION_TYPES,
+  KNOWLEDGE_SOURCE_TYPES,
+  type KnowledgeEntityType,
+  type KnowledgeRelationType,
+  type KnowledgeSourceType,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
@@ -25,6 +32,63 @@ async function resolveSessionId(env: Env, workspaceId: string): Promise<string |
   return row?.chat_session_id ?? null;
 }
 
+function isKnowledgeEntityType(value: string): value is KnowledgeEntityType {
+  return (KNOWLEDGE_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function isKnowledgeSourceType(value: string): value is KnowledgeSourceType {
+  return (KNOWLEDGE_SOURCE_TYPES as readonly string[]).includes(value);
+}
+
+function isKnowledgeRelationType(value: string): value is KnowledgeRelationType {
+  return (KNOWLEDGE_RELATION_TYPES as readonly string[]).includes(value);
+}
+
+function validateConfidence(
+  requestId: string | number | null,
+  value: unknown,
+  fieldName: string,
+): { ok: true; value: number | null } | { ok: false; response: JsonRpcResponse } {
+  if (value === undefined) {
+    return { ok: true, value: null };
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    return { ok: false, response: jsonRpcError(requestId, INVALID_PARAMS, `${fieldName} must be a number between 0.0 and 1.0`) };
+  }
+  return { ok: true, value };
+}
+
+function validateLimit(
+  requestId: string | number | null,
+  value: unknown,
+  defaultLimit: number,
+  maxLimit: number,
+): { ok: true; value: number } | { ok: false; response: JsonRpcResponse } {
+  if (value === undefined) {
+    return { ok: true, value: defaultLimit };
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { ok: false, response: jsonRpcError(requestId, INVALID_PARAMS, 'limit must be a number') };
+  }
+  return { ok: true, value: Math.min(Math.max(1, Math.round(value)), maxLimit) };
+}
+
+function sanitizeRequiredString(
+  requestId: string | number | null,
+  value: unknown,
+  fieldName: string,
+  maxLength: number,
+): { ok: true; value: string } | { ok: false; response: JsonRpcResponse } {
+  const sanitized = typeof value === 'string' ? sanitizeUserInput(value.trim()) : '';
+  if (!sanitized) {
+    return { ok: false, response: jsonRpcError(requestId, INVALID_PARAMS, `${fieldName} is required`) };
+  }
+  if (sanitized.length > maxLength) {
+    return { ok: false, response: jsonRpcError(requestId, INVALID_PARAMS, `${fieldName} exceeds maximum length of ${maxLength} characters`) };
+  }
+  return { ok: true, value: sanitized };
+}
+
 // ─── add_knowledge ──────────────────────────────────────────────────────────
 
 export async function handleAddKnowledge(
@@ -35,28 +99,34 @@ export async function handleAddKnowledge(
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
 
-  const entityName = typeof params.entityName === 'string'
-    ? sanitizeUserInput(params.entityName.trim()).slice(0, limits.knowledgeEntityNameMaxLength)
-    : '';
-  if (!entityName) return jsonRpcError(requestId, INVALID_PARAMS, 'entityName is required');
+  const entityNameResult = sanitizeRequiredString(
+    requestId, params.entityName, 'entityName', limits.knowledgeEntityNameMaxLength,
+  );
+  if (!entityNameResult.ok) return entityNameResult.response;
+  const entityName = entityNameResult.value;
 
   const entityType = typeof params.entityType === 'string' ? params.entityType : 'custom';
-  if (!KNOWLEDGE_ENTITY_TYPES.includes(entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])) {
+  if (!isKnowledgeEntityType(entityType)) {
     return jsonRpcError(requestId, INVALID_PARAMS, `Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
   }
 
-  const observation = typeof params.observation === 'string'
-    ? sanitizeUserInput(params.observation.trim()).slice(0, limits.knowledgeObservationMaxLength)
-    : '';
-  if (!observation) return jsonRpcError(requestId, INVALID_PARAMS, 'observation is required');
+  const observationResult = sanitizeRequiredString(
+    requestId, params.observation, 'observation', limits.knowledgeObservationMaxLength,
+  );
+  if (!observationResult.ok) return observationResult.response;
+  const observation = observationResult.value;
 
-  const confidence = typeof params.confidence === 'number'
-    ? Math.min(Math.max(0, params.confidence), 1)
-    : 0.7;
+  const confidenceResult = validateConfidence(requestId, params.confidence, 'confidence');
+  if (!confidenceResult.ok) return confidenceResult.response;
+  const confidence = confidenceResult.value ?? 0.7;
 
-  const sourceType = typeof params.sourceType === 'string' && KNOWLEDGE_SOURCE_TYPES.includes(params.sourceType as (typeof KNOWLEDGE_SOURCE_TYPES)[number])
-    ? params.sourceType
-    : 'inferred';
+  let sourceType: KnowledgeSourceType = 'inferred';
+  if (params.sourceType !== undefined) {
+    if (typeof params.sourceType !== 'string' || !isKnowledgeSourceType(params.sourceType)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `Invalid sourceType. Valid: ${KNOWLEDGE_SOURCE_TYPES.join(', ')}`);
+    }
+    sourceType = params.sourceType;
+  }
 
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
 
@@ -114,14 +184,15 @@ export async function handleUpdateKnowledge(
   const observationId = typeof params.observationId === 'string' ? params.observationId.trim() : '';
   if (!observationId) return jsonRpcError(requestId, INVALID_PARAMS, 'observationId is required');
 
-  const newContent = typeof params.newContent === 'string'
-    ? sanitizeUserInput(params.newContent.trim()).slice(0, limits.knowledgeObservationMaxLength)
-    : '';
-  if (!newContent) return jsonRpcError(requestId, INVALID_PARAMS, 'newContent is required');
+  const newContentResult = sanitizeRequiredString(
+    requestId, params.newContent, 'newContent', limits.knowledgeObservationMaxLength,
+  );
+  if (!newContentResult.ok) return newContentResult.response;
+  const newContent = newContentResult.value;
 
-  const confidence = typeof params.confidence === 'number'
-    ? Math.min(Math.max(0, params.confidence), 1)
-    : null;
+  const confidenceResult = validateConfidence(requestId, params.confidence, 'confidence');
+  if (!confidenceResult.ok) return confidenceResult.response;
+  const confidence = confidenceResult.value;
 
   try {
     const result = await projectDataService.updateKnowledgeObservation(
@@ -213,11 +284,19 @@ export async function handleSearchKnowledge(
   const query = typeof params.query === 'string' ? params.query.trim() : '';
   if (!query) return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
 
-  const entityType = typeof params.entityType === 'string' ? params.entityType : null;
-  const minConfidence = typeof params.minConfidence === 'number' ? params.minConfidence : null;
-  const limit = typeof params.limit === 'number'
-    ? Math.min(Math.max(1, params.limit), limits.knowledgeSearchLimit)
-    : limits.knowledgeSearchLimit;
+  let entityType: KnowledgeEntityType | null = null;
+  if (params.entityType !== undefined) {
+    if (typeof params.entityType !== 'string' || !isKnowledgeEntityType(params.entityType)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
+    }
+    entityType = params.entityType;
+  }
+  const minConfidenceResult = validateConfidence(requestId, params.minConfidence, 'minConfidence');
+  if (!minConfidenceResult.ok) return minConfidenceResult.response;
+  const minConfidence = minConfidenceResult.value;
+  const limitResult = validateLimit(requestId, params.limit, limits.knowledgeSearchLimit, limits.knowledgeSearchLimit);
+  if (!limitResult.ok) return limitResult.response;
+  const limit = limitResult.value;
 
   try {
     const results = await projectDataService.searchKnowledgeObservations(
@@ -241,10 +320,16 @@ export async function handleGetProjectKnowledge(
   env: Env,
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
-  const entityType = typeof params.entityType === 'string' ? params.entityType : null;
-  const limit = typeof params.limit === 'number'
-    ? Math.min(Math.max(1, params.limit), limits.knowledgeSearchLimit * 5)
-    : limits.knowledgeSearchLimit;
+  let entityType: KnowledgeEntityType | null = null;
+  if (params.entityType !== undefined) {
+    if (typeof params.entityType !== 'string' || !isKnowledgeEntityType(params.entityType)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
+    }
+    entityType = params.entityType;
+  }
+  const limitResult = validateLimit(requestId, params.limit, limits.knowledgeSearchLimit, limits.knowledgeSearchLimit * 5);
+  if (!limitResult.ok) return limitResult.response;
+  const limit = limitResult.value;
 
   try {
     const result = await projectDataService.listKnowledgeEntities(
@@ -274,9 +359,9 @@ export async function handleGetRelevantKnowledge(
   const context = typeof params.context === 'string' ? params.context.trim() : '';
   if (!context) return jsonRpcError(requestId, INVALID_PARAMS, 'context is required');
 
-  const limit = typeof params.limit === 'number'
-    ? Math.min(Math.max(1, params.limit), limits.knowledgeAutoRetrieveLimit)
-    : limits.knowledgeAutoRetrieveLimit;
+  const limitResult = validateLimit(requestId, params.limit, limits.knowledgeAutoRetrieveLimit, limits.knowledgeAutoRetrieveLimit);
+  if (!limitResult.ok) return limitResult.response;
+  const limit = limitResult.value;
 
   try {
     const results = await projectDataService.getRelevantKnowledge(
@@ -306,7 +391,7 @@ export async function handleRelateKnowledge(
   }
 
   const relationType = typeof params.relationType === 'string' ? params.relationType : 'related_to';
-  if (!KNOWLEDGE_RELATION_TYPES.includes(relationType as (typeof KNOWLEDGE_RELATION_TYPES)[number])) {
+  if (!isKnowledgeRelationType(relationType)) {
     return jsonRpcError(requestId, INVALID_PARAMS, `Invalid relationType. Valid: ${KNOWLEDGE_RELATION_TYPES.join(', ')}`);
   }
 
@@ -347,7 +432,13 @@ export async function handleGetRelated(
   const entityName = typeof params.entityName === 'string' ? params.entityName.trim() : '';
   if (!entityName) return jsonRpcError(requestId, INVALID_PARAMS, 'entityName is required');
 
-  const relationType = typeof params.relationType === 'string' ? params.relationType : null;
+  let relationType: KnowledgeRelationType | null = null;
+  if (params.relationType !== undefined) {
+    if (typeof params.relationType !== 'string' || !isKnowledgeRelationType(params.relationType)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `Invalid relationType. Valid: ${KNOWLEDGE_RELATION_TYPES.join(', ')}`);
+    }
+    relationType = params.relationType;
+  }
 
   try {
     const entity = await projectDataService.getKnowledgeEntityByName(env, tokenData.projectId, entityName);
@@ -398,10 +489,11 @@ export async function handleFlagContradiction(
   const existingObservationId = typeof params.existingObservationId === 'string' ? params.existingObservationId.trim() : '';
   if (!existingObservationId) return jsonRpcError(requestId, INVALID_PARAMS, 'existingObservationId is required');
 
-  const newObservation = typeof params.newObservation === 'string'
-    ? sanitizeUserInput(params.newObservation.trim()).slice(0, limits.knowledgeObservationMaxLength)
-    : '';
-  if (!newObservation) return jsonRpcError(requestId, INVALID_PARAMS, 'newObservation is required');
+  const newObservationResult = sanitizeRequiredString(
+    requestId, params.newObservation, 'newObservation', limits.knowledgeObservationMaxLength,
+  );
+  if (!newObservationResult.ok) return newObservationResult.response;
+  const newObservation = newObservationResult.value;
 
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
 
