@@ -17,9 +17,11 @@ import (
 
 // Engine manages the deployment lifecycle: reconcile, apply, revert, observe.
 type Engine struct {
-	disk     *DiskState
-	verifier *Verifier
-	cfg      EngineConfig
+	disk *DiskState
+	cfg  EngineConfig
+
+	verifierMu sync.RWMutex
+	verifier   *Verifier
 
 	// Apply mutex: only one apply at a time. Use TryLock() to reject concurrent applies.
 	applyMu sync.Mutex
@@ -77,8 +79,16 @@ func (e *Engine) SetCallbackToken(token string) {
 
 // SetVerifierKey updates the signing public key via the verifier's dual-key rotation.
 func (e *Engine) SetVerifierKey(pubKeyB64 string) error {
+	e.verifierMu.Lock()
+	defer e.verifierMu.Unlock()
+
 	if e.verifier == nil {
-		return fmt.Errorf("no verifier configured")
+		verifier, err := NewVerifier(pubKeyB64)
+		if err != nil {
+			return err
+		}
+		e.verifier = verifier
+		return nil
 	}
 	return e.verifier.SetCurrentKey(pubKeyB64)
 }
@@ -133,10 +143,13 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	}
 
 	// Verify signature and binding constraints
-	if e.verifier == nil {
+	e.verifierMu.RLock()
+	verifier := e.verifier
+	e.verifierMu.RUnlock()
+	if verifier == nil {
 		return fmt.Errorf("no signature verifier configured — refusing to apply unsigned payload")
 	}
-	if err := e.verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
+	if err := verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
 		return fmt.Errorf("payload verification failed: %w", err)
 	}
 

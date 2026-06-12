@@ -59,18 +59,6 @@ func runDeploymentMode(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Handle shutdown signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	// Start HTTP server
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.Start(); err != nil {
-			errCh <- err
-		}
-	}()
-
 	// Initialize disk state
 	disk, err := deploy.NewDiskState(cfg.DeployBaseDir)
 	if err != nil {
@@ -78,15 +66,17 @@ func runDeploymentMode(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Initialize signature verifier — required for deployment mode
-	if cfg.DeploySigningPubKey == "" {
-		slog.Error("deploy: DEPLOY_SIGNING_PUB_KEY is required in deployment mode")
-		os.Exit(1)
-	}
-	verifier, err := deploy.NewVerifier(cfg.DeploySigningPubKey)
-	if err != nil {
-		slog.Error("Failed to initialize deploy signature verifier", "error", err)
-		os.Exit(1)
+	// Initialize signature verifier when a boot-time key is available.
+	// If not, heartbeat can refresh the key before the first release is applied.
+	var verifier *deploy.Verifier
+	if cfg.DeploySigningPubKey != "" {
+		verifier, err = deploy.NewVerifier(cfg.DeploySigningPubKey)
+		if err != nil {
+			slog.Error("Failed to initialize deploy signature verifier", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		slog.Warn("deploy: DEPLOY_SIGNING_PUB_KEY is not set; waiting for heartbeat key refresh")
 	}
 
 	// Create deploy engine
@@ -108,6 +98,19 @@ func runDeploymentMode(cfg *config.Config) {
 
 	// Wire deploy engine into server for heartbeat reporting
 	srv.SetDeployEngine(engine)
+
+	// Handle shutdown signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start HTTP server after the deployment engine is attached so the first
+	// heartbeat can refresh signing keys and observe pending releases.
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Start(); err != nil {
+			errCh <- err
+		}
+	}()
 
 	// Send node-ready callback
 	srv.SendNodeReady()
