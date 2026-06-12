@@ -394,6 +394,9 @@ exit 0
 	if observed.Status != StatusFailedInitial {
 		t.Fatalf("expected observed failed-initial status, got %s", observed.Status)
 	}
+	if observed.AppliedSeq != 0 {
+		t.Fatalf("failed initial release must remain retryable in heartbeat, observed applied seq %d", observed.AppliedSeq)
+	}
 }
 
 func TestEngine_GetObserved_ThreadSafe(t *testing.T) {

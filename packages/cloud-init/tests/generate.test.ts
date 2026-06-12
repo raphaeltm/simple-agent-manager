@@ -1880,7 +1880,7 @@ describe('deployment role support', () => {
     expect(runcmd).toContain('systemctl reload-or-restart caddy');
   });
 
-  it('starts vm-agent before deployment Caddy package setup', () => {
+  it('sets up deployment Caddy before starting vm-agent', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
       { validateSize: false },
@@ -1890,8 +1890,8 @@ describe('deployment role support', () => {
 
     expect(runcmd.indexOf('PHASE START: vm-agent-start')).toBeGreaterThan(-1);
     expect(runcmd.indexOf('PHASE START: caddy-setup')).toBeGreaterThan(-1);
-    expect(runcmd.indexOf('PHASE START: vm-agent-start')).toBeLessThan(
-      runcmd.indexOf('PHASE START: caddy-setup'),
+    expect(runcmd.indexOf('PHASE START: caddy-setup')).toBeLessThan(
+      runcmd.indexOf('PHASE START: vm-agent-start'),
     );
   });
 

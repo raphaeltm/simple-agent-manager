@@ -1,8 +1,8 @@
 /**
  * Cloud-init template for node provisioning.
  *
- * ULTRA-MINIMAL: Cloud-init downloads and starts the VM agent, then performs
- * role-specific bootstrap that must exist before the node can serve traffic.
+ * ULTRA-MINIMAL: Cloud-init downloads the VM agent, performs role-specific
+ * bootstrap that must exist before the node can serve traffic, then starts the agent.
  * For deployment nodes, that includes installing and enabling Caddy. The agent
  * still handles Docker, Node.js, firewall, and release apply work.
  *
@@ -25,10 +25,10 @@ users:
 
 runcmd:
   # =====================================================================
-  # Cloud-init keeps bootstrap minimal: download/start vm-agent, then perform
-  # role-specific service setup required before traffic can be served. The
-  # agent handles Docker, firewall, Node.js, release apply, and heartbeats
-  # immediately for control-plane visibility.
+  # Cloud-init keeps bootstrap minimal: download vm-agent, perform
+  # role-specific service setup required before traffic can be served, then
+  # start vm-agent. The agent handles Docker, firewall, Node.js, release apply,
+  # and heartbeats after role-specific dependencies are ready.
   # =====================================================================
 
   # Disable automatic OS upgrades — ephemeral VMs gain nothing from them
@@ -70,12 +70,6 @@ runcmd:
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
-  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
-  - systemctl daemon-reload
-  - systemctl enable vm-agent
-  - systemctl start vm-agent
-  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
-
   - 'logger -t sam-boot "PHASE START: caddy-setup"'
   - |
     set -euo pipefail
@@ -106,6 +100,12 @@ runcmd:
       logger -t sam-boot "Skipping Caddy setup for ROLE=$ROLE"
     fi
   - 'logger -t sam-boot "PHASE END: caddy-setup"'
+
+  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
+  - systemctl daemon-reload
+  - systemctl enable vm-agent
+  - systemctl start vm-agent
+  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
   - 'logger -t sam-boot "ALL PHASES COMPLETE"'
 
 write_files:

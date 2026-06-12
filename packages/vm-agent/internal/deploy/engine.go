@@ -249,7 +249,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 		_ = e.disk.UpdateState(state)
 		e.setObserved(ObservedState{
-			AppliedSeq: state.Seq,
+			AppliedSeq: 0,
 			Status:     StatusFailedInitial,
 		})
 		return fmt.Errorf("apply failed (no previous release to revert): %w", applyErr)
