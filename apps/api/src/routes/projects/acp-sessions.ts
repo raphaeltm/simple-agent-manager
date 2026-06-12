@@ -61,6 +61,9 @@ acpSessionRoutes.post('/:id/acp-sessions', jsonValidator(CreateAcpSessionSchema)
 
   const body = c.req.valid('json');
   const chatSessionId = body.chatSessionId ?? '';
+  if (body.agentProfileId) {
+    throw errors.badRequest('agentProfileId is not supported by direct ACP session creation; use task or chat submit so profile model and effort are applied');
+  }
 
   // Validate initialPrompt length (256 KB default, configurable via MAX_ACP_PROMPT_BYTES)
   const maxPromptBytes = parsePositiveInt(c.env.MAX_ACP_PROMPT_BYTES, DEFAULT_MAX_ACP_PROMPT_BYTES);

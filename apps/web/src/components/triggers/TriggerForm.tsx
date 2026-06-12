@@ -3,6 +3,7 @@
  * Follows SettingsDrawer pattern (min(560px, 95vw)).
  */
 import type {
+  AgentEffort,
   AgentProfile,
   CreateTriggerRequest,
   GitHubTriggerEventType,
@@ -11,6 +12,7 @@ import type {
   UpdateTriggerRequest,
 } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_AGENT_EFFORT,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
@@ -39,6 +41,15 @@ const VM_SIZES = [
   { value: 'medium', label: 'Medium (4 vCPU, 8 GB)' },
   { value: 'large', label: 'Large (8 vCPU, 16 GB)' },
 ];
+
+const EFFORT_LABELS: Record<AgentEffort, string> = {
+  auto: 'auto',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
 
 const GITHUB_EVENT_OPTIONS: Array<{ value: GitHubTriggerEventType; label: string }> = [
   { value: 'issue_comment', label: 'Issue comment' },
@@ -666,7 +677,9 @@ export const TriggerForm: FC<TriggerFormProps> = ({
                     <option value="">Project default</option>
                     {profiles.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name}{p.model ? ` (${p.model})` : ''}
+                        {p.name}
+                        {p.model ? ` (${p.model})` : ''}
+                        {p.effort !== DEFAULT_AGENT_EFFORT ? ` · ${EFFORT_LABELS[p.effort]}` : ''}
                       </option>
                     ))}
                   </select>

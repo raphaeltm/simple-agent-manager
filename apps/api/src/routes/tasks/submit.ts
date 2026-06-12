@@ -469,6 +469,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
           project.agentDefaults,
           body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null
         ).model,
+      effort: resolvedProfile?.effort ?? null,
       permissionMode:
         resolvedProfile?.permissionMode ??
         resolveProjectAgentDefault(

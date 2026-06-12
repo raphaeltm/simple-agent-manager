@@ -52,6 +52,7 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
   description: 'Sonnet for quick implementation',
   agentType: 'claude-code',
   model: 'claude-sonnet-4-5-20250929',
+  effort: 'auto',
   permissionMode: 'acceptEdits',
   systemPromptAppend: null,
   maxTurns: null,
@@ -69,7 +70,7 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
 
 const PROFILES: AgentProfile[] = [
   makeProfile({ id: 'prof-1', name: 'Fast Implementer', model: 'claude-sonnet-4-5-20250929', isBuiltin: false }),
-  makeProfile({ id: 'prof-2', name: 'Deep Planner', model: 'claude-opus-4-6', isBuiltin: false }),
+  makeProfile({ id: 'prof-2', name: 'Deep Planner', model: 'claude-opus-4-6', effort: 'xhigh', isBuiltin: false }),
   makeProfile({ id: 'prof-builtin', name: 'default', model: 'claude-sonnet-4-5-20250929', isBuiltin: true }),
 ];
 
@@ -106,6 +107,16 @@ describe('ProfileSelector', () => {
     const select = screen.getByLabelText('Agent profile');
     const options = within(select).getAllByRole('option');
     expect(options[1]?.textContent).toContain('claude-sonnet');
+  });
+
+  it('shows non-default effort in option text', () => {
+    render(
+      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
+    );
+    const select = screen.getByLabelText('Agent profile');
+    const options = within(select).getAllByRole('option');
+    expect(options[2]?.textContent).toContain('xhigh');
+    expect(options[1]?.textContent).not.toContain('xhigh');
   });
 
   it('shows "(built-in)" suffix for built-in profiles', () => {
@@ -401,6 +412,7 @@ describe('ProfileFormDialog', () => {
         expect.objectContaining({
           name: 'Test Profile',
           description: 'A test',
+          effort: 'auto',
           maxTurns: null,
           timeoutMinutes: null,
           vmSizeOverride: null,
@@ -410,7 +422,7 @@ describe('ProfileFormDialog', () => {
   });
 
   it('pre-populates fields in edit mode', () => {
-    const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', maxTurns: 5 });
+    const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', effort: 'xhigh', maxTurns: 5 });
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
@@ -418,7 +430,19 @@ describe('ProfileFormDialog', () => {
     expect(screen.getByDisplayValue('desc')).toBeInTheDocument();
     // ModelSelect shows display format when not focused: "Name (id)"
     expect(screen.getByDisplayValue('Claude Opus 4.6 (claude-opus-4-6)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Effort')).toHaveValue('xhigh');
     expect(screen.getByDisplayValue('5')).toBeInTheDocument();
+  });
+
+  it('does not offer max effort for OpenAI Codex profiles', () => {
+    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5', effort: 'high' });
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
+    );
+
+    const effortSelect = screen.getByLabelText('Effort');
+    expect(within(effortSelect).queryByRole('option', { name: 'Max' })).not.toBeInTheDocument();
+    expect(effortSelect).toHaveValue('high');
   });
 
   it('offers GPT-5.5 Pro for OpenAI Codex profiles', async () => {

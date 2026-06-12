@@ -20,6 +20,10 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
     type: 'string',
     description: 'Model identifier override. Omit to use the resolved default.',
   },
+  effort: {
+    type: 'string',
+    description: 'Reasoning effort: auto, low, medium, high, xhigh, max. Unsupported values are rejected for the selected agent type.',
+  },
   permissionMode: {
     type: 'string',
     description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
@@ -65,6 +69,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
 /** Shared valid-values hint appended to create and update tool descriptions. */
 export const VALID_VALUES_HINT =
   'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
+  'Valid effort values: auto, low, medium, high, xhigh, max. ' +
   'Valid vmSize values: small, medium, large. ' +
   'Valid taskMode values: task, conversation. ' +
   'Valid workspaceProfile values: full, lightweight.';

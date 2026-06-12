@@ -147,7 +147,7 @@ func (h *SessionHost) loadAgentSettings(ctx context.Context, agentType string) *
 		return h.applyProfileOverrides(nil)
 	}
 	slog.Info("Agent settings loaded",
-		"model", settings.Model, "permissionMode", settings.PermissionMode,
+		"model", settings.Model, "permissionMode", settings.PermissionMode, "effort", settings.Effort,
 		"opencodeProvider", settings.OpencodeProvider, "opencodeBaseURL", settings.OpencodeBaseURL,
 		"agentType", agentType, "workspaceId", h.config.WorkspaceID)
 	return h.applyProfileOverrides(settings)
@@ -155,7 +155,7 @@ func (h *SessionHost) loadAgentSettings(ctx context.Context, agentType string) *
 
 func (h *SessionHost) applyProfileOverrides(settings *agentSettingsPayload) *agentSettingsPayload {
 	if h.config.ModelOverride == "" && h.config.PermissionModeOverride == "" &&
-		h.config.OpencodeProviderOverride == "" && h.config.OpencodeBaseURLOverride == "" {
+		h.config.EffortOverride == "" && h.config.OpencodeProviderOverride == "" && h.config.OpencodeBaseURLOverride == "" {
 		return settings
 	}
 	if settings == nil {
@@ -168,6 +168,10 @@ func (h *SessionHost) applyProfileOverrides(settings *agentSettingsPayload) *age
 	if h.config.PermissionModeOverride != "" {
 		settings.PermissionMode = h.config.PermissionModeOverride
 		slog.Info("Agent permission mode overridden by profile", "permissionMode", h.config.PermissionModeOverride)
+	}
+	if h.config.EffortOverride != "" {
+		settings.Effort = h.config.EffortOverride
+		slog.Info("Agent effort overridden by profile", "effort", h.config.EffortOverride)
 	}
 	if h.config.OpencodeProviderOverride != "" {
 		settings.OpencodeProvider = h.config.OpencodeProviderOverride

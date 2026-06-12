@@ -1,4 +1,5 @@
 import type {
+  AgentEffort,
   AgentProfile,
   CreateAgentProfileRequest,
   GitHubCliPermissionLevel,
@@ -10,7 +11,10 @@ import type {
 import {
   AGENT_CATALOG,
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_AGENT_EFFORT,
   DEFAULT_GITHUB_CLI_POLICY,
+  getSupportedEffortsForAgent,
+  isAgentEffortSupported,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
@@ -45,6 +49,15 @@ const PERMISSION_MODES = [
     label: AGENT_PERMISSION_MODE_LABELS[mode] ?? mode,
   })),
 ];
+
+const EFFORT_LABELS: Record<AgentEffort, string> = {
+  auto: 'Auto',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+};
 
 const VM_SIZES = [
   { value: '', label: 'Default' },
@@ -162,6 +175,7 @@ function SelectField({ label, value, onChange, options, disabled }: SelectFieldP
 function agentSettingsSummary(
   agentType: string,
   model: string,
+  effort: AgentEffort,
   permissionMode: string,
   timeoutMinutes: string,
 ): string {
@@ -171,6 +185,9 @@ function agentSettingsSummary(
   if (model) {
     const short = model.length > 24 ? model.slice(0, 22) + '...' : model;
     parts.push(short);
+  }
+  if (effort !== DEFAULT_AGENT_EFFORT) {
+    parts.push(`Effort: ${EFFORT_LABELS[effort]}`);
   }
   if (permissionMode) {
     parts.push(
@@ -229,6 +246,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [description, setDescription] = useState('');
   const [agentType, setAgentType] = useState<string>(DEFAULT_AGENT_TYPE);
   const [model, setModel] = useState('');
+  const [effort, setEffort] = useState<AgentEffort>(DEFAULT_AGENT_EFFORT);
   const [permissionMode, setPermissionMode] = useState('');
   const [systemPromptAppend, setSystemPromptAppend] = useState('');
   const [maxTurns, setMaxTurns] = useState('');
@@ -252,6 +270,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setDescription(profile.description ?? '');
       setAgentType(profile.agentType);
       setModel(profile.model ?? '');
+      setEffort(profile.effort ?? DEFAULT_AGENT_EFFORT);
       setPermissionMode(profile.permissionMode ?? '');
       setSystemPromptAppend(profile.systemPromptAppend ?? '');
       setMaxTurns(profile.maxTurns != null ? String(profile.maxTurns) : '');
@@ -266,6 +285,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setDescription('');
       setAgentType(DEFAULT_AGENT_TYPE);
       setModel('');
+      setEffort(DEFAULT_AGENT_EFFORT);
       setPermissionMode('');
       setSystemPromptAppend('');
       setMaxTurns('');
@@ -308,6 +328,10 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const effectiveLocation =
     profile?.vmLocation ?? projectLocation ?? activeCatalog?.defaultLocation ?? null;
   const providerContext = formatProviderCatalogContext(activeCatalog, effectiveLocation);
+  const effortOptions = getSupportedEffortsForAgent(agentType).map((value) => ({
+    value,
+    label: EFFORT_LABELS[value],
+  }));
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
@@ -324,6 +348,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         description: description.trim() || null,
         agentType: agentType || DEFAULT_AGENT_TYPE,
         model: model.trim() || null,
+        effort,
         permissionMode: permissionMode || null,
         systemPromptAppend: systemPromptAppend.trim() || null,
         maxTurns: maxTurns ? parseInt(maxTurns, 10) : null,
@@ -408,13 +433,19 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         <Section
           title="Agent Settings"
           defaultOpen
-          summary={agentSettingsSummary(agentType, model, permissionMode, timeoutMinutes)}
+          summary={agentSettingsSummary(agentType, model, effort, permissionMode, timeoutMinutes)}
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <SelectField
               label="Agent Type"
               value={agentType}
-              onChange={(v) => { setAgentType(v); setModel(''); }}
+              onChange={(v) => {
+                setAgentType(v);
+                setModel('');
+                setEffort((current) =>
+                  isAgentEffortSupported(v, current) ? current : DEFAULT_AGENT_EFFORT,
+                );
+              }}
               options={AGENT_CATALOG.map((a) => ({ value: a.id, label: a.name }))}
               disabled={saving}
             />
@@ -432,6 +463,14 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                 placeholder="Select or type a model..."
               />
             </div>
+
+            <SelectField
+              label="Effort"
+              value={effort}
+              onChange={(v) => setEffort(v as AgentEffort)}
+              options={effortOptions}
+              disabled={saving}
+            />
 
             <SelectField
               label="Permission Mode"

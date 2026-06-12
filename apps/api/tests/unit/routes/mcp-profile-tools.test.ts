@@ -71,6 +71,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     description: 'A test profile',
     agentType: 'claude-code',
     model: 'claude-sonnet-4-5-20250929',
+    effort: 'auto',
     permissionMode: 'acceptEdits',
     systemPromptAppend: null,
     maxTurns: null,
@@ -122,6 +123,7 @@ describe('MCP Profile Tools', () => {
         description: 'A test profile',
         agentType: 'claude-code',
         model: 'claude-sonnet-4-5-20250929',
+        effort: 'auto',
         isBuiltin: true,
       });
       // Should NOT include full details like systemPromptAppend, maxTurns, etc.

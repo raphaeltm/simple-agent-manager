@@ -211,6 +211,9 @@ type GatewayConfig struct {
 	// PermissionModeOverride, if non-empty, overrides the permission mode fetched from
 	// user agent settings. Set by the control plane when an agent profile specifies a permission mode.
 	PermissionModeOverride string
+	// EffortOverride, if non-empty, overrides the reasoning effort fetched from user agent settings.
+	// Values are provider-neutral: "auto", "low", "medium", "high", "xhigh", "max".
+	EffortOverride string
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
 	// Values: "platform", "scaleway", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
 	OpencodeProviderOverride string
@@ -467,6 +470,7 @@ func byteReader(data []byte) io.ReadCloser {
 type agentSettingsPayload struct {
 	Model            string `json:"model"`
 	PermissionMode   string `json:"permissionMode"`
+	Effort           string `json:"effort"`
 	OpencodeProvider string `json:"opencodeProvider"`
 	OpencodeBaseURL  string `json:"opencodeBaseUrl"`
 }
@@ -1075,13 +1079,34 @@ func generateCodexProxyProviderConfig(config *codexProxyProviderConfig) string {
 	return b.String()
 }
 
+func normalizeAgentEffort(effort string) string {
+	trimmed := strings.TrimSpace(effort)
+	switch trimmed {
+	case "low", "medium", "high", "xhigh", "max":
+		return trimmed
+	default:
+		return ""
+	}
+}
+
+func normalizeCodexEffort(effort string) string {
+	trimmed := strings.TrimSpace(effort)
+	switch trimmed {
+	case "low", "medium", "high", "xhigh":
+		return trimmed
+	default:
+		return ""
+	}
+}
+
 // generateCodexMcpConfig produces a managed TOML block for Codex MCP server
 // configuration plus the environment variables referenced by
 // bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
 // via ~/.codex/config.toml.
-func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig) (string, []string) {
+func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) (string, []string) {
 	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
-	if len(mcpServers) == 0 && providerConfig == "" {
+	codexEffort := normalizeCodexEffort(effort)
+	if len(mcpServers) == 0 && providerConfig == "" && codexEffort == "" {
 		return "", nil
 	}
 
@@ -1094,7 +1119,7 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 		}
 		validServers = append(validServers, server)
 	}
-	if len(validServers) == 0 && providerConfig == "" {
+	if len(validServers) == 0 && providerConfig == "" && codexEffort == "" {
 		return "", nil
 	}
 
@@ -1105,6 +1130,9 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 	config.WriteString("\n# Added by SAM vm-agent for Codex ACP sessions.\n")
 	config.WriteString("sandbox_mode = \"danger-full-access\"\n")
 	config.WriteString("approval_policy = \"never\"\n")
+	if codexEffort != "" {
+		config.WriteString(fmt.Sprintf("model_reasoning_effort = \"%s\"\n", codexEffort))
+	}
 	config.WriteString(providerConfig)
 
 	for i, server := range validServers {
@@ -1570,8 +1598,8 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 // writeCodexConfigToContainer updates ~/.codex/config.toml with a SAM-managed
 // MCP block. Existing non-SAM config is preserved, and prior SAM-managed blocks
 // are replaced so resumed or restarted sessions do not accumulate stale tokens.
-func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig) ([]string, error) {
-	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider)
+func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) ([]string, error) {
+	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider, effort)
 	existingConfig, err := readOptionalFileFromContainer(ctx, containerID, user, ".codex/config.toml")
 	if err != nil {
 		return nil, err

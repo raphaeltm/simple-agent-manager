@@ -172,6 +172,34 @@ export interface SaveAgentSettingsRequest {
 }
 
 // =============================================================================
+// Agent Effort
+// =============================================================================
+
+export const AGENT_EFFORT_LEVELS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type AgentEffort = (typeof AGENT_EFFORT_LEVELS)[number];
+
+export const DEFAULT_AGENT_EFFORT: AgentEffort = 'auto';
+
+export function isAgentEffort(value: unknown): value is AgentEffort {
+  return typeof value === 'string' && (AGENT_EFFORT_LEVELS as readonly string[]).includes(value);
+}
+
+export function getSupportedEffortsForAgent(agentType: string): readonly AgentEffort[] {
+  switch (agentType) {
+    case 'claude-code':
+      return AGENT_EFFORT_LEVELS;
+    case 'openai-codex':
+      return ['auto', 'low', 'medium', 'high', 'xhigh'];
+    default:
+      return ['auto'];
+  }
+}
+
+export function isAgentEffortSupported(agentType: string, effort: AgentEffort): boolean {
+  return getSupportedEffortsForAgent(agentType).includes(effort);
+}
+
+// =============================================================================
 // Agent Profiles (per-project role definitions)
 // =============================================================================
 
@@ -184,6 +212,7 @@ export interface AgentProfile {
   description: string | null;
   agentType: string;
   model: string | null;
+  effort: AgentEffort;
   permissionMode: string | null;
   systemPromptAppend: string | null;
   maxTurns: number | null;
@@ -208,6 +237,7 @@ export interface CreateAgentProfileRequest {
   description?: string | null;
   agentType?: string;
   model?: string | null;
+  effort?: AgentEffort | null;
   permissionMode?: string | null;
   systemPromptAppend?: string | null;
   maxTurns?: number | null;
@@ -229,6 +259,7 @@ export interface UpdateAgentProfileRequest {
   description?: string | null;
   agentType?: string;
   model?: string | null;
+  effort?: AgentEffort | null;
   permissionMode?: string | null;
   systemPromptAppend?: string | null;
   maxTurns?: number | null;
@@ -250,6 +281,7 @@ export interface ResolvedAgentProfile {
   profileName: string | null;
   agentType: string;
   model: string | null;
+  effort: AgentEffort;
   permissionMode: string | null;
   systemPromptAppend: string | null;
   maxTurns: number | null;
@@ -269,7 +301,9 @@ export interface ResolvedAgentProfile {
 // Skills (per-project repeatable-work definitions)
 // =============================================================================
 
-export interface AgentSkill extends AgentProfile {
+export interface AgentSkill extends Omit<AgentProfile, 'effort'> {
+  /** null = inherit from the selected/default profile. */
+  effort: AgentEffort | null;
   resourceRequirementsJson: string | null;
   defaultProfileId: string | null;
 }

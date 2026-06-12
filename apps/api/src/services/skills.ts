@@ -1,10 +1,11 @@
 import type {
+  AgentEffort,
   AgentSkill,
   CreateSkillRequest,
   ResolvedSkillProfile,
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
-import { isValidAgentType } from '@simple-agent-manager/shared';
+import { isAgentEffort, isAgentEffortSupported, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -26,6 +27,7 @@ type SkillEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 function toSkill(row: schema.SkillRow): AgentSkill {
   return {
     ...toBaseProfileFields(row),
+    effort: isAgentEffort(row.effort) ? row.effort : null,
     githubCliPolicy: null,
     resourceRequirementsJson: row.resourceRequirementsJson,
     defaultProfileId: row.defaultProfileId,
@@ -138,6 +140,10 @@ export async function createSkill(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  const createAgentType = body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode';
+  if (body.effort && !isAgentEffortSupported(createAgentType, body.effort)) {
+    throw errors.badRequest(`Effort '${body.effort}' is not supported for agent type '${createAgentType}'`);
+  }
 
   const existing = await db
     .select({ id: schema.skills.id })
@@ -153,6 +159,7 @@ export async function createSkill(
     userId,
     name,
     ...baseProfileInsertValues(body, env),
+    effort: body.effort ?? null,
     taskMode: body.taskMode ?? 'task',
     resourceRequirementsJson: validateResourceRequirementsJson(body.resourceRequirementsJson),
     defaultProfileId: await requireProjectProfile(db, projectId, body.defaultProfileId, userId),
@@ -174,6 +181,10 @@ export async function updateSkill(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  const updateAgentType = body.agentType ?? skill.agentType;
+  if (body.effort && !isAgentEffortSupported(updateAgentType, body.effort)) {
+    throw errors.badRequest(`Effort '${body.effort}' is not supported for agent type '${updateAgentType}'`);
+  }
 
   if (body.name !== undefined) {
     const name = body.name.trim();
@@ -190,6 +201,9 @@ export async function updateSkill(
 
   const updates: Partial<schema.NewSkillRow> = { updatedAt: new Date().toISOString() };
   applyBaseProfileUpdates(updates, body);
+  if (body.effort !== undefined) {
+    updates.effort = body.effort as AgentEffort | null;
+  }
   if (body.resourceRequirementsJson !== undefined) {
     updates.resourceRequirementsJson = validateResourceRequirementsJson(body.resourceRequirementsJson);
   }
@@ -264,6 +278,7 @@ export async function resolveSkillProfile(
     skillHint: skillNameOrId ?? null,
     agentType: skill?.agentType ?? profile.agentType,
     model: skill?.model ?? profile.model,
+    effort: isAgentEffort(skill?.effort) ? skill.effort : profile.effort,
     permissionMode: skill?.permissionMode ?? profile.permissionMode,
     systemPromptAppend: promptAppend,
     maxTurns: skill?.maxTurns ?? profile.maxTurns,

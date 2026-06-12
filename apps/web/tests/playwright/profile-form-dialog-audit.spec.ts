@@ -69,6 +69,7 @@ const FULL_PROFILE = {
   userId: 'user-test-1',
   agentType: 'claude-code',
   model: 'claude-sonnet-4-6',
+  effort: 'xhigh',
   permissionMode: 'auto-accept',
   systemPromptAppend:
     'Always write tests before implementation. Follow TDD principles. Use the project conventions in CLAUDE.md.',
@@ -123,6 +124,8 @@ async function setupApiMocks(page: Page) {
       });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/client-errors') return respond(204, null);
+    if (path === '/api/t') return respond(204, null);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/github/installations') return respond(200, []);
     if (path.startsWith('/api/notifications'))
@@ -140,14 +143,25 @@ async function setupApiMocks(page: Page) {
       if (subPath.match(/\/agent-profiles\/[^/]+\/runtime\/files$/))
         return respond(200, { files: [] });
       if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
+      if (subPath === '/repository-access') return respond(200, { repositories: [] });
+      if (subPath === '/devcontainer-configs')
+        return respond(200, {
+          repository: MOCK_PROJECT.repository,
+          branch: MOCK_PROJECT.defaultBranch,
+          defaultConfigExists: false,
+          configs: [],
+        });
+      if (subPath.startsWith('/cached-commands')) return respond(200, { commands: [] });
+      if (subPath.startsWith('/activity')) return respond(200, { events: [], nextCursor: null });
       if (subPath.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
       if (subPath.startsWith('/tasks')) return respond(200, { tasks: [], total: 0 });
       if (subPath === '/agent-profiles') return respond(200, { items: PROFILES });
+      if (subPath === '/skills') return respond(200, { items: [] });
       if (subPath.startsWith('/triggers')) return respond(200, { triggers: [] });
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, [MOCK_PROJECT]);
+    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     return respond(200, {});
   });
 }

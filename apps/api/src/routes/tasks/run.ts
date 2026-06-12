@@ -274,6 +274,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       // persisted profile hint must still reach TaskRunner so workspace
       // GitHub-token minting can enforce profile SAM platform policy.
       model: null,
+      effort: null,
       permissionMode: null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,

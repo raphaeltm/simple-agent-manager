@@ -982,6 +982,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		McpServers       []acp.McpServerEntry `json:"mcpServers,omitempty"`
 		Model            string               `json:"model,omitempty"`
 		PermissionMode   string               `json:"permissionMode,omitempty"`
+		Effort           string               `json:"effort,omitempty"`
 		OpencodeProvider string               `json:"opencodeProvider,omitempty"`
 		OpencodeBaseURL  string               `json:"opencodeBaseUrl,omitempty"`
 		ProjectID        string               `json:"projectId,omitempty"`
@@ -1034,6 +1035,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	s.sessionProfileOvr[hostKey] = profileOverrides{
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
+		Effort:           body.Effort,
 		OpencodeProvider: body.OpencodeProvider,
 		OpencodeBaseURL:  body.OpencodeBaseURL,
 	}
@@ -1057,10 +1059,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		delete(s.sessionTaskCtx, hostKey)
 	}
 	s.sessionHostMu.Unlock()
-	if body.Model != "" || body.PermissionMode != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
+	if body.Model != "" || body.PermissionMode != "" || body.Effort != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
-			"model", body.Model, "permissionMode", body.PermissionMode,
+			"model", body.Model, "permissionMode", body.PermissionMode, "effort", body.Effort,
 			"opencodeProvider", body.OpencodeProvider,
 			"opencodeBaseUrl", body.OpencodeBaseURL)
 	}

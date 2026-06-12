@@ -403,6 +403,7 @@ export async function handleRetrySubtask(
       devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: resolvedProvider,
       model: null,
+      effort: null,
       permissionMode: null,
       agentProfileHint: childTask.agentProfileHint ?? null,
       projectScaling: {

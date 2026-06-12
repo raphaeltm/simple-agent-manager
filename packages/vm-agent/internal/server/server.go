@@ -35,11 +35,12 @@ import (
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
-// profileOverrides holds model/permissionMode/opencode provider overrides from agent profiles.
+// profileOverrides holds model/permissionMode/effort/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
 	Model            string
 	PermissionMode   string
+	Effort           string
 	OpencodeProvider string
 	OpencodeBaseURL  string
 }
@@ -75,7 +76,7 @@ type Server struct {
 	sessionHostMu       sync.Mutex
 	sessionHosts        map[string]*acp.SessionHost
 	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
-	sessionProfileOvr   map[string]profileOverrides     // hostKey → model/permissionMode overrides from agent profiles
+	sessionProfileOvr   map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
 	sessionTaskCtx      map[string]taskCallbackContext  // hostKey → task callback ownership context
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter

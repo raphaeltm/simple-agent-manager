@@ -54,6 +54,7 @@ function makeSkill(overrides: Partial<AgentSkill> = {}): AgentSkill {
     description: 'A test skill',
     agentType: 'claude-code',
     model: 'claude-sonnet-4-5-20250929',
+    effort: null,
     permissionMode: 'acceptEdits',
     systemPromptAppend: null,
     maxTurns: null,
@@ -102,6 +103,7 @@ describe('MCP Skill Tools', () => {
         description: 'A test skill',
         agentType: 'claude-code',
         model: 'claude-sonnet-4-5-20250929',
+        effort: null,
         isBuiltin: true,
       });
       // Should NOT include full details like systemPromptAppend, resourceRequirementsJson, etc.

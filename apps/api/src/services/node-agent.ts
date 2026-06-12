@@ -302,6 +302,7 @@ export interface McpServerConfig {
 /** Optional overrides for agent model and permission mode, resolved from agent profiles. */
 export interface AgentSessionOverrides {
   model?: string | null;
+  effort?: string | null;
   permissionMode?: string | null;
   /** OpenCode inference provider (e.g. 'scaleway', 'anthropic', 'custom'). */
   opencodeProvider?: string | null;
@@ -338,6 +339,9 @@ export async function startAgentSessionOnNode(
   }
   if (overrides?.model != null) {
     body.model = overrides.model;
+  }
+  if (overrides?.effort != null) {
+    body.effort = overrides.effort;
   }
   if (overrides?.permissionMode != null) {
     body.permissionMode = overrides.permissionMode;

@@ -54,6 +54,7 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
     description: 'General-purpose coding agent',
     agentType: 'claude-code',
     model: 'claude-sonnet-4-5-20250929',
+    effort: 'auto',
     permissionMode: 'acceptEdits',
     systemPromptAppend: null,
     maxTurns: null,

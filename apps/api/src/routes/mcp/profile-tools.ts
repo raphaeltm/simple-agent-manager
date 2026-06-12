@@ -4,6 +4,7 @@
  * Wires MCP handlers to existing service functions in services/agent-profiles.ts.
  */
 import type { CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
+import { isAgentEffort } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -35,6 +36,7 @@ export function extractProfileFields(params: Record<string, unknown>): Omit<Upda
   if (typeof params.description === 'string') fields.description = params.description;
   if (typeof params.agentType === 'string') fields.agentType = params.agentType;
   if (typeof params.model === 'string') fields.model = params.model;
+  if (isAgentEffort(params.effort)) fields.effort = params.effort;
   if (typeof params.permissionMode === 'string') fields.permissionMode = params.permissionMode;
   if (typeof params.systemPromptAppend === 'string') fields.systemPromptAppend = params.systemPromptAppend;
   if (typeof params.maxTurns === 'number') fields.maxTurns = params.maxTurns;
@@ -68,6 +70,7 @@ export async function handleListAgentProfiles(
             description: p.description,
             agentType: p.agentType,
             model: p.model,
+            effort: p.effort,
             isBuiltin: p.isBuiltin,
           })),
           count: profiles.length,
@@ -107,6 +110,7 @@ export async function handleGetAgentProfile(
           description: profile.description,
           agentType: profile.agentType,
           model: profile.model,
+          effort: profile.effort,
           permissionMode: profile.permissionMode,
           systemPromptAppend: profile.systemPromptAppend,
           maxTurns: profile.maxTurns,
@@ -166,6 +170,7 @@ export async function handleCreateAgentProfile(
           description: profile.description,
           agentType: profile.agentType,
           model: profile.model,
+          effort: profile.effort,
           isBuiltin: profile.isBuiltin,
           message: 'Agent profile created successfully.',
         }, null, 2),

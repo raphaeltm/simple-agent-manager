@@ -1,8 +1,10 @@
 import type {
+  AgentEffort,
   AgentProfile,
   CreateAgentProfileRequest,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_AGENT_EFFORT } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import { type FC, useCallback, useMemo, useState } from 'react';
@@ -44,6 +46,15 @@ function formatGitHubCliPolicySummary(profile: AgentProfile): string | null {
 
   return 'GitHub CLI: repository scoped';
 }
+
+const EFFORT_LABELS: Record<AgentEffort, string> = {
+  auto: 'auto',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
 
 export const ProfileList: FC<ProfileListProps> = ({
   profiles,
@@ -180,6 +191,9 @@ export const ProfileList: FC<ProfileListProps> = ({
                   <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-xs text-fg-muted">
                     <span>{profile.agentType}</span>
                     {profile.model && <span>{profile.model}</span>}
+                    {profile.effort !== DEFAULT_AGENT_EFFORT && (
+                      <span>Effort: {EFFORT_LABELS[profile.effort]}</span>
+                    )}
                     {profile.permissionMode && <span>{profile.permissionMode}</span>}
                     {profile.vmSizeOverride && <span>VM: {profile.vmSizeOverride}</span>}
                     {profile.taskMode && <span>Mode: {profile.taskMode}</span>}
