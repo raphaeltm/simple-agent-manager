@@ -311,10 +311,11 @@ export interface ActivityEventsListResponse {
 
 export async function listActivityEvents(
   projectId: string,
-  params?: { eventType?: string; before?: number; limit?: number }
+  params?: { eventType?: string; sessionId?: string; before?: number; limit?: number }
 ): Promise<ActivityEventsListResponse> {
   const searchParams = new URLSearchParams();
   if (params?.eventType) searchParams.set('eventType', params.eventType);
+  if (params?.sessionId) searchParams.set('sessionId', params.sessionId);
   if (params?.before) searchParams.set('before', String(params.before));
   if (params?.limit) searchParams.set('limit', String(params.limit));
 

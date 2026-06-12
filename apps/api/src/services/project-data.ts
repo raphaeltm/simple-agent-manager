@@ -410,10 +410,12 @@ export async function listActivityEvents(
   projectId: string,
   eventType: string | null = null,
   limit: number = 50,
-  before: number | null = null
+  before: number | null = null,
+  sessionId: string | null = null
 ): Promise<{ events: Record<string, unknown>[]; hasMore: boolean }> {
-  const stub = await getStub(env, projectId);
-  return stub.listActivityEvents(eventType, limit, before);
+  return callProjectDataWithRetry(env, projectId, 'listActivityEvents', (stub) =>
+    stub.listActivityEvents(eventType, limit, before, sessionId)
+  );
 }
 
 // =========================================================================

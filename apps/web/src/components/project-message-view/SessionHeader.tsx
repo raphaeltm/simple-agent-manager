@@ -196,6 +196,7 @@ export function SessionHeader({
   onSessionMutated,
   onOpenFiles,
   onOpenGit,
+  onOpenTimeline,
   onRetry,
   onFork,
   lineageText,
@@ -215,6 +216,7 @@ export function SessionHeader({
   onSessionMutated?: () => void;
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
+  onOpenTimeline?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
@@ -597,6 +599,13 @@ export function SessionHeader({
                   </Button>
                 </a>
               </>
+            )}
+
+            {onOpenTimeline && (
+              <Button variant="ghost" size="sm" onClick={onOpenTimeline}>
+                <Clock size={14} className="mr-1" />
+                Timeline
+              </Button>
             )}
 
             {canMarkComplete && (

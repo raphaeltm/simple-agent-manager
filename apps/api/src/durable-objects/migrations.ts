@@ -621,6 +621,14 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '022-activity-session-index',
+    run: (sql) => {
+      sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_activity_events_session ON activity_events(session_id, created_at DESC) WHERE session_id IS NOT NULL`
+      );
+    },
+  },
 ];
 
 /**

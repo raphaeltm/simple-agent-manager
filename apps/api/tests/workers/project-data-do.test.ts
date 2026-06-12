@@ -909,6 +909,29 @@ describe('ProjectData Durable Object', () => {
       expect(events.length).toBeGreaterThanOrEqual(1);
     });
 
+    it('filters activity events by sessionId', async () => {
+      const stub = getStub('project-activity-session');
+
+      await stub.recordActivityEvent('task.started', 'system', null, null, 'sess-A', null, null);
+      await stub.recordActivityEvent('task.completed', 'system', null, null, 'sess-A', null, null);
+      await stub.recordActivityEvent('task.started', 'system', null, null, 'sess-B', null, null);
+      await stub.recordActivityEvent('workspace.created', 'user', null, null, null, null, null);
+
+      const { events: sessA } = await stub.listActivityEvents(null, 50, null, 'sess-A');
+      expect(sessA).toHaveLength(2);
+      for (const e of sessA) {
+        expect(e.sessionId).toBe('sess-A');
+      }
+
+      const { events: sessB } = await stub.listActivityEvents(null, 50, null, 'sess-B');
+      expect(sessB).toHaveLength(1);
+      expect(sessB[0]!.sessionId).toBe('sess-B');
+
+      // Without sessionId filter, returns all events
+      const { events: all } = await stub.listActivityEvents(null, 50);
+      expect(all).toHaveLength(4);
+    });
+
     it('paginates activity events with before cursor', async () => {
       const stub = getStub('project-activity-page');
 
