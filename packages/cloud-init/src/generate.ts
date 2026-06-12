@@ -155,6 +155,11 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push(`environmentId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.environmentId)})`);
     }
   }
+  if (variables.deploySigningPubKey !== undefined && variables.deploySigningPubKey !== '') {
+    if (!SAFE_TOKEN_RE.test(variables.deploySigningPubKey)) {
+      errors.push(`deploySigningPubKey: must contain only safe token characters (got ${JSON.stringify(variables.deploySigningPubKey)})`);
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
@@ -210,6 +215,8 @@ export interface CloudInitVariables {
   role?: string;
   /** Deployment environment ID (required when role='deployment'). */
   environmentId?: string;
+  /** Base64-encoded Ed25519 deploy signing public key for release verification. */
+  deploySigningPubKey?: string;
 }
 
 /**
@@ -258,6 +265,7 @@ export function generateCloudInit(
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
     '{{ role }}': variables.role ?? '',
     '{{ environment_id }}': variables.environmentId ?? '',
+    '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

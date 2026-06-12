@@ -198,6 +198,7 @@ export async function provisionNode(
       swapSwappiness: env.SWAP_SWAPPINESS,
       role: isDeploymentNode ? 'deployment' : undefined,
       environmentId: deploymentContext?.environmentId,
+      deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
