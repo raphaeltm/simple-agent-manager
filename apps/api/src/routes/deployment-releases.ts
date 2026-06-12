@@ -6,7 +6,7 @@
  */
 
 import { validateManifest } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -16,7 +16,8 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
-import { renderCompose } from '../services/compose-renderer';
+import { collectSecretNames, renderCompose } from '../services/compose-renderer';
+import { decrypt } from '../services/encryption';
 
 // =============================================================================
 // Helpers
@@ -39,18 +40,6 @@ export function validateSlice2Constraints(manifest: {
       error: 'MULTI_SERVICE_NOT_SUPPORTED',
       message: `Multi-service manifests are not yet supported. This manifest defines ${serviceCount} services, but only ${MAX_SERVICES_SLICE_2} is allowed. Multi-service support arrives in a future update.`,
     };
-  }
-
-  // Reject secret references
-  for (const [svcName, svc] of Object.entries(manifest.services)) {
-    for (const [envKey, envVal] of Object.entries(svc.env)) {
-      if (typeof envVal === 'object' && envVal !== null && 'secret' in envVal) {
-        return {
-          error: 'SECRETS_NOT_SUPPORTED',
-          message: `Secret references are not yet supported. Service "${svcName}" env var "${envKey}" references secret "${(envVal as { secret: string }).secret}". Use a literal string value instead, or wait for secret management in a future update.`,
-        };
-      }
-    }
   }
 
   return null;
@@ -106,6 +95,42 @@ async function requireOwnedRelease(
   return rows[0]!;
 }
 
+function getEncryptionKey(env: Env): string {
+  return env.CREDENTIAL_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
+}
+
+/**
+ * Load and decrypt secrets for an environment.
+ * Returns a map of secret name → decrypted value.
+ */
+async function loadResolvedSecrets(
+  db: ReturnType<typeof drizzle>,
+  envId: string,
+  secretNames: string[],
+  encryptionKey: string,
+): Promise<Record<string, string>> {
+  if (secretNames.length === 0) return {};
+
+  const rows = await db
+    .select({
+      name: schema.deploymentSecrets.name,
+      encryptedValue: schema.deploymentSecrets.encryptedValue,
+      iv: schema.deploymentSecrets.iv,
+    })
+    .from(schema.deploymentSecrets)
+    .where(
+      and(
+        eq(schema.deploymentSecrets.environmentId, envId),
+        inArray(schema.deploymentSecrets.name, secretNames),
+      ),
+    );
+
+  const entries = await Promise.all(
+    rows.map(async (row) => [row.name, await decrypt(row.encryptedValue, row.iv, encryptionKey)] as const),
+  );
+  return Object.fromEntries(entries);
+}
+
 // =============================================================================
 // Routes
 // =============================================================================
@@ -119,7 +144,7 @@ const deploymentReleaseRoutes = new Hono<{ Bindings: Env }>();
  * The request body IS the raw manifest JSON.
  * Validated via validateManifest() from @simple-agent-manager/shared.
  * Single-service constraint enforced for slice 2.
- * Secret references rejected (secret store deferred to later slice).
+ * Secret references are stored by name in the manifest (values never persisted).
  */
 deploymentReleaseRoutes.post(
   '/:projectId/environments/:envId/releases',
@@ -156,10 +181,33 @@ deploymentReleaseRoutes.post(
 
     const manifest = result.manifest;
 
-    // Phase 2+3: Enforce slice 2 constraints (single-service, no secrets)
+    // Phase 2: Enforce slice 2 constraints (single-service)
     const constraintError = validateSlice2Constraints(manifest);
     if (constraintError) {
       return c.json(constraintError, 400);
+    }
+
+    // Validate that all referenced secrets exist in the environment
+    const secretNames = collectSecretNames(manifest);
+    if (secretNames.length > 0) {
+      const existingSecrets = await db
+        .select({ name: schema.deploymentSecrets.name })
+        .from(schema.deploymentSecrets)
+        .where(eq(schema.deploymentSecrets.environmentId, envId));
+
+      const existingNames = new Set(existingSecrets.map((s) => s.name));
+      const missing = secretNames.filter((n) => !existingNames.has(n));
+
+      if (missing.length > 0) {
+        return c.json(
+          {
+            error: 'MISSING_SECRETS',
+            message: `Manifest references secrets that do not exist in this environment: ${missing.join(', ')}. Set these secrets before creating a release.`,
+            details: { missingSecrets: missing },
+          },
+          400,
+        );
+      }
     }
 
     // Determine next version number
@@ -172,7 +220,7 @@ deploymentReleaseRoutes.post(
 
     const nextVersion = (latestRelease[0]?.version ?? 0) + 1;
 
-    // Insert release (catch version collision from concurrent requests)
+    // Insert release — manifest stores secret REFERENCES (names only), never values
     const id = ulid();
     const now = new Date().toISOString();
 
@@ -270,6 +318,8 @@ deploymentReleaseRoutes.get(
 /**
  * GET /api/projects/:projectId/environments/:envId/releases/:releaseId/compose
  * Render and return the Compose YAML for a release.
+ * Resolves secret references at render time — values are decrypted from D1
+ * and injected into the rendered Compose but never stored in the release record.
  */
 deploymentReleaseRoutes.get(
   '/:projectId/environments/:envId/releases/:releaseId/compose',
@@ -286,10 +336,29 @@ deploymentReleaseRoutes.get(
     const row = await requireOwnedRelease(db, releaseId, envId);
 
     const manifest = JSON.parse(row.manifest);
-    const composeYaml = renderCompose(manifest, {
-      environmentId: envId,
-      releaseId,
-    });
+
+    // Resolve secret references at render time
+    const secretNames = collectSecretNames(manifest);
+    const resolvedSecrets = await loadResolvedSecrets(
+      db,
+      envId,
+      secretNames,
+      getEncryptionKey(c.env),
+    );
+
+    let composeYaml: string;
+    try {
+      composeYaml = renderCompose(manifest, {
+        environmentId: envId,
+        releaseId,
+        resolvedSecrets,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('Missing secrets')) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
 
     return c.text(composeYaml, 200, {
       'Content-Type': 'text/yaml; charset=utf-8',

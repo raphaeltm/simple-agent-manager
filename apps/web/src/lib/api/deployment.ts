@@ -1,6 +1,46 @@
 import { request } from './client';
 import type { GcpProject } from './credentials';
 
+// ─── Environment Secrets (write-only) ──────────────────────────────────────
+
+export interface DeploymentSecretEntry {
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listDeploymentSecrets(
+  projectId: string,
+  envId: string,
+): Promise<{ secrets: DeploymentSecretEntry[] }> {
+  return request<{ secrets: DeploymentSecretEntry[] }>(
+    `/api/projects/${projectId}/environments/${envId}/secrets`,
+  );
+}
+
+export async function setDeploymentSecret(
+  projectId: string,
+  envId: string,
+  name: string,
+  value: string,
+): Promise<{ name: string; created: boolean; updatedAt: string }> {
+  return request<{ name: string; created: boolean; updatedAt: string }>(
+    `/api/projects/${projectId}/environments/${envId}/secrets/${encodeURIComponent(name)}`,
+    { method: 'PUT', body: JSON.stringify({ value }) },
+  );
+}
+
+export async function deleteDeploymentSecret(
+  projectId: string,
+  envId: string,
+  name: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(
+    `/api/projects/${projectId}/environments/${envId}/secrets/${encodeURIComponent(name)}`,
+    { method: 'DELETE' },
+  );
+}
+
 // ─── Project Deployment (GCP OIDC for Defang) ─────────────────────────────
 
 export interface ProjectDeploymentGcpResponse {

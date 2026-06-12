@@ -126,6 +126,7 @@ export interface Env {
   GITHUB_INSTALLATION_LEAK_SWEEP_BATCH_SIZE?: string; // Max personal installations checked per leak-sweep invocation (default: 50)
   MAX_TASKS_PER_PROJECT?: string;
   MAX_TASK_DEPENDENCIES_PER_TASK?: string;
+  MAX_SECRETS_PER_ENVIRONMENT?: string;
   TASK_LIST_DEFAULT_PAGE_SIZE?: string;
   TASK_LIST_MAX_PAGE_SIZE?: string;
   MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT?: string;
