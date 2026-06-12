@@ -39,6 +39,14 @@ This matters because the tools write durable project knowledge and policy. Silen
 - Relevant local quality checks pass.
 - PR includes specialist review evidence, staging verification evidence, and is merged only after all gates pass.
 
+## Validation Notes
+
+- PASS: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-knowledge-policy-tools.test.ts tests/unit/policy-system.test.ts`
+- PASS: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-error-handling.test.ts`
+- PASS: `pnpm --filter @simple-agent-manager/api typecheck`
+- PASS: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
+- BLOCKED locally: `pnpm exec vitest run --config vitest.workers.config.ts tests/workers/policy-do.test.ts` failed before loading tests because `@cloudflare/workerd-linux-64@1.20260329.1` repeatedly segfaulted during worker-pool startup. The broader script form also crashed with no tests executed after starting the worker pool.
+
 ## References
 
 - `apps/api/src/routes/mcp/knowledge-tools.ts`
