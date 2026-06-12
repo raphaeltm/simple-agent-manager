@@ -44,7 +44,9 @@ export function EnvironmentSecretsSection({
   }, [projectId, environmentId, toast]);
 
   useEffect(() => {
-    void loadSecrets();
+    loadSecrets().catch(() => {
+      // Error already handled in loadSecrets via toast
+    });
   }, [loadSecrets]);
 
   const handleSave = async (e: React.FormEvent) => {

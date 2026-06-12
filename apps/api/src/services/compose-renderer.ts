@@ -43,12 +43,16 @@ export function collectSecretNames(manifest: DeploymentManifest): string[] {
   const names = new Set<string>();
   for (const svc of Object.values(manifest.services)) {
     for (const val of Object.values(svc.env)) {
-      if (typeof val === 'object' && val !== null && 'secret' in val) {
-        names.add((val as { secret: string }).secret);
+      if (isSecretRef(val)) {
+        names.add(val.secret);
       }
     }
   }
   return Array.from(names).sort();
+}
+
+function isSecretRef(val: EnvValue): val is { secret: string } {
+  return typeof val === 'object' && val !== null && 'secret' in val;
 }
 
 /**
@@ -56,7 +60,6 @@ export function collectSecretNames(manifest: DeploymentManifest): string[] {
  * Throws if a referenced secret is missing from the resolved map.
  */
 function resolveEnvValue(
-  _key: string,
   val: EnvValue,
   resolvedSecrets: Record<string, string>,
   missingSecrets: Set<string>,
@@ -64,7 +67,7 @@ function resolveEnvValue(
   if (typeof val === 'string') {
     return val;
   }
-  // Secret reference
+  // Secret reference (type-narrowed via isSecretRef above)
   const secretName = val.secret;
   if (secretName in resolvedSecrets) {
     return resolvedSecrets[secretName];
@@ -119,7 +122,7 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
     if (Object.keys(svc.env).length > 0) {
       const env: Record<string, string> = {};
       for (const [key, val] of Object.entries(svc.env)) {
-        const resolved = resolveEnvValue(key, val, resolvedSecrets, missingSecrets);
+        const resolved = resolveEnvValue(val, resolvedSecrets, missingSecrets);
         if (resolved !== undefined) {
           env[key] = resolved;
         }
