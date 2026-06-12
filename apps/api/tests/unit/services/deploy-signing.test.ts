@@ -1,9 +1,15 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { signDeployPayload } from '../../../src/services/deploy-signing';
 
 const TEST_SEED_B64 = 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=';
 const TEST_PUBLIC_KEY_B64 = 'ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=';
+const CONTRACT_FIXTURE_URL = new URL(
+  '../../../../../tests/fixtures/deploy-release/apply-payload-with-routes.json',
+  import.meta.url,
+);
 
 function fromBase64(value: string): Uint8Array {
   return Uint8Array.from(Buffer.from(value, 'base64'));
@@ -89,5 +95,21 @@ describe('signDeployPayload', () => {
     }, {
       DEPLOY_SIGNING_PRIVATE_KEY: goPrivateKey,
     })).resolves.toEqual(expect.any(String));
+  });
+
+  it('matches the shared API-to-vm-agent route payload contract fixture', async () => {
+    const fixture = JSON.parse(readFileSync(CONTRACT_FIXTURE_URL, 'utf8')) as {
+      environmentId: string;
+      nodeId: string;
+      seq: number;
+      expiresAt: number;
+      composeYaml: string;
+      routes: unknown[];
+      signature: string;
+    };
+
+    await expect(signDeployPayload(fixture, {
+      DEPLOY_SIGNING_PRIVATE_KEY: TEST_SEED_B64,
+    })).resolves.toBe(fixture.signature);
   });
 });
