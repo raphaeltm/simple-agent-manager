@@ -7,7 +7,7 @@
  * 3. Links the environment to the node with placement constraints
  * 4. Returns a provisioning promise for waitUntil()
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the dependencies before importing the module under test
 vi.mock('drizzle-orm/d1', () => ({
@@ -21,12 +21,13 @@ vi.mock('../../src/services/nodes', () => ({
 
 vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-  serializeError: vi.fn((e) => ({ error: String(e) })),
+  serializeError: vi.fn((e: unknown) => ({ error: String(e) })),
 }));
 
 import { drizzle } from 'drizzle-orm/d1';
+
+import { DEPLOYMENT_DEFAULT_VM_SIZE, provisionDeploymentNode } from '../../src/services/deployment-provisioning';
 import { createNodeRecord, provisionNode } from '../../src/services/nodes';
-import { provisionDeploymentNode, DEPLOYMENT_DEFAULT_VM_SIZE } from '../../src/services/deployment-provisioning';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -36,8 +37,6 @@ function createMockDb(options: {
   userCredProvider?: string | null;
   platformCredProvider?: string | null;
 }) {
-  const selectResults: Record<string, unknown[]> = {};
-
   // Build user credential rows
   const userCredRows = options.userCredProvider
     ? [{ provider: options.userCredProvider }]

@@ -6,8 +6,8 @@
  * the shared Provider interface (no provider-specific branches).
  */
 
-import { DEFAULT_VM_LOCATION, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
