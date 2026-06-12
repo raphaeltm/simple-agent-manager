@@ -5,7 +5,12 @@ import type {
   ResolvedAgentProfile,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
-import { isValidAgentType } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_AGENT_EFFORT,
+  isAgentEffort,
+  isAgentEffortSupported,
+  isValidAgentType,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -48,10 +53,21 @@ function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): s
   return JSON.stringify(policy);
 }
 
+function validateProfileEffort(agentType: string, effort: unknown): void {
+  if (effort == null) return;
+  if (!isAgentEffort(effort)) {
+    throw errors.badRequest('Invalid effort value');
+  }
+  if (!isAgentEffortSupported(agentType, effort)) {
+    throw errors.badRequest(`Effort '${effort}' is not supported for agent type '${agentType}'`);
+  }
+}
+
 /** Convert a DB row to an API response */
 function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
   return {
     ...toBaseProfileFields(row),
+    effort: isAgentEffort(row.effort) ? row.effort : DEFAULT_AGENT_EFFORT,
     githubCliPolicy: parseGitHubCliPolicy(row.githubCliPolicy),
   };
 }
@@ -124,6 +140,7 @@ export async function createProfile(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  validateProfileEffort(body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode', body.effort);
 
   // Check for duplicate name in this project
   const existing = await db
@@ -165,6 +182,7 @@ export async function updateProfile(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  validateProfileEffort(body.agentType ?? profile.agentType, body.effort ?? profile.effort);
 
   // If renaming, check for duplicate in the same project scope
   if (body.name !== undefined) {
@@ -245,6 +263,7 @@ export async function resolveAgentProfile(
       profileName: p.name,
       agentType: p.agentType,
       model: p.model,
+      effort: isAgentEffort(p.effort) ? p.effort : DEFAULT_AGENT_EFFORT,
       permissionMode: p.permissionMode,
       systemPromptAppend: p.systemPromptAppend,
       maxTurns: p.maxTurns,
@@ -266,6 +285,7 @@ export async function resolveAgentProfile(
       profileName: null,
       agentType: env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
       model: null,
+      effort: DEFAULT_AGENT_EFFORT,
       permissionMode: null,
       systemPromptAppend: null,
       maxTurns: null,
@@ -342,6 +362,7 @@ export async function resolveAgentProfile(
     profileName: null,
     agentType,
     model: null,
+    effort: DEFAULT_AGENT_EFFORT,
     permissionMode: null,
     systemPromptAppend: null,
     maxTurns: null,

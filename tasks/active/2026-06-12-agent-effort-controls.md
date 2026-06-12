@@ -21,11 +21,11 @@ Prior research created SAM idea `01KTN2NZN3MXYM6Z6DQZ9RTV6M`, which established 
 
 ## Implementation Checklist
 
-- [ ] Add shared effort constants/types and provider capability helpers.
-- [ ] Add D1 migration columns for `agent_profiles` and `skills` using safe `ALTER TABLE ADD COLUMN`.
-- [ ] Update Drizzle schema and shared profile/skill/request/resolved types.
-- [ ] Update Valibot schemas and MCP profile/skill tool definitions/extraction for effort.
-- [ ] Update profile and skill service mapping/resolution so effort defaults to `auto` and skill effort can override profile effort.
+- [x] Add shared effort constants/types and provider capability helpers.
+- [x] Add D1 migration columns for `agent_profiles` and `skills` using safe `ALTER TABLE ADD COLUMN`.
+- [x] Update Drizzle schema and shared profile/skill/request/resolved types.
+- [x] Update Valibot schemas and MCP profile/skill tool definitions/extraction for effort.
+- [x] Update profile and skill service mapping/resolution so effort defaults to `auto` and skill effort can override profile effort.
 - [ ] Thread resolved effort through task submit, MCP dispatch, SAM-session dispatch/retry, trigger submit, TaskRunner DO state, and `startAgentSessionOnNode`.
 - [ ] Update VM agent start request payload, profile override storage, settings payload, and launch mapping.
 - [ ] Map Claude effort to `CLAUDE_CODE_EFFORT_LEVEL`, omitting `auto`.

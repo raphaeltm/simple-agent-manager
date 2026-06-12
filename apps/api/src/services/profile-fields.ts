@@ -1,3 +1,9 @@
+import {
+  DEFAULT_AGENT_EFFORT,
+  isAgentEffort,
+  type AgentEffort,
+} from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 
 /**
@@ -17,6 +23,7 @@ export type BaseProfileFieldKeys =
   | 'description'
   | 'agentType'
   | 'model'
+  | 'effort'
   | 'permissionMode'
   | 'systemPromptAppend'
   | 'maxTurns'
@@ -48,6 +55,7 @@ export function toBaseProfileFields<R extends BaseProfileRow>(
     description: row.description,
     agentType: row.agentType,
     model: row.model,
+    effort: isAgentEffort(row.effort) ? row.effort : DEFAULT_AGENT_EFFORT,
     permissionMode: row.permissionMode,
     systemPromptAppend: row.systemPromptAppend,
     maxTurns: row.maxTurns,
@@ -69,6 +77,7 @@ export interface BaseProfileWriteInput {
   description?: string | null;
   agentType?: string;
   model?: string | null;
+  effort?: AgentEffort | null;
   permissionMode?: string | null;
   systemPromptAppend?: string | null;
   maxTurns?: number | null;
@@ -94,6 +103,7 @@ export function baseProfileInsertValues(
     description: body.description ?? null,
     agentType: body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode',
     model: body.model ?? null,
+    effort: body.effort ?? DEFAULT_AGENT_EFFORT,
     permissionMode: body.permissionMode ?? null,
     systemPromptAppend: body.systemPromptAppend ?? null,
     maxTurns: body.maxTurns ?? null,
@@ -126,6 +136,7 @@ export function applyBaseProfileUpdates<T extends Record<string, unknown>>(
   if (body.description !== undefined) set.description = body.description;
   if (body.agentType !== undefined) set.agentType = body.agentType;
   if (body.model !== undefined) set.model = body.model;
+  if (body.effort !== undefined) set.effort = body.effort ?? DEFAULT_AGENT_EFFORT;
   if (body.permissionMode !== undefined) set.permissionMode = body.permissionMode;
   if (body.systemPromptAppend !== undefined) set.systemPromptAppend = body.systemPromptAppend;
   if (body.maxTurns !== undefined) set.maxTurns = body.maxTurns;

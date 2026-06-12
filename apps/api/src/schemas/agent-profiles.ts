@@ -1,7 +1,10 @@
 import * as v from 'valibot';
 
+import { AGENT_EFFORT_LEVELS } from '@simple-agent-manager/shared';
+
 const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
 const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
+const AgentEffortSchema = v.picklist([...AGENT_EFFORT_LEVELS]);
 
 const GitHubCliPolicySchema = v.object({
   mode: v.picklist(['inherit', 'custom']),
@@ -20,6 +23,7 @@ export const CreateAgentProfileSchema = v.object({
   description: v.optional(v.nullable(v.string())),
   agentType: v.optional(v.string()),
   model: v.optional(v.nullable(v.string())),
+  effort: v.optional(v.nullable(AgentEffortSchema)),
   permissionMode: v.optional(v.nullable(v.string())),
   systemPromptAppend: v.optional(v.nullable(v.string())),
   maxTurns: v.optional(v.nullable(v.number())),
@@ -38,6 +42,7 @@ export const UpdateAgentProfileSchema = v.object({
   description: v.optional(v.nullable(v.string())),
   agentType: v.optional(v.string()),
   model: v.optional(v.nullable(v.string())),
+  effort: v.optional(v.nullable(AgentEffortSchema)),
   permissionMode: v.optional(v.nullable(v.string())),
   systemPromptAppend: v.optional(v.nullable(v.string())),
   maxTurns: v.optional(v.nullable(v.number())),

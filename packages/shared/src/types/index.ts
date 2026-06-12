@@ -240,6 +240,7 @@ export type {
 
 // Agent Settings & Profiles
 export type {
+  AgentEffort,
   AgentPermissionMode,
   AgentProfile,
   AgentProviderMode,
@@ -262,8 +263,13 @@ export type {
   UpdateSkillRequest,
 } from './agent-settings';
 export {
+  AGENT_EFFORT_LEVELS,
+  DEFAULT_AGENT_EFFORT,
   DEFAULT_GITHUB_CLI_POLICY,
+  getSupportedEffortsForAgent,
   GITHUB_CLI_POLICY_PERMISSION_KEYS,
+  isAgentEffort,
+  isAgentEffortSupported,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
   VALID_AGENT_PROVIDER_MODES,
