@@ -44,13 +44,13 @@ type ObservedState struct {
 
 // ApplyPayload is the signed payload received from the control plane.
 type ApplyPayload struct {
-	EnvironmentID string `json:"environmentId"`
-	NodeID        string `json:"nodeId"`
-	Seq           int64  `json:"seq"`
-	ExpiresAt     int64  `json:"expiresAt"` // Unix timestamp
-	ComposeYAML   string `json:"composeYaml"`
+	EnvironmentID string        `json:"environmentId"`
+	NodeID        string        `json:"nodeId"`
+	Seq           int64         `json:"seq"`
+	ExpiresAt     int64         `json:"expiresAt"` // Unix timestamp
+	ComposeYAML   string        `json:"composeYaml"`
 	Routes        []RouteTarget `json:"routes,omitempty"`
-	Signature     string `json:"signature"` // Base64-encoded Ed25519 signature
+	Signature     string        `json:"signature"` // Base64-encoded Ed25519 signature
 
 	// TODO: Registry credentials for private image pulls.
 	// This field will be consumed by the apply engine to docker login
@@ -83,5 +83,5 @@ type SignablePayload struct {
 	Seq           int64  `json:"seq"`
 	ExpiresAt     int64  `json:"expiresAt"`
 	ComposeHash   string `json:"composeHash"` // hex-encoded SHA-256 of ComposeYAML
-	RoutesHash    string `json:"routesHash"`   // hex-encoded SHA-256 of canonical routes JSON
+	RoutesHash    string `json:"routesHash"`  // hex-encoded SHA-256 of canonical routes JSON
 }
