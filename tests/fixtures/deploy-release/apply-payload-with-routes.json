@@ -1,0 +1,23 @@
+{
+  "environmentId": "env-1",
+  "nodeId": "node-1",
+  "seq": 7,
+  "expiresAt": 1800000000,
+  "composeYaml": "services:\n  web:\n    image: docker.io/example/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    ports:\n      - 127.0.0.1:35000:3000\n",
+  "routes": [
+    {
+      "hostname": "r1-web-3000-env-1.apps.sammy.party",
+      "service": "web",
+      "containerPort": 3000,
+      "hostPort": 35000
+    },
+    {
+      "hostname": "r2-api-8080-env-1.apps.sammy.party",
+      "service": "api",
+      "containerPort": 8080,
+      "hostPort": 35001
+    }
+  ],
+  "signature": "zQNnO/K5ajbvvu6vODGLTuNSgDGprzTXv8+BK0lV4n0UmClpODF70vVSIMDe1VcEM71Fn7VPg1uWvhprNOPdAQ==",
+  "registryCredentials": null
+}
