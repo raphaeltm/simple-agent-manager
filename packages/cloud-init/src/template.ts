@@ -129,6 +129,7 @@ write_files:
       Environment=ROLE={{ role }}
       Environment=NODE_ROLE={{ role }}
       Environment=ENVIRONMENT_ID={{ environment_id }}
+      Environment=DEPLOY_SIGNING_PUB_KEY={{ deploy_signing_pub_key }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5

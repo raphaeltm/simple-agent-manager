@@ -1796,9 +1796,13 @@ describe('swap file configuration', () => {
 // =============================================================================
 
 describe('deployment role support', () => {
-  it('sets ROLE, NODE_ROLE, and ENVIRONMENT_ID in vm-agent systemd unit', () => {
+  it('sets deployment role environment in vm-agent systemd unit', () => {
     const config = generateCloudInit(
-      baseVariables({ role: 'deployment', environmentId: 'env-abc123' }),
+      baseVariables({
+        role: 'deployment',
+        environmentId: 'env-abc123',
+        deploySigningPubKey: 'deploy-pub-key-abc123+/=',
+      }),
       { validateSize: false },
     );
     const parsed = YAML.parse(config);
@@ -1810,9 +1814,10 @@ describe('deployment role support', () => {
     expect(unitFile.content).toContain('Environment=ROLE=deployment');
     expect(unitFile.content).toContain('Environment=NODE_ROLE=deployment');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=env-abc123');
+    expect(unitFile.content).toContain('Environment=DEPLOY_SIGNING_PUB_KEY=deploy-pub-key-abc123+/=');
   });
 
-  it('leaves ROLE, NODE_ROLE, and ENVIRONMENT_ID empty when not specified', () => {
+  it('leaves deployment environment empty when not specified', () => {
     const config = generateCloudInit(
       baseVariables(),
       { validateSize: false },
@@ -1827,6 +1832,7 @@ describe('deployment role support', () => {
     expect(unitFile.content).toContain('Environment=ROLE=\n');
     expect(unitFile.content).toContain('Environment=NODE_ROLE=\n');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_SIGNING_PUB_KEY=\n');
   });
 
   it('generates valid YAML with deployment role set', () => {
