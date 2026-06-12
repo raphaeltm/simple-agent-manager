@@ -179,6 +179,13 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback |
 | `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error  |
 
+## App Deployment Routing
+
+| Variable                       | Default | Description                                           |
+| ------------------------------ | ------- | ----------------------------------------------------- |
+| `DEPLOYMENT_ROUTE_PORT_BASE`   | `35000` | First node-local loopback port reserved for app routes |
+| `DEPLOYMENT_ROUTE_PORT_SPAN`   | `1000`  | Number of loopback ports reserved per deployment node |
+
 ## Platform Limits
 
 | Variable                           | Default | Description                   |
