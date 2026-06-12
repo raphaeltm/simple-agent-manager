@@ -20,7 +20,7 @@ vi.mock('mermaid', () => ({
   },
 }));
 
-import { RenderedMarkdown, SVG_SANITIZE_CONFIG } from '../../../src/components/MarkdownRenderer';
+import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode, SVG_SANITIZE_CONFIG } from '../../../src/components/MarkdownRenderer';
 
 describe('RenderedMarkdown', () => {
   beforeEach(() => {
@@ -49,6 +49,29 @@ describe('RenderedMarkdown', () => {
     const content = '```typescript\nconst x = 1;\n```';
     render(<RenderedMarkdown content={content} />);
     expect(screen.getByText('const')).toBeInTheDocument();
+  });
+
+  it('fenced code blocks have a dark background from the nightOwl theme', () => {
+    const content = '```typescript\nconst x = 1;\n```';
+    const { container } = render(<RenderedMarkdown content={content} />);
+    // The inner <pre> from SyntaxHighlightedCode carries the theme background
+    const pres = container.querySelectorAll('pre');
+    const themedPre = Array.from(pres).find(
+      (p) => p.style.backgroundColor !== '',
+    );
+    expect(themedPre).toBeTruthy();
+    // nightOwl theme background is #011627 — must not be transparent or empty
+    expect(themedPre!.style.backgroundColor).toBe('rgb(1, 22, 39)');
+  });
+
+  it('inline code uses info-tint background, not the nightOwl theme background', () => {
+    const content = 'Use `myFunction()` here';
+    const { container } = render(<RenderedMarkdown content={content} />);
+    const code = container.querySelector('code');
+    expect(code).toBeTruthy();
+    expect(code!.className).toContain('bg-info-tint');
+    // Inline code should NOT have the nightOwl background
+    expect(code!.style.backgroundColor).not.toBe('rgb(1, 22, 39)');
   });
 
   it('renders mermaid code blocks as diagrams', async () => {
@@ -307,5 +330,21 @@ describe('RenderedMarkdown', () => {
       );
       expect(hasStrictCall).toBe(true);
     });
+  });
+});
+
+describe('SyntaxHighlightedCode', () => {
+  it('applies the nightOwl theme dark background to the pre element', () => {
+    const { container } = render(
+      <SyntaxHighlightedCode content="const x = 1;" language="typescript" />,
+    );
+    const pre = container.querySelector('pre');
+    expect(pre).toBeTruthy();
+    // nightOwl theme background (#011627) rendered as rgb
+    expect(pre!.style.backgroundColor).toBe('rgb(1, 22, 39)');
+  });
+
+  it('exports CODE_THEME_BG matching the nightOwl theme background', () => {
+    expect(CODE_THEME_BG).toBe('#011627');
   });
 });
