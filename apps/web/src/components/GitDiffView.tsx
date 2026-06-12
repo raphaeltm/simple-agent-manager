@@ -428,8 +428,8 @@ const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
               return (
                 <div style={{ marginBottom: 12 }}>
                   <Highlight theme={themes.nightOwl} code={code} language={match[1] ?? ''}>
-                    {({ tokens, getLineProps, getTokenProps }) => (
-                      <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: '0.8125rem', lineHeight: '1.5', background: 'transparent' }}>
+                    {({ style: themeStyle, tokens, getLineProps, getTokenProps }) => (
+                      <pre style={{ ...themeStyle, margin: 0, padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.8125rem', lineHeight: '1.5', borderRadius: '0.375rem', overflow: 'auto' }}>
                         {tokens.map((line, lineIdx) => {
                           const lineProps = getLineProps({ line });
                           return (

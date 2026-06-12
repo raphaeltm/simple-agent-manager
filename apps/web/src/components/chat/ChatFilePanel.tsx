@@ -20,7 +20,7 @@ import {
 } from '../../lib/api';
 import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-utils';
 import { fileNameFromPath, fuzzyFilterFiles } from '../../lib/fuzzy-match';
-import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
+import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
 
 export type FilePanelMode = 'browse' | 'view' | 'diff' | 'git-status';
@@ -583,7 +583,9 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                 isMd && mdMode === 'rendered' ? (
                   <RenderedMarkdown content={fileContent} />
                 ) : (
-                  <SyntaxHighlightedCode content={fileContent} language={language} />
+                  <div className="min-h-full" style={{ backgroundColor: CODE_THEME_BG }}>
+                    <SyntaxHighlightedCode content={fileContent} language={language} />
+                  </div>
                 )
               )}
             </>

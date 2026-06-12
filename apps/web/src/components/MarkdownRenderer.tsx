@@ -113,14 +113,17 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
 
 // ---------- Syntax Highlighted Code ----------
 
+/** Background color from the nightOwl theme, used by code viewer containers */
+export const CODE_THEME_BG = themes.nightOwl.plain.backgroundColor as string;
+
 export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = ({
   content,
   language,
 }) => {
   return (
     <Highlight theme={themes.nightOwl} code={content} language={language || 'text'}>
-      {({ tokens, getLineProps, getTokenProps }) => (
-        <pre className="m-0 p-0 font-mono bg-transparent" style={{ fontSize: '0.8125rem', lineHeight: '1.5', overflow: 'inherit' }}>
+      {({ style: themeStyle, tokens, getLineProps, getTokenProps }) => (
+        <pre className="m-0 py-3 font-mono" style={{ ...themeStyle, fontSize: '0.8125rem', lineHeight: '1.5', overflow: 'auto' }}>
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
             return (
@@ -234,7 +237,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
               }
 
               return (
-                <div className="mb-3 overflow-x-auto rounded-md">
+                <div className="mb-3 overflow-hidden rounded-md">
                   <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
                 </div>
               );
