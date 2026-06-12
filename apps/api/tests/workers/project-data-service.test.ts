@@ -687,6 +687,24 @@ describe('project-data service: activity events', () => {
     expect(events[0]!.payload).toEqual(payload);
   });
 
+  it('listActivityEvents filters by sessionId', async () => {
+    const pid = 'svc-activity-session';
+
+    await svc.recordActivityEvent(testEnv, pid, 'task.started', 'system', null, null, 'sess-1', null, null);
+    await svc.recordActivityEvent(testEnv, pid, 'task.completed', 'system', null, null, 'sess-1', null, null);
+    await svc.recordActivityEvent(testEnv, pid, 'task.started', 'system', null, null, 'sess-2', null, null);
+
+    const { events: sess1 } = await svc.listActivityEvents(testEnv, pid, null, 50, null, 'sess-1');
+    expect(sess1).toHaveLength(2);
+    for (const e of sess1) {
+      expect(e.sessionId).toBe('sess-1');
+    }
+
+    const { events: sess2 } = await svc.listActivityEvents(testEnv, pid, null, 50, null, 'sess-2');
+    expect(sess2).toHaveLength(1);
+    expect(sess2[0]!.sessionId).toBe('sess-2');
+  });
+
   it('listActivityEvents supports before cursor for pagination', async () => {
     const pid = 'svc-activity-cursor';
 
