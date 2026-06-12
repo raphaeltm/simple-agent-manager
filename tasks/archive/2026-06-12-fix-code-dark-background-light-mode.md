@@ -27,10 +27,11 @@ The expectation is that code should always have a dark background, even in light
 
 ## Implementation Checklist
 
-- [ ] In `SyntaxHighlightedCode`: Destructure `style` from Highlight render props and apply it to the `<pre>`, replacing `bg-transparent` with the theme's background color. Add padding for standalone use (file panel).
-- [ ] In `RenderedMarkdown` fenced code block: Ensure the wrapper div has a dark background + rounded corners that match.
-- [ ] In `ChatFilePanel`: Ensure code view area has a dark background when displaying code files.
-- [ ] Verify inline `<code>` in markdown is unaffected (it should remain with `bg-info-tint`).
+- [x] In `SyntaxHighlightedCode`: Destructure `style` from Highlight render props and apply it to the `<pre>`, replacing `bg-transparent` with the theme's background color. Add padding for standalone use (file panel).
+- [x] In `RenderedMarkdown` fenced code block: Changed wrapper to `overflow-hidden` so rounded corners clip the dark background properly.
+- [x] In `ChatFilePanel`: Wrapped code viewer in a `min-h-full` div with `CODE_THEME_BG` background.
+- [x] Also fixed `GitDiffView.tsx` which had the same `background: 'transparent'` issue.
+- [x] Verify inline `<code>` in markdown is unaffected (it should remain with `bg-info-tint`) — confirmed, inline code uses a separate code path.
 
 ## Acceptance Criteria
 
