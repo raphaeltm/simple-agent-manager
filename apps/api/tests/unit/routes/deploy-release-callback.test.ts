@@ -137,8 +137,12 @@ describe('deploy release callback route', () => {
     expect(body.signature).toEqual(expect.any(String));
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    const [, firstCreate] = fetchMock.mock.calls[2]!;
-    const [, secondCreate] = fetchMock.mock.calls[3]!;
+    const firstCreateCall = fetchMock.mock.calls.at(2);
+    const secondCreateCall = fetchMock.mock.calls.at(3);
+    expect(firstCreateCall).toBeDefined();
+    expect(secondCreateCall).toBeDefined();
+    const [, firstCreate] = firstCreateCall as [string, RequestInit];
+    const [, secondCreate] = secondCreateCall as [string, RequestInit];
     expect(JSON.parse(firstCreate.body)).toMatchObject({
       name: 'r1-web-3000-env-1.apps.sammy.party',
       content: '203.0.113.10',
