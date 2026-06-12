@@ -290,6 +290,56 @@ function makeAgentProfile(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function setupStaleHierarchyMocks() {
+  const staleLastMessageAt = Date.now() - (4 * 60 * 60 * 1000);
+  const parentSession = {
+    ...SESSION_2,
+    id: 'stale-parent-session',
+    topic: 'Parent dispatched task',
+    taskId: 'parent-task',
+    startedAt: staleLastMessageAt,
+    endedAt: staleLastMessageAt + 1000,
+    createdAt: staleLastMessageAt,
+    lastMessageAt: staleLastMessageAt,
+  };
+  const childSession = {
+    ...SESSION_2,
+    id: 'stale-child-session',
+    topic: 'Child dispatched task',
+    taskId: 'child-task',
+    startedAt: staleLastMessageAt,
+    endedAt: staleLastMessageAt + 2000,
+    createdAt: staleLastMessageAt,
+    lastMessageAt: staleLastMessageAt,
+  };
+
+  mocks.listChatSessions.mockResolvedValue({
+    sessions: [parentSession, childSession],
+    total: 2,
+  });
+  mocks.listProjectTasks.mockResolvedValue({
+    tasks: [
+      makeTask({
+        id: 'parent-task',
+        title: 'Parent dispatched task',
+        parentTaskId: null,
+        triggeredBy: 'user',
+        dispatchDepth: 0,
+      }),
+      makeTask({
+        id: 'child-task',
+        title: 'Child dispatched task',
+        parentTaskId: 'parent-task',
+        triggeredBy: 'mcp',
+        dispatchDepth: 1,
+      }),
+    ],
+    nextCursor: null,
+  });
+
+  return { parentSession, childSession };
+}
+
 async function openProfileWizardFromGate() {
   await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
@@ -452,51 +502,7 @@ describe('ProjectChat new chat button', () => {
   });
 
   it('shows and opens hierarchy controls for stale sessions in the Older bucket', async () => {
-    const staleLastMessageAt = Date.now() - (4 * 60 * 60 * 1000);
-    const parentSession = {
-      ...SESSION_2,
-      id: 'stale-parent-session',
-      topic: 'Parent dispatched task',
-      taskId: 'parent-task',
-      startedAt: staleLastMessageAt,
-      endedAt: staleLastMessageAt + 1000,
-      createdAt: staleLastMessageAt,
-      lastMessageAt: staleLastMessageAt,
-    };
-    const childSession = {
-      ...SESSION_2,
-      id: 'stale-child-session',
-      topic: 'Child dispatched task',
-      taskId: 'child-task',
-      startedAt: staleLastMessageAt,
-      endedAt: staleLastMessageAt + 2000,
-      createdAt: staleLastMessageAt,
-      lastMessageAt: staleLastMessageAt,
-    };
-
-    mocks.listChatSessions.mockResolvedValue({
-      sessions: [parentSession, childSession],
-      total: 2,
-    });
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [
-        makeTask({
-          id: 'parent-task',
-          title: 'Parent dispatched task',
-          parentTaskId: null,
-          triggeredBy: 'user',
-          dispatchDepth: 0,
-        }),
-        makeTask({
-          id: 'child-task',
-          title: 'Child dispatched task',
-          parentTaskId: 'parent-task',
-          triggeredBy: 'mcp',
-          dispatchDepth: 1,
-        }),
-      ],
-      nextCursor: null,
-    });
+    setupStaleHierarchyMocks();
 
     renderProjectChat();
 
@@ -540,51 +546,7 @@ describe('ProjectChat new chat button', () => {
   });
 
   it('navigates from the hierarchy modal to the selected task session', async () => {
-    const staleLastMessageAt = Date.now() - (4 * 60 * 60 * 1000);
-    const parentSession = {
-      ...SESSION_2,
-      id: 'stale-parent-session',
-      topic: 'Parent dispatched task',
-      taskId: 'parent-task',
-      startedAt: staleLastMessageAt,
-      endedAt: staleLastMessageAt + 1000,
-      createdAt: staleLastMessageAt,
-      lastMessageAt: staleLastMessageAt,
-    };
-    const childSession = {
-      ...SESSION_2,
-      id: 'stale-child-session',
-      topic: 'Child dispatched task',
-      taskId: 'child-task',
-      startedAt: staleLastMessageAt,
-      endedAt: staleLastMessageAt + 2000,
-      createdAt: staleLastMessageAt,
-      lastMessageAt: staleLastMessageAt,
-    };
-
-    mocks.listChatSessions.mockResolvedValue({
-      sessions: [parentSession, childSession],
-      total: 2,
-    });
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [
-        makeTask({
-          id: 'parent-task',
-          title: 'Parent dispatched task',
-          parentTaskId: null,
-          triggeredBy: 'user',
-          dispatchDepth: 0,
-        }),
-        makeTask({
-          id: 'child-task',
-          title: 'Child dispatched task',
-          parentTaskId: 'parent-task',
-          triggeredBy: 'mcp',
-          dispatchDepth: 1,
-        }),
-      ],
-      nextCursor: null,
-    });
+    setupStaleHierarchyMocks();
 
     renderProjectChat(`/projects/${PROJECT_ID}/chat/stale-child-session#hierarchy-child-task`);
 
