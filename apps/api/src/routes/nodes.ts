@@ -32,7 +32,12 @@ const nodesRoutes = new Hono<{ Bindings: Env }>();
 // We keep the skip to prevent auth middleware from blocking those requests.
 nodesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
-  if (path.endsWith('/ready') || path.endsWith('/heartbeat') || path.endsWith('/errors')) {
+  if (
+    path.endsWith('/ready')
+    || path.endsWith('/heartbeat')
+    || path.endsWith('/errors')
+    || path.endsWith('/deploy-release')
+  ) {
     return next();
   }
   return requireAuth()(c, async () => {
