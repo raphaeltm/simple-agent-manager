@@ -92,7 +92,7 @@ func (d *DiskState) WriteRelease(state *ReleaseState, composeYAML string, caddyf
 
 	// Write compose file
 	composePath := filepath.Join(dir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte(composeYAML), 0644); err != nil {
+	if err := writeFileAtomic(composePath, composeYAML, 0644); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
 	}
 
@@ -111,7 +111,7 @@ func (d *DiskState) WriteRelease(state *ReleaseState, composeYAML string, caddyf
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	if err := os.WriteFile(metadataPath, metaBytes, 0644); err != nil {
+	if err := writeFileAtomic(metadataPath, string(metaBytes), 0644); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
@@ -125,7 +125,7 @@ func (d *DiskState) UpdateState(state *ReleaseState) error {
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	if err := os.WriteFile(metadataPath, metaBytes, 0644); err != nil {
+	if err := writeFileAtomic(metadataPath, string(metaBytes), 0644); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 	return nil

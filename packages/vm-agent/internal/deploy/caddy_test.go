@@ -43,7 +43,10 @@ func TestGenerateCaddyfile_RoundTripsMultiRouteConfig(t *testing.T) {
 		{Hostname: "r1-web-env123.apps.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
 	}
 
-	caddyfile := GenerateCaddyfile(routes)
+	caddyfile, err := GenerateCaddyfile(routes)
+	if err != nil {
+		t.Fatalf("GenerateCaddyfile: %v", err)
+	}
 	parsed := parseGeneratedCaddyfile(caddyfile)
 
 	if len(parsed) != 2 {
@@ -87,7 +90,10 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("NewDiskState: %v", err)
 	}
 	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
-	caddyfile := GenerateCaddyfile([]RouteTarget{{Hostname: "app.apps.example.com", HostPort: 35000}})
+	caddyfile, err := GenerateCaddyfile([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}})
+	if err != nil {
+		t.Fatalf("GenerateCaddyfile: %v", err)
+	}
 	if err := disk.WriteRelease(state, "compose", caddyfile); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
 	}
@@ -143,5 +149,48 @@ func TestReloadCaddy_ReturnsReloadFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "false") {
 		t.Fatalf("expected command in error, got %v", err)
+	}
+}
+
+func TestGenerateCaddyfile_RejectsUnsafeRouteTargets(t *testing.T) {
+	tests := []struct {
+		name  string
+		route RouteTarget
+	}{
+		{
+			name: "hostname with caddyfile injection",
+			route: RouteTarget{
+				Hostname:      "app.example.com {\nrespond hacked\n}",
+				Service:       "web",
+				ContainerPort: 3000,
+				HostPort:      35000,
+			},
+		},
+		{
+			name: "invalid host port",
+			route: RouteTarget{
+				Hostname:      "app.example.com",
+				Service:       "web",
+				ContainerPort: 3000,
+				HostPort:      70000,
+			},
+		},
+		{
+			name: "invalid container port",
+			route: RouteTarget{
+				Hostname:      "app.example.com",
+				Service:       "web",
+				ContainerPort: 0,
+				HostPort:      35000,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := GenerateCaddyfile([]RouteTarget{tc.route}); err == nil {
+				t.Fatal("expected invalid route target to be rejected")
+			}
+		})
 	}
 }

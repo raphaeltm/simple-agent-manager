@@ -172,7 +172,10 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	// Write release to disk
-	caddyfile := GenerateCaddyfile(payload.Routes)
+	caddyfile, err := GenerateCaddyfile(payload.Routes)
+	if err != nil {
+		return fmt.Errorf("generate Caddyfile: %w", err)
+	}
 	if err := e.disk.WriteRelease(newState, payload.ComposeYAML, caddyfile); err != nil {
 		return fmt.Errorf("write release to disk: %w", err)
 	}
@@ -196,15 +199,14 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("caddy reload: %w", err))
 	}
 
-	// Success: update current pointer
-	if err := e.disk.SetCurrent(payload.Seq); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("set current pointer: %w", err))
-	}
-
 	newState.Status = StatusApplied
 	if err := e.disk.UpdateState(newState); err != nil {
-		slog.Error("deploy.apply: failed to update metadata after success",
-			"seq", payload.Seq, "error", err)
+		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("update applied metadata: %w", err))
+	}
+
+	// Success: update current pointer only after metadata is durably applied.
+	if err := e.disk.SetCurrent(payload.Seq); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("set current pointer: %w", err))
 	}
 
 	services, _ := e.inspectServices(ctx, payload.Seq)
