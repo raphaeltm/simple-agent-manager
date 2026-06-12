@@ -86,10 +86,11 @@ describe('renderCompose', () => {
     expect(doc.services.web.environment).toBeUndefined();
   });
 
-  it('renders volume bind mounts under default volume root', () => {
+  it('renders volume bind mounts under environment-specific volume root', () => {
     const doc = parse(renderCompose(makeManifest(), CTX));
+    // Default derives from SAM_VOLUME_MOUNT_PATH_TEMPLATE: /mnt/sam-env-{environmentId}/volumes/{name}
     expect(doc.services.web.volumes).toEqual([
-      '/mnt/data/volumes/data:/app/data',
+      '/mnt/sam-env-env-001/volumes/data:/app/data',
     ]);
   });
 

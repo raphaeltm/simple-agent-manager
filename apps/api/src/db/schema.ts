@@ -1924,3 +1924,41 @@ export const deploymentReleases = sqliteTable(
 
 export type DeploymentReleaseRow = typeof deploymentReleases.$inferSelect;
 export type NewDeploymentReleaseRow = typeof deploymentReleases.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT VOLUMES
+// =============================================================================
+
+export const deploymentVolumes = sqliteTable(
+  'deployment_volumes',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    providerVolumeId: text('provider_volume_id').notNull(),
+    providerName: text('provider_name').notNull(),
+    sizeGb: integer('size_gb').notNull(),
+    location: text('location').notNull(),
+    status: text('status').notNull().default('available'),
+    attachedServerId: text('attached_server_id'),
+    linuxDevice: text('linux_device'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envNameUnique: uniqueIndex('idx_deployment_volumes_env_name').on(
+      table.environmentId,
+      table.name,
+    ),
+    environmentIdIdx: index('idx_deployment_volumes_environment_id').on(table.environmentId),
+  }),
+);
+
+export type DeploymentVolumeRow = typeof deploymentVolumes.$inferSelect;
+export type NewDeploymentVolumeRow = typeof deploymentVolumes.$inferInsert;
