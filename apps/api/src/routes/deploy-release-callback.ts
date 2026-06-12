@@ -18,8 +18,8 @@ import { errors } from '../middleware/error';
 import { renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
 import { buildDeploymentRouteTargets } from '../services/deployment-routing';
-import { verifyCallbackToken } from '../services/jwt';
 import { upsertAppRouteDNSRecord } from '../services/dns';
+import { verifyCallbackToken } from '../services/jwt';
 
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 
