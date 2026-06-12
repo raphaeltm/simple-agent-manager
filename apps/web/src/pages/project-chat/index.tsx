@@ -41,11 +41,9 @@ export function ProjectChat() {
 
   const handleHierarchyNavigate = useCallback(
     (sessionId: string) => {
-      // Replace the hierarchy hash entry so Back returns to the graph
-      navigate(-1);
-      state.handleSelect(sessionId);
+      navigate(`/projects/${state.projectId}/chat/${sessionId}`, { replace: true });
     },
-    [navigate, state],
+    [navigate, state.projectId],
   );
   const activeSessionId = state.sessionId ?? '';
   const starterPrompts = useMemo(() => {

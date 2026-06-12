@@ -265,7 +265,7 @@ async function expandOlderBucket(page: Page) {
 }
 
 async function assertHierarchyButtonOpensModal(page: Page) {
-  const hierarchyButtons = page.getByRole('button', { name: 'View task hierarchy' });
+  const hierarchyButtons = page.getByRole('button', { name: /^(Has subtasks|Subtask)$/ });
   await expect(hierarchyButtons.first()).toBeVisible();
   await hierarchyButtons.nth(1).click();
   await expect(page.getByRole('dialog', { name: /Task hierarchy/i })).toBeVisible();

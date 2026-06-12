@@ -68,13 +68,18 @@ vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
     HierarchyModal: ({
       isOpen,
       focusTaskId,
+      onNavigate,
     }: {
       isOpen: boolean;
       focusTaskId: string;
+      onNavigate: (sessionId: string) => void;
     }) => (
       isOpen ? (
         <dialog open aria-label="Task hierarchy" data-focus-task-id={focusTaskId}>
           Task hierarchy for {focusTaskId}
+          <button type="button" onClick={() => onNavigate('stale-parent-session')}>
+            Open parent session
+          </button>
         </dialog>
       ) : null
     ),
@@ -532,6 +537,66 @@ describe('ProjectChat new chat button', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute('data-focus-task-id', 'task-abc');
+  });
+
+  it('navigates from the hierarchy modal to the selected task session', async () => {
+    const staleLastMessageAt = Date.now() - (4 * 60 * 60 * 1000);
+    const parentSession = {
+      ...SESSION_2,
+      id: 'stale-parent-session',
+      topic: 'Parent dispatched task',
+      taskId: 'parent-task',
+      startedAt: staleLastMessageAt,
+      endedAt: staleLastMessageAt + 1000,
+      createdAt: staleLastMessageAt,
+      lastMessageAt: staleLastMessageAt,
+    };
+    const childSession = {
+      ...SESSION_2,
+      id: 'stale-child-session',
+      topic: 'Child dispatched task',
+      taskId: 'child-task',
+      startedAt: staleLastMessageAt,
+      endedAt: staleLastMessageAt + 2000,
+      createdAt: staleLastMessageAt,
+      lastMessageAt: staleLastMessageAt,
+    };
+
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [parentSession, childSession],
+      total: 2,
+    });
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [
+        makeTask({
+          id: 'parent-task',
+          title: 'Parent dispatched task',
+          parentTaskId: null,
+          triggeredBy: 'user',
+          dispatchDepth: 0,
+        }),
+        makeTask({
+          id: 'child-task',
+          title: 'Child dispatched task',
+          parentTaskId: 'parent-task',
+          triggeredBy: 'mcp',
+          dispatchDepth: 1,
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/stale-child-session#hierarchy-child-task`);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
+    expect(dialog).toHaveAttribute('data-focus-task-id', 'child-task');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open parent session' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toHaveTextContent('stale-parent-session');
+    });
+    expect(screen.queryByRole('dialog', { name: 'Task hierarchy' })).not.toBeInTheDocument();
   });
 
   it('gear icon navigates to the project settings page', async () => {
