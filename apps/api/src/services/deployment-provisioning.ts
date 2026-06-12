@@ -8,7 +8,7 @@
 
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, getDefaultLocationForProvider } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -94,7 +94,9 @@ export async function provisionDeploymentNode(
     nodeRole: 'deployment',
   });
 
-  // Link the environment to the node with placement constraints
+  // Link the environment to the node with placement constraints.
+  // Conditional update: only set nodeId if still NULL to prevent
+  // concurrent releases from provisioning duplicate nodes.
   await db
     .update(schema.deploymentEnvironments)
     .set({
@@ -103,7 +105,12 @@ export async function provisionDeploymentNode(
       location: vmLocation,
       updatedAt: new Date().toISOString(),
     })
-    .where(eq(schema.deploymentEnvironments.id, envId));
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        isNull(schema.deploymentEnvironments.nodeId),
+      ),
+    );
 
   log.info('deployment_provisioning.started', {
     nodeId: node.id,

@@ -1888,3 +1888,16 @@ describe('deployment role support', () => {
     ).not.toThrow();
   });
 });
+
+describe('Docker daemon.json live-restore', () => {
+  it('includes live-restore: true for container survival during daemon restarts', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+    const daemonJson = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/docker/daemon.json',
+    );
+    expect(daemonJson).toBeDefined();
+    const dockerConfig = JSON.parse(daemonJson.content);
+    expect(dockerConfig['live-restore']).toBe(true);
+  });
+});

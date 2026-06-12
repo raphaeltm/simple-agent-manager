@@ -312,7 +312,8 @@ write_files:
         "log-opts": {
           "tag": "docker/{{ docker_name_tag }}"
         },
-        "dns": [{{ docker_dns_servers }}]
+        "dns": [{{ docker_dns_servers }}],
+        "live-restore": true
       }
     permissions: '0644'
 

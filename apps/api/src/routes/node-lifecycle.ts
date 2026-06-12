@@ -256,14 +256,23 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
   }
 
-  // Deployment mode: include pending release seq and deploy pub key for deployment nodes
+  // Deployment mode: include pending release seq and deploy pub key for deployment nodes.
+  // SECURITY: Look up the environment from the authenticated node's placement record —
+  // never trust the environmentId from the request body (IDOR risk).
   if (node.nodeRole === 'deployment' && body.deployment) {
     const appliedSeq = body.deployment.appliedSeq ?? 0;
-    const envId = body.deployment.environmentId;
 
-    // Find the latest release version for this node's environment
-    if (envId) {
-      try {
+    // Resolve environment from the node's placement record (node_id is indexed)
+    try {
+      const envRow = await db
+        .select({ envId: schema.deploymentEnvironments.id })
+        .from(schema.deploymentEnvironments)
+        .where(eq(schema.deploymentEnvironments.nodeId, nodeId))
+        .limit(1);
+
+      const envId = envRow[0]?.envId;
+
+      if (envId) {
         const latestRelease = await db
           .select({ version: schema.deploymentReleases.version })
           .from(schema.deploymentReleases)
@@ -274,13 +283,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         if (latestRelease[0] && latestRelease[0].version > appliedSeq) {
           response.pendingReleaseSeq = latestRelease[0].version;
         }
-      } catch (err) {
-        log.warn('heartbeat.deploy_release_lookup_failed', {
-          nodeId,
-          environmentId: envId,
-          error: String(err),
-        });
       }
+    } catch (err) {
+      log.warn('heartbeat.deploy_release_lookup_failed', {
+        nodeId,
+        error: String(err),
+      });
     }
 
     // Include deploy signing public key for key refresh
