@@ -127,6 +127,7 @@ write_files:
       Environment=PROVIDER={{ provider }}
       Environment=DEVCONTAINER_CACHE_ENABLED={{ devcontainer_cache_enabled }}
       Environment=ROLE={{ role }}
+      Environment=NODE_ROLE={{ role }}
       Environment=ENVIRONMENT_ID={{ environment_id }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
