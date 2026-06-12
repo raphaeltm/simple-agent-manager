@@ -47,6 +47,10 @@ This matters because the tools write durable project knowledge and policy. Silen
 - PASS after post-review follow-up: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-knowledge-policy-tools.test.ts tests/unit/policy-system.test.ts tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-error-handling.test.ts` (4 files / 236 tests)
 - PASS after post-review follow-up: `pnpm --filter @simple-agent-manager/api typecheck`
 - PASS after post-review follow-up: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
+- PASS after test-engineer follow-up: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-knowledge-policy-tools.test.ts` (1 file / 10 tests)
+- PASS after test-engineer follow-up: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-knowledge-policy-tools.test.ts tests/unit/policy-system.test.ts tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-error-handling.test.ts` (4 files / 237 tests)
+- PASS after test-engineer follow-up: `pnpm --filter @simple-agent-manager/api typecheck`
+- PASS after test-engineer follow-up: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
 - PASS: `pnpm --filter @simple-agent-manager/api typecheck`
 - PASS: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
 - PASS: `pnpm test` (root; API 308 files / 5,223 tests, web 178 files / 2,294 tests)
@@ -58,6 +62,7 @@ This matters because the tools write durable project knowledge and policy. Silen
 - PASS: task-completion-validator task `01KTWVQNPAEB2DS8EHNMVNY1PJ` found all planned work covered with no critical/high findings.
 - PASS/WARN: cloudflare-specialist task `01KTWVR0T5014HXCH1BM4GQXAY` found no critical/high Worker/Hono/DO boundary issues. Low findings for policy confidence finite-number validation and missing route assertions were addressed in follow-up code/tests; remaining low observations are pre-existing or non-blocking.
 - PASS/WARN: constitution-validator task `01KTWVRC9VGTP7BPB2FDNPFEG8` found no blocking Principle XI violations. Low observations about knowledge default confidence and description literals are non-blocking for this scoped remediation.
+- PASS/WARN: test-engineer task `01KTWVRQ1P5G1PDMPV11V7NQSH` found no blocking issues. Medium coverage gaps for `relate_knowledge` invalid relation type, `add_policy` invalid source/confidence bounds, and `add_policy` happy path arguments were addressed in follow-up route tests.
 
 ## References
 

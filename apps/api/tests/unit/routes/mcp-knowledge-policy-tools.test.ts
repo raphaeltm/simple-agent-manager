@@ -218,14 +218,29 @@ describe('MCP knowledge and policy route tools', () => {
       relationType: 'adjacent',
     }), 'Invalid relationType');
 
+    await expectInvalidParams(await mcpPost(app, 'relate_knowledge', {
+      sourceEntity: 'CodeStyle',
+      targetEntity: 'Tests',
+      relationType: 'adjacent',
+    }), 'Invalid relationType');
+
     await expectInvalidParams(await mcpPost(app, 'list_policies', {
       category: 'all',
     }), 'category must be one of');
+
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: 'Validate inputs',
+      content: 'Reject malformed source',
+      source: 'guessed',
+    }), 'source must be one of');
 
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
     expect(projectDataService.listKnowledgeEntities).not.toHaveBeenCalled();
     expect(projectDataService.getKnowledgeEntityByName).not.toHaveBeenCalled();
     expect(projectDataService.listPolicies).not.toHaveBeenCalled();
+    expect(projectDataService.createKnowledgeRelation).not.toHaveBeenCalled();
+    expect(projectDataService.createPolicy).not.toHaveBeenCalled();
   });
 
   it('rejects confidence values outside 0..1 instead of clamping', async () => {
@@ -253,10 +268,41 @@ describe('MCP knowledge and policy route tools', () => {
       confidence: 'high',
     }), 'confidence must be a number between 0.0 and 1.0');
 
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: 'Validate inputs',
+      content: 'Reject out-of-range confidence',
+      confidence: 1.5,
+    }), 'confidence must be a number between 0.0 and 1.0');
+
     expect(projectDataService.addKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
     expect(projectDataService.updateKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.createPolicy).not.toHaveBeenCalled();
+  });
+
+  it('passes sanitized and validated add_policy values to ProjectData', async () => {
+    const res = await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: '  Validate inputs  ',
+      content: '  Reject malformed\x01 JSON-RPC params  ',
+      source: 'explicit',
+      confidence: 0.8,
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error).toBeUndefined();
+    expect(projectDataService.createPolicy).toHaveBeenCalledWith(
+      mockEnv,
+      'proj-456',
+      'rule',
+      'Validate inputs',
+      'Reject malformed JSON-RPC params',
+      'explicit',
+      'task-123',
+      0.8,
+    );
   });
 
   it('rejects invalid typed filters before querying services', async () => {
