@@ -48,7 +48,7 @@ export function collectSecretNames(manifest: DeploymentManifest): string[] {
       }
     }
   }
-  return Array.from(names).sort();
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
 
 function isSecretRef(val: EnvValue): val is { secret: string } {
@@ -93,78 +93,94 @@ function resolveEnvValue(
  *
  * Throws if any secret reference cannot be resolved (fail-fast, doc 07).
  */
+interface ServiceBuildContext {
+  volumeRoot: string;
+  defaultMemMb: number;
+  resolvedSecrets: Record<string, string>;
+  environmentId: string;
+  releaseId: string;
+}
+
+function buildService(
+  name: string,
+  svc: DeploymentManifest['services'][string],
+  buildCtx: ServiceBuildContext,
+  missingSecrets: Set<string>,
+): Record<string, unknown> {
+  const service: Record<string, unknown> = {};
+
+  // Image — compose expects a single string
+  service.image = `${svc.image.registry}/${svc.image.repository}@${svc.image.digest}`;
+
+  // Command
+  if (svc.command) {
+    service.command = svc.command;
+  }
+
+  // Environment — resolve literal strings and secret references
+  if (Object.keys(svc.env).length > 0) {
+    const env: Record<string, string> = {};
+    for (const [key, val] of Object.entries(svc.env)) {
+      const resolved = resolveEnvValue(val, buildCtx.resolvedSecrets, missingSecrets);
+      if (resolved !== undefined) {
+        env[key] = resolved;
+      }
+    }
+    service.environment = env;
+  }
+
+  // Volumes — bind named volumes under the host volume root
+  if (svc.volumes.length > 0) {
+    service.volumes = svc.volumes.map(
+      (v) => `${buildCtx.volumeRoot}/${v.name}:${v.mountPath}`,
+    );
+  }
+
+  // Deploy: resource limits
+  const memMb = svc.resources?.memoryLimitMb ?? buildCtx.defaultMemMb;
+  const cpuLimit = svc.resources?.cpuLimit;
+  const limits: Record<string, string> = { memory: `${memMb}M` };
+  if (cpuLimit != null) {
+    limits.cpus = cpuLimit.toString();
+  }
+  service.deploy = { resources: { limits } };
+
+  // Restart policy
+  service.restart = 'unless-stopped';
+
+  // Labels
+  service.labels = {
+    'sam.environmentId': buildCtx.environmentId,
+    'sam.releaseId': buildCtx.releaseId,
+    'sam.service': name,
+  };
+
+  // Network
+  service.networks = ['sam-internal'];
+
+  return service;
+}
+
 export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderContext): string {
-  const volumeRoot = ctx.volumeRoot ?? DEFAULT_VOLUME_ROOT;
-  const defaultMemMb = ctx.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB;
-  const resolvedSecrets = ctx.resolvedSecrets ?? {};
+  const buildCtx: ServiceBuildContext = {
+    volumeRoot: ctx.volumeRoot ?? DEFAULT_VOLUME_ROOT,
+    defaultMemMb: ctx.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB,
+    resolvedSecrets: ctx.resolvedSecrets ?? {},
+    environmentId: ctx.environmentId,
+    releaseId: ctx.releaseId,
+  };
 
-  // Build the Compose document as a plain object, then stringify via yaml library.
   const doc: Record<string, unknown> = {};
-
-  // -- services --
   const services: Record<string, Record<string, unknown>> = {};
-
-  // Collect all missing secrets across all services for a single error message
   const missingSecrets = new Set<string>();
 
   for (const [name, svc] of Object.entries(manifest.services)) {
-    const service: Record<string, unknown> = {};
-
-    // Image — compose expects a single string
-    service.image = `${svc.image.registry}/${svc.image.repository}@${svc.image.digest}`;
-
-    // Command
-    if (svc.command) {
-      service.command = svc.command;
-    }
-
-    // Environment — resolve literal strings and secret references
-    if (Object.keys(svc.env).length > 0) {
-      const env: Record<string, string> = {};
-      for (const [key, val] of Object.entries(svc.env)) {
-        const resolved = resolveEnvValue(val, resolvedSecrets, missingSecrets);
-        if (resolved !== undefined) {
-          env[key] = resolved;
-        }
-      }
-      service.environment = env;
-    }
-
-    // Volumes — bind named volumes under the host volume root
-    if (svc.volumes.length > 0) {
-      service.volumes = svc.volumes.map(
-        (v) => `${volumeRoot}/${v.name}:${v.mountPath}`,
-      );
-    }
-
-    // Deploy: resource limits
-    const memMb = svc.resources?.memoryLimitMb ?? defaultMemMb;
-    const cpuLimit = svc.resources?.cpuLimit;
-    const limits: Record<string, string> = { memory: `${memMb}M` };
-    if (cpuLimit != null) {
-      limits.cpus = cpuLimit.toString();
-    }
-    service.deploy = { resources: { limits } };
-
-    // Restart policy
-    service.restart = 'unless-stopped';
-
-    // Labels
-    service.labels = {
-      'sam.environmentId': ctx.environmentId,
-      'sam.releaseId': ctx.releaseId,
-      'sam.service': name,
-    };
-
-    // Network
-    service.networks = ['sam-internal'];
-
-    services[name] = service;
+    services[name] = buildService(name, svc, buildCtx, missingSecrets);
   }
 
   // Fail fast if any secrets are missing (doc 07)
   if (missingSecrets.size > 0) {
-    const names = Array.from(missingSecrets).sort();
+    const names = Array.from(missingSecrets).sort((a, b) => a.localeCompare(b));
     throw new Error(
       `Missing secrets for render: ${names.join(', ')}. ` +
       `Set these secrets on the environment before creating a release.`,
