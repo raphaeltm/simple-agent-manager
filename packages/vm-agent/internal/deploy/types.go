@@ -49,6 +49,7 @@ type ApplyPayload struct {
 	Seq           int64  `json:"seq"`
 	ExpiresAt     int64  `json:"expiresAt"` // Unix timestamp
 	ComposeYAML   string `json:"composeYaml"`
+	Routes        []RouteTarget `json:"routes,omitempty"`
 	Signature     string `json:"signature"` // Base64-encoded Ed25519 signature
 
 	// TODO: Registry credentials for private image pulls.
@@ -56,6 +57,14 @@ type ApplyPayload struct {
 	// before pulling images. Currently stubbed pending the parallel
 	// registry-credential-service work (PR in-flight).
 	RegistryCredentials *RegistryCredentials `json:"registryCredentials,omitempty"`
+}
+
+// RouteTarget maps a public hostname to the loopback port published by Compose.
+type RouteTarget struct {
+	Hostname      string `json:"hostname"`
+	Service       string `json:"service"`
+	ContainerPort int    `json:"containerPort"`
+	HostPort      int    `json:"hostPort"`
 }
 
 // RegistryCredentials holds credentials for pulling private container images.
@@ -67,11 +76,12 @@ type RegistryCredentials struct {
 }
 
 // SignablePayload is the canonical byte representation that gets signed.
-// The signature covers: environmentId + nodeId + seq + expiresAt + sha256(composeYaml).
+// The signature covers: environmentId + nodeId + seq + expiresAt + sha256(composeYaml) + sha256(routes).
 type SignablePayload struct {
 	EnvironmentID string `json:"environmentId"`
 	NodeID        string `json:"nodeId"`
 	Seq           int64  `json:"seq"`
 	ExpiresAt     int64  `json:"expiresAt"`
 	ComposeHash   string `json:"composeHash"` // hex-encoded SHA-256 of ComposeYAML
+	RoutesHash    string `json:"routesHash"`   // hex-encoded SHA-256 of canonical routes JSON
 }

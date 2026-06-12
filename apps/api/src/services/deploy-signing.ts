@@ -20,6 +20,7 @@ interface SignablePayload {
   seq: number;
   expiresAt: number;
   composeYaml: string;
+  routes?: unknown;
 }
 
 /**
@@ -36,12 +37,20 @@ async function buildSignableBytes(p: SignablePayload): Promise<Uint8Array> {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
+  const routesBytes = new TextEncoder().encode(JSON.stringify(p.routes ?? []));
+  const routesHashBuffer = await crypto.subtle.digest('SHA-256', routesBytes);
+  const routesHashArray = new Uint8Array(routesHashBuffer);
+  const routesHash = Array.from(routesHashArray)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
   const canonical = JSON.stringify({
     environmentId: p.environmentId,
     nodeId: p.nodeId,
     seq: p.seq,
     expiresAt: p.expiresAt,
     composeHash,
+    routesHash,
   });
 
   return new TextEncoder().encode(canonical);

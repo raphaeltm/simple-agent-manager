@@ -70,6 +70,31 @@ runcmd:
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
+  - 'logger -t sam-boot "PHASE START: caddy-setup"'
+  - |
+    ROLE="{{ role }}"
+    if [ "$ROLE" = "deployment" ]; then
+      logger -t sam-boot "Installing Caddy for deployment node routing"
+      mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
+
+      if ! command -v caddy >/dev/null 2>&1; then
+        apt-get update 2>&1 | logger -t sam-boot
+        apt-get install -y debian-keyring debian-archive-keyring apt-transport-https gpg curl 2>&1 | logger -t sam-boot
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update 2>&1 | logger -t sam-boot
+        apt-get install -y caddy 2>&1 | logger -t sam-boot
+      fi
+
+      chown -R caddy:caddy /var/lib/caddy /var/log/caddy || true
+      systemctl enable caddy
+      systemctl reload-or-restart caddy
+      logger -t sam-boot "Caddy ready for deployment node routing"
+    else
+      logger -t sam-boot "Skipping Caddy setup for ROLE=$ROLE"
+    fi
+  - 'logger -t sam-boot "PHASE END: caddy-setup"'
+
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
@@ -109,6 +134,12 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+
+  - path: /etc/caddy/Caddyfile
+    permissions: '0644'
+    content: |
+      # Managed by SAM deployment agent.
+      # Release applies replace this file and run caddy reload.
 
   - path: /etc/workspace/config.json
     content: |

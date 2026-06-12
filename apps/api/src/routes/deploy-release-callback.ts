@@ -17,7 +17,9 @@ import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
+import { buildDeploymentRouteTargets } from '../services/deployment-routing';
 import { verifyCallbackToken } from '../services/jwt';
+import { upsertAppRouteDNSRecord } from '../services/dns';
 
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -67,7 +69,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   // Look up the node to get its userId for authorization
   const nodeRows = await db
-    .select({ userId: schema.nodes.userId })
+    .select({ userId: schema.nodes.userId, ipAddress: schema.nodes.ipAddress })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
@@ -119,10 +121,27 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const release = releaseRows[0]!;
   const manifest = JSON.parse(release.manifest);
 
+  const routes = buildDeploymentRouteTargets(manifest, {
+    environmentId,
+    baseDomain: c.env.BASE_DOMAIN,
+    routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+    routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+  });
+
+  if (routes.length > 0) {
+    const nodeIp = nodeRows[0]!.ipAddress;
+    if (!nodeIp) {
+      throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
+    }
+
+    await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
+  }
+
   // Render the Compose YAML from the manifest
   const composeYaml = renderCompose(manifest, {
     environmentId,
     releaseId: release.id,
+    routeTargets: routes,
   });
 
   // Build the expiry (1 hour from now)
@@ -136,6 +155,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       seq,
       expiresAt,
       composeYaml,
+      routes,
     },
     c.env,
   );
@@ -145,6 +165,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     environmentId,
     seq,
     releaseId: release.id,
+    routeCount: routes.length,
   });
 
   return c.json({
@@ -153,6 +174,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     expiresAt,
     composeYaml,
+    routes,
     signature,
     registryCredentials: null, // TODO: parallel work — registry credential minting
   });
