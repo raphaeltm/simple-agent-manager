@@ -9,9 +9,12 @@ describe('deployment release callback route ordering', () => {
 
     const deployReleaseIndex = source.indexOf("app.route('/api/nodes', deployReleaseCallbackRoute)");
     const nodesIndex = source.indexOf("app.route('/api/nodes', nodesRoutes)");
+    const nodeLifecycleIndex = source.indexOf("app.route('/api/nodes', nodeLifecycleRoutes)");
 
     expect(deployReleaseIndex).toBeGreaterThan(-1);
     expect(nodesIndex).toBeGreaterThan(-1);
+    expect(nodeLifecycleIndex).toBeGreaterThan(-1);
     expect(deployReleaseIndex).toBeLessThan(nodesIndex);
+    expect(nodesIndex).toBeLessThan(nodeLifecycleIndex);
   });
 });
