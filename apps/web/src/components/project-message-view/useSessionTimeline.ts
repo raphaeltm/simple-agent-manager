@@ -45,7 +45,7 @@ export function useSessionTimeline(
   }, [enabled, fetchEvents]);
 
   const entries = useMemo(
-    () => buildSessionTimeline(messages, activityEvents, showContext, messageIndexMap),
+    () => buildSessionTimeline(messages ?? [], activityEvents, showContext, messageIndexMap),
     [messages, activityEvents, showContext, messageIndexMap]
   );
 

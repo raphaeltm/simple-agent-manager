@@ -174,7 +174,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // Build message-id → index map for jump-to-message from timeline
   const messageIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    lc.messages.forEach((msg, i) => map.set(msg.id, i));
+    (lc.messages ?? []).forEach((msg, i) => map.set(msg.id, i));
     return map;
   }, [lc.messages]);
 
