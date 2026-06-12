@@ -413,8 +413,9 @@ export async function listActivityEvents(
   before: number | null = null,
   sessionId: string | null = null
 ): Promise<{ events: Record<string, unknown>[]; hasMore: boolean }> {
-  const stub = await getStub(env, projectId);
-  return stub.listActivityEvents(eventType, limit, before, sessionId);
+  return callProjectDataWithRetry(env, projectId, 'listActivityEvents', (stub) =>
+    stub.listActivityEvents(eventType, limit, before, sessionId)
+  );
 }
 
 // =========================================================================

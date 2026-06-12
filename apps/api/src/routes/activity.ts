@@ -38,7 +38,12 @@ activityRoutes.get('/', async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const eventType = c.req.query('eventType')?.trim() || null;
-  const sessionId = c.req.query('sessionId')?.trim() || null;
+  const rawSessionId = c.req.query('sessionId')?.trim() || null;
+  const SESSION_ID_RE = /^[\w-]{1,64}$/;
+  if (rawSessionId !== null && !SESSION_ID_RE.test(rawSessionId)) {
+    throw errors.badRequest('sessionId must be a valid identifier');
+  }
+  const sessionId = rawSessionId;
   const beforeParam = c.req.query('before')?.trim();
   const limitParam = c.req.query('limit')?.trim();
 
@@ -48,6 +53,9 @@ activityRoutes.get('/', async (c) => {
   }
 
   const requestedLimit = limitParam ? Number.parseInt(limitParam, 10) : 50;
+  if (limitParam && !Number.isFinite(requestedLimit)) {
+    throw errors.badRequest('limit must be a valid integer');
+  }
   const limit = Math.min(Math.max(requestedLimit, 1), 100);
 
   const result = await projectDataService.listActivityEvents(

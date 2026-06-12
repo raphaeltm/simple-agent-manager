@@ -139,4 +139,96 @@ describe('buildSessionTimeline', () => {
 
     expect(result[0]).toMatchObject({ kind: 'user_message', messageIndex: 42 });
   });
+
+  it('returns messageIndex -1 when message ID is absent from index map', () => {
+    const messages: ChatMessageResponse[] = [
+      makeMessage({ id: 'm1', content: 'Hello', createdAt: 1000 }),
+    ];
+    const result = buildSessionTimeline(messages, [], false, new Map());
+
+    expect(result[0]).toMatchObject({ kind: 'user_message', messageIndex: -1 });
+  });
+
+  it('handles non-string message content', () => {
+    const messages: ChatMessageResponse[] = [
+      makeMessage({ id: 'm1', content: 123 as unknown as string, createdAt: 1000 }),
+    ];
+    const result = buildSessionTimeline(messages, [], false, new Map([['m1', 0]]));
+    // Non-string content produces empty text which is skipped
+    expect(result).toHaveLength(0);
+  });
+
+  it('maps all event types to correct titles', () => {
+    const eventTypes = [
+      { eventType: 'workspace.created', expectedTitle: 'Workspace created' },
+      { eventType: 'workspace.stopped', expectedTitle: 'Workspace stopped' },
+      { eventType: 'workspace.restarted', expectedTitle: 'Workspace restarted' },
+      { eventType: 'session.started', expectedTitle: 'Session started' },
+      { eventType: 'session.stopped', expectedTitle: 'Session stopped' },
+      { eventType: 'task.created', expectedTitle: 'Task created' },
+      { eventType: 'task.delegated', expectedTitle: 'Task delegated' },
+    ];
+    const events = eventTypes.map((et, i) =>
+      makeEvent({ id: `e${i}`, eventType: et.eventType, createdAt: i * 1000 })
+    );
+    const result = buildSessionTimeline([], events, true, new Map());
+
+    for (let i = 0; i < eventTypes.length; i++) {
+      expect(result[i]).toMatchObject({
+        kind: 'system_event',
+        title: eventTypes[i].expectedTitle,
+      });
+    }
+  });
+
+  it('maps all event types to correct severity', () => {
+    const expectations = [
+      { eventType: 'workspace.created', severity: 'info' },
+      { eventType: 'workspace.stopped', severity: 'warning' },
+      { eventType: 'workspace.restarted', severity: 'info' },
+      { eventType: 'session.started', severity: 'info' },
+      { eventType: 'session.stopped', severity: 'warning' },
+      { eventType: 'task.created', severity: 'info' },
+      { eventType: 'task.delegated', severity: 'info' },
+    ];
+    const events = expectations.map((et, i) =>
+      makeEvent({ id: `e${i}`, eventType: et.eventType, createdAt: i * 1000 })
+    );
+    const result = buildSessionTimeline([], events, true, new Map());
+
+    for (let i = 0; i < expectations.length; i++) {
+      expect(result[i]).toMatchObject({
+        kind: 'system_event',
+        severity: expectations[i].severity,
+      });
+    }
+  });
+
+  it('maps task.status_changed with error status to error severity', () => {
+    const events: ActivityEventResponse[] = [
+      makeEvent({ id: 'e1', eventType: 'task.status_changed', payload: { toStatus: 'error' }, createdAt: 1000 }),
+    ];
+    const result = buildSessionTimeline([], events, true, new Map());
+    expect(result[0]).toMatchObject({ severity: 'error', title: 'Task error' });
+  });
+
+  it('handles task.status_changed with null payload', () => {
+    const events: ActivityEventResponse[] = [
+      makeEvent({ id: 'e1', eventType: 'task.status_changed', payload: null, createdAt: 1000 }),
+    ];
+    const result = buildSessionTimeline([], events, true, new Map());
+    expect(result[0]).toMatchObject({ severity: 'info', title: 'Task status changed' });
+  });
+
+  it('falls back to raw event type for unknown event types', () => {
+    const events: ActivityEventResponse[] = [
+      makeEvent({ id: 'e1', eventType: 'unknown.event', createdAt: 1000 }),
+    ];
+    const result = buildSessionTimeline([], events, true, new Map());
+    expect(result[0]).toMatchObject({
+      kind: 'system_event',
+      title: 'unknown.event',
+      severity: 'info',
+    });
+  });
 });

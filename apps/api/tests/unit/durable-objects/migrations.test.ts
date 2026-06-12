@@ -207,7 +207,8 @@ describe('DO Migrations', () => {
       // handoff_packets: 3 (mission_id, from_task_id, to_task_id) from migration 018
       // project_policies: 2 (active, category+active) from migration 019
       // session_attention_markers: 2 (active, expiry) from migration 020
-      expect(indexes.length).toBe(39);
+      // activity_events: 1 (session_id, created_at partial) from migration 022
+      expect(indexes.length).toBe(40);
     });
   });
 });

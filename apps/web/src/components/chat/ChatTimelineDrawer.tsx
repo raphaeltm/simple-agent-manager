@@ -57,7 +57,7 @@ export function ChatTimelineDrawer({
       <div
         className="hidden md:block fixed inset-0 glass-backdrop-dim z-40"
         onClick={onClose}
-        aria-hidden
+        aria-hidden="true"
       />
 
       {/* Panel */}
@@ -81,6 +81,7 @@ export function ChatTimelineDrawer({
             variant="ghost"
             size="sm"
             onClick={onToggleContext}
+            aria-pressed={showContext}
             className={showContext ? 'text-fg-primary' : 'text-fg-muted'}
           >
             <AlignLeft size={14} className="mr-1" />
@@ -90,7 +91,7 @@ export function ChatTimelineDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded hover:bg-bg-hover text-fg-muted hover:text-fg-primary transition-colors"
+            className="p-1.5 rounded hover:bg-bg-hover text-fg-muted hover:text-fg-primary transition-colors"
             aria-label="Close timeline"
           >
             <X size={16} />
