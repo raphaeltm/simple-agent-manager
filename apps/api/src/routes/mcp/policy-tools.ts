@@ -84,7 +84,7 @@ export async function handleAddPolicy(
   // Validate confidence (optional)
   let confidence = limits.defaultConfidence;
   if (params.confidence !== undefined) {
-    if (typeof params.confidence !== 'number' || params.confidence < 0 || params.confidence > 1) {
+    if (typeof params.confidence !== 'number' || !Number.isFinite(params.confidence) || params.confidence < 0 || params.confidence > 1) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'confidence must be a number between 0.0 and 1.0');
     }
     confidence = params.confidence;
@@ -223,7 +223,7 @@ export async function handleUpdatePolicy(
   }
 
   if (params.confidence !== undefined) {
-    if (typeof params.confidence !== 'number' || params.confidence < 0 || params.confidence > 1) {
+    if (typeof params.confidence !== 'number' || !Number.isFinite(params.confidence) || params.confidence < 0 || params.confidence > 1) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'confidence must be a number between 0.0 and 1.0');
     }
     updates.confidence = params.confidence;

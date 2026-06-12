@@ -16,12 +16,16 @@ vi.mock('../../../src/services/project-data', () => ({
   createKnowledgeRelation: vi.fn(),
   createPolicy: vi.fn(),
   flagKnowledgeContradiction: vi.fn(),
+  getKnowledgeEntity: vi.fn(),
   getKnowledgeEntityByName: vi.fn(),
+  getKnowledgeObservationsForEntity: vi.fn(),
+  getKnowledgeRelated: vi.fn(),
   getPolicy: vi.fn(),
   getRelevantKnowledge: vi.fn(),
   listKnowledgeEntities: vi.fn(),
   listPolicies: vi.fn(),
   searchKnowledgeObservations: vi.fn(),
+  updatePolicy: vi.fn(),
   updateKnowledgeObservation: vi.fn(),
 }));
 
@@ -185,8 +189,12 @@ describe('MCP knowledge and policy route tools', () => {
       content: 'Always validate inputs',
     }), 'title is required');
 
+    await expectInvalidParams(await mcpPost(app, 'get_knowledge', {}), 'Either entityName or entityId is required');
+
     expect(projectDataService.addKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.createPolicy).not.toHaveBeenCalled();
+    expect(projectDataService.getKnowledgeEntity).not.toHaveBeenCalled();
+    expect(projectDataService.getKnowledgeEntityByName).not.toHaveBeenCalled();
   });
 
   it('rejects invalid enum values instead of defaulting or broadening filters', async () => {
@@ -238,9 +246,17 @@ describe('MCP knowledge and policy route tools', () => {
       confidence: -1,
     }), 'confidence must be a number between 0.0 and 1.0');
 
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: 'Validate inputs',
+      content: 'Reject malformed confidence',
+      confidence: 'high',
+    }), 'confidence must be a number between 0.0 and 1.0');
+
     expect(projectDataService.addKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
     expect(projectDataService.updateKnowledgeObservation).not.toHaveBeenCalled();
+    expect(projectDataService.createPolicy).not.toHaveBeenCalled();
   });
 
   it('rejects invalid typed filters before querying services', async () => {
@@ -258,9 +274,14 @@ describe('MCP knowledge and policy route tools', () => {
       limit: 'many',
     }), 'limit must be a number');
 
+    await expectInvalidParams(await mcpPost(app, 'update_policy', {
+      policyId: 'policy-1',
+    }), 'At least one update field must be provided');
+
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
     expect(projectDataService.getRelevantKnowledge).not.toHaveBeenCalled();
     expect(projectDataService.listPolicies).not.toHaveBeenCalled();
+    expect(projectDataService.updatePolicy).not.toHaveBeenCalled();
   });
 
   it('passes sanitized and validated add_knowledge values to ProjectData', async () => {

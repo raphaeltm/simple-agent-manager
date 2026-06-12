@@ -44,11 +44,20 @@ This matters because the tools write durable project knowledge and policy. Silen
 
 - PASS: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-knowledge-policy-tools.test.ts tests/unit/policy-system.test.ts`
 - PASS: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-error-handling.test.ts`
+- PASS after post-review follow-up: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-knowledge-policy-tools.test.ts tests/unit/policy-system.test.ts tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-error-handling.test.ts` (4 files / 236 tests)
+- PASS after post-review follow-up: `pnpm --filter @simple-agent-manager/api typecheck`
+- PASS after post-review follow-up: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
 - PASS: `pnpm --filter @simple-agent-manager/api typecheck`
 - PASS: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
 - PASS: `pnpm test` (root; API 308 files / 5,223 tests, web 178 files / 2,294 tests)
 - PASS: `pnpm build` (root; existing Vite chunk-size warnings only)
 - BLOCKED locally: `pnpm exec vitest run --config vitest.workers.config.ts tests/workers/policy-do.test.ts` failed before loading tests because `@cloudflare/workerd-linux-64@1.20260329.1` repeatedly segfaulted during worker-pool startup. The broader script form also crashed with no tests executed after starting the worker pool.
+
+## Review Notes
+
+- PASS: task-completion-validator task `01KTWVQNPAEB2DS8EHNMVNY1PJ` found all planned work covered with no critical/high findings.
+- PASS/WARN: cloudflare-specialist task `01KTWVR0T5014HXCH1BM4GQXAY` found no critical/high Worker/Hono/DO boundary issues. Low findings for policy confidence finite-number validation and missing route assertions were addressed in follow-up code/tests; remaining low observations are pre-existing or non-blocking.
+- PASS/WARN: constitution-validator task `01KTWVRC9VGTP7BPB2FDNPFEG8` found no blocking Principle XI violations. Low observations about knowledge default confidence and description literals are non-blocking for this scoped remediation.
 
 ## References
 
