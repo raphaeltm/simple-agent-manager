@@ -18,6 +18,8 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | `ENCRYPTION_KEY`           | AES-256-GCM key for credential encryption (auto-generated)                                    |
 | `JWT_PRIVATE_KEY`          | RSA-2048 private key for signing tokens (auto-generated)                                      |
 | `JWT_PUBLIC_KEY`           | RSA-2048 public key for token verification (auto-generated)                                   |
+| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 private key for signing deployment apply payloads                                     |
+| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 public key delivered to deployment nodes for apply payload verification               |
 | `CF_API_TOKEN`             | Cloudflare API token for infrastructure, DNS, observability, AI Gateway, and admin log access |
 | `CF_ZONE_ID`               | Cloudflare zone ID for DNS record management                                                  |
 | `CF_ACCOUNT_ID`            | Cloudflare account ID                                                                         |
@@ -183,6 +185,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 | Variable                       | Default | Description                                           |
 | ------------------------------ | ------- | ----------------------------------------------------- |
+| `DEPLOY_PAYLOAD_EXPIRY_SECONDS` | `3600`  | Signed deployment apply payload lifetime              |
 | `DEPLOYMENT_ROUTE_PORT_BASE`   | `35000` | First node-local loopback port reserved for app routes |
 | `DEPLOYMENT_ROUTE_PORT_SPAN`   | `1000`  | Number of loopback ports reserved per deployment node |
 

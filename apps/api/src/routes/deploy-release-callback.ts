@@ -14,6 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
 import { renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
@@ -22,6 +23,7 @@ import { upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
+const DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS = 3_600;
 
 /**
  * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
@@ -144,8 +146,10 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     routeTargets: routes,
   });
 
-  // Build the expiry (1 hour from now)
-  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+  const expiresAt = Math.floor(Date.now() / 1000) + parsePositiveInt(
+    c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS,
+    DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS,
+  );
 
   // Sign the payload with the deploy signing key
   const signature = await signDeployPayload(
