@@ -70,6 +70,12 @@ runcmd:
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
+  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
+  - systemctl daemon-reload
+  - systemctl enable vm-agent
+  - systemctl start vm-agent
+  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
+
   - 'logger -t sam-boot "PHASE START: caddy-setup"'
   - |
     ROLE="{{ role }}"
@@ -94,12 +100,6 @@ runcmd:
       logger -t sam-boot "Skipping Caddy setup for ROLE=$ROLE"
     fi
   - 'logger -t sam-boot "PHASE END: caddy-setup"'
-
-  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
-  - systemctl daemon-reload
-  - systemctl enable vm-agent
-  - systemctl start vm-agent
-  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
   - 'logger -t sam-boot "ALL PHASES COMPLETE"'
 
 write_files:
