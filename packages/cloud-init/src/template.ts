@@ -1,10 +1,10 @@
 /**
  * Cloud-init template for node provisioning.
  *
- * ULTRA-MINIMAL: Cloud-init ONLY downloads and starts the VM agent.
- * The agent handles ALL other provisioning (Docker, Node.js, firewall, etc.)
- * and heartbeats immediately on start, giving the control plane visibility
- * within seconds of boot.
+ * ULTRA-MINIMAL: Cloud-init downloads and starts the VM agent, then performs
+ * role-specific bootstrap that must exist before the agent can serve traffic.
+ * For deployment nodes, that includes installing and enabling Caddy. The agent
+ * still handles Docker, Node.js, firewall, and release apply work.
  *
  * SECURITY: No provider/user credentials are embedded. The node agent receives
  * a callback token for authenticated control-plane check-ins and requests.
@@ -25,10 +25,10 @@ users:
 
 runcmd:
   # =====================================================================
-  # Cloud-init does ONE thing: download and start the VM agent.
-  # The agent handles ALL provisioning (Docker, firewall, Node.js, etc.)
-  # and starts heartbeating immediately. No packages section — curl is
-  # pre-installed on all Hetzner Ubuntu images.
+  # Cloud-init keeps bootstrap minimal: download/start vm-agent, then perform
+  # role-specific service setup required before traffic can be served. The
+  # agent handles Docker, firewall, Node.js, release apply, and heartbeats
+  # immediately for control-plane visibility.
   # =====================================================================
 
   # Disable automatic OS upgrades — ephemeral VMs gain nothing from them
