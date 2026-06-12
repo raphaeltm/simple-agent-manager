@@ -1790,3 +1790,114 @@ describe('swap file configuration', () => {
     expect(sysctlFile.content.trim()).toBe('vm.swappiness=60');
   });
 });
+
+// =============================================================================
+// Deployment Role Support
+// =============================================================================
+
+describe('deployment role support', () => {
+  it('sets ROLE=deployment and ENVIRONMENT_ID in vm-agent systemd unit', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-abc123' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const unitFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service',
+    );
+    expect(unitFile).toBeDefined();
+    expect(unitFile.content).toContain('Environment=ROLE=deployment');
+    expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=env-abc123');
+  });
+
+  it('leaves ROLE and ENVIRONMENT_ID empty when not specified', () => {
+    const config = generateCloudInit(
+      baseVariables(),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const unitFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service',
+    );
+    expect(unitFile).toBeDefined();
+    // Empty string values — vm-agent ignores empty env vars
+    expect(unitFile.content).toContain('Environment=ROLE=\n');
+    expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=\n');
+  });
+
+  it('generates valid YAML with deployment role set', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false },
+    );
+
+    // Must parse without error
+    const parsed = YAML.parse(config);
+    expect(parsed.hostname).toBe('sam-test-node');
+
+    // Verify config stays within 32KB limit
+    const sizeBytes = new TextEncoder().encode(config).length;
+    expect(sizeBytes).toBeLessThanOrEqual(32 * 1024);
+  });
+
+  it('rejects invalid role values', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'admin' })),
+    ).toThrow('role');
+
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'worker' })),
+    ).toThrow('role');
+  });
+
+  it('accepts valid role values', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'workspace' })),
+    ).not.toThrow();
+
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'deployment' })),
+    ).not.toThrow();
+  });
+
+  it('rejects environmentId with shell metacharacters', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-123; rm -rf /' })),
+    ).toThrow('environmentId');
+
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-$(whoami)' })),
+    ).toThrow('environmentId');
+  });
+
+  it('accepts valid environmentId values', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-abc123' })),
+    ).not.toThrow();
+
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'ENV_TEST-123_abc' })),
+    ).not.toThrow();
+  });
+
+  it('accepts empty role and environmentId', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: '', environmentId: '' })),
+    ).not.toThrow();
+  });
+});
+
+describe('Docker daemon.json live-restore', () => {
+  it('includes live-restore: true for container survival during daemon restarts', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+    const daemonJson = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/docker/daemon.json',
+    );
+    expect(daemonJson).toBeDefined();
+    const dockerConfig = JSON.parse(daemonJson.content);
+    expect(dockerConfig['live-restore']).toBe(true);
+  });
+});

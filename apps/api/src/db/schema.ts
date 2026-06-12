@@ -1839,6 +1839,12 @@ export const deploymentEnvironments = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     status: text('status').notNull().default('active'),
+    /** Node hosting this environment (one environment per node for MVP). */
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
+    provider: text('provider'),
+    /** Provider location/region for placement constraint. */
+    location: text('location'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -1853,6 +1859,7 @@ export const deploymentEnvironments = sqliteTable(
       table.name,
     ),
     projectIdIdx: index('idx_deployment_environments_project_id').on(table.projectId),
+    nodeIdIdx: index('idx_deployment_environments_node_id').on(table.nodeId),
   }),
 );
 
