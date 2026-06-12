@@ -26,6 +26,8 @@ const dnsRecordListResponseSchema = v.object({
     id: v.string(),
     name: v.string(),
     type: v.string(),
+    content: v.optional(v.string()),
+    proxied: v.optional(v.boolean()),
   })),
 });
 
@@ -195,6 +197,70 @@ export async function updateDNSRecord(
   if (!response.ok) {
     throw new Error(await readCloudflareError(response, `Failed to update DNS record: ${response.status}`));
   }
+}
+
+async function findDNSRecordByName(
+  recordName: string,
+  env: Env,
+): Promise<{ id: string; name: string; type: string; content?: string; proxied?: boolean } | null> {
+  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?type=A&name=${encodeURIComponent(recordName)}`;
+  const response = await fetchWithTimeout(searchUrl, {
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+    },
+  }, timeoutMs);
+
+  if (!response.ok) {
+    throw new Error(await readCloudflareError(response, `Failed to find DNS record: ${response.status}`));
+  }
+
+  const data = await readResponseJson(response, dnsRecordListResponseSchema, 'cloudflare.dns.find_record_by_name');
+  return data.result[0] ?? null;
+}
+
+/**
+ * Create or update a grey-cloud A record for an app route hostname.
+ *
+ * App routes intentionally use HTTP-01 ACME on the deployment node, so these
+ * records must not be proxied by Cloudflare.
+ */
+export async function upsertAppRouteDNSRecord(
+  hostname: string,
+  ip: string,
+  env: Env,
+): Promise<string> {
+  const existing = await findDNSRecordByName(hostname, env);
+  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const body = JSON.stringify({
+    type: 'A',
+    name: hostname,
+    content: ip,
+    ttl: getDnsTTL(env),
+    proxied: false,
+  });
+
+  const response = await fetchWithTimeout(
+    existing
+      ? `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${existing.id}`
+      : `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
+    {
+      method: existing ? 'PUT' : 'POST',
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    },
+    timeoutMs,
+  );
+
+  if (!response.ok) {
+    throw new Error(await readCloudflareError(response, `Failed to upsert app route DNS record: ${response.status}`));
+  }
+
+  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.upsert_app_route_record');
+  return data.result.id;
 }
 
 /**

@@ -94,12 +94,19 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 // buildSignableBytes constructs the canonical byte representation for signing.
 func buildSignableBytes(payload *ApplyPayload) []byte {
 	composeHash := sha256.Sum256([]byte(payload.ComposeYAML))
+	routes := payload.Routes
+	if routes == nil {
+		routes = []RouteTarget{}
+	}
+	routesBytes, _ := json.Marshal(routes)
+	routesHash := sha256.Sum256(routesBytes)
 	signable := SignablePayload{
 		EnvironmentID: payload.EnvironmentID,
 		NodeID:        payload.NodeID,
 		Seq:           payload.Seq,
 		ExpiresAt:     payload.ExpiresAt,
 		ComposeHash:   hex.EncodeToString(composeHash[:]),
+		RoutesHash:    hex.EncodeToString(routesHash[:]),
 	}
 	// JSON marshal with sorted keys (Go's encoding/json sorts by struct field order)
 	b, _ := json.Marshal(signable)
