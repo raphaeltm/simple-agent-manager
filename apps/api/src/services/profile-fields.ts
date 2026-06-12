@@ -1,7 +1,7 @@
 import {
+  type AgentEffort,
   DEFAULT_AGENT_EFFORT,
   isAgentEffort,
-  type AgentEffort,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';

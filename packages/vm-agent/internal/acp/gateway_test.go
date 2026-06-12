@@ -1048,9 +1048,38 @@ func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
 func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 	t.Parallel()
 
-	config, envVars := generateCodexMcpConfig(nil, nil)
+	config, envVars := generateCodexMcpConfig(nil, nil, "")
 	if config != "" {
 		t.Fatalf("expected empty config, got %q", config)
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no env vars, got %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfigWithReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig(nil, nil, "high")
+
+	if !strings.Contains(config, `model_reasoning_effort = "high"`) {
+		t.Fatalf("expected model_reasoning_effort in managed config, got %q", config)
+	}
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatal("expected sandbox mode in effort-only managed config")
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no env vars, got %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfigSkipsUnsupportedReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig(nil, nil, "max")
+
+	if config != "" {
+		t.Fatalf("expected empty config for unsupported Codex effort, got %q", config)
 	}
 	if len(envVars) != 0 {
 		t.Fatalf("expected no env vars, got %v", envVars)
@@ -1062,7 +1091,7 @@ func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, codexManagedMcpStartMarker) {
 		t.Fatal("expected managed start marker")
@@ -1099,7 +1128,7 @@ func TestGenerateCodexMcpConfigMultipleServers(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "token-1"},
 		{URL: "https://backup.example.com/mcp", Token: "token-2"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp-0]`) {
 		t.Fatal("expected first server entry")
@@ -1123,7 +1152,7 @@ func TestGenerateCodexMcpConfigServerWithoutToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
 		t.Fatal("expected server entry")
@@ -1142,7 +1171,7 @@ func TestGenerateCodexMcpConfigServerWithControlCharsRejected(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://good.example.com/mcp", Token: "good-token"},
 		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
 		t.Fatal("expected good server to be present")
@@ -1161,7 +1190,7 @@ func TestGenerateCodexMcpConfigWithProxyProvider(t *testing.T) {
 	config, envVars := generateCodexMcpConfig(nil, &codexProxyProviderConfig{
 		baseURL: "https://api.example.com/ai/v1",
 		model:   "gpt-4.1",
-	})
+	}, "")
 
 	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
 		t.Fatal("expected sandbox mode to disable Codex bubblewrap inside containers")

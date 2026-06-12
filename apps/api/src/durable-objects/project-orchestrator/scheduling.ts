@@ -297,6 +297,7 @@ async function autoDispatchSchedulableTasks(
         devcontainerConfigName: resolvedDevcontainerConfig,
         cloudProvider: resolvedProvider,
         agentProfileHint: task.agent_profile_hint ?? null,
+        effort: null,
         projectScaling: {
           taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
           maxWorkspacesPerNode: projectRow.max_workspaces_per_node ?? null,

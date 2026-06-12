@@ -1589,6 +1589,7 @@ describe('MCP Routes', () => {
         devcontainerConfigName: null,
         agentType: null,
         model: null,
+        effort: 'auto',
         permissionMode: null,
         systemPromptAppend: null,
       } as Awaited<ReturnType<typeof agentProfileService.resolveAgentProfile>>);

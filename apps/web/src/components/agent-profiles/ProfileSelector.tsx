@@ -1,4 +1,5 @@
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import type { AgentEffort, AgentProfile } from '@simple-agent-manager/shared';
+import { DEFAULT_AGENT_EFFORT } from '@simple-agent-manager/shared';
 import { type FC } from 'react';
 
 interface ProfileSelectorProps {
@@ -12,6 +13,15 @@ interface ProfileSelectorProps {
   /** HTML id for label association */
   id?: string;
 }
+
+const EFFORT_LABELS: Record<AgentEffort, string> = {
+  auto: 'auto',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
 
 /**
  * Dropdown selector for agent profiles. Shows profile name + agent type.
@@ -44,6 +54,7 @@ export const ProfileSelector: FC<ProfileSelectorProps> = ({
         <option key={profile.id} value={profile.id}>
           {profile.name}
           {profile.model ? ` · ${profile.model}` : ''}
+          {profile.effort !== DEFAULT_AGENT_EFFORT ? ` · ${EFFORT_LABELS[profile.effort]}` : ''}
           {profile.isBuiltin ? ' (built-in)' : ''}
         </option>
       ))}

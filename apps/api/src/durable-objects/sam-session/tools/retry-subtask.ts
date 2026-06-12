@@ -271,6 +271,7 @@ export async function retrySubtask(
       cloudProvider: resolvedProvider,
       taskMode: resolvedTaskMode,
       model: resolvedProfile?.model ?? agentDefaults.model,
+      effort: resolvedProfile?.effort ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? agentDefaults.permissionMode,
       opencodeProvider: null,
       opencodeBaseUrl: null,

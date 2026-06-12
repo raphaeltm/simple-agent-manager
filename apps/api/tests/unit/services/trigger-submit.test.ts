@@ -171,6 +171,7 @@ describe('submitTriggeredTask', () => {
       skillHint: 'triage',
       agentType: 'opencode',
       model: 'gpt-test',
+      effort: 'auto',
       permissionMode: null,
       systemPromptAppend: 'Profile prompt\n\nSkill prompt',
       maxTurns: null,

@@ -58,6 +58,7 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
     description: null,
     agentType: 'claude-code',
     model: 'profile-model',
+    effort: 'high',
     permissionMode: 'acceptEdits',
     systemPromptAppend: 'Profile prompt',
     maxTurns: 20,
@@ -82,6 +83,7 @@ function makeSkill(overrides: Record<string, unknown> = {}) {
     name: 'ship-it',
     systemPromptAppend: 'Skill prompt',
     model: 'skill-model',
+    effort: 'xhigh',
     vmSizeOverride: 'large',
     taskMode: 'task',
     resourceRequirementsJson: '{"minVcpu":4}',
@@ -113,6 +115,7 @@ describe('resolveSkillProfile', () => {
     expect(resolved.skillId).toBe('skill-1');
     expect(resolved.profileId).toBe('profile-1');
     expect(resolved.model).toBe('skill-model');
+    expect(resolved.effort).toBe('xhigh');
     expect(resolved.vmSizeOverride).toBe('large');
     expect(resolved.taskMode).toBe('task');
     expect(resolved.systemPromptAppend).toBe('Profile prompt\n\nSkill prompt');
@@ -121,7 +124,7 @@ describe('resolveSkillProfile', () => {
 
   it('keeps profile values when the skill leaves a field unset', async () => {
     const db = createMockDB();
-    db._pushResult([makeSkill({ model: null, vmSizeOverride: null, systemPromptAppend: null })]);
+    db._pushResult([makeSkill({ model: null, effort: null, vmSizeOverride: null, systemPromptAppend: null })]);
     db._pushResult([makeProfile()]);
 
     const resolved = await resolveSkillProfile(
@@ -134,6 +137,7 @@ describe('resolveSkillProfile', () => {
     );
 
     expect(resolved.model).toBe('profile-model');
+    expect(resolved.effort).toBe('high');
     expect(resolved.vmSizeOverride).toBe('small');
     expect(resolved.systemPromptAppend).toBe('Profile prompt');
   });

@@ -297,6 +297,7 @@ export async function submitTriggeredTask(
       cloudProvider: provider,
       taskMode,
       model: resolvedProfile?.model ?? null,
+      effort: resolvedProfile?.effort ?? null,
       permissionMode: resolvedProfile?.permissionMode ?? null,
       // OpenCode settings: VM agent fetches user-level settings via callback
       opencodeProvider: null,

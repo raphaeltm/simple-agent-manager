@@ -6,6 +6,7 @@
  * these functions instead of accessing the DO binding directly.
  */
 import type {
+  AgentEffort,
   CredentialProvider,
   ResolvedResourceReservation,
   ResourceRequirements,
@@ -68,6 +69,8 @@ export async function startTaskRunnerDO(
     taskMode?: TaskMode;
     /** Model override from agent profile. Null = use agent default. */
     model?: string | null;
+    /** Reasoning effort override from agent profile. Null = use agent default. */
+    effort?: AgentEffort | null;
     /** Permission mode override from agent profile. Null = use agent default. */
     permissionMode?: string | null;
     /** OpenCode inference provider override. Null = use agent default. */
@@ -124,6 +127,7 @@ export async function startTaskRunnerDO(
       cloudProvider: input.cloudProvider ?? null,
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,
+      effort: input.effort ?? null,
       permissionMode: input.permissionMode ?? null,
       opencodeProvider: input.opencodeProvider ?? null,
       opencodeBaseUrl: input.opencodeBaseUrl ?? null,

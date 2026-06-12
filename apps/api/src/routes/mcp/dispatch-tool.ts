@@ -608,6 +608,7 @@ export async function handleDispatchTask(
       model:
         resolvedProfile?.model ??
         resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
+      effort: resolvedProfile?.effort ?? null,
       permissionMode:
         resolvedProfile?.permissionMode ??
         resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,

@@ -1,6 +1,5 @@
-import * as v from 'valibot';
-
 import { AGENT_EFFORT_LEVELS } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
 const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);

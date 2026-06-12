@@ -26,15 +26,15 @@ Prior research created SAM idea `01KTN2NZN3MXYM6Z6DQZ9RTV6M`, which established 
 - [x] Update Drizzle schema and shared profile/skill/request/resolved types.
 - [x] Update Valibot schemas and MCP profile/skill tool definitions/extraction for effort.
 - [x] Update profile and skill service mapping/resolution so effort defaults to `auto` and skill effort can override profile effort.
-- [ ] Thread resolved effort through task submit, MCP dispatch, SAM-session dispatch/retry, trigger submit, TaskRunner DO state, and `startAgentSessionOnNode`.
-- [ ] Update VM agent start request payload, profile override storage, settings payload, and launch mapping.
-- [ ] Map Claude effort to `CLAUDE_CODE_EFFORT_LEVEL`, omitting `auto`.
-- [ ] Map Codex effort to `model_reasoning_effort` in the SAM-managed config block, omitting `auto` and rejecting unsupported `max`.
-- [ ] Fix or explicitly handle direct ACP session creation with `agentProfileId` so profile model/effort behavior is consistent.
-- [ ] Add effort controls to the profile editor UI and profile summaries without adding top-level composer clutter.
-- [ ] Add tests across API/profile/skill resolution, task/MCP/trigger launch propagation, VM agent Claude/Codex mapping, and UI behavior.
-- [ ] Run mandatory Playwright visual audit for changed profile UI.
-- [ ] Run lint, typecheck, tests, build, and migration safety checks.
+- [x] Thread resolved effort through task submit, MCP dispatch, SAM-session dispatch/retry, trigger submit, TaskRunner DO state, and `startAgentSessionOnNode`.
+- [x] Update VM agent start request payload, profile override storage, settings payload, and launch mapping.
+- [x] Map Claude effort to `CLAUDE_CODE_EFFORT_LEVEL`, omitting `auto`.
+- [x] Map Codex effort to `model_reasoning_effort` in the SAM-managed config block, omitting `auto` and rejecting unsupported `max`.
+- [x] Fix or explicitly handle direct ACP session creation with `agentProfileId` so profile model/effort behavior is consistent.
+- [x] Add effort controls to the profile editor UI and profile summaries without adding top-level composer clutter.
+- [x] Add tests across API/profile/skill resolution, task/MCP/trigger launch propagation, VM agent Claude/Codex mapping, and UI behavior.
+- [x] Run mandatory Playwright visual audit for changed profile UI.
+- [x] Run lint, typecheck, tests, build, and migration safety checks.
 
 ## Acceptance Criteria
 

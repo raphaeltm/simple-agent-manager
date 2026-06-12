@@ -4,6 +4,7 @@
  * Extracted from task-runner.ts for modularity.
  */
 import type {
+  AgentEffort,
   CredentialProvider,
   ResolvedResourceReservation,
   ResourceRequirements,
@@ -67,6 +68,8 @@ export interface TaskRunConfig {
   taskMode: TaskMode;
   /** Model override from agent profile (forwarded to VM agent). Null = use agent default. */
   model: string | null;
+  /** Reasoning effort override from agent profile (forwarded to VM agent). Null = use agent default. */
+  effort: AgentEffort | null;
   /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
   permissionMode: string | null;
   /** OpenCode inference provider override (forwarded to VM agent). Null = use agent default. */

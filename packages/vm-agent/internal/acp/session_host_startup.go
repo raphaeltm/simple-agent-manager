@@ -305,6 +305,12 @@ func (h *SessionHost) applyModelAndExtraEnv(agentType string, settings *agentSet
 			slog.Info("Agent model override", "envVar", modelEnv, "model", settings.Model)
 		}
 	}
+	if agentType == "claude-code" && settings != nil {
+		if effort := normalizeAgentEffort(settings.Effort); effort != "" {
+			envVars = append(envVars, fmt.Sprintf("CLAUDE_CODE_EFFORT_LEVEL=%s", effort))
+			slog.Info("Claude Code effort override", "effort", effort)
+		}
+	}
 	if extraEnv := getAgentExtraEnvVars(agentType); len(extraEnv) > 0 {
 		envVars = append(envVars, extraEnv...)
 	}
@@ -334,13 +340,17 @@ func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType str
 
 func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {
 	proxyConfig := codexProxyProviderConfigFromCredential(cred, h.config.CallbackToken)
-	codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig)
+	effort := ""
+	if startup.settings != nil {
+		effort = startup.settings.Effort
+	}
+	codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort)
 	if err != nil {
 		slog.Warn("Failed to write Codex config.toml", "error", err, "workspaceId", h.config.WorkspaceID)
 		return
 	}
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
-	slog.Info("Wrote Codex config.toml", "mcpServers", len(h.config.McpServers), "hasProxyProvider", proxyConfig != nil)
+	slog.Info("Wrote Codex config.toml", "mcpServers", len(h.config.McpServers), "hasProxyProvider", proxyConfig != nil, "effort", normalizeCodexEffort(effort))
 }
 
 func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {

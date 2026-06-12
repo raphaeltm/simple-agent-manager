@@ -112,6 +112,34 @@ func TestAgentSettingsEnvVarInjection(t *testing.T) {
 	}
 }
 
+func TestApplyModelAndExtraEnvAddsClaudeEffort(t *testing.T) {
+	h := &SessionHost{}
+
+	envVars, _ := h.applyModelAndExtraEnv("claude-code", &agentSettingsPayload{
+		Model:  "claude-opus-4-6",
+		Effort: "xhigh",
+	}, nil)
+
+	if !hasEnvEntry(envVars, "ANTHROPIC_MODEL=claude-opus-4-6") {
+		t.Fatalf("expected model env var, got %v", envVars)
+	}
+	if !hasEnvEntry(envVars, "CLAUDE_CODE_EFFORT_LEVEL=xhigh") {
+		t.Fatalf("expected Claude effort env var, got %v", envVars)
+	}
+}
+
+func TestApplyModelAndExtraEnvOmitsAutoEffort(t *testing.T) {
+	h := &SessionHost{}
+
+	envVars, _ := h.applyModelAndExtraEnv("claude-code", &agentSettingsPayload{
+		Effort: "auto",
+	}, nil)
+
+	if hasEnvEntry(envVars, "CLAUDE_CODE_EFFORT_LEVEL=auto") {
+		t.Fatalf("auto effort should not be forced into env vars: %v", envVars)
+	}
+}
+
 func TestPermissionModeOnSessionHost(t *testing.T) {
 	// Test that SessionHost stores permission mode correctly
 	h := &SessionHost{}

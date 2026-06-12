@@ -349,6 +349,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	if ovr, ok := s.sessionProfileOvr[hostKey]; ok {
 		cfg.ModelOverride = ovr.Model
 		cfg.PermissionModeOverride = ovr.PermissionMode
+		cfg.EffortOverride = ovr.Effort
 		cfg.OpencodeProviderOverride = ovr.OpencodeProvider
 		cfg.OpencodeBaseURLOverride = ovr.OpencodeBaseURL
 	}
@@ -365,6 +366,6 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 
 	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID,
 		"mcpServers", len(cfg.McpServers),
-		"modelOverride", cfg.ModelOverride, "permissionModeOverride", cfg.PermissionModeOverride)
+		"modelOverride", cfg.ModelOverride, "permissionModeOverride", cfg.PermissionModeOverride, "effortOverride", cfg.EffortOverride)
 	return host
 }
