@@ -35,17 +35,15 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   // Verify callback JWT auth (same pattern as heartbeat/ready)
   const token = extractBearerToken(c.req.header('Authorization'));
-  const payload = await verifyCallbackToken(token, c.env);
-
-  // Workspace-scoped tokens cannot be used for node-level endpoints
-  if (payload.scope === 'workspace') {
-    log.error('deploy_release.rejected_workspace_scoped_token', {
-      tokenWorkspace: payload.workspace,
-      nodeId,
-      scope: payload.scope,
-      action: 'rejected',
-    });
-    throw errors.forbidden('Insufficient token scope');
+  let payload;
+  try {
+    payload = await verifyCallbackToken(token, c.env, { expectedScope: 'node' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Invalid callback token';
+    if (message.includes('scope')) {
+      throw errors.forbidden('Insufficient token scope');
+    }
+    throw errors.unauthorized('Invalid callback token');
   }
 
   if (payload.workspace !== nodeId) {
@@ -84,6 +82,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .select({
       id: schema.deploymentEnvironments.id,
       projectId: schema.deploymentEnvironments.projectId,
+      nodeId: schema.deploymentEnvironments.nodeId,
     })
     .from(schema.deploymentEnvironments)
     .innerJoin(
@@ -93,6 +92,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .where(
       and(
         eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.deploymentEnvironments.nodeId, nodeId),
         eq(schema.projects.userId, nodeRows[0]!.userId),
       ),
     )

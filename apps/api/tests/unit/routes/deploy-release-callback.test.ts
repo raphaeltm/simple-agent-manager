@@ -4,6 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 
 const mockLimit = vi.fn();
+const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
+  workspace: 'node-deploy-1',
+  type: 'callback',
+  scope: 'node',
+});
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -19,11 +24,7 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({
-    workspace: 'node-deploy-1',
-    type: 'callback',
-    scope: 'node',
-  }),
+  verifyCallbackToken: (...args: unknown[]) => mockVerifyCallbackToken(...args),
 }));
 
 vi.mock('../../../src/services/deploy-signing', () => ({
@@ -85,13 +86,19 @@ function env(): Env {
 describe('deploy release callback route', () => {
   beforeEach(() => {
     mockLimit.mockReset();
+    mockVerifyCallbackToken.mockClear();
+    mockVerifyCallbackToken.mockResolvedValue({
+      workspace: 'node-deploy-1',
+      type: 'callback',
+      scope: 'node',
+    });
     vi.unstubAllGlobals();
   });
 
   it('returns signed route targets, publishes loopback Compose ports, and creates grey-cloud DNS records', async () => {
     mockLimit
       .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
-      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
       .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
 
     const fetchMock = vi.fn()
@@ -109,6 +116,7 @@ describe('deploy release callback route', () => {
 
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), { expectedScope: 'node' });
     expect(body.routes).toEqual([
       {
         hostname: 'r1-web-3000-env-1.apps.sammy.party',
@@ -142,5 +150,34 @@ describe('deploy release callback route', () => {
       content: '203.0.113.10',
       proxied: false,
     });
+  });
+
+  it('rejects a release fetch when the environment is assigned to a different node', async () => {
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([]);
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-other-node',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ message: 'Deployment environment not found' });
+  });
+
+  it('rejects legacy or workspace-scoped callback tokens before DNS or signing work', async () => {
+    mockVerifyCallbackToken.mockRejectedValueOnce(new Error("Token scope 'none' does not match expected 'node'"));
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer legacy-callback-token' } },
+      env(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ message: 'Insufficient token scope' });
+    expect(mockLimit).not.toHaveBeenCalled();
   });
 });

@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
 
-func GenerateCaddyfile(routes []RouteTarget) string {
+var caddyHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
+
+func GenerateCaddyfile(routes []RouteTarget) (string, error) {
 	var builder strings.Builder
 	builder.WriteString("# Managed by SAM deployment agent.\n")
 
@@ -18,6 +21,9 @@ func GenerateCaddyfile(routes []RouteTarget) string {
 	})
 
 	for _, route := range ordered {
+		if err := validateRouteTarget(route); err != nil {
+			return "", err
+		}
 		builder.WriteString("\n")
 		builder.WriteString(route.Hostname)
 		builder.WriteString(" {\n")
@@ -26,7 +32,23 @@ func GenerateCaddyfile(routes []RouteTarget) string {
 		builder.WriteString("}\n")
 	}
 
-	return builder.String()
+	return builder.String(), nil
+}
+
+func validateRouteTarget(route RouteTarget) error {
+	if route.Hostname == "" {
+		return fmt.Errorf("route hostname is required for service %q", route.Service)
+	}
+	if !caddyHostnamePattern.MatchString(route.Hostname) || strings.Contains(route.Hostname, "..") {
+		return fmt.Errorf("route hostname %q contains invalid Caddy site characters", route.Hostname)
+	}
+	if route.HostPort <= 0 || route.HostPort > 65535 {
+		return fmt.Errorf("route host port %d for %q is outside valid TCP port range", route.HostPort, route.Hostname)
+	}
+	if route.ContainerPort <= 0 || route.ContainerPort > 65535 {
+		return fmt.Errorf("route container port %d for %q is outside valid TCP port range", route.ContainerPort, route.Hostname)
+	}
+	return nil
 }
 
 func writeFileAtomic(path string, content string, perm os.FileMode) error {
