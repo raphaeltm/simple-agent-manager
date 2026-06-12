@@ -1796,7 +1796,7 @@ describe('swap file configuration', () => {
 // =============================================================================
 
 describe('deployment role support', () => {
-  it('sets ROLE=deployment and ENVIRONMENT_ID in vm-agent systemd unit', () => {
+  it('sets ROLE, NODE_ROLE, and ENVIRONMENT_ID in vm-agent systemd unit', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-abc123' }),
       { validateSize: false },
@@ -1808,10 +1808,11 @@ describe('deployment role support', () => {
     );
     expect(unitFile).toBeDefined();
     expect(unitFile.content).toContain('Environment=ROLE=deployment');
+    expect(unitFile.content).toContain('Environment=NODE_ROLE=deployment');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=env-abc123');
   });
 
-  it('leaves ROLE and ENVIRONMENT_ID empty when not specified', () => {
+  it('leaves ROLE, NODE_ROLE, and ENVIRONMENT_ID empty when not specified', () => {
     const config = generateCloudInit(
       baseVariables(),
       { validateSize: false },
@@ -1824,6 +1825,7 @@ describe('deployment role support', () => {
     expect(unitFile).toBeDefined();
     // Empty string values — vm-agent ignores empty env vars
     expect(unitFile.content).toContain('Environment=ROLE=\n');
+    expect(unitFile.content).toContain('Environment=NODE_ROLE=\n');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=\n');
   });
 
