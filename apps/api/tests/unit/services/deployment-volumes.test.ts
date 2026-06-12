@@ -1,14 +1,187 @@
 /**
  * Vertical-slice tests for deployment volume lifecycle service.
  *
- * Mocks at the Provider boundary with realistic state.
- * Tests the full path: service → Provider interface → D1 state.
+ * Mocks at two boundaries:
+ * 1. Provider interface — vi.mock on createProviderForUser
+ * 2. D1 database — vi.mock on drizzle operations via schema
+ *
+ * Tests exercise the real service functions end-to-end through these mocked boundaries.
  */
-import type { VolumeCapabilities, VolumeInstance } from '@simple-agent-manager/providers';
-import { SAM_VOLUME_MOUNT_PATH_TEMPLATE } from '@simple-agent-manager/providers';
-import { describe, expect, it } from 'vitest';
+import type { Provider, VolumeCapabilities, VolumeInstance } from '@simple-agent-manager/providers';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveVolumeMountRoot } from '../../../src/services/deployment-volumes';
+import {
+  attachEnvironmentVolumes,
+  createEnvironmentVolume,
+  deleteEnvironmentVolume,
+  detachEnvironmentVolumes,
+  resolveVolumeMountRoot,
+} from '../../../src/services/deployment-volumes';
+
+// =============================================================================
+// Mock setup
+// =============================================================================
+
+// Mock createProviderForUser at the module boundary
+vi.mock('../../../src/services/provider-credentials', () => ({
+  createProviderForUser: vi.fn(),
+}));
+
+// Mock ulid to return predictable IDs
+vi.mock('../../../src/lib/ulid', () => ({
+  ulid: vi.fn(() => 'vol-test-001'),
+}));
+
+// Mock getCredentialEncryptionKey
+vi.mock('../../../src/lib/secrets', () => ({
+  getCredentialEncryptionKey: vi.fn(() => 'test-key'),
+}));
+
+// Import the mocked module so we can configure it per-test
+import { createProviderForUser } from '../../../src/services/provider-credentials';
+
+const mockCreateProviderForUser = vi.mocked(createProviderForUser);
+
+// =============================================================================
+// Helpers: mock Provider
+// =============================================================================
+
+function makeVolumeCapabilities(overrides?: Partial<VolumeCapabilities>): VolumeCapabilities {
+  return {
+    supported: true,
+    minSizeGb: 10,
+    growOnlyResize: true,
+    requiresSameLocation: true,
+    defaultFormat: 'ext4',
+    lifecycle: {
+      filesystem: 'ext4',
+      mountPathTemplate: '/mnt/sam-env-{environmentId}/',
+      fstabOptions: ['nofail'],
+    },
+    ...overrides,
+  };
+}
+
+function makeVolumeInstance(overrides?: Partial<VolumeInstance>): VolumeInstance {
+  return {
+    id: 'prov-vol-1',
+    name: 'sam-env-001-data',
+    sizeGb: 10,
+    location: 'nbg1',
+    status: 'available',
+    createdAt: '2026-06-12T00:00:00Z',
+    labels: { 'sam-environment': 'env-001', 'sam-volume-name': 'data' },
+    ...overrides,
+  };
+}
+
+function makeMockProvider(overrides?: {
+  caps?: Partial<VolumeCapabilities>;
+  createResult?: VolumeInstance;
+  attachResult?: VolumeInstance;
+  detachResult?: VolumeInstance;
+}): Provider {
+  return {
+    volumeCapabilities: makeVolumeCapabilities(overrides?.caps),
+    createVolume: vi.fn().mockResolvedValue(overrides?.createResult ?? makeVolumeInstance()),
+    attachVolume: vi.fn().mockResolvedValue(overrides?.attachResult ?? makeVolumeInstance({
+      status: 'in-use',
+      attachedServerId: 'srv-1',
+      linuxDevice: '/dev/sdb',
+    })),
+    detachVolume: vi.fn().mockResolvedValue(undefined),
+    deleteVolume: vi.fn().mockResolvedValue(undefined),
+    resizeVolume: vi.fn(),
+    getVolume: vi.fn(),
+    listVolumes: vi.fn(),
+    createVM: vi.fn(),
+    deleteVM: vi.fn(),
+    getVM: vi.fn(),
+    listVMs: vi.fn(),
+    listLocations: vi.fn(),
+    listVMSizes: vi.fn(),
+    getVMPricing: vi.fn(),
+    listSSHKeys: vi.fn(),
+    createSSHKey: vi.fn(),
+    deleteSSHKey: vi.fn(),
+  } as unknown as Provider;
+}
+
+function setupProvider(provider: Provider, providerName = 'hetzner') {
+  mockCreateProviderForUser.mockResolvedValue({
+    provider,
+    providerName: providerName as 'hetzner',
+    credentialSource: 'user',
+  });
+}
+
+// =============================================================================
+// Helpers: mock Drizzle DB
+// =============================================================================
+
+interface MockRow {
+  id: string;
+  environmentId: string;
+  name: string;
+  providerVolumeId: string;
+  providerName: string;
+  sizeGb: number;
+  location: string;
+  status: string;
+  attachedServerId: string | null;
+  linuxDevice: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function createMockDb(initialRows: MockRow[] = []) {
+  const rows = [...initialRows];
+
+  // Build a chainable mock that simulates Drizzle's query builder
+  const db = {
+    insert: vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((row: MockRow) => {
+        rows.push({ ...row });
+        return Promise.resolve();
+      }),
+    }),
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation((_condition: unknown) => {
+          // Return all rows — filtering is done by the caller's condition
+          // For simplicity, we return rows and let limit/orderBy chain
+          return {
+            orderBy: vi.fn().mockResolvedValue([...rows]),
+            limit: vi.fn().mockImplementation((n: number) => {
+              return Promise.resolve(rows.slice(0, n));
+            }),
+            // If called directly as a promise (no further chaining)
+            then: (resolve: (v: MockRow[]) => void) => resolve([...rows]),
+          };
+        }),
+        orderBy: vi.fn().mockResolvedValue([...rows]),
+      }),
+    }),
+    update: vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => {
+          return Promise.resolve();
+        }),
+      }),
+    }),
+    delete: vi.fn().mockReturnValue({
+      where: vi.fn().mockImplementation(() => {
+        return Promise.resolve();
+      }),
+    }),
+    // Expose rows for assertion
+    _rows: rows,
+  };
+
+  return db;
+}
+
+const mockEnv = {} as unknown as import('../../../src/env').Env;
 
 // =============================================================================
 // resolveVolumeMountRoot
@@ -20,101 +193,434 @@ describe('resolveVolumeMountRoot', () => {
     expect(result).toBe('/mnt/sam-env-env-abc123/volumes');
   });
 
-  it('template is consistent with SAM_VOLUME_MOUNT_PATH_TEMPLATE', () => {
-    const envId = 'test-env';
-    const expected = SAM_VOLUME_MOUNT_PATH_TEMPLATE.replace('{environmentId}', envId) + 'volumes';
-    expect(resolveVolumeMountRoot(envId)).toBe(expected);
+  it('result starts with /mnt/ and ends with /volumes', () => {
+    const result = resolveVolumeMountRoot('my-env');
+    expect(result).toMatch(/^\/mnt\//);
+    expect(result).toMatch(/\/volumes$/);
+    expect(result).toContain('my-env');
   });
 });
 
 // =============================================================================
-// Volume lifecycle (with mocked provider)
+// createEnvironmentVolume
 // =============================================================================
 
-describe('deployment volume service', () => {
-  // These test the service logic against realistic mocked provider responses.
-  // The D1 layer is tested via Miniflare in workers tests.
-
-  const makeVolumeInstance = (overrides?: Partial<VolumeInstance>): VolumeInstance => ({
-    id: 'prov-vol-1',
-    name: 'sam-env-001-data',
-    sizeGb: 10,
-    location: 'nbg1',
-    status: 'available',
-    createdAt: '2026-06-12T00:00:00Z',
-    labels: { 'sam-environment': 'env-001', 'sam-volume-name': 'data' },
-    ...overrides,
+describe('createEnvironmentVolume', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  const makeAttachedVolumeInstance = (): VolumeInstance => makeVolumeInstance({
-    status: 'in-use',
-    attachedServerId: 'srv-1',
-    linuxDevice: '/dev/sdb',
+  it('creates a volume through the provider and returns a row', async () => {
+    const provider = makeMockProvider({
+      createResult: makeVolumeInstance({ id: 'prov-vol-99', status: 'available' }),
+    });
+    setupProvider(provider);
+    const db = createMockDb();
+
+    const result = await createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+      environmentId: 'env-001',
+      name: 'data',
+      sizeGb: 10,
+      location: 'nbg1',
+    });
+
+    // Provider was called with correct args
+    expect(provider.createVolume).toHaveBeenCalledWith({
+      name: 'sam-env-001-data',
+      sizeGb: 10,
+      location: 'nbg1',
+      labels: { 'sam-environment': 'env-001', 'sam-volume-name': 'data' },
+    });
+
+    // D1 insert was called
+    expect(db.insert).toHaveBeenCalled();
+
+    // Returned row has correct fields
+    expect(result.environmentId).toBe('env-001');
+    expect(result.name).toBe('data');
+    expect(result.providerVolumeId).toBe('prov-vol-99');
+    expect(result.providerName).toBe('hetzner');
+    expect(result.sizeGb).toBe(10);
+    expect(result.location).toBe('nbg1');
+    expect(result.status).toBe('available');
   });
 
-  describe('co-location validation', () => {
-    it('rejects when volume and server locations differ', () => {
-      // This tests the validation logic that would run in attachEnvironmentVolumes
-      const volumeLocation = 'nbg1';
-      const serverLocation = 'fsn1';
-      expect(volumeLocation).not.toBe(serverLocation);
-      // The service throws when locations mismatch — tested in integration
-    });
+  it('rejects when provider does not support volumes', async () => {
+    const provider = makeMockProvider({ caps: { supported: false } });
+    setupProvider(provider);
+    const db = createMockDb();
+
+    await expect(
+      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+        environmentId: 'env-001',
+        name: 'data',
+        sizeGb: 10,
+        location: 'nbg1',
+      }),
+    ).rejects.toThrow('does not support block volumes');
+
+    // Provider createVolume was NOT called
+    expect(provider.createVolume).not.toHaveBeenCalled();
   });
 
-  describe('provider capabilities check', () => {
-    it('minimum size is enforced', () => {
-      const caps: VolumeCapabilities = {
-        supported: true,
-        minSizeGb: 10,
-        growOnlyResize: true,
-        requiresSameLocation: true,
-        defaultFormat: 'ext4',
-        lifecycle: {
-          filesystem: 'ext4',
-          mountPathTemplate: '/mnt/sam-env-{environmentId}/',
-          fstabOptions: ['nofail'],
-        },
-      };
-      expect(caps.minSizeGb).toBe(10);
-      // The service throws for sizeGb < minSizeGb — tested in integration
-    });
+  it('rejects when size is below minimum', async () => {
+    const provider = makeMockProvider({ caps: { minSizeGb: 10 } });
+    setupProvider(provider);
+    const db = createMockDb();
 
-    it('unsupported provider is rejected', () => {
-      const caps: VolumeCapabilities = {
-        supported: false,
-        growOnlyResize: true,
-        requiresSameLocation: true,
-        defaultFormat: 'ext4',
-        lifecycle: {
-          filesystem: 'ext4',
-          mountPathTemplate: '/mnt/sam-env-{environmentId}/',
-          fstabOptions: ['nofail'],
-        },
-      };
-      expect(caps.supported).toBe(false);
-    });
+    await expect(
+      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+        environmentId: 'env-001',
+        name: 'data',
+        sizeGb: 5,
+        location: 'nbg1',
+      }),
+    ).rejects.toThrow('Minimum volume size');
+
+    expect(provider.createVolume).not.toHaveBeenCalled();
   });
 
-  describe('volume status transitions', () => {
-    it('newly created volume is available', () => {
-      const vol = makeVolumeInstance();
-      expect(vol.status).toBe('available');
-      expect(vol.attachedServerId).toBeUndefined();
+  it('rejects when size exceeds maximum', async () => {
+    const provider = makeMockProvider({ caps: { maxSizeGb: 100 } });
+    setupProvider(provider);
+    const db = createMockDb();
+
+    await expect(
+      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+        environmentId: 'env-001',
+        name: 'data',
+        sizeGb: 200,
+        location: 'nbg1',
+      }),
+    ).rejects.toThrow('Maximum volume size');
+
+    expect(provider.createVolume).not.toHaveBeenCalled();
+  });
+
+  it('rejects when no provider credential found', async () => {
+    mockCreateProviderForUser.mockResolvedValue(null as any);
+    const db = createMockDb();
+
+    await expect(
+      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+        environmentId: 'env-001',
+        name: 'data',
+        sizeGb: 10,
+        location: 'nbg1',
+      }),
+    ).rejects.toThrow('No cloud provider credential found');
+  });
+});
+
+// =============================================================================
+// deleteEnvironmentVolume
+// =============================================================================
+
+describe('deleteEnvironmentVolume', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('deletes a volume through the provider and removes D1 row', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const existingRow: MockRow = {
+      id: 'vol-1',
+      environmentId: 'env-001',
+      name: 'data',
+      providerVolumeId: 'prov-vol-1',
+      providerName: 'hetzner',
+      sizeGb: 10,
+      location: 'nbg1',
+      status: 'available',
+      attachedServerId: null,
+      linuxDevice: null,
+      createdAt: '2026-06-12T00:00:00Z',
+      updatedAt: '2026-06-12T00:00:00Z',
+    };
+    const db = createMockDb([existingRow]);
+
+    await deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001');
+
+    // Provider deleteVolume was called with correct args
+    expect(provider.deleteVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-1',
+      location: 'nbg1',
     });
 
-    it('attached volume has in-use status with server ID and device', () => {
-      const vol = makeAttachedVolumeInstance();
-      expect(vol.status).toBe('in-use');
-      expect(vol.attachedServerId).toBe('srv-1');
-      expect(vol.linuxDevice).toBe('/dev/sdb');
+    // D1 delete was called
+    expect(db.delete).toHaveBeenCalled();
+  });
+
+  it('rejects deleting an attached volume', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const attachedRow: MockRow = {
+      id: 'vol-1',
+      environmentId: 'env-001',
+      name: 'data',
+      providerVolumeId: 'prov-vol-1',
+      providerName: 'hetzner',
+      sizeGb: 10,
+      location: 'nbg1',
+      status: 'in-use',
+      attachedServerId: 'srv-1',
+      linuxDevice: '/dev/sdb',
+      createdAt: '2026-06-12T00:00:00Z',
+      updatedAt: '2026-06-12T00:00:00Z',
+    };
+    const db = createMockDb([attachedRow]);
+
+    await expect(
+      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001'),
+    ).rejects.toThrow('Cannot delete an attached volume');
+
+    // Provider was NOT called
+    expect(provider.deleteVolume).not.toHaveBeenCalled();
+    // D1 delete was NOT called
+    expect(db.delete).not.toHaveBeenCalled();
+  });
+
+  it('rejects when volume not found', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+    const db = createMockDb([]); // empty
+
+    await expect(
+      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-nonexistent', 'env-001'),
+    ).rejects.toThrow('Volume not found');
+  });
+});
+
+// =============================================================================
+// attachEnvironmentVolumes
+// =============================================================================
+
+describe('attachEnvironmentVolumes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('attaches all environment volumes to a server', async () => {
+    const provider = makeMockProvider({
+      attachResult: makeVolumeInstance({
+        status: 'in-use',
+        attachedServerId: 'srv-target',
+        linuxDevice: '/dev/sdb',
+      }),
+    });
+    setupProvider(provider);
+
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-1',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'available',
+        attachedServerId: null,
+        linuxDevice: null,
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    const results = await attachEnvironmentVolumes(
+      db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1',
+    );
+
+    // Provider attachVolume was called
+    expect(provider.attachVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-1',
+      serverId: 'srv-target',
+      location: 'nbg1',
     });
 
-    it('detached volume returns to available without server attachment', () => {
-      const vol = makeVolumeInstance({ status: 'available', attachedServerId: undefined, linuxDevice: undefined });
-      expect(vol.status).toBe('available');
-      expect(vol.attachedServerId).toBeUndefined();
-      expect(vol.linuxDevice).toBeUndefined();
+    // D1 was updated
+    expect(db.update).toHaveBeenCalled();
+
+    // Returned results reflect attached state
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('in-use');
+    expect(results[0].attachedServerId).toBe('srv-target');
+    expect(results[0].linuxDevice).toBe('/dev/sdb');
+  });
+
+  it('returns empty array when no volumes exist', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+    const db = createMockDb([]);
+
+    const results = await attachEnvironmentVolumes(
+      db as any, mockEnv, 'user-1', 'env-001', 'srv-1', 'nbg1',
+    );
+
+    expect(results).toEqual([]);
+    expect(provider.attachVolume).not.toHaveBeenCalled();
+  });
+
+  it('rejects when volume location differs from server location (co-location)', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-1',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1', // Volume is in Nuremberg
+        status: 'available',
+        attachedServerId: null,
+        linuxDevice: null,
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    // Server is in Falkenstein — different from volume
+    await expect(
+      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-1', 'fsn1'),
+    ).rejects.toThrow('Volumes and servers must be co-located');
+
+    // Provider was NOT called
+    expect(provider.attachVolume).not.toHaveBeenCalled();
+  });
+
+  it('rejects when volume is already attached to a different server', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-1',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'in-use',
+        attachedServerId: 'srv-other', // attached to a different server
+        linuxDevice: '/dev/sdb',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    await expect(
+      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1'),
+    ).rejects.toThrow('already attached to server');
+
+    expect(provider.attachVolume).not.toHaveBeenCalled();
+  });
+
+  it('skips volumes already attached to the target server', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-1',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'in-use',
+        attachedServerId: 'srv-target', // already attached to target
+        linuxDevice: '/dev/sdb',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    const results = await attachEnvironmentVolumes(
+      db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1',
+    );
+
+    // Volume was skipped — provider was NOT called
+    expect(provider.attachVolume).not.toHaveBeenCalled();
+    // But the volume is still returned in the results
+    expect(results).toHaveLength(1);
+    expect(results[0].attachedServerId).toBe('srv-target');
+  });
+});
+
+// =============================================================================
+// detachEnvironmentVolumes
+// =============================================================================
+
+describe('detachEnvironmentVolumes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('detaches all volumes attached to the target server', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-1',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'in-use',
+        attachedServerId: 'srv-1',
+        linuxDevice: '/dev/sdb',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    const results = await detachEnvironmentVolumes(
+      db as any, mockEnv, 'user-1', 'env-001', 'srv-1',
+    );
+
+    // Provider detachVolume was called
+    expect(provider.detachVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-1',
+      serverId: 'srv-1',
+      location: 'nbg1',
     });
+
+    // D1 was updated
+    expect(db.update).toHaveBeenCalled();
+
+    // Returned results reflect detached state
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('available');
+    expect(results[0].attachedServerId).toBeNull();
+    expect(results[0].linuxDevice).toBeNull();
+  });
+
+  it('returns empty array when no volumes are attached to the server', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+    const db = createMockDb([]); // no attached volumes
+
+    const results = await detachEnvironmentVolumes(
+      db as any, mockEnv, 'user-1', 'env-001', 'srv-1',
+    );
+
+    expect(results).toEqual([]);
+    expect(provider.detachVolume).not.toHaveBeenCalled();
   });
 });

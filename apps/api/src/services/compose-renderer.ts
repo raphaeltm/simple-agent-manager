@@ -7,9 +7,10 @@
  * and doc 06 rendering rules.
  */
 
-import { SAM_VOLUME_MOUNT_PATH_TEMPLATE } from '@simple-agent-manager/providers';
 import type { DeploymentManifest, EnvValue } from '@simple-agent-manager/shared';
 import { stringify } from 'yaml';
+
+import { resolveVolumeMountRoot } from './deployment-volumes';
 
 // =============================================================================
 // Render context — caller supplies IDs and config
@@ -32,12 +33,6 @@ export interface ComposeRenderContext {
    * Values are injected into the rendered Compose — never persisted in D1.
    */
   resolvedSecrets?: Record<string, string>;
-}
-
-/** Resolve the host mount path for an environment's volumes. */
-function resolveDefaultVolumeRoot(environmentId: string): string {
-  const base = SAM_VOLUME_MOUNT_PATH_TEMPLATE.replace('{environmentId}', environmentId);
-  return `${base}volumes`;
 }
 
 const DEFAULT_MEMORY_LIMIT_MB = 256;
@@ -173,7 +168,7 @@ function buildService(
 
 export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderContext): string {
   const buildCtx: ServiceBuildContext = {
-    volumeRoot: ctx.volumeRoot ?? resolveDefaultVolumeRoot(ctx.environmentId),
+    volumeRoot: ctx.volumeRoot ?? resolveVolumeMountRoot(ctx.environmentId),
     defaultMemMb: ctx.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB,
     resolvedSecrets: ctx.resolvedSecrets ?? {},
     environmentId: ctx.environmentId,
