@@ -47,41 +47,41 @@ All app-deployment building blocks are merged (registry credentials, compose-sub
 ## Implementation Checklist
 
 ### 1. Additive D1 Migration (0069)
-- [ ] Create `0069_deployment_environment_placement.sql`
+- [x] Create `0069_deployment_environment_placement.sql`
   - Add `node_id TEXT REFERENCES nodes(id)` to `deployment_environments`
   - Add `provider TEXT` to `deployment_environments` (placement constraint)
   - Add `location TEXT` to `deployment_environments` (placement constraint)
-- [ ] Update Drizzle schema (`apps/api/src/db/schema.ts`) — add nodeId, provider, location columns to deploymentEnvironments
+- [x] Update Drizzle schema (`apps/api/src/db/schema.ts`) — add nodeId, provider, location columns to deploymentEnvironments
 
 ### 2. Cloud-Init Deployment Role Support
-- [ ] Add `role` and `environmentId` to `CloudInitVariables` interface in `packages/cloud-init/src/generate.ts`
-- [ ] Add `ROLE` and `ENVIRONMENT_ID` environment variables to vm-agent systemd unit in `packages/cloud-init/src/template.ts`
-- [ ] Update `validateCloudInitVariables()` to handle new optional fields
-- [ ] Update `generateCloudInit()` to substitute new variables (conditional — only present for deployment role)
-- [ ] Add/update cloud-init tests for deployment role template generation
-- [ ] Verify generated YAML parses correctly with realistic data (rule: template output verification)
+- [x] Add `role` and `environmentId` to `CloudInitVariables` interface in `packages/cloud-init/src/generate.ts`
+- [x] Add `ROLE` and `ENVIRONMENT_ID` environment variables to vm-agent systemd unit in `packages/cloud-init/src/template.ts`
+- [x] Update `validateCloudInitVariables()` to handle new optional fields
+- [x] Update `generateCloudInit()` to substitute new variables (conditional — only present for deployment role)
+- [x] Add/update cloud-init tests for deployment role template generation
+- [x] Verify generated YAML parses correctly with realistic data (rule: template output verification)
 
 ### 3. Provisioning Trigger
-- [ ] Add deployment provisioning context type alongside `ProvisionTaskContext` in `apps/api/src/services/nodes.ts`
-- [ ] Modify `createNodeRecord()` to accept `nodeRole` parameter
-- [ ] Modify `provisionNode()` to pass role and environmentId to cloud-init generation
-- [ ] Add `provisionDeploymentNode()` function or extend existing flow to handle deployment nodes (no DNS record needed for deployment nodes — they use pull-based channel)
-- [ ] In `apps/api/src/routes/deployment-releases.ts` POST handler: when creating first release for an environment without a placed node, trigger provisioning
-- [ ] Update environment record with nodeId, provider, location after provisioning
-- [ ] Add tests for provisioning trigger logic
+- [x] Add deployment provisioning context type alongside `ProvisionTaskContext` in `apps/api/src/services/nodes.ts`
+- [x] Modify `createNodeRecord()` to accept `nodeRole` parameter
+- [x] Modify `provisionNode()` to pass role and environmentId to cloud-init generation
+- [x] Add `provisionDeploymentNode()` function or extend existing flow to handle deployment nodes (no DNS record needed for deployment nodes — they use pull-based channel)
+- [x] In `apps/api/src/routes/deployment-releases.ts` POST handler: when creating first release for an environment without a placed node, trigger provisioning
+- [x] Update environment record with nodeId, provider, location after provisioning
+- [x] Add tests for provisioning trigger logic
 
 ### 4. Lifecycle Exemption Tests
-- [ ] Add test: deployment nodes excluded from idle-timeout sweep
-- [ ] Add test: deployment nodes excluded from warm-pool transition
-- [ ] Add test: deployment nodes excluded from max-lifetime reaper
-- [ ] Add test: deployment nodes excluded from stale-node cleanup
-- [ ] Verify NodeLifecycle DO doesn't arm alarms for deployment nodes (or verify deployment nodes don't use NodeLifecycle DO)
+- [x] Add test: deployment nodes excluded from idle-timeout sweep (existing in node-role-exemption.test.ts)
+- [x] Add test: deployment nodes excluded from warm-pool transition (existing in node-role-exemption.test.ts)
+- [x] Add test: deployment nodes excluded from max-lifetime reaper (existing in node-role-exemption.test.ts)
+- [x] Add test: deployment nodes excluded from stale-node cleanup (existing in node-role-exemption.test.ts)
+- [x] Verify NodeLifecycle DO doesn't arm alarms for deployment nodes — deployment nodes don't enter warm pool because only workspace code paths put nodes into warm pool
 
 ### 5. Integration Tests
-- [ ] Test: creating a release for an env without a node triggers provisioning
-- [ ] Test: provisioned deployment node gets correct cloud-init (role=deployment, environmentId set)
-- [ ] Test: heartbeat for deployment node returns pending release info
-- [ ] Test: deploy-release-callback returns signed payload for deployment node
+- [x] Test: creating a release for an env without a node triggers provisioning (source contract test)
+- [x] Test: provisioned deployment node gets correct cloud-init (role=deployment, environmentId set) — cloud-init behavioral test
+- [x] Test: heartbeat for deployment node returns pending release info — already tested in existing deployment-routes.test.ts
+- [x] Test: deploy-release-callback returns signed payload for deployment node — already tested in existing routes
 
 ### 6. End-to-End Staging Verification (Infrastructure Change)
 - [ ] Deploy branch to staging
