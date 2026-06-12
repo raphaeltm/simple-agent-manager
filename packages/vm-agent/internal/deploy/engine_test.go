@@ -309,6 +309,93 @@ exit 0
 	}
 }
 
+func TestEngine_ApplyFailsBeforeMarkingAppliedWhenCaddyReloadFails(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\necho reload failed >&2\nexit 42\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     reloadScript,
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "services:\n  web:\n    image: nginx\n",
+		Routes: []RouteTarget{{
+			Hostname:      "r1-web-env.apps.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
+		}},
+	}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	err = engine.Apply(context.Background(), payload)
+	if err == nil {
+		t.Fatal("expected apply to fail when caddy reload fails")
+	}
+	if !strings.Contains(err.Error(), "caddy reload") {
+		t.Fatalf("expected caddy reload failure, got %v", err)
+	}
+
+	currentSeq, err := disk.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if currentSeq != 0 {
+		t.Fatalf("failed initial release must not become current, got seq %d", currentSeq)
+	}
+
+	state, err := disk.ReadState(1)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if state.Status != StatusFailedInitial {
+		t.Fatalf("expected failed-initial state, got %s", state.Status)
+	}
+
+	observed := engine.GetObserved()
+	if observed.Status != StatusFailedInitial {
+		t.Fatalf("expected observed failed-initial status, got %s", observed.Status)
+	}
+}
+
 func TestEngine_GetObserved_ThreadSafe(t *testing.T) {
 	dir := t.TempDir()
 	disk, _ := NewDiskState(dir)

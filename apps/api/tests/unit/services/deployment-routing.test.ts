@@ -59,4 +59,13 @@ describe('buildDeploymentRouteTargets', () => {
       routePortSpan: '1',
     })).toThrow('exceeding configured deployment route port span 1');
   });
+
+  it('fails before assigning loopback ports outside the TCP range', () => {
+    expect(() => buildDeploymentRouteTargets(manifest(), {
+      environmentId: 'env-1',
+      baseDomain: 'example.com',
+      routePortBase: '65535',
+      routePortSpan: '20',
+    })).toThrow('exceeding maximum TCP port 65535');
+  });
 });

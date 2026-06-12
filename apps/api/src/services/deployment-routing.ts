@@ -7,6 +7,7 @@ export const DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE = 35_000;
 export const DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN = 1_000;
 
 const MAX_SERVICE_LABEL_LENGTH = 24;
+const MAX_TCP_PORT = 65_535;
 
 export interface DeploymentRouteTarget {
   hostname: string;
@@ -51,9 +52,20 @@ export function buildDeploymentRouteTargets(
   const portBase = parsePositiveInt(opts.routePortBase, DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE);
   const portSpan = parsePositiveInt(opts.routePortSpan, DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN);
 
+  if (portBase > MAX_TCP_PORT) {
+    throw new Error(`Configured deployment route port base ${portBase} exceeds maximum TCP port ${MAX_TCP_PORT}`);
+  }
+
   if (publicRoutes.length > portSpan) {
     throw new Error(
       `Manifest defines ${publicRoutes.length} public routes, exceeding configured deployment route port span ${portSpan}`,
+    );
+  }
+
+  const lastAssignedPort = portBase + publicRoutes.length - 1;
+  if (publicRoutes.length > 0 && lastAssignedPort > MAX_TCP_PORT) {
+    throw new Error(
+      `Manifest public routes require ports through ${lastAssignedPort}, exceeding maximum TCP port ${MAX_TCP_PORT}`,
     );
   }
 
