@@ -119,6 +119,35 @@ func TestEngine_ApplyRejectsInvalidPayload(t *testing.T) {
 	}
 }
 
+func TestEngine_SetVerifierKeyInitializesMissingVerifier(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(dir)
+	pub, priv := generateTestKeys(t)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		ComposeCmd:    "false",
+		HealthTimeout: 1 * time.Second,
+	})
+	payload := makeTestPayload("env-1", "node-1", 1, "compose yaml", priv)
+
+	err := engine.Apply(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "no signature verifier configured") {
+		t.Fatalf("expected missing verifier rejection, got: %v", err)
+	}
+
+	if err := engine.SetVerifierKey(pubB64); err != nil {
+		t.Fatalf("SetVerifierKey: %v", err)
+	}
+
+	err = engine.Apply(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "compose pull") {
+		t.Fatalf("expected signed payload to proceed to compose pull, got: %v", err)
+	}
+}
+
 func TestEngine_ApplyRejectsWrongEnv(t *testing.T) {
 	dir := t.TempDir()
 	disk, _ := NewDiskState(dir)
