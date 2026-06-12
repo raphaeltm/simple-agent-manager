@@ -31,15 +31,16 @@ type Engine struct {
 
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
-	EnvironmentID   string
-	NodeID          string
-	ControlPlaneURL string
-	CallbackToken   string
-	ComposeCmd      string // e.g., "docker compose"
-	CaddyfilePath   string
-	CaddyReloadCmd  string
-	HealthTimeout   time.Duration
-	HTTPClient      *http.Client
+	EnvironmentID      string
+	NodeID             string
+	ControlPlaneURL    string
+	CallbackToken      string
+	ComposeCmd         string // e.g., "docker compose"
+	CaddyfilePath      string
+	CaddyReloadCmd     string
+	HealthTimeout      time.Duration
+	HealthPollInterval time.Duration
+	HTTPClient         *http.Client
 }
 
 // NewEngine creates a new deployment engine.
@@ -55,6 +56,9 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	}
 	if cfg.HealthTimeout == 0 {
 		cfg.HealthTimeout = 5 * time.Minute
+	}
+	if cfg.HealthPollInterval == 0 {
+		cfg.HealthPollInterval = 5 * time.Second
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
@@ -383,7 +387,7 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
 	deadline := time.NewTimer(e.cfg.HealthTimeout)
 	defer deadline.Stop()
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(e.cfg.HealthPollInterval)
 	defer ticker.Stop()
 
 	for {
