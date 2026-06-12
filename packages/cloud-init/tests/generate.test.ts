@@ -1869,7 +1869,7 @@ describe('deployment role support', () => {
     expect(caddyfile.content).toContain('SAM deployment node awaiting release');
   });
 
-  it('guards Caddy installation behind ROLE=deployment', () => {
+  it('guards Caddy path preparation behind ROLE=deployment', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
       { validateSize: false },
@@ -1879,11 +1879,13 @@ describe('deployment role support', () => {
 
     expect(runcmd).toContain('ROLE="deployment"');
     expect(runcmd).toContain('if [ "$ROLE" = "deployment" ]; then');
-    expect(runcmd).toContain('apt-get install -y caddy');
-    expect(runcmd).toContain('systemctl reload-or-restart caddy');
+    expect(runcmd).toContain('Preparing Caddy paths for deployment node routing');
+    expect(runcmd).toContain('vm-agent owns Caddy install/start');
+    expect(runcmd).not.toContain('apt-get install -y caddy');
+    expect(runcmd).not.toContain('systemctl reload-or-restart caddy');
   });
 
-  it('starts vm-agent before blocking deployment Caddy setup', () => {
+  it('starts vm-agent before non-blocking deployment Caddy path setup', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
       { validateSize: false },

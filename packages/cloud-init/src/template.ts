@@ -82,23 +82,9 @@ runcmd:
     set -euo pipefail
     ROLE="{{ role }}"
     if [ "$ROLE" = "deployment" ]; then
-      logger -t sam-boot "Installing Caddy for deployment node routing"
+      logger -t sam-boot "Preparing Caddy paths for deployment node routing"
       mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
-
-      if ! command -v caddy >/dev/null 2>&1; then
-        apt-get update 2>&1 | logger -t sam-boot
-        apt-get install -y caddy 2>&1 | logger -t sam-boot
-      fi
-
-      if ! id caddy >/dev/null 2>&1; then
-        logger -t sam-boot "ERROR: caddy package did not create caddy user"
-        exit 1
-      fi
-
-      chown -R caddy:caddy /var/lib/caddy /var/log/caddy
-      systemctl enable caddy
-      systemctl reload-or-restart caddy
-      logger -t sam-boot "Caddy ready for deployment node routing"
+      logger -t sam-boot "Caddy paths ready; vm-agent owns Caddy install/start"
     else
       logger -t sam-boot "Skipping Caddy setup for ROLE=$ROLE"
     fi

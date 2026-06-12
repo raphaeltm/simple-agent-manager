@@ -52,6 +52,14 @@ func runDeploymentMode(cfg *config.Config) {
 		"environmentId", cfg.EnvironmentID,
 		"baseDir", cfg.DeployBaseDir)
 
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	if err := deploy.EnsureRuntime(runtimeCtx); err != nil {
+		runtimeCancel()
+		slog.Error("Deployment runtime provisioning failed", "error", err)
+		os.Exit(1)
+	}
+	runtimeCancel()
+
 	// Create server with deployment-mode routes only
 	srv, err := server.New(cfg)
 	if err != nil {
