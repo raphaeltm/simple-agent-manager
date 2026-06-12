@@ -216,4 +216,19 @@ describe('renderCompose', () => {
     );
     expect(doc.services.web.environment.MULTILINE).toBe('line1\nline2\nline3');
   });
+
+  it('publishes public route targets to loopback for host-level Caddy', () => {
+    const doc = parse(renderCompose(makeManifest(), {
+      ...CTX,
+      routeTargets: [
+        { service: 'web', containerPort: 3000, hostPort: 35000 },
+        { service: 'web', containerPort: 3001, hostPort: 35001 },
+      ],
+    }));
+
+    expect(doc.services.web.ports).toEqual([
+      '127.0.0.1:35000:3000',
+      '127.0.0.1:35001:3001',
+    ]);
+  });
 });

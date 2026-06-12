@@ -97,6 +97,8 @@ export interface Env {
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
   PROVISIONING_TIMEOUT_MS?: string;
   DNS_TTL_SECONDS?: string;
+  DEPLOYMENT_ROUTE_PORT_BASE?: string;
+  DEPLOYMENT_ROUTE_PORT_SPAN?: string;
   // Rate limiting (per hour)
   RATE_LIMIT_WORKSPACE_CREATE?: string;
   RATE_LIMIT_TERMINAL_TOKEN?: string;

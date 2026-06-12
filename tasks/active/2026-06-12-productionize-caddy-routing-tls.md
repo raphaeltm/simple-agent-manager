@@ -25,41 +25,41 @@ This task productionizes the missing data plane: deployment nodes install Caddy,
 
 ### 1. Cloud-Init Caddy Installation and Service
 
-- [ ] Install Caddy on deployment nodes via `packages/cloud-init/` without adding provider-specific cloud-init branches.
-- [ ] Create required Caddy directories and a minimal initial `/etc/caddy/Caddyfile`.
-- [ ] Ensure Caddy is a separate systemd service from `vm-agent`, enabled at boot, and not restarted by release applies.
-- [ ] Keep workspace-node behavior intact.
-- [ ] Add cloud-init tests that parse the generated YAML and assert Caddy setup round-trips for realistic deployment-role data.
+- [x] Install Caddy on deployment nodes via `packages/cloud-init/` without adding provider-specific cloud-init branches.
+- [x] Create required Caddy directories and a minimal initial `/etc/caddy/Caddyfile`.
+- [x] Ensure Caddy is a separate systemd service from `vm-agent`, enabled at boot, and not restarted by release applies.
+- [x] Keep workspace-node behavior intact.
+- [x] Add cloud-init tests that parse the generated YAML and assert Caddy setup round-trips for realistic deployment-role data.
 
 ### 2. Control-Plane Route Hostname and DNS
 
-- [ ] Add deterministic app hostname generation from environment/project/release route state using `BASE_DOMAIN`; avoid hardcoded domains.
-- [ ] Add DNS service functions for app route A records that create/update grey-cloud records (`proxied: false`) pointing at the deployment node IP.
-- [ ] Wire release creation/provisioning so public routes create/update DNS records through `apps/api/src/services/dns.ts`; no provider-specific branches in `apps/api`.
-- [ ] Omit private routes from public DNS/Caddy exposure.
-- [ ] Add unit tests for hostname generation, grey-cloud DNS payloads, and idempotent create/update behavior.
+- [x] Add deterministic app hostname generation from environment/project/release route state using `BASE_DOMAIN`; avoid hardcoded domains.
+- [x] Add DNS service functions for app route A records that create/update grey-cloud records (`proxied: false`) pointing at the deployment node IP.
+- [x] Wire release creation/provisioning so public routes create/update DNS records through `apps/api/src/services/dns.ts`; no provider-specific branches in `apps/api`.
+- [x] Omit private routes from public DNS/Caddy exposure.
+- [x] Add unit tests for hostname generation, grey-cloud DNS payloads, and idempotent create/update behavior.
 
 ### 3. Signed Release Payload Route Contract
 
-- [ ] Add route-target data to the deploy release callback response and signature contract.
-- [ ] Generate Caddy route targets from the validated manifest and environment metadata in the control plane.
-- [ ] Preserve callback JWT auth and route mounting outside session-authenticated project routes.
-- [ ] Add cross-boundary contract tests proving the API response shape matches the Go deployment agent payload shape.
+- [x] Add route-target data to the deploy release callback response and signature contract.
+- [x] Generate Caddy route targets from the validated manifest and environment metadata in the control plane.
+- [x] Preserve callback JWT auth and route mounting outside session-authenticated project routes.
+- [x] Add cross-boundary contract tests proving the API response shape matches the Go deployment agent payload shape.
 
 ### 4. Caddyfile Generation and Reload in VM Agent
 
-- [ ] Add Go Caddyfile generation from signed route targets with realistic multi-route support.
-- [ ] Parse/round-trip the generated Caddy config in tests rather than relying on string containment only.
-- [ ] Write the generated Caddyfile atomically to disk during release apply.
-- [ ] Run `caddy reload --config <path> --adapter caddyfile` after successful compose convergence.
-- [ ] Ensure reload failures fail the release apply before it is marked applied.
-- [ ] Add Go tests for successful reload, reload failure, atomic write behavior, and no container restart of Caddy.
+- [x] Add Go Caddyfile generation from signed route targets with realistic multi-route support.
+- [x] Parse/round-trip the generated Caddy config in tests rather than relying on string containment only.
+- [x] Write the generated Caddyfile atomically to disk during release apply.
+- [x] Run `caddy reload --config <path> --adapter caddyfile` after successful compose convergence.
+- [x] Ensure reload failures fail the release apply before it is marked applied.
+- [x] Add Go tests for successful reload, reload failure, atomic write behavior, and no container restart of Caddy.
 
 ### 5. Vertical Slice and Regression Tests
 
 - [ ] Add a release-apply vertical slice test with realistic environment, node, release manifest, DNS state, callback payload, and route targets.
-- [ ] Add tests proving public routes get DNS + payload route targets while private routes do not.
-- [ ] Add tests that would fail if Caddyfile updates are skipped while containers apply successfully.
+- [x] Add tests proving public routes get DNS + payload route targets while private routes do not.
+- [x] Add tests that would fail if Caddyfile updates are skipped while containers apply successfully.
 - [ ] Run package-level tests for `shared`, `cloud-init`, `api`, and `vm-agent`.
 
 ### 6. Documentation / Operational Decision Record

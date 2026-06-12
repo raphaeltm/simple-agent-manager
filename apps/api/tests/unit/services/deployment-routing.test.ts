@@ -1,0 +1,62 @@
+import { describe, expect, it } from 'vitest';
+
+import { buildDeploymentRouteTargets } from '../../../src/services/deployment-routing';
+
+function manifest() {
+  return {
+    version: 1 as const,
+    services: {
+      web: {
+        image: { registry: 'docker.io', repository: 'example/web', digest: `sha256:${'a'.repeat(64)}` },
+        env: {},
+        volumes: [],
+      },
+      api: {
+        image: { registry: 'docker.io', repository: 'example/api', digest: `sha256:${'b'.repeat(64)}` },
+        env: {},
+        volumes: [],
+      },
+    },
+    volumes: {},
+    routes: [
+      { service: 'web', port: 3000, mode: 'public' as const },
+      { service: 'api', port: 8080, mode: 'private' as const },
+      { service: 'api', port: 8081, mode: 'public' as const },
+    ],
+  };
+}
+
+describe('buildDeploymentRouteTargets', () => {
+  it('derives stable app hostnames and loopback host ports for public routes only', () => {
+    const targets = buildDeploymentRouteTargets(manifest(), {
+      environmentId: '01KTX9M6J0TPMGW0CQ98HQ1EAW',
+      baseDomain: 'sammy.party',
+      routePortBase: '36000',
+      routePortSpan: '20',
+    });
+
+    expect(targets).toEqual([
+      {
+        hostname: 'r1-web-3000-01ktx9m6j0tp.apps.sammy.party',
+        service: 'web',
+        containerPort: 3000,
+        hostPort: 36000,
+      },
+      {
+        hostname: 'r2-api-8081-01ktx9m6j0tp.apps.sammy.party',
+        service: 'api',
+        containerPort: 8081,
+        hostPort: 36001,
+      },
+    ]);
+  });
+
+  it('fails before assigning ports outside the configured per-environment span', () => {
+    expect(() => buildDeploymentRouteTargets(manifest(), {
+      environmentId: 'env-1',
+      baseDomain: 'example.com',
+      routePortBase: '35000',
+      routePortSpan: '1',
+    })).toThrow('exceeding configured deployment route port span 1');
+  });
+});

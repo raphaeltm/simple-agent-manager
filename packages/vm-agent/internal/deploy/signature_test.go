@@ -64,6 +64,38 @@ func TestVerifier_WrongKey(t *testing.T) {
 	}
 }
 
+func TestVerifier_RejectsRouteMutationAfterSigning(t *testing.T) {
+	pub, priv := generateTestKeys(t)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	v, err := NewVerifier(pubB64)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "compose yaml",
+		Routes: []RouteTarget{{
+			Hostname:      "app.apps.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
+		}},
+	}
+	sig, _ := SignPayload(payload, priv)
+	payload.Signature = sig
+	payload.Routes[0].HostPort = 35001
+
+	err = v.Verify(payload, "env-1", "node-1", 0)
+	if err == nil {
+		t.Error("expected signature verification to fail after route mutation")
+	}
+}
+
 func TestVerifier_WrongEnvironment(t *testing.T) {
 	pub, priv := generateTestKeys(t)
 	pubB64 := base64.StdEncoding.EncodeToString(pub)

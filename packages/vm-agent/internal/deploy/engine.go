@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -35,6 +36,8 @@ type EngineConfig struct {
 	ControlPlaneURL string
 	CallbackToken   string
 	ComposeCmd      string // e.g., "docker compose"
+	CaddyfilePath   string
+	CaddyReloadCmd  string
 	HealthTimeout   time.Duration
 	HTTPClient      *http.Client
 }
@@ -43,6 +46,12 @@ type EngineConfig struct {
 func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	if cfg.ComposeCmd == "" {
 		cfg.ComposeCmd = "docker compose"
+	}
+	if cfg.CaddyfilePath == "" {
+		cfg.CaddyfilePath = "/etc/caddy/Caddyfile"
+	}
+	if cfg.CaddyReloadCmd == "" {
+		cfg.CaddyReloadCmd = "caddy reload --config {config} --adapter caddyfile"
 	}
 	if cfg.HealthTimeout == 0 {
 		cfg.HealthTimeout = 5 * time.Minute
@@ -146,7 +155,8 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	// Write release to disk
-	if err := e.disk.WriteRelease(newState, payload.ComposeYAML); err != nil {
+	caddyfile := GenerateCaddyfile(payload.Routes)
+	if err := e.disk.WriteRelease(newState, payload.ComposeYAML, caddyfile); err != nil {
 		return fmt.Errorf("write release to disk: %w", err)
 	}
 
@@ -163,6 +173,10 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Wait for health checks
 	if err := e.waitForHealth(ctx, payload.Seq); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("health check: %w", err))
+	}
+
+	if err := e.reloadCaddy(ctx, e.disk.CaddyfilePath(payload.Seq)); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("caddy reload: %w", err))
 	}
 
 	// Success: update current pointer
@@ -227,6 +241,11 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 			Status:     StatusFailed,
 		})
 		return fmt.Errorf("apply failed and revert failed: apply=%w, revert=%v", applyErr, err)
+	}
+
+	if err := e.reloadCaddy(ctx, e.disk.CaddyfilePath(previousSeq)); err != nil {
+		slog.Error("deploy.apply: caddy reload for reverted release failed",
+			"prevSeq", previousSeq, "error", err)
 	}
 
 	// Restore current pointer to previous
@@ -331,6 +350,32 @@ func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...str
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w (stderr: %s)",
 			e.cfg.ComposeCmd, strings.Join(args, " "), err, stderr.String())
+	}
+	return nil
+}
+
+func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error {
+	content, err := os.ReadFile(releaseCaddyfile)
+	if err != nil {
+		return fmt.Errorf("read release Caddyfile: %w", err)
+	}
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, string(content), 0644); err != nil {
+		return fmt.Errorf("write active Caddyfile: %w", err)
+	}
+
+	parts := strings.Fields(e.cfg.CaddyReloadCmd)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty caddy reload command")
+	}
+	for i, part := range parts {
+		parts[i] = strings.ReplaceAll(part, "{config}", e.cfg.CaddyfilePath)
+	}
+
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w (stderr: %s)", e.cfg.CaddyReloadCmd, err, stderr.String())
 	}
 	return nil
 }
