@@ -23,6 +23,11 @@ interface SignablePayload {
   routes?: unknown;
 }
 
+const ED25519_PKCS8_SEED_PREFIX = Uint8Array.from([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+  0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
+
 /**
  * Build the canonical bytes to sign, matching the Go-side buildSignableBytes().
  *
@@ -80,12 +85,16 @@ export async function signDeployPayload(
     );
   }
 
-  // WebCrypto Ed25519 raw import expects the 32-byte seed
+  // WebCrypto imports Ed25519 private keys as PKCS#8. The DER wrapper carries
+  // the raw 32-byte seed without adding node-side credential material.
   const seed = privateKeyBytes.length === 64 ? privateKeyBytes.slice(0, 32) : privateKeyBytes;
+  const pkcs8Key = new Uint8Array(ED25519_PKCS8_SEED_PREFIX.length + seed.length);
+  pkcs8Key.set(ED25519_PKCS8_SEED_PREFIX);
+  pkcs8Key.set(seed, ED25519_PKCS8_SEED_PREFIX.length);
 
   const key = await crypto.subtle.importKey(
-    'raw',
-    seed,
+    'pkcs8',
+    pkcs8Key,
     { name: 'Ed25519' },
     false,
     ['sign'],
