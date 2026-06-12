@@ -40,7 +40,7 @@ func TestEngine_ReconcileOnStart_WithState(t *testing.T) {
 		Status:        StatusApplied,
 		AppliedAt:     time.Now().UTC(),
 	}
-	disk.WriteRelease(state, "version: '3'\n")
+	disk.WriteRelease(state, "version: '3'\n", "caddyfile")
 	disk.SetCurrent(5)
 
 	engine := NewEngine(disk, nil, EngineConfig{
@@ -144,7 +144,7 @@ func TestEngine_ApplyRejectsSequenceReplay(t *testing.T) {
 
 	// Simulate already having applied seq 5
 	state := &ReleaseState{Seq: 5, Status: StatusApplied}
-	disk.WriteRelease(state, "old compose")
+	disk.WriteRelease(state, "old compose", "old caddyfile")
 	disk.SetCurrent(5)
 
 	pub, priv := generateTestKeys(t)

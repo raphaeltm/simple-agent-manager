@@ -1842,6 +1842,36 @@ describe('deployment role support', () => {
     expect(sizeBytes).toBeLessThanOrEqual(32 * 1024);
   });
 
+  it('writes an initial managed Caddyfile for deployment routing', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+
+    const caddyfile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/caddy/Caddyfile',
+    );
+    expect(caddyfile).toBeDefined();
+    expect(caddyfile.permissions).toBe('0644');
+    expect(caddyfile.content).toContain('Managed by SAM deployment agent');
+    expect(caddyfile.content).toContain('caddy reload');
+  });
+
+  it('guards Caddy installation behind ROLE=deployment', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false },
+    );
+    const parsed = YAML.parse(config);
+    const runcmd = parsed.runcmd.join('\n');
+
+    expect(runcmd).toContain('ROLE="deployment"');
+    expect(runcmd).toContain('if [ "$ROLE" = "deployment" ]; then');
+    expect(runcmd).toContain('apt-get install -y caddy');
+    expect(runcmd).toContain('systemctl reload-or-restart caddy');
+  });
+
   it('rejects invalid role values', () => {
     expect(() =>
       validateCloudInitVariables(baseVariables({ role: 'admin' })),

@@ -46,8 +46,9 @@ func TestDiskState_WriteAndRead(t *testing.T) {
 		AppliedAt:     time.Now().UTC().Truncate(time.Second),
 	}
 	composeYAML := "version: '3'\nservices:\n  web:\n    image: nginx\n"
+	caddyfile := "example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"
 
-	if err := ds.WriteRelease(state, composeYAML); err != nil {
+	if err := ds.WriteRelease(state, composeYAML, caddyfile); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
 	}
 
@@ -59,6 +60,14 @@ func TestDiskState_WriteAndRead(t *testing.T) {
 	}
 	if string(data) != composeYAML {
 		t.Errorf("compose file mismatch: got %q", string(data))
+	}
+
+	caddyData, err := os.ReadFile(ds.CaddyfilePath(42))
+	if err != nil {
+		t.Fatalf("read Caddyfile: %v", err)
+	}
+	if string(caddyData) != caddyfile {
+		t.Errorf("Caddyfile mismatch: got %q", string(caddyData))
 	}
 
 	// Verify metadata was written with computed hash
@@ -86,7 +95,7 @@ func TestDiskState_SetCurrent(t *testing.T) {
 
 	// Write a release
 	state := &ReleaseState{Seq: 10, Status: StatusApplied}
-	if err := ds.WriteRelease(state, "compose yaml"); err != nil {
+	if err := ds.WriteRelease(state, "compose yaml", "caddyfile"); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
 	}
 
@@ -124,7 +133,7 @@ func TestDiskState_SetCurrentAtomic(t *testing.T) {
 	// Write two releases
 	for _, seq := range []int64{1, 2} {
 		state := &ReleaseState{Seq: seq, Status: StatusApplied}
-		if err := ds.WriteRelease(state, "compose yaml"); err != nil {
+		if err := ds.WriteRelease(state, "compose yaml", "caddyfile"); err != nil {
 			t.Fatalf("WriteRelease seq=%d: %v", seq, err)
 		}
 	}
@@ -151,7 +160,7 @@ func TestDiskState_UpdateState(t *testing.T) {
 	}
 
 	state := &ReleaseState{Seq: 5, Status: StatusApplying}
-	if err := ds.WriteRelease(state, "compose yaml"); err != nil {
+	if err := ds.WriteRelease(state, "compose yaml", "caddyfile"); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
 	}
 
@@ -190,7 +199,7 @@ func TestDiskState_CurrentComposeFilePath(t *testing.T) {
 
 	// Write and set current
 	state := &ReleaseState{Seq: 7, Status: StatusApplied}
-	if err := ds.WriteRelease(state, "yaml content"); err != nil {
+	if err := ds.WriteRelease(state, "yaml content", "caddyfile"); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
 	}
 	if err := ds.SetCurrent(7); err != nil {
