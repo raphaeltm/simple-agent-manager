@@ -72,7 +72,8 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
 
-  if (nodeRows.length === 0) {
+  const node = nodeRows.at(0);
+  if (!node) {
     throw errors.notFound('Node');
   }
 
@@ -93,7 +94,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       and(
         eq(schema.deploymentEnvironments.id, environmentId),
         eq(schema.deploymentEnvironments.nodeId, nodeId),
-        eq(schema.projects.userId, nodeRows[0]!.userId),
+        eq(schema.projects.userId, node.userId),
       ),
     )
     .limit(1);
@@ -114,11 +115,10 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     )
     .limit(1);
 
-  if (releaseRows.length === 0) {
+  const release = releaseRows.at(0);
+  if (!release) {
     throw errors.notFound('Deployment release');
   }
-
-  const release = releaseRows[0]!;
   const manifest = JSON.parse(release.manifest);
 
   const routes = buildDeploymentRouteTargets(manifest, {
@@ -129,7 +129,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   });
 
   if (routes.length > 0) {
-    const nodeIp = nodeRows[0]!.ipAddress;
+    const nodeIp = node.ipAddress;
     if (!nodeIp) {
       throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
     }
