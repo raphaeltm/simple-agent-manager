@@ -97,6 +97,7 @@ export function classifyGcpError(
 const SAM_AGENT_FIREWALL_RULE_NAME = 'sam-allow-agent';
 const SAM_APP_ROUTE_FIREWALL_RULE_NAME = 'sam-allow-app-routes';
 const SAM_NETWORK_TAG = 'sam-agent';
+const SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG = 'sam-deployment-app-routes';
 /** Default ports the VM agent may listen on (8443 with TLS, 8080 without). */
 export const DEFAULT_GCP_AGENT_PORTS = ['8080', '8443'] as const;
 /** Default public ports served directly by deployment-node Caddy app routes. */
@@ -269,6 +270,7 @@ export class GcpProvider implements Provider {
     ports: readonly string[],
     sourceRanges: readonly string[],
     description: string,
+    targetTag: string,
   ): Promise<void> {
     const headers = await this.authHeaders();
     const url = `${this.projectUrl()}/global/firewalls`;
@@ -278,7 +280,7 @@ export class GcpProvider implements Provider {
       network: `${this.projectUrl()}/global/networks/default`,
       direction: 'INGRESS',
       priority: 1000,
-      targetTags: [SAM_NETWORK_TAG],
+      targetTags: [targetTag],
       allowed: [
         {
           IPProtocol: 'tcp',
@@ -319,12 +321,14 @@ export class GcpProvider implements Provider {
       this.agentPorts,
       this.firewallSourceRanges,
       'Allow configured inbound access to SAM VM agent (managed by Simple Agent Manager)',
+      SAM_NETWORK_TAG,
     );
     await this.ensureFirewallRule(
       SAM_APP_ROUTE_FIREWALL_RULE_NAME,
       this.appRoutePorts,
       this.appRouteSourceRanges,
       'Allow public HTTP/HTTPS access to SAM deployment app routes (managed by Simple Agent Manager)',
+      SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG,
     );
   }
 
@@ -372,6 +376,11 @@ export class GcpProvider implements Provider {
     // Ensure firewall rules exist before creating VM
     await this.ensureFirewallRules();
 
+    const networkTags = [SAM_NETWORK_TAG];
+    if (config.labels?.role === 'deployment') {
+      networkTags.push(SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG);
+    }
+
     const body = {
       name: config.name,
       machineType: `zones/${zone}/machineTypes/${machineType}`,
@@ -380,7 +389,7 @@ export class GcpProvider implements Provider {
         ...(config.labels || {}),
       },
       tags: {
-        items: [SAM_NETWORK_TAG],
+        items: networkTags,
       },
       disks: [
         {

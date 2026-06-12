@@ -146,8 +146,40 @@ describe('GcpProvider', () => {
       expect(body.machineType).toContain('e2-standard-2');
       expect(body.labels).toHaveProperty('sam-managed', 'true');
       expect(body.labels).toHaveProperty('node', 'test-node-id');
+      expect(body.tags.items).toEqual(['sam-agent']);
       expect(body.metadata.items[0].key).toBe('user-data');
       expect(body.metadata.items[0].value).toBe('#cloud-config\nruncmd: []');
+    });
+
+    it('adds the public app-route network tag only to deployment-role VMs', async () => {
+      let capturedBody: string | undefined;
+      globalThis.fetch = vi.fn()
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 }))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 }))
+        .mockImplementationOnce(async (_url: string, init: RequestInit) => {
+          capturedBody = init.body as string;
+          return new Response(JSON.stringify({ name: 'op-123', status: 'DONE' }));
+        })
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({
+          id: '1',
+          name: 'vm',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+          creationTimestamp: '2026-03-18T00:00:00Z',
+          networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
+        })));
+
+      await provider.createVM({
+        name: 'deployment-vm',
+        size: 'small',
+        location: 'us-central1-a',
+        userData: '',
+        labels: { role: 'deployment' },
+      });
+
+      const body = JSON.parse(expectDefined(capturedBody));
+      expect(body.tags.items).toEqual(['sam-agent', 'sam-deployment-app-routes']);
     });
 
     it('should use Authorization header with token from tokenProvider', async () => {
@@ -221,9 +253,11 @@ describe('GcpProvider', () => {
       const firewallBody = jsonBody(fetchCall(mockFetch, 0).init);
       expect(firewallBody.sourceRanges).toEqual([testCidr(10, 0, 0, 0, 8)]);
       expect(firewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['9443'] }]);
+      expect(firewallBody.targetTags).toEqual(['sam-agent']);
       const appRouteFirewallBody = jsonBody(fetchCall(mockFetch, 2).init);
       expect(appRouteFirewallBody.sourceRanges).toEqual([testCidr(0, 0, 0, 0, 0)]);
       expect(appRouteFirewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: ['80', '443'] }]);
+      expect(appRouteFirewallBody.targetTags).toEqual(['sam-deployment-app-routes']);
     });
 
     it('should default firewall source ranges to Cloudflare IPv4 ranges and app routes to public HTTP/HTTPS', async () => {
@@ -258,6 +292,7 @@ describe('GcpProvider', () => {
       const appRouteFirewallBody = jsonBody(fetchCall(mockFetch, 2).init);
       expect(appRouteFirewallBody.sourceRanges).toEqual([...DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES]);
       expect(appRouteFirewallBody.allowed).toEqual([{ IPProtocol: 'tcp', ports: [...DEFAULT_GCP_APP_ROUTE_PORTS] }]);
+      expect(appRouteFirewallBody.targetTags).toEqual(['sam-deployment-app-routes']);
     });
   });
 

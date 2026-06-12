@@ -39,7 +39,7 @@ function sanitizeDnsLabelPart(value: string): string {
 }
 
 function buildRouteHostname(environmentId: string, service: string, port: number, routeIndex: number, baseDomain: string): string {
-  const envPart = sanitizeDnsLabelPart(environmentId).slice(0, 12);
+  const envPart = sanitizeDnsLabelPart(environmentId);
   const servicePart = sanitizeDnsLabelPart(service).slice(0, MAX_SERVICE_LABEL_LENGTH);
   return `r${routeIndex + 1}-${servicePart}-${port}-${envPart}.apps.${baseDomain.toLowerCase()}`;
 }

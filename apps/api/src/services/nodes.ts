@@ -221,6 +221,7 @@ export async function provisionNode(
       labels: {
         node: node.id.toLowerCase(),
         managed: 'simple-agent-manager',
+        role: isDeploymentNode ? 'deployment' : 'workspace',
       },
     });
 

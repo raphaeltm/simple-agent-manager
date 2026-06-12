@@ -37,18 +37,33 @@ describe('buildDeploymentRouteTargets', () => {
 
     expect(targets).toEqual([
       {
-        hostname: 'r1-web-3000-01ktx9m6j0tp.apps.sammy.party',
+        hostname: 'r1-web-3000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
         service: 'web',
         containerPort: 3000,
         hostPort: 36000,
       },
       {
-        hostname: 'r2-api-8081-01ktx9m6j0tp.apps.sammy.party',
+        hostname: 'r2-api-8081-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
         service: 'api',
         containerPort: 8081,
         hostPort: 36001,
       },
     ]);
+  });
+
+  it('keeps enough environment entropy to avoid ULID timestamp-prefix hostname collisions', () => {
+    const first = buildDeploymentRouteTargets(manifest(), {
+      environmentId: '01KTX9M6J0AAAAAAAAAAAAAAAA',
+      baseDomain: 'sammy.party',
+    });
+    const second = buildDeploymentRouteTargets(manifest(), {
+      environmentId: '01KTX9M6J0BBBBBBBBBBBBBBBB',
+      baseDomain: 'sammy.party',
+    });
+
+    expect(first[0]!.hostname).toBe('r1-web-3000-01ktx9m6j0aaaaaaaaaaaaaaaa.apps.sammy.party');
+    expect(second[0]!.hostname).toBe('r1-web-3000-01ktx9m6j0bbbbbbbbbbbbbbbb.apps.sammy.party');
+    expect(first[0]!.hostname).not.toBe(second[0]!.hostname);
   });
 
   it('fails before assigning ports outside the configured per-environment span', () => {
