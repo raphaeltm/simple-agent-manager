@@ -3,6 +3,8 @@ package deploy
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 )
@@ -218,5 +220,35 @@ func TestVerifier_InvalidBase64(t *testing.T) {
 	_, err := NewVerifier("not-valid-base64!!!")
 	if err == nil {
 		t.Error("expected error for invalid base64")
+	}
+}
+
+func TestVerifier_AcceptsSharedApiRoutePayloadFixture(t *testing.T) {
+	bytes, err := os.ReadFile("../../../../tests/fixtures/deploy-release/apply-payload-with-routes.json")
+	if err != nil {
+		t.Fatalf("read contract fixture: %v", err)
+	}
+
+	var payload ApplyPayload
+	if err := json.Unmarshal(bytes, &payload); err != nil {
+		t.Fatalf("decode contract fixture: %v", err)
+	}
+
+	if len(payload.Routes) != 2 {
+		t.Fatalf("expected 2 route targets, got %d", len(payload.Routes))
+	}
+	if payload.Routes[0].Hostname != "r1-web-3000-env-1.apps.sammy.party" {
+		t.Fatalf("unexpected first route: %#v", payload.Routes[0])
+	}
+	if payload.Routes[0].HostPort != 35000 || payload.Routes[1].HostPort != 35001 {
+		t.Fatalf("unexpected host ports: %#v", payload.Routes)
+	}
+
+	verifier, err := NewVerifier("ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=")
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	if err := verifier.Verify(&payload, "env-1", "node-1", 0); err != nil {
+		t.Fatalf("Verify shared API fixture: %v", err)
 	}
 }
