@@ -155,8 +155,11 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     updatedAt: now,
   };
 
-  if (body.metrics) {
-    updatePayload.lastMetrics = JSON.stringify(body.metrics);
+  if (body.metrics || body.deployment) {
+    updatePayload.lastMetrics = JSON.stringify({
+      ...(body.metrics ?? {}),
+      ...(body.deployment ? { deployment: body.deployment } : {}),
+    });
   }
 
   // Self-heal stale "Awaiting IP allocation" error on nodes that already have an IP.

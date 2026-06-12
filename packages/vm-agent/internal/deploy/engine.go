@@ -249,8 +249,9 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 		_ = e.disk.UpdateState(state)
 		e.setObserved(ObservedState{
-			AppliedSeq: 0,
-			Status:     StatusFailedInitial,
+			AppliedSeq:   0,
+			Status:       StatusFailedInitial,
+			ErrorMessage: applyErr.Error(),
 		})
 		return fmt.Errorf("apply failed (no previous release to revert): %w", applyErr)
 	}
@@ -264,8 +265,9 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 		slog.Error("deploy.apply: revert also failed",
 			"prevSeq", previousSeq, "error", err)
 		e.setObserved(ObservedState{
-			AppliedSeq: previousSeq,
-			Status:     StatusFailed,
+			AppliedSeq:   previousSeq,
+			Status:       StatusFailed,
+			ErrorMessage: applyErr.Error(),
 		})
 		return fmt.Errorf("apply failed and revert failed: apply=%w, revert=%v", applyErr, err)
 	}

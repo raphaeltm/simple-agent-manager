@@ -119,6 +119,7 @@ func (s *Server) sendNodeHeartbeat() {
 			"environmentId": s.config.EnvironmentID,
 			"appliedSeq":    observed.AppliedSeq,
 			"status":        string(observed.Status),
+			"errorMessage":  observed.ErrorMessage,
 			"services":      observed.Services,
 		}
 	}

@@ -91,6 +91,7 @@ const DeploymentStateSchema = v.object({
   environmentId: v.optional(v.string()),
   appliedSeq: v.optional(v.number()),
   status: v.optional(v.string()),
+  errorMessage: v.optional(v.string()),
   services: v.optional(v.unknown()),
 });
 

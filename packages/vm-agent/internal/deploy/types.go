@@ -37,9 +37,10 @@ type ServiceState struct {
 
 // ObservedState is sent in the heartbeat to report deployment state.
 type ObservedState struct {
-	AppliedSeq int64          `json:"appliedSeq"`
-	Status     ApplyStatus    `json:"status"`
-	Services   []ServiceState `json:"services,omitempty"`
+	AppliedSeq   int64          `json:"appliedSeq"`
+	Status       ApplyStatus    `json:"status"`
+	ErrorMessage string         `json:"errorMessage,omitempty"`
+	Services     []ServiceState `json:"services,omitempty"`
 }
 
 // ApplyPayload is the signed payload received from the control plane.
