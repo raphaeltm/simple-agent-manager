@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type parsedCaddyRoute struct {
@@ -149,6 +150,43 @@ func TestReloadCaddy_ReturnsReloadFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "false") {
 		t.Fatalf("expected command in error, got %v", err)
+	}
+}
+
+func TestReloadCaddy_WaitsForReloadCommandToExist(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
+	if err := disk.WriteRelease(state, "compose", "app.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+
+	reloadLog := filepath.Join(dir, "reload.log")
+	reloadScript := filepath.Join(dir, "delayed-caddy")
+	engine := NewEngine(disk, nil, EngineConfig{
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     reloadScript + " " + reloadLog,
+		CaddyReadyTimeout:  2 * time.Second,
+		CaddyReadyInterval: 10 * time.Millisecond,
+	})
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = os.WriteFile(reloadScript, []byte("#!/bin/sh\necho delayed > \"$1\"\n"), 0755)
+	}()
+
+	if err := engine.reloadCaddy(t.Context(), disk.CaddyfilePath(1)); err != nil {
+		t.Fatalf("reloadCaddy: %v", err)
+	}
+	logBytes, err := os.ReadFile(reloadLog)
+	if err != nil {
+		t.Fatalf("reload command did not run: %v", err)
+	}
+	if strings.TrimSpace(string(logBytes)) != "delayed" {
+		t.Fatalf("unexpected reload log %q", string(logBytes))
 	}
 }
 

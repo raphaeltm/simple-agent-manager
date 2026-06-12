@@ -40,6 +40,8 @@ type EngineConfig struct {
 	ComposeCmd         string // e.g., "docker compose"
 	CaddyfilePath      string
 	CaddyReloadCmd     string
+	CaddyReadyTimeout  time.Duration
+	CaddyReadyInterval time.Duration
 	HealthTimeout      time.Duration
 	HealthPollInterval time.Duration
 	HTTPClient         *http.Client
@@ -55,6 +57,12 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	}
 	if cfg.CaddyReloadCmd == "" {
 		cfg.CaddyReloadCmd = "caddy reload --config {config} --adapter caddyfile"
+	}
+	if cfg.CaddyReadyTimeout == 0 {
+		cfg.CaddyReadyTimeout = 2 * time.Minute
+	}
+	if cfg.CaddyReadyInterval == 0 {
+		cfg.CaddyReadyInterval = 2 * time.Second
 	}
 	if cfg.HealthTimeout == 0 {
 		cfg.HealthTimeout = 5 * time.Minute
@@ -389,6 +397,9 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 	for i, part := range parts {
 		parts[i] = strings.ReplaceAll(part, "{config}", e.cfg.CaddyfilePath)
 	}
+	if err := e.waitForReloadCommand(ctx, parts[0]); err != nil {
+		return err
+	}
 
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	var stderr bytes.Buffer
@@ -397,6 +408,30 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 		return fmt.Errorf("%s: %w (stderr: %s)", e.cfg.CaddyReloadCmd, err, stderr.String())
 	}
 	return nil
+}
+
+func (e *Engine) waitForReloadCommand(ctx context.Context, command string) error {
+	if _, err := exec.LookPath(command); err == nil {
+		return nil
+	}
+
+	deadline := time.NewTimer(e.cfg.CaddyReadyTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(e.cfg.CaddyReadyInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("caddy reload command %q not available before context deadline: %w", command, ctx.Err())
+		case <-deadline.C:
+			return fmt.Errorf("caddy reload command %q not available after %s", command, e.cfg.CaddyReadyTimeout)
+		case <-ticker.C:
+			if _, err := exec.LookPath(command); err == nil {
+				return nil
+			}
+		}
+	}
 }
 
 func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
