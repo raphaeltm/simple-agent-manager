@@ -36,7 +36,8 @@ export function listActivityEvents(
   sql: SqlStorage,
   eventType: string | null,
   limit: number = 50,
-  before: number | null = null
+  before: number | null = null,
+  sessionId: string | null = null
 ): { events: Record<string, unknown>[]; hasMore: boolean } {
   let query =
     'SELECT id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at FROM activity_events WHERE 1=1';
@@ -45,6 +46,10 @@ export function listActivityEvents(
   if (eventType) {
     query += ' AND event_type = ?';
     params.push(eventType);
+  }
+  if (sessionId) {
+    query += ' AND session_id = ?';
+    params.push(sessionId);
   }
   if (before !== null) {
     query += ' AND created_at < ?';

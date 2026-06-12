@@ -189,8 +189,8 @@ export class ProjectData extends DurableObject<Env> {
     return id;
   }
 
-  async listActivityEvents(eventType: string | null, limit: number = 50, before: number | null = null) {
-    return activity.listActivityEvents(this.sql, eventType, limit, before);
+  async listActivityEvents(eventType: string | null, limit: number = 50, before: number | null = null, sessionId: string | null = null) {
+    return activity.listActivityEvents(this.sql, eventType, limit, before, sessionId);
   }
 
   async markAgentCompleted(sessionId: string): Promise<void> {

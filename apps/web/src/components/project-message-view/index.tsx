@@ -17,6 +17,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { getMessageToolContent } from '../../lib/api/sessions';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
+import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { AcpConversationItemView } from './AcpConversationItemView';
 import { FollowUpInput } from './FollowUpInput';
@@ -24,19 +25,21 @@ import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
+import { useSessionTimeline } from './useSessionTimeline';
 
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
-  projectId, lc, onSessionMutated, onRetry, onFork, sourceContext, onShowHierarchy,
+  projectId, lc, onSessionMutated, onRetry, onFork, onOpenTimeline, sourceContext, onShowHierarchy,
 }: {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
   onSessionMutated?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
+  onOpenTimeline?: () => void;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
 }) {
@@ -56,6 +59,7 @@ function FloatingHeader({
         onSessionMutated={onSessionMutated}
         onOpenFiles={lc.handleOpenFileBrowser}
         onOpenGit={lc.handleOpenGitChanges}
+        onOpenTimeline={onOpenTimeline}
         onRetry={onRetry}
         onFork={onFork}
         lineageText={sourceContext?.lineageText}
@@ -163,8 +167,24 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
+
+  // Build message-id → index map for jump-to-message from timeline
+  const messageIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    lc.messages.forEach((msg, i) => map.set(msg.id, i));
+    return map;
+  }, [lc.messages]);
+
+  const timeline = useSessionTimeline(projectId, sessionId, lc.messages, showTimeline, messageIndexMap);
+
+  const handleJumpToMessage = useCallback((messageIndex: number) => {
+    if (messageIndex < 0) return;
+    virtuosoRef.current?.scrollToIndex({ index: messageIndex, behavior: 'smooth', align: 'center' });
+    setShowTimeline(false);
+  }, []);
 
   // Close plan modal when agent transitions to idle
   useEffect(() => {
@@ -282,7 +302,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
         <div className="flex-1 min-h-0 flex flex-col relative">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
           <div className="flex flex-1 items-center justify-center pt-14">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
@@ -291,7 +311,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
           <div className="flex-1 min-h-0">
             <Virtuoso
               ref={virtuosoRef}
@@ -438,6 +458,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           initialMode={lc.filePanel.mode}
           initialPath={lc.filePanel.path}
           onClose={() => lc.setFilePanel(null)}
+        />
+      )}
+
+      {/* Timeline drawer */}
+      {showTimeline && (
+        <ChatTimelineDrawer
+          entries={timeline.entries}
+          loading={timeline.loading}
+          showContext={timeline.showContext}
+          onToggleContext={() => timeline.setShowContext(!timeline.showContext)}
+          onClose={() => setShowTimeline(false)}
+          onJumpToMessage={handleJumpToMessage}
         />
       )}
     </div>

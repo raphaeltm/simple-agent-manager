@@ -26,6 +26,7 @@ activityRoutes.use('/*', requireAuth(), requireApproved());
  *
  * Query params:
  *   - eventType: filter by event type (e.g. 'workspace.created', 'session.started', 'task.completed')
+ *   - sessionId: filter by chat session ID
  *   - before: cursor for pagination (timestamp in ms)
  *   - limit: max events to return (default 50, max 100)
  */
@@ -37,6 +38,7 @@ activityRoutes.get('/', async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const eventType = c.req.query('eventType')?.trim() || null;
+  const sessionId = c.req.query('sessionId')?.trim() || null;
   const beforeParam = c.req.query('before')?.trim();
   const limitParam = c.req.query('limit')?.trim();
 
@@ -53,7 +55,8 @@ activityRoutes.get('/', async (c) => {
     projectId,
     eventType,
     limit,
-    before
+    before,
+    sessionId
   );
 
   return c.json(result);
