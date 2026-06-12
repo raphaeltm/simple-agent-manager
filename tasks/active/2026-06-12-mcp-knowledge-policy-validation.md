@@ -25,7 +25,8 @@ This matters because the tools write durable project knowledge and policy. Silen
 - [x] Tighten policy `list_policies` filter/pagination validation so invalid filters do not silently broaden lists.
 - [x] Derive MCP tool-definition enum values from shared constants where practical.
 - [x] Add focused public route-level MCP tests for required/missing params, invalid enums, confidence bounds, filter broadening prevention, sanitized success arguments, and schema enum parity with shared constants.
-- [ ] Run focused route tests plus policy/knowledge related tests.
+- [x] Run focused route tests plus policy/knowledge related unit tests.
+- [x] Document local worker-policy test blocker if `workerd` cannot start.
 - [x] Run apps/api lint and typecheck commands.
 - [ ] Complete specialist review required for API/test changes before PR merge.
 - [ ] Deploy and verify staging MCP behavior, or document the exact verified blocker if live MCP endpoint exercise is impossible.
@@ -45,6 +46,8 @@ This matters because the tools write durable project knowledge and policy. Silen
 - PASS: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-error-handling.test.ts`
 - PASS: `pnpm --filter @simple-agent-manager/api typecheck`
 - PASS: `pnpm --filter @simple-agent-manager/api lint` (existing warnings only)
+- PASS: `pnpm test` (root; API 308 files / 5,223 tests, web 178 files / 2,294 tests)
+- PASS: `pnpm build` (root; existing Vite chunk-size warnings only)
 - BLOCKED locally: `pnpm exec vitest run --config vitest.workers.config.ts tests/workers/policy-do.test.ts` failed before loading tests because `@cloudflare/workerd-linux-64@1.20260329.1` repeatedly segfaulted during worker-pool startup. The broader script form also crashed with no tests executed after starting the worker pool.
 
 ## References
