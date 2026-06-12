@@ -542,9 +542,9 @@ app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
-app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/nodes', deployReleaseCallbackRoute);  // Callback JWT auth — deploy node fetches signed release payload
 app.route('/api/nodes', nodesRoutes);
+app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
