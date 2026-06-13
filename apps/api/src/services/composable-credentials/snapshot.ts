@@ -33,6 +33,7 @@ function safeParseJson(json: string, contextId: string): CCConfigurationSettings
   try {
     return JSON.parse(json) as CCConfigurationSettings;
   } catch {
+    // eslint-disable-next-line no-console -- structured error log for malformed settings JSON
     console.error('snapshot.settings_parse_error', { configId: contextId });
     return {};
   }
