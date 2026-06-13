@@ -157,7 +157,12 @@ function setupMocks(
 ) {
   return async (page: import('@playwright/test').Page) => {
     await setupAuditRoutes(page, (path: string, respond: AuditResponder) => {
-      if (path === '/api/auth/get-session') return respond(200, mockUser);
+      if (path.includes('/api/auth')) return respond(200, mockUser);
+      // Shell routes required for Settings page to render
+      if (path === '/api/projects') return respond(200, { projects: [], nextCursor: null });
+      if (path === '/api/credentials') return respond(200, []);
+      if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+      // CC routes
       if (path === '/api/cc/credentials') return respond(200, { credentials });
       if (path === '/api/cc/configurations') return respond(200, { configurations });
       if (path === '/api/cc/attachments') return respond(200, { attachments });
@@ -170,7 +175,12 @@ function setupMocks(
 function setupErrorMocks() {
   return async (page: import('@playwright/test').Page) => {
     await setupAuditRoutes(page, (path: string, respond: AuditResponder) => {
-      if (path === '/api/auth/get-session') return respond(200, mockUser);
+      if (path.includes('/api/auth')) return respond(200, mockUser);
+      // Shell routes required for Settings page to render
+      if (path === '/api/projects') return respond(200, { projects: [], nextCursor: null });
+      if (path === '/api/credentials') return respond(200, []);
+      if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+      // CC routes return errors for this scenario
       if (path.startsWith('/api/cc/')) return respond(500, { error: 'Internal server error' });
       return undefined;
     });
@@ -186,7 +196,8 @@ describeThemeAudit(
   setupMocks(NORMAL_CREDENTIALS, NORMAL_CONFIGS, NORMAL_ATTACHMENTS),
   async (page, theme, suffix) => {
     await page.goto('/settings/credentials');
-    await page.waitForTimeout(800);
+    await page.getByRole('heading', { name: 'Credentials' }).waitFor();
+    await page.waitForTimeout(500);
     await screenshot(page, `settings-credentials-normal-${suffix}`);
     await assertNoOverflow(page);
   },
@@ -197,7 +208,8 @@ describeThemeAudit(
   setupMocks(LONG_TEXT_CREDENTIALS, LONG_TEXT_CONFIGS, LONG_TEXT_ATTACHMENTS),
   async (page, theme, suffix) => {
     await page.goto('/settings/credentials');
-    await page.waitForTimeout(800);
+    await page.getByRole('heading', { name: 'Credentials' }).waitFor();
+    await page.waitForTimeout(500);
     await screenshot(page, `settings-credentials-long-text-${suffix}`);
     await assertNoOverflow(page);
   },
@@ -208,7 +220,8 @@ describeThemeAudit(
   setupMocks([], [], []),
   async (page, theme, suffix) => {
     await page.goto('/settings/credentials');
-    await page.waitForTimeout(800);
+    await page.getByRole('heading', { name: 'Credentials' }).waitFor();
+    await page.waitForTimeout(500);
     await screenshot(page, `settings-credentials-empty-${suffix}`);
     await assertNoOverflow(page);
   },
@@ -219,7 +232,8 @@ describeThemeAudit(
   setupMocks(MANY_CREDENTIALS, MANY_CONFIGS, MANY_ATTACHMENTS),
   async (page, theme, suffix) => {
     await page.goto('/settings/credentials');
-    await page.waitForTimeout(800);
+    await page.getByRole('heading', { name: 'Credentials' }).waitFor();
+    await page.waitForTimeout(500);
     await screenshot(page, `settings-credentials-many-${suffix}`);
     await assertNoOverflow(page);
   },
@@ -230,7 +244,8 @@ describeThemeAudit(
   setupErrorMocks(),
   async (page, theme, suffix) => {
     await page.goto('/settings/credentials');
-    await page.waitForTimeout(800);
+    await page.getByRole('heading', { name: 'Credentials' }).waitFor();
+    await page.waitForTimeout(500);
     await screenshot(page, `settings-credentials-error-${suffix}`);
     await assertNoOverflow(page);
   },
