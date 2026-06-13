@@ -1,0 +1,14 @@
+- generic [ref=e4]:
+  - heading "Simple Agent Manager" [level=1] [ref=e5]
+  - paragraph [ref=e6]: Launch AI coding agents on your own cloud infrastructure.
+  - generic [ref=e7]:
+    - generic [ref=e8]: Claude Code
+    - generic [ref=e9]: OpenAI Codex
+    - generic [ref=e10]: Gemini CLI
+    - generic [ref=e11]: Mistral Vibe
+  - button "Sign in with GitHub" [ref=e12] [cursor=pointer]:
+    - img [ref=e13]
+    - text: Sign in with GitHub
+  - paragraph [ref=e15]: Bring your own cloud — your infrastructure, your costs.
+  - link "Learn more about SAM" [ref=e16] [cursor=pointer]:
+    - /url: https://simple-agent-manager.org
