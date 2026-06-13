@@ -3,15 +3,13 @@
  * Tests mobile (375x667) + desktop (1280x800) with stress-test mock data.
  */
 
-import { test } from '@playwright/test';
-
 import {
   assertNoOverflow,
+  type AuditResponder,
   describeThemeAudit,
   makeMockUser,
   screenshot,
   setupAuditRoutes,
-  type AuditResponder,
 } from './audit-helpers';
 
 // ---------------------------------------------------------------------------

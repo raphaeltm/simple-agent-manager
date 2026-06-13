@@ -26,8 +26,8 @@ import { describe, expect, it } from 'vitest';
 import { agentAssembler } from '../../src/composable-credentials/assemblers';
 import { resolveEnvironment } from '../../src/composable-credentials/resolver';
 import type {
-  Credential,
   CompositionSnapshot,
+  Credential,
 } from '../../src/composable-credentials/types';
 
 // ---------------------------------------------------------------------------
