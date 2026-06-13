@@ -91,7 +91,15 @@ install -d -m 0755 /usr/share/keyrings
 curl -fsSL 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 curl -fsSL 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy
+# Cloud-init pre-writes /etc/caddy/Caddyfile so Caddy can start cleanly before
+# the first deploy apply. The caddy .deb ships its own Caddyfile as a dpkg
+# conffile, so the postinst hits a conffile conflict and, under noninteractive
+# apt, exits 100 (telemetry caught: "Configuration file '/etc/caddy/Caddyfile'
+# ... exit status 100"). Force-keep the on-disk version: the deploy engine
+# overwrites this file via GenerateCaddyfile on apply anyway, so the bootstrap
+# contents are disposable — all that matters is the install completing.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+  -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" caddy
 id caddy >/dev/null
 mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
 chown -R caddy:caddy /var/lib/caddy /var/log/caddy
