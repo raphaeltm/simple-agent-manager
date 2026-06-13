@@ -280,6 +280,12 @@ describe('provisionDeploymentNode', () => {
     // Second update rolls back nodeId to null
     expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
     expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('updatedAt');
+
+    // Both updates must have WHERE clauses (tracked via updateWhereArgs)
+    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
+
+    // Both updates must have WHERE clauses
+    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
   });
 
   it('rollback is robust even if the rollback update itself fails', async () => {
