@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/cache"
 )
 
 // Engine manages the deployment lifecycle: reconcile, apply, revert, observe.
@@ -31,6 +33,9 @@ type Engine struct {
 	observed   ObservedState
 }
 
+// DockerLoginFunc is the signature for authenticating to a container registry.
+type DockerLoginFunc func(ctx context.Context, registry, username, password string) error
+
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
 	EnvironmentID      string
@@ -48,6 +53,7 @@ type EngineConfig struct {
 	HealthTimeout      time.Duration
 	HealthPollInterval time.Duration
 	HTTPClient         *http.Client
+	DockerLogin        DockerLoginFunc // defaults to cache.DockerLogin if nil
 }
 
 // NewEngine creates a new deployment engine.
@@ -210,6 +216,23 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 				"prevSeq", currentSeq, "error", err)
 			// Continue anyway — the port may still be free if the previous
 			// containers already exited or were removed externally.
+		}
+	}
+
+	// Authenticate to private registry if credentials are provided
+	if payload.RegistryCredentials != nil {
+		slog.Info("deploy.apply: authenticating to container registry",
+			"server", payload.RegistryCredentials.Server)
+		loginFn := e.cfg.DockerLogin
+		if loginFn == nil {
+			loginFn = cache.DockerLogin
+		}
+		if err := loginFn(ctx,
+			payload.RegistryCredentials.Server,
+			payload.RegistryCredentials.Username,
+			payload.RegistryCredentials.Password,
+		); err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("docker login: %w", err))
 		}
 	}
 

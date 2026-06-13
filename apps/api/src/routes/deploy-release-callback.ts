@@ -21,6 +21,7 @@ import { signDeployPayload } from '../services/deploy-signing';
 import { buildDeploymentRouteTargets } from '../services/deployment-routing';
 import { upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
+import { mintProjectRegistryCredential } from '../services/registry-credentials';
 
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 const DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS = 3_600;
@@ -104,6 +105,8 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   if (envRows.length === 0) {
     throw errors.notFound('Deployment environment');
   }
+  // Safe: envRows.length is checked above (throws 404 if empty)
+  const deployEnv = envRows[0]!;
 
   // Find the release by version (seq) within the environment
   const releaseRows = await db
@@ -164,12 +167,40 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     c.env,
   );
 
+  // Mint short-lived pull-only registry credentials for private image pulls.
+  // Best-effort: if minting fails (e.g., CF_ACCOUNT_ID not configured),
+  // the payload is still served without credentials (public images still work).
+  let registryCredentials: { server: string; username: string; password: string } | null = null;
+  try {
+    const creds = await mintProjectRegistryCredential(
+      c.env,
+      deployEnv.projectId,
+      node.userId,
+      '', // no task context in deploy callback
+      environmentId,
+      { permissions: ['pull'] },
+    );
+    registryCredentials = {
+      server: creds.registry,
+      username: creds.username,
+      password: creds.password,
+    };
+  } catch (err) {
+    log.warn('deploy_release.registry_credentials_skipped', {
+      nodeId,
+      environmentId,
+      seq,
+      reason: err instanceof Error ? err.message : 'Unknown error',
+    });
+  }
+
   log.info('deploy_release.served', {
     nodeId,
     environmentId,
     seq,
     releaseId: release.id,
     routeCount: routes.length,
+    hasRegistryCredentials: registryCredentials !== null,
   });
 
   return c.json({
@@ -180,7 +211,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     composeYaml,
     routes,
     signature,
-    registryCredentials: null, // TODO: parallel work — registry credential minting
+    registryCredentials,
   });
 });
 

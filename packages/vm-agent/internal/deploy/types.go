@@ -53,10 +53,8 @@ type ApplyPayload struct {
 	Routes        []RouteTarget `json:"routes,omitempty"`
 	Signature     string        `json:"signature"` // Base64-encoded Ed25519 signature
 
-	// TODO: Registry credentials for private image pulls.
-	// This field will be consumed by the apply engine to docker login
-	// before pulling images. Currently stubbed pending the parallel
-	// registry-credential-service work (PR in-flight).
+	// Registry credentials for private image pulls. When present, the
+	// deploy engine calls docker login --password-stdin before composePull.
 	RegistryCredentials *RegistryCredentials `json:"registryCredentials,omitempty"`
 }
 
@@ -69,7 +67,7 @@ type RouteTarget struct {
 }
 
 // RegistryCredentials holds credentials for pulling private container images.
-// TODO: Populated by the registry-credential-service (parallel work, not yet merged).
+// Populated by the deploy-release callback when CF registry minting is available.
 type RegistryCredentials struct {
 	Server   string `json:"server"`
 	Username string `json:"username"`
