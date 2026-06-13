@@ -208,10 +208,20 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
   doc.services = services;
 
   // -- networks --
+  // The per-environment bridge isolates services from OTHER environments
+  // (each release is its own compose project with its own network), while
+  // still allowing the services within an environment to reach each other by
+  // name. It is intentionally NOT `internal: true`: a container attached only
+  // to an internal network cannot receive traffic from published ports, so
+  // Docker's host->container forwarding for `127.0.0.1:<hostPort>` is dropped
+  // by the internal-network isolation rules. Public routes depend on node-local
+  // Caddy reverse-proxying to that published loopback port, so an internal-only
+  // network makes every public route return 502 even when the container is
+  // healthy. Docker has no per-direction internal flag, so to admit the
+  // required host ingress the network must be a normal bridge.
   doc.networks = {
     'sam-internal': {
       driver: 'bridge',
-      internal: true,
     },
   };
 

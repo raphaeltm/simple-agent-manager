@@ -158,12 +158,16 @@ describe('renderCompose', () => {
     expect(doc.services.web.networks).toEqual(['sam-internal']);
   });
 
-  it('declares sam-internal network as bridge + internal', () => {
+  it('declares sam-internal network as a non-internal bridge', () => {
+    // Regression: an `internal: true` network drops Docker's host->container
+    // forwarding for published ports, so node-local Caddy reverse-proxying to
+    // `127.0.0.1:<hostPort>` returns 502 even when the container is healthy.
+    // Public routes require host ingress, which an internal network forbids.
     const doc = parse(renderCompose(makeManifest(), CTX));
     expect(doc.networks['sam-internal']).toEqual({
       driver: 'bridge',
-      internal: true,
     });
+    expect(doc.networks['sam-internal'].internal).toBeUndefined();
   });
 
   it('renders multiple services with distinct labels', () => {
