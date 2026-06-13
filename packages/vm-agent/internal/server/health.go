@@ -112,16 +112,23 @@ func (s *Server) sendNodeHeartbeat() {
 		"nodeId":           s.config.NodeID,
 	}
 
-	// In deployment mode, include observed deployment state
+	// In deployment mode, include observed deployment state + disk telemetry
 	if s.deployEngine != nil {
 		observed := s.deployEngine.GetObserved()
-		payload["deployment"] = map[string]interface{}{
+		deployPayload := map[string]interface{}{
 			"environmentId": s.config.EnvironmentID,
 			"appliedSeq":    observed.AppliedSeq,
 			"status":        string(observed.Status),
 			"errorMessage":  observed.ErrorMessage,
 			"services":      observed.Services,
 		}
+		if observed.DeployStatus != nil {
+			deployPayload["deployStatus"] = observed.DeployStatus
+		}
+		if observed.DiskTelemetry != nil {
+			deployPayload["diskTelemetry"] = observed.DiskTelemetry
+		}
+		payload["deployment"] = deployPayload
 	}
 
 	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
