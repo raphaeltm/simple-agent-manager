@@ -287,6 +287,16 @@ ccRoutes.post('/attachments', async (c) => {
     .limit(1);
   if (!cfg) throw errors.badRequest('Configuration not found or not owned by user');
 
+  // Verify project belongs to user if provided
+  if (projectId) {
+    const [proj] = await db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
+      .limit(1);
+    if (!proj) throw errors.badRequest('Project not found or not owned by user');
+  }
+
   const id = `cc-att-${ulid()}`;
   await db.insert(schema.ccAttachments).values({
     id,
