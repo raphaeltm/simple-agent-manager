@@ -19,6 +19,8 @@ func TestClassifyDiskPressure(t *testing.T) {
 		{"critical usage", 98.5, DiskPressureCritical},
 		{"zero", 0.0, DiskPressureNone},
 		{"exactly 69.9", 69.9, DiskPressureNone},
+		{"just below high", 84.9, DiskPressureModerate},
+		{"just below critical", 94.9, DiskPressureHigh},
 	}
 
 	for _, tt := range tests {
@@ -46,6 +48,7 @@ func TestClassifyConfigDrift(t *testing.T) {
 		{"failed-initial", 0, 1, StatusFailedInitial, ConfigDriftFailed},
 		{"no desired seq", 3, 0, StatusApplied, ConfigDriftUnknown},
 		{"reverted still same seq", 5, 5, StatusReverted, ConfigDriftNone},
+		{"observed ahead of desired (rollback)", 6, 5, StatusApplied, ConfigDriftNone},
 	}
 
 	for _, tt := range tests {

@@ -136,9 +136,19 @@ func TestPruneUnusedImages_PreservesCurrentAndPrevious(t *testing.T) {
 		t.Errorf("expected 2 protected images, got %d: %v", len(result.ProtectedImages), result.ProtectedImages)
 	}
 
-	// v1 and nginx should be pruned
+	// v1 and nginx should be pruned — assert exact contents
 	if len(result.PrunedImages) != 2 {
 		t.Errorf("expected 2 pruned images, got %d: %v", len(result.PrunedImages), result.PrunedImages)
+	}
+	prunedSet := make(map[string]bool)
+	for _, img := range result.PrunedImages {
+		prunedSet[img] = true
+	}
+	if !prunedSet["registry.example.com/app:v1"] {
+		t.Error("expected v1 in pruned set")
+	}
+	if !prunedSet["nginx:latest"] {
+		t.Error("expected nginx:latest in pruned set")
 	}
 
 	// v3 should NOT be removed
@@ -336,6 +346,50 @@ func TestListReleaseSeqs(t *testing.T) {
 	seqs := disk.ListReleaseSeqs()
 	if len(seqs) != 3 {
 		t.Fatalf("expected 3 seqs, got %d: %v", len(seqs), seqs)
+	}
+}
+
+func TestPruneUnusedImages_SkipsNoneNone(t *testing.T) {
+	compose := `services:
+  web:
+    image: myapp:v1
+`
+	disk := setupTestDisk(t, map[int64]string{1: compose}, 1)
+
+	runner := newMockExecRunner()
+	runner.OnWithOutput(
+		"myapp:v1\n<none>:<none>",
+		"docker", "images", "--format", "{{.Repository}}:{{.Tag}}",
+	)
+	runner.On("docker", "image", "prune", "-f")
+
+	result, err := PruneUnusedImages(context.Background(), disk, runner, ImageGCConfig{})
+	if err != nil {
+		t.Fatalf("PruneUnusedImages: %v", err)
+	}
+
+	// <none>:<none> should be skipped entirely — not pruned, not errored
+	if len(result.PrunedImages) != 0 {
+		t.Errorf("expected 0 pruned images, got %d: %v", len(result.PrunedImages), result.PrunedImages)
+	}
+	if runner.wasCalled("docker", "rmi", "<none>:<none>") {
+		t.Error("should NOT attempt to rmi <none>:<none> images")
+	}
+}
+
+func TestPruneUnusedImages_ListImagesError(t *testing.T) {
+	compose := `services:
+  web:
+    image: myapp:v1
+`
+	disk := setupTestDisk(t, map[int64]string{1: compose}, 1)
+
+	runner := newMockExecRunner()
+	runner.OnWithError(fmt.Errorf("docker not found"), "docker", "images", "--format", "{{.Repository}}:{{.Tag}}")
+
+	_, err := PruneUnusedImages(context.Background(), disk, runner, ImageGCConfig{})
+	if err == nil {
+		t.Fatal("expected error when docker images fails")
 	}
 }
 
