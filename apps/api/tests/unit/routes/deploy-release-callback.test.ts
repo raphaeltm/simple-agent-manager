@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { environmentPortOffset } from '../../../src/services/deployment-routing';
 
 const mockLimit = vi.fn();
 const mockSignDeployPayload = vi.fn().mockResolvedValue('signed-payload');
@@ -136,22 +137,28 @@ describe('deploy release callback route', () => {
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
     expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), { expectedScope: 'node' });
+
+    // Port base includes per-environment offset to prevent cross-env collisions
+    const envOffset = environmentPortOffset('env-1', 10, 36_000);
+    const expectedPort0 = 36_000 + envOffset;
+    const expectedPort1 = expectedPort0 + 1;
+
     expect(body.routes).toEqual([
       {
         hostname: 'r1-web-3000-env-1.apps.sammy.party',
         service: 'web',
         containerPort: 3000,
-        hostPort: 36000,
+        hostPort: expectedPort0,
       },
       {
         hostname: 'r2-web-3001-env-1.apps.sammy.party',
         service: 'web',
         containerPort: 3001,
-        hostPort: 36001,
+        hostPort: expectedPort1,
       },
     ]);
-    expect(body.composeYaml).toContain('127.0.0.1:36000:3000');
-    expect(body.composeYaml).toContain('127.0.0.1:36001:3001');
+    expect(body.composeYaml).toContain(`127.0.0.1:${expectedPort0}:3000`);
+    expect(body.composeYaml).toContain(`127.0.0.1:${expectedPort1}:3001`);
     expect(body.composeYaml).not.toContain('9000');
     expect(body.expiresAt).toBe(1_700_000_090);
     expect(body.signature).toEqual(expect.any(String));
@@ -160,7 +167,7 @@ describe('deploy release callback route', () => {
         environmentId: 'env-1',
         nodeId: 'node-deploy-1',
         seq: 7,
-        composeYaml: expect.stringContaining('127.0.0.1:36000:3000'),
+        composeYaml: expect.stringContaining(`127.0.0.1:${expectedPort0}:3000`),
         routes: body.routes,
       }),
       expect.anything(),
