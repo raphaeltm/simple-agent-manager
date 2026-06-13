@@ -82,6 +82,7 @@ export default defineConfig({
           TRIAL_SSE_MAX_DURATION_MS: '5000',
           NODE_WARM_TIMEOUT_MS: '5000',
           WORKSPACE_STOPPED_TTL_MS: '3000',
+          ENCRYPTION_KEY: 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=',
         },
       },
     }),

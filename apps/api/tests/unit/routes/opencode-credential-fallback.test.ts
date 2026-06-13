@@ -29,6 +29,12 @@ vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn(),
   decrypt: vi.fn(),
 }));
+vi.mock('../../../src/services/composable-credentials/resolve', () => ({
+  resolveForConsumer: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
+  lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
+}));
 
 const { decrypt } = await import('../../../src/services/encryption');
 const mockDecrypt = vi.mocked(decrypt);

@@ -29,6 +29,12 @@ vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn().mockResolvedValue({ ciphertext: 'encrypted', iv: 'iv' }),
   decrypt: vi.fn().mockResolvedValue('sk-ant-live-value'),
 }));
+vi.mock('../../../src/services/composable-credentials/resolve', () => ({
+  resolveForConsumer: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
+  lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
+}));
 
 interface MockDB {
   select: ReturnType<typeof vi.fn>;
