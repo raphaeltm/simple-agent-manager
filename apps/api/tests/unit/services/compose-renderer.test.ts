@@ -235,4 +235,62 @@ describe('renderCompose', () => {
       '127.0.0.1:35001:3001',
     ]);
   });
+
+  // =========================================================================
+  // Bounded container log rotation (day-2 operations)
+  // =========================================================================
+
+  it('adds bounded log rotation to every service with defaults', () => {
+    const doc = parse(renderCompose(makeManifest(), CTX));
+    expect(doc.services.web.logging).toEqual({
+      driver: 'json-file',
+      options: {
+        'max-size': '10m',
+        'max-file': '3',
+      },
+    });
+  });
+
+  it('applies log rotation to all services in a multi-service manifest', () => {
+    const manifest = makeManifest({
+      services: {
+        web: {
+          image: { registry: 'docker.io', repository: 'app/web', digest: 'sha256:' + 'a'.repeat(64) },
+          env: {},
+          volumes: [],
+        },
+        worker: {
+          image: { registry: 'docker.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
+          env: {},
+          volumes: [],
+        },
+      },
+    });
+    const doc = parse(renderCompose(manifest, CTX));
+
+    for (const svcName of ['web', 'worker']) {
+      expect(doc.services[svcName].logging).toBeDefined();
+      expect(doc.services[svcName].logging.driver).toBe('json-file');
+      expect(doc.services[svcName].logging.options['max-size']).toBe('10m');
+      expect(doc.services[svcName].logging.options['max-file']).toBe('3');
+    }
+  });
+
+  it('respects custom log rotation settings', () => {
+    const doc = parse(renderCompose(makeManifest(), {
+      ...CTX,
+      logRotation: { maxSize: '50m', maxFile: '5' },
+    }));
+    expect(doc.services.web.logging.options['max-size']).toBe('50m');
+    expect(doc.services.web.logging.options['max-file']).toBe('5');
+  });
+
+  it('uses defaults when logRotation is partially specified', () => {
+    const doc = parse(renderCompose(makeManifest(), {
+      ...CTX,
+      logRotation: { maxSize: '25m' },
+    }));
+    expect(doc.services.web.logging.options['max-size']).toBe('25m');
+    expect(doc.services.web.logging.options['max-file']).toBe('3'); // default
+  });
 });

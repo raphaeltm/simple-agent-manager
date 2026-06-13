@@ -41,6 +41,11 @@ type ObservedState struct {
 	Status       ApplyStatus    `json:"status"`
 	ErrorMessage string         `json:"errorMessage,omitempty"`
 	Services     []ServiceState `json:"services,omitempty"`
+
+	// Day-2 status model: six independent dimensions
+	DeployStatus *DeploymentStatus  `json:"deployStatus,omitempty"`
+	// Disk telemetry for root disk and optional data volume
+	DiskTelemetry *NodeDiskTelemetry `json:"diskTelemetry,omitempty"`
 }
 
 // ApplyPayload is the signed payload received from the control plane.
