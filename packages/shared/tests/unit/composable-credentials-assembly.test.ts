@@ -23,12 +23,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { agentAssembler } from '../../src/experiments/composable-credentials/assemblers';
-import { resolveEnvironment } from '../../src/experiments/composable-credentials/resolver';
+import { agentAssembler } from '../../src/composable-credentials/assemblers';
+import { resolveEnvironment } from '../../src/composable-credentials/resolver';
 import type {
   Credential,
   CompositionSnapshot,
-} from '../../src/experiments/composable-credentials/types';
+} from '../../src/composable-credentials/types';
 
 // ---------------------------------------------------------------------------
 // Oracle — faithful TS port of gateway.go buildOpencodeConfig 'custom' branch

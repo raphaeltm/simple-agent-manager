@@ -24,13 +24,13 @@ import { describe, expect, it } from 'vitest';
 import {
   agentAssembler,
   computeAssembler,
-} from '../../src/experiments/composable-credentials/assemblers';
-import { resolveEnvironment } from '../../src/experiments/composable-credentials/resolver';
+} from '../../src/composable-credentials/assemblers';
+import { resolveEnvironment } from '../../src/composable-credentials/resolver';
 import type {
   CompositionSnapshot,
   Credential,
   ResolutionSource,
-} from '../../src/experiments/composable-credentials/types';
+} from '../../src/composable-credentials/types';
 
 // ---------------------------------------------------------------------------
 // Reference oracle for getDecryptedAgentKey (decision only)

@@ -25,9 +25,9 @@ import {
   mapKind,
   type SourceCredentialRow,
   type SourcePlatformRow,
-} from '../../src/experiments/composable-credentials/backfill';
-import { resolveEnvironment } from '../../src/experiments/composable-credentials/resolver';
-import type { ResolutionSource } from '../../src/experiments/composable-credentials/types';
+} from '../../src/composable-credentials/backfill';
+import { resolveEnvironment } from '../../src/composable-credentials/resolver';
+import type { ResolutionSource } from '../../src/composable-credentials/types';
 
 // ---------------------------------------------------------------------------
 // Row builders
