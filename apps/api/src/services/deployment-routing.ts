@@ -30,11 +30,16 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 function sanitizeDnsLabelPart(value: string): string {
+  // Collapse every run of non-alphanumeric characters (including existing
+  // hyphens) into a single hyphen. After this pass there can be at most one
+  // leading and one trailing hyphen, so they are stripped with simple
+  // single-character patterns — avoiding the super-linear `^-+|-+$`
+  // alternation flagged by SonarCloud (typescript:S5852).
   const normalized = value
     .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-');
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-/, '')
+    .replace(/-$/, '');
   return normalized || 'app';
 }
 

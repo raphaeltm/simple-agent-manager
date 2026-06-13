@@ -156,7 +156,10 @@ func runRuntimeCommand(ctx context.Context, name string, args ...string) error {
 }
 
 func runRuntimeShell(ctx context.Context, script string) error {
-	cmd := exec.CommandContext(ctx, "bash", "-c", script)
+	// Use an absolute path so the shell is not resolved through a potentially
+	// writable PATH (go:S4036). The deployment runtime runs as root during
+	// provisioning; /bin/bash is the fixed, root-owned interpreter location.
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-c", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bash -c: %w (output: %s)", err, string(output))
