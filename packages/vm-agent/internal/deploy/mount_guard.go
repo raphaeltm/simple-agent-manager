@@ -72,7 +72,7 @@ func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 		// Invalid YAML will fail later at `docker compose up` anyway; the
 		// mount guard only needs to protect against valid compose files that
 		// reference SAM volumes on unmounted paths.
-		slog.Debug("deploy.mountGuard: could not parse compose YAML for volume check", "error", err)
+		slog.Warn("deploy.mountGuard: could not parse compose YAML for volume check — guard skipped", "error", err)
 		return nil, nil
 	}
 
