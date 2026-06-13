@@ -104,6 +104,15 @@ func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 			} else {
 				envDir = remainder[:slashIdx]
 			}
+
+			// Reject path traversal components in the envId segment.
+			// Compose YAML is signed by the control plane so this is
+			// defense-in-depth, not a primary security boundary.
+			if envDir == "" || envDir == "." || envDir == ".." || strings.ContainsAny(envDir, "/\\") {
+				slog.Warn("deploy.mountGuard: skipping suspicious volume path", "hostPath", hostPath)
+				continue
+			}
+
 			root := samVolumeMountPrefix + envDir
 
 			if !seen[root] {
