@@ -4,9 +4,11 @@
  * All routes require authentication. Users can only manage their own resources.
  */
 
-import { and,eq } from 'drizzle-orm';
+import { and,eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+
+import type { CCCredentialKind } from '@simple-agent-manager/shared';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -51,9 +53,13 @@ ccRoutes.post('/credentials', async (c) => {
   const userId = getUserId(c);
   const body = await c.req.json();
 
+  const VALID_KINDS: CCCredentialKind[] = ['api-key', 'oauth-token', 'openai-compatible', 'cloud-provider', 'auth-json'];
   const { name, kind, secret } = body;
   if (!name || !kind || !secret) {
     throw errors.badRequest('name, kind, and secret are required');
+  }
+  if (!VALID_KINDS.includes(kind)) {
+    throw errors.badRequest(`Invalid kind. Must be one of: ${VALID_KINDS.join(', ')}`);
   }
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
@@ -88,6 +94,7 @@ ccRoutes.patch('/credentials/:id', async (c) => {
   if (Object.keys(updates).length === 0) {
     throw errors.badRequest('No valid fields to update');
   }
+  updates.updatedAt = sql`(datetime('now'))`;
 
   const result = await db
     .update(schema.ccCredentials)
@@ -188,13 +195,25 @@ ccRoutes.patch('/configurations/:id', async (c) => {
 
   const updates: Record<string, unknown> = {};
   if (typeof body.name === 'string') updates.name = body.name;
-  if (typeof body.credentialId === 'string' || body.credentialId === null) updates.credentialId = body.credentialId;
+  if (typeof body.credentialId === 'string') {
+    // Verify credential belongs to user before allowing update
+    const [cred] = await db
+      .select({ id: schema.ccCredentials.id })
+      .from(schema.ccCredentials)
+      .where(and(eq(schema.ccCredentials.id, body.credentialId), eq(schema.ccCredentials.ownerId, userId)))
+      .limit(1);
+    if (!cred) throw errors.badRequest('Credential not found or not owned by user');
+    updates.credentialId = body.credentialId;
+  } else if (body.credentialId === null) {
+    updates.credentialId = null;
+  }
   if (body.settings !== undefined) updates.settingsJson = body.settings ? JSON.stringify(body.settings) : null;
   if (typeof body.isActive === 'boolean') updates.isActive = body.isActive;
 
   if (Object.keys(updates).length === 0) {
     throw errors.badRequest('No valid fields to update');
   }
+  updates.updatedAt = sql`(datetime('now'))`;
 
   const result = await db
     .update(schema.ccConfigurations)
@@ -295,6 +314,7 @@ ccRoutes.patch('/attachments/:id', async (c) => {
   if (Object.keys(updates).length === 0) {
     throw errors.badRequest('No valid fields to update');
   }
+  updates.updatedAt = sql`(datetime('now'))`;
 
   const result = await db
     .update(schema.ccAttachments)

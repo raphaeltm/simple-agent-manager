@@ -129,7 +129,7 @@ export async function runBackfill(
           isActive: c.isActive,
         };
       }),
-    );
+    ).onConflictDoNothing();
   }
 
   if (ccConfigs.length > 0) {
@@ -145,7 +145,7 @@ export async function runBackfill(
           ? JSON.stringify(cfg.settings) : null,
         isActive: cfg.isActive,
       })),
-    );
+    ).onConflictDoNothing();
   }
 
   if (ccAtts.length > 0) {
@@ -159,7 +159,7 @@ export async function runBackfill(
         projectId: att.target.scope === 'project' ? att.target.projectId : null,
         isActive: att.isActive,
       })),
-    );
+    ).onConflictDoNothing();
   }
 
   return {
