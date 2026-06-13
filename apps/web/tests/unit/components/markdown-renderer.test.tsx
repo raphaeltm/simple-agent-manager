@@ -20,7 +20,7 @@ vi.mock('mermaid', () => ({
   },
 }));
 
-import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode, SVG_SANITIZE_CONFIG } from '../../../src/components/MarkdownRenderer';
+import { CODE_THEME_BG, RenderedMarkdown, SVG_SANITIZE_CONFIG, SyntaxHighlightedCode } from '../../../src/components/MarkdownRenderer';
 
 describe('RenderedMarkdown', () => {
   beforeEach(() => {
