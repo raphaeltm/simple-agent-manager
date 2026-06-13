@@ -54,6 +54,7 @@ type EngineConfig struct {
 	HealthPollInterval time.Duration
 	HTTPClient         *http.Client
 	DockerLogin        DockerLoginFunc // defaults to cache.DockerLogin if nil
+	MountChecker       MountChecker    // defaults to RealMountChecker if nil
 }
 
 // NewEngine creates a new deployment engine.
@@ -234,6 +235,17 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		); err != nil {
 			return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("docker login: %w", err))
 		}
+	}
+
+	// Volume mount guard: refuse to apply if required SAM volumes are not mounted.
+	// This prevents starting containers against a fell-through empty directory
+	// when the provider volume has not been attached to this node.
+	mountChecker := e.cfg.MountChecker
+	if mountChecker == nil {
+		mountChecker = RealMountChecker{}
+	}
+	if err := verifyVolumeMounts(payload.ComposeYAML, mountChecker); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, err)
 	}
 
 	// Execute docker compose
