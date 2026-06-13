@@ -98,9 +98,13 @@ export async function runBackfill(
   const result = backfill(sourceCredentials, sourcePlatform);
   const { credentials: ccCreds, configurations: ccConfigs, attachments: ccAtts } = result.snapshot;
 
+  // Platform credentials (ownerId '__platform__') can't be inserted into cc_credentials
+  // because owner_id has a FK to users.id. They remain in platform_credentials table.
+  const userCredsCount = ccCreds.filter((c) => c.ownerId !== '__platform__').length;
+
   if (dryRun) {
     return {
-      credentialsInserted: ccCreds.length,
+      credentialsInserted: userCredsCount,
       configurationsInserted: ccConfigs.length,
       attachmentsInserted: ccAtts.length,
       dryRun: true,
@@ -110,13 +114,16 @@ export async function runBackfill(
   // 5. Insert into cc_* tables
   // For credentials, we need to recover the actual (encryptedToken, iv) from the fingerprint
   // embedded in the credential ID: `cred-{ownerId}-{fingerprint}` or `plat-cred-{fingerprint}`
-  if (ccCreds.length > 0) {
+  //
+  // Platform credentials (ownerId '__platform__') are excluded — cc_credentials.owner_id has a
+  // FK to users.id and '__platform__' is not a real user. Platform defaults are resolved
+  // directly from the platform_credentials table, not through cc_*.
+  const userCreds = ccCreds.filter((c) => c.ownerId !== '__platform__');
+  if (userCreds.length > 0) {
     await db.insert(ccCredentials).values(
-      ccCreds.map((c) => {
+      userCreds.map((c) => {
         // Extract fingerprint from the credential ID
-        const fp = c.id.startsWith('plat-cred-')
-          ? c.id.slice('plat-cred-'.length)
-          : c.id.slice(`cred-${c.ownerId}-`.length);
+        const fp = c.id.slice(`cred-${c.ownerId}-`.length);
         const secret = secretByCiphertext.get(fp);
         if (!secret) throw new Error(`No ciphertext found for credential ${c.id}`);
         return {
@@ -163,7 +170,7 @@ export async function runBackfill(
   }
 
   return {
-    credentialsInserted: ccCreds.length,
+    credentialsInserted: userCreds.length,
     configurationsInserted: ccConfigs.length,
     attachmentsInserted: ccAtts.length,
     dryRun: false,
