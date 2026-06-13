@@ -70,13 +70,13 @@ This task productionizes the missing data plane: deployment nodes install Caddy,
 
 ### 7. Mandatory Staging Verification
 
-- [ ] Deploy branch to staging.
-- [ ] Follow rule 27: ensure VM-agent staging verification uses freshly provisioned deployment nodes with the new binary.
-- [ ] Submit a release with public routes on staging.
-- [ ] Verify DNS resolves for the generated app hostname.
-- [ ] Verify TLS handshake succeeds over HTTPS at the app hostname.
-- [ ] Verify the app responds over HTTPS.
-- [ ] Verify Caddy reload path, not container restart, is used for route updates.
+- [x] Deploy branch to staging. (Deploy Staging green on `sam/resume-land-caddy-routingtls-01ktyg`.)
+- [x] Follow rule 27: ensure VM-agent staging verification uses freshly provisioned deployment nodes with the new binary. (Deleted prior staging node, deployed, then provisioned FRESH node `deploy-01kv07k3` / `01KV07KD51VWDWARDD3W0ZW41R`, IP 167.233.66.254, hetzner fsn1.)
+- [x] Submit a release with public routes on staging. (Env `caddyfresh` `01KV07K3WX5P7SPSNJHJH8ZJYS`, release v1 `01KV07KCKX6346HE4CZP2MA5B6`, public route to `traefik/whoami`:80; service `1-whoami-1` running, heartbeat `appliedSeq=1 status=applied`.)
+- [x] Verify DNS resolves for the generated app hostname. (`r1-whoami-80-01kv07k3wx5p7spsnjhjh8zjys.apps.sammy.party` → A 167.233.66.254, grey-cloud `proxied=false`.)
+- [x] Verify TLS handshake succeeds over HTTPS at the app hostname. (Let's Encrypt cert CN=YE2 valid 2026-06-13→2026-09-11, TLS verify 0, via HTTP-01 ACME.)
+- [x] Verify the app responds over HTTPS. (HTTP 200 through Caddy: `Via: 2.0 Caddy`, `X-Forwarded-Proto: https`.)
+- [x] Verify Caddy reload path, not container restart, is used for route updates. (`engine.go` uses `caddy reload --config <path> --adapter caddyfile` via admin API 2019; restart only on admin-unavailable fallback. Caddy systemd survived on fresh node; no caddy errors in telemetry.)
 - [ ] Clean up test deployment environment, node, DNS records, and any other paid/external resources.
 - [ ] Record exact staging evidence in the PR.
 
@@ -191,6 +191,39 @@ network/iptables state. Pull it once and most of the table below resolves immedi
 - Reproduced current generator output and ran `caddy validate` (Caddy v2.8.4): **valid**, auto-HTTPS
   enabled on :443, HTTP→HTTPS redirect enabled.
 - Validated the proposed global-options block (email, and email+staging `acme_ca`): both valid.
+
+## ROOT CAUSE FOUND — internal network blocks published-port ingress (BUG #3, 2026-06-13)
+
+Staging telemetry + node heartbeat resolved the 502 to a control-plane compose-render bug,
+not a caddy/ACME/firewall problem. Evidence on the prior node:
+- Node heartbeat `lastMetrics.deployment.services` showed the whoami container
+  (`4-whoami-1`) `status: "running"` — the container was healthy.
+- A valid Let's Encrypt certificate was issued for the app hostname — proving host
+  networking on :80 and HTTP-01 ACME both work end to end.
+- Yet `https://<host>/` returned **502**, which `engine.go` only reaches *after*
+  `composeUp` + `waitForHealth` succeed and `reloadCaddy` runs — i.e. a fully-applied
+  release whose Caddy upstream `127.0.0.1:<hostPort>` is unreachable.
+
+Root cause: `apps/api/src/services/compose-renderer.ts` attached every service solely to
+the `sam-internal` network **and** declared that network `internal: true`. A container
+attached only to an `internal: true` Docker network cannot receive host→container traffic
+for published ports — Docker's internal-network isolation drops the docker-proxy forwarded
+packets. The renderer publishes public-route ports on `127.0.0.1:<hostPort>` for node-local
+Caddy to reverse-proxy, so with `internal: true` that loopback forward is dropped and every
+public route returns 502 despite a healthy container and issued TLS.
+
+Fix (commit `5b0765bd`, Worker-only — VM-agent binary unchanged): removed `internal: true`
+so `sam-internal` is a normal bridge. Per-environment isolation is preserved because each
+release is its own compose project with its own network. Regression test in
+`compose-renderer.test.ts` now asserts a non-internal bridge.
+
+## DISCOVERED LIMITATION — redeploy port rebind (out of scope, note in PR)
+
+`engine.go` Apply does **not** `composeDown` the previous release before `composeUp`
+(composeDown only runs in `handleApplyFailure`/revert). Consecutive releases are distinct
+compose projects (project name = seq) competing for the same host port (35000), so an
+in-place upgrade would fail to rebind the port and revert. This is why a **fresh** node is
+required for clean E2E verification (also mandated by rule 27). File as a follow-up slice.
 
 ## References
 
