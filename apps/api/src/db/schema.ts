@@ -1971,3 +1971,105 @@ export const deploymentVolumes = sqliteTable(
 
 export type DeploymentVolumeRow = typeof deploymentVolumes.$inferSelect;
 export type NewDeploymentVolumeRow = typeof deploymentVolumes.$inferInsert;
+
+// =============================================================================
+// Composable Credentials — three-primitive model (migration 0071)
+// =============================================================================
+
+export const ccCredentials = sqliteTable(
+  'cc_credentials',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(), // 'api-key' | 'oauth-token' | 'openai-compatible' | 'cloud-provider' | 'auth-json'
+    encryptedToken: text('encrypted_token').notNull(),
+    iv: text('iv').notNull(),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_cc_credentials_owner').on(table.ownerId),
+    ownerKindIdx: index('idx_cc_credentials_owner_kind').on(table.ownerId, table.kind),
+  }),
+);
+
+export type CCCredentialRow = typeof ccCredentials.$inferSelect;
+export type NewCCCredentialRow = typeof ccCredentials.$inferInsert;
+
+export const ccConfigurations = sqliteTable(
+  'cc_configurations',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    consumerKind: text('consumer_kind').notNull(), // 'agent' | 'compute'
+    consumerTarget: text('consumer_target').notNull(), // 'claude-code' | 'hetzner' etc.
+    credentialId: text('credential_id').references(() => ccCredentials.id, { onDelete: 'set null' }),
+    settingsJson: text('settings_json'), // JSON blob
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_cc_configurations_owner').on(table.ownerId),
+    credentialIdx: index('idx_cc_configurations_credential').on(table.credentialId),
+  }),
+);
+
+export type CCConfigurationRow = typeof ccConfigurations.$inferSelect;
+export type NewCCConfigurationRow = typeof ccConfigurations.$inferInsert;
+
+export const ccAttachments = sqliteTable(
+  'cc_attachments',
+  {
+    id: text('id').primaryKey(),
+    configurationId: text('configuration_id')
+      .notNull()
+      .references(() => ccConfigurations.id, { onDelete: 'cascade' }),
+    consumerKind: text('consumer_kind').notNull(),
+    consumerTarget: text('consumer_target').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    userIdx: index('idx_cc_attachments_user').on(table.userId),
+    userConsumerIdx: index('idx_cc_attachments_user_consumer').on(
+      table.userId,
+      table.consumerKind,
+      table.consumerTarget,
+    ),
+    projectIdx: index('idx_cc_attachments_project').on(
+      table.userId,
+      table.projectId,
+      table.consumerKind,
+      table.consumerTarget,
+    ),
+    configIdx: index('idx_cc_attachments_config').on(table.configurationId),
+  }),
+);
+
+export type CCAttachmentRow = typeof ccAttachments.$inferSelect;
+export type NewCCAttachmentRow = typeof ccAttachments.$inferInsert;
