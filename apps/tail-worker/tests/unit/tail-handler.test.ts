@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Env, TailWorkerEvent } from '../../src';
 
 /**
  * Unit tests for the Tail Worker handler.
@@ -11,9 +13,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Import the default export
 const handler = (await import('../../src/index')).default;
 
+type MockFetcher = { fetch: ReturnType<typeof vi.fn> };
+type TestEnv = Omit<Env, 'API_WORKER'> & { API_WORKER?: MockFetcher };
+
+interface TraceLogFixture {
+  level: string;
+  message: unknown;
+  timestamp: unknown;
+}
+
+interface TraceItemFixture {
+  scriptName: string;
+  logs?: TraceLogFixture[];
+  exceptions: [];
+  event: null;
+  eventTimestamp: unknown;
+  outcome: 'ok';
+}
+
 describe('Tail Worker handler', () => {
   let mockFetch: ReturnType<typeof vi.fn>;
-  let env: { API_WORKER?: { fetch: ReturnType<typeof vi.fn> } };
+  let env: TestEnv;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -23,7 +43,7 @@ describe('Tail Worker handler', () => {
     };
   });
 
-  function createTraceItem(overrides: Partial<any> = {}): any {
+  function createTraceItem(overrides: Partial<TraceItemFixture> = {}): TraceItem {
     return {
       scriptName: 'workspaces-api',
       logs: [],
@@ -32,15 +52,26 @@ describe('Tail Worker handler', () => {
       eventTimestamp: Date.now(),
       outcome: 'ok',
       ...overrides,
+    } as TraceItem;
+  }
+
+  function createLogItem(
+    level: string,
+    message: unknown,
+    timestamp: unknown = Date.now()
+  ): TraceLogFixture {
+    return {
+      level,
+      message: Array.isArray(message) ? message : [message],
+      timestamp,
     };
   }
 
-  function createLogItem(level: string, message: string, timestamp = Date.now()) {
-    return {
-      level,
-      message: [message],
-      timestamp,
+  function forwardedLogs(): TailWorkerEvent[] {
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string) as {
+      logs: TailWorkerEvent[];
     };
+    return body.logs;
   }
 
   it('should extract log entries from trace items', async () => {
@@ -53,50 +84,42 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    const call = mockFetch.mock.calls[0];
-    const body = JSON.parse(call[1].body);
-    expect(body.logs).toHaveLength(2);
-    expect(body.logs[0].entry.level).toBe('error');
-    expect(body.logs[1].entry.level).toBe('info'); // 'log' maps to 'info'
+    const logs = forwardedLogs();
+    expect(logs).toHaveLength(2);
+    expect(logs[0].entry.level).toBe('error');
+    expect(logs[1].entry.level).toBe('info'); // 'log' maps to 'info'
   });
 
   it('should skip debug and trace level logs', async () => {
     const events = [
       createTraceItem({
-        logs: [
-          createLogItem('debug', 'Debug message'),
-          createLogItem('error', 'Error message'),
-        ],
+        logs: [createLogItem('debug', 'Debug message'), createLogItem('error', 'Error message')],
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.logs).toHaveLength(1);
-    expect(body.logs[0].entry.level).toBe('error');
+    const logs = forwardedLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].entry.level).toBe('error');
   });
 
   it('should not forward when no log entries found', async () => {
-    const events = [
-      createTraceItem({ logs: [] }),
-    ];
+    const events = [createTraceItem({ logs: [] })];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('should not forward when events have no logs', async () => {
-    const events = [
-      createTraceItem({ logs: undefined }),
-    ];
+    const events = [createTraceItem({ logs: undefined })];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -116,12 +139,12 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.logs[0].entry.event).toBe('http.request');
-    expect(body.logs[0].entry.message).toBe('GET /api/health');
-    expect(body.logs[0].entry.details).toHaveProperty('method', 'GET');
+    const logs = forwardedLogs();
+    expect(logs[0].entry.event).toBe('http.request');
+    expect(logs[0].entry.message).toBe('GET /api/health');
+    expect(logs[0].entry.details).toHaveProperty('method', 'GET');
   });
 
   it('should handle non-JSON log messages gracefully', async () => {
@@ -131,11 +154,11 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.logs[0].entry.message).toBe('Plain text error message');
-    expect(body.logs[0].entry.event).toBe('log');
+    const logs = forwardedLogs();
+    expect(logs[0].entry.message).toBe('Plain text error message');
+    expect(logs[0].entry.event).toBe('log');
   });
 
   it('should include script name in log entries', async () => {
@@ -146,10 +169,10 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.logs[0].entry.scriptName).toBe('my-worker');
+    const logs = forwardedLogs();
+    expect(logs[0].entry.scriptName).toBe('my-worker');
   });
 
   it('should handle missing API_WORKER binding gracefully', async () => {
@@ -160,7 +183,7 @@ describe('Tail Worker handler', () => {
     ];
 
     // No API_WORKER binding
-    await handler.tail(events, {} as any);
+    await handler.tail(events, {});
 
     // Should not throw
     expect(mockFetch).not.toHaveBeenCalled();
@@ -178,7 +201,7 @@ describe('Tail Worker handler', () => {
     ];
 
     // Should not throw
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     expect(consoleSpy).toHaveBeenCalled();
     consoleSpy.mockRestore();
@@ -191,10 +214,10 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.logs[0].entry.level).toBe('warn');
+    const logs = forwardedLogs();
+    expect(logs[0].entry.level).toBe('warn');
   });
 
   it('should forward to the correct internal URL', async () => {
@@ -204,7 +227,7 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     const url = mockFetch.mock.calls[0][0];
     expect(url).toBe('https://internal/api/admin/observability/logs/ingest');
@@ -217,7 +240,7 @@ describe('Tail Worker handler', () => {
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
     const headers = mockFetch.mock.calls[0][1].headers;
     expect(headers['Content-Type']).toBe('application/json');
@@ -229,16 +252,92 @@ describe('Tail Worker handler', () => {
         logs: [createLogItem('info', 'request 1')],
       }),
       createTraceItem({
-        logs: [
-          createLogItem('error', 'error 1'),
-          createLogItem('warn', 'warning 1'),
-        ],
+        logs: [createLogItem('error', 'error 1'), createLogItem('warn', 'warning 1')],
       }),
     ];
 
-    await handler.tail(events, env as any);
+    await handler.tail(events, env as Env);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.logs).toHaveLength(3);
+    const logs = forwardedLogs();
+    expect(logs).toHaveLength(3);
+  });
+
+  it('does not throw on invalid log timestamps and falls back to the trace timestamp', async () => {
+    const fallbackTimestamp = '2026-06-13T12:34:56.789Z';
+    const events = [
+      createTraceItem({
+        eventTimestamp: Date.parse(fallbackTimestamp),
+        logs: [createLogItem('error', 'bad timestamp', 'not-a-date')],
+      }),
+    ];
+
+    await expect(handler.tail(events, env as Env)).resolves.toBeUndefined();
+
+    const logs = forwardedLogs();
+    expect(logs[0].entry.timestamp).toBe(fallbackTimestamp);
+    expect(Number.isNaN(Date.parse(logs[0].entry.timestamp))).toBe(false);
+  });
+
+  it('does not throw on malformed message shapes and forwards a safe string message', async () => {
+    const unstringifiableMessage = {
+      toString() {
+        throw new Error('cannot stringify');
+      },
+    };
+    const events = [
+      createTraceItem({
+        logs: [{ level: 'warn', message: unstringifiableMessage, timestamp: Date.now() }],
+      }),
+    ];
+
+    await expect(handler.tail(events, env as Env)).resolves.toBeUndefined();
+
+    const logs = forwardedLogs();
+    expect(logs[0].entry.level).toBe('warn');
+    expect(logs[0].entry.message).toBe('');
+    expect(logs[0].entry.event).toBe('log');
+  });
+
+  it('does not allow structured JSON to forward a debug level after console-level filtering', async () => {
+    const structuredMessage = JSON.stringify({
+      level: 'debug',
+      event: 'tail.structured',
+      message: 'structured log',
+    });
+    const events = [
+      createTraceItem({
+        logs: [createLogItem('log', structuredMessage)],
+      }),
+    ];
+
+    await handler.tail(events, env as Env);
+
+    const logs = forwardedLogs();
+    expect(logs[0].entry.level).toBe('info');
+    expect(['error', 'warn', 'info']).toContain(logs[0].entry.level);
+  });
+
+  it('uses only non-empty string structured message and event fields', async () => {
+    const structuredMessage = JSON.stringify({
+      level: { nested: 'warn' },
+      event: 123,
+      message: { text: 'not a string' },
+      code: 'bad_shape',
+    });
+    const events = [
+      createTraceItem({
+        logs: [createLogItem('info', structuredMessage)],
+      }),
+    ];
+
+    await handler.tail(events, env as Env);
+
+    const logs = forwardedLogs();
+    expect(logs[0].entry.level).toBe('info');
+    expect(logs[0].entry.event).toBe('log');
+    expect(logs[0].entry.message).toBe(structuredMessage);
+    expect(typeof logs[0].entry.event).toBe('string');
+    expect(typeof logs[0].entry.message).toBe('string');
+    expect(logs[0].entry.details).toHaveProperty('code', 'bad_shape');
   });
 });

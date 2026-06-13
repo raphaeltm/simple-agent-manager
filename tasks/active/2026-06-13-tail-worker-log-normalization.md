@@ -46,24 +46,24 @@ Add focused regression tests for adversarial boundary payloads and failed-respon
 
 ## Implementation Checklist
 
-- [ ] Add local helpers in `apps/tail-worker/src/index.ts` for console-level normalization, structured-level validation, safe non-empty string extraction, safe message joining, safe timestamp formatting, and successful subscriber-count extraction.
-- [ ] Ensure malformed message shapes and timestamps cannot throw before or outside the forwarding fail-safe.
-- [ ] Ensure structured JSON can only override level with accepted `error`, `warn`, or `info`; invalid values keep the already-normalized console level.
-- [ ] Ensure structured `message` and `event` are only used when they are non-empty strings; otherwise fall back to raw joined message and `log`.
-- [ ] Ensure `subscriberCache` updates only when `response.ok` and the parsed subscriber count is finite and non-negative, while still consuming response bodies for all responses.
-- [ ] Tighten tail-worker unit fixtures enough to make adversarial payload cases explicit and readable.
-- [ ] Add regression tests for invalid timestamps, malformed message shapes, structured `level: "debug"`, non-string/empty structured `message` and `event`, and 500 JSON `{ "subscribers": 0 }` fail-open behavior.
-- [ ] Run `pnpm --filter @simple-agent-manager/tail-worker test`.
-- [ ] Run `pnpm --filter @simple-agent-manager/tail-worker typecheck`.
+- [x] Add local helpers in `apps/tail-worker/src/index.ts` for console-level normalization, structured-level validation, safe non-empty string extraction, safe message joining, safe timestamp formatting, and successful subscriber-count extraction.
+- [x] Ensure malformed message shapes and timestamps cannot throw before or outside the forwarding fail-safe.
+- [x] Ensure structured JSON can only override level with accepted `error`, `warn`, or `info`; invalid values keep the already-normalized console level.
+- [x] Ensure structured `message` and `event` are only used when they are non-empty strings; otherwise fall back to raw joined message and `log`.
+- [x] Ensure `subscriberCache` updates only when `response.ok` and the parsed subscriber count is finite and non-negative, while still consuming response bodies for all responses.
+- [x] Tighten tail-worker unit fixtures enough to make adversarial payload cases explicit and readable.
+- [x] Add regression tests for invalid timestamps, malformed message shapes, structured `level: "debug"`, non-string/empty structured `message` and `event`, and 500 JSON `{ "subscribers": 0 }` fail-open behavior.
+- [x] Run `pnpm --filter @simple-agent-manager/tail-worker test`.
+- [x] Run `pnpm --filter @simple-agent-manager/tail-worker typecheck`.
 
 ## Acceptance Criteria
 
-- [ ] Normal `error`, `warn`, `info`, and `log` entries preserve existing forwarding behavior.
-- [ ] Malformed timestamps and message shapes do not throw and still forward a string timestamp/message when the normalized console level is accepted.
-- [ ] Forwarded `TailWorkerEvent.entry.level` is always one of `error`, `warn`, or `info`.
-- [ ] Forwarded `TailWorkerEvent.entry.message` and `.event` are strings, with safe fallbacks for invalid structured JSON fields.
-- [ ] Non-2xx ingest responses, including JSON bodies with `subscribers: 0`, do not arm or refresh the zero-subscriber cache.
-- [ ] Focused tail-worker tests and typecheck pass.
+- [x] Normal `error`, `warn`, `info`, and `log` entries preserve existing forwarding behavior.
+- [x] Malformed timestamps and message shapes do not throw and still forward a string timestamp/message when the normalized console level is accepted.
+- [x] Forwarded `TailWorkerEvent.entry.level` is always one of `error`, `warn`, or `info`.
+- [x] Forwarded `TailWorkerEvent.entry.message` and `.event` are strings, with safe fallbacks for invalid structured JSON fields.
+- [x] Non-2xx ingest responses, including JSON bodies with `subscribers: 0`, do not arm or refresh the zero-subscriber cache.
+- [x] Focused tail-worker tests and typecheck pass.
 
 ## References
 

@@ -59,7 +59,70 @@ export interface TailWorkerEvent {
   };
 }
 
-const ACCEPTED_LEVELS = new Set(['error', 'warn', 'info']);
+type AcceptedLogLevel = 'error' | 'warn' | 'info';
+
+const ACCEPTED_LEVELS = new Set<AcceptedLogLevel>(['error', 'warn', 'info']);
+
+function normalizeConsoleLevel(level: unknown): AcceptedLogLevel | null {
+  if (level === 'error') return 'error';
+  if (level === 'warn') return 'warn';
+  if (level === 'log' || level === 'info') return 'info';
+  return null;
+}
+
+function normalizeStructuredLevel(level: unknown, fallback: AcceptedLogLevel): AcceptedLogLevel {
+  return typeof level === 'string' && ACCEPTED_LEVELS.has(level as AcceptedLogLevel)
+    ? (level as AcceptedLogLevel)
+    : fallback;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? value : null;
+}
+
+function stringifyMessagePart(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return '';
+  }
+}
+
+function safeJoinMessage(message: unknown): string {
+  if (Array.isArray(message)) return message.map(stringifyMessagePart).join(' ');
+  return stringifyMessagePart(message);
+}
+
+function safeIsoTimestamp(timestamp: unknown, fallbackTimestamp: unknown): string {
+  const parsed = new Date(timestamp as string | number | Date);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+
+  // Prefer the trace event timestamp when a malformed log timestamp is present;
+  // tests can provide it deterministically, and Date.now() remains the last resort.
+  const fallback = new Date(fallbackTimestamp as string | number | Date);
+  return Number.isNaN(fallback.getTime()) ? new Date().toISOString() : fallback.toISOString();
+}
+
+function parseStructuredMessage(message: unknown): Record<string, unknown> {
+  if (!Array.isArray(message) || typeof message[0] !== 'string') return {};
+
+  try {
+    const json = JSON.parse(message[0]) as unknown;
+    return typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function successfulSubscriberCount(response: Response, result: unknown): number | null {
+  if (!response.ok || typeof result !== 'object' || result === null) return null;
+  const subscribers = (result as { subscribers?: unknown }).subscribers;
+  return typeof subscribers === 'number' && Number.isFinite(subscribers) && subscribers >= 0
+    ? subscribers
+    : null;
+}
 
 export default {
   async tail(events: TraceItem[], env: Env): Promise<void> {
@@ -67,40 +130,25 @@ export default {
     const logEntries: TailWorkerEvent[] = [];
 
     for (const event of events) {
-      if (!event.logs) continue;
+      if (!Array.isArray(event.logs)) continue;
 
       for (const log of event.logs) {
-        // Map console methods to log levels
-        let level: string;
-        if (log.level === 'error') level = 'error';
-        else if (log.level === 'warn') level = 'warn';
-        else if (log.level === 'log' || log.level === 'info') level = 'info';
-        else continue; // skip debug/trace
+        let level = normalizeConsoleLevel(log.level);
+        if (level === null) continue; // skip debug/trace and unknown levels
 
-        if (!ACCEPTED_LEVELS.has(level)) continue;
+        const rawMessage = safeJoinMessage(log.message);
+        const parsed = parseStructuredMessage(log.message);
+        const structuredMessage = nonEmptyString(parsed.message);
+        const structuredEvent = nonEmptyString(parsed.event);
 
-        // Try to parse structured JSON log messages
-        const rawMessage = log.message.join(' ');
-        let parsed: Record<string, unknown> = {};
-        let message = rawMessage;
-        let eventName = 'log';
-
-        try {
-          const json = JSON.parse(log.message[0]);
-          if (typeof json === 'object' && json !== null) {
-            parsed = json;
-            message = json.message || json.event || rawMessage;
-            eventName = json.event || 'log';
-            if (json.level) level = json.level;
-          }
-        } catch {
-          // Not structured JSON, use raw message
-        }
+        const message = structuredMessage ?? structuredEvent ?? rawMessage;
+        const eventName = structuredEvent ?? 'log';
+        level = normalizeStructuredLevel(parsed.level, level);
 
         logEntries.push({
           type: 'log',
           entry: {
-            timestamp: new Date(log.timestamp).toISOString(),
+            timestamp: safeIsoTimestamp(log.timestamp, event.eventTimestamp),
             level,
             event: eventName,
             message,
@@ -128,19 +176,23 @@ export default {
 
     // Forward to AdminLogs DO via the API Worker service binding
     try {
-      const response = await env.API_WORKER.fetch('https://internal/api/admin/observability/logs/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs: logEntries }),
-      });
+      const response = await env.API_WORKER.fetch(
+        'https://internal/api/admin/observability/logs/ingest',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs: logEntries }),
+        }
+      );
 
       // Consume the response body to completion. The ingest endpoint returns a
       // fully-buffered JSON body carrying the connected-subscriber count; not
       // reading it would tear down the connection and record the upstream
       // invocation as `canceled`/clientDisconnected.
-      const result = (await response.json().catch(() => null)) as { subscribers?: number } | null;
-      if (result && typeof result.subscribers === 'number') {
-        subscriberCache.count = result.subscribers;
+      const result = await response.json().catch(() => null);
+      const subscribers = successfulSubscriberCount(response, result);
+      if (subscribers !== null) {
+        subscriberCache.count = subscribers;
         subscriberCache.ts = Date.now();
       }
     } catch (err) {

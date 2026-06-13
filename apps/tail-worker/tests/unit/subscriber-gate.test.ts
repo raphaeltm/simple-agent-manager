@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Env } from '../../src';
 
 /**
  * Unit tests for the Tail Worker's subscriber-aware forwarding gate.
@@ -8,7 +10,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * to isolate cache state.
  */
 
-function createTraceItem(level = 'info', message = 'test') {
+type MockFetcher = { fetch: ReturnType<typeof vi.fn> };
+type TestEnv = Omit<Env, 'API_WORKER'> & { API_WORKER: MockFetcher };
+
+function createTraceItem(level = 'info', message = 'test'): TraceItem {
   return {
     scriptName: 'workspaces-api',
     logs: [{ level, message: [message], timestamp: Date.now() }],
@@ -16,7 +21,7 @@ function createTraceItem(level = 'info', message = 'test') {
     event: null,
     eventTimestamp: Date.now(),
     outcome: 'ok',
-  };
+  } as TraceItem;
 }
 
 async function loadHandler() {
@@ -43,7 +48,7 @@ describe('Tail Worker subscriber-aware gate', () => {
     const jsonSpy = vi.spyOn(response, 'json');
     const mockFetch = vi.fn().mockResolvedValue(response);
 
-    await handler.tail([createTraceItem()] as any, { API_WORKER: { fetch: mockFetch } } as any);
+    await handler.tail([createTraceItem()], { API_WORKER: { fetch: mockFetch } } as TestEnv);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(jsonSpy).toHaveBeenCalledTimes(1);
@@ -52,24 +57,24 @@ describe('Tail Worker subscriber-aware gate', () => {
   it('skips forwarding when last observed subscriber count is zero (cache fresh)', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(ingestResponse(0));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
     // First call forwards and caches subscribers=0
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Second call within TTL must skip forwarding
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('keeps forwarding when subscribers are present', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(ingestResponse(3));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
-    await handler.tail([createTraceItem()] as any, env);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
@@ -78,20 +83,20 @@ describe('Tail Worker subscriber-aware gate', () => {
     vi.useFakeTimers();
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(ingestResponse(0));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' };
 
     // Forward and cache subscribers=0
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Within TTL: skipped
     vi.advanceTimersByTime(4000);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // After TTL: re-probes
     vi.advanceTimersByTime(2000);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
@@ -99,31 +104,33 @@ describe('Tail Worker subscriber-aware gate', () => {
     vi.useFakeTimers();
     const handler = await loadHandler();
     let subscribers = 0;
-    const mockFetch = vi.fn().mockImplementation(() => Promise.resolve(ingestResponse(subscribers)));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' } as any;
+    const mockFetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(ingestResponse(subscribers)));
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' };
 
     // Cache subscribers=0
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Admin connects; after TTL the re-probe observes subscribers=1
     subscribers = 1;
     vi.advanceTimersByTime(6000);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // Now forwarding continues without waiting for TTL
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it('does not gate when the response body is not JSON (count stays unknown)', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(new Response('OK', { status: 200 }));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
-    await handler.tail([createTraceItem()] as any, env);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
 
     // Unknown count never gates forwarding off
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -132,9 +139,9 @@ describe('Tail Worker subscriber-aware gate', () => {
   it('forwards the parsed log entries to the ingest endpoint', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(ingestResponse(1));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
-    await handler.tail([createTraceItem('error', 'boom')] as any, env);
+    await handler.tail([createTraceItem('error', 'boom')], env);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0];
@@ -155,10 +162,10 @@ describe('Tail Worker subscriber-aware gate', () => {
       if (mode === 'throw') return Promise.reject(new Error('DO unreachable'));
       return Promise.resolve(ingestResponse(0));
     });
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' };
 
     // Cache subscribers=0 (gate armed)
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // After TTL, the DO is unreachable. The re-probe throws and is swallowed —
@@ -166,12 +173,12 @@ describe('Tail Worker subscriber-aware gate', () => {
     // would extend the gate-closed window indefinitely.
     mode = 'throw';
     vi.advanceTimersByTime(6000);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // The cache ts was not refreshed by the failed probe, so the very next
     // invocation still attempts to forward (fail-open) rather than being gated.
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
@@ -180,11 +187,44 @@ describe('Tail Worker subscriber-aware gate', () => {
     const mockFetch = vi
       .fn()
       .mockResolvedValue(new Response('Internal Server Error', { status: 500 }));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
     // 500 has no subscribers field → count stays unknown → never gates off
-    await handler.tail([createTraceItem()] as any, env);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails open when a non-2xx ingest response contains subscribers=0 JSON', async () => {
+    const handler = await loadHandler();
+    const response = new Response(JSON.stringify({ ok: false, subscribers: 0 }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const jsonSpy = vi.spyOn(response, 'json');
+    const mockFetch = vi.fn().mockResolvedValue(response);
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
+
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
+
+    expect(jsonSpy).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores malformed subscriber counts on successful ingest responses', async () => {
+    const handler = await loadHandler();
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ subscribers: -1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
+
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
@@ -192,11 +232,11 @@ describe('Tail Worker subscriber-aware gate', () => {
   it('applies the gate using the default TTL when TAIL_SUBSCRIBER_CACHE_MS is unset', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(ingestResponse(0));
-    const env = { API_WORKER: { fetch: mockFetch } } as any; // no TAIL_SUBSCRIBER_CACHE_MS
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch } }; // no TAIL_SUBSCRIBER_CACHE_MS
 
     // First call caches subscribers=0; second (well within the 5s default) skips
-    await handler.tail([createTraceItem()] as any, env);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
@@ -204,11 +244,11 @@ describe('Tail Worker subscriber-aware gate', () => {
   it("disables the gate when TAIL_SUBSCRIBER_CACHE_MS is '0' (always forwards)", async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(ingestResponse(0));
-    const env = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '0' } as any;
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '0' };
 
     // TTL of 0 means the cache is never fresh, so zero-count never gates off
-    await handler.tail([createTraceItem()] as any, env);
-    await handler.tail([createTraceItem()] as any, env);
+    await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
