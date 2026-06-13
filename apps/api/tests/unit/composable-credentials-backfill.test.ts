@@ -5,13 +5,13 @@
  * with DB reads/writes, which is tested separately).
  */
 
-import { describe, it, expect } from 'vitest';
 import {
   backfill,
-  mapKind,
   type CCSourceCredentialRow,
   type CCSourcePlatformRow,
+  mapKind,
 } from '@simple-agent-manager/shared';
+import { describe, expect,it } from 'vitest';
 
 function makeSourceRow(overrides: Partial<CCSourceCredentialRow>): CCSourceCredentialRow {
   return {

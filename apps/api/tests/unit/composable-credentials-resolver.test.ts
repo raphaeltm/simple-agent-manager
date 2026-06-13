@@ -7,17 +7,17 @@
  * - Consumer matching
  */
 
-import { describe, it, expect } from 'vitest';
 import {
-  resolveEnvironment,
-  type CCCompositionSnapshot,
-  type CCConsumerRef,
-  type CCResolutionContext,
-  type CCCredential,
-  type CCConfiguration,
   type CCAttachment,
+  type CCCompositionSnapshot,
+  type CCConfiguration,
+  type CCConsumerRef,
+  type CCCredential,
   type CCPlatformDefault,
+  type CCResolutionContext,
+  resolveEnvironment,
 } from '@simple-agent-manager/shared';
+import { describe, expect,it } from 'vitest';
 
 function makeCredential(overrides: Partial<CCCredential> & { id: string }): CCCredential {
   return {

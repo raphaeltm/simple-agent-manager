@@ -1,5 +1,5 @@
-export { buildSnapshot } from './snapshot';
-export { resolveForConsumer, resolveAgentEnv, resolveComputeConfig } from './resolve';
-export type { CCEnvInjection, CCProviderConfig } from './resolve';
-export { runBackfill } from './backfill-service';
 export type { BackfillOptions, BackfillReport } from './backfill-service';
+export { runBackfill } from './backfill-service';
+export type { CCEnvInjection, CCProviderConfig } from './resolve';
+export { resolveAgentEnv, resolveComputeConfig,resolveForConsumer } from './resolve';
+export { buildSnapshot } from './snapshot';

@@ -9,19 +9,20 @@
  * real (encryptedToken, iv) pairs from the source rows for DB insertion.
  */
 
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import {
   backfill,
   type CCSourceCredentialRow,
   type CCSourcePlatformRow,
 } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import { type drizzle } from 'drizzle-orm/d1';
+
 import {
+  ccAttachments,
+  ccConfigurations,
+  ccCredentials,
   credentials,
   platformCredentials,
-  ccCredentials,
-  ccConfigurations,
-  ccAttachments,
 } from '../../db/schema';
 
 /**
