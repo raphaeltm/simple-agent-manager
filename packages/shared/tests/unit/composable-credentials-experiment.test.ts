@@ -209,8 +209,6 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
     const configurations: CompositionSnapshot['configurations'] = [];
     const attachments: CompositionSnapshot['attachments'] = [];
     const platform: CompositionSnapshot['platform'] = {};
-    const provider = userCred?.provider ?? platformCred?.provider ?? 'hetzner';
-
     if (userCred) {
       const cred: Credential = {
         id: nextId('cred'),
