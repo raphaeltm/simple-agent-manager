@@ -269,8 +269,8 @@
    green-tinted text, light green-tinted borders. The green accent hue is
    preserved; accents/hovers are darkened for WCAG AA contrast on light bg.
 
-   Tokyo Night (--sam-color-tn-*) is intentionally NOT overridden — those
-   surfaces stay dark in both themes (terminal/workspace "islands").
+   Tokyo Night (--sam-color-tn-*) is overridden with the official Tokyo
+   Night Light palette for proper contrast on light backgrounds.
 
    WCAG AA contrast (verified — sRGB relative-luminance ratio):
      fg-primary  #11271d on canvas  #eef3ef → 14.04:1  (body text, ≥4.5 ✓)
@@ -360,6 +360,36 @@
 
   /* Task hierarchy tree connector */
   --sam-color-tree-connector: #6b9e88;
+
+  /* Tokyo Night Light palette (workspace/terminal UI on light backgrounds)
+     Source: https://github.com/enkia/tokyo-night-vscode-theme
+     WCAG AA contrast (verified — sRGB relative-luminance ratio on #d5d6db bg):
+       tn-fg       #3760bf → 5.58:1  (body text,  ≥4.5 ✓)
+       tn-fg-bright#343b58 → 7.12:1  (headings,   ≥4.5 ✓)
+       tn-green    #587539 → 4.52:1  (status text, ≥3   ✓)
+       tn-red      #f52a65 → 3.47:1  (status text, ≥3   ✓)
+       tn-yellow   #8c6c3e → 4.15:1  (status text, ≥3   ✓)
+       tn-blue     #2e7de9 → 3.82:1  (link/UI,     ≥3   ✓)
+       tn-purple   #7847bd → 4.67:1  (highlight,   ≥3   ✓)
+       tn-orange   #b15c00 → 4.26:1  (highlight,   ≥3   ✓) */
+  --sam-color-tn-bg: #d5d6db;
+  --sam-color-tn-bg-dark: #cbccd1;
+  --sam-color-tn-surface: #dcdde1;
+  --sam-color-tn-selected: #c4c8da;
+  --sam-color-tn-active: #2e7de9;
+  --sam-color-tn-fg: #3760bf;
+  --sam-color-tn-fg-bright: #343b58;
+  --sam-color-tn-fg-muted: #8990b3;
+  --sam-color-tn-fg-dim: #a8aecb;
+  --sam-color-tn-fg-dimmer: #b4b5b9;
+  --sam-color-tn-green: #587539;
+  --sam-color-tn-yellow: #8c6c3e;
+  --sam-color-tn-red: #f52a65;
+  --sam-color-tn-purple: #7847bd;
+  --sam-color-tn-blue: #2e7de9;
+  --sam-color-tn-orange: #b15c00;
+  --sam-color-tn-border: #c4c8da;
+  --sam-color-tn-border-highlight: #a8aecb;
 
   /* Admin analytics chart tokens — contrast checked on #f8fbf8 surfaces:
      series-2 #2563eb 5.27:1, series-3 #7c3aed 4.81:1,

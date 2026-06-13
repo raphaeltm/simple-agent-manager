@@ -66,6 +66,11 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   const [currentPath, setCurrentPath] = useState(initialPath ?? '.');
   const [filePath, setFilePath] = useState(initialPath ?? '');
 
+  // Track previous list mode so back returns to git-status when appropriate
+  const previousModeRef = useRef<'browse' | 'git-status'>(
+    initialMode === 'git-status' ? 'git-status' : 'browse',
+  );
+
   // File browser state
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -234,6 +239,9 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   };
 
   const openFile = (path: string) => {
+    if (mode === 'browse' || mode === 'git-status') {
+      previousModeRef.current = mode;
+    }
     setFilePath(path);
     setMode('view');
     // Image files are rendered via <img src> — skip text content fetch
@@ -243,6 +251,9 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   };
 
   const openDiff = (path: string, staged = false) => {
+    if (mode === 'browse' || mode === 'git-status') {
+      previousModeRef.current = mode;
+    }
     setFilePath(path);
     setMode('diff');
     loadDiff(path, staged);
@@ -250,10 +261,15 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
 
   const goBack = () => {
     if (mode === 'view' || mode === 'diff') {
-      setMode('browse');
+      const target = previousModeRef.current;
+      setMode(target);
       setSearchActive(false);
       setSearchQuery('');
-      loadListing(currentPath);
+      if (target === 'git-status') {
+        loadGitStatus();
+      } else {
+        loadListing(currentPath);
+      }
     } else {
       onClose();
     }
@@ -316,7 +332,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               <button
                 type="button"
                 aria-pressed={mode === 'browse'}
-                onClick={() => { setMode('browse'); loadListing(currentPath); }}
+                onClick={() => { previousModeRef.current = 'browse'; setMode('browse'); loadListing(currentPath); }}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'browse' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
                 Files
@@ -324,7 +340,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               <button
                 type="button"
                 aria-pressed={mode === 'git-status'}
-                onClick={() => { setMode('git-status'); loadGitStatus(); }}
+                onClick={() => { previousModeRef.current = 'git-status'; setMode('git-status'); loadGitStatus(); }}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'git-status' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
                 Git
