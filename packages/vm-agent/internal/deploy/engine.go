@@ -197,6 +197,22 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		return fmt.Errorf("write release to disk: %w", err)
 	}
 
+	// Tear down the previous release's containers to free host ports.
+	// Each release renders as a distinct compose project, so consecutive releases
+	// compete for the same host port. We must down the old project before upping
+	// the new one to avoid port-bind failures.
+	if currentSeq > 0 {
+		prevComposeFile := e.disk.ComposeFilePath(currentSeq)
+		slog.Info("deploy.apply: tearing down previous release to free ports",
+			"prevSeq", currentSeq)
+		if err := e.composeDown(ctx, prevComposeFile); err != nil {
+			slog.Warn("deploy.apply: failed to tear down previous release",
+				"prevSeq", currentSeq, "error", err)
+			// Continue anyway — the port may still be free if the previous
+			// containers already exited or were removed externally.
+		}
+	}
+
 	// Execute docker compose
 	composeFile := e.disk.ComposeFilePath(payload.Seq)
 	if err := e.composePull(ctx, composeFile); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -396,6 +397,284 @@ exit 0
 	}
 	if observed.AppliedSeq != 0 {
 		t.Fatalf("failed initial release must remain retryable in heartbeat, observed applied seq %d", observed.AppliedSeq)
+	}
+}
+
+// TestEngine_RedeployPortRebind verifies that Apply() tears down the previous
+// release's containers before starting the new release, preventing host-port
+// collisions when consecutive compose projects bind the same port.
+func TestEngine_RedeployPortRebind(t *testing.T) {
+	type testCase struct {
+		name           string
+		currentSeq     int64 // 0 = first release
+		newSeq         int64
+		failComposeUp  bool  // make composeUp of newSeq fail
+		wantDownBefore bool  // expect composeDown(currentSeq) before pull/up(newSeq)
+		wantRevertUp   bool  // expect composeUp(currentSeq) on rollback
+	}
+
+	tests := []testCase{
+		{
+			name:           "first release skips composeDown",
+			currentSeq:     0,
+			newSeq:         1,
+			failComposeUp:  false,
+			wantDownBefore: false,
+			wantRevertUp:   false,
+		},
+		{
+			name:           "happy redeploy tears down old before upping new",
+			currentSeq:     1,
+			newSeq:         2,
+			failComposeUp:  false,
+			wantDownBefore: true,
+			wantRevertUp:   false,
+		},
+		{
+			name:           "no overlap window: down-old strictly precedes up-new",
+			currentSeq:     3,
+			newSeq:         4,
+			failComposeUp:  false,
+			wantDownBefore: true,
+			wantRevertUp:   false,
+		},
+		{
+			name:           "rollback re-ups previous after failed composeUp",
+			currentSeq:     1,
+			newSeq:         2,
+			failComposeUp:  true,
+			wantDownBefore: true,
+			wantRevertUp:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			disk, err := NewDiskState(filepath.Join(dir, "state"))
+			if err != nil {
+				t.Fatalf("NewDiskState: %v", err)
+			}
+
+			// Set up previous release on disk if currentSeq > 0
+			if tc.currentSeq > 0 {
+				prevState := &ReleaseState{
+					Seq:           tc.currentSeq,
+					EnvironmentID: "env-1",
+					NodeID:        "node-1",
+					Status:        StatusApplied,
+				}
+				if err := disk.WriteRelease(prevState, "services:\n  web:\n    image: nginx\n", "prev caddyfile"); err != nil {
+					t.Fatalf("write previous release: %v", err)
+				}
+				if err := disk.SetCurrent(tc.currentSeq); err != nil {
+					t.Fatalf("set current: %v", err)
+				}
+			}
+
+			// Build a compose script that logs each invocation and optionally fails compose up for newSeq
+			composeLog := filepath.Join(dir, "compose.log")
+			newComposeFile := disk.ComposeFilePath(tc.newSeq)
+			prevComposeFile := ""
+			if tc.currentSeq > 0 {
+				prevComposeFile = disk.ComposeFilePath(tc.currentSeq)
+			}
+
+			// The script logs "CMD <file> <args>" per invocation.
+			// It fails `up` for the new release's compose file if failComposeUp is set.
+			failClause := ""
+			if tc.failComposeUp {
+				failClause = fmt.Sprintf(`
+# Fail compose up for the new release file
+case "$*" in
+  *"-f %s"*" up "*)
+    echo "CMD $*" >> "%s"
+    echo "port already in use" >&2
+    exit 1
+    ;;
+esac
+`, newComposeFile, composeLog)
+			}
+
+			composeScript := filepath.Join(dir, "compose.sh")
+			scriptContent := fmt.Sprintf(`#!/bin/sh
+%s
+echo "CMD $*" >> "%s"
+case "$*" in
+  *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
+esac
+exit 0
+`, failClause, composeLog)
+
+			if err := os.WriteFile(composeScript, []byte(scriptContent), 0755); err != nil {
+				t.Fatalf("write compose script: %v", err)
+			}
+
+			reloadScript := filepath.Join(dir, "reload.sh")
+			if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+				t.Fatalf("write reload script: %v", err)
+			}
+
+			pub, priv := generateTestKeys(t)
+			verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+			if err != nil {
+				t.Fatalf("NewVerifier: %v", err)
+			}
+
+			engine := NewEngine(disk, verifier, EngineConfig{
+				EnvironmentID:      "env-1",
+				NodeID:             "node-1",
+				ComposeCmd:         composeScript,
+				CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+				CaddyReloadCmd:     reloadScript,
+				HealthTimeout:      1 * time.Second,
+				HealthPollInterval: 10 * time.Millisecond,
+			})
+
+			payload := makeTestPayload("env-1", "node-1", tc.newSeq, "services:\n  web:\n    image: nginx:latest\n", priv)
+			payload.Routes = []RouteTarget{{
+				Hostname:      "app.example.com",
+				Service:       "web",
+				ContainerPort: 3000,
+				HostPort:      35000,
+			}}
+			// Re-sign with routes
+			sig, err := SignPayload(payload, priv)
+			if err != nil {
+				t.Fatalf("SignPayload: %v", err)
+			}
+			payload.Signature = sig
+
+			applyErr := engine.Apply(context.Background(), payload)
+
+			// Read the compose command log
+			logBytes, err := os.ReadFile(composeLog)
+			if err != nil {
+				t.Fatalf("read compose log: %v", err)
+			}
+			logLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+
+			if tc.failComposeUp {
+				if applyErr == nil {
+					t.Fatal("expected apply to fail when composeUp fails")
+				}
+			} else {
+				if applyErr != nil {
+					t.Fatalf("expected apply to succeed, got: %v", applyErr)
+				}
+			}
+
+			// Parse command log into ordered operations
+			type op struct {
+				action string // "down", "pull", "up", "ps"
+				file   string // compose file path
+			}
+			var ops []op
+			for _, line := range logLines {
+				if !strings.HasPrefix(line, "CMD ") {
+					continue
+				}
+				args := line[4:]
+				var action string
+				switch {
+				case strings.Contains(args, " down"):
+					action = "down"
+				case strings.Contains(args, " pull"):
+					action = "pull"
+				case strings.Contains(args, " up "):
+					action = "up"
+				case strings.Contains(args, " ps "):
+					action = "ps"
+				default:
+					continue
+				}
+
+				// Extract compose file from -f <path>
+				var file string
+				parts := strings.Fields(args)
+				for i, p := range parts {
+					if p == "-f" && i+1 < len(parts) {
+						file = parts[i+1]
+						break
+					}
+				}
+				ops = append(ops, op{action: action, file: file})
+			}
+
+			// Verify: composeDown of previous release occurs (or not) and ordering
+			if tc.wantDownBefore {
+				// Find the "down" for the previous compose file
+				downIdx := -1
+				for i, o := range ops {
+					if o.action == "down" && o.file == prevComposeFile {
+						downIdx = i
+						break
+					}
+				}
+				if downIdx == -1 {
+					t.Fatalf("expected composeDown for previous release (file=%s) but not found in log:\n%s",
+						prevComposeFile, string(logBytes))
+				}
+
+				// Find the first "pull" or "up" for the new compose file
+				pullUpIdx := -1
+				for i, o := range ops {
+					if (o.action == "pull" || o.action == "up") && o.file == newComposeFile {
+						pullUpIdx = i
+						break
+					}
+				}
+				if pullUpIdx == -1 {
+					t.Fatalf("expected composePull/Up for new release but not found in log:\n%s", string(logBytes))
+				}
+
+				if downIdx >= pullUpIdx {
+					t.Fatalf("composeDown(prev) at index %d must precede composePull/Up(new) at index %d:\n%s",
+						downIdx, pullUpIdx, string(logBytes))
+				}
+			} else {
+				// First release: no composeDown should be called before pull/up
+				for _, o := range ops {
+					if o.action == "down" && (prevComposeFile == "" || o.file == prevComposeFile) {
+						// For first release (currentSeq=0), there should be no down for a previous file.
+						// A down for the NEW file is OK (handleApplyFailure cleanup).
+						if o.file != newComposeFile {
+							t.Fatalf("unexpected composeDown for non-new file %s in first release:\n%s",
+								o.file, string(logBytes))
+						}
+					}
+				}
+			}
+
+			// Verify rollback re-ups the previous release
+			if tc.wantRevertUp {
+				revertFound := false
+				for _, o := range ops {
+					if o.action == "up" && o.file == prevComposeFile {
+						revertFound = true
+						break
+					}
+				}
+				if !revertFound {
+					t.Fatalf("expected rollback composeUp for previous release (file=%s) but not found:\n%s",
+						prevComposeFile, string(logBytes))
+				}
+
+				// Verify the reverted state
+				currentSeq, err := disk.CurrentSeq()
+				if err != nil {
+					t.Fatalf("CurrentSeq: %v", err)
+				}
+				if currentSeq != tc.currentSeq {
+					t.Fatalf("expected current seq to revert to %d, got %d", tc.currentSeq, currentSeq)
+				}
+
+				observed := engine.GetObserved()
+				if observed.Status != StatusReverted {
+					t.Fatalf("expected observed status=reverted, got %s", observed.Status)
+				}
+			}
+		})
 	}
 }
 
