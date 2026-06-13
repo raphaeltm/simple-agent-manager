@@ -129,6 +129,29 @@ func TestExtractSAMVolumeMountRoots_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestExtractSAMVolumeMountRoots_PathTraversal_Rejected(t *testing.T) {
+	// Defense-in-depth: a compose YAML with path-traversal components in the
+	// envId position must be silently skipped to prevent os.Stat on
+	// attacker-controlled paths.
+	yaml := `services:
+  evil:
+    volumes:
+      - /mnt/sam-env-../etc/shadow:/x
+      - /mnt/sam-env-.:/y
+      - /mnt/sam-env-legitimate/volumes/data:/data`
+	roots, err := extractSAMVolumeMountRoots(yaml)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only the legitimate path should survive
+	if len(roots) != 1 {
+		t.Fatalf("expected 1 root (only legitimate), got %d: %v", len(roots), roots)
+	}
+	if roots[0] != "/mnt/sam-env-legitimate" {
+		t.Fatalf("expected /mnt/sam-env-legitimate, got %s", roots[0])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // verifyVolumeMounts tests
 // ---------------------------------------------------------------------------

@@ -4,12 +4,14 @@
  * Exercises the full provider-level lifecycle that the SAM resiliency model
  * promises:
  *
- *   create-or-reuse → attach to node → (release apply) → detach from old node
+ *   create → attach to node → (release apply) → detach from old node
  *   → attach to new node → re-apply current release → same data path
  *
- * Asserts idempotency (re-create reuses existing; detach tolerates
- * already-detached) and that the environment remains canonical across node
- * replacement (same volume id, same data path).
+ * Asserts idempotency (detach tolerates already-deleted via 404) and that the
+ * environment remains canonical across node replacement (same volume id, same
+ * data path). Note: "create-or-reuse" logic lives above the provider layer
+ * (in deployment-volumes.ts listEnvironmentVolumes); provider.createVolume
+ * will error on duplicate names.
  *
  * Uses realistic mocked provider fetch responses (Hetzner) with full
  * VolumeInstance shapes — no empty mock objects.
