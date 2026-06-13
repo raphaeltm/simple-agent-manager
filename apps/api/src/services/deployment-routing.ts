@@ -76,3 +76,41 @@ export function buildDeploymentRouteTargets(
     hostPort: portBase + index,
   }));
 }
+
+/**
+ * Collect the unique set of app-route hostnames an environment's releases have
+ * provisioned, by reapplying the same derivation the apply path uses
+ * ({@link buildDeploymentRouteTargets}). Used by teardown paths to deprovision
+ * the matching grey-cloud DNS records.
+ *
+ * Manifests are stored as JSON strings on each release; malformed manifests and
+ * manifests whose route set exceeds configured bounds are skipped rather than
+ * aborting the whole teardown.
+ */
+export function collectEnvironmentRouteHostnames(
+  manifests: string[],
+  opts: DeploymentRouteTargetOptions,
+): string[] {
+  const hostnames = new Set<string>();
+  for (const raw of manifests) {
+    let manifest: DeploymentManifest;
+    try {
+      manifest = JSON.parse(raw) as DeploymentManifest;
+    } catch {
+      continue;
+    }
+    if (!manifest || !Array.isArray(manifest.routes)) {
+      continue;
+    }
+    let targets: DeploymentRouteTarget[];
+    try {
+      targets = buildDeploymentRouteTargets(manifest, opts);
+    } catch {
+      continue;
+    }
+    for (const target of targets) {
+      hostnames.add(target.hostname);
+    }
+  }
+  return [...hostnames];
+}

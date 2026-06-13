@@ -12,11 +12,14 @@ import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
+import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
+import { cleanupAppRouteDNSRecords } from '../services/dns';
 
 // =============================================================================
 // Validation schemas (Valibot — matches project convention)
@@ -151,6 +154,77 @@ deploymentEnvironmentRoutes.get(
     }
 
     return c.json(rows[0]);
+  },
+);
+
+/**
+ * DELETE /api/projects/:projectId/environments/:envId
+ *
+ * Tear down a deployment environment. Deprovisions the grey-cloud app-route
+ * DNS records the environment's releases created, then deletes the environment
+ * row — the foreign keys cascade-delete its releases, secrets, volumes, and
+ * routes. DNS cleanup runs before the row delete so the manifests are still
+ * available to reconstruct the route hostnames; it is idempotent and tolerant
+ * of already-deleted records.
+ */
+deploymentEnvironmentRoutes.delete(
+  '/:projectId/environments/:envId',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('projectId');
+    const envId = c.req.param('envId');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, userId);
+
+    const envRows = await db
+      .select({ id: schema.deploymentEnvironments.id })
+      .from(schema.deploymentEnvironments)
+      .where(
+        and(
+          eq(schema.deploymentEnvironments.id, envId),
+          eq(schema.deploymentEnvironments.projectId, projectId),
+        ),
+      )
+      .limit(1);
+
+    if (envRows.length === 0) {
+      throw errors.notFound('Deployment environment');
+    }
+
+    // Reconstruct app-route hostnames from each release's manifest before the
+    // cascade delete removes the rows.
+    const releases = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(eq(schema.deploymentReleases.environmentId, envId));
+
+    const hostnames = collectEnvironmentRouteHostnames(
+      releases.map((r) => r.manifest),
+      {
+        environmentId: envId,
+        baseDomain: c.env.BASE_DOMAIN,
+        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      },
+    );
+
+    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
+
+    // Cascade-delete releases, secrets, volumes, and routes via FK constraints.
+    await db
+      .delete(schema.deploymentEnvironments)
+      .where(eq(schema.deploymentEnvironments.id, envId));
+
+    log.info('deployment_environment.deleted', {
+      projectId,
+      envId,
+      releaseCount: releases.length,
+      dnsRecordsDeleted,
+    });
+
+    return c.json({ id: envId, deleted: true, dnsRecordsDeleted });
   },
 );
 

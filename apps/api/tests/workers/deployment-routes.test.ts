@@ -113,6 +113,14 @@ describe('deployment environment routes', () => {
     );
     expect(res.status).toBe(401);
   });
+
+  it('DELETE /api/projects/:projectId/environments/:envId returns 401 without auth', async () => {
+    const res = await SELF.fetch(
+      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake`,
+      { method: 'DELETE' },
+    );
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('deployment release routes', () => {

@@ -11,6 +11,8 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator } from '../schemas';
+import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
+import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { signNodeManagementToken } from '../services/jwt';
 import { getRuntimeLimits } from '../services/limits';
 import {
@@ -286,6 +288,38 @@ nodesRoutes.delete('/:id', async (c) => {
   }
 
   await deleteNodeResources(nodeId, userId, c.env);
+
+  // Deprovision app-route DNS records for any deployment environments hosted on
+  // this node. The environment rows survive (nodeId is set null by the FK), but
+  // their grey-cloud A records would otherwise point at the now-freed VM IP.
+  const hostedEnvs = await db
+    .select({ id: schema.deploymentEnvironments.id })
+    .from(schema.deploymentEnvironments)
+    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
+
+  for (const envRow of hostedEnvs) {
+    const releases = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(eq(schema.deploymentReleases.environmentId, envRow.id));
+
+    const hostnames = collectEnvironmentRouteHostnames(
+      releases.map((r) => r.manifest),
+      {
+        environmentId: envRow.id,
+        baseDomain: c.env.BASE_DOMAIN,
+        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      },
+    );
+
+    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
+    log.info('node.deployment_dns_cleaned_up', {
+      nodeId,
+      environmentId: envRow.id,
+      dnsRecordsDeleted,
+    });
+  }
 
   const workspaceRows = await db
     .select({ id: schema.workspaces.id })

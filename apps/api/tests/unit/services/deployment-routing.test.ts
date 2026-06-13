@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDeploymentRouteTargets } from '../../../src/services/deployment-routing';
+import {
+  buildDeploymentRouteTargets,
+  collectEnvironmentRouteHostnames,
+} from '../../../src/services/deployment-routing';
 
 function manifest() {
   return {
@@ -82,5 +85,55 @@ describe('buildDeploymentRouteTargets', () => {
       routePortBase: '65535',
       routePortSpan: '20',
     })).toThrow('exceeding maximum TCP port 65535');
+  });
+});
+
+describe('collectEnvironmentRouteHostnames', () => {
+  const opts = { environmentId: '01KTX9M6J0TPMGW0CQ98HQ1EAW', baseDomain: 'sammy.party' };
+
+  it('reuses the apply-path derivation to collect public-route hostnames', () => {
+    const hostnames = collectEnvironmentRouteHostnames([JSON.stringify(manifest())], opts);
+    expect(hostnames).toEqual([
+      'r1-web-3000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+      'r2-api-8081-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+  });
+
+  it('dedupes hostnames across multiple releases of the same environment', () => {
+    const hostnames = collectEnvironmentRouteHostnames(
+      [JSON.stringify(manifest()), JSON.stringify(manifest())],
+      opts,
+    );
+    expect(hostnames).toEqual([
+      'r1-web-3000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+      'r2-api-8081-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+  });
+
+  it('skips malformed manifests instead of aborting teardown', () => {
+    const hostnames = collectEnvironmentRouteHostnames(
+      ['not-json', JSON.stringify(manifest())],
+      opts,
+    );
+    expect(hostnames).toEqual([
+      'r1-web-3000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+      'r2-api-8081-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+  });
+
+  it('skips manifests whose route set exceeds the configured span', () => {
+    const hostnames = collectEnvironmentRouteHostnames([JSON.stringify(manifest())], {
+      ...opts,
+      routePortSpan: '1',
+    });
+    expect(hostnames).toEqual([]);
+  });
+
+  it('returns an empty list when no release defines a public route', () => {
+    const noPublic = {
+      ...manifest(),
+      routes: [{ service: 'api', port: 8080, mode: 'private' as const }],
+    };
+    expect(collectEnvironmentRouteHostnames([JSON.stringify(noPublic)], opts)).toEqual([]);
   });
 });
