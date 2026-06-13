@@ -16,12 +16,13 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
-import { renderCompose } from '../services/compose-renderer';
+import { collectSecretNames, renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
 import { buildDeploymentRouteTargets } from '../services/deployment-routing';
 import { upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
+import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
 
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 const DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS = 3_600;
@@ -142,11 +143,18 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
   }
 
+  // Resolve secret references — inject decrypted values for the node
+  const secretNames = collectSecretNames(manifest);
+  const resolvedSecrets = secretNames.length > 0
+    ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
+    : {};
+
   // Render the Compose YAML from the manifest
   const composeYaml = renderCompose(manifest, {
     environmentId,
     releaseId: release.id,
     routeTargets: routes,
+    resolvedSecrets,
   });
 
   const expiresAt = Math.floor(Date.now() / 1000) + parsePositiveInt(
