@@ -21,3 +21,6 @@ export * from './deployment-manifest';
 
 // Compose Parser (Compose YAML → deployment manifest)
 export * from './compose-parser';
+
+// Composable Credentials (three-primitive model)
+export * from './composable-credentials';
