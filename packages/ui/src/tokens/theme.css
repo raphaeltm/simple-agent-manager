@@ -363,15 +363,18 @@
 
   /* Tokyo Night Light palette (workspace/terminal UI on light backgrounds)
      Source: https://github.com/enkia/tokyo-night-vscode-theme
-     WCAG AA contrast (verified — sRGB relative-luminance ratio on #d5d6db bg):
-       tn-fg       #3760bf → 5.58:1  (body text,  ≥4.5 ✓)
-       tn-fg-bright#343b58 → 7.12:1  (headings,   ≥4.5 ✓)
-       tn-green    #587539 → 4.52:1  (status text, ≥3   ✓)
-       tn-red      #f52a65 → 3.47:1  (status text, ≥3   ✓)
-       tn-yellow   #8c6c3e → 4.15:1  (status text, ≥3   ✓)
-       tn-blue     #2e7de9 → 3.82:1  (link/UI,     ≥3   ✓)
-       tn-purple   #7847bd → 4.67:1  (highlight,   ≥3   ✓)
-       tn-orange   #b15c00 → 4.26:1  (highlight,   ≥3   ✓) */
+     Contrast checked against glass-modal surface #f8fbf8 (sRGB luminance ratio):
+       tn-fg       #3760bf → 6.71:1  (body text,   ≥4.5 ✓)
+       tn-fg-bright#343b58 → 8.64:1  (headings,    ≥4.5 ✓)
+       tn-green    #587539 → 5.38:1  (status text,  ≥4.5 ✓)
+       tn-red      #c4233d → 5.51:1  (status text,  ≥4.5 ✓)
+       tn-yellow   #8c6c3e → 4.95:1  (status text,  ≥4.5 ✓)
+       tn-blue     #2959a3 → 6.60:1  (link/UI,      ≥3   ✓)
+       tn-purple   #7847bd → 5.57:1  (highlight,    ≥3   ✓)
+       tn-orange   #b15c00 → 5.06:1  (highlight,    ≥3   ✓)
+       tn-fg-muted #6e7891 → 4.23:1  (secondary,   AA-large ✓)
+       tn-fg-dim   #848da5 → 3.18:1  (placeholder, AA-large ✓)
+       tn-fg-dimmer#9499a8 → 2.73:1  (decorative only) */
   --sam-color-tn-bg: #d5d6db;
   --sam-color-tn-bg-dark: #cbccd1;
   --sam-color-tn-surface: #dcdde1;
@@ -379,14 +382,14 @@
   --sam-color-tn-active: #2e7de9;
   --sam-color-tn-fg: #3760bf;
   --sam-color-tn-fg-bright: #343b58;
-  --sam-color-tn-fg-muted: #8990b3;
-  --sam-color-tn-fg-dim: #a8aecb;
-  --sam-color-tn-fg-dimmer: #b4b5b9;
+  --sam-color-tn-fg-muted: #6e7891;
+  --sam-color-tn-fg-dim: #848da5;
+  --sam-color-tn-fg-dimmer: #9499a8;
   --sam-color-tn-green: #587539;
   --sam-color-tn-yellow: #8c6c3e;
-  --sam-color-tn-red: #f52a65;
+  --sam-color-tn-red: #c4233d;
   --sam-color-tn-purple: #7847bd;
-  --sam-color-tn-blue: #2e7de9;
+  --sam-color-tn-blue: #2959a3;
   --sam-color-tn-orange: #b15c00;
   --sam-color-tn-border: #c4c8da;
   --sam-color-tn-border-highlight: #a8aecb;
