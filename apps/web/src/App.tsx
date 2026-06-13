@@ -47,6 +47,7 @@ import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
+import { SettingsCredentials } from './pages/SettingsCredentials';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
@@ -138,6 +139,7 @@ export default function App() {
                     <Route path="notifications" element={<SettingsNotifications />} />
                     <Route path="usage" element={<SettingsComputeUsage />} />
                     <Route path="api-tokens" element={<SettingsApiTokens />} />
+                    <Route path="credentials" element={<SettingsCredentials />} />
                   </Route>
                   <Route path="/account-map" element={<AccountMap />} />
                   <Route path="/tools" element={<Tools />} />
