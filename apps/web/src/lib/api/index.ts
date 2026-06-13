@@ -119,6 +119,25 @@ export {
   validateCredential,
 } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
+export type {
+  CCCredentialListItem,
+  CCConfigurationListItem,
+  CCAttachmentListItem,
+} from './composable-credentials';
+export {
+  listCCCredentials,
+  createCCCredential,
+  updateCCCredential,
+  deleteCCCredential,
+  listCCConfigurations,
+  createCCConfiguration,
+  updateCCConfiguration,
+  deleteCCConfiguration,
+  listCCAttachments,
+  createCCAttachment,
+  updateCCAttachment,
+  deleteCCAttachment,
+} from './composable-credentials';
 export type { DeploymentSecretEntry, ProjectDeploymentGcpResponse } from './deployment';
 export {
   deleteDeploymentSecret,
