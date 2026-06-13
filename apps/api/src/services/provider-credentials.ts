@@ -7,6 +7,8 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
+import { resolveComputeConfig } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
 import { getPlatformCloudCredential } from './platform-credentials';
 
@@ -193,8 +195,80 @@ export async function getUserCloudProviderConfig(
  * Create a Provider instance for a user, handling all provider types including GCP.
  * Falls back to platform credentials when no user credential is found.
  * For GCP, injects the STS token exchange as the token provider.
+ *
+ * Resolution order (composable-credentials PRIMARY, old path FALLBACK):
+ *   1. CC resolver: project-attachment → user-attachment → platform default
+ *   2. If cc_* tables are empty, lazy-backfill from legacy tables, retry
+ *   3. If CC still returns null, fall back to legacy single-table lookup
  */
 export async function createProviderForUser(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  env: Env & Partial<HetznerCapacityRetryEnv>,
+  targetProvider?: CredentialProvider,
+): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
+  // --- Primary path: composable-credentials resolver -------------------------
+  // CC resolver requires a specific provider name (compute consumers are always
+  // provider-specific). When targetProvider is undefined, we skip CC and use the
+  // legacy path which handles the "any provider" case. All current call sites
+  // that create nodes specify a targetProvider, so this gap is not reachable in
+  // practice. When legacy tables are fully retired, all call sites must pass
+  // targetProvider explicitly.
+  if (targetProvider) {
+    const ccResult = await resolveProviderViaCC(db, userId, encryptionKey, env, targetProvider);
+    if (ccResult !== undefined) return ccResult;
+  }
+
+  // --- Fallback: legacy single-table lookup ----------------------------------
+  return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider);
+}
+
+/**
+ * Try composable-credentials resolution for compute providers with lazy backfill.
+ * Returns `undefined` when CC has no data and fallback should be attempted.
+ */
+async function resolveProviderViaCC(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  env: Env & Partial<HetznerCapacityRetryEnv>,
+  targetProvider: CredentialProvider,
+): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null | undefined> {
+  let ccConfig = await resolveComputeConfig(db, userId, encryptionKey, targetProvider);
+
+  if (!ccConfig) {
+    const didBackfill = await lazyBackfillIfNeeded(db, userId);
+    if (didBackfill) {
+      ccConfig = await resolveComputeConfig(db, userId, encryptionKey, targetProvider);
+    } else {
+      return undefined;
+    }
+  }
+
+  if (!ccConfig) return undefined;
+
+  const providerName = targetProvider;
+  const credentialSource: CredentialSource = ccConfig.isPlatform ? 'platform' : 'user';
+
+  // GCP requires runtime STS token exchange — not a simple token
+  if (providerName === 'gcp') {
+    const gcpCred = parseGcpCredential(ccConfig.token);
+    const { getGcpAccessToken } = await import('./gcp-sts');
+    const cacheUserId = ccConfig.isPlatform ? `platform:${userId}` : userId;
+    const tokenProvider = () => getGcpAccessToken(cacheUserId, gcpCred.gcpProjectId, gcpCred, env);
+    const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+    return { provider, providerName, credentialSource };
+  }
+
+  const config = buildProviderConfig(providerName, ccConfig.token, env);
+  return { provider: createProvider(config), providerName, credentialSource };
+}
+
+/**
+ * Legacy single-table provider resolution (fallback when CC has no data).
+ */
+async function createProviderForUserLegacy(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
@@ -249,7 +323,6 @@ export async function createProviderForUser(
   if (platformProvider === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
-    // Use a synthetic user ID for platform credentials in token cache
     const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env);
 
     const provider = new GcpProvider(
