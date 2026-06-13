@@ -264,10 +264,18 @@ describe('Tail Worker handler', () => {
 
   it('does not throw on invalid log timestamps and falls back to the trace timestamp', async () => {
     const fallbackTimestamp = '2026-06-13T12:34:56.789Z';
+    const throwingTimestamp = {
+      valueOf() {
+        throw new Error('cannot convert timestamp');
+      },
+    };
     const events = [
       createTraceItem({
         eventTimestamp: Date.parse(fallbackTimestamp),
-        logs: [createLogItem('error', 'bad timestamp', 'not-a-date')],
+        logs: [
+          createLogItem('error', 'bad timestamp', 'not-a-date'),
+          createLogItem('warn', 'throwing timestamp', throwingTimestamp),
+        ],
       }),
     ];
 
@@ -275,6 +283,7 @@ describe('Tail Worker handler', () => {
 
     const logs = forwardedLogs();
     expect(logs[0].entry.timestamp).toBe(fallbackTimestamp);
+    expect(logs[1].entry.timestamp).toBe(fallbackTimestamp);
     expect(Number.isNaN(Date.parse(logs[0].entry.timestamp))).toBe(false);
   });
 

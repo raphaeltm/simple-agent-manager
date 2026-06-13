@@ -95,14 +95,22 @@ function safeJoinMessage(message: unknown): string {
   return stringifyMessagePart(message);
 }
 
+function parseDate(value: unknown): Date | null {
+  try {
+    const parsed = new Date(value as string | number | Date);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  } catch {
+    return null;
+  }
+}
+
 function safeIsoTimestamp(timestamp: unknown, fallbackTimestamp: unknown): string {
-  const parsed = new Date(timestamp as string | number | Date);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  const parsed = parseDate(timestamp);
+  if (parsed) return parsed.toISOString();
 
   // Prefer the trace event timestamp when a malformed log timestamp is present;
   // tests can provide it deterministically, and Date.now() remains the last resort.
-  const fallback = new Date(fallbackTimestamp as string | number | Date);
-  return Number.isNaN(fallback.getTime()) ? new Date().toISOString() : fallback.toISOString();
+  return (parseDate(fallbackTimestamp) ?? new Date()).toISOString();
 }
 
 function parseStructuredMessage(message: unknown): Record<string, unknown> {
