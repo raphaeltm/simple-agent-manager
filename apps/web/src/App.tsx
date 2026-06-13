@@ -24,6 +24,7 @@ import { AdminUsers } from './pages/AdminUsers';
 import { AgentContextPage } from './pages/AgentContextPage';
 import { Chats } from './pages/Chats';
 import { CreateWorkspace } from './pages/CreateWorkspace';
+import { CredentialsPrototype } from './pages/credentials-prototype';
 import { Dashboard } from './pages/Dashboard';
 import { DeviceAuth } from './pages/DeviceAuth';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
@@ -92,6 +93,8 @@ export default function App() {
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
+                {/* Composable-credentials experiment (E4) — public, no auth */}
+                <Route path="/prototype/credentials" element={<CredentialsPrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
