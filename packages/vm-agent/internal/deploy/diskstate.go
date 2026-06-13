@@ -175,6 +175,36 @@ func (d *DiskState) CurrentComposeFilePath() (string, error) {
 	return d.ComposeFilePath(seq), nil
 }
 
+// ReadComposeFile returns the contents of docker-compose.yml for a given release.
+func (d *DiskState) ReadComposeFile(seq int64) (string, error) {
+	data, err := os.ReadFile(d.ComposeFilePath(seq))
+	if err != nil {
+		return "", fmt.Errorf("read compose file for seq %d: %w", seq, err)
+	}
+	return string(data), nil
+}
+
+// ListReleaseSeqs returns all release sequence numbers on disk, unsorted.
+func (d *DiskState) ListReleaseSeqs() []int64 {
+	releasesDir := filepath.Join(d.baseDir, "desired", "releases")
+	entries, err := os.ReadDir(releasesDir)
+	if err != nil {
+		return nil
+	}
+	var seqs []int64
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		seq, err := strconv.ParseInt(e.Name(), 10, 64)
+		if err != nil {
+			continue
+		}
+		seqs = append(seqs, seq)
+	}
+	return seqs
+}
+
 func (d *DiskState) releaseDir(seq int64) string {
 	return filepath.Join(d.baseDir, "desired", "releases", strconv.FormatInt(seq, 10))
 }
