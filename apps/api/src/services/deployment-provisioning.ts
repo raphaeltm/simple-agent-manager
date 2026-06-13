@@ -135,11 +135,18 @@ export async function provisionDeploymentNode(
 
     // Roll back the environment→node linkage so subsequent releases can
     // re-trigger provisioning instead of being orphaned against a dead node.
+    // Guard on nodeId = our node to avoid stomping a concurrent successful
+    // re-provisioning that already wrote a different nodeId.
     try {
       await db
         .update(schema.deploymentEnvironments)
         .set({ nodeId: null, updatedAt: new Date().toISOString() })
-        .where(eq(schema.deploymentEnvironments.id, envId));
+        .where(
+          and(
+            eq(schema.deploymentEnvironments.id, envId),
+            eq(schema.deploymentEnvironments.nodeId, node.id),
+          ),
+        );
       log.info('deployment_provisioning.nodeId_rolled_back', { envId, nodeId: node.id });
     } catch (rollbackErr) {
       log.error('deployment_provisioning.nodeId_rollback_failed', {
