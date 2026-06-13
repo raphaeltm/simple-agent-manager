@@ -281,6 +281,113 @@ describe('E6 — project-scoped resolution maps to credentialSource "project"', 
   });
 });
 
+describe('E6 — Rule 28: inactive project-scoped attachment halts CC resolution', () => {
+  it('inactive project attachment returns null (does NOT fall through to user-scoped)', () => {
+    seq = 0;
+    const userId = 'user-1';
+    const projectId = 'proj-1';
+
+    // Active user-scoped credential that should NOT be reached
+    const userCred: Credential = {
+      id: id('cred'),
+      ownerId: userId,
+      name: 'user key',
+      kind: 'api-key',
+      secret: { kind: 'api-key', apiKey: 'sk-user-key' },
+      isActive: true,
+    };
+
+    // Project-scoped credential (also active, but attachment is inactive)
+    const projCred: Credential = {
+      id: id('cred'),
+      ownerId: userId,
+      name: 'project key',
+      kind: 'api-key',
+      secret: { kind: 'api-key', apiKey: 'sk-proj-key' },
+      isActive: true,
+    };
+
+    const userCfg = {
+      id: id('cfg'),
+      ownerId: userId,
+      name: 'user config',
+      consumer: { kind: 'agent' as const, agentType: 'claude-code' },
+      credentialId: userCred.id,
+      settings: {},
+      isActive: true,
+    };
+    const projCfg = {
+      id: id('cfg'),
+      ownerId: userId,
+      name: 'project config',
+      consumer: { kind: 'agent' as const, agentType: 'claude-code' },
+      credentialId: projCred.id,
+      settings: {},
+      isActive: true,
+    };
+
+    const userAtt = {
+      id: id('att'),
+      configurationId: userCfg.id,
+      consumer: { kind: 'agent' as const, agentType: 'claude-code' },
+      target: { scope: 'user' as const, userId },
+      isActive: true,
+    };
+    // INACTIVE project attachment — Rule 28 says this halts the chain
+    const projAtt = {
+      id: id('att'),
+      configurationId: projCfg.id,
+      consumer: { kind: 'agent' as const, agentType: 'claude-code' },
+      target: { scope: 'project' as const, userId, projectId },
+      isActive: false,
+    };
+
+    const snap: CompositionSnapshot = {
+      credentials: [userCred, projCred],
+      configurations: [userCfg, projCfg],
+      attachments: [userAtt, projAtt],
+      platform: {},
+    };
+
+    const resolved = resolveEnvironment(
+      snap,
+      { kind: 'agent', agentType: 'claude-code' },
+      { userId, projectId },
+    );
+
+    // Rule 28: inactive project attachment HALTS — returns null, does NOT
+    // fall through to the active user-scoped attachment
+    expect(resolved).toBeNull();
+  });
+
+  it('active project attachment resolves normally', () => {
+    seq = 0;
+    const userId = 'user-1';
+    const projectId = 'proj-1';
+
+    const projCred: Credential = {
+      id: id('cred'),
+      ownerId: userId,
+      name: 'project key',
+      kind: 'api-key',
+      secret: { kind: 'api-key', apiKey: 'sk-proj-active' },
+      isActive: true,
+    };
+    const snap = makeSnapshot({ userId, credentials: [projCred], agentType: 'claude-code', projectId });
+    const resolved = resolveEnvironment(
+      snap,
+      { kind: 'agent', agentType: 'claude-code' },
+      { userId, projectId },
+    );
+
+    expect(resolved).not.toBeNull();
+    expect(resolved!.source).toBe('project-attachment');
+    const legacy = mapResolvedToLegacy(resolved!);
+    expect(legacy).not.toBeNull();
+    expect(legacy!.credential).toBe('sk-proj-active');
+  });
+});
+
 describe('E6 — compute assembler output compatible with buildProviderConfig', () => {
   it('hetzner compute credential produces token string for buildProviderConfig', () => {
     seq = 0;

@@ -30,6 +30,11 @@ export async function hasUserCCData(
 /**
  * If the user has no cc_* data, run the backfill from legacy tables.
  * Returns true if backfill was performed, false if data already existed.
+ *
+ * TOCTOU note: concurrent requests for the same user can both see an empty cc
+ * table and both invoke runBackfill. This is safe because runBackfill uses
+ * onConflictDoNothing on all inserts — the second call is a no-op at the DB
+ * level and produces identical results.
  */
 export async function lazyBackfillIfNeeded(
   db: ReturnType<typeof drizzle>,

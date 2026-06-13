@@ -209,6 +209,12 @@ export async function createProviderForUser(
   targetProvider?: CredentialProvider,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // --- Primary path: composable-credentials resolver -------------------------
+  // CC resolver requires a specific provider name (compute consumers are always
+  // provider-specific). When targetProvider is undefined, we skip CC and use the
+  // legacy path which handles the "any provider" case. All current call sites
+  // that create nodes specify a targetProvider, so this gap is not reachable in
+  // practice. When legacy tables are fully retired, all call sites must pass
+  // targetProvider explicitly.
   if (targetProvider) {
     const ccResult = await resolveProviderViaCC(db, userId, encryptionKey, env, targetProvider);
     if (ccResult !== undefined) return ccResult;
