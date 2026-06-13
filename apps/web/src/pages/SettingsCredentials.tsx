@@ -3,7 +3,7 @@
  * Credentials, Configurations, and Attachments.
  */
 
-import { Alert, Card, StatusBadge } from '@simple-agent-manager/ui';
+import { Alert, Button, Card, Input, Select, StatusBadge } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import {
@@ -41,8 +41,8 @@ function CredentialCard({
   onDelete,
 }: {
   cred: CCCredentialListItem;
-  onToggle: () => void;
-  onDelete: () => void;
+  onToggle: () => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   return (
     <div
@@ -59,13 +59,23 @@ function CredentialCard({
           {!cred.isActive && <StatusBadge status="stopped" label="Inactive" />}
         </div>
       </div>
-      <div className="flex gap-2 text-xs">
-        <button className="text-fg-muted hover:text-fg-primary" onClick={onToggle}>
+      <div className="flex gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`${cred.isActive ? 'Deactivate' : 'Activate'} credential ${cred.name}`}
+          onClick={onToggle}
+        >
           {cred.isActive ? 'Deactivate' : 'Activate'}
-        </button>
-        <button className="text-red-400 hover:text-red-300" onClick={onDelete}>
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          aria-label={`Delete credential ${cred.name}`}
+          onClick={onDelete}
+        >
           Delete
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -77,16 +87,20 @@ function AddCredentialForm({ onCreated }: { onCreated: () => void }) {
   const [kind, setKind] = useState('api-key');
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    setFormError(null);
     try {
       await createCCCredential({ name, kind, secret });
       setName('');
       setSecret('');
       setOpen(false);
       onCreated();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to create credential');
     } finally {
       setSubmitting(false);
     }
@@ -94,56 +108,56 @@ function AddCredentialForm({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <button
-        className="text-sm text-brand-primary hover:underline"
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
         + Add credential
-      </button>
+      </Button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface">
-      <input
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary"
-        placeholder="Name (e.g. My Anthropic Key)"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-      />
-      <select
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary"
-        value={kind}
-        onChange={(e) => setKind(e.target.value)}
-      >
-        {Object.entries(KIND_LABELS).map(([k, label]) => (
-          <option key={k} value={k}>{label}</option>
-        ))}
-      </select>
-      <input
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary font-mono"
-        placeholder="Secret / token"
-        type="password"
-        value={secret}
-        onChange={(e) => setSecret(e.target.value)}
-        required
-      />
+      {formError && <Alert variant="error" onDismiss={() => setFormError(null)}>{formError}</Alert>}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-cred-name" className="text-xs font-medium text-fg-muted">Name</label>
+        <Input
+          id="cc-cred-name"
+          placeholder="My Anthropic Key"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-cred-kind" className="text-xs font-medium text-fg-muted">Kind</label>
+        <Select
+          id="cc-cred-kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+        >
+          {Object.entries(KIND_LABELS).map(([k, label]) => (
+            <option key={k} value={k}>{label}</option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-cred-secret" className="text-xs font-medium text-fg-muted">Secret</label>
+        <Input
+          id="cc-cred-secret"
+          placeholder="sk-..."
+          type="password"
+          className="font-mono"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          required
+        />
+      </div>
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-brand-primary px-3 py-1 text-sm text-white disabled:opacity-50"
-        >
+        <Button type="submit" variant="primary" size="sm" loading={submitting}>
           Save
-        </button>
-        <button
-          type="button"
-          className="text-sm text-fg-muted hover:text-fg-primary"
-          onClick={() => setOpen(false)}
-        >
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -160,7 +174,7 @@ function ConfigurationCard({
 }: {
   cfg: CCConfigurationListItem;
   credentials: CCCredentialListItem[];
-  onDelete: () => void;
+  onDelete: () => Promise<void>;
 }) {
   const cred = credentials.find((c) => c.id === cfg.credentialId);
   return (
@@ -168,20 +182,29 @@ function ConfigurationCard({
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <span className="text-sm font-semibold text-fg-primary break-words">{cfg.name}</span>
         <span className="inline-flex items-center rounded-full border border-border-default px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted whitespace-nowrap">
-          {cfg.consumerKind}:{cfg.consumerTarget}
+          {cfg.consumerKind === 'agent' ? 'Agent' : 'Compute'}: {cfg.consumerTarget}
         </span>
       </div>
       <div className="text-xs text-fg-muted">
         Credential: {cred ? cred.name : cfg.credentialId ? '(missing)' : '(none)'}
       </div>
       {cfg.settingsJson && (
-        <pre className="text-xs text-fg-muted font-mono bg-bg-primary rounded p-2 overflow-x-auto">
+        <pre
+          className="text-xs text-fg-muted font-mono bg-bg-primary rounded p-2 overflow-x-auto"
+          aria-label="Configuration settings JSON"
+        >
           {cfg.settingsJson}
         </pre>
       )}
-      <button className="text-xs text-red-400 hover:text-red-300 self-start" onClick={onDelete}>
+      <Button
+        variant="danger"
+        size="sm"
+        aria-label={`Delete configuration ${cfg.name}`}
+        onClick={onDelete}
+        className="self-start"
+      >
         Delete
-      </button>
+      </Button>
     </div>
   );
 }
@@ -199,10 +222,12 @@ function AddConfigurationForm({
   const [consumerTarget, setConsumerTarget] = useState('');
   const [credentialId, setCredentialId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    setFormError(null);
     try {
       await createCCConfiguration({
         name,
@@ -215,6 +240,8 @@ function AddConfigurationForm({
       setCredentialId('');
       setOpen(false);
       onCreated();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to create configuration');
     } finally {
       setSubmitting(false);
     }
@@ -222,66 +249,68 @@ function AddConfigurationForm({
 
   if (!open) {
     return (
-      <button
-        className="text-sm text-brand-primary hover:underline"
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
         + Add configuration
-      </button>
+      </Button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface">
-      <input
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary"
-        placeholder="Name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-      />
-      <div className="flex gap-2">
-        <select
-          className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary flex-1"
-          value={consumerKind}
-          onChange={(e) => setConsumerKind(e.target.value)}
-        >
-          <option value="agent">Agent</option>
-          <option value="compute">Compute</option>
-        </select>
-        <input
-          className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary flex-1"
-          placeholder={consumerKind === 'agent' ? 'claude-code' : 'hetzner'}
-          value={consumerTarget}
-          onChange={(e) => setConsumerTarget(e.target.value)}
+      {formError && <Alert variant="error" onDismiss={() => setFormError(null)}>{formError}</Alert>}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-cfg-name" className="text-xs font-medium text-fg-muted">Name</label>
+        <Input
+          id="cc-cfg-name"
+          placeholder="Claude Code config"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
           required
         />
       </div>
-      <select
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary"
-        value={credentialId}
-        onChange={(e) => setCredentialId(e.target.value)}
-      >
-        <option value="">(none)</option>
-        {credentials.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
-      </select>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex flex-col gap-1 flex-1">
+          <label htmlFor="cc-cfg-consumer-kind" className="text-xs font-medium text-fg-muted">Consumer type</label>
+          <Select
+            id="cc-cfg-consumer-kind"
+            value={consumerKind}
+            onChange={(e) => setConsumerKind(e.target.value)}
+          >
+            <option value="agent">Agent</option>
+            <option value="compute">Compute</option>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1 flex-1">
+          <label htmlFor="cc-cfg-consumer-target" className="text-xs font-medium text-fg-muted">Target</label>
+          <Input
+            id="cc-cfg-consumer-target"
+            placeholder={consumerKind === 'agent' ? 'claude-code' : 'hetzner'}
+            value={consumerTarget}
+            onChange={(e) => setConsumerTarget(e.target.value)}
+            required
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-cfg-credential" className="text-xs font-medium text-fg-muted">Credential</label>
+        <Select
+          id="cc-cfg-credential"
+          value={credentialId}
+          onChange={(e) => setCredentialId(e.target.value)}
+        >
+          <option value="">(none)</option>
+          {credentials.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </Select>
+      </div>
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-brand-primary px-3 py-1 text-sm text-white disabled:opacity-50"
-        >
+        <Button type="submit" variant="primary" size="sm" loading={submitting}>
           Save
-        </button>
-        <button
-          type="button"
-          className="text-sm text-fg-muted hover:text-fg-primary"
-          onClick={() => setOpen(false)}
-        >
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -299,10 +328,11 @@ function AttachmentCard({
 }: {
   att: CCAttachmentListItem;
   configurations: CCConfigurationListItem[];
-  onToggle: () => void;
-  onDelete: () => void;
+  onToggle: () => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   const cfg = configurations.find((c) => c.id === att.configurationId);
+  const label = cfg?.name ?? att.configurationId;
   return (
     <div
       className={`flex flex-col gap-2 rounded-md border border-border-default p-3 ${
@@ -310,20 +340,28 @@ function AttachmentCard({
       }`}
     >
       <div className="flex items-start justify-between gap-2 flex-wrap">
-        <span className="text-sm text-fg-primary">
-          {cfg?.name ?? att.configurationId}
-        </span>
+        <span className="text-sm text-fg-primary">{label}</span>
         <span className="inline-flex items-center rounded-full border border-border-default px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted whitespace-nowrap">
           {att.projectId ? `project: ${att.projectId.slice(0, 8)}…` : 'user default'}
         </span>
       </div>
-      <div className="flex gap-2 text-xs">
-        <button className="text-fg-muted hover:text-fg-primary" onClick={onToggle}>
+      <div className="flex gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`${att.isActive ? 'Deactivate' : 'Activate'} attachment ${label}`}
+          onClick={onToggle}
+        >
           {att.isActive ? 'Deactivate' : 'Activate'}
-        </button>
-        <button className="text-red-400 hover:text-red-300" onClick={onDelete}>
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          aria-label={`Delete attachment ${label}`}
+          onClick={onDelete}
+        >
           Delete
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -340,11 +378,13 @@ function AddAttachmentForm({
   const [configurationId, setConfigurationId] = useState('');
   const [projectId, setProjectId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!configurationId) return;
     setSubmitting(true);
+    setFormError(null);
     try {
       await createCCAttachment({
         configurationId,
@@ -354,6 +394,8 @@ function AddAttachmentForm({
       setProjectId('');
       setOpen(false);
       onCreated();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to create attachment');
     } finally {
       setSubmitting(false);
     }
@@ -361,49 +403,47 @@ function AddAttachmentForm({
 
   if (!open) {
     return (
-      <button
-        className="text-sm text-brand-primary hover:underline"
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
         + Add attachment
-      </button>
+      </Button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface">
-      <select
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary"
-        value={configurationId}
-        onChange={(e) => setConfigurationId(e.target.value)}
-        required
-      >
-        <option value="">Select configuration</option>
-        {configurations.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
-      </select>
-      <input
-        className="rounded border border-border-default bg-bg-primary px-3 py-1.5 text-sm text-fg-primary"
-        placeholder="Project ID (leave blank for user default)"
-        value={projectId}
-        onChange={(e) => setProjectId(e.target.value)}
-      />
+      {formError && <Alert variant="error" onDismiss={() => setFormError(null)}>{formError}</Alert>}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-att-config" className="text-xs font-medium text-fg-muted">Configuration</label>
+        <Select
+          id="cc-att-config"
+          value={configurationId}
+          onChange={(e) => setConfigurationId(e.target.value)}
+          required
+        >
+          <option value="">Select configuration</option>
+          {configurations.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cc-att-project" className="text-xs font-medium text-fg-muted">
+          Project ID <span className="font-normal">(leave blank for user default)</span>
+        </label>
+        <Input
+          id="cc-att-project"
+          placeholder="Optional project ID"
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+        />
+      </div>
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={submitting || !configurationId}
-          className="rounded bg-brand-primary px-3 py-1 text-sm text-white disabled:opacity-50"
-        >
+        <Button type="submit" variant="primary" size="sm" loading={submitting} disabled={!configurationId}>
           Save
-        </button>
-        <button
-          type="button"
-          className="text-sm text-fg-muted hover:text-fg-primary"
-          onClick={() => setOpen(false)}
-        >
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -442,8 +482,17 @@ export function SettingsCredentials() {
     loadAll();
   }, [loadAll]);
 
+  const handleMutation = useCallback(async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+      loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Operation failed');
+    }
+  }, [loadAll]);
+
   if (loading) {
-    return <p className="text-sm text-fg-muted p-4">Loading credentials…</p>;
+    return <p className="text-sm text-fg-muted p-4" role="status" aria-live="polite">Loading credentials…</p>;
   }
 
   return (
@@ -454,7 +503,7 @@ export function SettingsCredentials() {
       <Card>
         <div className="flex flex-col gap-3 p-4">
           <div className="flex flex-col gap-1">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">Credentials</h3>
+            <h3 className="text-base font-semibold text-fg-primary">Credentials</h3>
             <p className="text-xs text-fg-muted">
               Named, typed secrets. Agent-agnostic — one key can power many configurations.
             </p>
@@ -466,13 +515,10 @@ export function SettingsCredentials() {
             <CredentialCard
               key={cred.id}
               cred={cred}
-              onToggle={async () => {
-                await updateCCCredential(cred.id, { isActive: !cred.isActive });
-                loadAll();
-              }}
-              onDelete={async () => {
-                await deleteCCCredential(cred.id);
-                loadAll();
+              onToggle={() => handleMutation(() => updateCCCredential(cred.id, { isActive: !cred.isActive }))}
+              onDelete={() => {
+                if (!confirm(`Delete credential "${cred.name}"? This cannot be undone.`)) return Promise.resolve();
+                return handleMutation(() => deleteCCCredential(cred.id));
               }}
             />
           ))}
@@ -484,7 +530,7 @@ export function SettingsCredentials() {
       <Card>
         <div className="flex flex-col gap-3 p-4">
           <div className="flex flex-col gap-1">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">Configurations</h3>
+            <h3 className="text-base font-semibold text-fg-primary">Configurations</h3>
             <p className="text-xs text-fg-muted">
               Consumer + credential binding. Links a credential to an agent or compute provider.
             </p>
@@ -497,9 +543,9 @@ export function SettingsCredentials() {
               key={cfg.id}
               cfg={cfg}
               credentials={credentials}
-              onDelete={async () => {
-                await deleteCCConfiguration(cfg.id);
-                loadAll();
+              onDelete={() => {
+                if (!confirm(`Delete configuration "${cfg.name}"? This cannot be undone.`)) return Promise.resolve();
+                return handleMutation(() => deleteCCConfiguration(cfg.id));
               }}
             />
           ))}
@@ -511,7 +557,7 @@ export function SettingsCredentials() {
       <Card>
         <div className="flex flex-col gap-3 p-4">
           <div className="flex flex-col gap-1">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-fg-muted">Attachments</h3>
+            <h3 className="text-base font-semibold text-fg-primary">Attachments</h3>
             <p className="text-xs text-fg-muted">
               Bind configurations to scopes — user default or project override.
             </p>
@@ -524,13 +570,12 @@ export function SettingsCredentials() {
               key={att.id}
               att={att}
               configurations={configurations}
-              onToggle={async () => {
-                await updateCCAttachment(att.id, { isActive: !att.isActive });
-                loadAll();
-              }}
-              onDelete={async () => {
-                await deleteCCAttachment(att.id);
-                loadAll();
+              onToggle={() => handleMutation(() => updateCCAttachment(att.id, { isActive: !att.isActive }))}
+              onDelete={() => {
+                const cfg = configurations.find((c) => c.id === att.configurationId);
+                const label = cfg?.name ?? att.configurationId;
+                if (!confirm(`Delete attachment "${label}"? This cannot be undone.`)) return Promise.resolve();
+                return handleMutation(() => deleteCCAttachment(att.id));
               }}
             />
           ))}
