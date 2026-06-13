@@ -7,20 +7,20 @@ import { Alert, Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  listCCCredentials,
-  listCCConfigurations,
-  listCCAttachments,
-  createCCCredential,
-  deleteCCCredential,
-  updateCCCredential,
-  createCCConfiguration,
-  deleteCCConfiguration,
-  createCCAttachment,
-  deleteCCAttachment,
-  updateCCAttachment,
-  type CCCredentialListItem,
-  type CCConfigurationListItem,
   type CCAttachmentListItem,
+  type CCConfigurationListItem,
+  type CCCredentialListItem,
+  createCCAttachment,
+  createCCConfiguration,
+  createCCCredential,
+  deleteCCAttachment,
+  deleteCCConfiguration,
+  deleteCCCredential,
+  listCCAttachments,
+  listCCConfigurations,
+  listCCCredentials,
+  updateCCAttachment,
+  updateCCCredential,
 } from '../lib/api';
 
 const KIND_LABELS: Record<string, string> = {

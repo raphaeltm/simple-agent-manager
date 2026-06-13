@@ -16,10 +16,10 @@
 
 import type {
   Attachment,
+  CompositionSnapshot,
   Configuration,
   Credential,
   CredentialKind,
-  CompositionSnapshot,
   PlatformDefault,
 } from './types';
 import { consumerKey } from './types';

@@ -5,17 +5,18 @@
  * composable-credentials tables have been backfilled for a user.
  */
 
-import { drizzle } from 'drizzle-orm/d1';
 import {
-  resolveEnvironment,
   agentAssembler,
-  computeAssembler,
   type CCConsumerRef,
-  type CCResolvedEnvironment,
-  type CCResolutionContext,
   type CCEnvInjection,
   type CCProviderConfig,
+  type CCResolutionContext,
+  type CCResolvedEnvironment,
+  computeAssembler,
+  resolveEnvironment,
 } from '@simple-agent-manager/shared';
+import { type drizzle } from 'drizzle-orm/d1';
+
 import { buildSnapshot } from './snapshot';
 
 export type { CCEnvInjection, CCProviderConfig };

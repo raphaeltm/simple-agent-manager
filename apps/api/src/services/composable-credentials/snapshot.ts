@@ -5,27 +5,28 @@
  * It materializes all rows for a user into the shape the resolver expects.
  */
 
-import { eq, and, or, isNull } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
+import type {
+  CCAttachment,
+  CCCompositionSnapshot,
+  CCConfiguration,
+  CCConfigurationSettings,
+  CCConsumerRef,
+  CCCredential,
+  CCCredentialKind,
+  CCCredentialSecret,
+  CCPlatformDefault,
+} from '@simple-agent-manager/shared';
+import { consumerKey, mapKind } from '@simple-agent-manager/shared';
+import { and, eq, isNull,or } from 'drizzle-orm';
+import { type drizzle } from 'drizzle-orm/d1';
+
 import {
-  ccCredentials,
-  ccConfigurations,
   ccAttachments,
+  ccConfigurations,
+  ccCredentials,
   platformCredentials,
 } from '../../db/schema';
 import { decrypt } from '../encryption';
-import type {
-  CCCredential,
-  CCConfiguration,
-  CCAttachment,
-  CCConsumerRef,
-  CCConfigurationSettings,
-  CCCompositionSnapshot,
-  CCPlatformDefault,
-  CCCredentialSecret,
-  CCCredentialKind,
-} from '@simple-agent-manager/shared';
-import { consumerKey, mapKind } from '@simple-agent-manager/shared';
 
 /**
  * Parse the decrypted token into a typed CredentialSecret based on the kind.
