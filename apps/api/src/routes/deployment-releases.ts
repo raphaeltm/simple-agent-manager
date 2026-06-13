@@ -19,6 +19,7 @@ import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';
+import { buildDeploymentRouteTargets } from '../services/deployment-routing';
 import { decrypt } from '../services/encryption';
 import { createImageResolver, ImageResolveError } from '../services/image-resolver';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
@@ -99,7 +100,7 @@ async function requireOwnedRelease(
   return rows[0]!;
 }
 
-function getEncryptionKey(env: Env): string {
+export function getEncryptionKey(env: Env): string {
   return env.CREDENTIAL_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
 }
 
@@ -107,7 +108,7 @@ function getEncryptionKey(env: Env): string {
  * Load and decrypt secrets for an environment.
  * Returns a map of secret name → decrypted value.
  */
-async function loadResolvedSecrets(
+export async function loadResolvedSecrets(
   db: ReturnType<typeof drizzle>,
   envId: string,
   secretNames: string[],
@@ -507,9 +508,13 @@ deploymentReleaseRoutes.get(
 
 /**
  * GET /api/projects/:projectId/environments/:envId/releases/:releaseId/compose
- * Render and return the Compose YAML for a release.
- * Resolves secret references at render time — values are decrypted from D1
- * and injected into the rendered Compose but never stored in the release record.
+ * Render and return the Compose YAML preview for a release.
+ *
+ * Includes route-target host-port bindings (same as the real apply payload)
+ * so the preview is structurally identical to what the node will run.
+ *
+ * Secret values are MASKED — the preview shows `***` for every secret
+ * reference so users can inspect the structure without leaking credentials.
  */
 deploymentReleaseRoutes.get(
   '/:projectId/environments/:envId/releases/:releaseId/compose',
@@ -527,21 +532,30 @@ deploymentReleaseRoutes.get(
 
     const manifest = JSON.parse(row.manifest);
 
-    // Resolve secret references at render time
+    // Build route targets — same derivation as the apply callback so
+    // the preview port bindings match what the node actually runs.
+    const routes = buildDeploymentRouteTargets(manifest, {
+      environmentId: envId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    });
+
+    // Mask secret values — preview NEVER contains decrypted credentials.
+    // Every referenced secret name is mapped to a masked placeholder.
     const secretNames = collectSecretNames(manifest);
-    const resolvedSecrets = await loadResolvedSecrets(
-      db,
-      envId,
-      secretNames,
-      getEncryptionKey(c.env),
-    );
+    const maskedSecrets: Record<string, string> = {};
+    for (const name of secretNames) {
+      maskedSecrets[name] = '***';
+    }
 
     let composeYaml: string;
     try {
       composeYaml = renderCompose(manifest, {
         environmentId: envId,
         releaseId,
-        resolvedSecrets,
+        resolvedSecrets: maskedSecrets,
+        routeTargets: routes,
       });
     } catch (err) {
       if (err instanceof Error && err.message.includes('Missing secrets')) {
