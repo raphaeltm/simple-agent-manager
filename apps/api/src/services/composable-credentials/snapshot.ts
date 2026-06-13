@@ -28,6 +28,16 @@ import {
 } from '../../db/schema';
 import { decrypt } from '../encryption';
 
+/** Safely parse JSON settings, returning empty object on malformed data. */
+function safeParseJson(json: string, contextId: string): CCConfigurationSettings {
+  try {
+    return JSON.parse(json) as CCConfigurationSettings;
+  } catch {
+    console.error('snapshot.settings_parse_error', { configId: contextId });
+    return {};
+  }
+}
+
 /**
  * Parse the decrypted token into a typed CredentialSecret based on the kind.
  */
@@ -102,7 +112,7 @@ export async function buildSnapshot(
     name: row.name,
     consumer: rowToConsumer(row),
     credentialId: row.credentialId,
-    settings: row.settingsJson ? (JSON.parse(row.settingsJson) as CCConfigurationSettings) : {},
+    settings: row.settingsJson ? safeParseJson(row.settingsJson, row.id) : {},
     isActive: row.isActive,
   }));
 

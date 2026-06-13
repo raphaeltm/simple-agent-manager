@@ -155,9 +155,13 @@ ccRoutes.post('/configurations', async (c) => {
   const userId = getUserId(c);
   const body = await c.req.json();
 
+  const VALID_CONSUMER_KINDS = ['agent', 'compute'] as const;
   const { name, consumerKind, consumerTarget, credentialId, settings } = body;
   if (!name || !consumerKind || !consumerTarget) {
     throw errors.badRequest('name, consumerKind, and consumerTarget are required');
+  }
+  if (!VALID_CONSUMER_KINDS.includes(consumerKind)) {
+    throw errors.badRequest(`Invalid consumerKind. Must be one of: ${VALID_CONSUMER_KINDS.join(', ')}`);
   }
 
   // Verify credential belongs to user if provided
