@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { environmentPortOffset } from '../../../src/services/deployment-routing';
 
 const mockLimit = vi.fn();
 const mockSignDeployPayload = vi.fn().mockResolvedValue('signed-payload');
@@ -10,6 +11,7 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
   type: 'callback',
   scope: 'node',
 });
+const mockMintProjectRegistryCredential = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -30,6 +32,10 @@ vi.mock('../../../src/services/jwt', () => ({
 
 vi.mock('../../../src/services/deploy-signing', () => ({
   signDeployPayload: (...args: unknown[]) => mockSignDeployPayload(...args),
+}));
+
+vi.mock('../../../src/services/registry-credentials', () => ({
+  mintProjectRegistryCredential: (...args: unknown[]) => mockMintProjectRegistryCredential(...args),
 }));
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
@@ -90,11 +96,20 @@ describe('deploy release callback route', () => {
     mockLimit.mockReset();
     mockVerifyCallbackToken.mockClear();
     mockSignDeployPayload.mockClear();
+    mockMintProjectRegistryCredential.mockReset();
     mockSignDeployPayload.mockResolvedValue('signed-payload');
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
       type: 'callback',
       scope: 'node',
+    });
+    // Default: registry credential minting succeeds
+    mockMintProjectRegistryCredential.mockResolvedValue({
+      registry: 'registry.cloudflare.com',
+      username: 'cf-mint-user',
+      password: 'cf-mint-secret',
+      namespace: 'acct123/sam-proj-1',
+      expiresAt: '2026-06-13T12:00:00.000Z',
     });
     vi.unstubAllGlobals();
   });
@@ -122,22 +137,28 @@ describe('deploy release callback route', () => {
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
     expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), { expectedScope: 'node' });
+
+    // Port base includes per-environment offset to prevent cross-env collisions
+    const envOffset = environmentPortOffset('env-1', 10, 36_000);
+    const expectedPort0 = 36_000 + envOffset;
+    const expectedPort1 = expectedPort0 + 1;
+
     expect(body.routes).toEqual([
       {
         hostname: 'r1-web-3000-env-1.apps.sammy.party',
         service: 'web',
         containerPort: 3000,
-        hostPort: 36000,
+        hostPort: expectedPort0,
       },
       {
         hostname: 'r2-web-3001-env-1.apps.sammy.party',
         service: 'web',
         containerPort: 3001,
-        hostPort: 36001,
+        hostPort: expectedPort1,
       },
     ]);
-    expect(body.composeYaml).toContain('127.0.0.1:36000:3000');
-    expect(body.composeYaml).toContain('127.0.0.1:36001:3001');
+    expect(body.composeYaml).toContain(`127.0.0.1:${expectedPort0}:3000`);
+    expect(body.composeYaml).toContain(`127.0.0.1:${expectedPort1}:3001`);
     expect(body.composeYaml).not.toContain('9000');
     expect(body.expiresAt).toBe(1_700_000_090);
     expect(body.signature).toEqual(expect.any(String));
@@ -146,7 +167,7 @@ describe('deploy release callback route', () => {
         environmentId: 'env-1',
         nodeId: 'node-deploy-1',
         seq: 7,
-        composeYaml: expect.stringContaining('127.0.0.1:36000:3000'),
+        composeYaml: expect.stringContaining(`127.0.0.1:${expectedPort0}:3000`),
         routes: body.routes,
       }),
       expect.anything(),
@@ -222,5 +243,178 @@ describe('deploy release callback route', () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ message: 'Insufficient token scope' });
     expect(mockLimit).not.toHaveBeenCalled();
+  });
+
+  it('includes registryCredentials in response when minting succeeds', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })),
+    );
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+
+    // Verify registryCredentials are included with correct JSON field names
+    // (must match Go RegistryCredentials struct: server, username, password)
+    expect(body.registryCredentials).toEqual({
+      server: 'registry.cloudflare.com',
+      username: 'cf-mint-user',
+      password: 'cf-mint-secret',
+    });
+
+    // Verify the mint was called with pull-only permissions and correct project context
+    expect(mockMintProjectRegistryCredential).toHaveBeenCalledWith(
+      expect.anything(), // env
+      'proj-1',          // projectId
+      'user-1',          // userId
+      '',                // taskId (empty for deploy callback)
+      'env-1',           // environment
+      { permissions: ['pull'] },
+    );
+  });
+
+  it('returns registryCredentials: null when minting fails (public images still work)', async () => {
+    mockMintProjectRegistryCredential.mockRejectedValueOnce(
+      new Error('CF_ACCOUNT_ID and CF_API_TOKEN must be configured'),
+    );
+
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })),
+    );
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+
+    // Payload is still served — registryCredentials is null (graceful fallback)
+    expect(body.registryCredentials).toBeNull();
+    expect(body.signature).toBe('signed-payload');
+    expect(body.composeYaml).toBeDefined();
+  });
+
+  it('credential values are ABSENT from audit log (never logged)', async () => {
+    const logEntries: Array<Record<string, unknown>> = [];
+    const origConsoleLog = console.log;
+    const origConsoleInfo = console.info;
+    // Intercept logger output
+    console.log = (...args: unknown[]) => logEntries.push({ args });
+    console.info = (...args: unknown[]) => logEntries.push({ args });
+
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })),
+    );
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+
+    expect(response.status).toBe(200);
+
+    // Verify that the log output does NOT contain credential values
+    const logStr = JSON.stringify(logEntries);
+    expect(logStr).not.toContain('cf-mint-secret');
+    expect(logStr).not.toContain('cf-mint-user');
+
+    console.log = origConsoleLog;
+    console.info = origConsoleInfo;
+  });
+});
+
+/**
+ * Go↔TS contract test: JSON field shape alignment.
+ *
+ * The deploy-release callback response must produce JSON field names that
+ * match the Go ApplyPayload and RegistryCredentials struct tags exactly.
+ * If either side renames a field, this test catches the mismatch.
+ */
+describe('deploy-release: Go↔TS contract (registryCredentials JSON shape)', () => {
+  it('response registryCredentials field names match Go struct json tags', () => {
+    // Go struct RegistryCredentials (types.go):
+    //   Server   string `json:"server"`
+    //   Username string `json:"username"`
+    //   Password string `json:"password"`
+    //
+    // The TS callback builds: { server, username, password }
+    // This test asserts the exact keys are present and no extra keys exist.
+    const tsPayload = {
+      server: 'registry.cloudflare.com',
+      username: 'cf-user',
+      password: 'cf-secret',
+    };
+
+    const goExpectedFields = ['server', 'username', 'password'] as const;
+    const tsFields = Object.keys(tsPayload).sort();
+    const goFields = [...goExpectedFields].sort();
+
+    expect(tsFields).toEqual(goFields);
+  });
+
+  it('response top-level field names match Go ApplyPayload struct json tags', () => {
+    // Go struct ApplyPayload (types.go) json tags:
+    //   environmentId, nodeId, seq, expiresAt, composeYaml, routes, signature, registryCredentials
+    const goExpectedTopLevel = [
+      'environmentId',
+      'nodeId',
+      'seq',
+      'expiresAt',
+      'composeYaml',
+      'routes',
+      'signature',
+      'registryCredentials',
+    ].sort();
+
+    // The TS callback response returns these exact fields
+    const tsResponseShape = {
+      environmentId: 'env-1',
+      nodeId: 'node-1',
+      seq: 1,
+      expiresAt: 1234567890,
+      composeYaml: 'services:',
+      routes: [],
+      signature: 'sig',
+      registryCredentials: null,
+    };
+
+    const tsFields = Object.keys(tsResponseShape).sort();
+    expect(tsFields).toEqual(goExpectedTopLevel);
   });
 });

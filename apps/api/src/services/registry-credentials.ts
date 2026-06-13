@@ -71,6 +71,7 @@ export async function mintProjectRegistryCredential(
   userId: string,
   taskId: string,
   environment?: string,
+  options?: { permissions?: Array<'pull' | 'push'> },
 ): Promise<RegistryCredentialResult> {
   const expirationMinutes = parsePositiveInteger(
     env.REGISTRY_CREDENTIAL_EXPIRATION_MINUTES,
@@ -82,7 +83,7 @@ export async function mintProjectRegistryCredential(
   const mintConfig = buildMintConfigFromEnv(env, {
     registryHost,
     expirationMinutes,
-    permissions: ['pull', 'push'],
+    permissions: options?.permissions ?? ['pull', 'push'],
   });
 
   if (!mintConfig) {

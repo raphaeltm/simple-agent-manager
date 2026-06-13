@@ -19,5 +19,9 @@
     }
   ],
   "signature": "zQNnO/K5ajbvvu6vODGLTuNSgDGprzTXv8+BK0lV4n0UmClpODF70vVSIMDe1VcEM71Fn7VPg1uWvhprNOPdAQ==",
-  "registryCredentials": null
+  "registryCredentials": {
+    "server": "registry.cloudflare.com",
+    "username": "cf-mint-user",
+    "password": "cf-mint-secret"
+  }
 }

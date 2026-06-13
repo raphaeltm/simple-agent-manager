@@ -4,7 +4,19 @@ import type { DeploymentManifest } from '@simple-agent-manager/shared';
 export const DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE = 35_000;
 
 /** Default number of loopback ports reserved per deployment environment. */
-export const DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN = 1_000;
+export const DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN = 100;
+
+/**
+ * Maximum number of environment port bands that fit in the available range.
+ * Ports are assigned from portBase to MAX_TCP_PORT, each environment
+ * occupies portSpan consecutive ports. The number of bands is:
+ *   floor((MAX_TCP_PORT - portBase + 1) / portSpan)
+ *
+ * With defaults (35000 base, 100 span): 305 distinct environment bands.
+ * Collisions are possible only when two environments hash to the same
+ * band AND are scheduled onto the same node — a low probability event
+ * that is further mitigated by bridge-network isolation.
+ */
 
 const MAX_SERVICE_LABEL_LENGTH = 24;
 const MAX_TCP_PORT = 65_535;
@@ -27,6 +39,39 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Derive a deterministic, stable port-band offset for an environment.
+ *
+ * Uses a simple FNV-1a-style hash of the environmentId to pick one of
+ * `bandCount` bands. Each band reserves `portSpan` consecutive ports
+ * starting at `portBase + band * portSpan`.
+ *
+ * Properties:
+ * - Same environmentId always returns the same offset (stable across redeploys)
+ * - Different environmentIds overwhelmingly map to different bands
+ * - Resulting ports stay within [portBase, portBase + bandCount * portSpan - 1]
+ *
+ * Exported for testing.
+ */
+export function environmentPortOffset(
+  environmentId: string,
+  portSpan: number,
+  portBase: number,
+): number {
+  const bandCount = Math.floor((MAX_TCP_PORT - portBase + 1) / portSpan);
+  if (bandCount <= 0) return 0;
+
+  // FNV-1a 32-bit hash (deterministic, fast, good distribution)
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < environmentId.length; i++) {
+    hash ^= environmentId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  // Ensure positive value via unsigned right shift
+  const band = (hash >>> 0) % bandCount;
+  return band * portSpan;
 }
 
 function sanitizeDnsLabelPart(value: string): string {
@@ -67,7 +112,13 @@ export function buildDeploymentRouteTargets(
     );
   }
 
-  const lastAssignedPort = portBase + publicRoutes.length - 1;
+  // Per-environment offset: hash the environmentId to pick a stable band
+  // within the available port range. This prevents two environments on
+  // the same node from colliding on host ports.
+  const envOffset = environmentPortOffset(opts.environmentId, portSpan, portBase);
+  const envPortBase = portBase + envOffset;
+
+  const lastAssignedPort = envPortBase + publicRoutes.length - 1;
   if (publicRoutes.length > 0 && lastAssignedPort > MAX_TCP_PORT) {
     throw new Error(
       `Manifest public routes require ports through ${lastAssignedPort}, exceeding maximum TCP port ${MAX_TCP_PORT}`,
@@ -78,7 +129,7 @@ export function buildDeploymentRouteTargets(
     hostname: buildRouteHostname(opts.environmentId, route.service, route.port, index, opts.baseDomain),
     service: route.service,
     containerPort: route.port,
-    hostPort: portBase + index,
+    hostPort: envPortBase + index,
   }));
 }
 

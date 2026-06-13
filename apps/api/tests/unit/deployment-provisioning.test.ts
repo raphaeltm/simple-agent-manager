@@ -73,7 +73,7 @@ function createMockDb(options: {
         }),
       };
     }),
-    update: vi.fn().mockReturnValue({
+    update: vi.fn().mockImplementation(() => ({
       set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
         tracker.updateSetValues.push(values);
         return {
@@ -83,7 +83,7 @@ function createMockDb(options: {
           }),
         };
       }),
-    }),
+    })),
     _tracker: tracker,
   };
 
@@ -249,6 +249,96 @@ describe('provisionDeploymentNode', () => {
     expect(result).not.toBeNull();
     // The provisioning promise should not throw — it has a .catch()
     await expect(result!.provisioningPromise).resolves.toBeUndefined();
+  });
+
+  it('rolls back nodeId to NULL when provisioning fails (Gap 7)', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-rollback-1' }));
+    vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+
+    const result = await provisionDeploymentNode(
+      'env-rollback',
+      'proj-1',
+      'user-1',
+      createMockEnv(),
+    );
+
+    expect(result).not.toBeNull();
+
+    // Wait for the provisioning promise (catch handler runs the rollback)
+    await result!.provisioningPromise;
+
+    // There should be 2 update calls:
+    // 1. Initial link: set nodeId = 'node-rollback-1'
+    // 2. Rollback: set nodeId = null
+    expect(mockDb._tracker.updateSetValues).toHaveLength(2);
+
+    // First update sets nodeId to the new node
+    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', 'node-rollback-1');
+
+    // Second update rolls back nodeId to null
+    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
+    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('updatedAt');
+
+    // Both updates must have WHERE clauses (tracked via updateWhereArgs)
+    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
+
+    // Both updates must have WHERE clauses
+    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
+  });
+
+  it('rollback is robust even if the rollback update itself fails', async () => {
+    // Create a DB where the second update call throws
+    const tracker = { selectCalls: 0, updateSetValues: [] as Record<string, unknown>[], updateWhereArgs: [] as unknown[][] };
+    let updateCallCount = 0;
+    const mockDb = {
+      select: vi.fn().mockImplementation(() => {
+        tracker.selectCalls++;
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ provider: 'hetzner' }]),
+            }),
+          }),
+        };
+      }),
+      update: vi.fn().mockImplementation(() => ({
+        set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+          updateCallCount++;
+          tracker.updateSetValues.push(values);
+          return {
+            where: vi.fn().mockImplementation(() => {
+              // Second update (rollback) throws
+              if (updateCallCount >= 2) return Promise.reject(new Error('DB write failed'));
+              return Promise.resolve();
+            }),
+          };
+        }),
+      })),
+      _tracker: tracker,
+    };
+
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-rollback-fail' }));
+    vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+
+    const result = await provisionDeploymentNode(
+      'env-rollback-fail',
+      'proj-1',
+      'user-1',
+      createMockEnv(),
+    );
+
+    expect(result).not.toBeNull();
+
+    // The provisioning promise should still not throw, even if rollback fails
+    await expect(result!.provisioningPromise).resolves.toBeUndefined();
+
+    // Both updates were attempted
+    expect(tracker.updateSetValues).toHaveLength(2);
+    // The rollback was attempted (nodeId: null)
+    expect(tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
   });
 });
 

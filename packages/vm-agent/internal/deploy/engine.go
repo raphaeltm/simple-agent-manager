@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/cache"
 )
 
 // Engine manages the deployment lifecycle: reconcile, apply, revert, observe.
@@ -31,6 +33,9 @@ type Engine struct {
 	observed   ObservedState
 }
 
+// DockerLoginFunc is the signature for authenticating to a container registry.
+type DockerLoginFunc func(ctx context.Context, registry, username, password string) error
+
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
 	EnvironmentID      string
@@ -48,6 +53,8 @@ type EngineConfig struct {
 	HealthTimeout      time.Duration
 	HealthPollInterval time.Duration
 	HTTPClient         *http.Client
+	DockerLogin        DockerLoginFunc // defaults to cache.DockerLogin if nil
+	MountChecker       MountChecker    // defaults to RealMountChecker if nil
 }
 
 // NewEngine creates a new deployment engine.
@@ -195,6 +202,50 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	}
 	if err := e.disk.WriteRelease(newState, payload.ComposeYAML, caddyfile); err != nil {
 		return fmt.Errorf("write release to disk: %w", err)
+	}
+
+	// Tear down the previous release's containers to free host ports.
+	// Each release renders as a distinct compose project, so consecutive releases
+	// compete for the same host port. We must down the old project before upping
+	// the new one to avoid port-bind failures.
+	if currentSeq > 0 {
+		prevComposeFile := e.disk.ComposeFilePath(currentSeq)
+		slog.Info("deploy.apply: tearing down previous release to free ports",
+			"prevSeq", currentSeq)
+		if err := e.composeDown(ctx, prevComposeFile); err != nil {
+			slog.Warn("deploy.apply: failed to tear down previous release",
+				"prevSeq", currentSeq, "error", err)
+			// Continue anyway — the port may still be free if the previous
+			// containers already exited or were removed externally.
+		}
+	}
+
+	// Authenticate to private registry if credentials are provided
+	if payload.RegistryCredentials != nil {
+		slog.Info("deploy.apply: authenticating to container registry",
+			"server", payload.RegistryCredentials.Server)
+		loginFn := e.cfg.DockerLogin
+		if loginFn == nil {
+			loginFn = cache.DockerLogin
+		}
+		if err := loginFn(ctx,
+			payload.RegistryCredentials.Server,
+			payload.RegistryCredentials.Username,
+			payload.RegistryCredentials.Password,
+		); err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("docker login: %w", err))
+		}
+	}
+
+	// Volume mount guard: refuse to apply if required SAM volumes are not mounted.
+	// This prevents starting containers against a fell-through empty directory
+	// when the provider volume has not been attached to this node.
+	mountChecker := e.cfg.MountChecker
+	if mountChecker == nil {
+		mountChecker = RealMountChecker{}
+	}
+	if err := verifyVolumeMounts(payload.ComposeYAML, mountChecker); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, err)
 	}
 
 	// Execute docker compose

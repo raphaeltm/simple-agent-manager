@@ -126,12 +126,35 @@ export async function provisionDeploymentNode(
     undefined,
     undefined,
     { environmentId: envId },
-  ).catch((err) => {
+  ).catch(async (err) => {
     log.error('deployment_provisioning.provision_failed', {
       nodeId: node.id,
       envId,
       ...serializeError(err),
     });
+
+    // Roll back the environment→node linkage so subsequent releases can
+    // re-trigger provisioning instead of being orphaned against a dead node.
+    // Guard on nodeId = our node to avoid stomping a concurrent successful
+    // re-provisioning that already wrote a different nodeId.
+    try {
+      await db
+        .update(schema.deploymentEnvironments)
+        .set({ nodeId: null, updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(schema.deploymentEnvironments.id, envId),
+            eq(schema.deploymentEnvironments.nodeId, node.id),
+          ),
+        );
+      log.info('deployment_provisioning.nodeId_rolled_back', { envId, nodeId: node.id });
+    } catch (rollbackErr) {
+      log.error('deployment_provisioning.nodeId_rollback_failed', {
+        envId,
+        nodeId: node.id,
+        ...serializeError(rollbackErr),
+      });
+    }
   });
 
   return { nodeId: node.id, provisioningPromise };
