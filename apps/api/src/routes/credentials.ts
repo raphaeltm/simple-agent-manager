@@ -706,18 +706,39 @@ async function resolveAgentKeyViaCC(
   // First attempt with current cc_* data
   let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
 
-  // If no result, try lazy backfill (migrates legacy data on first resolution)
-  if (!resolved) {
+  // A platform-tier first resolution must NOT pre-empt lazy backfill + the user's own
+  // (higher-precedence) credentials. If the user's agent credential still lives only in the
+  // legacy tables and a matching ENABLED platform default exists, the first resolve returns
+  // the platform default (Tier 3) and the original `if (!resolved)` guard skipped backfill —
+  // leaving cc_* empty, skipping the legacy fallback, and 404ing the user's own credential at
+  // the VM agent for non-'sam' provider modes. Treat a platform-only hit like a miss: backfill
+  // migrates the user's legacy credential into a Tier 1/2 attachment that out-precedes the
+  // platform default on re-resolution.
+  const platformOnly =
+    resolved !== null &&
+    (resolved.source === 'platform' || resolved.source === 'platform-proxy');
+
+  if (!resolved || platformOnly) {
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
     if (didBackfill) {
-      resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
-    } else {
+      const reResolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+      if (platformOnly) {
+        // cc_* is now authoritative for this user. Commit to the re-resolved result —
+        // including a Rule 28 null halt (inactive project attachment) — rather than the
+        // platform default we started with. Do not fall back to legacy after backfill.
+        return reResolved ? mapResolvedToLegacy(reResolved) : null;
+      }
+      // First resolution was a genuine miss — preserve original null-path semantics.
+      resolved = reResolved;
+    } else if (!resolved) {
       // cc_* tables already had data but no match — this is a definitive "no credential"
       // from the CC model. However, the user may have legacy data that wasn't backfilled
       // for this specific consumer (e.g. cloud-provider credentials used as agent fallback).
       // Let the legacy path handle those edge cases.
       return undefined;
     }
+    // else: platformOnly && !didBackfill — cc_* already reflects this user, so the platform
+    // default is authoritative. Fall through and return it.
   }
 
   if (!resolved) return undefined;

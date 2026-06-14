@@ -237,11 +237,18 @@ async function resolveProviderViaCC(
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null | undefined> {
   let ccConfig = await resolveComputeConfig(db, userId, encryptionKey, targetProvider);
 
-  if (!ccConfig) {
+  // A platform-only first resolution (isPlatform) must be treated like a miss:
+  // an enabled platform default resolves non-null at Tier 3 on the first pass,
+  // which would otherwise short-circuit the lazy backfill of the user's own
+  // legacy credentials. Run the backfill, then re-resolve so the user's own
+  // credential takes precedence over the platform default. Mirrors the
+  // agent-path platformOnly logic in resolveAgentKeyViaCC (credentials.ts).
+  const platformOnly = ccConfig !== null && ccConfig.isPlatform;
+  if (!ccConfig || platformOnly) {
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
     if (didBackfill) {
       ccConfig = await resolveComputeConfig(db, userId, encryptionKey, targetProvider);
-    } else {
+    } else if (!ccConfig) {
       return undefined;
     }
   }
