@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Credential routes + CC resolver integration — splitting would break the tightly coupled resolution chain. See .claude/rules/18-file-size-limits.md
 import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource, CredentialValidationStatus } from '@simple-agent-manager/shared';
 import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
