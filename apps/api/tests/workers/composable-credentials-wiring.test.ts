@@ -270,3 +270,134 @@ describe('Rule 28: inactive project-scoped attachment halts resolution', () => {
     expect(result).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: enabled platform default must NOT short-circuit lazy backfill of a
+// user's own (higher-precedence) legacy credential.
+//
+// THE BUG (production rollback): an ENABLED platform agent-api-key default resolves
+// at Tier 3 on the FIRST resolveForConsumer call (non-null). The original
+// `if (!resolved)` guard saw a non-null result and SKIPPED lazy backfill, so the
+// user's own credential never migrated into cc_*, the legacy fallback was skipped,
+// and getDecryptedAgentKey returned the platform credential (mapped to null for a
+// platform proxy, or the wrong credential) → the VM agent 404'd the user's own key
+// for non-'sam' provider modes.
+//
+// This describe block runs LAST so the global enabled platform default it seeds
+// cannot contaminate the earlier source:'user' assertions.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const USER_C = `${TEST_PREFIX}-user-c`;
+const USER_D = `${TEST_PREFIX}-user-d`;
+
+async function seedPlatformCredential(opts: {
+  id: string;
+  createdBy: string;
+  credentialType: 'agent-api-key' | 'cloud-provider';
+  credentialKind: string;
+  agentType: string | null;
+  provider: string | null;
+  secret: string;
+  isEnabled?: boolean;
+}) {
+  const { ciphertext, iv } = await encrypt(opts.secret, ENCRYPTION_KEY);
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO platform_credentials
+     (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(
+      opts.id,
+      opts.credentialType,
+      opts.provider,
+      opts.agentType,
+      opts.credentialKind,
+      `platform ${opts.id}`,
+      ciphertext,
+      iv,
+      opts.isEnabled !== false ? 1 : 0,
+      opts.createdBy,
+    )
+    .run();
+}
+
+describe('enabled platform default does not short-circuit user backfill', () => {
+  const PLATFORM_SECRET = 'sk-platform-claude-default';
+  const USER_C_OAUTH = 'oauth-user-c-own-token';
+
+  beforeAll(async () => {
+    // Seed two fresh users so earlier tests are unaffected
+    for (const uid of [USER_C, USER_D]) {
+      await env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      )
+        .bind(uid, `gh-${uid}`, `${uid}@test.com`, `Test User ${uid}`)
+        .run();
+    }
+
+    // User C owns their OWN claude-code oauth-token, in the LEGACY table only (empty cc_*)
+    await seedLegacyCredential({
+      id: `${TEST_PREFIX}-cred-user-c-oauth`,
+      userId: USER_C,
+      credentialType: 'agent-api-key',
+      credentialKind: 'oauth-token',
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      secret: USER_C_OAUTH,
+    });
+
+    // An ENABLED platform claude-code default exists (the Tier-3 short-circuit trigger)
+    await seedPlatformCredential({
+      id: `${TEST_PREFIX}-platform-claude`,
+      createdBy: USER_C,
+      credentialType: 'agent-api-key',
+      credentialKind: 'api-key',
+      agentType: 'claude-code',
+      provider: null,
+      secret: PLATFORM_SECRET,
+      isEnabled: true,
+    });
+  });
+
+  it('user has no cc_* data before resolution (legacy-only)', async () => {
+    const { results } = await env.DATABASE.prepare(
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+    )
+      .bind(USER_C)
+      .all();
+    expect(results).toHaveLength(0);
+  });
+
+  it("resolves to the USER's own oauth-token, NOT the enabled platform default", async () => {
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(db, USER_C, 'claude-code', ENCRYPTION_KEY);
+
+    expect(result).not.toBeNull();
+    // The user's own credential wins — not the platform default
+    expect(result!.credential).toBe(USER_C_OAUTH);
+    expect(result!.credentialKind).toBe('oauth-token');
+    expect(result!.credentialSource).toBe('user');
+    // Must NOT be the platform credential
+    expect(result!.credential).not.toBe(PLATFORM_SECRET);
+  });
+
+  it('lazy backfill populated cc_* from the legacy credential', async () => {
+    const { results } = await env.DATABASE.prepare(
+      `SELECT id, kind FROM cc_credentials WHERE owner_id = ?`,
+    )
+      .bind(USER_C)
+      .all();
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('user with NO own credential still falls through to the platform default', async () => {
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(db, USER_D, 'claude-code', ENCRYPTION_KEY);
+
+    expect(result).not.toBeNull();
+    expect(result!.credential).toBe(PLATFORM_SECRET);
+    expect(result!.credentialKind).toBe('api-key');
+    expect(result!.credentialSource).toBe('platform');
+  });
+});
