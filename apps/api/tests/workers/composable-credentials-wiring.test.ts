@@ -289,6 +289,11 @@ describe('Rule 28: inactive project-scoped attachment halts resolution', () => {
 
 const USER_C = `${TEST_PREFIX}-user-c`;
 const USER_D = `${TEST_PREFIX}-user-d`;
+const USER_E = `${TEST_PREFIX}-user-e`;
+const USER_F = `${TEST_PREFIX}-user-f`;
+const USER_G = `${TEST_PREFIX}-user-g`;
+const USER_H = `${TEST_PREFIX}-user-h`;
+const PROJECT_E = `${TEST_PREFIX}-proj-e`;
 
 async function seedPlatformCredential(opts: {
   id: string;
@@ -325,9 +330,12 @@ describe('enabled platform default does not short-circuit user backfill', () => 
   const PLATFORM_SECRET = 'sk-platform-claude-default';
   const USER_C_OAUTH = 'oauth-user-c-own-token';
 
+  const USER_G_HETZNER = 'user-g-own-hetzner-token';
+  const USER_F_HETZNER = 'user-f-own-hetzner-token';
+
   beforeAll(async () => {
-    // Seed two fresh users so earlier tests are unaffected
-    for (const uid of [USER_C, USER_D]) {
+    // Seed fresh users so earlier tests are unaffected
+    for (const uid of [USER_C, USER_D, USER_E, USER_F, USER_G, USER_H]) {
       await env.DATABASE.prepare(
         `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
          VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
@@ -335,6 +343,14 @@ describe('enabled platform default does not short-circuit user backfill', () => 
         .bind(uid, `gh-${uid}`, `${uid}@test.com`, `Test User ${uid}`)
         .run();
     }
+
+    // Project owned by USER_E for the Rule-28-via-platformOnly halt test
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO projects (id, user_id, name, created_at, updated_at)
+       VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+    )
+      .bind(PROJECT_E, USER_E, 'Test Project E')
+      .run();
 
     // User C owns their OWN claude-code oauth-token, in the LEGACY table only (empty cc_*)
     await seedLegacyCredential({
@@ -347,6 +363,54 @@ describe('enabled platform default does not short-circuit user backfill', () => 
       secret: USER_C_OAUTH,
     });
 
+    // User E owns ONLY an INACTIVE project-scoped claude-code cred (empty cc_* until
+    // resolution triggers lazy backfill). With an enabled platform default present,
+    // the FIRST resolveForConsumer returns the platform default (platformOnly), the
+    // platformOnly path lazy-backfills, then re-resolves WITH projectId — Tier 1 finds
+    // the inactive project attachment and Rule 28 halts the chain to null.
+    await seedLegacyCredential({
+      id: `${TEST_PREFIX}-cred-user-e-proj-inactive`,
+      userId: USER_E,
+      credentialType: 'agent-api-key',
+      credentialKind: 'api-key',
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      secret: 'sk-user-e-project-inactive',
+      projectId: PROJECT_E,
+      isActive: false,
+    });
+
+    // User F has cc_* data for an UNRELATED consumer (a cloud-provider), but NO
+    // claude-code agent credential. Backfill is run now so cc_* is non-empty →
+    // lazyBackfillIfNeeded returns false at test time → exercises the
+    // `platformOnly && !didBackfill` fall-through arm (returns the platform default).
+    await seedLegacyCredential({
+      id: `${TEST_PREFIX}-cred-user-f-hetzner`,
+      userId: USER_F,
+      credentialType: 'cloud-provider',
+      credentialKind: 'api-key',
+      agentType: null,
+      provider: 'hetzner',
+      secret: USER_F_HETZNER,
+    });
+    const { runBackfill: runBackfillF } = await import(
+      '../../src/services/composable-credentials/backfill-service'
+    );
+    await runBackfillF(db, { userId: USER_F });
+
+    // User G owns their OWN hetzner cloud-provider cred (legacy only, empty cc_*) —
+    // used to prove the compute path (createProviderForUser) also lazy-backfills past
+    // an enabled platform cloud-provider default rather than short-circuiting to it.
+    await seedLegacyCredential({
+      id: `${TEST_PREFIX}-cred-user-g-hetzner`,
+      userId: USER_G,
+      credentialType: 'cloud-provider',
+      credentialKind: 'api-key',
+      agentType: null,
+      provider: 'hetzner',
+      secret: USER_G_HETZNER,
+    });
+
     // An ENABLED platform claude-code default exists (the Tier-3 short-circuit trigger)
     await seedPlatformCredential({
       id: `${TEST_PREFIX}-platform-claude`,
@@ -356,6 +420,18 @@ describe('enabled platform default does not short-circuit user backfill', () => 
       agentType: 'claude-code',
       provider: null,
       secret: PLATFORM_SECRET,
+      isEnabled: true,
+    });
+
+    // An ENABLED platform hetzner cloud-provider default (compute-path short-circuit trigger)
+    await seedPlatformCredential({
+      id: `${TEST_PREFIX}-platform-hetzner`,
+      createdBy: USER_C,
+      credentialType: 'cloud-provider',
+      credentialKind: 'api-key',
+      agentType: null,
+      provider: 'hetzner',
+      secret: 'platform-hetzner-token',
       isEnabled: true,
     });
   });
@@ -382,13 +458,15 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     expect(result!.credential).not.toBe(PLATFORM_SECRET);
   });
 
-  it('lazy backfill populated cc_* from the legacy credential', async () => {
+  it('lazy backfill populated cc_* from the legacy credential (oauth-token preserved)', async () => {
     const { results } = await env.DATABASE.prepare(
       `SELECT id, kind FROM cc_credentials WHERE owner_id = ?`,
     )
       .bind(USER_C)
       .all();
     expect(results.length).toBeGreaterThan(0);
+    // The migrated credential must retain its oauth-token kind, not be coerced to api-key.
+    expect((results as Array<{ kind: string }>).some((r) => r.kind === 'oauth-token')).toBe(true);
   });
 
   it('user with NO own credential still falls through to the platform default', async () => {
@@ -398,6 +476,88 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     expect(result).not.toBeNull();
     expect(result!.credential).toBe(PLATFORM_SECRET);
     expect(result!.credentialKind).toBe('api-key');
+    expect(result!.credentialSource).toBe('platform');
+  });
+
+  // Rule 28 halt THROUGH the new platformOnly + lazy-backfill + re-resolve path.
+  // The first resolution returns the enabled platform default (platformOnly), the
+  // platformOnly arm runs lazy backfill (migrating the inactive project cred), then
+  // re-resolves WITH projectId — Tier 1 finds the inactive project attachment and
+  // Rule 28 halts to null. This null arm has dedicated code but was previously untested.
+  it('Rule 28: inactive project attachment halts even through platformOnly backfill', async () => {
+    // Sanity: USER_E starts with empty cc_* (lazy backfill is triggered by resolution)
+    const { results: before } = await env.DATABASE.prepare(
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+    )
+      .bind(USER_E)
+      .all();
+    expect(before).toHaveLength(0);
+
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(
+      db,
+      USER_E,
+      'claude-code',
+      ENCRYPTION_KEY,
+      PROJECT_E,
+    );
+
+    // Must NOT fall through to the platform default — the inactive project row halts.
+    expect(result).toBeNull();
+  });
+
+  // platformOnly && !didBackfill fall-through: the user already has cc_* data (for an
+  // unrelated consumer), so lazy backfill is skipped (returns false). The first
+  // resolution is the platform default (platformOnly), but with no backfill the code
+  // must fall through and return that platform default rather than undefined/null.
+  it('platformOnly with existing cc_* data (no backfill) returns the platform default', async () => {
+    // Sanity: USER_F has cc_* data but no claude-code agent credential
+    const { results: ccRows } = await env.DATABASE.prepare(
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+    )
+      .bind(USER_F)
+      .all();
+    expect(ccRows.length).toBeGreaterThan(0);
+
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(db, USER_F, 'claude-code', ENCRYPTION_KEY);
+
+    expect(result).not.toBeNull();
+    expect(result!.credential).toBe(PLATFORM_SECRET);
+    expect(result!.credentialSource).toBe('platform');
+  });
+
+  // Compute path (createProviderForUser → resolveProviderViaCC) must NOT short-circuit
+  // to an enabled platform cloud-provider default: it lazy-backfills the user's own
+  // legacy cred and re-resolves so the user's own credential wins (source 'user').
+  it('compute path: user own cloud-provider wins over enabled platform default', async () => {
+    const { createProviderForUser } = await import('../../src/services/provider-credentials');
+    const result = await createProviderForUser(
+      db,
+      USER_G,
+      ENCRYPTION_KEY,
+      env as never,
+      'hetzner',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.providerName).toBe('hetzner');
+    // The user's own credential is used, NOT the platform default
+    expect(result!.credentialSource).toBe('user');
+  });
+
+  it('compute path: user with NO cloud-provider cred falls through to platform default', async () => {
+    const { createProviderForUser } = await import('../../src/services/provider-credentials');
+    const result = await createProviderForUser(
+      db,
+      USER_H,
+      ENCRYPTION_KEY,
+      env as never,
+      'hetzner',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.providerName).toBe('hetzner');
     expect(result!.credentialSource).toBe('platform');
   });
 });
