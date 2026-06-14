@@ -98,6 +98,10 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
       expect(hetznerDefault.credential.secret.token).toBe(
         'raw-hetzner-token-not-json-1234567890abcdef',
       );
+      // Raw hetzner tokens have no embedded provider; the snapshot must
+      // backfill it from the platform_credentials.provider column so an empty
+      // provider never reaches the compute assembler (which throws on '').
+      expect(hetznerDefault.credential.secret.provider).toBe('hetzner');
     }
   });
 
@@ -166,5 +170,60 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
     const ids = snapshot.credentials.map((c) => c.id);
     expect(ids).not.toContain(`${TEST_PREFIX}-cred-broken`);
     expect(snapshot.credentials.length).toBeGreaterThan(0);
+  });
+
+  it('an undecryptable platform_credentials row is skipped, not fatal', async () => {
+    // buildPlatformDefaults has its own per-row try/catch separate from the
+    // user-credential loop. Seed a platform row with a bogus iv so decrypt
+    // throws, and assert the snapshot still builds and other defaults survive.
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO platform_credentials
+       (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
+       VALUES (?, 'cloud-provider', 'aws', NULL, 'api-key', 'broken aws', 'not-real-ciphertext', 'bad-iv', 1, ?, datetime('now'), datetime('now'))`,
+    )
+      .bind(`${TEST_PREFIX}-plat-broken`, ADMIN)
+      .run();
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    // Must not throw — the broken platform row is skipped.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    // The broken platform default is absent, but the good hetzner default
+    // (seeded earlier in this describe block) remains.
+    expect(snapshot.platform['compute:aws']).toBeUndefined();
+    expect(snapshot.platform['compute:hetzner']).toBeDefined();
+  });
+
+  it('a raw (non-JSON) openai-compatible user credential does not crash the snapshot', async () => {
+    // openai-compatible secrets are normally JSON ({apiKey, baseUrl}), but the
+    // same JSON.parse-on-raw bug class applies to this kind too. Seed a raw
+    // token cc_credentials row and assert the snapshot builds without throwing
+    // and the secret degrades to apiKey=raw, baseUrl='' rather than crashing.
+    const { ciphertext, iv } = await encrypt('raw-openai-key-not-json', ENCRYPTION_KEY);
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO cc_credentials
+       (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, 'raw-openai', 'openai-compatible', ?, ?, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(`${TEST_PREFIX}-cred-openai`, USER, ciphertext, iv)
+      .run();
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    // Must not throw.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const cred = snapshot.credentials.find(
+      (c) => c.id === `${TEST_PREFIX}-cred-openai`,
+    );
+    expect(cred).toBeDefined();
+    expect(cred?.secret.kind).toBe('openai-compatible');
+    if (cred?.secret.kind === 'openai-compatible') {
+      expect(cred.secret.apiKey).toBe('raw-openai-key-not-json');
+      expect(cred.secret.baseUrl).toBe('');
+    }
   });
 });

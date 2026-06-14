@@ -206,6 +206,16 @@ async function buildPlatformDefaults(
         (row.credentialKind ?? 'api-key') as 'api-key' | 'oauth-token',
       );
 
+      const secret = parseSecret(kind, decrypted);
+      // For platform cloud-provider rows the authoritative provider name is the
+      // row.provider column, not the (possibly raw, non-JSON) token body. Raw
+      // hetzner tokens carry no embedded provider, so parseSecret returns an
+      // empty provider — backfill it from the row here so an empty provider
+      // never propagates into the compute assembler (which throws on '').
+      if (secret.kind === 'cloud-provider' && !secret.provider && row.provider) {
+        secret.provider = row.provider;
+      }
+
       defaults[consumerKey(consumer)] = {
         mode: 'credential',
         credential: {
@@ -213,7 +223,7 @@ async function buildPlatformDefaults(
           ownerId: '__platform__',
           name: `platform ${consumerKey(consumer)}`,
           kind,
-          secret: parseSecret(kind, decrypted),
+          secret,
           isActive: true,
         },
       };
