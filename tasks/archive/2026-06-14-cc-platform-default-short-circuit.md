@@ -56,14 +56,14 @@ user/project tiers that lazy backfill materializes.
 
 ## Implementation checklist
 
-- [ ] In `resolveAgentKeyViaCC`, detect a platform-only first resolution
+- [x] In `resolveAgentKeyViaCC`, detect a platform-only first resolution
       (`source === 'platform' || source === 'platform-proxy'`).
-- [ ] When first resolution is null OR platform-only, call `lazyBackfillIfNeeded`; if it
+- [x] When first resolution is null OR platform-only, call `lazyBackfillIfNeeded`; if it
       backfilled, re-resolve and prefer the re-resolved result.
-- [ ] Preserve the existing `undefined` (legacy fallback) path when nothing resolves and no
+- [x] Preserve the existing `undefined` (legacy fallback) path when nothing resolves and no
       backfill ran.
-- [ ] Preserve Rule 28 (inactive project attachment halts → null, no fallback).
-- [ ] Add a behavioral worker test: user with own oauth-token claude-code + enabled platform
+- [x] Preserve Rule 28 (inactive project attachment halts → null, no fallback).
+- [x] Add a behavioral worker test: user with own oauth-token claude-code + enabled platform
       claude-code default + empty `cc_*` → resolves to the USER's oauth-token (source 'user'),
       `cc_credentials` is populated (backfill ran), NOT 404 / NOT platform.
 
