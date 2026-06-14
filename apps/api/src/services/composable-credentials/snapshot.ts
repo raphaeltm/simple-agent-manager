@@ -39,8 +39,23 @@ function safeParseJson(json: string, contextId: string): CCConfigurationSettings
   }
 }
 
+/** Attempt to parse a decrypted token as a JSON object; returns null if it is not JSON. */
+function tryParseJsonObject(decryptedToken: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(decryptedToken);
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Parse the decrypted token into a typed CredentialSecret based on the kind.
+ *
+ * cloud-provider and openai-compatible secrets may be stored either as a JSON
+ * object (gcp/scaleway: { provider, token }) or as a raw token string
+ * (hetzner tokens, and anything copied verbatim by the legacy backfill). We
+ * tolerate both so a raw token never throws and crashes the whole snapshot.
  */
 function parseSecret(kind: CCCredentialKind, decryptedToken: string): CCCredentialSecret {
   switch (kind) {
@@ -49,12 +64,20 @@ function parseSecret(kind: CCCredentialKind, decryptedToken: string): CCCredenti
     case 'oauth-token':
       return { kind: 'oauth-token', token: decryptedToken };
     case 'openai-compatible': {
-      const parsed = JSON.parse(decryptedToken);
-      return { kind: 'openai-compatible', apiKey: parsed.apiKey, baseUrl: parsed.baseUrl };
+      const parsed = tryParseJsonObject(decryptedToken);
+      return {
+        kind: 'openai-compatible',
+        apiKey: typeof parsed?.apiKey === 'string' ? parsed.apiKey : decryptedToken,
+        baseUrl: typeof parsed?.baseUrl === 'string' ? parsed.baseUrl : '',
+      };
     }
     case 'cloud-provider': {
-      const parsed = JSON.parse(decryptedToken);
-      return { kind: 'cloud-provider', provider: parsed.provider, token: parsed.token ?? decryptedToken };
+      const parsed = tryParseJsonObject(decryptedToken);
+      return {
+        kind: 'cloud-provider',
+        provider: typeof parsed?.provider === 'string' ? parsed.provider : '',
+        token: typeof parsed?.token === 'string' ? parsed.token : decryptedToken,
+      };
     }
     case 'auth-json':
       return { kind: 'auth-json', authJson: decryptedToken };
@@ -91,19 +114,34 @@ export async function buildSnapshot(
     ),
   ]);
 
-  // Decrypt credentials
-  const credentials: CCCredential[] = await Promise.all(
-    credRows.map(async (row) => {
-      const decrypted = await decrypt(row.encryptedToken, row.iv, encryptionKey);
-      return {
-        id: row.id,
-        ownerId: row.ownerId,
-        name: row.name,
-        kind: row.kind as CCCredentialKind,
-        secret: parseSecret(row.kind as CCCredentialKind, decrypted),
-        isActive: row.isActive,
-      };
+  // Decrypt credentials. A single unparseable/undecryptable credential must
+  // never crash the whole snapshot — skip it and log, so resolution for all
+  // other consumers (other agents, platform defaults) still succeeds.
+  const credentialResults = await Promise.all(
+    credRows.map(async (row): Promise<CCCredential | null> => {
+      try {
+        const decrypted = await decrypt(row.encryptedToken, row.iv, encryptionKey);
+        return {
+          id: row.id,
+          ownerId: row.ownerId,
+          name: row.name,
+          kind: row.kind as CCCredentialKind,
+          secret: parseSecret(row.kind as CCCredentialKind, decrypted),
+          isActive: row.isActive,
+        };
+      } catch (err) {
+        // eslint-disable-next-line no-console -- structured error log for unreadable credential
+        console.error('snapshot.credential_parse_error', {
+          credentialId: row.id,
+          kind: row.kind,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
     }),
+  );
+  const credentials: CCCredential[] = credentialResults.filter(
+    (c): c is CCCredential => c !== null,
   );
 
   // Map configurations
@@ -158,23 +196,45 @@ async function buildPlatformDefaults(
           : null;
     if (!consumer) continue;
 
-    const decrypted = await decrypt(row.encryptedToken, row.iv, encryptionKey);
-    const kind = mapKind(
-      row.credentialType as 'agent-api-key' | 'cloud-provider',
-      (row.credentialKind ?? 'api-key') as 'api-key' | 'oauth-token',
-    );
+    // A single unreadable platform credential must not crash the snapshot —
+    // skip it and log. Otherwise one bad platform row (e.g. a raw cloud-provider
+    // token) takes down agent resolution for every user and every consumer.
+    try {
+      const decrypted = await decrypt(row.encryptedToken, row.iv, encryptionKey);
+      const kind = mapKind(
+        row.credentialType as 'agent-api-key' | 'cloud-provider',
+        (row.credentialKind ?? 'api-key') as 'api-key' | 'oauth-token',
+      );
 
-    defaults[consumerKey(consumer)] = {
-      mode: 'credential',
-      credential: {
-        id: row.id,
-        ownerId: '__platform__',
-        name: `platform ${consumerKey(consumer)}`,
-        kind,
-        secret: parseSecret(kind, decrypted),
-        isActive: true,
-      },
-    };
+      const secret = parseSecret(kind, decrypted);
+      // For platform cloud-provider rows the authoritative provider name is the
+      // row.provider column, not the (possibly raw, non-JSON) token body. Raw
+      // hetzner tokens carry no embedded provider, so parseSecret returns an
+      // empty provider — backfill it from the row here so an empty provider
+      // never propagates into the compute assembler (which throws on '').
+      if (secret.kind === 'cloud-provider' && !secret.provider && row.provider) {
+        secret.provider = row.provider;
+      }
+
+      defaults[consumerKey(consumer)] = {
+        mode: 'credential',
+        credential: {
+          id: row.id,
+          ownerId: '__platform__',
+          name: `platform ${consumerKey(consumer)}`,
+          kind,
+          secret,
+          isActive: true,
+        },
+      };
+    } catch (err) {
+      // eslint-disable-next-line no-console -- structured error log for unreadable platform credential
+      console.error('snapshot.platform_credential_parse_error', {
+        credentialId: row.id,
+        credentialType: row.credentialType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   return defaults;
