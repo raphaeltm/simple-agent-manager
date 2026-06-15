@@ -39,8 +39,12 @@ describe('model-catalog', () => {
       expect(getModelGroupsForAgent('nonexistent')).toEqual([]);
     });
 
-    it('returns empty array for opencode (no catalog)', () => {
-      expect(getModelGroupsForAgent('opencode')).toEqual([]);
+    it('returns grouped models for opencode', () => {
+      const groups = getModelGroupsForAgent('opencode');
+      expect(groups.length).toBeGreaterThanOrEqual(1);
+      const allModels = groups.flatMap((g) => g.models);
+      expect(allModels.some((m) => m.id === 'devstral-2512')).toBe(true);
+      expect(allModels.some((m) => m.id === 'north-mini-code-1-0')).toBe(true);
     });
   });
 

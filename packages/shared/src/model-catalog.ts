@@ -95,6 +95,93 @@ const CODEX_MODELS: ModelGroup[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// OpenAI-compatible alternative provider models
+// ---------------------------------------------------------------------------
+
+const OPENAI_COMPATIBLE_ALTERNATIVE_MODELS: ModelGroup[] = [
+  {
+    label: 'Mistral AI (OpenAI-compatible)',
+    models: [
+      {
+        id: 'mistral-medium-3-5-2604',
+        name: 'Mistral Medium 3.5',
+        group: 'Mistral AI (OpenAI-compatible)',
+      },
+      {
+        id: 'mistral-small-2603',
+        name: 'Mistral Small 4',
+        group: 'Mistral AI (OpenAI-compatible)',
+      },
+      {
+        id: 'mistral-large-2512',
+        name: 'Mistral Large 3',
+        group: 'Mistral AI (OpenAI-compatible)',
+      },
+      {
+        id: 'devstral-2512',
+        name: 'Devstral 2',
+        group: 'Mistral AI (OpenAI-compatible)',
+      },
+      {
+        id: 'codestral-2508',
+        name: 'Codestral',
+        group: 'Mistral AI (OpenAI-compatible)',
+      },
+    ],
+  },
+  {
+    label: 'Cohere North (OpenAI-compatible)',
+    models: [
+      {
+        id: 'north-mini-code-1-0',
+        name: 'North Mini Code',
+        group: 'Cohere North (OpenAI-compatible)',
+      },
+      {
+        id: 'command-a-plus-05-2026',
+        name: 'Command A+',
+        group: 'Cohere North (OpenAI-compatible)',
+      },
+      {
+        id: 'command-a-03-2025',
+        name: 'Command A',
+        group: 'Cohere North (OpenAI-compatible)',
+      },
+      {
+        id: 'command-a-reasoning-08-2025',
+        name: 'Command A Reasoning',
+        group: 'Cohere North (OpenAI-compatible)',
+      },
+    ],
+  },
+  {
+    label: 'Scaleway Generative APIs (OpenAI-compatible)',
+    models: [
+      {
+        id: 'qwen3-coder-30b-a3b-instruct',
+        name: 'Qwen3 Coder 30B A3B Instruct',
+        group: 'Scaleway Generative APIs (OpenAI-compatible)',
+      },
+      {
+        id: 'qwen3.6-35b-a3b',
+        name: 'Qwen3.6 35B A3B',
+        group: 'Scaleway Generative APIs (OpenAI-compatible)',
+      },
+      {
+        id: 'gemma-4-26b-a4b-it',
+        name: 'Gemma 4 26B A4B IT',
+        group: 'Scaleway Generative APIs (OpenAI-compatible)',
+      },
+      {
+        id: 'gpt-oss-120b',
+        name: 'GPT OSS 120B',
+        group: 'Scaleway Generative APIs (OpenAI-compatible)',
+      },
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Mistral Vibe models
 // ---------------------------------------------------------------------------
 
@@ -168,6 +255,7 @@ const MODEL_CATALOG: Partial<Record<AgentType, ModelGroup[]>> = {
   'openai-codex': CODEX_MODELS,
   'mistral-vibe': MISTRAL_MODELS,
   'google-gemini': GEMINI_MODELS,
+  opencode: OPENAI_COMPATIBLE_ALTERNATIVE_MODELS,
 };
 
 /** Get the model groups for a given agent type. Returns empty array if none defined. */
