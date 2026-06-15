@@ -4,7 +4,11 @@ import { AGENT_TYPE_VALUES } from '../../src/agents';
 import { agentAssembler } from '../../src/composable-credentials/assemblers';
 import type { CredentialSecret, ResolvedEnvironment } from '../../src/composable-credentials/types';
 
-function resolved(agentType: string, source: ResolvedEnvironment['source'], secret: CredentialSecret | null): ResolvedEnvironment {
+function resolved(
+  agentType: string,
+  source: ResolvedEnvironment['source'],
+  secret: CredentialSecret | null
+): ResolvedEnvironment {
   return {
     source,
     consumer: { kind: 'agent', agentType },
@@ -24,7 +28,11 @@ function resolved(agentType: string, source: ResolvedEnvironment['source'], secr
       name: 'configuration',
       consumer: { kind: 'agent', agentType },
       credentialId: secret ? 'cred' : null,
-      settings: { model: 'glm-4.6', baseUrl: 'https://provider.example/v1' },
+      settings: {
+        model: 'glm-4.6',
+        baseUrl: 'https://provider.example/v1',
+        samProxyBaseUrl: 'https://api.sam.example/ai/proxy/{wstoken}',
+      },
       isActive: true,
     },
   };
@@ -151,13 +159,17 @@ describe('agent assembler harness capability snapshots', () => {
         } catch (error) {
           cases.oauthError = (error as Error).message;
         }
-        cases.openaiCompatible = agentAssembler.assemble(
-          resolved(agentType, 'user-attachment', {
-            kind: 'openai-compatible',
-            apiKey: 'sk-custom',
-            baseUrl: 'https://secret.example/v1',
-          })
-        );
+        try {
+          cases.openaiCompatible = agentAssembler.assemble(
+            resolved(agentType, 'user-attachment', {
+              kind: 'openai-compatible',
+              apiKey: 'sk-custom',
+              baseUrl: 'https://secret.example/v1',
+            })
+          );
+        } catch (error) {
+          cases.openaiCompatibleError = (error as Error).message;
+        }
         return [agentType, cases];
       })
     );
