@@ -10,6 +10,7 @@ import {
   HARNESS_CAPABILITIES,
   isValidAgentType,
   OPENCODE_PROVIDERS,
+  resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -66,14 +67,12 @@ function buildPassthroughInferenceConfig(input: {
   agentType: string;
   baseDomain: string;
   defaultModel: string;
-  upstreamBaseURL?: string;
 }) {
   const capability = getProxyCapability(input.agentType);
   if (!capability) return null;
   return {
     provider: capability.proxyProviderTag,
     baseURL: `https://api.${input.baseDomain}/ai/proxy/{wstoken}/${capability.proxyRouteSegment}`,
-    ...(input.upstreamBaseURL ? { upstreamBaseURL: input.upstreamBaseURL } : {}),
     model: input.defaultModel,
     apiKeySource: 'callback-token' as const,
   };
@@ -419,6 +418,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     if (
       credentialData &&
       credentialData.baseUrl &&
+      credentialData.providerDialect &&
+      resolveHarnessDialect(body.agentType, credentialData.providerDialect) &&
       !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')
     ) {
       // User has their own credential — use passthrough proxy routes.
@@ -427,7 +428,6 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         agentType: body.agentType,
         baseDomain,
         defaultModel,
-        upstreamBaseURL: credentialData.baseUrl,
       });
       if (!inferenceConfig) {
         throw errors.notFound('Agent credential');
@@ -460,6 +460,16 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialSource: credentialData.credentialSource,
         inferenceConfig,
       });
+    }
+
+    if (credentialData?.baseUrl) {
+      log.warn('agent_key.ai_proxy_incompatible_passthrough_credential', {
+        workspaceId,
+        userId: workspace.userId,
+        agentType: body.agentType,
+        providerDialect: credentialData.providerDialect ?? null,
+      });
+      throw errors.notFound('Agent credential');
     }
 
     if (credentialData) {

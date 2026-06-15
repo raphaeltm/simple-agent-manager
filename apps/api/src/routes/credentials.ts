@@ -1,6 +1,6 @@
 // FILE SIZE EXCEPTION: Credential routes + CC resolver integration — splitting would break the tightly coupled resolution chain. See .claude/rules/18-file-size-limits.md
-import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource, CredentialValidationStatus } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource, CredentialValidationStatus, Dialect } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, DIALECT_VALUES, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -679,7 +679,7 @@ export async function getDecryptedAgentKey(
   agentType: string,
   encryptionKey: string,
   projectId?: string | null
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string } | null> {
+): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string; providerDialect?: Dialect } | null> {
   // --- Primary path: composable-credentials resolver -------------------------
   const ccResult = await resolveAgentKeyViaCC(db, userId, agentType, encryptionKey, projectId);
   if (ccResult !== undefined) return ccResult;
@@ -700,7 +700,7 @@ async function resolveAgentKeyViaCC(
   agentType: string,
   encryptionKey: string,
   projectId?: string | null,
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string } | null | undefined> {
+): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string; providerDialect?: Dialect } | null | undefined> {
   const consumer = { kind: 'agent' as const, agentType };
 
   // First attempt with current cc_* data
@@ -751,7 +751,7 @@ async function resolveAgentKeyViaCC(
  */
 function mapResolvedToLegacy(
   resolved: NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>,
-): { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string } | null {
+): { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string; providerDialect?: Dialect } | null {
   // Platform proxy — no raw credential to return
   if (resolved.source === 'platform-proxy' || !resolved.credential) {
     return null;
@@ -784,12 +784,28 @@ function mapResolvedToLegacy(
   }
 
   const credentialSource = mapSourceToLegacy(resolved.source);
+  const settings = resolved.configuration?.settings ?? {};
+  const settingsBaseUrl = typeof settings.baseUrl === 'string' && settings.baseUrl.trim() !== ''
+    ? settings.baseUrl.trim()
+    : undefined;
+  const providerDialect = readProviderDialect(settings.dialect)
+    ?? (secret.kind === 'openai-compatible' ? 'openai-compatible' : undefined);
+  const baseUrl = settingsBaseUrl
+    ?? (secret.kind === 'openai-compatible' && secret.baseUrl ? secret.baseUrl : undefined);
+
   return {
     credential,
     credentialKind,
     credentialSource,
-    ...(secret.kind === 'openai-compatible' && secret.baseUrl ? { baseUrl: secret.baseUrl } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(providerDialect ? { providerDialect } : {}),
   };
+}
+
+function readProviderDialect(value: unknown): Dialect | undefined {
+  return typeof value === 'string' && (DIALECT_VALUES as readonly string[]).includes(value)
+    ? value as Dialect
+    : undefined;
 }
 
 function mapSourceToLegacy(source: string): CredentialSource {

@@ -68,7 +68,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = [
   },
   {
     agentType: 'opencode',
-    dialects: ['openai-compatible', 'anthropic'],
+    dialects: ['openai-compatible'],
     authEnvVar: 'OPENCODE_API_KEY',
     authStyle: 'api-key',
     usesOpencodeConfig: true,

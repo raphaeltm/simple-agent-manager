@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { getDecryptedAgentKey } from '../../../src/routes/credentials';
 import { projectCredentialsRoutes } from '../../../src/routes/projects/credentials';
+import { resolveForConsumer } from '../../../src/services/composable-credentials/resolve';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
@@ -405,6 +406,50 @@ describe('getDecryptedAgentKey — resolution order', () => {
 
   beforeEach(() => {
     mockDB = makeMockDB();
+    vi.mocked(resolveForConsumer).mockResolvedValue(null);
+  });
+
+  it('maps CC settings baseUrl and dialect for Anthropic-compatible passthrough credentials', async () => {
+    vi.mocked(resolveForConsumer).mockResolvedValueOnce({
+      consumer: { kind: 'agent', agentType: 'claude-code' },
+      configuration: {
+        id: 'cfg-anthropic-alt',
+        ownerId: 'u1',
+        name: 'Anthropic-compatible',
+        consumer: { kind: 'agent', agentType: 'claude-code' },
+        credentialId: 'cred-anthropic-alt',
+        settings: {
+          baseUrl: 'https://anthropic-alt.example/anthropic',
+          dialect: 'anthropic',
+        },
+        isActive: true,
+      },
+      credential: {
+        id: 'cred-anthropic-alt',
+        ownerId: 'u1',
+        name: 'Anthropic-compatible key',
+        kind: 'api-key',
+        secret: { kind: 'api-key', apiKey: 'sk-anthropic-compatible' },
+        isActive: true,
+      },
+      source: 'user-attachment',
+    });
+
+    const result = await getDecryptedAgentKey(
+      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
+      'u1',
+      'claude-code',
+      'test-key',
+      'p1',
+    );
+
+    expect(result).toMatchObject({
+      credential: 'sk-anthropic-compatible',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://anthropic-alt.example/anthropic',
+      providerDialect: 'anthropic',
+    });
   });
 
   it('returns project-scoped credential when projectId is provided and project row exists', async () => {

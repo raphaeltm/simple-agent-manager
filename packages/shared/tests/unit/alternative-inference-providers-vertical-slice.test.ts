@@ -327,9 +327,9 @@ describe('Item 4 — anthropic-dialect alternative provider (deepseek-anthropic)
 
   it('is an anthropic-dialect preset only anthropic-speaking harnesses accept', () => {
     expect(p.dialect).toBe('anthropic');
-    // claude-code + opencode speak anthropic; the rest do not.
+    // claude-code speaks anthropic; opencode's current assembler is OpenAI-compatible only.
     expect(resolveHarnessDialect('claude-code', 'anthropic')).not.toBeNull();
-    expect(resolveHarnessDialect('opencode', 'anthropic')).not.toBeNull();
+    expect(resolveHarnessDialect('opencode', 'anthropic')).toBeNull();
     expect(resolveHarnessDialect('openai-codex', 'anthropic')).toBeNull();
     expect(resolveHarnessDialect('mistral-vibe', 'anthropic')).toBeNull();
   });

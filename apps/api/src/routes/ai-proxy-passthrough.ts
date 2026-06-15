@@ -257,6 +257,16 @@ function credentialApiKey(
   }
 }
 
+function credentialSupportsDialect(
+  secret: ResolvedCredentialSecret,
+  settings: Record<string, unknown>,
+  dialect: Dialect,
+): boolean {
+  const configuredDialect = stringSetting(settings.dialect);
+  if (configuredDialect) return configuredDialect === dialect;
+  return secret.kind === 'openai-compatible' && dialect === 'openai-compatible';
+}
+
 async function resolveProxyUpstream(input: {
   env: Env;
   userId: string;
@@ -277,6 +287,7 @@ async function resolveProxyUpstream(input: {
     if (!resolved?.credential || resolved.source === 'platform-proxy') continue;
     const secret = resolved.credential.secret;
     const settings = resolved.configuration?.settings ?? {};
+    if (!credentialSupportsDialect(secret, settings, input.dialect)) continue;
     const apiKey = credentialApiKey(secret);
     const baseUrl = resolvedBaseUrl(secret, settings);
     if (!apiKey || !baseUrl || !isHttpsUrl(baseUrl)) continue;
@@ -500,10 +511,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     });
 
     if (!upstreamResponse.ok) {
-      const errorText = await upstreamResponse.text();
       log.error('ai_proxy_passthrough.anthropic.upstream_error', {
         status: upstreamResponse.status,
-        body: errorText.slice(0, 500),
+        userId,
+        workspaceId,
+        modelId,
+        providerId: upstream.provider.providerId,
       });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
@@ -567,9 +580,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
     });
 
     if (!upstreamResponse.ok) {
-      const errorText = await upstreamResponse.text();
       log.error('ai_proxy_passthrough.anthropic.count_tokens_error', {
-        userId, status: upstreamResponse.status, body: errorText.slice(0, 500),
+        userId,
+        workspaceId,
+        modelId,
+        status: upstreamResponse.status,
+        providerId: upstream.provider.providerId,
       });
       return anthropicError(`Token counting failed (${upstreamResponse.status}).`, 'api_error', upstreamResponse.status);
     }
@@ -627,10 +643,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     });
 
     if (!upstreamResponse.ok) {
-      const errorText = await upstreamResponse.text();
       log.error('ai_proxy_passthrough.openai.upstream_error', {
         status: upstreamResponse.status,
-        body: errorText.slice(0, 500),
+        userId,
+        workspaceId,
+        modelId,
+        providerId: upstream.provider.providerId,
       });
       return openaiError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,

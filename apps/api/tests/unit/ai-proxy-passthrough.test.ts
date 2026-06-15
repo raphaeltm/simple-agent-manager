@@ -16,6 +16,7 @@ const mockCheckAiUsageGate = vi.fn();
 const mockIncrementTokenUsage = vi.fn();
 const mockIncrementProviderUsage = vi.fn();
 const mockResolveForConsumer = vi.fn();
+const mockLogError = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({}),
@@ -54,7 +55,7 @@ vi.mock('../../src/services/ai-token-budget', () => ({
 }));
 
 vi.mock('../../src/lib/logger', () => ({
-  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  log: { info: vi.fn(), error: (...args: unknown[]) => mockLogError(...args), warn: vi.fn() },
 }));
 
 vi.mock('../../src/lib/secrets', () => ({
@@ -117,7 +118,9 @@ beforeEach(() => {
     if (agentType === 'claude-code') {
       return Promise.resolve({
         consumer,
-        configuration: { settings: { baseUrl: 'https://anthropic-alt.example/anthropic' } },
+        configuration: {
+          settings: { baseUrl: 'https://anthropic-alt.example/anthropic', dialect: 'anthropic' },
+        },
         credential: { secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' } },
         source: 'user-attachment',
       });
@@ -173,7 +176,9 @@ describe('AI Proxy Passthrough Routes', () => {
       mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
       mockResolveForConsumer.mockResolvedValueOnce({
         consumer: { kind: 'agent', agentType: 'claude-code' },
-        configuration: { settings: { baseUrl: 'https://anthropic-alt.example/anthropic' } },
+        configuration: {
+          settings: { baseUrl: 'https://anthropic-alt.example/anthropic', dialect: 'anthropic' },
+        },
         credential: { secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' } },
         source: 'project-attachment',
       });
@@ -328,6 +333,55 @@ describe('AI Proxy Passthrough Routes', () => {
       );
       expect(res.status).toBe(200);
     });
+
+    it('does not expose upstream Anthropic error bodies to clients or logs', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        error: 'invalid api key sk-leaked-upstream-diagnostic',
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/anthropic/v1/messages',
+        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+      );
+
+      expect(res.status).toBe(401);
+      expect(await res.text()).not.toContain('sk-leaked-upstream-diagnostic');
+      expect(JSON.stringify(mockLogError.mock.calls)).not.toContain('sk-leaked-upstream-diagnostic');
+    });
+
+    it('does not resolve an OpenAI-compatible credential for the Anthropic route', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockResolveForConsumer.mockResolvedValueOnce({
+        consumer: { kind: 'agent', agentType: 'claude-code' },
+        configuration: { settings: {} },
+        credential: {
+          secret: {
+            kind: 'openai-compatible',
+            apiKey: 'sk-openai-resolved-key',
+            baseUrl: 'https://custom-openai.example/v1',
+          },
+        },
+        source: 'user-attachment',
+      });
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/anthropic/v1/messages',
+        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+      );
+
+      expect(res.status).toBe(401);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
   });
 
   describe('OpenAI passthrough', () => {
@@ -422,6 +476,28 @@ describe('AI Proxy Passthrough Routes', () => {
         { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
       );
       expect(res.status).toBe(401);
+    });
+
+    it('does not expose upstream OpenAI-compatible error bodies to clients or logs', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'openai-codex',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { message: 'authorization failed for sk-leaked-openai-diagnostic' },
+      }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/openai/v1/chat/completions',
+        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.text()).not.toContain('sk-leaked-openai-diagnostic');
+      expect(JSON.stringify(mockLogError.mock.calls)).not.toContain('sk-leaked-openai-diagnostic');
     });
   });
 });

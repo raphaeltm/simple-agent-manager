@@ -87,7 +87,6 @@ describe('harness capability registry', () => {
           "authStyle": "api-key",
           "dialects": [
             "openai-compatible",
-            "anthropic",
           ],
           "proxyProviderTag": "openai-passthrough",
           "proxyRouteSegment": "openai/v1",
@@ -114,10 +113,10 @@ describe('harness capability registry', () => {
     );
     expect(resolveHarnessDialect('google-gemini', 'gemini')?.agentType).toBe('google-gemini');
     expect(resolveHarnessDialect('opencode', 'openai-compatible')?.agentType).toBe('opencode');
-    expect(resolveHarnessDialect('opencode', 'anthropic')?.agentType).toBe('opencode');
 
     expect(resolveHarnessDialect('claude-code', 'openai-compatible')).toBeNull();
     expect(resolveHarnessDialect('openai-codex', 'anthropic')).toBeNull();
+    expect(resolveHarnessDialect('opencode', 'anthropic')).toBeNull();
     expect(resolveHarnessDialect('amp', 'gemini')).toBeNull();
     expect(resolveHarnessDialect('unknown-agent', 'anthropic')).toBeNull();
   });

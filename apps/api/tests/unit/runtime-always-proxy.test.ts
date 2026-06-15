@@ -236,6 +236,7 @@ describe('runtime.ts always-proxy', () => {
         baseUrl: agentType === 'claude-code'
           ? 'https://anthropic-alt.example/anthropic'
           : 'https://custom-openai.example/v1',
+        providerDialect: agentType === 'claude-code' ? 'anthropic' : 'openai-compatible',
       });
 
       const response = await postAgentKey(agentType);
@@ -251,21 +252,18 @@ describe('runtime.ts always-proxy', () => {
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/anthropic",
           "model": "claude-sonnet-4-6",
           "provider": "anthropic-passthrough",
-          "upstreamBaseURL": "https://anthropic-alt.example/anthropic",
         },
         "openai-codex": {
           "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
           "model": "gpt-4.1",
           "provider": "openai-passthrough",
-          "upstreamBaseURL": "https://custom-openai.example/v1",
         },
         "opencode": {
           "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
           "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
           "provider": "openai-passthrough",
-          "upstreamBaseURL": "https://custom-openai.example/v1",
         },
       }
     `);
@@ -328,6 +326,7 @@ describe('runtime.ts always-proxy', () => {
       credentialKind: 'api-key',
       credentialSource: 'user',
       baseUrl: 'https://anthropic-alt.example/anthropic',
+      providerDialect: 'anthropic',
     });
 
     const res = await postAgentKey('claude-code');
@@ -455,6 +454,7 @@ describe('runtime.ts always-proxy', () => {
       credentialKind: 'api-key',
       credentialSource: 'user',
       baseUrl: 'https://custom-openai.example/v1',
+      providerDialect: 'openai-compatible',
     });
 
     const res = await postAgentKey('openai-codex');
@@ -468,6 +468,29 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.provider).toBe('openai-passthrough');
     expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
-    expect(json.inferenceConfig.upstreamBaseURL).toBe('https://custom-openai.example/v1');
+    expect(json.inferenceConfig.upstreamBaseURL).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain('https://custom-openai.example/v1');
+  });
+
+  it('fails closed instead of injecting an incompatible baseURL-backed credential', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'sk-openai-user-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://custom-openai.example/v1',
+      providerDialect: 'openai-compatible',
+    });
+
+    const res = await postAgentKey('claude-code');
+    const json = await res.json() as { message?: string; apiKey?: string };
+
+    expect(res.status).toBe(404);
+    expect(json.message).toBe('Agent credential');
+    expect(json.apiKey).toBeUndefined();
   });
 });
