@@ -1,7 +1,11 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-import { incrementTokenUsage } from './ai-token-budget';
+import {
+  type AiProviderUsageAttribution,
+  incrementProviderUsage,
+  incrementTokenUsage,
+} from './ai-token-budget';
 
 export type TokenUsageFormat = 'openai' | 'anthropic';
 
@@ -15,6 +19,7 @@ export interface TokenUsageAccountingOptions {
   userId: string;
   format: TokenUsageFormat;
   fallbackInputTokens?: number;
+  provider?: AiProviderUsageAttribution;
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
 }
 
@@ -180,6 +185,16 @@ async function incrementExtractedUsage(
     outputTokens,
     options.env,
   );
+  if (options.provider) {
+    await incrementProviderUsage(
+      options.env.KV,
+      options.userId,
+      options.provider,
+      inputTokens,
+      outputTokens,
+      options.env,
+    );
+  }
 }
 
 function processSseBuffer(

@@ -15,16 +15,19 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import {
   aggregateByDay,
   aggregateByModel,
+  aggregateByProvider,
   getGatewayPeriodBounds,
   getPeriodLabel,
   iterateGatewayLogs,
   parseGatewayPeriod,
   type UsageByDay,
   type UsageByModel,
+  type UsageByProvider,
 } from '../services/ai-gateway-logs';
 import {
   deleteUserBudgetSettings,
   getAdminAiAllowance,
+  getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
   resolveEffectiveLimits,
@@ -83,8 +86,8 @@ usageRoutes.get('/quota', requireAuth(), requireApproved(), async (c) => {
  *
  * Query params: ?period=current-month|7d|30d|90d (default: current-month)
  *
- * MVP: queries Gateway logs directly — no D1 ai_usage_events table.
- * Direct BYOK/non-Gateway usage is out of scope.
+ * Combines AI Gateway logs with local proxy provider meters for direct
+ * alternative-provider passthrough requests.
  */
 usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -93,15 +96,30 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
 
   const gatewayId = c.env.AI_GATEWAY_ID;
   if (!gatewayId) {
-    // Gateway not configured — return empty state, not error
+    const providerMap = new Map<string, UsageByProvider>();
+    const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
+    let totalRequests = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCostUsd = 0;
+    for (const entry of localProviderUsage) {
+      mergeLocalProviderUsage(providerMap, entry);
+      totalRequests += entry.requests;
+      totalInputTokens += entry.inputTokens;
+      totalOutputTokens += entry.outputTokens;
+      totalCostUsd += entry.estimatedCostUsd;
+    }
+
+    // Gateway not configured — return local proxy usage only, not an error.
     return c.json({
-      totalCostUsd: 0,
-      totalRequests: 0,
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
+      totalCostUsd,
+      totalRequests,
+      totalInputTokens,
+      totalOutputTokens,
       cachedRequests: 0,
       errorRequests: 0,
       byModel: [],
+      byProvider: Array.from(providerMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
       byDay: [],
       period,
       periodLabel: getPeriodLabel(period),
@@ -109,6 +127,7 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
   }
 
   const modelMap = new Map<string, UsageByModel>();
+  const providerMap = new Map<string, UsageByProvider>();
   const dayMap = new Map<string, UsageByDay>();
   let totalCostUsd = 0;
   let totalRequests = 0;
@@ -135,6 +154,7 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       if (!entry.success) errorRequests++;
 
       aggregateByModel(modelMap, entry);
+      aggregateByProvider(providerMap, entry);
       aggregateByDay(dayMap, entry);
     });
   } catch (err) {
@@ -151,10 +171,20 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       cachedRequests: 0,
       errorRequests: 0,
       byModel: [],
+      byProvider: [],
       byDay: [],
       period,
       periodLabel: getPeriodLabel(period),
     } satisfies UserAiUsageResponse);
+  }
+
+  const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
+  for (const entry of localProviderUsage) {
+    mergeLocalProviderUsage(providerMap, entry);
+    totalRequests += entry.requests;
+    totalInputTokens += entry.inputTokens;
+    totalOutputTokens += entry.outputTokens;
+    totalCostUsd += entry.estimatedCostUsd;
   }
 
   const response: UserAiUsageResponse = {
@@ -165,6 +195,7 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     cachedRequests,
     errorRequests,
     byModel: Array.from(modelMap.values()).sort((a, b) => b.costUsd - a.costUsd),
+    byProvider: Array.from(providerMap.values()).sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens),
     byDay: Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
     period,
     periodLabel: getPeriodLabel(period),
@@ -172,6 +203,37 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
 
   return c.json(response);
 });
+
+function mergeLocalProviderUsage(
+  map: Map<string, UsageByProvider>,
+  entry: Awaited<ReturnType<typeof getProviderUsage>>[number],
+): void {
+  const key = `${entry.providerId}:${entry.dialect}`;
+  const existing = map.get(key);
+  if (existing) {
+    existing.requests += entry.requests;
+    existing.inputTokens += entry.inputTokens;
+    existing.outputTokens += entry.outputTokens;
+    existing.totalTokens += entry.inputTokens + entry.outputTokens;
+    existing.costUsd += entry.estimatedCostUsd;
+    existing.costSource = existing.costSource === 'unavailable' ? 'unavailable' : 'mixed';
+    return;
+  }
+
+  map.set(key, {
+    providerId: entry.providerId,
+    providerName: entry.providerName,
+    dialect: entry.dialect,
+    requests: entry.requests,
+    inputTokens: entry.inputTokens,
+    outputTokens: entry.outputTokens,
+    totalTokens: entry.inputTokens + entry.outputTokens,
+    costUsd: entry.estimatedCostUsd,
+    costSource: 'unavailable',
+    cachedRequests: 0,
+    errorRequests: 0,
+  });
+}
 
 // =============================================================================
 // Budget Settings

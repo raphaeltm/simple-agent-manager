@@ -14,6 +14,7 @@ const mockCheckTokenBudget = vi.fn();
 const mockCheckMonthlyCostCap = vi.fn();
 const mockCheckAiUsageGate = vi.fn();
 const mockIncrementTokenUsage = vi.fn();
+const mockIncrementProviderUsage = vi.fn();
 const mockResolveForConsumer = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -32,7 +33,7 @@ vi.mock('../../src/services/ai-proxy-shared', () => ({
       this.name = 'AIProxyAuthError';
     }
   },
-  buildAIGatewayMetadata: () => '{"test":"metadata"}',
+  buildAIGatewayMetadata: (opts: unknown) => JSON.stringify(opts),
   buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
   buildAnthropicCountTokensUrl: () => 'https://gateway.example.com/anthropic/v1/messages/count_tokens',
   isAnthropicModel: (id: string) => id.startsWith('claude-'),
@@ -49,6 +50,7 @@ vi.mock('../../src/services/ai-token-budget', () => ({
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
   checkMonthlyCostCap: (...args: unknown[]) => mockCheckMonthlyCostCap(...args),
   incrementTokenUsage: (...args: unknown[]) => mockIncrementTokenUsage(...args),
+  incrementProviderUsage: (...args: unknown[]) => mockIncrementProviderUsage(...args),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -122,7 +124,7 @@ beforeEach(() => {
     }
     return Promise.resolve({
       consumer,
-      configuration: { settings: {} },
+      configuration: { settings: { providerId: 'custom-openai', providerName: 'Custom OpenAI' } },
       credential: {
         secret: {
           kind: 'openai-compatible',
@@ -192,7 +194,11 @@ describe('AI Proxy Passthrough Routes', () => {
       const headers = init.headers as Record<string, string>;
       expect(headers['x-api-key']).toBe('sk-ant-resolved-key');
       expect(headers['Authorization']).toBeUndefined();
-      expect(headers['cf-aig-metadata']).toBeDefined();
+      expect(JSON.parse(headers['cf-aig-metadata'])).toMatchObject({
+        providerId: 'anthropic-alt-example',
+        providerName: 'Anthropic Alt Example',
+        providerDialect: 'anthropic',
+      });
     });
 
     it('increments token usage after a successful Anthropic response', async () => {
@@ -225,6 +231,18 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(mockIncrementTokenUsage).toHaveBeenCalledWith(
         expect.anything(),
         'user1',
+        13,
+        8,
+        expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+      );
+      expect(mockIncrementProviderUsage).toHaveBeenCalledWith(
+        expect.anything(),
+        'user1',
+        expect.objectContaining({
+          providerId: 'anthropic-alt-example',
+          providerName: 'Anthropic Alt Example',
+          dialect: 'anthropic',
+        }),
         13,
         8,
         expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
@@ -335,7 +353,11 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(url).toBe('https://custom-openai.example/v1/chat/completions');
       const headers = init.headers as Record<string, string>;
       expect(headers['Authorization']).toBe('Bearer sk-resolved-openai');
-      expect(headers['cf-aig-metadata']).toBeDefined();
+      expect(JSON.parse(headers['cf-aig-metadata'])).toMatchObject({
+        providerId: 'custom-openai',
+        providerName: 'Custom OpenAI',
+        providerDialect: 'openai-compatible',
+      });
     });
 
     it('increments token usage and rejects the next over-budget request', async () => {

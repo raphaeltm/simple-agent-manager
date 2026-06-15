@@ -4,17 +4,25 @@
  * Tests user isolation, missing gateway config, gateway errors,
  * and response shape — pure logic with mocked dependencies.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AIGatewayLogEntry } from '../../src/services/ai-gateway-logs';
 
 // Mock the gateway log service
 const mockIterateGatewayLogs = vi.fn();
+const mockGetProviderUsage = vi.fn();
 vi.mock('../../src/services/ai-gateway-logs', async () => {
   const actual = await vi.importActual('../../src/services/ai-gateway-logs');
   return {
     ...actual,
     iterateGatewayLogs: (...args: unknown[]) => mockIterateGatewayLogs(...args),
+  };
+});
+vi.mock('../../src/services/ai-token-budget', async () => {
+  const actual = await vi.importActual('../../src/services/ai-token-budget');
+  return {
+    ...actual,
+    getProviderUsage: (...args: unknown[]) => mockGetProviderUsage(...args),
   };
 });
 
@@ -59,6 +67,10 @@ function makeEntry(overrides: Partial<AIGatewayLogEntry> = {}): AIGatewayLogEntr
 }
 
 describe('GET /api/usage/ai', () => {
+  beforeEach(() => {
+    mockIterateGatewayLogs.mockReset();
+    mockGetProviderUsage.mockResolvedValue([]);
+  });
   // ---------------------------------------------------------------------------
   // User Isolation
   // ---------------------------------------------------------------------------
@@ -125,6 +137,7 @@ describe('GET /api/usage/ai', () => {
       expect(data.totalRequests).toBe(0);
       expect(data.totalCostUsd).toBe(0);
       expect(data.byModel).toEqual([]);
+      expect(data.byProvider).toEqual([]);
       expect(data.byDay).toEqual([]);
       expect(data.period).toBe('current-month');
       expect(data.periodLabel).toBeTruthy();
@@ -201,6 +214,7 @@ describe('GET /api/usage/ai', () => {
       expect(data).toHaveProperty('cachedRequests');
       expect(data).toHaveProperty('errorRequests');
       expect(data).toHaveProperty('byModel');
+      expect(data).toHaveProperty('byProvider');
       expect(data).toHaveProperty('byDay');
       expect(data).toHaveProperty('period');
       expect(data).toHaveProperty('periodLabel');
@@ -237,6 +251,99 @@ describe('GET /api/usage/ai', () => {
 
       expect(data.byDay[0].date).toBe('2026-04-15');
       expect(data.byDay[1].date).toBe('2026-04-20');
+    });
+
+    it('rolls up Gateway and direct proxy usage by provider', async () => {
+      mockIterateGatewayLogs.mockImplementation(
+        async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
+          cb(makeEntry({
+            provider: 'openai',
+            model: 'gpt-4o',
+            cost: 0.03,
+            tokens_in: 300,
+            tokens_out: 100,
+            metadata: {
+              userId: 'user-test-1',
+              providerId: 'openai',
+              providerName: 'OpenAI',
+              providerDialect: 'openai-compatible',
+            },
+          }));
+          cb(makeEntry({
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            cost: 0.01,
+            tokens_in: 100,
+            tokens_out: 50,
+            metadata: {
+              userId: 'user-test-1',
+              providerId: 'openai',
+              providerName: 'OpenAI',
+              providerDialect: 'openai-compatible',
+            },
+          }));
+        },
+      );
+      mockGetProviderUsage.mockResolvedValueOnce([
+        {
+          providerId: 'groq',
+          providerName: 'Groq',
+          dialect: 'openai-compatible',
+          requests: 3,
+          inputTokens: 900,
+          outputTokens: 300,
+          estimatedCostUsd: 0,
+        },
+        {
+          providerId: 'deepseek-anthropic',
+          providerName: 'DeepSeek Anthropic API',
+          dialect: 'anthropic',
+          requests: 2,
+          inputTokens: 700,
+          outputTokens: 200,
+          estimatedCostUsd: 0,
+        },
+      ]);
+
+      const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
+      const data = await resp.json();
+
+      expect(data.totalRequests).toBe(7);
+      expect(data.totalInputTokens).toBe(2000);
+      expect(data.totalOutputTokens).toBe(650);
+      expect(data.totalCostUsd).toBeCloseTo(0.04);
+      expect(data.byProvider).toEqual([
+        expect.objectContaining({
+          providerId: 'openai',
+          providerName: 'OpenAI',
+          dialect: 'openai-compatible',
+          requests: 2,
+          inputTokens: 400,
+          outputTokens: 150,
+          costUsd: 0.04,
+          costSource: 'gateway',
+        }),
+        expect.objectContaining({
+          providerId: 'groq',
+          providerName: 'Groq',
+          dialect: 'openai-compatible',
+          requests: 3,
+          inputTokens: 900,
+          outputTokens: 300,
+          costUsd: 0,
+          costSource: 'unavailable',
+        }),
+        expect.objectContaining({
+          providerId: 'deepseek-anthropic',
+          providerName: 'DeepSeek Anthropic API',
+          dialect: 'anthropic',
+          requests: 2,
+          inputTokens: 700,
+          outputTokens: 200,
+          costUsd: 0,
+          costSource: 'unavailable',
+        }),
+      ]);
     });
   });
 });

@@ -10,6 +10,7 @@ import { log } from '../../src/lib/logger';
 import {
   aggregateByDay,
   aggregateByModel,
+  aggregateByProvider,
   type AIGatewayLogEntry,
   getGatewayPeriodBounds,
   getPeriodLabel,
@@ -18,6 +19,7 @@ import {
   resolveGatewayPagination,
   type UsageByDay,
   type UsageByModel,
+  type UsageByProvider,
 } from '../../src/services/ai-gateway-logs';
 
 // ---------------------------------------------------------------------------
@@ -295,6 +297,74 @@ describe('aggregateByModel', () => {
     expect(entry.outputTokens).toBe(0);
     expect(entry.totalTokens).toBe(0);
     expect(entry.costUsd).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aggregateByProvider
+// ---------------------------------------------------------------------------
+
+describe('aggregateByProvider', () => {
+  it('uses explicit provider metadata when present', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({
+      provider: 'openai',
+      metadata: {
+        userId: 'user-1',
+        providerId: 'groq',
+        providerName: 'Groq',
+        providerDialect: 'openai-compatible',
+      },
+    }));
+
+    const entry = map.get('groq:openai-compatible')!;
+    expect(entry).toMatchObject({
+      providerId: 'groq',
+      providerName: 'Groq',
+      dialect: 'openai-compatible',
+      requests: 1,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      costUsd: 0.01,
+      costSource: 'gateway',
+    });
+  });
+
+  it('accumulates multiple models for the same provider and dialect', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({
+      model: 'model-a',
+      cost: 0.02,
+      metadata: { userId: 'user-1', providerId: 'openai', providerName: 'OpenAI', providerDialect: 'openai-compatible' },
+    }));
+    aggregateByProvider(map, makeEntry({
+      model: 'model-b',
+      tokens_in: 200,
+      tokens_out: 75,
+      cost: 0.03,
+      cached: true,
+      success: false,
+      metadata: { userId: 'user-1', providerId: 'openai', providerName: 'OpenAI', providerDialect: 'openai-compatible' },
+    }));
+
+    const entry = map.get('openai:openai-compatible')!;
+    expect(entry.requests).toBe(2);
+    expect(entry.inputTokens).toBe(300);
+    expect(entry.outputTokens).toBe(125);
+    expect(entry.totalTokens).toBe(425);
+    expect(entry.costUsd).toBeCloseTo(0.05);
+    expect(entry.cachedRequests).toBe(1);
+    expect(entry.errorRequests).toBe(1);
+  });
+
+  it('falls back to the Gateway provider field when metadata is absent', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({ provider: 'workers-ai', metadata: null }));
+
+    const entry = map.get('workers-ai:unknown')!;
+    expect(entry.providerName).toBe('Workers Ai');
+    expect(entry.dialect).toBe('unknown');
   });
 });
 

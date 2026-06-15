@@ -21,6 +21,7 @@ import {
   type Dialect,
   HARNESS_CAPABILITIES,
   type HarnessCapability,
+  PROVIDER_PRESETS,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
@@ -37,6 +38,7 @@ import {
   buildAIGatewayMetadata,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
+import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
 import { checkAiUsageGate } from '../services/ai-token-budget';
 import {
   attachUpstreamTokenUsageAccounting,
@@ -101,6 +103,7 @@ interface ResolvedProxyUpstream {
   capability: HarnessCapability;
   apiKey: string;
   baseUrl: string;
+  provider: AiProviderUsageAttribution;
 }
 
 interface PreparedProxyRequest extends PassthroughAuthResult {
@@ -185,6 +188,62 @@ function resolvedBaseUrl(
     ?? (secret.kind === 'openai-compatible' ? stringSetting(secret.baseUrl) : null);
 }
 
+function normalizeBaseUrl(value: string): string {
+  const parsed = new URL(value);
+  parsed.hash = '';
+  parsed.search = '';
+  return trimTrailingSlashes(parsed.toString());
+}
+
+function slugFromHost(baseUrl: string): string {
+  const hostname = new URL(baseUrl).hostname.toLowerCase();
+  const host = hostname.startsWith('api.') ? hostname.slice(4) : hostname;
+  let slug = '';
+  let pendingSeparator = false;
+
+  for (let index = 0; index < host.length; index++) {
+    const code = host.charCodeAt(index);
+    const isAlphaNumeric = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+    if (isAlphaNumeric) {
+      if (pendingSeparator && slug.length > 0) slug += '-';
+      slug += host.charAt(index);
+      pendingSeparator = false;
+    } else if (slug.length > 0) {
+      pendingSeparator = true;
+    }
+  }
+
+  return slug || 'custom-provider';
+}
+
+function labelFromProviderId(providerId: string): string {
+  return providerId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Custom Provider';
+}
+
+function resolveProviderAttribution(input: {
+  baseUrl: string;
+  dialect: Dialect;
+  settings: Record<string, unknown>;
+}): AiProviderUsageAttribution {
+  const explicitProviderId = stringSetting(input.settings.providerId);
+  const explicitProviderName = stringSetting(input.settings.providerName);
+  const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
+  const preset = PROVIDER_PRESETS.find((candidate) => (
+    candidate.dialect === input.dialect
+    && normalizeBaseUrl(candidate.baseUrl) === normalizedBaseUrl
+  ));
+  const providerId = explicitProviderId ?? preset?.id ?? slugFromHost(input.baseUrl);
+  return {
+    providerId,
+    providerName: explicitProviderName ?? preset?.label ?? labelFromProviderId(providerId),
+    dialect: input.dialect,
+  };
+}
+
 function credentialApiKey(
   secret: ResolvedCredentialSecret,
 ): string | null {
@@ -217,8 +276,9 @@ async function resolveProxyUpstream(input: {
     );
     if (!resolved?.credential || resolved.source === 'platform-proxy') continue;
     const secret = resolved.credential.secret;
+    const settings = resolved.configuration?.settings ?? {};
     const apiKey = credentialApiKey(secret);
-    const baseUrl = resolvedBaseUrl(secret, resolved.configuration?.settings ?? {});
+    const baseUrl = resolvedBaseUrl(secret, settings);
     if (!apiKey || !baseUrl || !isHttpsUrl(baseUrl)) continue;
     return {
       agentType: capability.agentType,
@@ -226,6 +286,7 @@ async function resolveProxyUpstream(input: {
       capability,
       apiKey,
       baseUrl,
+      provider: resolveProviderAttribution({ baseUrl, dialect: input.dialect, settings }),
     };
   }
   return null;
@@ -413,6 +474,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId,
     stream: isStreaming,
     hasTools: Array.isArray(body.tools) && body.tools.length > 0,
+    providerId: upstream.provider.providerId,
+    providerName: upstream.provider.providerName,
+    providerDialect: upstream.provider.dialect,
   });
 
   const upstreamHeaders = addAnthropicRequestHeaders(buildJsonUpstreamHeaders(upstream, aigMetadata), c);
@@ -457,6 +521,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       userId,
       format: 'anthropic',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      provider: upstream.provider,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
@@ -486,6 +551,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   const { userId, workspaceId, projectId, chatSessionId, trialId, body, modelId, upstream } = prepared.value;
   const aigMetadata = buildAIGatewayMetadata({
     userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId, stream: false, hasTools: false,
+    providerId: upstream.provider.providerId,
+    providerName: upstream.provider.providerName,
+    providerDialect: upstream.provider.dialect,
   });
 
   const upstreamHeaders = addAnthropicRequestHeaders(buildJsonUpstreamHeaders(upstream, aigMetadata), c);
@@ -535,6 +603,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId,
     stream: !!body.stream,
     hasTools: !!body.tools,
+    providerId: upstream.provider.providerId,
+    providerName: upstream.provider.providerName,
+    providerDialect: upstream.provider.dialect,
   });
 
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'chat/completions');
@@ -581,6 +652,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       userId,
       format: 'openai',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      provider: upstream.provider,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });

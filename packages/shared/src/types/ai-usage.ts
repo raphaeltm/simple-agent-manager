@@ -7,6 +7,7 @@ export interface UserAiUsageResponse {
   cachedRequests: number;
   errorRequests: number;
   byModel: UserAiUsageByModel[];
+  byProvider: UserAiUsageByProvider[];
   byDay: UserAiUsageByDay[];
   period: string;
   periodLabel: string;
@@ -19,6 +20,20 @@ export interface UserAiUsageByModel {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  cachedRequests: number;
+  errorRequests: number;
+}
+
+export interface UserAiUsageByProvider {
+  providerId: string;
+  providerName: string;
+  dialect: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  costSource: 'gateway' | 'unavailable' | 'mixed';
   cachedRequests: number;
   errorRequests: number;
 }
