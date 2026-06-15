@@ -41,6 +41,12 @@ notificationRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const stub = getNotificationStub(c.env, userId);
 
   const cursor = c.req.query('cursor');
+  if (cursor !== undefined) {
+    const cursorValue = Number(cursor);
+    if (!Number.isInteger(cursorValue) || cursorValue <= 0) {
+      throw errors.badRequest('cursor must be a positive integer timestamp');
+    }
+  }
   const limitRaw = c.req.query('limit');
   const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
   if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {

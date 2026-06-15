@@ -24,7 +24,12 @@ import {
 import { DurableObject } from 'cloudflare:workers';
 
 import { runNotificationMigrations } from './notification-migrations';
-import { parseIdRow,parseNotificationPreferenceRow, parseNotificationRow } from './notification-row-schemas';
+import {
+  parseIdRow,
+  parseNotificationPreferenceRow,
+  parseNotificationRow,
+  toStoredPreferenceProjectId,
+} from './notification-row-schemas';
 import { parseCountCnt, parseEnabled } from './project-data/row-schemas';
 
 type Env = {
@@ -329,7 +334,7 @@ export class NotificationService extends DurableObject<Env> {
     enabled: boolean,
     projectId?: string | null
   ): Promise<void> {
-    const projId = projectId || '';
+    const projId = toStoredPreferenceProjectId(projectId);
     this.sql.exec(
       `INSERT INTO notification_preferences (user_id, notification_type, project_id, channel, enabled)
        VALUES (?, ?, ?, ?, ?)
@@ -349,15 +354,18 @@ export class NotificationService extends DurableObject<Env> {
     notificationType: NotificationType,
     projectId?: string | null
   ): Promise<boolean> {
-    // Check project-specific preference first
-    if (projectId) {
+    const storedProjectId = toStoredPreferenceProjectId(projectId);
+    const globalScope = toStoredPreferenceProjectId(null);
+
+    // Check project-specific preference first (only for a real, non-global scope)
+    if (storedProjectId !== globalScope) {
       const rows = this.sql
         .exec(
           `SELECT enabled FROM notification_preferences
            WHERE user_id = ? AND notification_type = ? AND project_id = ? AND channel = 'in_app'`,
           userId,
           notificationType,
-          projectId
+          storedProjectId
         )
         .toArray();
       if (rows.length > 0) {
@@ -369,9 +377,10 @@ export class NotificationService extends DurableObject<Env> {
     const typeRows = this.sql
       .exec(
         `SELECT enabled FROM notification_preferences
-         WHERE user_id = ? AND notification_type = ? AND project_id = '' AND channel = 'in_app'`,
+         WHERE user_id = ? AND notification_type = ? AND project_id = ? AND channel = 'in_app'`,
         userId,
-        notificationType
+        notificationType,
+        globalScope
       )
       .toArray();
     if (typeRows.length > 0) {
@@ -382,8 +391,9 @@ export class NotificationService extends DurableObject<Env> {
     const globalRows = this.sql
       .exec(
         `SELECT enabled FROM notification_preferences
-         WHERE user_id = ? AND notification_type = '*' AND project_id = '' AND channel = 'in_app'`,
-        userId
+         WHERE user_id = ? AND notification_type = '*' AND project_id = ? AND channel = 'in_app'`,
+        userId,
+        globalScope
       )
       .toArray();
     if (globalRows.length > 0) {

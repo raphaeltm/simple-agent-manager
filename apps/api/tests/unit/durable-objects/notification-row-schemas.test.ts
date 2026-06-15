@@ -126,9 +126,10 @@ describe('parseNotificationPreferenceRow', () => {
   });
 
   it('maps preference row with enabled=0', () => {
+    // Preference rows store the global sentinel as '' (NOT NULL column), never null.
     const result = parseNotificationPreferenceRow({
       notification_type: 'progress',
-      project_id: null,
+      project_id: '',
       channel: 'in_app',
       enabled: 0,
     });

@@ -1,10 +1,11 @@
+import { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-const NotificationTypeSchema = v.picklist([
-  'task_complete', 'needs_input', 'error', 'progress', 'session_ended', 'pr_created',
-]);
+// Derive validation schemas from the shared notification constants so the API
+// contract cannot drift from the canonical type/channel lists.
+const NotificationTypeSchema = v.picklist(NOTIFICATION_TYPES);
 
-const NotificationChannelSchema = v.picklist(['in_app']);
+const NotificationChannelSchema = v.picklist(NOTIFICATION_CHANNELS);
 
 export const UpdateNotificationPreferenceSchema = v.object({
   notificationType: v.union([NotificationTypeSchema, v.literal('*')]),

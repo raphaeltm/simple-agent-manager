@@ -62,9 +62,32 @@ export function parseNotificationRow(row: unknown): NotificationResponse {
 // Notification preference row
 // =============================================================================
 
+/**
+ * Storage sentinel for "no project" / global preferences.
+ *
+ * SQLite's UNIQUE constraint does NOT treat NULLs as equal, so a nullable
+ * `project_id` column would allow duplicate global preference rows for the same
+ * (user, type, channel). We store an empty string instead so the UNIQUE
+ * constraint dedupes global rows. This sentinel is an internal storage detail
+ * of the Notification DO and MUST NOT leak across the API boundary — callers
+ * use `null` for global scope. Convert at the storage edge with the helpers
+ * below.
+ */
+const STORED_PREFERENCE_GLOBAL_SENTINEL = '';
+
+/** Convert an API project scope (`null`/`undefined` = global) to its stored form. */
+export function toStoredPreferenceProjectId(projectId?: string | null): string {
+  return projectId ?? STORED_PREFERENCE_GLOBAL_SENTINEL;
+}
+
+/** Convert a stored `project_id` back to its API form (`''` sentinel → `null`). */
+export function fromStoredPreferenceProjectId(projectId: string): string | null {
+  return projectId === STORED_PREFERENCE_GLOBAL_SENTINEL ? null : projectId;
+}
+
 const NotificationPreferenceRowSchema = v.object({
   notification_type: v.string(),
-  project_id: v.nullable(v.string()),
+  project_id: v.string(),
   channel: v.string(),
   enabled: v.number(),
 });
@@ -78,7 +101,7 @@ export function parseNotificationPreferenceRow(row: unknown): {
   const r = parseRow(NotificationPreferenceRowSchema, row, 'notification_preference');
   return {
     notificationType: r.notification_type,
-    projectId: r.project_id || null,
+    projectId: fromStoredPreferenceProjectId(r.project_id),
     channel: r.channel,
     enabled: r.enabled === 1,
   };

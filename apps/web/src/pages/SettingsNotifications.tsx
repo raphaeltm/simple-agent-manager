@@ -35,17 +35,27 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
   },
 };
 
+/** A global preference is one not scoped to any project (`projectId === null`). */
+function isGlobalInAppPref(pref: NotificationPreference): boolean {
+  return pref.projectId === null && pref.channel === 'in_app';
+}
+
 export function SettingsNotifications() {
   const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const loadPreferences = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const result = await getNotificationPreferences();
       setPreferences(result.preferences);
     } catch (err) {
       console.error('Failed to load notification preferences:', err);
+      setLoadError('Could not load notification preferences. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -58,13 +68,13 @@ export function SettingsNotifications() {
   const isEnabled = (type: NotificationType): boolean => {
     // Check specific type preference
     const typePref = preferences.find(
-      (p) => p.notificationType === type && !p.projectId && p.channel === 'in_app'
+      (p) => p.notificationType === type && isGlobalInAppPref(p)
     );
     if (typePref) return typePref.enabled;
 
     // Check global default
     const globalPref = preferences.find(
-      (p) => p.notificationType === '*' && !p.projectId && p.channel === 'in_app'
+      (p) => p.notificationType === '*' && isGlobalInAppPref(p)
     );
     if (globalPref) return globalPref.enabled;
 
@@ -74,23 +84,26 @@ export function SettingsNotifications() {
 
   const handleToggle = async (type: NotificationType) => {
     const currentlyEnabled = isEnabled(type);
+    const nextEnabled = !currentlyEnabled;
     setSaving(type);
+    setSaveError(null);
 
     try {
       await updateNotificationPreference({
         notificationType: type,
         channel: 'in_app',
-        enabled: !currentlyEnabled,
+        enabled: nextEnabled,
       });
 
-      // Update local state
+      // Commit local state only after the server confirms the change, so the
+      // switch never shows a value the backend did not accept.
       setPreferences((prev) => {
         const existing = prev.findIndex(
-          (p) => p.notificationType === type && !p.projectId && p.channel === 'in_app'
+          (p) => p.notificationType === type && isGlobalInAppPref(p)
         );
         if (existing >= 0) {
           const updated = [...prev];
-          updated[existing] = { ...updated[existing]!, enabled: !currentlyEnabled };
+          updated[existing] = { ...updated[existing]!, enabled: nextEnabled };
           return updated;
         }
         return [
@@ -99,12 +112,15 @@ export function SettingsNotifications() {
             notificationType: type,
             projectId: null,
             channel: 'in_app' as const,
-            enabled: !currentlyEnabled,
+            enabled: nextEnabled,
           },
         ];
       });
     } catch (err) {
       console.error('Failed to update preference:', err);
+      setSaveError(
+        `Could not save the "${TYPE_LABELS[type].label}" setting. Please try again.`
+      );
     } finally {
       setSaving(null);
     }
@@ -121,8 +137,26 @@ export function SettingsNotifications() {
             Choose which notifications appear in your notification center.
           </p>
 
+          {saveError && (
+            <p role="alert" className="text-xs text-danger mb-3">
+              {saveError}
+            </p>
+          )}
+
           {loading ? (
-            <p className="text-xs text-fg-muted">Loading preferences...</p>
+            <p role="status" className="text-xs text-fg-muted">
+              Loading preferences...
+            </p>
+          ) : loadError ? (
+            <div role="alert" className="space-y-2">
+              <p className="text-xs text-danger">{loadError}</p>
+              <button
+                onClick={() => void loadPreferences()}
+                className="text-xs text-accent underline cursor-pointer border-none bg-transparent p-0"
+              >
+                Retry
+              </button>
+            </div>
           ) : (
             <div className="space-y-3">
               {NOTIFICATION_TYPES.map((type) => {
@@ -147,6 +181,7 @@ export function SettingsNotifications() {
                       } ${isSaving ? 'opacity-50' : ''}`}
                       role="switch"
                       aria-checked={enabled}
+                      aria-busy={isSaving}
                       aria-label={`${enabled ? 'Disable' : 'Enable'} ${config.label} notifications`}
                     >
                       <span
