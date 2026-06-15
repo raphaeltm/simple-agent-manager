@@ -110,6 +110,22 @@ describe('composable-credentials credential validation', () => {
     expect(routeFile).toContain('encrypt(');
     expect(routeFile).toContain('getCredentialEncryptionKey');
   });
+
+  it.each([
+    ['credential HTTPS validation', [
+      'validateOpenAICompatibleSecret(secret)',
+      'HTTPS baseUrl is required',
+      'openai-compatible credentials require apiKey, baseUrl, and dialect',
+      'openai-compatible credentials require dialect openai-compatible',
+    ]],
+    ['configuration dialect compatibility', [
+      'validateConfigurationSettings({ consumerKind, consumerTarget, settings })',
+      'resolveHarnessDialect(input.consumerTarget, dialect)',
+      'does not support provider dialect',
+    ]],
+  ])('%s', (_label, snippets) => {
+    for (const snippet of snippets) expect(routeFile).toContain(snippet);
+  });
 });
 
 describe('composable-credentials schema tables', () => {

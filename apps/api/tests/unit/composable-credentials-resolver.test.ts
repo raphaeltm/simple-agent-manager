@@ -141,6 +141,63 @@ describe('composable-credentials resolver', () => {
   });
 
   describe('platform default fallback', () => {
+    it('resolves active project, then active user, then platform, then null across scenarios', () => {
+      const projectCred = makeCredential({ id: 'cred-project', secret: { kind: 'api-key', apiKey: 'sk-project' } });
+      const userCred = makeCredential({ id: 'cred-user', secret: { kind: 'api-key', apiKey: 'sk-user' } });
+      const platformCred = makeCredential({
+        id: 'cred-platform',
+        ownerId: '__platform__',
+        secret: { kind: 'api-key', apiKey: 'sk-platform' },
+      });
+      const projectCfg = makeConfiguration({ id: 'cfg-project', credentialId: 'cred-project' });
+      const userCfg = makeConfiguration({ id: 'cfg-user', credentialId: 'cred-user' });
+      const projectAtt = makeAttachment({
+        id: 'att-project',
+        configurationId: 'cfg-project',
+        target: { scope: 'project', userId: 'user-1', projectId: 'proj-1' },
+      });
+      const userAtt = makeAttachment({
+        id: 'att-user',
+        configurationId: 'cfg-user',
+        target: { scope: 'user', userId: 'user-1' },
+      });
+
+      const activeProject = resolveEnvironment({
+        credentials: [projectCred, userCred],
+        configurations: [projectCfg, userCfg],
+        attachments: [projectAtt, userAtt],
+        platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
+      expect(activeProject?.source).toBe('project-attachment');
+      expect(activeProject?.credential?.id).toBe('cred-project');
+
+      const activeUser = resolveEnvironment({
+        credentials: [userCred],
+        configurations: [userCfg],
+        attachments: [userAtt],
+        platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
+      expect(activeUser?.source).toBe('user-attachment');
+      expect(activeUser?.credential?.id).toBe('cred-user');
+
+      const platform = resolveEnvironment({
+        credentials: [],
+        configurations: [],
+        attachments: [],
+        platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
+      expect(platform?.source).toBe('platform');
+      expect(platform?.credential?.id).toBe('cred-platform');
+
+      const none = resolveEnvironment({
+        credentials: [],
+        configurations: [],
+        attachments: [],
+        platform: {},
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
+      expect(none).toBeNull();
+    });
+
     it('falls through to platform default when no attachments match', () => {
       const platCred = makeCredential({ id: 'plat-1', ownerId: '__platform__' });
       const platDefault: CCPlatformDefault = {
