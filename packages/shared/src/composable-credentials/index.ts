@@ -28,6 +28,8 @@ export type {
   PlatformDefault as CCPlatformDefault,
   ResolutionContext as CCResolutionContext,
   ResolutionSource as CCResolutionSource,
+  ResolutionStatusResponse as CCResolutionStatusResponse,
   ResolvedEnvironment as CCResolvedEnvironment,
+  ConsumerResolutionStatus as CCConsumerResolutionStatus,
 } from './types';
 export { consumerKey } from './types';
