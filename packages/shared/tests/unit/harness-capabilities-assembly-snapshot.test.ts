@@ -4,7 +4,11 @@ import { AGENT_TYPE_VALUES } from '../../src/agents';
 import { agentAssembler } from '../../src/composable-credentials/assemblers';
 import type { CredentialSecret, ResolvedEnvironment } from '../../src/composable-credentials/types';
 
-function resolved(agentType: string, source: ResolvedEnvironment['source'], secret: CredentialSecret | null): ResolvedEnvironment {
+function resolved(
+  agentType: string,
+  source: ResolvedEnvironment['source'],
+  secret: CredentialSecret | null
+): ResolvedEnvironment {
   return {
     source,
     consumer: { kind: 'agent', agentType },

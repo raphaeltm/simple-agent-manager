@@ -21,10 +21,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  agentAssembler,
-  computeAssembler,
-} from '../../src/composable-credentials/assemblers';
+import { agentAssembler, computeAssembler } from '../../src/composable-credentials/assemblers';
 import { resolveEnvironment } from '../../src/composable-credentials/resolver';
 import type {
   CompositionSnapshot,
@@ -48,7 +45,7 @@ type OracleResult = 'project' | 'user' | 'platform' | 'proxy' | null;
 function agentOracle(
   rows: AgentRow[],
   platform: 'credential' | 'proxy' | 'none',
-  ctx: { hasProject: boolean },
+  ctx: { hasProject: boolean }
 ): OracleResult {
   if (ctx.hasProject) {
     const projectRow = rows.find((r) => r.scope === 'project');
@@ -100,7 +97,7 @@ function buildAgentSnapshot(
   rows: AgentRow[],
   platform: 'credential' | 'proxy' | 'none',
   userId: string,
-  projectId: string,
+  projectId: string
 ): CompositionSnapshot {
   const credentials: Credential[] = [];
   const configurations: CompositionSnapshot['configurations'] = [];
@@ -168,7 +165,7 @@ describe('E1 — agent resolution parity vs getDecryptedAgentKey', () => {
         for (const platform of platformStates) {
           const rows = [projRow, userRow].filter((r): r is AgentRow => r !== null);
           const label = `project=${describeRow(projRow)} user=${describeRow(
-            userRow,
+            userRow
           )} platform=${platform} ctxProject=${hasProject}`;
 
           it(label, () => {
@@ -178,7 +175,7 @@ describe('E1 — agent resolution parity vs getDecryptedAgentKey', () => {
             const resolved = resolveEnvironment(
               snapshot,
               { kind: 'agent', agentType: 'claude-code' },
-              { userId, projectId: hasProject ? projectId : undefined },
+              { userId, projectId: hasProject ? projectId : undefined }
             );
             expect(sourceToOracle(resolved?.source ?? null)).toBe(expected);
           });
@@ -202,7 +199,7 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
 
   function buildComputeSnapshot(
     userCred: { provider: string; active: boolean } | null,
-    platformCred: { provider: string } | null,
+    platformCred: { provider: string } | null
   ): CompositionSnapshot {
     idSeq = 0;
     const credentials: Credential[] = [];
@@ -254,7 +251,10 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
   }
 
   it('user active cloud credential wins', () => {
-    const snap = buildComputeSnapshot({ provider: 'hetzner', active: true }, { provider: 'hetzner' });
+    const snap = buildComputeSnapshot(
+      { provider: 'hetzner', active: true },
+      { provider: 'hetzner' }
+    );
     const resolved = resolveEnvironment(snap, { kind: 'compute', provider: 'hetzner' }, { userId });
     expect(resolved?.source).toBe('user-attachment');
     const cfg = computeAssembler.assemble(resolved!);
@@ -269,7 +269,10 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
   });
 
   it('inactive user credential falls through to platform (compute has no halt rule)', () => {
-    const snap = buildComputeSnapshot({ provider: 'hetzner', active: false }, { provider: 'hetzner' });
+    const snap = buildComputeSnapshot(
+      { provider: 'hetzner', active: false },
+      { provider: 'hetzner' }
+    );
     const resolved = resolveEnvironment(snap, { kind: 'compute', provider: 'hetzner' }, { userId });
     expect(resolved?.source).toBe('platform');
   });
@@ -388,7 +391,7 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
     const resolved = resolveEnvironment(
       snap,
       { kind: 'agent', agentType: 'openai-codex' },
-      { userId },
+      { userId }
     );
     expect(agentAssembler.assemble(resolved!).env).toEqual({ CODEX_AUTH_JSON: authBlob });
   });
@@ -404,7 +407,7 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
     const resolved = resolveEnvironment(
       snap,
       { kind: 'agent', agentType: 'claude-code' },
-      { userId },
+      { userId }
     );
     expect(resolved?.source).toBe('platform-proxy');
     expect(agentAssembler.assemble(resolved!).env).toEqual({
@@ -449,7 +452,7 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
     const resolved = resolveEnvironment(
       snap,
       { kind: 'agent', agentType: 'openai-codex' },
-      { userId },
+      { userId }
     );
     // The credential is NOT bound to an agentType — only the configuration is.
     expect(resolved?.credential?.id).toBe(cred.id);
