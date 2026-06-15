@@ -83,6 +83,9 @@ type TestEnv = {
 const app = new Hono<{ Bindings: TestEnv }>();
 app.route('/ai/proxy', aiProxyPassthroughRoutes);
 
+const ANTHROPIC_MESSAGES_PATH = '/ai/proxy/valid-token/anthropic/v1/messages';
+const OPENAI_CHAT_COMPLETIONS_PATH = '/ai/proxy/valid-token/openai/v1/chat/completions';
+
 function makeEnv(overrides: Partial<TestEnv> = {}): TestEnv {
   return {
     DATABASE: {},
@@ -105,6 +108,51 @@ function postJson(
     headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
   }, makeEnv(env));
+}
+
+function anthropicMessagesBody(model = 'claude-sonnet-4-20250514'): Record<string, unknown> {
+  return { model, messages: [{ role: 'user', content: 'hi' }] };
+}
+
+function openaiChatBody(model = 'gpt-4o'): Record<string, unknown> {
+  return { model, messages: [{ role: 'user', content: 'hi' }] };
+}
+
+function mockWorkspaceAuth(agentType: string): void {
+  mockVerifyAIProxyAuth.mockResolvedValueOnce({
+    userId: 'user1',
+    workspaceId: 'ws1',
+    projectId: 'proj1',
+    agentType,
+  });
+}
+
+function mockAllowedRateLimit(): void {
+  mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+}
+
+function mockSuccessfulFetch(body: string): void {
+  mockFetch.mockResolvedValueOnce(new Response(body, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  }));
+}
+
+function expectNoSAMMetadataHeaders(headers: Record<string, string>): void {
+  expect(headers['cf-aig-metadata']).toBeUndefined();
+  const serializedHeaders = JSON.stringify(headers);
+  expect(serializedHeaders).not.toContain('user1');
+  expect(serializedHeaders).not.toContain('ws1');
+  expect(serializedHeaders).not.toContain('proj1');
+}
+
+async function expectNoResponseOrLogLeakage(res: Response, leakedValues: string[]): Promise<void> {
+  const responseText = await res.text();
+  const logs = JSON.stringify(mockLogError.mock.calls);
+  for (const leakedValue of leakedValues) {
+    expect(responseText).not.toContain(leakedValue);
+    expect(logs).not.toContain(leakedValue);
+  }
 }
 
 beforeEach(() => {
@@ -154,25 +202,18 @@ describe('AI Proxy Passthrough Routes', () => {
     });
 
     it('returns 401 when no server-side credential resolves', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('claude-code');
+      mockAllowedRateLimit();
       mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
       mockResolveForConsumer.mockResolvedValueOnce(null);
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
       expect(res.status).toBe(401);
     });
 
     it('forwards resolved Anthropic credential without leaking SAM metadata headers', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('claude-code');
+      mockAllowedRateLimit();
       mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
       mockResolveForConsumer.mockResolvedValueOnce({
         consumer: { kind: 'agent', agentType: 'claude-code' },
@@ -182,15 +223,9 @@ describe('AI Proxy Passthrough Routes', () => {
         credential: { secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' } },
         source: 'project-attachment',
       });
-      mockFetch.mockResolvedValueOnce(new Response('{"id":"msg_1"}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }));
+      mockSuccessfulFetch('{"id":"msg_1"}');
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
       expect(res.status).toBe(200);
 
       expect(mockFetch).toHaveBeenCalledOnce();
@@ -199,10 +234,7 @@ describe('AI Proxy Passthrough Routes', () => {
       const headers = init.headers as Record<string, string>;
       expect(headers['x-api-key']).toBe('sk-ant-resolved-key');
       expect(headers['Authorization']).toBeUndefined();
-      expect(headers['cf-aig-metadata']).toBeUndefined();
-      expect(JSON.stringify(headers)).not.toContain('user1');
-      expect(JSON.stringify(headers)).not.toContain('ws1');
-      expect(JSON.stringify(headers)).not.toContain('proj1');
+      expectNoSAMMetadataHeaders(headers);
     });
 
     it('increments token usage after a successful Anthropic response', async () => {
@@ -317,27 +349,17 @@ describe('AI Proxy Passthrough Routes', () => {
     });
 
     it('allows non-Claude model names for Anthropic-dialect compatible providers', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
-      mockFetch.mockResolvedValueOnce(new Response('{"id":"msg_1"}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }));
+      mockWorkspaceAuth('claude-code');
+      mockAllowedRateLimit();
+      mockSuccessfulFetch('{"id":"msg_1"}');
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody('gpt-4o'));
       expect(res.status).toBe(200);
     });
 
     it('does not expose upstream Anthropic error bodies to clients or logs', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('claude-code');
+      mockAllowedRateLimit();
       mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
         error: 'invalid api key sk-leaked-upstream-diagnostic',
       }), {
@@ -345,10 +367,7 @@ describe('AI Proxy Passthrough Routes', () => {
         headers: { 'Content-Type': 'application/json' },
       }));
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
 
       expect(res.status).toBe(401);
       expect(await res.text()).not.toContain('sk-leaked-upstream-diagnostic');
@@ -356,34 +375,22 @@ describe('AI Proxy Passthrough Routes', () => {
     });
 
     it('does not log upstream Anthropic URL or credential from fetch failures', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('claude-code');
+      mockAllowedRateLimit();
       mockFetch.mockRejectedValueOnce(new TypeError(
         'connect failed for https://anthropic-alt.example/anthropic/v1/messages using sk-ant-resolved-key',
       ));
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
 
       expect(res.status).toBe(502);
-      const responseText = await res.text();
-      const logs = JSON.stringify(mockLogError.mock.calls);
-      expect(responseText).not.toContain('anthropic-alt.example');
-      expect(responseText).not.toContain('sk-ant-resolved-key');
-      expect(logs).not.toContain('anthropic-alt.example');
-      expect(logs).not.toContain('sk-ant-resolved-key');
-      expect(logs).toContain('TypeError');
+      await expectNoResponseOrLogLeakage(res, ['anthropic-alt.example', 'sk-ant-resolved-key']);
+      expect(JSON.stringify(mockLogError.mock.calls)).toContain('TypeError');
     });
 
     it('does not resolve an OpenAI-compatible credential for the Anthropic route', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('claude-code');
+      mockAllowedRateLimit();
       mockResolveForConsumer.mockResolvedValueOnce({
         consumer: { kind: 'agent', agentType: 'claude-code' },
         configuration: { settings: {} },
@@ -397,10 +404,7 @@ describe('AI Proxy Passthrough Routes', () => {
         source: 'user-attachment',
       });
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
 
       expect(res.status).toBe(401);
       expect(mockFetch).not.toHaveBeenCalled();
@@ -409,20 +413,12 @@ describe('AI Proxy Passthrough Routes', () => {
 
   describe('OpenAI passthrough', () => {
     it('forwards resolved OpenAI-compatible credential to its configured upstream', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'openai-codex',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('openai-codex');
+      mockAllowedRateLimit();
       mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
-      mockFetch.mockResolvedValueOnce(new Response('{"id":"chatcmpl-1"}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }));
+      mockSuccessfulFetch('{"id":"chatcmpl-1"}');
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/openai/v1/chat/completions',
-        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, openaiChatBody());
       expect(res.status).toBe(200);
 
       expect(mockFetch).toHaveBeenCalledOnce();
@@ -430,10 +426,7 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(url).toBe('https://custom-openai.example/v1/chat/completions');
       const headers = init.headers as Record<string, string>;
       expect(headers['Authorization']).toBe('Bearer sk-resolved-openai');
-      expect(headers['cf-aig-metadata']).toBeUndefined();
-      expect(JSON.stringify(headers)).not.toContain('user1');
-      expect(JSON.stringify(headers)).not.toContain('ws1');
-      expect(JSON.stringify(headers)).not.toContain('proj1');
+      expectNoSAMMetadataHeaders(headers);
     });
 
     it('increments token usage and rejects the next over-budget request', async () => {
@@ -486,25 +479,18 @@ describe('AI Proxy Passthrough Routes', () => {
     });
 
     it('returns 401 without a resolved server-side credential', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'openai-codex',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('openai-codex');
+      mockAllowedRateLimit();
       mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
       mockResolveForConsumer.mockResolvedValueOnce(null);
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/openai/v1/chat/completions',
-        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, openaiChatBody());
       expect(res.status).toBe(401);
     });
 
     it('does not expose upstream OpenAI-compatible error bodies to clients or logs', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'openai-codex',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('openai-codex');
+      mockAllowedRateLimit();
       mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
         error: { message: 'authorization failed for sk-leaked-openai-diagnostic' },
       }), {
@@ -512,10 +498,7 @@ describe('AI Proxy Passthrough Routes', () => {
         headers: { 'Content-Type': 'application/json' },
       }));
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/openai/v1/chat/completions',
-        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, openaiChatBody());
 
       expect(res.status).toBe(403);
       expect(await res.text()).not.toContain('sk-leaked-openai-diagnostic');
@@ -523,27 +506,17 @@ describe('AI Proxy Passthrough Routes', () => {
     });
 
     it('does not log upstream OpenAI-compatible URL or credential from fetch failures', async () => {
-      mockVerifyAIProxyAuth.mockResolvedValueOnce({
-        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'openai-codex',
-      });
-      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockWorkspaceAuth('openai-codex');
+      mockAllowedRateLimit();
       mockFetch.mockRejectedValueOnce(new TypeError(
         'connect failed for https://custom-openai.example/v1/chat/completions using sk-resolved-openai',
       ));
 
-      const res = await postJson(
-        '/ai/proxy/valid-token/openai/v1/chat/completions',
-        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
-      );
+      const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, openaiChatBody());
 
       expect(res.status).toBe(502);
-      const responseText = await res.text();
-      const logs = JSON.stringify(mockLogError.mock.calls);
-      expect(responseText).not.toContain('custom-openai.example');
-      expect(responseText).not.toContain('sk-resolved-openai');
-      expect(logs).not.toContain('custom-openai.example');
-      expect(logs).not.toContain('sk-resolved-openai');
-      expect(logs).toContain('TypeError');
+      await expectNoResponseOrLogLeakage(res, ['custom-openai.example', 'sk-resolved-openai']);
+      expect(JSON.stringify(mockLogError.mock.calls)).toContain('TypeError');
     });
   });
 });
