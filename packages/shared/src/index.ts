@@ -7,6 +7,9 @@ export * from './agents';
 // Harness Capabilities
 export * from './harness-capabilities';
 
+// Provider Presets
+export * from './provider-presets';
+
 // Model Catalog
 export * from './model-catalog';
 
