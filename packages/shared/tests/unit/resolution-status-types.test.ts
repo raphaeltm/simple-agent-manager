@@ -15,7 +15,6 @@ import type {
   ConsumerRef,
   ConsumerResolutionStatus,
   Credential,
-  ResolutionSource,
 } from '../../src/composable-credentials/types';
 import { consumerKey } from '../../src/composable-credentials/types';
 

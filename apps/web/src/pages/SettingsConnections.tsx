@@ -4,8 +4,8 @@
  */
 import { useState } from 'react';
 
-import { ConnectionsOverview } from '../components/ConnectionsOverview';
 import { ConnectFlow } from '../components/ConnectFlow';
+import { ConnectionsOverview } from '../components/ConnectionsOverview';
 
 export function SettingsConnections() {
   const [showConnect, setShowConnect] = useState(false);
@@ -34,7 +34,7 @@ export function SettingsConnections() {
         </h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
           How each AI agent and cloud provider resolves credentials for your account.
-          Click "Connect" to set up or change a credential.
+          Click &ldquo;Connect&rdquo; to set up or change a credential.
         </p>
       </div>
 

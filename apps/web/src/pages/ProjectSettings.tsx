@@ -9,8 +9,8 @@ import { Button, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ConnectionsOverview } from '../components/ConnectionsOverview';
 import { ConnectFlow } from '../components/ConnectFlow';
+import { ConnectionsOverview } from '../components/ConnectionsOverview';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';

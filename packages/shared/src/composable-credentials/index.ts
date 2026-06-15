@@ -22,6 +22,7 @@ export type {
   ConfigurationSettings as CCConfigurationSettings,
   ConsumerKind as CCConsumerKind,
   ConsumerRef as CCConsumerRef,
+  ConsumerResolutionStatus as CCConsumerResolutionStatus,
   Credential as CCCredential,
   CredentialKind as CCCredentialKind,
   CredentialSecret as CCCredentialSecret,
@@ -30,6 +31,5 @@ export type {
   ResolutionSource as CCResolutionSource,
   ResolutionStatusResponse as CCResolutionStatusResponse,
   ResolvedEnvironment as CCResolvedEnvironment,
-  ConsumerResolutionStatus as CCConsumerResolutionStatus,
 } from './types';
 export { consumerKey } from './types';
