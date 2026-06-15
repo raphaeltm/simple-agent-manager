@@ -146,8 +146,9 @@ export const computeAssembler: Assembler<ProviderConfig> = {
 
 /** Map an agent type to its primary API-key env var name. */
 function keyEnvVar(agentType: string, value: string): Record<string, string> {
-  const name = HARNESS_CAPABILITIES.find((capability) => capability.agentType === agentType)
-    ?.authEnvVar;
+  const name = HARNESS_CAPABILITIES.find(
+    (capability) => capability.agentType === agentType
+  )?.authEnvVar;
   if (!name) throw new Error(`no api-key env var mapping for agent ${agentType}`);
   return { [name]: value };
 }
@@ -163,16 +164,29 @@ const OAUTH_ENV: Record<string, string> = {
   'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
 };
 
-function proxyBaseUrl(
-  capability: HarnessCapability,
-  settings: Record<string, unknown>
-): string {
+function proxyBaseUrl(capability: HarnessCapability, settings: Record<string, unknown>): string {
   const base = stringSetting(settings.samProxyBaseUrl) ?? '/ai/proxy/{wstoken}';
-  return `${base.replace(/\/+$/, '')}/${capability.proxyRouteSegment.replace(/^\/+/, '')}`;
+  return `${trimTrailingSlashes(base)}/${trimLeadingSlashes(capability.proxyRouteSegment)}`;
 }
 
 function stringSetting(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
+function trimLeadingSlashes(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === 47) {
+    start++;
+  }
+  return value.slice(start);
 }
 
 /** Mirror of opencode's model-alias sanitization (slashes/spaces → dashes). */
