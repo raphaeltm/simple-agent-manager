@@ -196,11 +196,24 @@ function normalizeBaseUrl(value: string): string {
 }
 
 function slugFromHost(baseUrl: string): string {
-  const host = new URL(baseUrl).hostname.toLowerCase();
-  return host
-    .replace(/^api\./, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'custom-provider';
+  const hostname = new URL(baseUrl).hostname.toLowerCase();
+  const host = hostname.startsWith('api.') ? hostname.slice(4) : hostname;
+  let slug = '';
+  let pendingSeparator = false;
+
+  for (let index = 0; index < host.length; index++) {
+    const code = host.charCodeAt(index);
+    const isAlphaNumeric = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+    if (isAlphaNumeric) {
+      if (pendingSeparator && slug.length > 0) slug += '-';
+      slug += host.charAt(index);
+      pendingSeparator = false;
+    } else if (slug.length > 0) {
+      pendingSeparator = true;
+    }
+  }
+
+  return slug || 'custom-provider';
 }
 
 function labelFromProviderId(providerId: string): string {
