@@ -128,9 +128,9 @@ function ConnectionRow({
         <div className="text-sm font-medium text-fg-primary truncate">
           {consumer.consumerName}
         </div>
-        {consumer.maskedLabel && (
+        {consumer.credentialName && (
           <div className="text-xs text-fg-muted truncate font-mono">
-            {consumer.maskedLabel}
+            {consumer.credentialName}
           </div>
         )}
       </div>

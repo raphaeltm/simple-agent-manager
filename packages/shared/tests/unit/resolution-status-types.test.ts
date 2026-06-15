@@ -77,7 +77,7 @@ function resolveConsumerStatus(
       consumerKind,
       consumerName,
       source: resolved.source,
-      maskedLabel: resolved.credential?.name ?? null,
+      credentialName: resolved.credential?.name ?? null,
       halted: false,
     };
   }
@@ -100,7 +100,7 @@ function resolveConsumerStatus(
         consumerKind,
         consumerName,
         source: 'halted',
-        maskedLabel: null,
+        credentialName: null,
         halted: true,
       };
     }
@@ -111,7 +111,7 @@ function resolveConsumerStatus(
     consumerKind,
     consumerName,
     source: 'unresolved',
-    maskedLabel: null,
+    credentialName: null,
     halted: false,
   };
 }
@@ -142,7 +142,7 @@ describe('resolution-status mapping', () => {
     );
 
     expect(status.source).toBe('user-attachment');
-    expect(status.maskedLabel).toBe('My Anthropic Key');
+    expect(status.credentialName).toBe('My Anthropic Key');
     expect(status.halted).toBe(false);
   });
 
@@ -170,7 +170,7 @@ describe('resolution-status mapping', () => {
     );
 
     expect(status.source).toBe('project-attachment');
-    expect(status.maskedLabel).toBe('My Anthropic Key');
+    expect(status.credentialName).toBe('My Anthropic Key');
     expect(status.halted).toBe(false);
   });
 
@@ -203,7 +203,7 @@ describe('resolution-status mapping', () => {
 
     expect(status.source).toBe('halted');
     expect(status.halted).toBe(true);
-    expect(status.maskedLabel).toBeNull();
+    expect(status.credentialName).toBeNull();
   });
 
   it('returns platform source when platform default exists', () => {
@@ -227,7 +227,7 @@ describe('resolution-status mapping', () => {
     );
 
     expect(status.source).toBe('platform');
-    expect(status.maskedLabel).toBe('Platform Key');
+    expect(status.credentialName).toBe('Platform Key');
   });
 
   it('returns platform-proxy source for proxy platform default', () => {
@@ -250,7 +250,7 @@ describe('resolution-status mapping', () => {
     );
 
     expect(status.source).toBe('platform-proxy');
-    expect(status.maskedLabel).toBeNull();
+    expect(status.credentialName).toBeNull();
   });
 
   it('returns unresolved when no attachment or platform default', () => {
@@ -271,7 +271,7 @@ describe('resolution-status mapping', () => {
     );
 
     expect(status.source).toBe('unresolved');
-    expect(status.maskedLabel).toBeNull();
+    expect(status.credentialName).toBeNull();
     expect(status.halted).toBe(false);
   });
 
@@ -311,6 +311,6 @@ describe('resolution-status mapping', () => {
 
     expect(status.source).toBe('user-attachment');
     expect(status.consumerKind).toBe('compute');
-    expect(status.maskedLabel).toBe('Hetzner Token');
+    expect(status.credentialName).toBe('Hetzner Token');
   });
 });

@@ -179,8 +179,8 @@ export interface ConsumerResolutionStatus {
   consumerKind: ConsumerKind;
   consumerName: string;
   source: ResolutionSource | 'halted' | 'unresolved';
-  /** Masked credential label (e.g. "sk-ant-…3f9a"), null when platform/unresolved. */
-  maskedLabel: string | null;
+  /** User-chosen credential name, null when resolved from platform or unresolved. */
+  credentialName: string | null;
   /** Rule 28: inactive project override halts the cascade. */
   halted: boolean;
 }

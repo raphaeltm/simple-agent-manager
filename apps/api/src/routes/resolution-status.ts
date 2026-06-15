@@ -21,6 +21,7 @@ import {
   CREDENTIAL_PROVIDERS,
   resolveEnvironment,
 } from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -51,11 +52,30 @@ resolutionStatusRoute.get(
     const encryptionKey = getCredentialEncryptionKey(c.env);
     const projectId = c.req.query('projectId') || undefined;
 
-    // Ensure lazy backfill has run for this user
-    await lazyBackfillIfNeeded(db, userId);
+    // Validate project ownership if scoped to a project
+    if (projectId) {
+      const project = await db.query.projects.findFirst({
+        where: and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)),
+        columns: { id: true },
+      });
+      if (!project) {
+        return c.json({ error: 'NOT_FOUND', message: 'Project not found' }, 404);
+      }
+    }
 
-    // Build a single snapshot and resolve each consumer against it
-    const snapshot = await buildSnapshot(db, userId, encryptionKey, projectId);
+    // Build snapshot — per Rule 41, a DB/decryption failure returns a degraded
+    // response (empty consumers) rather than a 500.
+    let snapshot: CCCompositionSnapshot;
+    try {
+      await lazyBackfillIfNeeded(db, userId);
+      snapshot = await buildSnapshot(db, userId, encryptionKey, projectId);
+    } catch (err) {
+      log.error('resolution-status.snapshot-error', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ consumers: [] } satisfies CCResolutionStatusResponse);
+    }
 
     const consumers: CCConsumerResolutionStatus[] = [];
 
@@ -77,7 +97,7 @@ resolutionStatusRoute.get(
           consumerKind: 'agent',
           consumerName: agent.name,
           source: 'unresolved',
-          maskedLabel: null,
+          credentialName: null,
           halted: false,
         });
       }
@@ -101,7 +121,7 @@ resolutionStatusRoute.get(
           consumerKind: 'compute',
           consumerName: CLOUD_PROVIDER_NAMES[provider] ?? provider,
           source: 'unresolved',
-          maskedLabel: null,
+          credentialName: null,
           halted: false,
         });
       }
@@ -133,7 +153,7 @@ function resolveConsumerStatus(
       consumerKind,
       consumerName,
       source: resolved.source,
-      maskedLabel: resolved.credential?.name ?? null,
+      credentialName: resolved.credential?.name ?? null,
       halted: false,
     };
   }
@@ -145,7 +165,7 @@ function resolveConsumerStatus(
       consumerKind,
       consumerName,
       source: 'halted',
-      maskedLabel: null,
+      credentialName: null,
       halted: true,
     };
   }
@@ -155,7 +175,7 @@ function resolveConsumerStatus(
     consumerKind,
     consumerName,
     source: 'unresolved',
-    maskedLabel: null,
+    credentialName: null,
     halted: false,
   };
 }
