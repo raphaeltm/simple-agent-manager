@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_AI_PROXY_OPENAI_MODEL,
   getAgentDefinition,
+  HARNESS_CAPABILITIES,
   isValidAgentType,
   OPENCODE_PROVIDERS,
 } from '@simple-agent-manager/shared';
@@ -49,11 +50,54 @@ import { assertRepositoryAccess } from '../projects/_helpers';
 import { getWorkspaceRuntimeAssets, safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
-const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set([
-  'opencode',
-  'claude-code',
-  'openai-codex',
-]);
+const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
+  HARNESS_CAPABILITIES.filter(
+    (capability) => capability.proxyRouteSegment && capability.proxyProviderTag
+  ).map((capability) => capability.agentType)
+);
+
+function getProxyCapability(agentType: string) {
+  const capability = HARNESS_CAPABILITIES.find((entry) => entry.agentType === agentType);
+  if (!capability?.proxyRouteSegment || !capability.proxyProviderTag) return null;
+  return capability;
+}
+
+function buildPassthroughInferenceConfig(input: {
+  agentType: string;
+  baseDomain: string;
+  defaultModel: string;
+}) {
+  const capability = getProxyCapability(input.agentType);
+  if (!capability) return null;
+  return {
+    provider: capability.proxyProviderTag,
+    baseURL: `https://api.${input.baseDomain}/ai/proxy/{wstoken}/${capability.proxyRouteSegment}`,
+    model: input.defaultModel,
+    apiKeySource: 'user-credential' as const,
+  };
+}
+
+function buildPlatformInferenceConfig(input: {
+  agentType: string;
+  baseDomain: string;
+  defaultModel: string;
+}) {
+  const capability = getProxyCapability(input.agentType);
+  if (!capability) return null;
+  const provider =
+    capability.proxyProviderTag === 'anthropic-passthrough'
+      ? 'anthropic-proxy'
+      : capability.usesOpencodeConfig
+        ? 'openai-compatible'
+        : 'openai-proxy';
+  const routeSegment = capability.proxyRouteSegment === 'anthropic' ? 'anthropic' : 'v1';
+  return {
+    provider,
+    baseURL: `https://api.${input.baseDomain}/ai/${routeSegment}`,
+    model: input.defaultModel,
+    apiKeySource: 'callback-token' as const,
+  };
+}
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -376,31 +420,19 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     ) {
       // User has their own credential — use passthrough proxy routes.
       // URL-path auth: wstoken embedded in URL, user credential in auth headers.
-      let proxyBaseUrl: string;
-      let proxyProvider: string;
-      if (isClaudeCode) {
-        // Claude Code appends /v1/messages to ANTHROPIC_BASE_URL automatically.
-        // Passthrough route: /ai/proxy/{wstoken}/anthropic/v1/messages
-        // So base URL should be: /ai/proxy/{wstoken}/anthropic
-        // But wstoken is not known at this point — VM agent will substitute {wstoken}
-        // with the callback token at injection time.
-        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/anthropic`;
-        proxyProvider = 'anthropic-passthrough';
-      } else if (isCodex) {
-        // Codex appends /chat/completions to OPENAI_BASE_URL.
-        // Passthrough route: /ai/proxy/{wstoken}/openai/v1/chat/completions
-        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
-        proxyProvider = 'openai-passthrough';
-      } else {
-        // OpenCode: openai-compatible, same pattern as Codex
-        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
-        proxyProvider = 'openai-passthrough';
+      const inferenceConfig = buildPassthroughInferenceConfig({
+        agentType: body.agentType,
+        baseDomain,
+        defaultModel,
+      });
+      if (!inferenceConfig) {
+        throw errors.notFound('Agent credential');
       }
 
       log.info('agent_key.ai_proxy_passthrough', {
         workspaceId,
         userId: workspace.userId,
-        proxyBaseUrl,
+        proxyBaseUrl: inferenceConfig.baseURL,
         agentType: body.agentType,
       });
 
@@ -422,12 +454,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         apiKey: credentialData.credential,
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
-        inferenceConfig: {
-          provider: proxyProvider,
-          baseURL: proxyBaseUrl,
-          model: defaultModel,
-          apiKeySource: 'user-credential',
-        },
+        inferenceConfig,
       });
     }
 
@@ -456,23 +483,19 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
     // Activate platform proxy.
     // Auth via callback token in headers.
-    let proxyBaseUrl: string;
-    let proxyProvider: string;
-    if (isClaudeCode) {
-      proxyBaseUrl = `https://api.${baseDomain}/ai/anthropic`;
-      proxyProvider = 'anthropic-proxy';
-    } else if (isCodex) {
-      proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-      proxyProvider = 'openai-proxy';
-    } else {
-      proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-      proxyProvider = 'openai-compatible';
+    const inferenceConfig = buildPlatformInferenceConfig({
+      agentType: body.agentType,
+      baseDomain,
+      defaultModel,
+    });
+    if (!inferenceConfig) {
+      throw errors.notFound('Agent credential');
     }
 
     log.info('agent_key.ai_proxy_sam_provider', {
       workspaceId,
       userId: workspace.userId,
-      proxyBaseUrl,
+      proxyBaseUrl: inferenceConfig.baseURL,
       agentType: body.agentType,
     });
 
@@ -494,12 +517,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       apiKey: '__platform_proxy__',
       credentialKind: 'api-key' as const,
       credentialSource: 'platform' as const,
-      inferenceConfig: {
-        provider: proxyProvider,
-        baseURL: proxyBaseUrl,
-        model: defaultModel,
-        apiKeySource: 'callback-token',
-      },
+      inferenceConfig,
     });
   }
 

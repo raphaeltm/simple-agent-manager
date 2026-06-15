@@ -1,0 +1,173 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agent assembler harness capability snapshots > preserves current oauth and openai-compatible edge behavior 1`] = `
+{
+  "amp": {
+    "oauthError": "no oauth env var mapping for agent amp",
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "sk-custom",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://provider.example/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+  "claude-code": {
+    "oauth": {
+      "env": {
+        "CLAUDE_CODE_OAUTH_TOKEN": "oauth-claude-code",
+      },
+      "files": [],
+    },
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "sk-custom",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://provider.example/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+  "google-gemini": {
+    "oauthError": "no oauth env var mapping for agent google-gemini",
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "sk-custom",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://provider.example/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+  "mistral-vibe": {
+    "oauthError": "no oauth env var mapping for agent mistral-vibe",
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "sk-custom",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://provider.example/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+  "openai-codex": {
+    "oauthError": "no oauth env var mapping for agent openai-codex",
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "sk-custom",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://provider.example/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+  "opencode": {
+    "oauthError": "no oauth env var mapping for agent opencode",
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "sk-custom",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://provider.example/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+}
+`;

@@ -12,6 +12,7 @@
  * OPENCODE_API_KEY + opencode custom-provider config).
  */
 
+import { HARNESS_CAPABILITIES } from '../harness-capabilities';
 import type { ConsumerKind, ResolvedEnvironment } from './types';
 
 /** What an agent consumer needs injected into the workspace. */
@@ -122,7 +123,8 @@ export const computeAssembler: Assembler<ProviderConfig> = {
 
 /** Map an agent type to its primary API-key env var name. */
 function keyEnvVar(agentType: string, value: string): Record<string, string> {
-  const name = API_KEY_ENV[agentType];
+  const name = HARNESS_CAPABILITIES.find((capability) => capability.agentType === agentType)
+    ?.authEnvVar;
   if (!name) throw new Error(`no api-key env var mapping for agent ${agentType}`);
   return { [name]: value };
 }
@@ -133,15 +135,6 @@ function oauthEnvVar(agentType: string, value: string): Record<string, string> {
   if (!name) throw new Error(`no oauth env var mapping for agent ${agentType}`);
   return { [name]: value };
 }
-
-const API_KEY_ENV: Record<string, string> = {
-  'claude-code': 'ANTHROPIC_API_KEY',
-  'openai-codex': 'OPENAI_API_KEY',
-  'google-gemini': 'GEMINI_API_KEY',
-  'mistral-vibe': 'MISTRAL_API_KEY',
-  opencode: 'OPENCODE_API_KEY',
-  amp: 'AMP_API_KEY',
-};
 
 const OAUTH_ENV: Record<string, string> = {
   'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
