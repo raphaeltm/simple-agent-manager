@@ -117,7 +117,7 @@ describe('Project Credentials Routes', () => {
       const res = await app.request(
         '/api/projects/other-users-project/credentials',
         { method: 'GET' },
-        env,
+        env
       );
       expect(res.status).toBe(404);
     });
@@ -128,13 +128,9 @@ describe('Project Credentials Routes', () => {
       // credentials query: where() resolves with no rows (2nd where call)
       mockDB.where
         .mockReturnValueOnce(mockDB) // 1st call: ownership where() → chain continues into limit()
-        .mockResolvedValueOnce([]);  // 2nd call: credentials where() awaited directly
+        .mockResolvedValueOnce([]); // 2nd call: credentials where() awaited directly
 
-      const res = await app.request(
-        '/api/projects/proj-1/credentials',
-        { method: 'GET' },
-        env,
-      );
+      const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
       const json = (await res.json()) as { credentials: unknown[] };
       expect(json.credentials).toEqual([]);
@@ -142,26 +138,20 @@ describe('Project Credentials Routes', () => {
 
     it('returns project-scoped credentials with scope="project" and the requested projectId', async () => {
       mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      mockDB.where
-        .mockReturnValueOnce(mockDB)
-        .mockResolvedValueOnce([
-          {
-            agentType: 'claude-code',
-            provider: null,
-            credentialKind: 'api-key',
-            isActive: 1,
-            encryptedToken: 'enc',
-            iv: 'iv',
-            createdAt: 1000,
-            updatedAt: 1000,
-          },
-        ]);
+      mockDB.where.mockReturnValueOnce(mockDB).mockResolvedValueOnce([
+        {
+          agentType: 'claude-code',
+          provider: null,
+          credentialKind: 'api-key',
+          isActive: 1,
+          encryptedToken: 'enc',
+          iv: 'iv',
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
 
-      const res = await app.request(
-        '/api/projects/proj-1/credentials',
-        { method: 'GET' },
-        env,
-      );
+      const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
       const json = (await res.json()) as {
         credentials: Array<{
@@ -186,26 +176,20 @@ describe('Project Credentials Routes', () => {
 
     it('adds a "Pro/Max Subscription" label for claude-code OAuth tokens', async () => {
       mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      mockDB.where
-        .mockReturnValueOnce(mockDB)
-        .mockResolvedValueOnce([
-          {
-            agentType: 'claude-code',
-            provider: null,
-            credentialKind: 'oauth-token',
-            isActive: 1,
-            encryptedToken: 'enc',
-            iv: 'iv',
-            createdAt: 1000,
-            updatedAt: 1000,
-          },
-        ]);
+      mockDB.where.mockReturnValueOnce(mockDB).mockResolvedValueOnce([
+        {
+          agentType: 'claude-code',
+          provider: null,
+          credentialKind: 'oauth-token',
+          isActive: 1,
+          encryptedToken: 'enc',
+          iv: 'iv',
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
 
-      const res = await app.request(
-        '/api/projects/proj-1/credentials',
-        { method: 'GET' },
-        env,
-      );
+      const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
       const json = (await res.json()) as {
         credentials: Array<{ label?: string; credentialKind: string }>;
@@ -232,7 +216,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        env,
+        env
       );
       expect(res.status).toBe(404);
     });
@@ -255,7 +239,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        env,
+        env
       );
       expect(res.status).toBe(201);
       const json = (await res.json()) as { scope?: string; projectId?: string };
@@ -271,7 +255,9 @@ describe('Project Credentials Routes', () => {
       expect(insertSql).toContain("'agent-api-key'");
       // The prepared statement was bound with the correct positional values — userId, projectId, etc.
       expect(preparedStmt.bind).toHaveBeenCalled();
-      const bindArgs = preparedStmt.bind.mock.calls.find((c) => c.includes('test-user-id') && c.includes('proj-1'));
+      const bindArgs = preparedStmt.bind.mock.calls.find(
+        (c) => c.includes('test-user-id') && c.includes('proj-1')
+      );
       expect(bindArgs).toBeDefined();
     });
 
@@ -292,7 +278,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        env,
+        env
       );
       expect(res.status).toBe(201);
       // Atomic deactivate+upsert batch should have run.
@@ -300,7 +286,9 @@ describe('Project Credentials Routes', () => {
       // Deactivate SQL must scope to project_id = ? — NOT user-scoped (project_id IS NULL).
       // This is the key scope-guard: project autoActivate must not touch user-scoped rows.
       const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
-      const deactivateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials SET is_active = 0'));
+      const deactivateSql = prepareCalls.find((sql) =>
+        sql.includes('UPDATE credentials SET is_active = 0')
+      );
       expect(deactivateSql).toBeDefined();
       expect(deactivateSql).toContain('project_id = ?');
       expect(deactivateSql).not.toContain('project_id IS NULL');
@@ -350,7 +338,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        cappedEnv,
+        cappedEnv
       );
 
       expect(res.status).toBe(429);
@@ -368,21 +356,30 @@ describe('Project Credentials Routes', () => {
       const res = await app.request(
         '/api/projects/other/credentials/claude-code/api-key',
         { method: 'DELETE' },
-        env,
+        env
       );
       expect(res.status).toBe(404);
     });
 
-    it('returns 404 when project is owned but no credential matches', async () => {
+    it('disconnects a CC-only project override when no legacy row matches', async () => {
       mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       mockDB.returning.mockResolvedValueOnce([]);
+      database.prepare.mockClear();
 
       const res = await app.request(
-        '/api/projects/proj-1/credentials/claude-code/api-key',
+        '/api/projects/proj-1/credentials/openai-codex/oauth-token',
         { method: 'DELETE' },
-        env,
+        env
       );
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json).toEqual({ success: true, disconnected: true });
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find((sql) => sql.includes('DELETE FROM cc_attachments'));
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain('att.project_id = ?');
+      expect(disconnectSql).toContain('cred.kind = ?');
     });
 
     it('deletes only the project-scoped credential', async () => {
@@ -392,7 +389,7 @@ describe('Project Credentials Routes', () => {
       const res = await app.request(
         '/api/projects/proj-1/credentials/claude-code/api-key',
         { method: 'DELETE' },
-        env,
+        env
       );
       expect(res.status).toBe(200);
       expect(mockDB.delete).toHaveBeenCalled();
@@ -409,25 +406,24 @@ describe('getDecryptedAgentKey — resolution order', () => {
 
   it('returns project-scoped credential when projectId is provided and project row exists', async () => {
     // First query: project-scoped lookup returns an active credential
-    mockDB.limit
-      .mockResolvedValueOnce([
-        {
-          id: 'c1',
-          userId: 'u1',
-          projectId: 'p1',
-          encryptedToken: 'enc',
-          iv: 'iv',
-          credentialKind: 'api-key',
-          isActive: true,
-        },
-      ]);
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'c1',
+        userId: 'u1',
+        projectId: 'p1',
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'api-key',
+        isActive: true,
+      },
+    ]);
 
     const result = await getDecryptedAgentKey(
       mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).not.toBeNull();
@@ -439,25 +435,23 @@ describe('getDecryptedAgentKey — resolution order', () => {
   it('falls back to user-scoped credential when project has no override', async () => {
     // First query: project-scoped returns nothing
     // Second query: user-scoped (project_id IS NULL) returns a credential
-    mockDB.limit
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: 'c2',
-          userId: 'u1',
-          projectId: null,
-          encryptedToken: 'enc',
-          iv: 'iv',
-          credentialKind: 'oauth-token',
-        },
-      ]);
+    mockDB.limit.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'c2',
+        userId: 'u1',
+        projectId: null,
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'oauth-token',
+      },
+    ]);
 
     const result = await getDecryptedAgentKey(
       mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).not.toBeNull();
@@ -483,7 +477,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      null,
+      null
     );
 
     expect(result).not.toBeNull();
@@ -503,7 +497,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
     expect(result).toBeNull();
   });
@@ -542,7 +536,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).toBeNull();

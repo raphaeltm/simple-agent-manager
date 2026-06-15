@@ -32,7 +32,7 @@ beforeAll(async () => {
   for (const userId of [USER_A, USER_B]) {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
       .bind(userId, `gh-${userId}`, `${userId}@test.com`, `Test User ${userId}`)
       .run();
@@ -41,7 +41,7 @@ beforeAll(async () => {
   // Seed a project for Rule 28 tests
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO projects (id, user_id, name, created_at, updated_at)
-     VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(PROJECT_ID, USER_A, 'Test Project')
     .run();
@@ -66,7 +66,7 @@ async function seedLegacyCredential(opts: {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO credentials
      (id, user_id, project_id, credential_type, credential_kind, agent_type, provider, encrypted_token, iv, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(
       opts.id,
@@ -78,7 +78,7 @@ async function seedLegacyCredential(opts: {
       opts.provider,
       ciphertext,
       iv,
-      opts.isActive !== false ? 1 : 0,
+      opts.isActive !== false ? 1 : 0
     )
     .run();
 }
@@ -106,7 +106,7 @@ describe('lazy backfill wiring', () => {
 
   it('user has no cc_* data before backfill', async () => {
     const { results } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(userId)
       .all();
@@ -114,15 +114,14 @@ describe('lazy backfill wiring', () => {
   });
 
   it('lazyBackfillIfNeeded migrates legacy credentials to cc_* tables', async () => {
-    const { lazyBackfillIfNeeded } = await import(
-      '../../src/services/composable-credentials/lazy-backfill'
-    );
+    const { lazyBackfillIfNeeded } =
+      await import('../../src/services/composable-credentials/lazy-backfill');
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
     expect(didBackfill).toBe(true);
 
     // Verify cc_credentials was populated
     const { results: creds } = await env.DATABASE.prepare(
-      `SELECT id, kind FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id, kind FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(userId)
       .all();
@@ -130,7 +129,7 @@ describe('lazy backfill wiring', () => {
 
     // Verify cc_configurations was populated
     const { results: configs } = await env.DATABASE.prepare(
-      `SELECT id, consumer_kind, consumer_target FROM cc_configurations WHERE owner_id = ?`,
+      `SELECT id, consumer_kind, consumer_target FROM cc_configurations WHERE owner_id = ?`
     )
       .bind(userId)
       .all();
@@ -138,7 +137,7 @@ describe('lazy backfill wiring', () => {
 
     // Verify cc_attachments was populated
     const { results: atts } = await env.DATABASE.prepare(
-      `SELECT id, user_id FROM cc_attachments WHERE user_id = ?`,
+      `SELECT id, user_id FROM cc_attachments WHERE user_id = ?`
     )
       .bind(userId)
       .all();
@@ -146,9 +145,8 @@ describe('lazy backfill wiring', () => {
   });
 
   it('lazyBackfillIfNeeded returns false on second call (data exists)', async () => {
-    const { lazyBackfillIfNeeded } = await import(
-      '../../src/services/composable-credentials/lazy-backfill'
-    );
+    const { lazyBackfillIfNeeded } =
+      await import('../../src/services/composable-credentials/lazy-backfill');
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
     expect(didBackfill).toBe(false);
   });
@@ -162,9 +160,8 @@ describe('CC resolver behavioral parity with legacy', () => {
   const userId = USER_A;
 
   it('resolveForConsumer returns the agent credential after backfill', async () => {
-    const { resolveForConsumer } = await import(
-      '../../src/services/composable-credentials/resolve'
-    );
+    const { resolveForConsumer } =
+      await import('../../src/services/composable-credentials/resolve');
     const consumer = { kind: 'agent' as const, agentType: 'claude-code' };
     const resolved = await resolveForConsumer(db, userId, ENCRYPTION_KEY, consumer);
 
@@ -218,12 +215,7 @@ describe('getDecryptedAgentKey CC-primary wiring', () => {
 
   it('returns null for non-existent agent type', async () => {
     const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
-    const result = await getDecryptedAgentKey(
-      db,
-      USER_A,
-      'nonexistent-agent',
-      ENCRYPTION_KEY,
-    );
+    const result = await getDecryptedAgentKey(db, USER_A, 'nonexistent-agent', ENCRYPTION_KEY);
     expect(result).toBeNull();
   });
 });
@@ -250,9 +242,8 @@ describe('Rule 28: inactive project-scoped attachment halts resolution', () => {
     });
 
     // Run backfill for this user to get cc_* data with the inactive project row
-    const { runBackfill } = await import(
-      '../../src/services/composable-credentials/backfill-service'
-    );
+    const { runBackfill } =
+      await import('../../src/services/composable-credentials/backfill-service');
     await runBackfill(db, { userId });
   });
 
@@ -264,9 +255,165 @@ describe('Rule 28: inactive project-scoped attachment halts resolution', () => {
       userId,
       'claude-code',
       ENCRYPTION_KEY,
-      PROJECT_ID,
+      PROJECT_ID
     );
     // Rule 28: inactive project row blocks fallthrough to user-scoped
+    expect(result).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: normal replacement must update the composable credential graph, and
+// Codex auth-json rows must resolve to the VM agent's oauth-token/auth-file mode.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const USER_CODEX_REPLACE = `${TEST_PREFIX}-user-codex-replace`;
+const USER_CODEX_MANUAL = `${TEST_PREFIX}-user-codex-manual`;
+
+function codexAuthJson(accessToken: string): string {
+  return JSON.stringify({
+    OPENAI_API_KEY: null,
+    tokens: {
+      access_token: accessToken,
+      refresh_token: `refresh-${accessToken}`,
+      account_id: `acct-${accessToken}`,
+    },
+    last_refresh: '2026-06-15T00:00:00.000Z',
+  });
+}
+
+describe('Codex composable credential replacement and runtime mapping', () => {
+  beforeAll(async () => {
+    for (const uid of [USER_CODEX_REPLACE, USER_CODEX_MANUAL]) {
+      await env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+        .bind(uid, `gh-${uid}`, `${uid}@test.com`, `Test User ${uid}`)
+        .run();
+    }
+  });
+
+  it('replace creates a fresh auth-json credential and makes it the only active Codex attachment', async () => {
+    const { syncAgentCredentialToCC } =
+      await import('../../src/services/composable-credentials/agent-sync');
+    const oldAuthJson = codexAuthJson('old-access-token');
+    const newAuthJson = codexAuthJson('new-access-token');
+    const oldEncrypted = await encrypt(oldAuthJson, ENCRYPTION_KEY);
+    const newEncrypted = await encrypt(newAuthJson, ENCRYPTION_KEY);
+
+    await syncAgentCredentialToCC(env.DATABASE, {
+      userId: USER_CODEX_REPLACE,
+      agentType: 'openai-codex',
+      credentialKind: 'oauth-token',
+      encryptedToken: oldEncrypted.ciphertext,
+      iv: oldEncrypted.iv,
+      agentName: 'OpenAI Codex',
+      isActive: true,
+    });
+    await syncAgentCredentialToCC(env.DATABASE, {
+      userId: USER_CODEX_REPLACE,
+      agentType: 'openai-codex',
+      credentialKind: 'oauth-token',
+      encryptedToken: newEncrypted.ciphertext,
+      iv: newEncrypted.iv,
+      agentName: 'OpenAI Codex',
+      isActive: true,
+    });
+
+    const { results: attachments } = await env.DATABASE.prepare(
+      `SELECT id, configuration_id, is_active
+       FROM cc_attachments
+       WHERE user_id = ? AND project_id IS NULL
+         AND consumer_kind = 'agent' AND consumer_target = 'openai-codex'`
+    )
+      .bind(USER_CODEX_REPLACE)
+      .all();
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]?.is_active).toBe(1);
+
+    const { results: activeKinds } = await env.DATABASE.prepare(
+      `SELECT cred.kind
+       FROM cc_attachments att
+       JOIN cc_configurations cfg ON cfg.id = att.configuration_id
+       JOIN cc_credentials cred ON cred.id = cfg.credential_id
+       WHERE att.user_id = ? AND att.consumer_target = 'openai-codex'`
+    )
+      .bind(USER_CODEX_REPLACE)
+      .all();
+    expect(activeKinds[0]?.kind).toBe('auth-json');
+
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(
+      db,
+      USER_CODEX_REPLACE,
+      'openai-codex',
+      ENCRYPTION_KEY
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.credential).toBe(newAuthJson);
+    expect(result!.credentialKind).toBe('oauth-token');
+    expect(result!.credentialSource).toBe('user');
+  });
+
+  it('manual auth-json configuration resolves to oauth-token auth-file mode for Codex', async () => {
+    const authJson = codexAuthJson('manual-access-token');
+    const { ciphertext, iv } = await encrypt(authJson, ENCRYPTION_KEY);
+    const credentialId = `${TEST_PREFIX}-manual-codex-cred`;
+    const configurationId = `${TEST_PREFIX}-manual-codex-cfg`;
+    const attachmentId = `${TEST_PREFIX}-manual-codex-att`;
+
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, 'Manual Codex auth.json', 'auth-json', ?, ?, 1, datetime('now'), datetime('now'))`
+    )
+      .bind(credentialId, USER_CODEX_MANUAL, ciphertext, iv)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+       VALUES (?, ?, 'Codex default', 'agent', 'openai-codex', ?, NULL, 1, datetime('now'), datetime('now'))`
+    )
+      .bind(configurationId, USER_CODEX_MANUAL, credentialId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
+       VALUES (?, ?, 'agent', 'openai-codex', ?, NULL, 1, datetime('now'), datetime('now'))`
+    )
+      .bind(attachmentId, configurationId, USER_CODEX_MANUAL)
+      .run();
+
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(
+      db,
+      USER_CODEX_MANUAL,
+      'openai-codex',
+      ENCRYPTION_KEY
+    );
+
+    expect(result).toEqual({
+      credential: authJson,
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+  });
+
+  it('disconnect removes the active Codex attachment from resolution', async () => {
+    const { disconnectAgentCredentialFromCC } =
+      await import('../../src/services/composable-credentials/agent-sync');
+
+    await disconnectAgentCredentialFromCC(env.DATABASE, {
+      userId: USER_CODEX_REPLACE,
+      agentType: 'openai-codex',
+    });
+
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(
+      db,
+      USER_CODEX_REPLACE,
+      'openai-codex',
+      ENCRYPTION_KEY
+    );
     expect(result).toBeNull();
   });
 });
@@ -309,7 +456,7 @@ async function seedPlatformCredential(opts: {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO platform_credentials
      (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(
       opts.id,
@@ -321,7 +468,7 @@ async function seedPlatformCredential(opts: {
       ciphertext,
       iv,
       opts.isEnabled !== false ? 1 : 0,
-      opts.createdBy,
+      opts.createdBy
     )
     .run();
 }
@@ -338,7 +485,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     for (const uid of [USER_C, USER_D, USER_E, USER_F, USER_G, USER_H]) {
       await env.DATABASE.prepare(
         `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
       )
         .bind(uid, `gh-${uid}`, `${uid}@test.com`, `Test User ${uid}`)
         .run();
@@ -347,7 +494,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     // Project owned by USER_E for the Rule-28-via-platformOnly halt test
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO projects (id, user_id, name, created_at, updated_at)
-       VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, datetime('now'), datetime('now'))`
     )
       .bind(PROJECT_E, USER_E, 'Test Project E')
       .run();
@@ -393,9 +540,8 @@ describe('enabled platform default does not short-circuit user backfill', () => 
       provider: 'hetzner',
       secret: USER_F_HETZNER,
     });
-    const { runBackfill: runBackfillF } = await import(
-      '../../src/services/composable-credentials/backfill-service'
-    );
+    const { runBackfill: runBackfillF } =
+      await import('../../src/services/composable-credentials/backfill-service');
     await runBackfillF(db, { userId: USER_F });
 
     // User G owns their OWN hetzner cloud-provider cred (legacy only, empty cc_*) —
@@ -438,7 +584,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
 
   it('user has no cc_* data before resolution (legacy-only)', async () => {
     const { results } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(USER_C)
       .all();
@@ -460,7 +606,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
 
   it('lazy backfill populated cc_* from the legacy credential (oauth-token preserved)', async () => {
     const { results } = await env.DATABASE.prepare(
-      `SELECT id, kind FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id, kind FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(USER_C)
       .all();
@@ -487,20 +633,14 @@ describe('enabled platform default does not short-circuit user backfill', () => 
   it('Rule 28: inactive project attachment halts even through platformOnly backfill', async () => {
     // Sanity: USER_E starts with empty cc_* (lazy backfill is triggered by resolution)
     const { results: before } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(USER_E)
       .all();
     expect(before).toHaveLength(0);
 
     const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
-    const result = await getDecryptedAgentKey(
-      db,
-      USER_E,
-      'claude-code',
-      ENCRYPTION_KEY,
-      PROJECT_E,
-    );
+    const result = await getDecryptedAgentKey(db, USER_E, 'claude-code', ENCRYPTION_KEY, PROJECT_E);
 
     // Must NOT fall through to the platform default — the inactive project row halts.
     expect(result).toBeNull();
@@ -513,7 +653,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
   it('platformOnly with existing cc_* data (no backfill) returns the platform default', async () => {
     // Sanity: USER_F has cc_* data but no claude-code agent credential
     const { results: ccRows } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(USER_F)
       .all();
@@ -532,13 +672,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
   // legacy cred and re-resolves so the user's own credential wins (source 'user').
   it('compute path: user own cloud-provider wins over enabled platform default', async () => {
     const { createProviderForUser } = await import('../../src/services/provider-credentials');
-    const result = await createProviderForUser(
-      db,
-      USER_G,
-      ENCRYPTION_KEY,
-      env as never,
-      'hetzner',
-    );
+    const result = await createProviderForUser(db, USER_G, ENCRYPTION_KEY, env as never, 'hetzner');
 
     expect(result).not.toBeNull();
     expect(result!.providerName).toBe('hetzner');
@@ -548,13 +682,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
 
   it('compute path: user with NO cloud-provider cred falls through to platform default', async () => {
     const { createProviderForUser } = await import('../../src/services/provider-credentials');
-    const result = await createProviderForUser(
-      db,
-      USER_H,
-      ENCRYPTION_KEY,
-      env as never,
-      'hetzner',
-    );
+    const result = await createProviderForUser(db, USER_H, ENCRYPTION_KEY, env as never, 'hetzner');
 
     expect(result).not.toBeNull();
     expect(result!.providerName).toBe('hetzner');

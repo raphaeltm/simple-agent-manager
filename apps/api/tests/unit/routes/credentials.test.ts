@@ -53,11 +53,15 @@ function makeTestEnv(): Env {
 }
 
 function putAgentCredential(app: Hono<{ Bindings: Env }>, request: unknown) {
-  return app.request('/api/credentials/agent', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  }, makeTestEnv());
+  return app.request(
+    '/api/credentials/agent',
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    },
+    makeTestEnv()
+  );
 }
 
 function makeFakeSecret(prefix: string): string {
@@ -112,7 +116,10 @@ describe('Credentials Routes - OAuth Support', () => {
 
     it('returns 400 when provider validation rejects the API key', async () => {
       vi.mocked(globalThis.fetch).mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+        new Response(JSON.stringify({ error: 'bad key' }), {
+          status: 401,
+          statusText: 'Unauthorized',
+        })
       );
       const claudeApiKey = makeFakeSecret('sk-ant-api03');
 
@@ -299,7 +306,10 @@ describe('Credentials Routes - OAuth Support', () => {
 
     it('saves an API key and returns a warning when provider validation rejects it', async () => {
       vi.mocked(globalThis.fetch).mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+        new Response(JSON.stringify({ error: 'bad key' }), {
+          status: 401,
+          statusText: 'Unauthorized',
+        })
       );
 
       const res = await app.request(
@@ -394,11 +404,15 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: true,
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -475,6 +489,30 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(body.credentials[1].credentialKind).toBe('oauth-token');
       expect(body.credentials[1].isActive).toBe(true);
       expect(body.credentials[1].label).toBe('Pro/Max Subscription');
+    });
+  });
+
+  describe('DELETE /api/credentials/agent/:agentType/:credentialKind', () => {
+    it('disconnects a CC-only Codex auth.json source when no legacy row exists', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      const env = makeTestEnv();
+
+      const res = await app.request(
+        '/api/credentials/agent/openai-codex/oauth-token',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ success: true, disconnected: true });
+
+      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find((sql) => sql.includes('DELETE FROM cc_attachments'));
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain('consumer_target = ?');
+      expect(disconnectSql).toContain('cred.kind = ?');
     });
   });
 

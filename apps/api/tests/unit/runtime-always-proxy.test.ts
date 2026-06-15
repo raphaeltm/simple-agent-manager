@@ -10,7 +10,7 @@
  * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
  */
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // --- Mock dependencies ---
 
@@ -97,11 +97,21 @@ vi.mock('../../src/schemas', () => ({
   AgentCredentialSyncSchema: {},
   BootLogEntrySchema: {},
   MessageBatchSchema: {},
-  jsonValidator: () => async (c: { req: { json: () => Promise<unknown>; addValidatedData: (target: string, data: unknown) => void }}, next: () => Promise<void>) => {
-    const body = await c.req.json();
-    c.req.addValidatedData('json', body);
-    await next();
-  },
+  jsonValidator:
+    () =>
+    async (
+      c: {
+        req: {
+          json: () => Promise<unknown>;
+          addValidatedData: (target: string, data: unknown) => void;
+        };
+      },
+      next: () => Promise<void>
+    ) => {
+      const body = await c.req.json();
+      c.req.addValidatedData('json', body);
+      await next();
+    },
 }));
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
@@ -177,14 +187,18 @@ const mockEnv = {
 } as unknown as Env;
 
 function postAgentKey(agentType: string, envOverrides?: Partial<Env>) {
-  return testApp.request('/ws/test-workspace/agent-key', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer test-callback-token',
+  return testApp.request(
+    '/ws/test-workspace/agent-key',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-callback-token',
+      },
+      body: JSON.stringify({ agentType }),
     },
-    body: JSON.stringify({ agentType }),
-  }, envOverrides ? { ...mockEnv, ...envOverrides } as Env : mockEnv);
+    envOverrides ? ({ ...mockEnv, ...envOverrides } as Env) : mockEnv
+  );
 }
 
 function mockWorkspaceOnly() {
@@ -197,7 +211,7 @@ function mockWorkspaceOnly() {
 
 async function readAgentKey(agentType: string) {
   const res = await postAgentKey(agentType);
-  const json = await res.json() as {
+  const json = (await res.json()) as {
     apiKey?: string;
     credentialKind?: string;
     inferenceConfig?: unknown;
@@ -232,7 +246,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       credentialKind: string;
       inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
@@ -260,7 +274,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       credentialKind: string;
       inferenceConfig?: unknown;
@@ -282,7 +296,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       credentialSource: string;
       inferenceConfig: { provider: string; apiKeySource: string };
@@ -308,7 +322,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code', { AI_PROXY_ENABLED: 'false' } as Partial<Env>);
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       inferenceConfig?: unknown;
     };
@@ -358,7 +372,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('openai-codex');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
     };
@@ -366,5 +380,21 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.provider).toBe('openai-passthrough');
     expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
+  });
+
+  it('returns direct auth-file credential for Codex oauth-token without passthrough proxy', async () => {
+    mockWorkspaceOnly();
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: '{"tokens":{"access_token":"codex-access"}}',
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+
+    const { res, json } = await readAgentKey('openai-codex');
+
+    expect(res.status).toBe(200);
+    expect(json.apiKey).toBe('{"tokens":{"access_token":"codex-access"}}');
+    expect(json.credentialKind).toBe('oauth-token');
+    expect(json.inferenceConfig).toBeUndefined();
   });
 });

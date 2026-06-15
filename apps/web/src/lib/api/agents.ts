@@ -38,7 +38,7 @@ export async function toggleAgentCredential(
   agentType: string,
   credentialKind: string
 ): Promise<void> {
-  return request<void>(`/api/credentials/agent/${agentType}/toggle`, {
+  return request<void>(`/api/credentials/agent/${encodeURIComponent(agentType)}/toggle`, {
     method: 'POST',
     body: JSON.stringify({ credentialKind }),
   });
@@ -48,13 +48,16 @@ export async function deleteAgentCredentialByKind(
   agentType: string,
   credentialKind: string
 ): Promise<void> {
-  return request<void>(`/api/credentials/agent/${agentType}/${credentialKind}`, {
-    method: 'DELETE',
-  });
+  return request<void>(
+    `/api/credentials/agent/${encodeURIComponent(agentType)}/${encodeURIComponent(credentialKind)}`,
+    {
+      method: 'DELETE',
+    }
+  );
 }
 
 export async function deleteAgentCredential(agentType: string): Promise<void> {
-  return request<void>(`/api/credentials/agent/${agentType}`, {
+  return request<void>(`/api/credentials/agent/${encodeURIComponent(agentType)}`, {
     method: 'DELETE',
   });
 }
@@ -64,31 +67,34 @@ export async function deleteAgentCredential(agentType: string): Promise<void> {
 // =============================================================================
 
 export async function listProjectAgentCredentials(
-  projectId: string,
+  projectId: string
 ): Promise<{ credentials: AgentCredentialInfo[] }> {
   return request<{ credentials: AgentCredentialInfo[] }>(
-    `/api/projects/${projectId}/credentials`,
+    `/api/projects/${encodeURIComponent(projectId)}/credentials`
   );
 }
 
 export async function saveProjectAgentCredential(
   projectId: string,
-  data: SaveAgentCredentialRequest,
+  data: SaveAgentCredentialRequest
 ): Promise<AgentCredentialInfo> {
-  return request<AgentCredentialInfo>(`/api/projects/${projectId}/credentials`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
+  return request<AgentCredentialInfo>(
+    `/api/projects/${encodeURIComponent(projectId)}/credentials`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }
+  );
 }
 
 export async function deleteProjectAgentCredential(
   projectId: string,
   agentType: string,
-  credentialKind: string,
+  credentialKind: string
 ): Promise<void> {
   return request<void>(
-    `/api/projects/${projectId}/credentials/${agentType}/${credentialKind}`,
-    { method: 'DELETE' },
+    `/api/projects/${encodeURIComponent(projectId)}/credentials/${encodeURIComponent(agentType)}/${encodeURIComponent(credentialKind)}`,
+    { method: 'DELETE' }
   );
 }
 
@@ -151,16 +157,14 @@ export async function deleteAgentSettings(agentType: string): Promise<void> {
 // Agent Profiles
 // =============================================================================
 
-export async function listAgentProfiles(
-  projectId: string,
-): Promise<AgentProfile[]> {
+export async function listAgentProfiles(projectId: string): Promise<AgentProfile[]> {
   const res = await request<{ items: AgentProfile[] }>(`/api/projects/${projectId}/agent-profiles`);
   return res.items ?? [];
 }
 
 export async function createAgentProfile(
   projectId: string,
-  data: CreateAgentProfileRequest,
+  data: CreateAgentProfileRequest
 ): Promise<AgentProfile> {
   return request<AgentProfile>(`/api/projects/${projectId}/agent-profiles`, {
     method: 'POST',
@@ -171,7 +175,7 @@ export async function createAgentProfile(
 export async function updateAgentProfile(
   projectId: string,
   profileId: string,
-  data: UpdateAgentProfileRequest,
+  data: UpdateAgentProfileRequest
 ): Promise<AgentProfile> {
   return request<AgentProfile>(`/api/projects/${projectId}/agent-profiles/${profileId}`, {
     method: 'PUT',
@@ -179,10 +183,7 @@ export async function updateAgentProfile(
   });
 }
 
-export async function deleteAgentProfile(
-  projectId: string,
-  profileId: string,
-): Promise<void> {
+export async function deleteAgentProfile(projectId: string, profileId: string): Promise<void> {
   await request(`/api/projects/${projectId}/agent-profiles/${profileId}`, {
     method: 'DELETE',
   });
@@ -194,14 +195,14 @@ export async function deleteAgentProfile(
 
 export async function getProfileRuntimeConfig(
   projectId: string,
-  profileId: string,
+  profileId: string
 ): Promise<ProjectRuntimeConfigResponse> {
   const [envRes, filesRes] = await Promise.all([
     request<{ envVars: ProjectRuntimeConfigResponse['envVars'] }>(
-      `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars`,
+      `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars`
     ),
     request<{ files: ProjectRuntimeConfigResponse['files'] }>(
-      `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files`,
+      `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files`
     ),
   ]);
   return { envVars: envRes.envVars, files: filesRes.files };
@@ -210,45 +211,45 @@ export async function getProfileRuntimeConfig(
 export async function upsertProfileRuntimeEnvVar(
   projectId: string,
   profileId: string,
-  data: UpsertProjectRuntimeEnvVarRequest,
+  data: UpsertProjectRuntimeEnvVarRequest
 ): Promise<ProjectRuntimeConfigResponse> {
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars`,
-    { method: 'POST', body: JSON.stringify(data) },
+    { method: 'POST', body: JSON.stringify(data) }
   );
 }
 
 export async function deleteProfileRuntimeEnvVar(
   projectId: string,
   profileId: string,
-  envKey: string,
+  envKey: string
 ): Promise<ProjectRuntimeConfigResponse> {
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/env-vars/${encodeURIComponent(envKey)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }
   );
 }
 
 export async function upsertProfileRuntimeFile(
   projectId: string,
   profileId: string,
-  data: UpsertProjectRuntimeFileRequest,
+  data: UpsertProjectRuntimeFileRequest
 ): Promise<ProjectRuntimeConfigResponse> {
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files`,
-    { method: 'POST', body: JSON.stringify(data) },
+    { method: 'POST', body: JSON.stringify(data) }
   );
 }
 
 export async function deleteProfileRuntimeFile(
   projectId: string,
   profileId: string,
-  path: string,
+  path: string
 ): Promise<ProjectRuntimeConfigResponse> {
   const params = new URLSearchParams({ path });
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/agent-profiles/${profileId}/runtime/files?${params.toString()}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }
   );
 }
 
@@ -261,7 +262,10 @@ export async function listSkills(projectId: string): Promise<AgentSkill[]> {
   return res.items;
 }
 
-export async function createSkill(projectId: string, data: CreateSkillRequest): Promise<AgentSkill> {
+export async function createSkill(
+  projectId: string,
+  data: CreateSkillRequest
+): Promise<AgentSkill> {
   return request<AgentSkill>(`/api/projects/${projectId}/skills`, {
     method: 'POST',
     body: JSON.stringify(data),
@@ -271,7 +275,7 @@ export async function createSkill(projectId: string, data: CreateSkillRequest): 
 export async function updateSkill(
   projectId: string,
   skillId: string,
-  data: UpdateSkillRequest,
+  data: UpdateSkillRequest
 ): Promise<AgentSkill> {
   return request<AgentSkill>(`/api/projects/${projectId}/skills/${skillId}`, {
     method: 'PATCH',
@@ -285,14 +289,14 @@ export async function deleteSkill(projectId: string, skillId: string): Promise<v
 
 export async function getSkillRuntimeConfig(
   projectId: string,
-  skillId: string,
+  skillId: string
 ): Promise<ProjectRuntimeConfigResponse> {
   const [envRes, filesRes] = await Promise.all([
     request<{ envVars: ProjectRuntimeConfigResponse['envVars'] }>(
-      `/api/projects/${projectId}/skills/${skillId}/runtime/env-vars`,
+      `/api/projects/${projectId}/skills/${skillId}/runtime/env-vars`
     ),
     request<{ files: ProjectRuntimeConfigResponse['files'] }>(
-      `/api/projects/${projectId}/skills/${skillId}/runtime/files`,
+      `/api/projects/${projectId}/skills/${skillId}/runtime/files`
     ),
   ]);
   return { envVars: envRes.envVars, files: filesRes.files };
@@ -301,44 +305,44 @@ export async function getSkillRuntimeConfig(
 export async function upsertSkillRuntimeEnvVar(
   projectId: string,
   skillId: string,
-  data: UpsertProjectRuntimeEnvVarRequest,
+  data: UpsertProjectRuntimeEnvVarRequest
 ): Promise<ProjectRuntimeConfigResponse> {
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/skills/${skillId}/runtime/env-vars`,
-    { method: 'POST', body: JSON.stringify(data) },
+    { method: 'POST', body: JSON.stringify(data) }
   );
 }
 
 export async function deleteSkillRuntimeEnvVar(
   projectId: string,
   skillId: string,
-  envKey: string,
+  envKey: string
 ): Promise<ProjectRuntimeConfigResponse> {
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/skills/${skillId}/runtime/env-vars/${encodeURIComponent(envKey)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }
   );
 }
 
 export async function upsertSkillRuntimeFile(
   projectId: string,
   skillId: string,
-  data: UpsertProjectRuntimeFileRequest,
+  data: UpsertProjectRuntimeFileRequest
 ): Promise<ProjectRuntimeConfigResponse> {
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/skills/${skillId}/runtime/files`,
-    { method: 'POST', body: JSON.stringify(data) },
+    { method: 'POST', body: JSON.stringify(data) }
   );
 }
 
 export async function deleteSkillRuntimeFile(
   projectId: string,
   skillId: string,
-  path: string,
+  path: string
 ): Promise<ProjectRuntimeConfigResponse> {
   const params = new URLSearchParams({ path });
   return request<ProjectRuntimeConfigResponse>(
     `/api/projects/${projectId}/skills/${skillId}/runtime/files?${params.toString()}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }
   );
 }

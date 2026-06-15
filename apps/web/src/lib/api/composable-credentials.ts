@@ -2,6 +2,10 @@ import type { CCResolutionStatusResponse } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
+function pathId(id: string): string {
+  return encodeURIComponent(id);
+}
+
 // Resolution status (read-only view of how each consumer currently resolves)
 export async function getResolutionStatus(projectId?: string): Promise<CCResolutionStatusResponse> {
   const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
@@ -60,21 +64,23 @@ export async function createCCCredential(body: {
 
 export async function updateCCCredential(
   id: string,
-  body: { name?: string; isActive?: boolean },
+  body: { name?: string; isActive?: boolean }
 ): Promise<{ success: boolean }> {
-  return request(`/api/cc/credentials/${id}`, {
+  return request(`/api/cc/credentials/${pathId(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
 
 export async function deleteCCCredential(id: string): Promise<{ success: boolean }> {
-  return request(`/api/cc/credentials/${id}`, { method: 'DELETE' });
+  return request(`/api/cc/credentials/${pathId(id)}`, { method: 'DELETE' });
 }
 
 // Configurations
 export async function listCCConfigurations(): Promise<CCConfigurationListItem[]> {
-  const data = await request<{ configurations: CCConfigurationListItem[] }>('/api/cc/configurations');
+  const data = await request<{ configurations: CCConfigurationListItem[] }>(
+    '/api/cc/configurations'
+  );
   return data.configurations;
 }
 
@@ -93,16 +99,21 @@ export async function createCCConfiguration(body: {
 
 export async function updateCCConfiguration(
   id: string,
-  body: { name?: string; credentialId?: string | null; settings?: Record<string, unknown>; isActive?: boolean },
+  body: {
+    name?: string;
+    credentialId?: string | null;
+    settings?: Record<string, unknown>;
+    isActive?: boolean;
+  }
 ): Promise<{ success: boolean }> {
-  return request(`/api/cc/configurations/${id}`, {
+  return request(`/api/cc/configurations/${pathId(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
 
 export async function deleteCCConfiguration(id: string): Promise<{ success: boolean }> {
-  return request(`/api/cc/configurations/${id}`, { method: 'DELETE' });
+  return request(`/api/cc/configurations/${pathId(id)}`, { method: 'DELETE' });
 }
 
 // Attachments
@@ -123,14 +134,14 @@ export async function createCCAttachment(body: {
 
 export async function updateCCAttachment(
   id: string,
-  body: { isActive?: boolean },
+  body: { isActive?: boolean }
 ): Promise<{ success: boolean }> {
-  return request(`/api/cc/attachments/${id}`, {
+  return request(`/api/cc/attachments/${pathId(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
 
 export async function deleteCCAttachment(id: string): Promise<{ success: boolean }> {
-  return request(`/api/cc/attachments/${id}`, { method: 'DELETE' });
+  return request(`/api/cc/attachments/${pathId(id)}`, { method: 'DELETE' });
 }

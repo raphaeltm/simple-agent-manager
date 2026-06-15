@@ -63,9 +63,7 @@ export type ConsumerRef =
 
 /** Stable string key for a consumer ref (used to index attachments/platform defaults). */
 export function consumerKey(consumer: ConsumerRef): string {
-  return consumer.kind === 'agent'
-    ? `agent:${consumer.agentType}`
-    : `compute:${consumer.provider}`;
+  return consumer.kind === 'agent' ? `agent:${consumer.agentType}` : `compute:${consumer.provider}`;
 }
 
 // =============================================================================
@@ -127,9 +125,7 @@ export interface Attachment {
  *  - agents: a platform credential, OR the SAM proxy sentinel
  *  - compute: a platform cloud credential
  */
-export type PlatformDefault =
-  | { mode: 'credential'; credential: Credential }
-  | { mode: 'proxy' };
+export type PlatformDefault = { mode: 'credential'; credential: Credential } | { mode: 'proxy' };
 
 // =============================================================================
 // Composition snapshot — the queryable boundary the real DB implements
@@ -181,6 +177,24 @@ export interface ConsumerResolutionStatus {
   source: ResolutionSource | 'halted' | 'unresolved';
   /** User-chosen credential name, null when resolved from platform or unresolved. */
   credentialName: string | null;
+  /** User-chosen configuration name, null when not resolved through a configuration. */
+  configurationName?: string | null;
+  /** The resolved credential kind, when a tenant or platform credential is visible. */
+  credentialKind?: CredentialKind | null;
+  /** Stable diagnostic for broken rows that could not materialize. */
+  statusReason?:
+    | 'configuration-missing'
+    | 'configuration-inactive'
+    | 'credential-missing'
+    | 'credential-inactive'
+    | 'invalid-auth-json'
+    | null;
+  /** Format validation for credential types the UI can safely inspect after decryption. */
+  validation?: {
+    status: 'valid' | 'warning' | 'invalid' | 'unknown';
+    message: string | null;
+    warnings?: string[];
+  };
   /** Rule 28: inactive project override halts the cascade. */
   halted: boolean;
 }

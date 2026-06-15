@@ -6,7 +6,7 @@
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { workspacesRoutes } from '../../../src/routes/workspaces';
@@ -20,7 +20,9 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ userId: 'test-user-id' }),
 }));
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({
@@ -34,6 +36,13 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   let app: Hono<{ Bindings: Env }>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockDB: any;
+  let d1PreparedStmt: {
+    bind: ReturnType<typeof vi.fn>;
+    run: ReturnType<typeof vi.fn>;
+  };
+  let d1Database: {
+    prepare: ReturnType<typeof vi.fn>;
+  };
 
   const mockEnv = {
     DATABASE: {} as D1Database,
@@ -50,10 +59,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   };
 
   /** Helper: issue a POST to the endpoint with proper env bindings. */
-  function postSync(
-    body: unknown,
-    headers: Record<string, string> = {},
-  ): Promise<Response> {
+  function postSync(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
     return app.request(
       '/api/workspaces/ws-123/agent-credential-sync',
       {
@@ -65,12 +71,20 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         },
         body: JSON.stringify(body),
       },
-      mockEnv,
+      mockEnv
     );
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
+    d1PreparedStmt = {
+      bind: vi.fn().mockReturnThis(),
+      run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+    };
+    d1Database = {
+      prepare: vi.fn().mockReturnValue(d1PreparedStmt),
+    };
+    (mockEnv as unknown as { DATABASE: typeof d1Database }).DATABASE = d1Database;
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -79,13 +93,10 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         error?: string;
         message?: string;
       };
-      if (
-        typeof appError.statusCode === 'number' &&
-        typeof appError.error === 'string'
-      ) {
+      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500,
+          appError.statusCode as 400 | 401 | 403 | 404 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -128,7 +139,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validBody),
       },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(401);
   });
@@ -144,7 +155,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         },
         body: 'not-json',
       },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -193,12 +204,10 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   it('returns updated:false when credential is unchanged', async () => {
     setupDBMocks(
       { userId: 'user-1', nodeId: 'node-1' },
-      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true },
+      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
     );
     // decrypt returns the same value as the submitted credential
-    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      validBody.credential,
-    );
+    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(validBody.credential);
 
     const res = await postSync(validBody);
     expect(res.status).toBe(200);
@@ -210,12 +219,10 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   it('re-encrypts and returns updated:true when credential has changed', async () => {
     setupDBMocks(
       { userId: 'user-1', nodeId: 'node-1' },
-      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true },
+      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
     );
     // decrypt returns a different value than the submitted credential
-    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      'old-different-value',
-    );
+    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce('old-different-value');
 
     const res = await postSync(validBody);
     expect(res.status).toBe(200);
@@ -230,14 +237,18 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       expect.objectContaining({
         encryptedToken: 'new-encrypted',
         iv: 'new-iv',
-      }),
+      })
     );
+    expect(d1Database.prepare).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE cc_credentials')
+    );
+    expect(d1PreparedStmt.run).toHaveBeenCalled();
   });
 
   it('does not fall back to user-scoped credential when a project-scoped row exists but is inactive', async () => {
     setupDBMocks(
       { userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' },
-      { id: 'proj-cred-1', encryptedToken: 'enc-project', iv: 'iv-project', isActive: false },
+      { id: 'proj-cred-1', encryptedToken: 'enc-project', iv: 'iv-project', isActive: false }
     );
 
     const res = await postSync(validBody);
@@ -250,14 +261,13 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   });
 
   it('falls back to user-scoped credential when the workspace project has no project-scoped row', async () => {
-    setupDBMocks(
-      { userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' },
-      null,
-      { id: 'user-cred-1', encryptedToken: 'enc-user', iv: 'iv-user', isActive: true },
-    );
-    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      'old-different-value',
-    );
+    setupDBMocks({ userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' }, null, {
+      id: 'user-cred-1',
+      encryptedToken: 'enc-user',
+      iv: 'iv-user',
+      isActive: true,
+    });
+    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce('old-different-value');
 
     const res = await postSync(validBody);
     expect(res.status).toBe(200);
@@ -279,7 +289,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         },
         body: JSON.stringify(validBody),
       },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(400);
     const body = await res.json();

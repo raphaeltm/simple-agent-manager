@@ -21,22 +21,40 @@ function makeConsumer(overrides: Partial<CCConsumerResolutionStatus>): CCConsume
     consumerName: 'Claude Code',
     source: 'user-attachment',
     credentialName: 'My Key',
+    credentialKind: 'api-key',
     halted: false,
     ...overrides,
   };
 }
 
 const MOCK_CONSUMERS: CCConsumerResolutionStatus[] = [
-  makeConsumer({ consumerId: 'claude-code', consumerName: 'Claude Code', source: 'user-attachment', credentialName: 'My Anthropic Key' }),
-  makeConsumer({ consumerId: 'codex', consumerName: 'Codex', source: 'unresolved', credentialName: null }),
-  makeConsumer({ consumerId: 'hetzner', consumerKind: 'compute', consumerName: 'Hetzner Cloud', source: 'unresolved', credentialName: null }),
+  makeConsumer({
+    consumerId: 'claude-code',
+    consumerName: 'Claude Code',
+    source: 'user-attachment',
+    credentialName: 'My Anthropic Key',
+  }),
+  makeConsumer({
+    consumerId: 'openai-codex',
+    consumerName: 'Codex',
+    source: 'unresolved',
+    credentialName: null,
+    credentialKind: null,
+  }),
+  makeConsumer({
+    consumerId: 'hetzner',
+    consumerKind: 'compute',
+    consumerName: 'Hetzner Cloud',
+    source: 'unresolved',
+    credentialName: null,
+  }),
 ];
 
 function renderOverview(props: Partial<React.ComponentProps<typeof ConnectionsOverview>> = {}) {
   return render(
     <MemoryRouter>
       <ConnectionsOverview {...props} />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -55,7 +73,7 @@ describe('ConnectionsOverview', () => {
 
     expect(screen.getByText('Codex')).toBeInTheDocument();
     expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument();
-    expect(screen.getByText('My Anthropic Key')).toBeInTheDocument();
+    expect(screen.getByText(/My Anthropic Key/)).toBeInTheDocument();
   });
 
   it('renders resolution badges for each consumer', async () => {
@@ -69,7 +87,7 @@ describe('ConnectionsOverview', () => {
     expect(screen.getAllByText('Not configured')).toHaveLength(2);
   });
 
-  it('calls onConnect when Connect button is clicked for an unconfigured agent', async () => {
+  it('calls onConnect when Make default is clicked for an unconfigured agent', async () => {
     const onConnect = vi.fn();
     renderOverview({ onConnect });
 
@@ -77,10 +95,27 @@ describe('ConnectionsOverview', () => {
       expect(screen.getByText('Codex')).toBeInTheDocument();
     });
 
-    const connectButtons = screen.getAllByRole('button', { name: 'Connect' });
-    fireEvent.click(connectButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Make default' }));
 
-    expect(onConnect).toHaveBeenCalledWith('codex', 'agent');
+    expect(onConnect).toHaveBeenCalledWith('openai-codex', 'agent');
+  });
+
+  it('renders configured agent row actions', async () => {
+    const onReplace = vi.fn();
+    const onDisconnect = vi.fn();
+    renderOverview({ onReplace, onDisconnect });
+
+    await waitFor(() => {
+      expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace default' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+    expect(onReplace).toHaveBeenCalledWith(expect.objectContaining({ consumerId: 'claude-code' }));
+    expect(onDisconnect).toHaveBeenCalledWith(
+      expect.objectContaining({ consumerId: 'claude-code' })
+    );
   });
 
   it('renders Configure link for unconfigured compute consumers', async () => {
@@ -94,7 +129,7 @@ describe('ConnectionsOverview', () => {
     expect(configureLink).toHaveAttribute('href', '/settings/cloud-provider');
   });
 
-  it('does not render Connect button for configured consumers', async () => {
+  it('does not render a Connect button for configured consumers', async () => {
     const onConnect = vi.fn();
     renderOverview({ onConnect });
 
@@ -102,10 +137,9 @@ describe('ConnectionsOverview', () => {
       expect(screen.getByText('Claude Code')).toBeInTheDocument();
     });
 
-    // Only 1 Connect button (for Codex agent — configured Claude Code doesn't get one,
-    // and Hetzner gets a Configure link instead)
     const connectButtons = screen.queryAllByRole('button', { name: 'Connect' });
-    expect(connectButtons).toHaveLength(1);
+    expect(connectButtons).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Make default' })).toBeInTheDocument();
   });
 
   it('shows error alert and retries on click', async () => {
@@ -137,7 +171,15 @@ describe('ConnectionsOverview', () => {
 
   it('shows empty state when no agents available', async () => {
     mocks.getResolutionStatus.mockResolvedValue({
-      consumers: [makeConsumer({ consumerId: 'hetzner', consumerKind: 'compute', consumerName: 'Hetzner', source: 'unresolved', credentialName: null })],
+      consumers: [
+        makeConsumer({
+          consumerId: 'hetzner',
+          consumerKind: 'compute',
+          consumerName: 'Hetzner',
+          source: 'unresolved',
+          credentialName: null,
+        }),
+      ],
     });
     renderOverview();
 

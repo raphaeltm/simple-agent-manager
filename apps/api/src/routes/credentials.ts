@@ -1,6 +1,19 @@
 // FILE SIZE EXCEPTION: Credential routes + CC resolver integration — splitting would break the tightly coupled resolution chain. See .claude/rules/18-file-size-limits.md
-import type { AgentCredentialInfo, AgentType, CreateCredentialRequest, CredentialKind, CredentialProvider, CredentialResponse, CredentialSource, CredentialValidationStatus } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import type {
+  AgentCredentialInfo,
+  AgentType,
+  CreateCredentialRequest,
+  CredentialKind,
+  CredentialProvider,
+  CredentialResponse,
+  CredentialSource,
+  CredentialValidationStatus,
+} from '@simple-agent-manager/shared';
+import {
+  CREDENTIAL_PROVIDERS,
+  getAgentDefinition,
+  isValidAgentType,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -14,14 +27,29 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
-import { CreateCredentialSchema, CredentialKindBodySchema, jsonValidator, SaveAgentCredentialSchema } from '../schemas';
+import {
+  CreateCredentialSchema,
+  CredentialKindBodySchema,
+  jsonValidator,
+  SaveAgentCredentialSchema,
+} from '../schemas';
+import {
+  disconnectAgentCredentialFromCC,
+  syncAgentCredentialToCC,
+} from '../services/composable-credentials/agent-sync';
 import { lazyBackfillIfNeeded } from '../services/composable-credentials/lazy-backfill';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 import { serializeCredentialToken } from '../services/provider-credentials';
-import { CredentialValidator, formatOnlyValidation, validateAgentApiKeyCredentialWithProvider, validateHetznerCredentialWithProvider, validateScalewayCredentialWithProvider } from '../services/validation';
+import {
+  CredentialValidator,
+  formatOnlyValidation,
+  validateAgentApiKeyCredentialWithProvider,
+  validateHetznerCredentialWithProvider,
+  validateScalewayCredentialWithProvider,
+} from '../services/validation';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -38,14 +66,19 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
   }
 
   if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
-    throw errors.badRequest(`Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+    throw errors.badRequest(
+      `Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`
+    );
   }
 
   if (providerName === 'hetzner') {
     if (!body.token) {
       throw errors.badRequest('Token is required for Hetzner');
     }
-    return { providerName, tokenToValidate: serializeCredentialToken(providerName, { token: body.token }) };
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+    };
   }
 
   if (providerName === 'scaleway') {
@@ -62,8 +95,17 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
   }
 
   if (providerName === 'gcp') {
-    if (!body.gcpProjectId || !body.gcpProjectNumber || !body.serviceAccountEmail || !body.wifPoolId || !body.wifProviderId || !body.defaultZone) {
-      throw errors.badRequest('gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP');
+    if (
+      !body.gcpProjectId ||
+      !body.gcpProjectNumber ||
+      !body.serviceAccountEmail ||
+      !body.wifPoolId ||
+      !body.wifProviderId ||
+      !body.defaultZone
+    ) {
+      throw errors.badRequest(
+        'gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP'
+      );
     }
     return {
       providerName,
@@ -84,15 +126,20 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
 const DEFAULT_SAVE_VALIDATION_TIMEOUT_MS = 8000;
 
 function getSaveValidationTimeoutMs(env: Env): number {
-  return getTimeoutMs(env.AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS, DEFAULT_SAVE_VALIDATION_TIMEOUT_MS);
+  return getTimeoutMs(
+    env.AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS,
+    DEFAULT_SAVE_VALIDATION_TIMEOUT_MS
+  );
 }
 
 async function validateCloudCredentialRequest(
   body: CreateCredentialRequest,
-  env: Env,
+  env: Env
 ): Promise<CredentialValidationStatus> {
   if (body.provider === 'hetzner') {
-    return validateHetznerCredentialWithProvider(body.token, { timeoutMs: getSaveValidationTimeoutMs(env) });
+    return validateHetznerCredentialWithProvider(body.token, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
   }
 
   if (body.provider === 'scaleway') {
@@ -101,7 +148,9 @@ async function validateCloudCredentialRequest(
     });
   }
 
-  return formatOnlyValidation('GCP credential metadata accepted. Live validation runs during Google setup.');
+  return formatOnlyValidation(
+    'GCP credential metadata accepted. Live validation runs during Google setup.'
+  );
 }
 
 function rejectInvalidCredentialValidation(validation: CredentialValidationStatus): void {
@@ -110,7 +159,11 @@ function rejectInvalidCredentialValidation(validation: CredentialValidationStatu
   }
 }
 
-function logCredentialValidationWarning(scope: 'cloud' | 'agent', providerName: string, validation: CredentialValidationStatus): void {
+function logCredentialValidationWarning(
+  scope: 'cloud' | 'agent',
+  providerName: string,
+  validation: CredentialValidationStatus
+): void {
   if (validation.valid) return;
   log.warn('credentials.validation_warning', {
     scope,
@@ -118,6 +171,14 @@ function logCredentialValidationWarning(scope: 'cloud' | 'agent', providerName: 
     status: validation.status,
     error: validation.error ?? validation.message,
   });
+}
+
+function getAgentCredentialLabel(
+  agentType: string,
+  credentialKind: CredentialKind
+): string | undefined {
+  if (credentialKind !== 'oauth-token') return undefined;
+  return agentType === 'openai-codex' ? 'Codex auth.json' : 'Pro/Max Subscription';
 }
 
 // Apply auth middleware to all routes
@@ -291,7 +352,11 @@ credentialsRoutes.post('/agent/validate', jsonValidator(SaveAgentCredentialSchem
     throw errors.badRequest('Unknown agent type');
   }
 
-  const validation = CredentialValidator.validateCredential(body.credential, credentialKind, body.agentType);
+  const validation = CredentialValidator.validateCredential(
+    body.credential,
+    credentialKind,
+    body.agentType
+  );
   if (!validation.valid) {
     throw errors.badRequest(validation.error || 'Invalid credential format');
   }
@@ -347,7 +412,11 @@ credentialsRoutes.get('/agent', async (c) => {
       .filter((cred) => cred.agentType != null)
       .map(async (cred) => {
         // Decrypt to get last 4 chars for masking (guards short credentials via maskCredential)
-        const plaintext = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
+        const plaintext = await decrypt(
+          cred.encryptedToken,
+          cred.iv,
+          getCredentialEncryptionKey(c.env)
+        );
         const maskedKey = maskCredential(plaintext);
 
         // Determine label based on credential kind
@@ -381,108 +450,143 @@ credentialsRoutes.get('/agent', async (c) => {
  * Rate-limited per-user (default 30/hour via rateLimitCredentialUpdate) to prevent
  * an authenticated user from spamming encrypt+write operations.
  */
-credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c, next), jsonValidator(SaveAgentCredentialSchema), async (c) => {
-  const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE, { schema });
+credentialsRoutes.put(
+  '/agent',
+  (c, next) => rateLimitCredentialUpdate(c.env)(c, next),
+  jsonValidator(SaveAgentCredentialSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = c.req.valid('json');
+    const body = c.req.valid('json');
 
-  const credential = body.credential;
-  const credentialKind = body.credentialKind || 'api-key';
-  const autoActivate = body.autoActivate !== false; // Default true
+    const credential = body.credential;
+    const credentialKind = body.credentialKind || 'api-key';
+    const autoActivate = body.autoActivate !== false; // Default true
 
-  if (!isValidAgentType(body.agentType)) {
-    throw errors.badRequest('Invalid agent type');
-  }
+    if (!isValidAgentType(body.agentType)) {
+      throw errors.badRequest('Invalid agent type');
+    }
 
-  const agentDef = getAgentDefinition(body.agentType);
-  if (!agentDef) {
-    throw errors.badRequest('Unknown agent type');
-  }
+    const agentDef = getAgentDefinition(body.agentType);
+    if (!agentDef) {
+      throw errors.badRequest('Unknown agent type');
+    }
 
-  // Validate credential format (agent-aware for OpenAI Codex auth.json)
-  const validation = CredentialValidator.validateCredential(credential, credentialKind, body.agentType);
-  if (!validation.valid) {
-    throw errors.badRequest(validation.error || 'Invalid credential format');
-  }
+    // Validate credential format (agent-aware for OpenAI Codex auth.json)
+    const validation = CredentialValidator.validateCredential(
+      credential,
+      credentialKind,
+      body.agentType
+    );
+    if (!validation.valid) {
+      throw errors.badRequest(validation.error || 'Invalid credential format');
+    }
 
-  // Check if OAuth is supported for this agent
-  if (credentialKind === 'oauth-token' && !agentDef.oauthSupport) {
-    throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
-  }
+    // Check if OAuth is supported for this agent
+    if (credentialKind === 'oauth-token' && !agentDef.oauthSupport) {
+      throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
+    }
 
-  const providerValidation = credentialKind === 'api-key'
-    ? await validateAgentApiKeyCredentialWithProvider(body.agentType, credential, {
-        timeoutMs: getSaveValidationTimeoutMs(c.env),
-      })
-    : formatOnlyValidation(`${agentDef.name} OAuth credential format looks valid.`);
-  logCredentialValidationWarning('agent', agentDef.provider, providerValidation);
+    const providerValidation =
+      credentialKind === 'api-key'
+        ? await validateAgentApiKeyCredentialWithProvider(body.agentType, credential, {
+            timeoutMs: getSaveValidationTimeoutMs(c.env),
+          })
+        : formatOnlyValidation(`${agentDef.name} OAuth credential format looks valid.`);
+    logCredentialValidationWarning('agent', agentDef.provider, providerValidation);
 
-  // Encrypt the credential
-  const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
+    // Encrypt the credential
+    const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
 
-  // Check if a credential of this type already exists (user-scoped only — project_id IS NULL)
-  const existing = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        isNull(schema.credentials.projectId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, body.agentType),
-        eq(schema.credentials.credentialKind, credentialKind)
+    // Check if a credential of this type already exists (user-scoped only — project_id IS NULL)
+    const existing = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          isNull(schema.credentials.projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, body.agentType),
+          eq(schema.credentials.credentialKind, credentialKind)
+        )
       )
-    )
-    .limit(1);
+      .limit(1);
 
-  const now = new Date().toISOString();
+    const now = new Date().toISOString();
 
-  const existingCred = existing[0];
+    const existingCred = existing[0];
 
-  // Atomicity (cloudflare-specialist review): when autoActivate is true, deactivate
-  // + upsert must execute as a single D1 batch. Two separate statements leave a
-  // microsecond window where a concurrent read sees zero active credentials for
-  // the user/agent pair.
-  //
-  // Scope guard: the deactivate statement has `project_id IS NULL` so it only
-  // affects user-scoped rows — per-project overrides are never touched.
-  const upsertStmt = existingCred
-    ? c.env.DATABASE.prepare(
-        `UPDATE credentials
+    // Atomicity (cloudflare-specialist review): when autoActivate is true, deactivate
+    // + upsert must execute as a single D1 batch. Two separate statements leave a
+    // microsecond window where a concurrent read sees zero active credentials for
+    // the user/agent pair.
+    //
+    // Scope guard: the deactivate statement has `project_id IS NULL` so it only
+    // affects user-scoped rows — per-project overrides are never touched.
+    const upsertStmt = existingCred
+      ? c.env.DATABASE.prepare(
+          `UPDATE credentials
          SET encrypted_token = ?, iv = ?, is_active = ?, updated_at = ?
          WHERE id = ?`
-      ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
-    : c.env.DATABASE.prepare(
-        `INSERT INTO credentials (
+        ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
+      : c.env.DATABASE.prepare(
+          `INSERT INTO credentials (
            id, user_id, project_id, provider, credential_type, agent_type,
            credential_kind, is_active, encrypted_token, iv, created_at, updated_at
          ) VALUES (?, ?, NULL, ?, 'agent-api-key', ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        ulid(),
-        userId,
-        agentDef.provider,
-        body.agentType,
-        credentialKind,
-        autoActivate ? 1 : 0,
-        ciphertext,
-        iv,
-        now,
-        now
-      );
+        ).bind(
+          ulid(),
+          userId,
+          agentDef.provider,
+          body.agentType,
+          credentialKind,
+          autoActivate ? 1 : 0,
+          ciphertext,
+          iv,
+          now,
+          now
+        );
 
-  if (autoActivate) {
-    const deactivateStmt = c.env.DATABASE.prepare(
-      `UPDATE credentials SET is_active = 0
+    if (autoActivate) {
+      const deactivateStmt = c.env.DATABASE.prepare(
+        `UPDATE credentials SET is_active = 0
        WHERE user_id = ? AND project_id IS NULL
          AND credential_type = 'agent-api-key' AND agent_type = ?`
-    ).bind(userId, body.agentType);
-    await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
-  } else {
-    await upsertStmt.run();
-  }
+      ).bind(userId, body.agentType);
+      await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
+    } else {
+      await upsertStmt.run();
+    }
 
-  if (existingCred) {
+    await syncAgentCredentialToCC(c.env.DATABASE, {
+      userId,
+      agentType: body.agentType,
+      credentialKind,
+      encryptedToken: ciphertext,
+      iv,
+      agentName: agentDef.name,
+      isActive: autoActivate,
+    });
+
+    if (existingCred) {
+      const maskedKey = maskCredential(credential);
+      const response: AgentCredentialInfo = {
+        agentType: body.agentType,
+        provider: agentDef.provider,
+        credentialKind,
+        isActive: autoActivate,
+        maskedKey,
+        validation: providerValidation,
+        label: getAgentCredentialLabel(body.agentType, credentialKind),
+        createdAt: existingCred.createdAt,
+        updatedAt: now,
+      };
+
+      return c.json(response);
+    }
+
     const maskedKey = maskCredential(credential);
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
@@ -491,29 +595,14 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
       isActive: autoActivate,
       maskedKey,
       validation: providerValidation,
-      label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
-      createdAt: existingCred.createdAt,
+      label: getAgentCredentialLabel(body.agentType, credentialKind),
+      createdAt: now,
       updatedAt: now,
     };
 
-    return c.json(response);
+    return c.json(response, 201);
   }
-
-  const maskedKey = maskCredential(credential);
-  const response: AgentCredentialInfo = {
-    agentType: body.agentType,
-    provider: agentDef.provider,
-    credentialKind,
-    isActive: autoActivate,
-    maskedKey,
-    validation: providerValidation,
-    label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  return c.json(response, 201);
-});
+);
 
 /**
  * POST /api/credentials/agent/:agentType/toggle - Toggle active credential
@@ -522,45 +611,80 @@ credentialsRoutes.put('/agent', (c, next) => rateLimitCredentialUpdate(c.env)(c,
  * target, preventing race conditions where concurrent requests could leave
  * multiple credentials active or none active.
  */
-credentialsRoutes.post('/agent/:agentType/toggle', jsonValidator(CredentialKindBodySchema), async (c) => {
-  const userId = getUserId(c);
-  const agentType = c.req.param('agentType');
+credentialsRoutes.post(
+  '/agent/:agentType/toggle',
+  jsonValidator(CredentialKindBodySchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const agentType = c.req.param('agentType');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  if (!isValidAgentType(agentType)) {
-    throw errors.badRequest('Invalid agent type');
-  }
+    if (!isValidAgentType(agentType)) {
+      throw errors.badRequest('Invalid agent type');
+    }
 
-  const body = c.req.valid('json');
+    const body = c.req.valid('json');
 
-  const now = new Date().toISOString();
+    const now = new Date().toISOString();
 
-  // Use D1 batch for atomic multi-statement execution.
-  // Both statements execute in a single implicit transaction,
-  // preventing race conditions between deactivate and activate.
-  // Scope guards (project_id IS NULL) prevent toggling user-scoped credentials from
-  // touching project-scoped overrides.
-  const deactivateStmt = c.env.DATABASE.prepare(
-    `UPDATE credentials SET is_active = 0
+    // Use D1 batch for atomic multi-statement execution.
+    // Both statements execute in a single implicit transaction,
+    // preventing race conditions between deactivate and activate.
+    // Scope guards (project_id IS NULL) prevent toggling user-scoped credentials from
+    // touching project-scoped overrides.
+    const deactivateStmt = c.env.DATABASE.prepare(
+      `UPDATE credentials SET is_active = 0
      WHERE user_id = ? AND project_id IS NULL
        AND credential_type = 'agent-api-key' AND agent_type = ?`
-  ).bind(userId, agentType);
+    ).bind(userId, agentType);
 
-  const activateStmt = c.env.DATABASE.prepare(
-    `UPDATE credentials SET is_active = 1, updated_at = ?
+    const activateStmt = c.env.DATABASE.prepare(
+      `UPDATE credentials SET is_active = 1, updated_at = ?
      WHERE user_id = ? AND project_id IS NULL
        AND credential_type = 'agent-api-key'
        AND agent_type = ? AND credential_kind = ?`
-  ).bind(now, userId, agentType, body.credentialKind);
+    ).bind(now, userId, agentType, body.credentialKind);
 
-  const batchResults = await c.env.DATABASE.batch([deactivateStmt, activateStmt]);
-  const activateResult = batchResults[1];
+    const batchResults = await c.env.DATABASE.batch([deactivateStmt, activateStmt]);
+    const activateResult = batchResults[1];
 
-  if (!activateResult?.meta.changes || activateResult.meta.changes === 0) {
-    throw errors.notFound(`No ${body.credentialKind} found for ${agentType}`);
+    if (!activateResult?.meta.changes || activateResult.meta.changes === 0) {
+      throw errors.notFound(`No ${body.credentialKind} found for ${agentType}`);
+    }
+
+    const agentDef = getAgentDefinition(agentType);
+    if (agentDef) {
+      const [activated] = await db
+        .select()
+        .from(schema.credentials)
+        .where(
+          and(
+            eq(schema.credentials.userId, userId),
+            isNull(schema.credentials.projectId),
+            eq(schema.credentials.credentialType, 'agent-api-key'),
+            eq(schema.credentials.agentType, agentType),
+            eq(schema.credentials.credentialKind, body.credentialKind),
+            eq(schema.credentials.isActive, true)
+          )
+        )
+        .limit(1);
+
+      if (activated) {
+        await syncAgentCredentialToCC(c.env.DATABASE, {
+          userId,
+          agentType,
+          credentialKind: body.credentialKind,
+          encryptedToken: activated.encryptedToken,
+          iv: activated.iv,
+          agentName: agentDef.name,
+          isActive: true,
+        });
+      }
+    }
+
+    return c.json({ success: true, activated: body.credentialKind });
   }
-
-  return c.json({ success: true, activated: body.credentialKind });
-});
+);
 
 /**
  * DELETE /api/credentials/agent/:agentType/:credentialKind - Remove specific credential
@@ -596,13 +720,16 @@ credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
 
   const toDelete = existing[0];
   if (!toDelete) {
-    throw errors.notFound('Credential not found');
+    await disconnectAgentCredentialFromCC(c.env.DATABASE, {
+      userId,
+      agentType,
+      credentialKind,
+    });
+    return c.json({ success: true, disconnected: true });
   }
 
   // Delete the credential
-  await db
-    .delete(schema.credentials)
-    .where(eq(schema.credentials.id, toDelete.id));
+  await db.delete(schema.credentials).where(eq(schema.credentials.id, toDelete.id));
 
   // If it was active, auto-activate another user-scoped credential (not project-scoped)
   if (toDelete.isActive) {
@@ -624,7 +751,28 @@ credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
         .update(schema.credentials)
         .set({ isActive: true, updatedAt: new Date().toISOString() })
         .where(eq(schema.credentials.id, remaining[0].id));
+
+      const agentDef = getAgentDefinition(agentType);
+      if (agentDef && remaining[0].credentialKind) {
+        await syncAgentCredentialToCC(c.env.DATABASE, {
+          userId,
+          agentType,
+          credentialKind: remaining[0].credentialKind as CredentialKind,
+          encryptedToken: remaining[0].encryptedToken,
+          iv: remaining[0].iv,
+          agentName: agentDef.name,
+          isActive: true,
+        });
+      }
+    } else {
+      await disconnectAgentCredentialFromCC(c.env.DATABASE, { userId, agentType });
     }
+  } else {
+    await disconnectAgentCredentialFromCC(c.env.DATABASE, {
+      userId,
+      agentType,
+      credentialKind,
+    });
   }
 
   return c.json({ success: true });
@@ -659,6 +807,8 @@ credentialsRoutes.delete('/agent/:agentType', async (c) => {
     throw errors.notFound('Agent credential');
   }
 
+  await disconnectAgentCredentialFromCC(c.env.DATABASE, { userId, agentType });
+
   return c.json({ success: true });
 });
 
@@ -679,7 +829,11 @@ export async function getDecryptedAgentKey(
   agentType: string,
   encryptionKey: string,
   projectId?: string | null
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
+): Promise<{
+  credential: string;
+  credentialKind: CredentialKind;
+  credentialSource: CredentialSource;
+} | null> {
   // --- Primary path: composable-credentials resolver -------------------------
   const ccResult = await resolveAgentKeyViaCC(db, userId, agentType, encryptionKey, projectId);
   if (ccResult !== undefined) return ccResult;
@@ -699,8 +853,12 @@ async function resolveAgentKeyViaCC(
   userId: string,
   agentType: string,
   encryptionKey: string,
-  projectId?: string | null,
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null | undefined> {
+  projectId?: string | null
+): Promise<
+  | { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource }
+  | null
+  | undefined
+> {
   const consumer = { kind: 'agent' as const, agentType };
 
   // First attempt with current cc_* data
@@ -715,8 +873,7 @@ async function resolveAgentKeyViaCC(
   // migrates the user's legacy credential into a Tier 1/2 attachment that out-precedes the
   // platform default on re-resolution.
   const platformOnly =
-    resolved !== null &&
-    (resolved.source === 'platform' || resolved.source === 'platform-proxy');
+    resolved !== null && (resolved.source === 'platform' || resolved.source === 'platform-proxy');
 
   if (!resolved || platformOnly) {
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
@@ -750,16 +907,20 @@ async function resolveAgentKeyViaCC(
  * Map a CC ResolvedEnvironment to the legacy getDecryptedAgentKey return shape.
  */
 function mapResolvedToLegacy(
-  resolved: NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>,
-): { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null {
+  resolved: NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>
+): {
+  credential: string;
+  credentialKind: CredentialKind;
+  credentialSource: CredentialSource;
+} | null {
   // Platform proxy — no raw credential to return
   if (resolved.source === 'platform-proxy' || !resolved.credential) {
     return null;
   }
 
   const secret = resolved.credential.secret;
-  let credential: string;
-  let credentialKind: CredentialKind;
+  let credential = '';
+  let credentialKind: CredentialKind = 'api-key';
 
   switch (secret.kind) {
     case 'api-key':
@@ -772,7 +933,10 @@ function mapResolvedToLegacy(
       break;
     case 'auth-json':
       credential = secret.authJson;
-      credentialKind = 'api-key';
+      if (resolved.consumer.kind !== 'agent' || resolved.consumer.agentType !== 'openai-codex') {
+        return null;
+      }
+      credentialKind = 'oauth-token';
       break;
     case 'openai-compatible':
       credential = secret.apiKey;
@@ -789,9 +953,12 @@ function mapResolvedToLegacy(
 
 function mapSourceToLegacy(source: string): CredentialSource {
   switch (source) {
-    case 'project-attachment': return 'project';
-    case 'user-attachment': return 'user';
-    default: return 'platform';
+    case 'project-attachment':
+      return 'project';
+    case 'user-attachment':
+      return 'user';
+    default:
+      return 'platform';
   }
 }
 
@@ -804,8 +971,12 @@ async function resolveAgentKeyLegacy(
   userId: string,
   agentType: string,
   encryptionKey: string,
-  projectId?: string | null,
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
+  projectId?: string | null
+): Promise<{
+  credential: string;
+  credentialKind: CredentialKind;
+  credentialSource: CredentialSource;
+} | null> {
   // 1. Project-scoped credential (Rule 28: inactive blocks fallthrough)
   if (projectId) {
     const projectCreds = await db
@@ -825,7 +996,11 @@ async function resolveAgentKeyLegacy(
     if (projectCred) {
       if (projectCred.isActive) {
         const credential = await decrypt(projectCred.encryptedToken, projectCred.iv, encryptionKey);
-        return { credential, credentialKind: projectCred.credentialKind as CredentialKind, credentialSource: 'project' };
+        return {
+          credential,
+          credentialKind: projectCred.credentialKind as CredentialKind,
+          credentialSource: 'project',
+        };
       }
       return null;
     }
@@ -849,7 +1024,11 @@ async function resolveAgentKeyLegacy(
   const foundCred = userCreds[0];
   if (foundCred) {
     const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
-    return { credential, credentialKind: foundCred.credentialKind as CredentialKind, credentialSource: 'user' };
+    return {
+      credential,
+      credentialKind: foundCred.credentialKind as CredentialKind,
+      credentialSource: 'user',
+    };
   }
 
   // 3. Platform credential

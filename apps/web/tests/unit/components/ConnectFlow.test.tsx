@@ -88,7 +88,7 @@ describe('ConnectFlow', () => {
     const input = screen.getByLabelText(/API Key/i);
     fireEvent.change(input, { target: { value: 'sk-ant-test-key' } });
 
-    const saveButton = screen.getByRole('button', { name: /Connect for this project/i });
+    const saveButton = screen.getByRole('button', { name: /Save override/i });
     fireEvent.click(saveButton);
 
     await waitFor(() => {
@@ -100,6 +100,32 @@ describe('ConnectFlow', () => {
     });
 
     expect(onConnected).toHaveBeenCalled();
+  });
+
+  it('uses a multiline Codex auth.json field and saves it as oauth-token', async () => {
+    const authJson = '{"tokens":{"access_token":"codex-access"}}';
+    renderFlow({
+      initialAgentId: 'openai-codex',
+      initialAuthMethod: 'oauth-token',
+      mode: 'replace',
+    });
+
+    expect(screen.getByRole('button', { name: 'Codex auth.json' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    const textarea = screen.getByLabelText('Codex auth.json');
+    fireEvent.change(textarea, { target: { value: authJson } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() => {
+      expect(mocks.saveAgentCredential).toHaveBeenCalledWith({
+        agentType: 'openai-codex',
+        credentialKind: 'oauth-token',
+        credential: authJson,
+      });
+    });
   });
 
   it('shows error alert on save failure', async () => {

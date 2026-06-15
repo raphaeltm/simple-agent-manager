@@ -3,6 +3,7 @@
  * Credentials, Configurations, and Attachments.
  */
 
+import { AGENT_CATALOG, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, Select, StatusBadge } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -19,6 +20,7 @@ import {
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
+  listProjects,
   updateCCAttachment,
   updateCCCredential,
 } from '../lib/api';
@@ -30,6 +32,31 @@ const KIND_LABELS: Record<string, string> = {
   'cloud-provider': 'Cloud Provider',
   'auth-json': 'Auth JSON',
 };
+
+const COMPUTE_LABELS: Record<string, string> = {
+  hetzner: 'Hetzner Cloud',
+  scaleway: 'Scaleway',
+  gcp: 'Google Cloud (GCP)',
+};
+
+interface ProjectOption {
+  id: string;
+  name: string;
+}
+
+function getConsumerOptions(consumerKind: string): Array<{ value: string; label: string }> {
+  if (consumerKind === 'compute') {
+    return CREDENTIAL_PROVIDERS.map((provider) => ({
+      value: provider,
+      label: COMPUTE_LABELS[provider] ?? provider,
+    }));
+  }
+
+  return AGENT_CATALOG.map((agent) => ({
+    value: agent.id,
+    label: agent.name,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Credential CRUD
@@ -115,10 +142,19 @@ function AddCredentialForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface">
-      {formError && <Alert variant="error" onDismiss={() => setFormError(null)}>{formError}</Alert>}
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface"
+    >
+      {formError && (
+        <Alert variant="error" onDismiss={() => setFormError(null)}>
+          {formError}
+        </Alert>
+      )}
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-cred-name" className="text-xs font-medium text-fg-muted">Name</label>
+        <label htmlFor="cc-cred-name" className="text-xs font-medium text-fg-muted">
+          Name
+        </label>
         <Input
           id="cc-cred-name"
           placeholder="My Anthropic Key"
@@ -128,19 +164,21 @@ function AddCredentialForm({ onCreated }: { onCreated: () => void }) {
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-cred-kind" className="text-xs font-medium text-fg-muted">Kind</label>
-        <Select
-          id="cc-cred-kind"
-          value={kind}
-          onChange={(e) => setKind(e.target.value)}
-        >
+        <label htmlFor="cc-cred-kind" className="text-xs font-medium text-fg-muted">
+          Kind
+        </label>
+        <Select id="cc-cred-kind" value={kind} onChange={(e) => setKind(e.target.value)}>
           {Object.entries(KIND_LABELS).map(([k, label]) => (
-            <option key={k} value={k}>{label}</option>
+            <option key={k} value={k}>
+              {label}
+            </option>
           ))}
         </Select>
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-cred-secret" className="text-xs font-medium text-fg-muted">Secret</label>
+        <label htmlFor="cc-cred-secret" className="text-xs font-medium text-fg-muted">
+          Secret
+        </label>
         <Input
           id="cc-cred-secret"
           placeholder="sk-..."
@@ -219,10 +257,11 @@ function AddConfigurationForm({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [consumerKind, setConsumerKind] = useState('agent');
-  const [consumerTarget, setConsumerTarget] = useState('');
+  const [consumerTarget, setConsumerTarget] = useState(getConsumerOptions('agent')[0]?.value ?? '');
   const [credentialId, setCredentialId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const consumerOptions = getConsumerOptions(consumerKind);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -236,7 +275,7 @@ function AddConfigurationForm({
         credentialId: credentialId || undefined,
       });
       setName('');
-      setConsumerTarget('');
+      setConsumerTarget(getConsumerOptions(consumerKind)[0]?.value ?? '');
       setCredentialId('');
       setOpen(false);
       onCreated();
@@ -256,10 +295,19 @@ function AddConfigurationForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface">
-      {formError && <Alert variant="error" onDismiss={() => setFormError(null)}>{formError}</Alert>}
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface"
+    >
+      {formError && (
+        <Alert variant="error" onDismiss={() => setFormError(null)}>
+          {formError}
+        </Alert>
+      )}
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-cfg-name" className="text-xs font-medium text-fg-muted">Name</label>
+        <label htmlFor="cc-cfg-name" className="text-xs font-medium text-fg-muted">
+          Name
+        </label>
         <Input
           id="cc-cfg-name"
           placeholder="Claude Code config"
@@ -270,29 +318,44 @@ function AddConfigurationForm({
       </div>
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="flex flex-col gap-1 flex-1">
-          <label htmlFor="cc-cfg-consumer-kind" className="text-xs font-medium text-fg-muted">Consumer type</label>
+          <label htmlFor="cc-cfg-consumer-kind" className="text-xs font-medium text-fg-muted">
+            Consumer type
+          </label>
           <Select
             id="cc-cfg-consumer-kind"
             value={consumerKind}
-            onChange={(e) => setConsumerKind(e.target.value)}
+            onChange={(e) => {
+              const nextKind = e.target.value;
+              setConsumerKind(nextKind);
+              setConsumerTarget(getConsumerOptions(nextKind)[0]?.value ?? '');
+            }}
           >
             <option value="agent">Agent</option>
             <option value="compute">Compute</option>
           </Select>
         </div>
         <div className="flex flex-col gap-1 flex-1">
-          <label htmlFor="cc-cfg-consumer-target" className="text-xs font-medium text-fg-muted">Target</label>
-          <Input
+          <label htmlFor="cc-cfg-consumer-target" className="text-xs font-medium text-fg-muted">
+            Target
+          </label>
+          <Select
             id="cc-cfg-consumer-target"
-            placeholder={consumerKind === 'agent' ? 'claude-code' : 'hetzner'}
             value={consumerTarget}
             onChange={(e) => setConsumerTarget(e.target.value)}
             required
-          />
+          >
+            {consumerOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-cfg-credential" className="text-xs font-medium text-fg-muted">Credential</label>
+        <label htmlFor="cc-cfg-credential" className="text-xs font-medium text-fg-muted">
+          Credential
+        </label>
         <Select
           id="cc-cfg-credential"
           value={credentialId}
@@ -300,7 +363,9 @@ function AddConfigurationForm({
         >
           <option value="">(none)</option>
           {credentials.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
           ))}
         </Select>
       </div>
@@ -369,13 +434,16 @@ function AttachmentCard({
 
 function AddAttachmentForm({
   configurations,
+  projects,
   onCreated,
 }: {
   configurations: CCConfigurationListItem[];
+  projects: ProjectOption[];
   onCreated: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [configurationId, setConfigurationId] = useState('');
+  const [scope, setScope] = useState<'user' | 'project'>('user');
   const [projectId, setProjectId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -388,9 +456,10 @@ function AddAttachmentForm({
     try {
       await createCCAttachment({
         configurationId,
-        projectId: projectId || undefined,
+        projectId: scope === 'project' ? projectId : undefined,
       });
       setConfigurationId('');
+      setScope('user');
       setProjectId('');
       setOpen(false);
       onCreated();
@@ -410,10 +479,19 @@ function AddAttachmentForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface">
-      {formError && <Alert variant="error" onDismiss={() => setFormError(null)}>{formError}</Alert>}
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-3 rounded-md border border-border-default p-3 bg-surface"
+    >
+      {formError && (
+        <Alert variant="error" onDismiss={() => setFormError(null)}>
+          {formError}
+        </Alert>
+      )}
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-att-config" className="text-xs font-medium text-fg-muted">Configuration</label>
+        <label htmlFor="cc-att-config" className="text-xs font-medium text-fg-muted">
+          Configuration
+        </label>
         <Select
           id="cc-att-config"
           value={configurationId}
@@ -422,23 +500,62 @@ function AddAttachmentForm({
         >
           <option value="">Select configuration</option>
           {configurations.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
           ))}
         </Select>
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="cc-att-project" className="text-xs font-medium text-fg-muted">
-          Project ID <span className="font-normal">(leave blank for user default)</span>
+        <label htmlFor="cc-att-scope" className="text-xs font-medium text-fg-muted">
+          Attachment target
         </label>
-        <Input
-          id="cc-att-project"
-          placeholder="Optional project ID"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-        />
+        <Select
+          id="cc-att-scope"
+          value={scope}
+          onChange={(e) => {
+            const nextScope = e.target.value === 'project' ? 'project' : 'user';
+            setScope(nextScope);
+            if (nextScope === 'user') setProjectId('');
+          }}
+        >
+          <option value="user">User default</option>
+          <option value="project">Project override</option>
+        </Select>
       </div>
+      {scope === 'project' && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="cc-att-project" className="text-xs font-medium text-fg-muted">
+            Project
+          </label>
+          <Select
+            id="cc-att-project"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            required
+          >
+            <option value="">Select project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+      {scope === 'project' && projects.length === 0 && (
+        <p className="m-0 text-xs text-fg-muted">
+          No projects are available for project-scoped attachments.
+        </p>
+      )}
       <div className="flex gap-2">
-        <Button type="submit" variant="primary" size="sm" loading={submitting} disabled={!configurationId}>
+        <Button
+          type="submit"
+          variant="primary"
+          size="sm"
+          loading={submitting}
+          disabled={!configurationId || (scope === 'project' && !projectId)}
+        >
           Save
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
@@ -457,20 +574,23 @@ export function SettingsCredentials() {
   const [credentials, setCredentials] = useState<CCCredentialListItem[]>([]);
   const [configurations, setConfigurations] = useState<CCConfigurationListItem[]>([]);
   const [attachments, setAttachments] = useState<CCAttachmentListItem[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     try {
       setError(null);
-      const [creds, cfgs, atts] = await Promise.all([
+      const [creds, cfgs, atts, projectData] = await Promise.all([
         listCCCredentials(),
         listCCConfigurations(),
         listCCAttachments(),
+        listProjects(100),
       ]);
       setCredentials(creds);
       setConfigurations(cfgs);
       setAttachments(atts);
+      setProjects(projectData.projects.map((project) => ({ id: project.id, name: project.name })));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
@@ -482,28 +602,42 @@ export function SettingsCredentials() {
     loadAll();
   }, [loadAll]);
 
-  const handleMutation = useCallback(async (action: () => Promise<unknown>) => {
-    try {
-      await action();
-      loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Operation failed');
-    }
-  }, [loadAll]);
+  const handleMutation = useCallback(
+    async (action: () => Promise<unknown>) => {
+      try {
+        await action();
+        loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Operation failed');
+      }
+    },
+    [loadAll]
+  );
 
   if (loading) {
-    return <p className="text-sm text-fg-muted p-4" role="status" aria-live="polite">Loading credentials…</p>;
+    return (
+      <p className="text-sm text-fg-muted p-4" role="status" aria-live="polite">
+        Loading credentials…
+      </p>
+    );
   }
 
   return (
     <div className="flex flex-col gap-6">
       <Alert variant="info">
-        This is the advanced view showing the raw composable-credentials primitives.
-        Most users should use the <a href="/settings/connections" className="text-accent font-medium">Connections</a> tab
-        to manage agent and cloud provider credentials through the guided flow.
+        This is the advanced view showing the raw composable-credentials primitives. Most users
+        should use the{' '}
+        <a href="/settings/connections" className="text-accent font-medium">
+          Connections
+        </a>{' '}
+        tab to manage agent and cloud provider credentials through the guided flow.
       </Alert>
 
-      {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}
+      {error && (
+        <Alert variant="error" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
       {/* Credentials */}
       <Card>
@@ -521,9 +655,12 @@ export function SettingsCredentials() {
             <CredentialCard
               key={cred.id}
               cred={cred}
-              onToggle={() => handleMutation(() => updateCCCredential(cred.id, { isActive: !cred.isActive }))}
+              onToggle={() =>
+                handleMutation(() => updateCCCredential(cred.id, { isActive: !cred.isActive }))
+              }
               onDelete={() => {
-                if (!confirm(`Delete credential "${cred.name}"? This cannot be undone.`)) return Promise.resolve();
+                if (!confirm(`Delete credential "${cred.name}"? This cannot be undone.`))
+                  return Promise.resolve();
                 return handleMutation(() => deleteCCCredential(cred.id));
               }}
             />
@@ -550,7 +687,8 @@ export function SettingsCredentials() {
               cfg={cfg}
               credentials={credentials}
               onDelete={() => {
-                if (!confirm(`Delete configuration "${cfg.name}"? This cannot be undone.`)) return Promise.resolve();
+                if (!confirm(`Delete configuration "${cfg.name}"? This cannot be undone.`))
+                  return Promise.resolve();
                 return handleMutation(() => deleteCCConfiguration(cfg.id));
               }}
             />
@@ -576,16 +714,23 @@ export function SettingsCredentials() {
               key={att.id}
               att={att}
               configurations={configurations}
-              onToggle={() => handleMutation(() => updateCCAttachment(att.id, { isActive: !att.isActive }))}
+              onToggle={() =>
+                handleMutation(() => updateCCAttachment(att.id, { isActive: !att.isActive }))
+              }
               onDelete={() => {
                 const cfg = configurations.find((c) => c.id === att.configurationId);
                 const label = cfg?.name ?? att.configurationId;
-                if (!confirm(`Delete attachment "${label}"? This cannot be undone.`)) return Promise.resolve();
+                if (!confirm(`Delete attachment "${label}"? This cannot be undone.`))
+                  return Promise.resolve();
                 return handleMutation(() => deleteCCAttachment(att.id));
               }}
             />
           ))}
-          <AddAttachmentForm configurations={configurations} onCreated={loadAll} />
+          <AddAttachmentForm
+            configurations={configurations}
+            projects={projects}
+            onCreated={loadAll}
+          />
         </div>
       </Card>
     </div>

@@ -56,19 +56,18 @@ describe('SettingsConnections', () => {
 
     // ConnectFlow renders agent cards from AGENT_CATALOG
     await waitFor(() => {
-      expect(screen.getByText('Agent', { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByText('Agent')).toBeInTheDocument();
     });
   });
 
-  it('shows ConnectFlow with pre-selected agent when Connect button is clicked', async () => {
+  it('shows ConnectFlow with pre-selected agent when Make default is clicked', async () => {
     render(<SettingsConnections />);
 
     await waitFor(() => {
       expect(screen.getByText('Claude Code')).toBeInTheDocument();
     });
 
-    // Click the Connect button for the unresolved agent
-    const connectBtn = screen.getByRole('button', { name: 'Connect' });
+    const connectBtn = screen.getByRole('button', { name: 'Make default' });
     fireEvent.click(connectBtn);
 
     // ConnectFlow should show with credential input visible (agent pre-selected)

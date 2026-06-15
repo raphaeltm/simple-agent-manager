@@ -1,4 +1,9 @@
-import type { ProjectRuntimeConfigResponse, VMSize } from '@simple-agent-manager/shared';
+import type {
+  CCConsumerResolutionStatus,
+  CredentialKind,
+  ProjectRuntimeConfigResponse,
+  VMSize,
+} from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
@@ -15,12 +20,16 @@ import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
 import { ScalingSettings } from '../components/ScalingSettings';
-import { formatProviderCatalogContext, selectProviderCatalog } from '../components/vm/format-vm-size';
+import {
+  formatProviderCatalogContext,
+  selectProviderCatalog,
+} from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
 import {
   deleteProject,
+  deleteProjectAgentCredential,
   deleteProjectRuntimeEnvVar,
   deleteProjectRuntimeFile,
   getProjectRuntimeConfig,
@@ -37,13 +46,20 @@ function ProjectConnectionsSection({
   projectId: string;
   onUpdated: () => void;
 }) {
+  const toast = useToast();
   const [showConnect, setShowConnect] = useState(false);
   const [connectAgentId, setConnectAgentId] = useState<string | undefined>();
+  const [connectAuthMethod, setConnectAuthMethod] = useState<CredentialKind | undefined>();
+  const [connectMode, setConnectMode] = useState<'connect' | 'replace' | 'project-override'>(
+    'project-override'
+  );
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleConnect = (consumerId: string, consumerKind: 'agent' | 'compute') => {
     if (consumerKind === 'agent') {
       setConnectAgentId(consumerId);
+      setConnectAuthMethod(undefined);
+      setConnectMode('project-override');
       setShowConnect(true);
     }
   };
@@ -51,19 +67,64 @@ function ProjectConnectionsSection({
   const handleConnected = () => {
     setShowConnect(false);
     setConnectAgentId(undefined);
+    setConnectAuthMethod(undefined);
+    setConnectMode('project-override');
     setRefreshKey((k) => k + 1);
     onUpdated();
+  };
+
+  const openProjectOverride = (consumer: CCConsumerResolutionStatus) => {
+    setConnectAgentId(consumer.consumerId);
+    setConnectAuthMethod(toLegacyCredentialKind(consumer.credentialKind));
+    setConnectMode(consumer.source === 'project-attachment' ? 'replace' : 'project-override');
+    setShowConnect(true);
+  };
+
+  const handleDisconnect = async (consumer: CCConsumerResolutionStatus) => {
+    const credentialKind = toLegacyCredentialKind(consumer.credentialKind);
+    if (!credentialKind) {
+      toast.error('This project override does not expose a removable credential.');
+      return;
+    }
+    if (!confirm(`Remove the ${consumer.consumerName} project override?`)) return;
+
+    try {
+      await deleteProjectAgentCredential(projectId, consumer.consumerId, credentialKind);
+      toast.success(`${consumer.consumerName} project override removed`);
+      setRefreshKey((k) => k + 1);
+      onUpdated();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove project override');
+    }
+  };
+
+  const handleValidate = (consumer: CCConsumerResolutionStatus) => {
+    const validation = consumer.validation;
+    if (!validation) {
+      toast.info('No local validation is available for this credential type.');
+      return;
+    }
+    if (validation.status === 'invalid') {
+      toast.error(validation.message ?? 'Credential validation failed');
+      return;
+    }
+    if (validation.status === 'warning') {
+      toast.warning(
+        validation.warnings?.join(' ') ?? validation.message ?? 'Credential validated with warnings'
+      );
+      return;
+    }
+    toast.success(validation.message ?? 'Credential format is valid');
   };
 
   return (
     <section className="glass-surface rounded-lg p-4 grid gap-3">
       <div>
-        <h2 className="sam-type-section-heading m-0 text-fg-primary">
-          Connections
-        </h2>
+        <h2 className="sam-type-section-heading m-0 text-fg-primary">Connections</h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          How each agent and cloud provider resolves credentials for this project.
-          Badges show whether a credential comes from a project override, your user default, or the SAM platform.
+          How each agent and cloud provider resolves credentials for this project. Badges show
+          whether a credential comes from a project override, your user default, or the SAM
+          platform.
         </p>
       </div>
 
@@ -71,15 +132,27 @@ function ProjectConnectionsSection({
         <ConnectFlow
           projectId={projectId}
           initialAgentId={connectAgentId}
+          initialAuthMethod={connectAuthMethod}
+          mode={connectMode}
           onConnected={handleConnected}
           onCancel={() => {
             setShowConnect(false);
             setConnectAgentId(undefined);
+            setConnectAuthMethod(undefined);
+            setConnectMode('project-override');
           }}
         />
       ) : (
         <>
-          <ConnectionsOverview key={refreshKey} projectId={projectId} onConnect={handleConnect} />
+          <ConnectionsOverview
+            key={refreshKey}
+            projectId={projectId}
+            onConnect={handleConnect}
+            onReplace={openProjectOverride}
+            onProjectOverride={openProjectOverride}
+            onDisconnect={(consumer) => void handleDisconnect(consumer)}
+            onValidate={handleValidate}
+          />
           <button
             type="button"
             onClick={() => setShowConnect(true)}
@@ -91,6 +164,12 @@ function ProjectConnectionsSection({
       )}
     </section>
   );
+}
+
+function toLegacyCredentialKind(kind: string | null | undefined): CredentialKind | undefined {
+  if (kind === 'api-key' || kind === 'oauth-token') return kind;
+  if (kind === 'auth-json') return 'oauth-token';
+  return undefined;
 }
 
 export function ProjectSettings() {
@@ -109,7 +188,9 @@ export function ProjectSettings() {
 
   const [defaultVmSize, setDefaultVmSize] = useState<VMSize | null>(project?.defaultVmSize ?? null);
   const [savingVmSize, setSavingVmSize] = useState(false);
-  const [defaultAgentType, setDefaultAgentType] = useState<string | null>(project?.defaultAgentType ?? null);
+  const [defaultAgentType, setDefaultAgentType] = useState<string | null>(
+    project?.defaultAgentType ?? null
+  );
   const [savingAgentType, setSavingAgentType] = useState(false);
 
   // Workspace idle timeout (node idle timeout is managed in ScalingSettings)
@@ -129,7 +210,9 @@ export function ProjectSettings() {
       setProjectName(project.name);
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultAgentType(project.defaultAgentType ?? null);
-      setWorkspaceIdleTimeoutMs(project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
+      setWorkspaceIdleTimeoutMs(
+        project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+      );
     }
   }, [project]);
 
@@ -170,7 +253,11 @@ export function ProjectSettings() {
     try {
       await updateProject(projectId, { defaultVmSize: newSize });
       await reload();
-      toast.success(newSize ? `Default VM size set to ${newSize}` : 'Default VM size cleared (will use platform default)');
+      toast.success(
+        newSize
+          ? `Default VM size set to ${newSize}`
+          : 'Default VM size cleared (will use platform default)'
+      );
     } catch (err) {
       // Revert on error
       setDefaultVmSize(project?.defaultVmSize ?? null);
@@ -187,7 +274,11 @@ export function ProjectSettings() {
     try {
       await updateProject(projectId, { defaultAgentType: newType });
       await reload();
-      toast.success(newType ? `Default agent set to ${AGENT_CATALOG.find(a => a.id === newType)?.name ?? newType}` : 'Default agent cleared (will use platform default)');
+      toast.success(
+        newType
+          ? `Default agent set to ${AGENT_CATALOG.find((a) => a.id === newType)?.name ?? newType}`
+          : 'Default agent cleared (will use platform default)'
+      );
     } catch (err) {
       setDefaultAgentType(project?.defaultAgentType ?? null);
       toast.error(err instanceof Error ? err.message : 'Failed to update agent type');
@@ -203,14 +294,19 @@ export function ProjectSettings() {
       await reload();
       toast.success('Workspace idle timeout saved');
     } catch (err) {
-      setWorkspaceIdleTimeoutMs(project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
+      setWorkspaceIdleTimeoutMs(
+        project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+      );
       toast.error(err instanceof Error ? err.message : 'Failed to update timeout');
     } finally {
       setSavingWorkspaceTimeout(false);
     }
   };
 
-  const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
+  const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({
+    envVars: [],
+    files: [],
+  });
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
   const [savingRuntimeConfig, setSavingRuntimeConfig] = useState(false);
 
@@ -233,7 +329,9 @@ export function ProjectSettings() {
     }
   }, [projectId, toast]);
 
-  useEffect(() => { void loadRuntimeConfig(); }, [loadRuntimeConfig]);
+  useEffect(() => {
+    void loadRuntimeConfig();
+  }, [loadRuntimeConfig]);
 
   const handleUpsertEnvVar = async () => {
     if (!envKeyInput.trim()) {
@@ -314,12 +412,8 @@ export function ProjectSettings() {
       {/* Project Name */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Project Name
-          </h2>
-          <p className="m-0 mt-1 text-xs text-fg-muted">
-            The display name for this project.
-          </p>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">Project Name</h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">The display name for this project.</p>
         </div>
         <div className="flex gap-2 items-end">
           <input
@@ -327,7 +421,9 @@ export function ProjectSettings() {
             aria-label="Project name"
             value={projectName}
             onChange={(e) => setProjectName(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveName(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleSaveName();
+            }}
             className="flex-1 py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
           />
           <Button
@@ -344,12 +440,12 @@ export function ProjectSettings() {
       {/* Default VM Size */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Default Node Size
-          </h2>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">Default Node Size</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
             Used when launching new workspaces from this project. Click again to clear.
-            {catalogContext ? ` Catalog: ${catalogContext}.` : ' Exact specs depend on the selected provider.'}
+            {catalogContext
+              ? ` Catalog: ${catalogContext}.`
+              : ' Exact specs depend on the selected provider.'}
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -374,9 +470,7 @@ export function ProjectSettings() {
       {/* Default Agent Type */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Default Agent Type
-          </h2>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">Default Agent Type</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
             Which AI coding agent to use for tasks in this project. Click again to clear.
           </p>
@@ -398,9 +492,7 @@ export function ProjectSettings() {
                 } ${savingAgentType ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
               >
                 <div className="font-medium">{agent.name}</div>
-                <div className="text-xs text-fg-muted mt-0.5">
-                  {agent.description}
-                </div>
+                <div className="text-xs text-fg-muted mt-0.5">{agent.description}</div>
               </button>
             );
           })}
@@ -418,9 +510,7 @@ export function ProjectSettings() {
       {/* Per-agent model/permission overrides (advanced) */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Agent Overrides
-          </h2>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">Agent Overrides</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
             Per-agent model and permission-mode overrides for this project. Empty fields fall
             through to your user-level settings.
@@ -443,15 +533,16 @@ export function ProjectSettings() {
       {/* Workspace Idle Timeout */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Workspace Idle Timeout
-          </h2>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">Workspace Idle Timeout</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
-            How long workspaces stay active when idle. Workspaces with no messages or terminal activity beyond the timeout are automatically cleaned up.
+            How long workspaces stay active when idle. Workspaces with no messages or terminal
+            activity beyond the timeout are automatically cleaned up.
           </p>
         </div>
         <div>
-          <label htmlFor="workspace-idle-timeout" className="sr-only">Workspace idle timeout</label>
+          <label htmlFor="workspace-idle-timeout" className="sr-only">
+            Workspace idle timeout
+          </label>
           <div className="flex items-center gap-3">
             <input
               id="workspace-idle-timeout"
@@ -479,8 +570,8 @@ export function ProjectSettings() {
             </span>
           </div>
           <p className="m-0 mt-1 text-xs text-fg-muted">
-              Default: {DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS / (60 * 60 * 1000)}h. Range: 30m \u2013 24h.
-            </p>
+            Default: {DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS / (60 * 60 * 1000)}h. Range: 30m \u2013 24h.
+          </p>
         </div>
         <div className="flex justify-end">
           <Button
@@ -488,7 +579,8 @@ export function ProjectSettings() {
             loading={savingWorkspaceTimeout}
             disabled={
               savingWorkspaceTimeout ||
-              workspaceIdleTimeoutMs === (project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS)
+              workspaceIdleTimeoutMs ===
+                (project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS)
             }
             onClick={() => void handleSaveWorkspaceTimeout()}
           >
@@ -498,15 +590,11 @@ export function ProjectSettings() {
       </section>
 
       {/* Scaling & Scheduling */}
-      {project && (
-        <ScalingSettings projectId={projectId} project={project} reload={reload} />
-      )}
+      {project && <ScalingSettings projectId={projectId} project={project} reload={reload} />}
 
       {/* Runtime Config */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
-        <h2 className="sam-type-section-heading m-0 text-fg-primary">
-          Runtime Config
-        </h2>
+        <h2 className="sam-type-section-heading m-0 text-fg-primary">Runtime Config</h2>
 
         {runtimeConfigLoading ? (
           <div className="flex items-center gap-2">
@@ -577,12 +665,16 @@ export function ProjectSettings() {
                       key={item.key}
                       className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.envVars.length - 1 ? 'border-b border-border-default' : ''}`}
                     >
-                      <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
+                      <code className="font-semibold text-fg-primary text-[0.8125rem]">
+                        {item.key}
+                      </code>
                       <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                         = {item.isSecret ? '\u2022\u2022\u2022\u2022\u2022\u2022' : item.value}
                       </span>
                       {item.isSecret && (
-                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
+                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">
+                          secret
+                        </span>
                       )}
                       <button
                         onClick={() => void handleDeleteEnvVar(item.key)}
@@ -591,8 +683,18 @@ export function ProjectSettings() {
                         aria-label={`Remove ${item.key}`}
                         title={`Remove ${item.key}`}
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
                       </button>
                     </div>
@@ -653,9 +755,7 @@ export function ProjectSettings() {
 
               {/* File list */}
               {runtimeConfig.files.length === 0 ? (
-                <div className="text-fg-muted text-xs py-1">
-                  No runtime files configured.
-                </div>
+                <div className="text-fg-muted text-xs py-1">No runtime files configured.</div>
               ) : (
                 <div className="border border-border-default rounded-sm overflow-hidden">
                   {runtimeConfig.files.map((item, idx) => (
@@ -663,10 +763,14 @@ export function ProjectSettings() {
                       key={item.path}
                       className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.files.length - 1 ? 'border-b border-border-default' : ''}`}
                     >
-                      <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{item.path}</code>
+                      <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
+                        {item.path}
+                      </code>
                       <span className="flex-1" />
                       {item.isSecret && (
-                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
+                        <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">
+                          secret
+                        </span>
                       )}
                       <button
                         onClick={() => void handleDeleteFile(item.path)}
@@ -675,8 +779,18 @@ export function ProjectSettings() {
                         aria-label={`Remove ${item.path}`}
                         title={`Remove ${item.path}`}
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
                       </button>
                     </div>
@@ -694,20 +808,14 @@ export function ProjectSettings() {
       {/* Danger Zone */}
       <section className="bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] backdrop-blur-[12px] rounded-lg border border-danger p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-danger">
-            Danger Zone
-          </h2>
+          <h2 className="sam-type-section-heading m-0 text-danger">Danger Zone</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
             Permanently delete this project and all associated data. This action cannot be undone.
           </p>
         </div>
         {!showDeleteConfirm ? (
           <div>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setShowDeleteConfirm(true)}
-            >
+            <Button variant="danger" size="sm" onClick={() => setShowDeleteConfirm(true)}>
               Delete Project
             </Button>
           </div>
@@ -738,7 +846,10 @@ export function ProjectSettings() {
                 variant="secondary"
                 size="sm"
                 disabled={deleting}
-                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteConfirmText('');
+                }}
               >
                 Cancel
               </Button>

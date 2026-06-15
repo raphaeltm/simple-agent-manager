@@ -27,6 +27,10 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
+import {
+  disconnectAgentCredentialFromCC,
+  syncAgentCredentialToCC,
+} from '../../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../../services/encryption';
 import { CredentialValidator } from '../../services/validation';
 
@@ -36,6 +40,14 @@ const projectCredentialsRoutes = new Hono<{ Bindings: Env }>();
 // if mounted independently (e.g., test harness). Parent `projectsRoutes` also
 // applies these, but duplicated middleware is idempotent.
 projectCredentialsRoutes.use('/*', requireAuth(), requireApproved());
+
+function getAgentCredentialLabel(
+  agentType: string,
+  credentialKind: CredentialKind
+): string | undefined {
+  if (credentialKind !== 'oauth-token') return undefined;
+  return agentType === 'openai-codex' ? 'Codex auth.json' : 'Pro/Max Subscription';
+}
 
 /**
  * GET /api/projects/:id/credentials — list agent credentials scoped to this project.
@@ -72,7 +84,11 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
     creds
       .filter((cred) => cred.agentType != null)
       .map(async (cred) => {
-        const plaintext = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
+        const plaintext = await decrypt(
+          cred.encryptedToken,
+          cred.iv,
+          getCredentialEncryptionKey(c.env)
+        );
         const maskedKey = maskCredential(plaintext);
         let label: string | undefined;
         if (cred.credentialKind === 'oauth-token' && cred.agentType) {
@@ -87,7 +103,11 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
           credentialKind: cred.credentialKind as CredentialKind,
           isActive: cred.isActive,
           maskedKey,
-          label,
+          label:
+            getAgentCredentialLabel(
+              cred.agentType as AgentType,
+              cred.credentialKind as CredentialKind
+            ) ?? label,
           createdAt: cred.createdAt,
           updatedAt: cred.updatedAt,
           scope: 'project' as const,
@@ -105,132 +125,152 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
  * Rate-limited per-user (default 30/hour via rateLimitCredentialUpdate) to match the
  * user-scoped PUT protection — prevents spam encrypt+write operations (MEDIUM #7).
  */
-projectCredentialsRoutes.put('/:id/credentials', (c, next) => rateLimitCredentialUpdate(c.env)(c, next), jsonValidator(SaveAgentCredentialSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
+projectCredentialsRoutes.put(
+  '/:id/credentials',
+  (c, next) => rateLimitCredentialUpdate(c.env)(c, next),
+  jsonValidator(SaveAgentCredentialSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = c.req.param('id');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+    await requireOwnedProject(db, projectId, userId);
 
-  const body = c.req.valid('json');
-  const credential = body.credential;
-  const credentialKind = body.credentialKind || 'api-key';
-  const autoActivate = body.autoActivate !== false;
+    const body = c.req.valid('json');
+    const credential = body.credential;
+    const credentialKind = body.credentialKind || 'api-key';
+    const autoActivate = body.autoActivate !== false;
 
-  if (!isValidAgentType(body.agentType)) {
-    throw errors.badRequest('Invalid agent type');
-  }
-  const agentDef = getAgentDefinition(body.agentType);
-  if (!agentDef) {
-    throw errors.badRequest('Unknown agent type');
-  }
+    if (!isValidAgentType(body.agentType)) {
+      throw errors.badRequest('Invalid agent type');
+    }
+    const agentDef = getAgentDefinition(body.agentType);
+    if (!agentDef) {
+      throw errors.badRequest('Unknown agent type');
+    }
 
-  const validation = CredentialValidator.validateCredential(credential, credentialKind, body.agentType);
-  if (!validation.valid) {
-    throw errors.badRequest(validation.error || 'Invalid credential format');
-  }
-  if (credentialKind === 'oauth-token' && !agentDef.oauthSupport) {
-    throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
-  }
+    const validation = CredentialValidator.validateCredential(
+      credential,
+      credentialKind,
+      body.agentType
+    );
+    if (!validation.valid) {
+      throw errors.badRequest(validation.error || 'Invalid credential format');
+    }
+    if (credentialKind === 'oauth-token' && !agentDef.oauthSupport) {
+      throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
+    }
 
-  const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
+    const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
 
-  // Look for an existing project-scoped credential with the same (agentType, credentialKind).
-  const existing = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.projectId, projectId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, body.agentType),
-        eq(schema.credentials.credentialKind, credentialKind)
+    // Look for an existing project-scoped credential with the same (agentType, credentialKind).
+    const existing = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.projectId, projectId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, body.agentType),
+          eq(schema.credentials.credentialKind, credentialKind)
+        )
       )
-    )
-    .limit(1);
+      .limit(1);
 
-  const now = new Date().toISOString();
+    const now = new Date().toISOString();
 
-  const existingCred = existing[0];
-  // Derive mask from the plaintext that was just encrypted — matches GET/list which
-  // masks from decrypted plaintext (LOW #9 consistency).
-  const maskedKey = maskCredential(credential);
+    const existingCred = existing[0];
+    // Derive mask from the plaintext that was just encrypted — matches GET/list which
+    // masks from decrypted plaintext (LOW #9 consistency).
+    const maskedKey = maskCredential(credential);
 
-  // Atomicity (cloudflare-specialist review): batch deactivate + upsert as a
-  // single D1 transaction when autoActivate is true. Two separate statements
-  // open a microsecond window where concurrent reads see zero active
-  // credentials for this (user, project, agentType) tuple.
-  //
-  // Scope guard: deactivate has `project_id = ?` so only this project's rows
-  // are touched — user-scoped credentials remain active so OTHER projects
-  // inheriting at user scope are unaffected.
-  const upsertStmt = existingCred
-    ? c.env.DATABASE.prepare(
-        `UPDATE credentials
+    // Atomicity (cloudflare-specialist review): batch deactivate + upsert as a
+    // single D1 transaction when autoActivate is true. Two separate statements
+    // open a microsecond window where concurrent reads see zero active
+    // credentials for this (user, project, agentType) tuple.
+    //
+    // Scope guard: deactivate has `project_id = ?` so only this project's rows
+    // are touched — user-scoped credentials remain active so OTHER projects
+    // inheriting at user scope are unaffected.
+    const upsertStmt = existingCred
+      ? c.env.DATABASE.prepare(
+          `UPDATE credentials
          SET encrypted_token = ?, iv = ?, is_active = ?, updated_at = ?
          WHERE id = ?`
-      ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
-    : c.env.DATABASE.prepare(
-        `INSERT INTO credentials (
+        ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
+      : c.env.DATABASE.prepare(
+          `INSERT INTO credentials (
            id, user_id, project_id, provider, credential_type, agent_type,
            credential_kind, is_active, encrypted_token, iv, created_at, updated_at
          ) VALUES (?, ?, ?, ?, 'agent-api-key', ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        ulid(),
-        userId,
-        projectId,
-        agentDef.provider,
-        body.agentType,
-        credentialKind,
-        autoActivate ? 1 : 0,
-        ciphertext,
-        iv,
-        now,
-        now
-      );
+        ).bind(
+          ulid(),
+          userId,
+          projectId,
+          agentDef.provider,
+          body.agentType,
+          credentialKind,
+          autoActivate ? 1 : 0,
+          ciphertext,
+          iv,
+          now,
+          now
+        );
 
-  if (autoActivate) {
-    const deactivateStmt = c.env.DATABASE.prepare(
-      `UPDATE credentials SET is_active = 0
+    if (autoActivate) {
+      const deactivateStmt = c.env.DATABASE.prepare(
+        `UPDATE credentials SET is_active = 0
        WHERE user_id = ? AND project_id = ?
          AND credential_type = 'agent-api-key' AND agent_type = ?`
-    ).bind(userId, projectId, body.agentType);
-    await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
-  } else {
-    await upsertStmt.run();
-  }
+      ).bind(userId, projectId, body.agentType);
+      await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
+    } else {
+      await upsertStmt.run();
+    }
 
-  if (existingCred) {
+    await syncAgentCredentialToCC(c.env.DATABASE, {
+      userId,
+      projectId,
+      agentType: body.agentType,
+      credentialKind,
+      encryptedToken: ciphertext,
+      iv,
+      agentName: agentDef.name,
+      isActive: autoActivate,
+    });
+
+    if (existingCred) {
+      const response: AgentCredentialInfo = {
+        agentType: body.agentType,
+        provider: agentDef.provider,
+        credentialKind,
+        isActive: autoActivate,
+        maskedKey,
+        label: getAgentCredentialLabel(body.agentType, credentialKind),
+        createdAt: existingCred.createdAt,
+        updatedAt: now,
+        scope: 'project',
+        projectId,
+      };
+      return c.json(response);
+    }
+
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
       provider: agentDef.provider,
       credentialKind,
       isActive: autoActivate,
       maskedKey,
-      label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
-      createdAt: existingCred.createdAt,
+      label: getAgentCredentialLabel(body.agentType, credentialKind),
+      createdAt: now,
       updatedAt: now,
       scope: 'project',
       projectId,
     };
-    return c.json(response);
+    return c.json(response, 201);
   }
-
-  const response: AgentCredentialInfo = {
-    agentType: body.agentType,
-    provider: agentDef.provider,
-    credentialKind,
-    isActive: autoActivate,
-    maskedKey,
-    label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
-    createdAt: now,
-    updatedAt: now,
-    scope: 'project',
-    projectId,
-  };
-  return c.json(response, 201);
-});
+);
 
 /**
  * DELETE /api/projects/:id/credentials/:agentType/:credentialKind — remove a project-scoped credential.
@@ -265,7 +305,29 @@ projectCredentialsRoutes.delete('/:id/credentials/:agentType/:credentialKind', a
     .returning();
 
   if (result.length === 0) {
-    throw errors.notFound('Credential');
+    await disconnectAgentCredentialFromCC(c.env.DATABASE, {
+      userId,
+      projectId,
+      agentType,
+      credentialKind,
+    });
+    return c.json({ success: true, disconnected: true });
+  }
+
+  const deleted = result[0];
+  if (!deleted || deleted.isActive) {
+    await disconnectAgentCredentialFromCC(c.env.DATABASE, {
+      userId,
+      projectId,
+      agentType,
+    });
+  } else {
+    await disconnectAgentCredentialFromCC(c.env.DATABASE, {
+      userId,
+      projectId,
+      agentType,
+      credentialKind,
+    });
   }
 
   return c.json({ success: true });
