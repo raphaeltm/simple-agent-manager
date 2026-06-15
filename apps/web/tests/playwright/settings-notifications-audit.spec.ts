@@ -1,30 +1,18 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import { assertNoOverflow, jsonResponse, makeMockUser, screenshot } from './audit-helpers';
+
 // ---------------------------------------------------------------------------
 // Mock Data Factories
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  userId: 'user-test-1',
+  sessionId: 'session-test-1',
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+});
 
 type NotificationType =
   | 'task_complete'
@@ -67,12 +55,7 @@ async function setupApiMocks(
     const path = url.pathname;
     const method = route.request().method();
 
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({
-        status,
-        contentType: 'application/json',
-        body: JSON.stringify(body),
-      });
+    const respond = (status: number, body: unknown) => jsonResponse(route, status, body);
 
     // Auth (BetterAuth get-session and other auth routes)
     if (path.includes('/api/auth/')) {
@@ -117,32 +100,6 @@ async function setupApiMocks(
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(() => ({
-    docOverflow: document.documentElement.scrollWidth > window.innerWidth,
-    bodyOverflow: document.body.scrollWidth > window.innerWidth,
-    docWidth: document.documentElement.scrollWidth,
-    bodyWidth: document.body.scrollWidth,
-    viewportWidth: window.innerWidth,
-  }));
-  expect(
-    overflow.docOverflow,
-    `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`
-  ).toBe(false);
-  expect(
-    overflow.bodyOverflow,
-    `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`
-  ).toBe(false);
-}
-
-async function takeScreenshot(page: Page, name: string) {
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
-  });
-}
-
 async function navigateToNotificationSettings(page: Page) {
   await page.goto('/settings/notifications');
   await page.waitForTimeout(1000);
@@ -157,7 +114,7 @@ test.describe('Notification Settings — Mobile', () => {
     await setupApiMocks(page, { preferences: [] });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
-    await takeScreenshot(page, 'notification-settings-mobile-default');
+    await screenshot(page, 'notification-settings-mobile-default');
     await assertNoOverflow(page);
 
     const switches = page.getByRole('switch');
@@ -172,7 +129,7 @@ test.describe('Notification Settings — Mobile', () => {
     await setupApiMocks(page, { preferences: [globalPref('task_complete', false)] });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
-    await takeScreenshot(page, 'notification-settings-mobile-type-disabled');
+    await screenshot(page, 'notification-settings-mobile-type-disabled');
     await assertNoOverflow(page);
 
     const taskCompleteSwitch = page.getByRole('switch', { name: /Task Complete/i });
@@ -183,7 +140,7 @@ test.describe('Notification Settings — Mobile', () => {
     await setupApiMocks(page, { preferences: [globalPref('*', false)] });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
-    await takeScreenshot(page, 'notification-settings-mobile-wildcard-disabled');
+    await screenshot(page, 'notification-settings-mobile-wildcard-disabled');
     await assertNoOverflow(page);
 
     const switches = page.getByRole('switch');
@@ -196,7 +153,7 @@ test.describe('Notification Settings — Mobile', () => {
   test('load failure surfaces an accessible alert with Retry control', async ({ page }) => {
     await setupApiMocks(page, { preferencesError: true });
     await navigateToNotificationSettings(page);
-    await takeScreenshot(page, 'notification-settings-mobile-load-error');
+    await screenshot(page, 'notification-settings-mobile-load-error');
     await assertNoOverflow(page);
 
     const alert = page.getByRole('alert');
@@ -219,7 +176,7 @@ test.describe('Notification Settings — Mobile', () => {
     const alert = page.getByRole('alert');
     await expect(alert).toBeVisible();
     await expect(alert).toContainText(/Task Complete/);
-    await takeScreenshot(page, 'notification-settings-mobile-save-error');
+    await screenshot(page, 'notification-settings-mobile-save-error');
     await assertNoOverflow(page);
 
     // Switch state did NOT optimistically change to the rejected value
@@ -236,7 +193,7 @@ test.describe('Notification Settings — Mobile', () => {
     });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
-    await takeScreenshot(page, 'notification-settings-mobile-project-scoped-ignored');
+    await screenshot(page, 'notification-settings-mobile-project-scoped-ignored');
     await assertNoOverflow(page);
 
     const taskCompleteSwitch = page.getByRole('switch', { name: /Task Complete/i });
@@ -255,7 +212,7 @@ test.describe('Notification Settings — Desktop', () => {
     await setupApiMocks(page, { preferences: [] });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
-    await takeScreenshot(page, 'notification-settings-desktop-default');
+    await screenshot(page, 'notification-settings-desktop-default');
     await assertNoOverflow(page);
 
     const switches = page.getByRole('switch');
@@ -272,7 +229,7 @@ test.describe('Notification Settings — Desktop', () => {
     });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
-    await takeScreenshot(page, 'notification-settings-desktop-mixed');
+    await screenshot(page, 'notification-settings-desktop-mixed');
     await assertNoOverflow(page);
 
     await expect(
@@ -286,7 +243,7 @@ test.describe('Notification Settings — Desktop', () => {
   test('load failure renders accessible alert on desktop', async ({ page }) => {
     await setupApiMocks(page, { preferencesError: true });
     await navigateToNotificationSettings(page);
-    await takeScreenshot(page, 'notification-settings-desktop-load-error');
+    await screenshot(page, 'notification-settings-desktop-load-error');
     await assertNoOverflow(page);
 
     await expect(page.getByRole('alert')).toContainText(

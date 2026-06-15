@@ -58,34 +58,14 @@ describe('GET /notifications query validation', () => {
     ['cursor=0', 'zero cursor'],
     ['cursor=-5', 'negative cursor'],
     ['cursor=1.5', 'fractional cursor'],
-  ])('returns 400 for invalid %s (%s) without calling the DO', async (qs) => {
-    const app = buildApp();
-    const res = await app.request(`/notifications?${qs}`, {}, mockEnv);
-    expect(res.status).toBe(400);
-    expect(listNotifications).not.toHaveBeenCalled();
-  });
-
-  it.each([
     ['limit=abc', 'non-numeric limit'],
     ['limit=0', 'zero limit'],
     ['limit=-3', 'negative limit'],
+    ['filter=bogus', 'unknown filter'],
+    ['type=not_a_type', 'unknown notification type'],
   ])('returns 400 for invalid %s (%s) without calling the DO', async (qs) => {
     const app = buildApp();
     const res = await app.request(`/notifications?${qs}`, {}, mockEnv);
-    expect(res.status).toBe(400);
-    expect(listNotifications).not.toHaveBeenCalled();
-  });
-
-  it('returns 400 for an unknown filter value without calling the DO', async () => {
-    const app = buildApp();
-    const res = await app.request('/notifications?filter=bogus', {}, mockEnv);
-    expect(res.status).toBe(400);
-    expect(listNotifications).not.toHaveBeenCalled();
-  });
-
-  it('returns 400 for an unknown notification type without calling the DO', async () => {
-    const app = buildApp();
-    const res = await app.request('/notifications?type=not_a_type', {}, mockEnv);
     expect(res.status).toBe(400);
     expect(listNotifications).not.toHaveBeenCalled();
   });
