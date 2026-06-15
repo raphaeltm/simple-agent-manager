@@ -4,30 +4,7 @@ exports[`agent assembler harness capability snapshots > preserves current oauth 
 {
   "amp": {
     "oauthError": "no oauth env var mapping for agent amp",
-    "openaiCompatible": {
-      "env": {
-        "OPENCODE_API_KEY": "sk-custom",
-      },
-      "files": [],
-      "opencodeConfig": {
-        "model": "custom/glm-4-6",
-        "provider": {
-          "custom": {
-            "models": {
-              "glm-4-6": {
-                "name": "glm-4.6",
-              },
-            },
-            "name": "Custom Provider",
-            "npm": "@ai-sdk/openai-compatible",
-            "options": {
-              "apiKey": "{env:OPENCODE_API_KEY}",
-              "baseURL": "https://provider.example/v1",
-            },
-          },
-        },
-      },
-    },
+    "openaiCompatibleError": "agent amp does not support openai-compatible proxy credentials",
   },
   "claude-code": {
     "oauth": {
@@ -36,117 +13,31 @@ exports[`agent assembler harness capability snapshots > preserves current oauth 
       },
       "files": [],
     },
-    "openaiCompatible": {
-      "env": {
-        "OPENCODE_API_KEY": "sk-custom",
-      },
-      "files": [],
-      "opencodeConfig": {
-        "model": "custom/glm-4-6",
-        "provider": {
-          "custom": {
-            "models": {
-              "glm-4-6": {
-                "name": "glm-4.6",
-              },
-            },
-            "name": "Custom Provider",
-            "npm": "@ai-sdk/openai-compatible",
-            "options": {
-              "apiKey": "{env:OPENCODE_API_KEY}",
-              "baseURL": "https://provider.example/v1",
-            },
-          },
-        },
-      },
-    },
+    "openaiCompatibleError": "agent claude-code does not support openai-compatible proxy credentials",
   },
   "google-gemini": {
     "oauthError": "no oauth env var mapping for agent google-gemini",
-    "openaiCompatible": {
-      "env": {
-        "OPENCODE_API_KEY": "sk-custom",
-      },
-      "files": [],
-      "opencodeConfig": {
-        "model": "custom/glm-4-6",
-        "provider": {
-          "custom": {
-            "models": {
-              "glm-4-6": {
-                "name": "glm-4.6",
-              },
-            },
-            "name": "Custom Provider",
-            "npm": "@ai-sdk/openai-compatible",
-            "options": {
-              "apiKey": "{env:OPENCODE_API_KEY}",
-              "baseURL": "https://provider.example/v1",
-            },
-          },
-        },
-      },
-    },
+    "openaiCompatibleError": "agent google-gemini does not support openai-compatible proxy credentials",
   },
   "mistral-vibe": {
     "oauthError": "no oauth env var mapping for agent mistral-vibe",
-    "openaiCompatible": {
-      "env": {
-        "OPENCODE_API_KEY": "sk-custom",
-      },
-      "files": [],
-      "opencodeConfig": {
-        "model": "custom/glm-4-6",
-        "provider": {
-          "custom": {
-            "models": {
-              "glm-4-6": {
-                "name": "glm-4.6",
-              },
-            },
-            "name": "Custom Provider",
-            "npm": "@ai-sdk/openai-compatible",
-            "options": {
-              "apiKey": "{env:OPENCODE_API_KEY}",
-              "baseURL": "https://provider.example/v1",
-            },
-          },
-        },
-      },
-    },
+    "openaiCompatibleError": "agent mistral-vibe does not support openai-compatible proxy credentials",
   },
   "openai-codex": {
     "oauthError": "no oauth env var mapping for agent openai-codex",
     "openaiCompatible": {
       "env": {
-        "OPENCODE_API_KEY": "sk-custom",
+        "OPENAI_API_KEY": "__platform_proxy__",
+        "OPENAI_BASE_URL": "https://api.sam.example/ai/proxy/{wstoken}/openai/v1",
       },
       "files": [],
-      "opencodeConfig": {
-        "model": "custom/glm-4-6",
-        "provider": {
-          "custom": {
-            "models": {
-              "glm-4-6": {
-                "name": "glm-4.6",
-              },
-            },
-            "name": "Custom Provider",
-            "npm": "@ai-sdk/openai-compatible",
-            "options": {
-              "apiKey": "{env:OPENCODE_API_KEY}",
-              "baseURL": "https://provider.example/v1",
-            },
-          },
-        },
-      },
     },
   },
   "opencode": {
     "oauthError": "no oauth env var mapping for agent opencode",
     "openaiCompatible": {
       "env": {
-        "OPENCODE_API_KEY": "sk-custom",
+        "OPENCODE_API_KEY": "__platform_proxy__",
       },
       "files": [],
       "opencodeConfig": {
@@ -162,7 +53,7 @@ exports[`agent assembler harness capability snapshots > preserves current oauth 
             "npm": "@ai-sdk/openai-compatible",
             "options": {
               "apiKey": "{env:OPENCODE_API_KEY}",
-              "baseURL": "https://provider.example/v1",
+              "baseURL": "https://api.sam.example/ai/proxy/{wstoken}/openai/v1",
             },
           },
         },

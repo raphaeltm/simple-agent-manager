@@ -288,7 +288,7 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
 describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection', () => {
   const userId = 'user-1';
 
-  it('OpenCode + z.ai (openai-compatible) → OPENCODE_API_KEY + custom provider config', () => {
+  it('OpenCode + z.ai (openai-compatible) → proxy sentinel + custom provider config', () => {
     idSeq = 0;
     const cred: Credential = {
       id: nextId('cred'),
@@ -308,7 +308,11 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
       name: 'GLM 4.6 via z.ai',
       consumer: { kind: 'agent', agentType: 'opencode' },
       credentialId: cred.id,
-      settings: { model: 'glm-4.6', baseUrl: 'https://api.z.ai/api/coding/paas/v4' },
+      settings: {
+        model: 'glm-4.6',
+        baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+        samProxyBaseUrl: 'https://api.sam.example/ai/proxy/{wstoken}',
+      },
       isActive: true,
     };
     const snap: CompositionSnapshot = {
@@ -328,8 +332,9 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
     const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'opencode' }, { userId });
     const injection = agentAssembler.assemble(resolved!);
 
-    expect(injection.env).toEqual({ OPENCODE_API_KEY: 'zai-secret' });
-    // Mirrors gateway.go buildOpencodeConfig 'openai-compatible'/'custom' case.
+    expect(injection.env).toEqual({ OPENCODE_API_KEY: '__platform_proxy__' });
+    expect(JSON.stringify(injection)).not.toContain('zai-secret');
+    expect(JSON.stringify(injection)).not.toContain('https://api.z.ai/api/coding/paas/v4');
     expect(injection.opencodeConfig).toEqual({
       model: 'custom/glm-4-6',
       provider: {
@@ -337,7 +342,7 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
           npm: '@ai-sdk/openai-compatible',
           name: 'Custom Provider',
           options: {
-            baseURL: 'https://api.z.ai/api/coding/paas/v4',
+            baseURL: 'https://api.sam.example/ai/proxy/{wstoken}/openai/v1',
             apiKey: '{env:OPENCODE_API_KEY}',
           },
           models: { 'glm-4-6': { name: 'glm-4.6' } },
