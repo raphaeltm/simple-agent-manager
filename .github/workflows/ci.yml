@@ -424,14 +424,8 @@ jobs:
       - name: Install devcontainers CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Pull test images
-        run: |
-          docker pull debian:bookworm-slim &
-          docker pull node:22-bookworm &
-          docker pull mcr.microsoft.com/devcontainers/base:debian &
-          docker pull mcr.microsoft.com/devcontainers/python:3.12 &
-          docker pull mcr.microsoft.com/devcontainers/typescript-node:22-bookworm &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent
@@ -455,10 +449,8 @@ jobs:
       - name: Install devcontainers CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Pull test images
-        run: |
-          docker pull mcr.microsoft.com/devcontainers/base:debian &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run VM Agent E2E tests
         working-directory: packages/vm-agent
@@ -479,6 +471,9 @@ jobs:
 
       - name: Install devcontainer CLI
         run: npm install -g @devcontainers/cli
+
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Validate devcontainer.json syntax
         run: |
@@ -681,12 +676,8 @@ jobs:
       - name: Install devcontainer CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Pull base images
-        run: |
-          docker pull alpine:latest &
-          docker pull mcr.microsoft.com/devcontainers/typescript-node:24-bookworm &
-          docker pull mcr.microsoft.com/devcontainers/base:ubuntu &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run SAM volume mount devcontainer test
         run: bash scripts/ci/test-devcontainer-volume-mount.sh .
