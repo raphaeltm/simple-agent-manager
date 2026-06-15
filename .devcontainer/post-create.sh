@@ -28,6 +28,9 @@ mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 
 echo "=== Installing Claude Code (native) ==="
 try_run "Install Claude Code" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+if [ -x "$HOME/.local/bin/claude" ]; then
+	export PATH="$HOME/.local/bin:$PATH"
+fi
 
 echo "=== Installing OpenAI Codex ==="
 try_run "Install OpenAI Codex" npm i -g @openai/codex

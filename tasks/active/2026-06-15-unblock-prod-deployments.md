@@ -24,6 +24,7 @@ Production deployments are not reaching the deploy step because the latest `main
 - [x] Replace direct MCR pre-pull workflow steps with the helper.
 - [x] Cover all MCR tags used by CI devcontainer jobs.
 - [x] Align devcontainer validation with post-create's non-fatal external tool installs.
+- [x] Ensure successful Claude native installs are added to PATH before MCP setup.
 - [x] Validate shell syntax and, if Docker is available, fixture image preparation.
 - [ ] Push the branch and verify CI reaches green.
 
@@ -36,6 +37,7 @@ Production deployments are not reaching the deploy step because the latest `main
 - Docker is not installed in this workspace, so fixture image build validation must run in GitHub Actions.
 - PR CI run `27580874584` proved the original blockers now pass: `VM Agent Integration`, `VM Agent E2E`, and `Devcontainer Volume Mount`.
 - Same run exposed an unrelated external-installer validation mismatch: `claude --version` was required even though `.devcontainer/post-create.sh` treats Claude install as non-fatal.
+- PR CI run `27581282825` proved `VM Agent Integration`, `VM Agent E2E`, and `Devcontainer Volume Mount` still pass. It then exposed that a successful Claude native install writes to `$HOME/.local/bin`, which was not on PATH before MCP setup.
 
 ## Acceptance Criteria
 

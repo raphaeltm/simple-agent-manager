@@ -636,15 +636,20 @@ jobs:
 
             echo "=== MCP Server Configuration ==="
 
-            # Claude MCP servers configured by post-create.sh
-            for server in playwright sequential-thinking context7 cloudflare-observability; do
-              if claude mcp get "$server" >/dev/null 2>&1; then
-                echo "OK: Claude MCP server '$server' configured"
-              else
-                echo "FAIL: Claude MCP server '$server' not found"
-                FAIL=$((FAIL + 1))
-              fi
-            done
+            # Claude MCP servers are configured only when the non-fatal Claude
+            # install succeeds and the binary is available on PATH.
+            if command -v claude >/dev/null 2>&1; then
+              for server in playwright sequential-thinking context7 cloudflare-observability; do
+                if claude mcp get "$server" >/dev/null 2>&1; then
+                  echo "OK: Claude MCP server '$server' configured"
+                else
+                  echo "FAIL: Claude MCP server '$server' not found"
+                  FAIL=$((FAIL + 1))
+                fi
+              done
+            else
+              echo "WARNING: Claude CLI unavailable; skipping Claude MCP server verification"
+            fi
 
             # Codex Cloudflare Observability MCP is intentionally opt-in after
             # OAuth login. post-create.sh prints the setup commands instead of
