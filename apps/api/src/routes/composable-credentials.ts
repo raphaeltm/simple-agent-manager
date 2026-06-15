@@ -4,7 +4,12 @@
  * All routes require authentication. Users can only manage their own resources.
  */
 
-import type { CCCredentialKind } from '@simple-agent-manager/shared';
+import {
+  type CCCredentialKind,
+  type Dialect,
+  DIALECT_VALUES,
+  resolveHarnessDialect,
+} from '@simple-agent-manager/shared';
 import { and,eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -21,6 +26,64 @@ import { encrypt } from '../services/encryption';
 const ccRoutes = new Hono<{ Bindings: Env }>();
 
 ccRoutes.use('/*', requireAuth(), requireApproved());
+
+function requireHttpsBaseUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw errors.badRequest('HTTPS baseUrl is required');
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') {
+      throw errors.badRequest('HTTPS baseUrl is required');
+    }
+    return value.trim();
+  } catch {
+    throw errors.badRequest('HTTPS baseUrl is required');
+  }
+}
+
+function requireDialect(value: unknown): Dialect {
+  if (typeof value !== 'string' || !(DIALECT_VALUES as readonly string[]).includes(value)) {
+    throw errors.badRequest(`provider dialect is required and must be one of: ${DIALECT_VALUES.join(', ')}`);
+  }
+  return value as Dialect;
+}
+
+function validateOpenAICompatibleSecret(secret: unknown): void {
+  if (secret === null || typeof secret !== 'object') {
+    throw errors.badRequest('openai-compatible credentials require apiKey, baseUrl, and dialect');
+  }
+  const record = secret as Record<string, unknown>;
+  if (typeof record.apiKey !== 'string' || record.apiKey.trim() === '') {
+    throw errors.badRequest('openai-compatible apiKey is required');
+  }
+  requireHttpsBaseUrl(record.baseUrl);
+  const dialect = requireDialect(record.dialect);
+  if (dialect !== 'openai-compatible') {
+    throw errors.badRequest('openai-compatible credentials require dialect openai-compatible');
+  }
+}
+
+function validateConfigurationSettings(input: {
+  consumerKind: unknown;
+  consumerTarget: unknown;
+  settings: unknown;
+}): void {
+  if (input.consumerKind !== 'agent') return;
+  if (typeof input.consumerTarget !== 'string') return;
+  if (input.settings === undefined || input.settings === null) return;
+  if (typeof input.settings !== 'object') {
+    throw errors.badRequest('settings must be an object');
+  }
+  const settings = input.settings as Record<string, unknown>;
+  if (settings.baseUrl !== undefined) requireHttpsBaseUrl(settings.baseUrl);
+  if (settings.dialect !== undefined || settings.baseUrl !== undefined) {
+    const dialect = requireDialect(settings.dialect);
+    if (!resolveHarnessDialect(input.consumerTarget, dialect)) {
+      throw errors.badRequest(`Agent ${input.consumerTarget} does not support provider dialect ${dialect}`);
+    }
+  }
+}
 
 // =============================================================================
 // Credentials
@@ -59,6 +122,9 @@ ccRoutes.post('/credentials', async (c) => {
   }
   if (!VALID_KINDS.includes(kind)) {
     throw errors.badRequest(`Invalid kind. Must be one of: ${VALID_KINDS.join(', ')}`);
+  }
+  if (kind === 'openai-compatible') {
+    validateOpenAICompatibleSecret(secret);
   }
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
@@ -163,6 +229,7 @@ ccRoutes.post('/configurations', async (c) => {
   if (!VALID_CONSUMER_KINDS.includes(consumerKind)) {
     throw errors.badRequest(`Invalid consumerKind. Must be one of: ${VALID_CONSUMER_KINDS.join(', ')}`);
   }
+  validateConfigurationSettings({ consumerKind, consumerTarget, settings });
 
   // Verify credential belongs to user if provided
   if (credentialId) {
@@ -210,7 +277,23 @@ ccRoutes.patch('/configurations/:id', async (c) => {
   } else if (body.credentialId === null) {
     updates.credentialId = null;
   }
-  if (body.settings !== undefined) updates.settingsJson = body.settings ? JSON.stringify(body.settings) : null;
+  if (body.settings !== undefined) {
+    const [existing] = await db
+      .select({
+        consumerKind: schema.ccConfigurations.consumerKind,
+        consumerTarget: schema.ccConfigurations.consumerTarget,
+      })
+      .from(schema.ccConfigurations)
+      .where(and(eq(schema.ccConfigurations.id, id), eq(schema.ccConfigurations.ownerId, userId)))
+      .limit(1);
+    if (!existing) throw errors.notFound('Configuration');
+    validateConfigurationSettings({
+      consumerKind: existing.consumerKind,
+      consumerTarget: existing.consumerTarget,
+      settings: body.settings,
+    });
+    updates.settingsJson = body.settings ? JSON.stringify(body.settings) : null;
+  }
   if (typeof body.isActive === 'boolean') updates.isActive = body.isActive;
 
   if (Object.keys(updates).length === 0) {

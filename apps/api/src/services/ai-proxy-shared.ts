@@ -7,7 +7,7 @@
  *
  * Upstream auth resolution (Unified Billing vs platform key) lives in ai-billing.ts.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -26,6 +26,7 @@ export interface AIProxyAuthResult {
   projectId: string | null;
   chatSessionId?: string | null;
   trialId?: string;
+  agentType?: string | null;
 }
 
 /**
@@ -64,6 +65,7 @@ export async function verifyAIProxyAuth(
       userId: schema.workspaces.userId,
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
+      agentProfileHint: schema.workspaces.agentProfileHint,
     })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
@@ -72,6 +74,27 @@ export async function verifyAIProxyAuth(
   if (!workspace?.userId) {
     log.error('ai_proxy.workspace_not_found', { workspaceId });
     throw new AIProxyAuthError('Workspace not found', 404);
+  }
+
+  let agentType: string | null = null;
+  if (workspace.agentProfileHint) {
+    const profile = await db
+      .select({ agentType: schema.agentProfiles.agentType })
+      .from(schema.agentProfiles)
+      .where(
+        and(
+          eq(schema.agentProfiles.id, workspace.agentProfileHint),
+          eq(schema.agentProfiles.userId, workspace.userId),
+          or(
+            isNull(schema.agentProfiles.projectId),
+            workspace.projectId
+              ? eq(schema.agentProfiles.projectId, workspace.projectId)
+              : isNull(schema.agentProfiles.projectId),
+          ),
+        ),
+      )
+      .get();
+    agentType = profile?.agentType ?? null;
   }
 
   // Check if this workspace belongs to a trial
@@ -91,6 +114,7 @@ export async function verifyAIProxyAuth(
     projectId: workspace.projectId,
     chatSessionId: workspace.chatSessionId,
     trialId,
+    agentType,
   };
 }
 

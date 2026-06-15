@@ -6,7 +6,7 @@
  * the upstream provider.
  *
  * Two modes:
- * - User has upstream-compatible credential → apiKeySource: 'user-credential' (passthrough proxy)
+ * - User has upstream-compatible credential → apiKeySource: 'callback-token' (passthrough proxy)
  * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
  */
 import { Hono } from 'hono';
@@ -233,6 +233,9 @@ describe('runtime.ts always-proxy', () => {
         credential: `sk-${agentType}`,
         credentialKind: 'api-key',
         credentialSource: 'user',
+        baseUrl: agentType === 'claude-code'
+          ? 'https://anthropic-alt.example/anthropic'
+          : 'https://custom-openai.example/v1',
       });
 
       const response = await postAgentKey(agentType);
@@ -244,22 +247,25 @@ describe('runtime.ts always-proxy', () => {
     expect(outputs).toMatchInlineSnapshot(`
       {
         "claude-code": {
-          "apiKeySource": "user-credential",
+          "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/anthropic",
           "model": "claude-sonnet-4-6",
           "provider": "anthropic-passthrough",
+          "upstreamBaseURL": "https://anthropic-alt.example/anthropic",
         },
         "openai-codex": {
-          "apiKeySource": "user-credential",
+          "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
           "model": "gpt-4.1",
           "provider": "openai-passthrough",
+          "upstreamBaseURL": "https://custom-openai.example/v1",
         },
         "opencode": {
-          "apiKeySource": "user-credential",
+          "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
           "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
           "provider": "openai-passthrough",
+          "upstreamBaseURL": "https://custom-openai.example/v1",
         },
       }
     `);
@@ -321,6 +327,7 @@ describe('runtime.ts always-proxy', () => {
       credential: 'sk-ant-user-key',
       credentialKind: 'api-key',
       credentialSource: 'user',
+      baseUrl: 'https://anthropic-alt.example/anthropic',
     });
 
     const res = await postAgentKey('claude-code');
@@ -331,11 +338,11 @@ describe('runtime.ts always-proxy', () => {
       credentialKind: string;
       inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
     };
-    expect(json.apiKey).toBe('sk-ant-user-key');
+    expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.credentialKind).toBe('api-key');
     expect(json.inferenceConfig).toBeDefined();
     expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
-    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
   });
 
@@ -447,6 +454,7 @@ describe('runtime.ts always-proxy', () => {
       credential: 'sk-openai-user-key',
       credentialKind: 'api-key',
       credentialSource: 'user',
+      baseUrl: 'https://custom-openai.example/v1',
     });
 
     const res = await postAgentKey('openai-codex');
@@ -454,11 +462,12 @@ describe('runtime.ts always-proxy', () => {
     expect(res.status).toBe(200);
     const json = await res.json() as {
       apiKey: string;
-      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
+      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string; upstreamBaseURL?: string };
     };
-    expect(json.apiKey).toBe('sk-openai-user-key');
+    expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.inferenceConfig.provider).toBe('openai-passthrough');
-    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
+    expect(json.inferenceConfig.upstreamBaseURL).toBe('https://custom-openai.example/v1');
   });
 });
