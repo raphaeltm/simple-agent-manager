@@ -76,6 +76,12 @@ func buildAcpMcpServers(entries []McpServerEntry, agentType string) []acpsdk.Mcp
 	if len(entries) == 0 {
 		return []acpsdk.McpServer{}
 	}
+	if agentType == "openai-codex" {
+		// codex-acp currently drops timeout configuration for ACP-injected
+		// mcpServers. SAM writes Codex MCP servers to ~/.codex/config.toml
+		// instead, where explicit timeout fields are honored.
+		return []acpsdk.McpServer{}
+	}
 	servers := make([]acpsdk.McpServer, 0, len(entries))
 	for i, e := range entries {
 		name := mcpServerName(i, len(entries))

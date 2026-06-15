@@ -205,6 +205,10 @@ type GatewayConfig struct {
 	// When non-empty, these are converted to acpsdk.McpServer entries
 	// and passed in NewSession/LoadSession requests.
 	McpServers []McpServerEntry
+	// CodexMCPStartupTimeout is written to ~/.codex/config.toml for SAM MCP servers.
+	CodexMCPStartupTimeout time.Duration
+	// CodexMCPToolTimeout is written to ~/.codex/config.toml for SAM MCP servers.
+	CodexMCPToolTimeout time.Duration
 	// ModelOverride, if non-empty, overrides the model fetched from user agent settings.
 	// Set by the control plane when an agent profile specifies a model.
 	ModelOverride string
@@ -1103,7 +1107,7 @@ func normalizeCodexEffort(effort string) string {
 // configuration plus the environment variables referenced by
 // bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
 // via ~/.codex/config.toml.
-func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) (string, []string) {
+func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string, startupTimeout, toolTimeout time.Duration) (string, []string) {
 	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
 	codexEffort := normalizeCodexEffort(effort)
 	if len(mcpServers) == 0 && providerConfig == "" && codexEffort == "" {
@@ -1144,12 +1148,25 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 			config.WriteString(fmt.Sprintf("bearer_token_env_var = \"%s\"\n", tokenEnvVar))
 			envVars = append(envVars, fmt.Sprintf("%s=%s", tokenEnvVar, server.Token))
 		}
+		if seconds := durationSeconds(startupTimeout); seconds > 0 {
+			config.WriteString(fmt.Sprintf("startup_timeout_sec = %d\n", seconds))
+		}
+		if seconds := durationSeconds(toolTimeout); seconds > 0 {
+			config.WriteString(fmt.Sprintf("tool_timeout_sec = %d\n", seconds))
+		}
 		config.WriteString("\n")
 	}
 
 	config.WriteString(codexManagedMcpEndMarker)
 	config.WriteString("\n")
 	return config.String(), envVars
+}
+
+func durationSeconds(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int((d + time.Second - 1) / time.Second)
 }
 
 // vibeDefaultActiveModel is the model alias used when no user model override
@@ -1598,8 +1615,8 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 // writeCodexConfigToContainer updates ~/.codex/config.toml with a SAM-managed
 // MCP block. Existing non-SAM config is preserved, and prior SAM-managed blocks
 // are replaced so resumed or restarted sessions do not accumulate stale tokens.
-func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) ([]string, error) {
-	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider, effort)
+func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string, startupTimeout, toolTimeout time.Duration) ([]string, error) {
+	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider, effort, startupTimeout, toolTimeout)
 	existingConfig, err := readOptionalFileFromContainer(ctx, containerID, user, ".codex/config.toml")
 	if err != nil {
 		return nil, err

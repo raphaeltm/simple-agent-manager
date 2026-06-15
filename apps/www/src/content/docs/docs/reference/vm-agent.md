@@ -106,6 +106,8 @@ Environment variables set by the cloud-init template:
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
+| `CODEX_MCP_STARTUP_TIMEOUT` | `60s` | Startup timeout for Codex MCP servers written to config.toml |
+| `CODEX_MCP_TOOL_TIMEOUT` | `30m` | Tool timeout for Codex MCP servers written to config.toml |
 
 ### Log Retrieval Settings
 

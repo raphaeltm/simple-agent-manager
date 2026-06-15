@@ -124,6 +124,8 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m`    | Max exponential backoff for transient provider prompt retries |
 | `ACP_IDLE_SUSPEND_TIMEOUT`    | `30m`   | Idle session auto-suspend timeout  |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s`    | Notification serialization timeout |
+| `CODEX_MCP_STARTUP_TIMEOUT`   | `60s`   | Startup timeout for Codex MCP servers |
+| `CODEX_MCP_TOOL_TIMEOUT`      | `30m`   | Tool timeout for Codex MCP servers |
 
 ## MCP (Agent Tools)
 

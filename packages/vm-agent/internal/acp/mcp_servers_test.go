@@ -68,6 +68,18 @@ func TestBuildAcpMcpServers_NoToken(t *testing.T) {
 	}
 }
 
+func TestBuildAcpMcpServers_CodexUsesConfigTomlOnly(t *testing.T) {
+	entries := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
+	}
+
+	result := buildAcpMcpServers(entries, "openai-codex")
+
+	if len(result) != 0 {
+		t.Fatalf("expected no ACP-injected MCP servers for Codex, got %d", len(result))
+	}
+}
+
 func TestBuildAcpMcpServers_MultipleServers(t *testing.T) {
 	entries := []McpServerEntry{
 		{URL: "https://api1.example.com/mcp", Token: "token-1"},

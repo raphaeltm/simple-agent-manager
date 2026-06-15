@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tests for OAuth support
@@ -1048,7 +1049,7 @@ func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
 func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 	t.Parallel()
 
-	config, envVars := generateCodexMcpConfig(nil, nil, "")
+	config, envVars := generateCodexMcpConfig(nil, nil, "", 0, 0)
 	if config != "" {
 		t.Fatalf("expected empty config, got %q", config)
 	}
@@ -1060,7 +1061,7 @@ func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 func TestGenerateCodexMcpConfigWithReasoningEffort(t *testing.T) {
 	t.Parallel()
 
-	config, envVars := generateCodexMcpConfig(nil, nil, "high")
+	config, envVars := generateCodexMcpConfig(nil, nil, "high", 0, 0)
 
 	if !strings.Contains(config, `model_reasoning_effort = "high"`) {
 		t.Fatalf("expected model_reasoning_effort in managed config, got %q", config)
@@ -1076,7 +1077,7 @@ func TestGenerateCodexMcpConfigWithReasoningEffort(t *testing.T) {
 func TestGenerateCodexMcpConfigSkipsUnsupportedReasoningEffort(t *testing.T) {
 	t.Parallel()
 
-	config, envVars := generateCodexMcpConfig(nil, nil, "max")
+	config, envVars := generateCodexMcpConfig(nil, nil, "max", 0, 0)
 
 	if config != "" {
 		t.Fatalf("expected empty config for unsupported Codex effort, got %q", config)
@@ -1091,7 +1092,7 @@ func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
-	}, nil, "")
+	}, nil, "", time.Minute, 30*time.Minute)
 
 	if !strings.Contains(config, codexManagedMcpStartMarker) {
 		t.Fatal("expected managed start marker")
@@ -1114,6 +1115,12 @@ func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 	if !strings.Contains(config, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
 		t.Fatal("expected bearer token env var entry")
 	}
+	if !strings.Contains(config, `startup_timeout_sec = 60`) {
+		t.Fatal("expected startup timeout entry")
+	}
+	if !strings.Contains(config, `tool_timeout_sec = 1800`) {
+		t.Fatal("expected tool timeout entry")
+	}
 	if !strings.Contains(config, codexManagedMcpEndMarker) {
 		t.Fatal("expected managed end marker")
 	}
@@ -1128,7 +1135,7 @@ func TestGenerateCodexMcpConfigMultipleServers(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "token-1"},
 		{URL: "https://backup.example.com/mcp", Token: "token-2"},
-	}, nil, "")
+	}, nil, "", 0, 0)
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp-0]`) {
 		t.Fatal("expected first server entry")
@@ -1152,7 +1159,7 @@ func TestGenerateCodexMcpConfigServerWithoutToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp"},
-	}, nil, "")
+	}, nil, "", 0, 0)
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
 		t.Fatal("expected server entry")
@@ -1171,7 +1178,7 @@ func TestGenerateCodexMcpConfigServerWithControlCharsRejected(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://good.example.com/mcp", Token: "good-token"},
 		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
-	}, nil, "")
+	}, nil, "", 0, 0)
 
 	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
 		t.Fatal("expected good server to be present")
@@ -1190,7 +1197,7 @@ func TestGenerateCodexMcpConfigWithProxyProvider(t *testing.T) {
 	config, envVars := generateCodexMcpConfig(nil, &codexProxyProviderConfig{
 		baseURL: "https://api.example.com/ai/v1",
 		model:   "gpt-4.1",
-	}, "")
+	}, "", 0, 0)
 
 	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
 		t.Fatal("expected sandbox mode to disable Codex bubblewrap inside containers")

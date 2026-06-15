@@ -344,7 +344,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if startup.settings != nil {
 		effort = startup.settings.Effort
 	}
-	codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort)
+	codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort, h.config.CodexMCPStartupTimeout, h.config.CodexMCPToolTimeout)
 	if err != nil {
 		slog.Warn("Failed to write Codex config.toml", "error", err, "workspaceId", h.config.WorkspaceID)
 		return

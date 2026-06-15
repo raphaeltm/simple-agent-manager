@@ -134,6 +134,8 @@ type Config struct {
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
+	CodexMCPStartupTimeout   time.Duration // Startup timeout for Codex MCP servers written to config.toml (default: 60s)
+	CodexMCPToolTimeout      time.Duration // Tool timeout for Codex MCP servers written to config.toml (default: 30m)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -358,6 +360,8 @@ func Load() (*Config, error) {
 		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
+		CodexMCPStartupTimeout:   getEnvDuration("CODEX_MCP_STARTUP_TIMEOUT", time.Minute),
+		CodexMCPToolTimeout:      getEnvDuration("CODEX_MCP_TOOL_TIMEOUT", 30*time.Minute),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),

@@ -186,6 +186,8 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 - `ACP_PROMPT_RETRY_MAX_BACKOFF` — Max exponential backoff for transient provider prompt retries (default: 2m)
 - `ACP_IDLE_SUSPEND_TIMEOUT` — Idle timeout before auto-suspending agent session (default: 30m)
 - `ACP_NOTIF_SERIALIZE_TIMEOUT` — Max wait for previous session/update processing before delivering next (default: 5s)
+- `CODEX_MCP_STARTUP_TIMEOUT` — Startup timeout for Codex MCP servers written to config.toml (default: 60s)
+- `CODEX_MCP_TOOL_TIMEOUT` — Tool timeout for Codex MCP servers written to config.toml (default: 30m)
 
 ### Events
 
