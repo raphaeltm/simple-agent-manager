@@ -41,10 +41,10 @@ describe('alternative-provider model catalog entries', () => {
         for (const modelId of providerModels) {
           expect(
             models.some((model) => model.id === modelId),
-            `${agentType} is missing ${modelId}`,
+            `${agentType} is missing ${modelId}`
           ).toBe(true);
           expect(isKnownModel(agentType, modelId), `${agentType} should know ${modelId}`).toBe(
-            true,
+            true
           );
         }
       }
