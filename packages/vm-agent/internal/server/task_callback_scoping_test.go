@@ -83,6 +83,14 @@ func TestTaskCompletionCallbackTreatsPromptCancellationAsAwaitingFollowup(t *tes
 	}
 }
 
+// TestTaskCompletionCallbackTreatsCrashRecoveryAsAwaitingFollowup is the
+// server-side regression guard for the codex LoadSession recovery fix: once the
+// acp layer stopped routing successful openai-codex recovery to a terminal
+// "error" (resumeShouldReportTerminalErrorLocked was removed), codex recovery
+// now emits the same "recovered" stop reason as claude-code. makeTaskCompletionCallback
+// is agent-agnostic, so this asserts that "recovered" maps to awaiting_followup
+// (task keeps running) and is NEVER turned into a terminal failure — for codex
+// and claude-code alike.
 func TestTaskCompletionCallbackTreatsCrashRecoveryAsAwaitingFollowup(t *testing.T) {
 	t.Parallel()
 

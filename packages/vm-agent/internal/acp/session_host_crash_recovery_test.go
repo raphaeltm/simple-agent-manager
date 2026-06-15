@@ -290,13 +290,18 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	expectCompletion(t, completed, "end_turn", time.Second, "normal prompt completion was swallowed by recovery once")
 }
 
-// TestSessionHost_CodexCrashRecovery_ReportsTerminalError proves the Codex
-// conservatism invariant (resumeShouldReportTerminalErrorLocked): even when the
-// LoadSession-based restart succeeds, Codex recovery is routed to a terminal
-// "error" rather than "recovered" until resume coherence is validated. The long
-// watchdog isolates this from the watchdog path so the only way to reach "error"
-// is through the successful-restart branch of monitorProcessExit.
-func TestSessionHost_CodexCrashRecovery_ReportsTerminalError(t *testing.T) {
+// TestSessionHost_CodexCrashRecovery_ReportsRecovered proves that a successful
+// LoadSession-based restart of an openai-codex agent is reported as "recovered"
+// — identical to claude-code (TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce).
+// The resumed ACP session reuses the same session ID and conversation state, so
+// the task continues with awaiting_followup rather than being marked failed. The
+// long watchdog isolates this from the watchdog path so the only way to reach a
+// completion signal is through the successful-restart branch of monitorProcessExit.
+//
+// Regression guard: this previously reported a terminal "error" via the
+// resumeShouldReportTerminalErrorLocked codex guard, which converted every
+// successful codex mid-prompt disconnect recovery into a false task failure.
+func TestSessionHost_CodexCrashRecovery_ReportsRecovered(t *testing.T) {
 	host := newRecoveryTestHost(t, 30*time.Second)
 	defer host.Stop()
 
@@ -306,10 +311,13 @@ func TestSessionHost_CodexCrashRecovery_ReportsTerminalError(t *testing.T) {
 	completed := startRecoveryMonitor(t, host, oldProc, "openai-codex", countingSpawn(t, &startCount))
 	finishWithPeerDisconnect(host)
 
-	expectCompletion(t, completed, "error", 2*time.Second, "codex recovery did not report terminal error")
+	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "codex recovery did not report recovered")
 	assertNoSecondCompletion(t, completed)
+	if oldProc.stopCount.Load() != 1 {
+		t.Fatalf("Stop count = %d, want 1", oldProc.stopCount.Load())
+	}
 	if startCount.Load() != 1 {
-		t.Fatalf("restart count = %d, want 1 (LoadSession restart must run before the terminal error)", startCount.Load())
+		t.Fatalf("restart count = %d, want 1 (LoadSession restart must run and report recovered)", startCount.Load())
 	}
 }
 

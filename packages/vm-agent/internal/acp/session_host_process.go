@@ -112,22 +112,12 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 
 	// Crash-recovery restart succeeded. Clear the recovery episode state now
 	// that a healthy process is installed, so the watchdog short-circuits and
-	// never tears down the freshly-restarted process. The terminal-error
-	// decision below intentionally keys off agentType via
-	// resumeShouldReportTerminalErrorLocked, NOT off crashRecoveryInProgress,
-	// so clearing the flag here cannot accidentally make the Codex branch
-	// unreachable.
+	// never tears down the freshly-restarted process. A successful restart +
+	// LoadSession is reported as "recovered" for every agent type (claude-code
+	// and openai-codex alike): the resumed ACP session retains the same session
+	// ID and conversation state, so the task can continue with awaiting_followup
+	// rather than being marked as a terminal failure.
 	h.clearCrashRecoveryLocked()
-	if h.resumeShouldReportTerminalErrorLocked(agentType) {
-		message := fmt.Sprintf("Agent %s LoadSession recovery needs staging validation before being reported as recovered", agentType)
-		h.status = HostError
-		h.statusErr = message
-		h.mu.Unlock()
-		h.finishCrashRecoveryFailure(crashRecovery, message, fmt.Errorf("%s", message), recoveryNotify)
-		h.broadcastAgentStatus(StatusError, agentType, message)
-		h.reportActivity("error")
-		return
-	}
 	h.mu.Unlock()
 
 	h.broadcastAgentStatus(StatusRecovered, agentType, "")
@@ -174,13 +164,6 @@ func (h *SessionHost) applyRestartDecayLocked() {
 	if time.Since(h.lastCrashTime) > h.restartDecayWindow() {
 		h.restartCount = 0
 	}
-}
-
-func (h *SessionHost) resumeShouldReportTerminalErrorLocked(agentType string) bool {
-	// TODO: empirically validate codex-acp LoadSession coherence on staging. Until
-	// that round-trip proves coherent, report Codex disconnect recovery as a
-	// terminal task error instead of a possibly misleading "recovered".
-	return agentType == "openai-codex"
 }
 
 func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput string, maxRestarts int, crashRecovery crashRecoverySnapshot, notify recoveryNotify) {
