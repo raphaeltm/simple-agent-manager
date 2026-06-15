@@ -153,6 +153,9 @@ export function buildAIGatewayMetadata(opts: {
   modelId: string;
   stream: boolean;
   hasTools?: boolean;
+  providerId?: string;
+  providerName?: string;
+  providerDialect?: string;
 }): string {
   return JSON.stringify({
     userId: opts.userId,
@@ -163,6 +166,9 @@ export function buildAIGatewayMetadata(opts: {
     modelId: opts.modelId,
     stream: opts.stream,
     hasTools: opts.hasTools ?? false,
+    providerId: opts.providerId,
+    providerName: opts.providerName,
+    providerDialect: opts.providerDialect,
   });
 }
 

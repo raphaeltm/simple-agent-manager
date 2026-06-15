@@ -8,12 +8,15 @@ import {
   buildBudgetKey,
   buildBudgetSettingsKey,
   buildMonthlyCostCacheKey,
+  buildProviderUsageKey,
   checkAiUsageGate,
   checkMonthlyCostCap,
   checkTokenBudget,
   deleteUserBudgetSettings,
+  getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
+  incrementProviderUsage,
   incrementTokenUsage,
   resolveEffectiveLimits,
   saveUserBudgetSettings,
@@ -44,6 +47,15 @@ function createMockKV(): KVNamespace & { _store: Map<string, string> } {
 
 function createAtomicBudgetEnv() {
   const store = new Map<string, { inputTokens: number; outputTokens: number }>();
+  const providerStore = new Map<string, {
+    providerId: string;
+    providerName: string;
+    dialect: string;
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  }>();
   let queue = Promise.resolve();
   const stub = {
     async get(dateKey: string) {
@@ -60,6 +72,35 @@ function createAtomicBudgetEnv() {
       });
       await queue;
       return store.get(dateKey)!;
+    },
+    async incrementProviderUsage(
+      dateKey: string,
+      attribution: { providerId: string; providerName: string; dialect: string },
+      inputTokens: number,
+      outputTokens: number,
+      estimatedCostUsd: number,
+    ) {
+      const key = `${dateKey}:${attribution.providerId}:${attribution.dialect}`;
+      const current = providerStore.get(key) ?? {
+        ...attribution,
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+      };
+      providerStore.set(key, {
+        ...current,
+        providerName: attribution.providerName,
+        requests: current.requests + 1,
+        inputTokens: current.inputTokens + inputTokens,
+        outputTokens: current.outputTokens + outputTokens,
+        estimatedCostUsd: current.estimatedCostUsd + estimatedCostUsd,
+      });
+    },
+    async getProviderUsage(startDateKey: string) {
+      return Array.from(providerStore.entries())
+        .filter(([key]) => key.slice(0, 10) >= startDateKey)
+        .map(([, value]) => value);
     },
   };
 
@@ -183,6 +224,65 @@ describe('incrementTokenUsage', () => {
 
     const usage = await getTokenUsage(kv, 'user-atomic', env);
     expect(usage).toEqual({ inputTokens: 250, outputTokens: 50 });
+    expect(kv.put).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider usage', () => {
+  it('builds a daily provider usage key', () => {
+    const date = new Date('2026-06-15T12:30:00Z');
+    expect(buildProviderUsageKey('user-123', date)).toBe('ai-provider-usage:user-123:2026-06-15');
+  });
+
+  it('accumulates provider usage by provider and dialect in KV fallback', async () => {
+    const kv = createMockKV();
+    await incrementProviderUsage(kv, 'user-provider', {
+      providerId: 'groq',
+      providerName: 'Groq',
+      dialect: 'openai-compatible',
+    }, 100, 20);
+    await incrementProviderUsage(kv, 'user-provider', {
+      providerId: 'groq',
+      providerName: 'Groq',
+      dialect: 'openai-compatible',
+    }, 300, 40);
+
+    const usage = await getProviderUsage(kv, 'user-provider', new Date());
+    expect(usage).toEqual([
+      {
+        providerId: 'groq',
+        providerName: 'Groq',
+        dialect: 'openai-compatible',
+        requests: 2,
+        inputTokens: 400,
+        outputTokens: 60,
+        estimatedCostUsd: 0,
+      },
+    ]);
+  });
+
+  it('uses the Durable Object counter when available', async () => {
+    const kv = createMockKV();
+    const env = createAtomicBudgetEnv();
+
+    await incrementProviderUsage(kv, 'user-provider-do', {
+      providerId: 'deepseek-anthropic',
+      providerName: 'DeepSeek Anthropic API',
+      dialect: 'anthropic',
+    }, 50, 10, env);
+
+    const usage = await getProviderUsage(kv, 'user-provider-do', new Date('2000-01-01T00:00:00Z'), env);
+    expect(usage).toEqual([
+      {
+        providerId: 'deepseek-anthropic',
+        providerName: 'DeepSeek Anthropic API',
+        dialect: 'anthropic',
+        requests: 1,
+        inputTokens: 50,
+        outputTokens: 10,
+        estimatedCostUsd: 0,
+      },
+    ]);
     expect(kv.put).not.toHaveBeenCalled();
   });
 });

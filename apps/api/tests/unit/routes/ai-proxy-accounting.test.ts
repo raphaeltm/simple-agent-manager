@@ -7,6 +7,7 @@ const mockCheckTokenBudget = vi.fn();
 const mockCheckMonthlyCostCap = vi.fn();
 const mockCheckAiUsageGate = vi.fn();
 const mockIncrementTokenUsage = vi.fn();
+const mockIncrementProviderUsage = vi.fn();
 const mockResolveUpstreamAuth = vi.fn();
 const mockGetPlatformAgentCredential = vi.fn();
 const mockFetch = vi.fn();
@@ -46,6 +47,7 @@ vi.mock('../../../src/services/ai-token-budget', () => ({
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
   checkMonthlyCostCap: (...args: unknown[]) => mockCheckMonthlyCostCap(...args),
   incrementTokenUsage: (...args: unknown[]) => mockIncrementTokenUsage(...args),
+  incrementProviderUsage: (...args: unknown[]) => mockIncrementProviderUsage(...args),
 }));
 vi.mock('../../../src/services/ai-billing', () => ({
   resolveUnifiedBillingToken: () => undefined,

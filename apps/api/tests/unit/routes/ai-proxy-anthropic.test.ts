@@ -92,6 +92,9 @@ describe('buildAIGatewayMetadata', () => {
       modelId: 'claude-sonnet-4-20250514',
       stream: true,
       hasTools: true,
+      providerId: 'deepseek-anthropic',
+      providerName: 'DeepSeek Anthropic API',
+      providerDialect: 'anthropic',
     }));
     expect(meta).toEqual({
       userId: 'u1',
@@ -101,6 +104,9 @@ describe('buildAIGatewayMetadata', () => {
       modelId: 'claude-sonnet-4-20250514',
       stream: true,
       hasTools: true,
+      providerId: 'deepseek-anthropic',
+      providerName: 'DeepSeek Anthropic API',
+      providerDialect: 'anthropic',
     });
   });
 

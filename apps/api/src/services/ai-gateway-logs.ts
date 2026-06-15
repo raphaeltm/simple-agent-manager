@@ -257,6 +257,20 @@ export interface UsageByModel {
   errorRequests: number;
 }
 
+export interface UsageByProvider {
+  providerId: string;
+  providerName: string;
+  dialect: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  costSource: 'gateway' | 'unavailable' | 'mixed';
+  cachedRequests: number;
+  errorRequests: number;
+}
+
 export interface UsageByDay {
   date: string;
   requests: number;
@@ -296,6 +310,40 @@ export function aggregateByModel(map: Map<string, UsageByModel>, entry: AIGatewa
   }
 }
 
+/** Accumulate a gateway log entry into a by-provider map. */
+export function aggregateByProvider(map: Map<string, UsageByProvider>, entry: AIGatewayLogEntry): void {
+  const provider = providerAttributionFromEntry(entry);
+  const key = `${provider.providerId}:${provider.dialect}`;
+  const tokensIn = entry.tokens_in || 0;
+  const tokensOut = entry.tokens_out || 0;
+  const cost = entry.cost || 0;
+
+  const existing = map.get(key);
+  if (existing) {
+    existing.requests++;
+    existing.inputTokens += tokensIn;
+    existing.outputTokens += tokensOut;
+    existing.totalTokens += tokensIn + tokensOut;
+    existing.costUsd += cost;
+    if (entry.cached) existing.cachedRequests++;
+    if (!entry.success) existing.errorRequests++;
+  } else {
+    map.set(key, {
+      providerId: provider.providerId,
+      providerName: provider.providerName,
+      dialect: provider.dialect,
+      requests: 1,
+      inputTokens: tokensIn,
+      outputTokens: tokensOut,
+      totalTokens: tokensIn + tokensOut,
+      costUsd: cost,
+      costSource: 'gateway',
+      cachedRequests: entry.cached ? 1 : 0,
+      errorRequests: entry.success ? 0 : 1,
+    });
+  }
+}
+
 /** Accumulate a gateway log entry into a by-day map. */
 export function aggregateByDay(map: Map<string, UsageByDay>, entry: AIGatewayLogEntry): void {
   const key = entry.created_at?.slice(0, 10) || 'unknown';
@@ -318,4 +366,28 @@ export function aggregateByDay(map: Map<string, UsageByDay>, entry: AIGatewayLog
       costUsd: cost,
     });
   }
+}
+
+function providerAttributionFromEntry(entry: AIGatewayLogEntry): {
+  providerId: string;
+  providerName: string;
+  dialect: string;
+} {
+  const metadata = entry.metadata ?? {};
+  const providerId = nonEmpty(metadata.providerId) ?? nonEmpty(entry.provider) ?? 'unknown';
+  const providerName = nonEmpty(metadata.providerName) ?? labelFromProviderId(providerId);
+  const dialect = nonEmpty(metadata.providerDialect) ?? nonEmpty(metadata.dialect) ?? 'unknown';
+  return { providerId, providerName, dialect };
+}
+
+function nonEmpty(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+function labelFromProviderId(providerId: string): string {
+  return providerId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Unknown';
 }
