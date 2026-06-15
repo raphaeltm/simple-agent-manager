@@ -570,8 +570,10 @@ jobs:
             }
 
             echo "=== Post-Create Hook Tools ==="
-            check "Claude Code"   claude --version
-            check "OpenAI Codex"  codex --version
+            # post-create.sh installs these with try_run so transient external
+            # installer failures do not make the workspace invalid.
+            optional_check "Claude Code"   claude --version
+            optional_check "OpenAI Codex"  codex --version
             optional_check "happy-coder"   happy --version
             optional_check "Playwright"    npx playwright --version
 

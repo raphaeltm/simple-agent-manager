@@ -23,6 +23,7 @@ Production deployments are not reaching the deploy step because the latest `main
 - [x] Add a CI helper that prepares local devcontainer fixture image tags without pulling MCR.
 - [x] Replace direct MCR pre-pull workflow steps with the helper.
 - [x] Cover all MCR tags used by CI devcontainer jobs.
+- [x] Align devcontainer validation with post-create's non-fatal external tool installs.
 - [x] Validate shell syntax and, if Docker is available, fixture image preparation.
 - [ ] Push the branch and verify CI reaches green.
 
@@ -33,6 +34,8 @@ Production deployments are not reaching the deploy step because the latest `main
 - `git diff --check`
 - Confirmed `.github/workflows/ci.yml` has no direct `docker pull mcr.microsoft.com` calls.
 - Docker is not installed in this workspace, so fixture image build validation must run in GitHub Actions.
+- PR CI run `27580874584` proved the original blockers now pass: `VM Agent Integration`, `VM Agent E2E`, and `Devcontainer Volume Mount`.
+- Same run exposed an unrelated external-installer validation mismatch: `claude --version` was required even though `.devcontainer/post-create.sh` treats Claude install as non-fatal.
 
 ## Acceptance Criteria
 
