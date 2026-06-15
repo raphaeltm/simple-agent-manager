@@ -143,6 +143,7 @@ export class AIProxyAuthError extends Error {
 
 /**
  * Build the `cf-aig-metadata` header value for AI Gateway analytics.
+ * https://developers.cloudflare.com/ai-gateway/observability/custom-metadata/
  */
 export function buildAIGatewayMetadata(opts: {
   userId: string;

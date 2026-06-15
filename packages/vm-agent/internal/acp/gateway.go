@@ -459,7 +459,7 @@ type inferenceConfig struct {
 	Provider     string `json:"provider"`     // e.g. "openai-compatible"
 	BaseURL      string `json:"baseURL"`      // e.g. "https://api.example.com/ai/v1"
 	Model        string `json:"model"`        // e.g. "@cf/qwen/qwen3-30b-a3b-fp8"
-	APIKeySource string `json:"apiKeySource"` // "callback-token" means use workspace callback token
+	APIKeySource string `json:"apiKeySource"` // "callback-token" means use workspace callback token and replace {wstoken}
 }
 
 func byteReader(data []byte) io.ReadCloser {

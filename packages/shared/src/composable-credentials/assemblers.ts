@@ -87,6 +87,10 @@ export const agentAssembler: Assembler<EnvInjection> = {
         };
 
         if (capability.usesOpencodeConfig) {
+          // OpenCode custom providers use an AI SDK package plus options.baseURL
+          // and options.apiKey; OpenAI-compatible providers use /v1/chat/completions.
+          // https://opencode.ai/docs/providers/
+          // https://ai-sdk.dev/providers/openai-compatible-providers
           return {
             env,
             files: [],

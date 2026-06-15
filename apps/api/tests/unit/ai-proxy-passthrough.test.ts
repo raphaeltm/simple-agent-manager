@@ -168,7 +168,7 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(res.status).toBe(401);
     });
 
-    it('forwards resolved Anthropic credential to its configured upstream and injects cf-aig-metadata', async () => {
+    it('forwards resolved Anthropic credential without leaking SAM metadata headers', async () => {
       mockVerifyAIProxyAuth.mockResolvedValueOnce({
         userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
       });
@@ -199,11 +199,10 @@ describe('AI Proxy Passthrough Routes', () => {
       const headers = init.headers as Record<string, string>;
       expect(headers['x-api-key']).toBe('sk-ant-resolved-key');
       expect(headers['Authorization']).toBeUndefined();
-      expect(JSON.parse(headers['cf-aig-metadata'])).toMatchObject({
-        providerId: 'anthropic-alt-example',
-        providerName: 'Anthropic Alt Example',
-        providerDialect: 'anthropic',
-      });
+      expect(headers['cf-aig-metadata']).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain('user1');
+      expect(JSON.stringify(headers)).not.toContain('ws1');
+      expect(JSON.stringify(headers)).not.toContain('proj1');
     });
 
     it('increments token usage after a successful Anthropic response', async () => {
@@ -356,6 +355,30 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(JSON.stringify(mockLogError.mock.calls)).not.toContain('sk-leaked-upstream-diagnostic');
     });
 
+    it('does not log upstream Anthropic URL or credential from fetch failures', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockFetch.mockRejectedValueOnce(new TypeError(
+        'connect failed for https://anthropic-alt.example/anthropic/v1/messages using sk-ant-resolved-key',
+      ));
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/anthropic/v1/messages',
+        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+      );
+
+      expect(res.status).toBe(502);
+      const responseText = await res.text();
+      const logs = JSON.stringify(mockLogError.mock.calls);
+      expect(responseText).not.toContain('anthropic-alt.example');
+      expect(responseText).not.toContain('sk-ant-resolved-key');
+      expect(logs).not.toContain('anthropic-alt.example');
+      expect(logs).not.toContain('sk-ant-resolved-key');
+      expect(logs).toContain('TypeError');
+    });
+
     it('does not resolve an OpenAI-compatible credential for the Anthropic route', async () => {
       mockVerifyAIProxyAuth.mockResolvedValueOnce({
         userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',
@@ -407,11 +430,10 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(url).toBe('https://custom-openai.example/v1/chat/completions');
       const headers = init.headers as Record<string, string>;
       expect(headers['Authorization']).toBe('Bearer sk-resolved-openai');
-      expect(JSON.parse(headers['cf-aig-metadata'])).toMatchObject({
-        providerId: 'custom-openai',
-        providerName: 'Custom OpenAI',
-        providerDialect: 'openai-compatible',
-      });
+      expect(headers['cf-aig-metadata']).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain('user1');
+      expect(JSON.stringify(headers)).not.toContain('ws1');
+      expect(JSON.stringify(headers)).not.toContain('proj1');
     });
 
     it('increments token usage and rejects the next over-budget request', async () => {
@@ -498,6 +520,30 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(res.status).toBe(403);
       expect(await res.text()).not.toContain('sk-leaked-openai-diagnostic');
       expect(JSON.stringify(mockLogError.mock.calls)).not.toContain('sk-leaked-openai-diagnostic');
+    });
+
+    it('does not log upstream OpenAI-compatible URL or credential from fetch failures', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'openai-codex',
+      });
+      mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+      mockFetch.mockRejectedValueOnce(new TypeError(
+        'connect failed for https://custom-openai.example/v1/chat/completions using sk-resolved-openai',
+      ));
+
+      const res = await postJson(
+        '/ai/proxy/valid-token/openai/v1/chat/completions',
+        { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
+      );
+
+      expect(res.status).toBe(502);
+      const responseText = await res.text();
+      const logs = JSON.stringify(mockLogError.mock.calls);
+      expect(responseText).not.toContain('custom-openai.example');
+      expect(responseText).not.toContain('sk-resolved-openai');
+      expect(logs).not.toContain('custom-openai.example');
+      expect(logs).not.toContain('sk-resolved-openai');
+      expect(logs).toContain('TypeError');
     });
   });
 });

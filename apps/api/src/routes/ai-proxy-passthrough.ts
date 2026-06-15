@@ -2,9 +2,8 @@
  * AI proxy passthrough routes — URL-path-based workspace auth.
  *
  * These routes embed the workspace callback token in the URL path instead of
- * auth headers, freeing auth headers for the user's own API credentials.
- * This enables universal usage tracking: even users with their own API keys
- * route through AI Gateway for analytics, rate limiting, and budget enforcement.
+ * auth headers, so protocol auth headers can be reserved for upstream provider
+ * credentials that are resolved server-side.
  *
  * Routes:
  *   POST /ai/proxy/:wstoken/anthropic/v1/messages
@@ -12,8 +11,8 @@
  *   POST /ai/proxy/:wstoken/openai/v1/chat/completions
  *
  * The wstoken is verified as a workspace callback token to extract userId,
- * workspaceId, projectId for analytics metadata. The user's credential from
- * the request's auth headers is forwarded to the upstream provider.
+ * workspaceId, and projectId. Upstream provider credentials are never accepted
+ * from, or returned to, tenant workspaces.
  */
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
@@ -35,7 +34,6 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   AIProxyAuthError,
-  buildAIGatewayMetadata,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
@@ -444,21 +442,26 @@ async function prepareProxyRequest(
   return { ok: true, value: { ...auth, body, modelId, upstream } };
 }
 
-function buildJsonUpstreamHeaders(
-  upstream: ResolvedProxyUpstream,
-  aigMetadata: string,
-): Record<string, string> {
+function buildJsonUpstreamHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
   return {
     ...buildUpstreamAuthHeaders(upstream),
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
   };
+}
+
+function upstreamFetchErrorMeta(err: unknown): Record<string, string> {
+  if (err instanceof Error) {
+    return { errorName: err.name };
+  }
+  return { errorType: typeof err };
 }
 
 function addAnthropicRequestHeaders(
   headers: Record<string, string>,
   c: ProxyContext,
 ): Record<string, string> {
+  // Anthropic-compatible Messages calls require an API version header.
+  // https://docs.anthropic.com/en/api/versioning
   headers['anthropic-version'] = c.req.header('anthropic-version') || '2023-06-01';
   const anthropicBeta = c.req.header('anthropic-beta');
   if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
@@ -479,24 +482,23 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   );
   if (!prepared.ok) return prepared.response;
 
-  const { userId, workspaceId, projectId, chatSessionId, trialId, body, modelId, upstream } = prepared.value;
+  const { userId, workspaceId, body, modelId, upstream } = prepared.value;
   const isStreaming = body.stream === true;
-  const aigMetadata = buildAIGatewayMetadata({
-    userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId,
-    stream: isStreaming,
-    hasTools: Array.isArray(body.tools) && body.tools.length > 0,
-    providerId: upstream.provider.providerId,
-    providerName: upstream.provider.providerName,
-    providerDialect: upstream.provider.dialect,
-  });
 
-  const upstreamHeaders = addAnthropicRequestHeaders(buildJsonUpstreamHeaders(upstream, aigMetadata), c);
+  // Direct BYO upstreams are not Cloudflare AI Gateway endpoints. Do not send
+  // cf-aig-metadata here: Cloudflare documents that metadata appears in Gateway
+  // logs, and forwarding it to third-party providers would leak SAM identifiers.
+  // https://developers.cloudflare.com/ai-gateway/observability/custom-metadata/
+  const upstreamHeaders = addAnthropicRequestHeaders(buildJsonUpstreamHeaders(upstream), c);
 
   log.info('ai_proxy_passthrough.anthropic.forward', {
     userId, workspaceId, modelId, stream: isStreaming,
     agentType: upstream.agentType,
   });
 
+  // Anthropic and Anthropic-compatible providers treat the configured base URL
+  // as the prefix before /v1/messages.
+  // https://docs.anthropic.com/en/api/messages
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages');
 
   try {
@@ -516,7 +518,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
         userId,
         workspaceId,
         modelId,
-        providerId: upstream.provider.providerId,
       });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
@@ -541,7 +542,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   } catch (err) {
     log.error('ai_proxy_passthrough.anthropic.fetch_error', {
       userId, workspaceId, modelId,
-      error: err instanceof Error ? err.message : String(err),
+      ...upstreamFetchErrorMeta(err),
     });
     return anthropicError('Failed to reach upstream API. Please try again.', 'api_error', 502);
   }
@@ -561,15 +562,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   );
   if (!prepared.ok) return prepared.response;
 
-  const { userId, workspaceId, projectId, chatSessionId, trialId, body, modelId, upstream } = prepared.value;
-  const aigMetadata = buildAIGatewayMetadata({
-    userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId, stream: false, hasTools: false,
-    providerId: upstream.provider.providerId,
-    providerName: upstream.provider.providerName,
-    providerDialect: upstream.provider.dialect,
-  });
+  const { userId, workspaceId, body, modelId, upstream } = prepared.value;
 
-  const upstreamHeaders = addAnthropicRequestHeaders(buildJsonUpstreamHeaders(upstream, aigMetadata), c);
+  const upstreamHeaders = addAnthropicRequestHeaders(buildJsonUpstreamHeaders(upstream), c);
   const countTokensUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages/count_tokens');
 
   try {
@@ -585,7 +580,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
         workspaceId,
         modelId,
         status: upstreamResponse.status,
-        providerId: upstream.provider.providerId,
       });
       return anthropicError(`Token counting failed (${upstreamResponse.status}).`, 'api_error', upstreamResponse.status);
     }
@@ -597,7 +591,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
     });
   } catch (err) {
     log.error('ai_proxy_passthrough.anthropic.count_tokens_fetch_error', {
-      userId, error: err instanceof Error ? err.message : String(err),
+      userId, ...upstreamFetchErrorMeta(err),
     });
     return anthropicError('Failed to reach upstream API.', 'api_error', 502);
   }
@@ -614,18 +608,13 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   );
   if (!prepared.ok) return prepared.response;
 
-  const { userId, workspaceId, projectId, chatSessionId, trialId, body, modelId, upstream } = prepared.value;
-  const aigMetadata = buildAIGatewayMetadata({
-    userId, workspaceId, projectId, sessionId: chatSessionId, trialId, modelId,
-    stream: !!body.stream,
-    hasTools: !!body.tools,
-    providerId: upstream.provider.providerId,
-    providerName: upstream.provider.providerName,
-    providerDialect: upstream.provider.dialect,
-  });
+  const { userId, workspaceId, body, modelId, upstream } = prepared.value;
 
+  // OpenAI-compatible providers use an OpenAI-style base URL and chat
+  // completions path; the API key is sent as a Bearer token.
+  // https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create/
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'chat/completions');
-  const upstreamHeaders = buildJsonUpstreamHeaders(upstream, aigMetadata);
+  const upstreamHeaders = buildJsonUpstreamHeaders(upstream);
 
   log.info('ai_proxy_passthrough.openai.forward', {
     userId, workspaceId, modelId, stream: !!body.stream,
@@ -648,7 +637,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
         userId,
         workspaceId,
         modelId,
-        providerId: upstream.provider.providerId,
       });
       return openaiError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
@@ -677,7 +665,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   } catch (err) {
     log.error('ai_proxy_passthrough.openai.fetch_error', {
       userId, workspaceId, modelId,
-      error: err instanceof Error ? err.message : String(err),
+      ...upstreamFetchErrorMeta(err),
     });
     return openaiError('Failed to reach upstream API. Please try again.', 'server_error', 502);
   }

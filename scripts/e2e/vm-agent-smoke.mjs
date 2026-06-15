@@ -645,16 +645,14 @@ async function runOpenCodeNoKeySmoke(jwtToken, controlPlane) {
   });
 
   try {
-    ws.send(JSON.stringify({ type: 'select_agent', agentType: 'opencode' }));
-
-    await waitForJsonMessage(
+    const startingMessage = waitForJsonMessage(
       ws,
       (msg) =>
         msg.type === 'agent_status' && msg.status === 'starting' && msg.agentType === 'opencode',
       15_000
     );
 
-    const errorMessage = await waitForJsonMessage(
+    const errorMessagePromise = waitForJsonMessage(
       ws,
       (msg) =>
         msg.type === 'agent_status' &&
@@ -664,6 +662,11 @@ async function runOpenCodeNoKeySmoke(jwtToken, controlPlane) {
         msg.error.includes('Failed to fetch credential'),
       15_000
     );
+
+    ws.send(JSON.stringify({ type: 'select_agent', agentType: 'opencode' }));
+
+    await startingMessage;
+    const errorMessage = await errorMessagePromise;
 
     if (/sk-e2e|callback-e2e-token/.test(errorMessage.error)) {
       throw new Error('OpenCode missing-key error leaked credential material');

@@ -2387,6 +2387,54 @@ func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
 	assertEnvEntry(t, envVars, "ANTHROPIC_MODEL=claude-sonnet")
 }
 
+func TestInjectAgentCredential_CallbackTokenPassthroughProxyReplacesWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			WorkspaceID:   "test-workspace",
+			CallbackToken: "workspace-token",
+		},
+	})
+	defer host.Stop()
+
+	cred := &agentCredential{
+		credential: "__sam_proxy__",
+		inferenceConfig: &inferenceConfig{
+			Provider:     "openai-passthrough",
+			BaseURL:      "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+			Model:        "gpt-4.1",
+			APIKeySource: "callback-token",
+		},
+	}
+	envVars, settings, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		"openai-codex",
+		cred,
+		nil,
+		getAgentCommandInfo("openai-codex", "api-key"),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("injectAgentCredential returned error: %v", err)
+	}
+	if settings != nil {
+		t.Fatalf("settings = %#v, want nil", settings)
+	}
+	assertEnvEntry(t, envVars, "OPENAI_BASE_URL=https://api.example.com/ai/proxy/workspace-token/openai/v1")
+	assertEnvEntry(t, envVars, "OPENAI_API_KEY=workspace-token")
+	assertEnvEntry(t, envVars, "OPENAI_MODEL=gpt-4.1")
+	for _, entry := range envVars {
+		if strings.Contains(entry, "{wstoken}") {
+			t.Fatalf("env var still contains placeholder: %q", entry)
+		}
+		if strings.Contains(entry, "__sam_proxy__") {
+			t.Fatalf("env var leaked proxy sentinel as credential: %q", entry)
+		}
+	}
+}
+
 func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) {
 	t.Parallel()
 
@@ -2428,6 +2476,42 @@ func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) 
 	}
 	if settings.Model != "meta/llama-4-scout" {
 		t.Fatalf("Model = %q, want stripped Workers AI model", settings.Model)
+	}
+}
+
+func TestOpenCodeConfigOverridesCallbackTokenPassthroughReplacesWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			WorkspaceID:   "test-workspace",
+			CallbackToken: "workspace-token",
+		},
+	})
+	defer host.Stop()
+
+	cred := &agentCredential{
+		credential: "__sam_proxy__",
+		inferenceConfig: &inferenceConfig{
+			Provider:     "openai-passthrough",
+			BaseURL:      "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+			Model:        "openai/gpt-5.5",
+			APIKeySource: "callback-token",
+		},
+	}
+
+	overrides := host.opencodeConfigOverrides(cred)
+	if overrides == nil {
+		t.Fatal("opencodeConfigOverrides returned nil")
+	}
+	if overrides.PlatformBaseURL != "https://api.example.com/ai/proxy/workspace-token/openai/v1" {
+		t.Fatalf("PlatformBaseURL = %q", overrides.PlatformBaseURL)
+	}
+	if strings.Contains(overrides.PlatformBaseURL, "{wstoken}") {
+		t.Fatalf("PlatformBaseURL still contains placeholder: %q", overrides.PlatformBaseURL)
+	}
+	if overrides.PlatformAPIKey != "workspace-token" {
+		t.Fatalf("PlatformAPIKey = %q, want callback token", overrides.PlatformAPIKey)
 	}
 }
 
