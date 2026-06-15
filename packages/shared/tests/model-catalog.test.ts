@@ -69,7 +69,10 @@ describe('model-catalog', () => {
       for (const agentType of ['claude-code', 'openai-codex'] as const) {
         const dropdown = getModelsForAgent(agentType);
         for (const model of dropdown) {
-          expect(platformIds.has(model.id), `${agentType} dropdown model ${model.id} missing from PLATFORM_AI_MODELS`).toBe(true);
+          expect(
+            platformIds.has(model.id),
+            `${agentType} dropdown model ${model.id} missing from PLATFORM_AI_MODELS`
+          ).toBe(true);
         }
       }
     });
