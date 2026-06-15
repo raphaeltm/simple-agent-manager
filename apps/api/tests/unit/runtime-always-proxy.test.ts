@@ -216,6 +216,100 @@ beforeEach(() => {
 });
 
 describe('runtime.ts always-proxy', () => {
+  it('preserves current passthrough inferenceConfig outputs by agent type', async () => {
+    const outputs: Record<string, unknown> = {};
+
+    for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
+      vi.clearAllMocks();
+      queryCount = 0;
+      mockKvGet.mockResolvedValue(null);
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+        if (queryCount === 2) return [];
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce({
+        credential: `sk-${agentType}`,
+        credentialKind: 'api-key',
+        credentialSource: 'user',
+      });
+
+      const response = await postAgentKey(agentType);
+      const json = await response.json() as { inferenceConfig?: unknown };
+      expect(response.status).toBe(200);
+      outputs[agentType] = json.inferenceConfig;
+    }
+
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "claude-code": {
+          "apiKeySource": "user-credential",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/anthropic",
+          "model": "claude-sonnet-4-6",
+          "provider": "anthropic-passthrough",
+        },
+        "openai-codex": {
+          "apiKeySource": "user-credential",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+          "model": "gpt-4.1",
+          "provider": "openai-passthrough",
+        },
+        "opencode": {
+          "apiKeySource": "user-credential",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+          "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+          "provider": "openai-passthrough",
+        },
+      }
+    `);
+  });
+
+  it('preserves current platform inferenceConfig outputs by agent type', async () => {
+    const outputs: Record<string, unknown> = {};
+
+    for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
+      vi.clearAllMocks();
+      queryCount = 0;
+      mockKvGet.mockResolvedValue(null);
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+        if (queryCount === 2 && agentType !== 'opencode') return [{ providerMode: 'sam' }];
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+
+      const response = await postAgentKey(agentType);
+      const json = await response.json() as { inferenceConfig?: unknown };
+      expect(response.status).toBe(200);
+      outputs[agentType] = json.inferenceConfig;
+    }
+
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "claude-code": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/anthropic",
+          "model": "claude-sonnet-4-6",
+          "provider": "anthropic-proxy",
+        },
+        "openai-codex": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/v1",
+          "model": "gpt-4.1",
+          "provider": "openai-proxy",
+        },
+        "opencode": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/v1",
+          "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+          "provider": "openai-compatible",
+        },
+      }
+    `);
+  });
+
   it('returns passthrough proxy config when user has claude-code credential and proxy enabled', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;

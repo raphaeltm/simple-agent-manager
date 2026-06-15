@@ -4,6 +4,9 @@ export * from './types';
 // Agents
 export * from './agents';
 
+// Harness Capabilities
+export * from './harness-capabilities';
+
 // Model Catalog
 export * from './model-catalog';
 
