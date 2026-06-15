@@ -8,10 +8,14 @@ import {
   resolveHarnessDialect,
 } from '../../src/harness-capabilities';
 
+const byName = (a: string, b: string) => a.localeCompare(b);
+
 describe('harness capability registry', () => {
   it('has exactly one row per agent catalog id', () => {
-    const catalogIds = AGENT_CATALOG.map((agent) => agent.id).sort();
-    const capabilityIds = HARNESS_CAPABILITIES.map((capability) => capability.agentType).sort();
+    const catalogIds = AGENT_CATALOG.map((agent) => agent.id).sort(byName);
+    const capabilityIds = HARNESS_CAPABILITIES.map((capability) => capability.agentType).sort(
+      byName
+    );
 
     expect(capabilityIds).toEqual(catalogIds);
   });
