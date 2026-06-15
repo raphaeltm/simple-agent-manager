@@ -66,14 +66,16 @@ function buildPassthroughInferenceConfig(input: {
   agentType: string;
   baseDomain: string;
   defaultModel: string;
+  upstreamBaseURL?: string;
 }) {
   const capability = getProxyCapability(input.agentType);
   if (!capability) return null;
   return {
     provider: capability.proxyProviderTag,
     baseURL: `https://api.${input.baseDomain}/ai/proxy/{wstoken}/${capability.proxyRouteSegment}`,
+    ...(input.upstreamBaseURL ? { upstreamBaseURL: input.upstreamBaseURL } : {}),
     model: input.defaultModel,
-    apiKeySource: 'user-credential' as const,
+    apiKeySource: 'callback-token' as const,
   };
 }
 
@@ -416,6 +418,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
     if (
       credentialData &&
+      credentialData.baseUrl &&
       !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')
     ) {
       // User has their own credential — use passthrough proxy routes.
@@ -424,6 +427,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         agentType: body.agentType,
         baseDomain,
         defaultModel,
+        upstreamBaseURL: credentialData.baseUrl,
       });
       if (!inferenceConfig) {
         throw errors.notFound('Agent credential');
@@ -451,7 +455,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       }
 
       return c.json({
-        apiKey: credentialData.credential,
+        apiKey: '__sam_proxy__',
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
         inferenceConfig,

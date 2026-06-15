@@ -18,6 +18,10 @@
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  type Dialect,
+  HARNESS_CAPABILITIES,
+  type HarnessCapability,
+  resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -26,13 +30,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   AIProxyAuthError,
   buildAIGatewayMetadata,
-  buildAnthropicCountTokensUrl,
-  buildAnthropicGatewayUrl,
-  isAnthropicModel,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
@@ -41,6 +43,7 @@ import {
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
+import { resolveForConsumer } from '../services/composable-credentials/resolve';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 
@@ -88,7 +91,20 @@ interface PassthroughAuthResult {
   projectId: string | null;
   chatSessionId?: string | null;
   trialId?: string;
+  agentType?: string | null;
 }
+
+interface ResolvedProxyUpstream {
+  agentType: string;
+  dialect: Dialect;
+  capability: HarnessCapability;
+  apiKey: string;
+  baseUrl: string;
+}
+
+type ResolvedCredentialSecret = NonNullable<
+  NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>['credential']
+>['secret'];
 
 async function verifyPassthroughAuth(
   wstoken: string,
@@ -96,6 +112,112 @@ async function verifyPassthroughAuth(
 ): Promise<PassthroughAuthResult> {
   const db = drizzle(env.DATABASE, { schema });
   return verifyAIProxyAuth(wstoken, env, db);
+}
+
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end--;
+  return value.slice(0, end);
+}
+
+function trimLeadingSlashes(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === 47) start++;
+  return value.slice(start);
+}
+
+function joinUpstreamUrl(baseUrl: string, path: string): string {
+  return `${trimTrailingSlashes(baseUrl)}/${trimLeadingSlashes(path)}`;
+}
+
+function stringSetting(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function routeDialect(routeSegment: string): Dialect {
+  return routeSegment === 'anthropic' ? 'anthropic' : 'openai-compatible';
+}
+
+function candidateCapabilities(agentType: string | null | undefined, dialect: Dialect): HarnessCapability[] {
+  if (agentType) {
+    const capability = resolveHarnessDialect(agentType, dialect);
+    return capability?.proxyRouteSegment ? [capability] : [];
+  }
+  return HARNESS_CAPABILITIES.filter(
+    (capability) => capability.proxyRouteSegment && capability.dialects.includes(dialect),
+  );
+}
+
+function resolvedBaseUrl(
+  secret: ResolvedCredentialSecret,
+  settings: Record<string, unknown>,
+): string | null {
+  return stringSetting(settings.baseUrl)
+    ?? (secret.kind === 'openai-compatible' ? stringSetting(secret.baseUrl) : null);
+}
+
+function credentialApiKey(
+  secret: ResolvedCredentialSecret,
+): string | null {
+  switch (secret.kind) {
+    case 'api-key':
+      return secret.apiKey;
+    case 'openai-compatible':
+      return secret.apiKey;
+    default:
+      return null;
+  }
+}
+
+async function resolveProxyUpstream(input: {
+  env: Env;
+  userId: string;
+  projectId: string | null;
+  agentType?: string | null;
+  dialect: Dialect;
+}): Promise<ResolvedProxyUpstream | null> {
+  const db = drizzle(input.env.DATABASE, { schema });
+  const encryptionKey = getCredentialEncryptionKey(input.env);
+  for (const capability of candidateCapabilities(input.agentType, input.dialect)) {
+    const resolved = await resolveForConsumer(
+      db,
+      input.userId,
+      encryptionKey,
+      { kind: 'agent', agentType: capability.agentType },
+      input.projectId,
+    );
+    if (!resolved?.credential || resolved.source === 'platform-proxy') continue;
+    const secret = resolved.credential.secret;
+    const apiKey = credentialApiKey(secret);
+    const baseUrl = resolvedBaseUrl(secret, resolved.configuration?.settings ?? {});
+    if (!apiKey || !baseUrl || !isHttpsUrl(baseUrl)) continue;
+    return {
+      agentType: capability.agentType,
+      dialect: input.dialect,
+      capability,
+      apiKey,
+      baseUrl,
+    };
+  }
+  return null;
+}
+
+function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
+  if (upstream.capability.authStyle === 'bearer-token' || upstream.dialect === 'openai-compatible') {
+    return { Authorization: `Bearer ${upstream.apiKey}` };
+  }
+  if (upstream.capability.authStyle === 'api-key' && upstream.dialect === 'anthropic') {
+    return { 'x-api-key': upstream.apiKey };
+  }
+  return {};
 }
 
 async function checkPassthroughRateLimit(
@@ -159,27 +281,21 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   if (!modelId) {
     return anthropicError('model is required', 'invalid_request_error', 400);
   }
-  if (!isAnthropicModel(modelId)) {
-    return anthropicError(
-      `Model '${modelId}' is not supported. Only Anthropic models (claude-*) are accepted.`,
-      'invalid_request_error', 400,
-    );
-  }
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
   if (!usageGate.allowed) {
     return anthropicUsageGateError(usageGate.reason);
   }
 
-  // --- Extract user's credential from request headers (passthrough) ---
-  // The user's API key is in x-api-key or Authorization: Bearer — forward it upstream.
-  const userApiKey = c.req.header('x-api-key');
-  const userAuthHeader = c.req.header('Authorization');
-  if (!userApiKey && !userAuthHeader) {
-    return anthropicError(
-      'Missing upstream credential. Provide x-api-key or Authorization header with your API key.',
-      'authentication_error', 401,
-    );
+  const upstream = await resolveProxyUpstream({
+    env: c.env,
+    userId,
+    projectId,
+    agentType: auth.agentType,
+    dialect: 'anthropic',
+  });
+  if (!upstream) {
+    return anthropicError('No compatible upstream credential configured.', 'authentication_error', 401);
   }
 
   // --- Build metadata for AI Gateway analytics ---
@@ -192,17 +308,10 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
 
   // --- Build upstream headers: forward user's credential + inject analytics ---
   const upstreamHeaders: Record<string, string> = {
+    ...buildUpstreamAuthHeaders(upstream),
     'Content-Type': 'application/json',
     'cf-aig-metadata': aigMetadata,
   };
-
-  // Forward the user's auth credential to upstream
-  if (userApiKey) {
-    upstreamHeaders['x-api-key'] = userApiKey;
-  }
-  if (userAuthHeader) {
-    upstreamHeaders['Authorization'] = userAuthHeader;
-  }
 
   // Forward Anthropic-specific headers
   const anthropicVersion = c.req.header('anthropic-version');
@@ -214,15 +323,13 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
 
   log.info('ai_proxy_passthrough.anthropic.forward', {
     userId, workspaceId, modelId, stream: isStreaming,
-    hasUserApiKey: !!userApiKey,
-    hasUserAuthHeader: !!userAuthHeader,
+    agentType: upstream.agentType,
   });
 
-  // --- Forward to AI Gateway ---
-  const gatewayUrl = buildAnthropicGatewayUrl(c.env);
+  const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages');
 
   try {
-    const upstreamResponse = await fetch(gatewayUrl, {
+    const upstreamResponse = await fetch(upstreamUrl, {
       method: 'POST',
       headers: upstreamHeaders,
       body: JSON.stringify(body),
@@ -306,8 +413,8 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   }
 
   const modelId = typeof body.model === 'string' ? body.model : undefined;
-  if (!modelId || !isAnthropicModel(modelId)) {
-    return anthropicError('model is required and must be an Anthropic model (claude-*)', 'invalid_request_error', 400);
+  if (!modelId) {
+    return anthropicError('model is required', 'invalid_request_error', 400);
   }
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
@@ -315,10 +422,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
     return anthropicUsageGateError(usageGate.reason);
   }
 
-  const userApiKey = c.req.header('x-api-key');
-  const userAuthHeader = c.req.header('Authorization');
-  if (!userApiKey && !userAuthHeader) {
-    return anthropicError('Missing upstream credential.', 'authentication_error', 401);
+  const upstream = await resolveProxyUpstream({
+    env: c.env,
+    userId,
+    projectId,
+    agentType: auth.agentType,
+    dialect: 'anthropic',
+  });
+  if (!upstream) {
+    return anthropicError('No compatible upstream credential configured.', 'authentication_error', 401);
   }
 
   const aigMetadata = buildAIGatewayMetadata({
@@ -326,18 +438,17 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   });
 
   const upstreamHeaders: Record<string, string> = {
+    ...buildUpstreamAuthHeaders(upstream),
     'Content-Type': 'application/json',
     'cf-aig-metadata': aigMetadata,
   };
-  if (userApiKey) upstreamHeaders['x-api-key'] = userApiKey;
-  if (userAuthHeader) upstreamHeaders['Authorization'] = userAuthHeader;
 
   const anthropicVersion = c.req.header('anthropic-version');
   upstreamHeaders['anthropic-version'] = anthropicVersion || '2023-06-01';
   const anthropicBeta = c.req.header('anthropic-beta');
   if (anthropicBeta) upstreamHeaders['anthropic-beta'] = anthropicBeta;
 
-  const countTokensUrl = buildAnthropicCountTokensUrl(c.env);
+  const countTokensUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages/count_tokens');
 
   try {
     const upstreamResponse = await fetch(countTokensUrl, {
@@ -421,10 +532,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     return openaiUsageGateError(usageGate.reason);
   }
 
-  // Extract user's credential from Authorization header (passthrough)
-  const userAuthHeader = c.req.header('Authorization');
-  if (!userAuthHeader) {
-    return openaiError('Missing Authorization header with your API key.', 'invalid_request_error', 401);
+  const upstream = await resolveProxyUpstream({
+    env: c.env,
+    userId,
+    projectId,
+    agentType: auth.agentType,
+    dialect: routeDialect('openai/v1'),
+  });
+  if (!upstream) {
+    return openaiError('No compatible upstream credential configured.', 'invalid_request_error', 401);
   }
 
   const aigMetadata = buildAIGatewayMetadata({
@@ -433,17 +549,10 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     hasTools: !!body.tools,
   });
 
-  // Build the upstream OpenAI Gateway URL
-  const gatewayId = c.env.AI_GATEWAY_ID;
-  let gatewayUrl: string;
-  if (gatewayId) {
-    gatewayUrl = `https://gateway.ai.cloudflare.com/v1/${c.env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/chat/completions`;
-  } else {
-    gatewayUrl = 'https://api.openai.com/v1/chat/completions';
-  }
+  const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'chat/completions');
 
   const upstreamHeaders: Record<string, string> = {
-    'Authorization': userAuthHeader,
+    ...buildUpstreamAuthHeaders(upstream),
     'Content-Type': 'application/json',
     'cf-aig-metadata': aigMetadata,
   };
@@ -453,7 +562,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   });
 
   try {
-    const upstreamResponse = await fetch(gatewayUrl, {
+    const upstreamResponse = await fetch(upstreamUrl, {
       method: 'POST',
       headers: upstreamHeaders,
       body: JSON.stringify(body),
@@ -501,4 +610,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   }
 });
 
-export { aiProxyPassthroughRoutes };
+export {
+  aiProxyPassthroughRoutes,
+  buildUpstreamAuthHeaders,
+  joinUpstreamUrl,
+  resolveProxyUpstream,
+};

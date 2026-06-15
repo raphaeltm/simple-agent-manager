@@ -679,7 +679,7 @@ export async function getDecryptedAgentKey(
   agentType: string,
   encryptionKey: string,
   projectId?: string | null
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null> {
+): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string } | null> {
   // --- Primary path: composable-credentials resolver -------------------------
   const ccResult = await resolveAgentKeyViaCC(db, userId, agentType, encryptionKey, projectId);
   if (ccResult !== undefined) return ccResult;
@@ -700,7 +700,7 @@ async function resolveAgentKeyViaCC(
   agentType: string,
   encryptionKey: string,
   projectId?: string | null,
-): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null | undefined> {
+): Promise<{ credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string } | null | undefined> {
   const consumer = { kind: 'agent' as const, agentType };
 
   // First attempt with current cc_* data
@@ -751,7 +751,7 @@ async function resolveAgentKeyViaCC(
  */
 function mapResolvedToLegacy(
   resolved: NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>,
-): { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource } | null {
+): { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource; baseUrl?: string } | null {
   // Platform proxy — no raw credential to return
   if (resolved.source === 'platform-proxy' || !resolved.credential) {
     return null;
@@ -784,7 +784,12 @@ function mapResolvedToLegacy(
   }
 
   const credentialSource = mapSourceToLegacy(resolved.source);
-  return { credential, credentialKind, credentialSource };
+  return {
+    credential,
+    credentialKind,
+    credentialSource,
+    ...(secret.kind === 'openai-compatible' && secret.baseUrl ? { baseUrl: secret.baseUrl } : {}),
+  };
 }
 
 function mapSourceToLegacy(source: string): CredentialSource {

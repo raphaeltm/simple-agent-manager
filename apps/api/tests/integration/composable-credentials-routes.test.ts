@@ -110,6 +110,19 @@ describe('composable-credentials credential validation', () => {
     expect(routeFile).toContain('encrypt(');
     expect(routeFile).toContain('getCredentialEncryptionKey');
   });
+
+  it('requires HTTPS baseUrl and dialect for openai-compatible credentials', () => {
+    expect(routeFile).toContain('validateOpenAICompatibleSecret(secret)');
+    expect(routeFile).toContain('HTTPS baseUrl is required');
+    expect(routeFile).toContain('openai-compatible credentials require apiKey, baseUrl, and dialect');
+    expect(routeFile).toContain('openai-compatible credentials require dialect openai-compatible');
+  });
+
+  it('validates configuration dialect compatibility through resolveHarnessDialect', () => {
+    expect(routeFile).toContain('validateConfigurationSettings({ consumerKind, consumerTarget, settings })');
+    expect(routeFile).toContain('resolveHarnessDialect(input.consumerTarget, dialect)');
+    expect(routeFile).toContain('does not support provider dialect');
+  });
 });
 
 describe('composable-credentials schema tables', () => {
