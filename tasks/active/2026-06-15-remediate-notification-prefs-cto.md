@@ -54,9 +54,11 @@ Adjacent findings:
         `apps/web/tests/unit/components/settings-notifications.test.tsx` (7)
   - [x] Playwright visual audit (mobile + desktop) —
         `apps/web/tests/playwright/settings-notifications-audit.spec.ts` (9)
-- [ ] **Item 7** — Focused checks + `/do` quality gates + specialist reviews
+- [x] **Item 7** — Focused checks + `/do` quality gates + specialist reviews
       (cloudflare-specialist, ui-ux-specialist, test-engineer, constitution-validator,
-      task-completion-validator) before PR.
+      task-completion-validator) before PR. All gates green; 5 reviews returned with no
+      CRITICAL/HIGH. MEDIUM/LOW findings deferred as out-of-scope/non-blocking (see
+      `.do-state.md` Phase 5 Decision Note).
 
 ## Notes
 
