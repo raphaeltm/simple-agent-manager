@@ -1,4 +1,12 @@
+import type { CCResolutionStatusResponse } from '@simple-agent-manager/shared';
+
 import { request } from './client';
+
+// Resolution status (read-only view of how each consumer currently resolves)
+export async function getResolutionStatus(projectId?: string): Promise<CCResolutionStatusResponse> {
+  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return request<CCResolutionStatusResponse>(`/api/credentials/resolution-status${query}`);
+}
 
 // Types matching the API responses
 export interface CCCredentialListItem {

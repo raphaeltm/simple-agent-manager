@@ -46,7 +46,7 @@ import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
-import { SettingsAgents } from './pages/SettingsAgents';
+import { SettingsConnections } from './pages/SettingsConnections';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
@@ -133,13 +133,15 @@ export default function App() {
                     <Route index element={<Navigate to="cloud-provider" replace />} />
                     <Route path="cloud-provider" element={<SettingsCloudProvider />} />
                     <Route path="github" element={<SettingsGitHub />} />
-                    <Route path="agents" element={<SettingsAgents />} />
-                    <Route path="agent-keys" element={<Navigate to="../agents" replace />} />
-                    <Route path="agent-config" element={<Navigate to="../agents" replace />} />
+                    <Route path="connections" element={<SettingsConnections />} />
+                    <Route path="agents" element={<Navigate to="../connections" replace />} />
+                    <Route path="agent-keys" element={<Navigate to="../connections" replace />} />
+                    <Route path="agent-config" element={<Navigate to="../connections" replace />} />
                     <Route path="notifications" element={<SettingsNotifications />} />
                     <Route path="usage" element={<SettingsComputeUsage />} />
                     <Route path="api-tokens" element={<SettingsApiTokens />} />
-                    <Route path="credentials" element={<SettingsCredentials />} />
+                    <Route path="advanced" element={<SettingsCredentials />} />
+                    <Route path="credentials" element={<Navigate to="../advanced" replace />} />
                   </Route>
                   <Route path="/account-map" element={<AccountMap />} />
                   <Route path="/tools" element={<Tools />} />

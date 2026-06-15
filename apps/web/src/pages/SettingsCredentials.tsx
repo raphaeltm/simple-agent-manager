@@ -497,6 +497,12 @@ export function SettingsCredentials() {
 
   return (
     <div className="flex flex-col gap-6">
+      <Alert variant="info">
+        This is the advanced view showing the raw composable-credentials primitives.
+        Most users should use the <a href="/settings/connections" className="text-accent font-medium">Connections</a> tab
+        to manage agent and cloud provider credentials through the guided flow.
+      </Alert>
+
       {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}
 
       {/* Credentials */}

@@ -122,6 +122,7 @@ export {
   listCCCredentials,
   updateCCAttachment,
   updateCCConfiguration,
+  getResolutionStatus,
   updateCCCredential,
 } from './composable-credentials';
 export type {

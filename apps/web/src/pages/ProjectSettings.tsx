@@ -9,6 +9,8 @@ import { Button, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { ConnectionsOverview } from '../components/ConnectionsOverview';
+import { ConnectFlow } from '../components/ConnectFlow';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
@@ -27,6 +29,69 @@ import {
   upsertProjectRuntimeFile,
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
+
+function ProjectConnectionsSection({
+  projectId,
+  onUpdated,
+}: {
+  projectId: string;
+  onUpdated: () => void;
+}) {
+  const [showConnect, setShowConnect] = useState(false);
+  const [connectAgentId, setConnectAgentId] = useState<string | undefined>();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleConnect = (consumerId: string, consumerKind: 'agent' | 'compute') => {
+    if (consumerKind === 'agent') {
+      setConnectAgentId(consumerId);
+      setShowConnect(true);
+    }
+  };
+
+  const handleConnected = () => {
+    setShowConnect(false);
+    setConnectAgentId(undefined);
+    setRefreshKey((k) => k + 1);
+    onUpdated();
+  };
+
+  return (
+    <section className="glass-surface rounded-lg p-4 grid gap-3">
+      <div>
+        <h2 className="sam-type-section-heading m-0 text-fg-primary">
+          Connections
+        </h2>
+        <p className="m-0 mt-1 text-xs text-fg-muted">
+          How each agent and cloud provider resolves credentials for this project.
+          Badges show whether a credential comes from a project override, your user default, or the SAM platform.
+        </p>
+      </div>
+
+      {showConnect ? (
+        <ConnectFlow
+          projectId={projectId}
+          initialAgentId={connectAgentId}
+          onConnected={handleConnected}
+          onCancel={() => {
+            setShowConnect(false);
+            setConnectAgentId(undefined);
+          }}
+        />
+      ) : (
+        <>
+          <ConnectionsOverview key={refreshKey} projectId={projectId} onConnect={handleConnect} />
+          <button
+            type="button"
+            onClick={() => setShowConnect(true)}
+            className="self-start text-xs text-accent font-medium bg-transparent border-none cursor-pointer px-0 py-1 hover:underline"
+          >
+            + Connect an agent for this project
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
 
 export function ProjectSettings() {
   const toast = useToast();
@@ -347,16 +412,17 @@ export function ProjectSettings() {
         )}
       </section>
 
-      {/* Unified per-agent project overrides — credential override + model/permission
-          override live in a single card per agent. Resolution chain:
-          task > profile > project.agentDefaults > user settings > platform default. */}
+      {/* Connections — resolution overview + guided connect for this project */}
+      <ProjectConnectionsSection projectId={projectId} onUpdated={() => void reload()} />
+
+      {/* Per-agent model/permission overrides (advanced) */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-fg-primary">
-            Agents
+            Agent Overrides
           </h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
-            Per-agent credential and configuration overrides for this project. Empty fields fall
+            Per-agent model and permission-mode overrides for this project. Empty fields fall
             through to your user-level settings.
           </p>
         </div>
