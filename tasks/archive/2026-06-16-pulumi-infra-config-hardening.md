@@ -40,3 +40,10 @@ The Pulumi infra resource slice currently bakes deployment policy into resource 
 - Existing resource names and default production behavior remain stable.
 - Tests cover resource inputs, Pulumi options, exported outputs consumed by deployment scripts, secret marking where applicable, config defaults, overrides, and invalid-config failure modes.
 - Infra test and typecheck commands pass.
+
+## PR & Staging Evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1333.
+- Staging deploy: https://github.com/raphaeltm/simple-agent-manager/actions/runs/27590612543 passed for `sam/remediate-cto-spot-check-01kv74`.
+- Direct staging checks passed: R2 bucket `sam-staging-assets` reports `location: WNAM`; DNS records target staging Workers/Pages hosts; API health returned HTTP 200 healthy; D1 counts returned users=4, projects=25, tasks=142, nodes=61, workspaces=101.
+- GitHub staging Playwright smoke-tests passed in the deploy workflow. A local rerun was attempted, but local browser checks could not launch because Chromium was missing from the local Playwright cache; the install hung after download and was terminated.
