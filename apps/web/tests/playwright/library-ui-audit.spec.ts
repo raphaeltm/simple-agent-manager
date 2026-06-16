@@ -119,6 +119,21 @@ const MANY_FILES = Array.from({ length: 25 }, (_, i) =>
   }),
 );
 
+const DIRECTORY_NAV_DIRS = [
+  makeDirectory({ name: 'Nebula', path: '/Nebula/', fileCount: 1 }),
+];
+
+const DIRECTORY_NAV_FILES = [
+  makeFile({
+    id: 'nebula-thesis',
+    filename: 'nebula-thesis.md',
+    mimeType: 'text/markdown',
+    sizeBytes: 18132,
+    directory: '/Nebula/',
+    tags: ['strategy'],
+  }),
+];
+
 // ---------------------------------------------------------------------------
 // Single route handler for all API calls (follows existing pattern)
 // ---------------------------------------------------------------------------
@@ -187,15 +202,34 @@ async function setupApiMocks(
 
     // Library directories
     if (path.includes('/library/directories')) {
-      return respond(200, { directories });
+      const parentDirectory = url.searchParams.get('parentDirectory') ?? '/';
+      const parentDepth = parentDirectory === '/' ? 0 : parentDirectory.split('/').filter(Boolean).length;
+      const scopedDirectories = directories.filter((directory) => {
+        const segments = directory.path.split('/').filter(Boolean);
+        if (segments.length !== parentDepth + 1) return false;
+        return parentDirectory === '/' || directory.path.startsWith(parentDirectory);
+      });
+      return respond(200, { directories: scopedDirectories });
     }
 
-    // Library files
+    // Library files. Match the API contract closely enough to catch regressions:
+    // root-only by default, recursive only when explicitly requested.
     if (path.includes('/library') && !path.includes('/library/')) {
       if (errorOnFiles) {
         return respond(500, { message: 'Internal server error' });
       }
-      return respond(200, { files, total, cursor: null });
+      const directory = url.searchParams.get('directory');
+      const recursive = url.searchParams.get('recursive') === 'true';
+      const search = url.searchParams.get('search');
+      const scopedFiles = files.filter((file) => {
+        if (directory) {
+          return recursive ? file.directory.startsWith(directory) : file.directory === directory;
+        }
+        if (!recursive && !search) return file.directory === '/';
+        return true;
+      });
+      const responseTotal = total === files.length ? scopedFiles.length : total;
+      return respond(200, { files: scopedFiles, total: responseTotal, cursor: null });
     }
 
     // Sessions
@@ -219,8 +253,10 @@ async function setupApiMocks(
 
 async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(800);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
     fullPage: true,
   });
 }
@@ -309,6 +345,24 @@ test.describe('Library — Desktop', () => {
         expect(ratio).toBeLessThan(1.3);
       }
     }
+  });
+
+  test('directory navigation uses the recursive client index', async ({ page }) => {
+    await setupApiMocks(page, {
+      files: DIRECTORY_NAV_FILES,
+      directories: DIRECTORY_NAV_DIRS,
+      total: DIRECTORY_NAV_FILES.length,
+    });
+    await page.goto('/projects/proj-test-1/library');
+    await page.waitForSelector('h1:has-text("Library")');
+
+    await expect(page.getByRole('button', { name: 'Folder: Nebula, 1 file' })).toBeVisible();
+    await page.getByRole('button', { name: 'Folder: Nebula, 1 file' }).click();
+
+    await expect(page).toHaveURL(/dir=%2FNebula%2F|dir=\/Nebula\//);
+    await expect(page.getByText('nebula-thesis.md')).toBeVisible();
+    await screenshot(page, 'library-directory-navigation-desktop');
+    await assertNoOverflow(page);
   });
 
   test('grid view — directories separate from files', async ({ page }) => {
