@@ -102,6 +102,18 @@ describe('MessageBubble', () => {
       expect(pre!.style.background).toBe('rgb(1, 22, 39)');
     });
 
+    it('uses explicit light text on language-less fenced code blocks', () => {
+      const markdown = '```\nOn branch main\nnothing to commit\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      expect(pre!.style.background).toBe('rgb(1, 22, 39)');
+      expect(pre!.style.color).toBe('rgb(214, 222, 235)');
+    });
+
     it('renders a language-less fenced block as a <pre>, preserving line breaks', () => {
       // No language → no `language-*` class. The old `!match && !className`
       // test misclassified this as inline <code> and collapsed the newlines.

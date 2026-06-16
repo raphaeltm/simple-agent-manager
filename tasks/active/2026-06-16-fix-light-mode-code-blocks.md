@@ -28,18 +28,18 @@ The same issue exists in `MermaidCodeFallback` in `packages/acp-client/src/compo
 
 ## Implementation Checklist
 
-- [ ] Add `color: '#d6deeb'` to the language-less fenced code `<pre>` in `MessageBubble.tsx:makeCodeComponent` (line ~171)
-- [ ] Add `color: '#d6deeb'` to `MermaidCodeFallback` in `MermaidDiagram.tsx` (line ~559)
-- [ ] Verify `MarkdownRenderer.tsx` doesn't need the same fix (it delegates to `SyntaxHighlightedCode` which handles color via theme)
-- [ ] Check `HighlightedCode` in MessageBubble.tsx — confirm prism theme sets text color (it does via inline styles)
-- [ ] Add/update tests to verify light-mode code block text color
-- [ ] Build `acp-client` package to confirm no errors
+- [x] Add `color: '#d6deeb'` to the language-less fenced code `<pre>` in `MessageBubble.tsx:makeCodeComponent` (line ~171)
+- [x] Add `color: '#d6deeb'` to `MermaidCodeFallback` in `MermaidDiagram.tsx` (line ~559)
+- [x] Verify `MarkdownRenderer.tsx` doesn't need the same fix (it delegates to `SyntaxHighlightedCode` which handles color via theme)
+- [x] Check `HighlightedCode` in MessageBubble.tsx — confirm prism theme sets text color (it does via inline styles)
+- [x] Add/update tests to verify light-mode code block text color
+- [x] Build `acp-client` package to confirm no errors
 
 ## Acceptance Criteria
 
-- [ ] Fenced code blocks (``` and ```language) are readable in both light and dark modes
-- [ ] Language-less fenced code blocks show light text on dark background in both themes
-- [ ] Mermaid code fallback blocks are readable in both themes
-- [ ] Inline code remains readable in both themes (no regression)
-- [ ] All existing tests pass
-- [ ] acp-client package builds successfully
+- [x] Fenced code blocks (``` and ```language) are readable in both light and dark modes
+- [x] Language-less fenced code blocks show light text on dark background in both themes
+- [x] Mermaid code fallback blocks are readable in both themes
+- [x] Inline code remains readable in both themes (no regression)
+- [x] All existing tests pass
+- [x] acp-client package builds successfully

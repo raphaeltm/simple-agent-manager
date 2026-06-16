@@ -285,6 +285,15 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
   expect(langlessText).toContain('On branch main');
   expect(langlessText).toContain('nothing to commit');
   expect(langlessText).toContain('\n');
+  const langlessColors = await page
+    .locator('.prose pre', { hasText: 'On branch main' })
+    .first()
+    .evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { backgroundColor: style.backgroundColor, color: style.color };
+    });
+  expect(langlessColors.backgroundColor).toBe('rgb(1, 22, 39)');
+  expect(langlessColors.color).toBe('rgb(214, 222, 235)');
 
   await screenshot(page, screenshotName);
   await assertNoOverflow(page);

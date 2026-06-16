@@ -89,6 +89,8 @@ describe('MessageBubble Mermaid rendering', () => {
     );
 
     expect(screen.getByTestId('mermaid-code-fallback').textContent).toContain('graph TD');
+    expect(screen.getByTestId('mermaid-code-fallback').style.background).toBe('rgb(1, 22, 39)');
+    expect(screen.getByTestId('mermaid-code-fallback').style.color).toBe('rgb(214, 222, 235)');
     expect(screen.queryByTestId('mermaid-diagram')).toBeNull();
     expect(mocks.mermaidRender).not.toHaveBeenCalled();
   });

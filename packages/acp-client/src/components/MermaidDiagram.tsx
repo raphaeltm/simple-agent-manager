@@ -21,6 +21,9 @@ export { MERMAID_SVG_SANITIZE_CONFIG } from '../mermaid';
 const MERMAID_FONT =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
+const NIGHT_OWL_CODE_BACKGROUND = '#011627';
+const NIGHT_OWL_CODE_FOREGROUND = '#d6deeb';
+
 const MERMAID_THEME_VARIABLES = {
   darkMode: true,
   background: '#13201d',
@@ -556,7 +559,14 @@ export function MermaidCodeFallback({ code, style }: MermaidCodeFallbackProps) {
     <pre
       data-testid="mermaid-code-fallback"
       className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
-      style={{ margin: 0, background: '#011627', fontFamily: 'monospace', lineHeight: '1.5', ...style }}
+      style={{
+        margin: 0,
+        background: NIGHT_OWL_CODE_BACKGROUND,
+        color: NIGHT_OWL_CODE_FOREGROUND,
+        fontFamily: 'monospace',
+        lineHeight: '1.5',
+        ...style,
+      }}
     >
       {code}
     </pre>
