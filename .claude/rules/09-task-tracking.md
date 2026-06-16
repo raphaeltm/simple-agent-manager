@@ -29,18 +29,18 @@ Findings that exist only in the Research section without a corresponding checkli
 
 Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run the `task-completion-validator` agent (`.claude/agents/task-completion-validator/`). This agent performs six cross-reference checks:
 
-| Check | What it catches |
-|-------|----------------|
-| **A: Research → Checklist** | Research findings that never became checklist items |
-| **B: Checklist → Diff** | Checklist items checked off but not actually in the code changes |
-| **C: Criteria → Tests** | Acceptance criteria with no test or manual verification |
-| **D: UI → Backend** | UI form fields that collect input but never send it to the API |
-| **E: Multi-Resource** | Selection functions that pick from a set without a discriminator |
-| **F: Vertical Slice** | Cross-boundary features tested only in isolation with empty mocks instead of vertical slice tests with realistic state (see `35-vertical-slice-testing.md`) |
+| Check                       | What it catches                                                                                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A: Research → Checklist** | Research findings that never became checklist items                                                                                                         |
+| **B: Checklist → Diff**     | Checklist items checked off but not actually in the code changes                                                                                            |
+| **C: Criteria → Tests**     | Acceptance criteria with no test or manual verification                                                                                                     |
+| **D: UI → Backend**         | UI form fields that collect input but never send it to the API                                                                                              |
+| **E: Multi-Resource**       | Selection functions that pick from a set without a discriminator                                                                                            |
+| **F: Vertical Slice**       | Cross-boundary features tested only in isolation with empty mocks instead of vertical slice tests with realistic state (see `35-vertical-slice-testing.md`) |
 
 ### Validation Rules
 
-- **CRITICAL/HIGH findings block merge.** Fix them in the branch before merging. Filing a backlog task is NOT an acceptable alternative — the validator exists to catch gaps *before* they ship, not to generate follow-up work. The only exception is explicit human approval to defer a specific finding.
+- **CRITICAL/HIGH findings block merge.** Fix them in the branch before merging. Filing a backlog task is NOT an acceptable alternative — the validator exists to catch gaps _before_ they ship, not to generate follow-up work. The only exception is explicit human approval to defer a specific finding.
 - **A validator FAIL means the task is not complete.** Return to implementation. Do NOT proceed to PR creation or merge.
 - **Do NOT rationalize gaps.** "It works when I test it manually" is not an answer to "no test covers this acceptance criterion." Either add the test or document the manual verification with evidence.
 - **"Fix or defer" is not a real choice.** If you have time to write a backlog task file, you have time to write the test or fix the gap. The backlog escape hatch has been abused in every case where it was used (PR #568, PR #570) — the follow-up tasks add friction and delay but deliver the same work that should have been done in the original PR.
@@ -54,6 +54,7 @@ Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run th
 ## Acceptance Criteria Must Be Testable
 
 When writing acceptance criteria, each criterion must be verifiable by at least one of:
+
 - An automated test (unit, integration, or E2E)
 - A documented manual verification with evidence (screenshot, API response, log output)
 
@@ -62,6 +63,12 @@ Criteria like "User with both providers can select which provider to use" requir
 ## Dispatching Tasks to Other Agents
 
 When dispatching a task to another agent (via `dispatch_task` or any other mechanism), the task description MUST instruct the receiving agent to execute the work using the `/do` skill. The `/do` skill is the standard end-to-end workflow for implementing tasks — it handles research, planning, implementation, review, staging verification, and PR creation.
+
+### Read-Only Requests Are Not Implementation Tasks
+
+PR status, PR history, task status, and diagnostic/investigation questions are read-only by default. Answer them in the current session using SAM MCP tools, GitHub/`gh`, logs, and local repo evidence.
+
+Do not create a task file, branch, commit, or PR for a read-only status/history request unless the user explicitly asks for code changes, config changes, a durable artifact, or a delegated task. Repeated recent failures came from treating simple status/history questions as full SAM task executions, which created branches and failed sessions without improving the answer.
 
 ### How to Write Dispatch Descriptions
 
@@ -91,6 +98,18 @@ If the session failed immediately, never started, launched under the wrong profi
 If the requested specialist/profile is not available or cannot be observed from the dispatch result, do not assume it worked. Use the cheapest available status/details check, record what is missing, and either re-dispatch with an explicit supported profile or ask for clarification. A generic task running under the platform default is not a substitute for a requested reviewer, specialist, or constrained profile.
 
 When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile and respected the original constraints. If the result was produced by the wrong profile, ignored `draft PR`/`do not merge`, dropped the requested branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
+
+### Before Retrying a Failed Dispatch
+
+Before retrying or redispatching the same work after a SAM task fails, diagnose the failed start:
+
+- Call `get_task_details` for the failed task and read any output summary, branch, PR URL, and status evidence.
+- If there is a session, read enough messages to distinguish no-workspace/startup failure, transient provider error, human-cancel recovery, wrong profile, or real task failure.
+- Call `list_tasks`/`list_project_agents` to check for active duplicates with the same prompt, title, branch, or PR.
+- If an active duplicate exists, inspect or coordinate with it instead of creating another copy.
+- If the failure was a transient provider or platform startup issue, adjust the retry only after confirming the current platform behavior has not already fixed it.
+
+Do not blindly submit the same prompt repeatedly after no-workspace/startup failures, provider overloads, or immediately failed sessions. If the cheapest evidence does not reveal why the task failed, report the failure with the exact task IDs and observed state instead of multiplying duplicate tasks.
 
 ### Why This Matters
 
