@@ -38,6 +38,17 @@ When reviewing or touching ideas:
 3. If an idea has become a narrower follow-up, update the title/content so future agents do not execute the stale original plan.
 4. If a prototype informed a real product change, record which production surface still needs validation; prototype routes are not the deliverable by default.
 5. Include concrete evidence in idea updates: merged commit, PR number, task ID, branch, or file path.
+6. If an implementation only satisfies a backend, API, or infrastructure slice of a broader user-facing idea, narrow the idea to the remaining user-facing work instead of marking it completed. For example, backend provider support does not complete provider-configuration UX unless the selection, credential mapping, validation, and user-facing flow also shipped.
+
+## Periodic Maintenance Review
+
+For broad "review recent work / update memory and configs" tasks:
+
+1. Inspect recent SAM tasks, failed tasks, sessions, ideas, active policies, and relevant git history before proposing changes.
+2. Prefer updating existing rules, policies, ideas, or knowledge over adding parallel duplicates.
+3. Separate evidence-backed facts from inference: task status, merged PRs, and branch ancestry are facts; a title or draft idea alone is not shipped evidence.
+4. Keep branch-backed work open unless it has merged or shipped on the intended branch; append branch/PR/task evidence so future agents do not rediscover the same partial work.
+5. Only promote repeated human frustration into durable config when a rule would have prevented the class of failure.
 
 ## Knowledge vs Ideas vs Policies
 

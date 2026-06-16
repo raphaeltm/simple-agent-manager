@@ -92,6 +92,26 @@ If the requested specialist/profile is not available or cannot be observed from 
 
 When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile and respected the original constraints. If the result was produced by the wrong profile, ignored `draft PR`/`do not merge`, dropped the requested branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
 
+### No Blind Retry After Failed Starts
+
+Before retrying or redispatching a failed SAM task, especially after no-workspace starts, two-message failures, transient provider errors, wrong-profile starts, or duplicate branch names:
+
+1. Inspect the failed task/session enough to identify the observed failure mode.
+2. Search active and queued tasks for duplicates with the same prompt, title, branch, PR, or output branch.
+3. Verify the retry will use the intended profile/skill, branch, workspace profile, and critical constraints such as `/do`, `draft PR`, `do not merge`, and required base branch.
+4. Include the failed task ID and any active duplicate task IDs in your report or retry context.
+5. Recommend or perform cancellation/removal of duplicate queued tasks only when you have authority and an available tool for it; otherwise report the duplicate IDs clearly.
+
+Do not resubmit the same prompt just because the previous task failed quickly. A fast failure is evidence to inspect, not proof that a fresh duplicate will behave differently.
+
+### Read-Only and Liveness Prompts
+
+When Raphaël asks for status, open PRs, task history, deployment state, or a simple liveness check such as "Hello?" or "Can you hear me?", treat the work as in-session and read-only by default:
+
+- Use SAM MCP tools, GitHub/gh, logs, and local evidence as needed.
+- Do not create task files, branches, PRs, or dispatched SAM subtasks unless the user asks for durable changes, implementation, a PR, or explicit delegation.
+- If the prompt is ambiguous, answer the immediate status/liveness question first and ask whether he wants a follow-up task or PR.
+
 ### Why This Matters
 
 Without the `/do` instruction, a dispatched agent may skip critical phases like staging verification, specialist review, or proper PR creation. The `/do` workflow enforces all quality gates defined in this project's rules.
