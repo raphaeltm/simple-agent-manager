@@ -51,7 +51,7 @@ function mapResolvedToLegacy(
       break;
     case 'auth-json':
       credential = secret.authJson;
-      credentialKind = 'api-key';
+      credentialKind = 'oauth-token';
       break;
     case 'openai-compatible':
       credential = secret.apiKey;
@@ -165,7 +165,7 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
     });
   });
 
-  it('auth-json credential maps to credentialKind "api-key" (backwards compat)', () => {
+  it('auth-json credential maps to credentialKind "oauth-token" for auth-file injection', () => {
     const userId = 'user-1';
     const cred: Credential = {
       id: id('cred'),
@@ -181,7 +181,7 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
     const legacy = mapResolvedToLegacy(resolved!);
     expect(legacy).toEqual({
       credential: '{"token":"abc"}',
-      credentialKind: 'api-key',
+      credentialKind: 'oauth-token',
       credentialSource: 'user',
     });
   });

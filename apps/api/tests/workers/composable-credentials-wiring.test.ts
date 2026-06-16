@@ -293,6 +293,7 @@ const USER_E = `${TEST_PREFIX}-user-e`;
 const USER_F = `${TEST_PREFIX}-user-f`;
 const USER_G = `${TEST_PREFIX}-user-g`;
 const USER_H = `${TEST_PREFIX}-user-h`;
+const USER_I = `${TEST_PREFIX}-user-i`;
 const PROJECT_E = `${TEST_PREFIX}-proj-e`;
 
 async function seedPlatformCredential(opts: {
@@ -335,7 +336,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
 
   beforeAll(async () => {
     // Seed fresh users so earlier tests are unaffected
-    for (const uid of [USER_C, USER_D, USER_E, USER_F, USER_G, USER_H]) {
+    for (const uid of [USER_C, USER_D, USER_E, USER_F, USER_G, USER_H, USER_I]) {
       await env.DATABASE.prepare(
         `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
          VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
@@ -434,6 +435,41 @@ describe('enabled platform default does not short-circuit user backfill', () => 
       secret: 'platform-hetzner-token',
       isEnabled: true,
     });
+
+    const { ciphertext: authJsonCiphertext, iv: authJsonIv } = await encrypt(
+      '{"tokens":{"access_token":"codex-access-token","refresh_token":"codex-refresh-token"}}',
+      ENCRYPTION_KEY,
+    );
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_credentials
+       (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 'auth-json', ?, ?, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(`${TEST_PREFIX}-cc-codex-auth-json`, USER_I, 'Codex auth.json', authJsonCiphertext, authJsonIv)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_configurations
+       (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 'agent', 'openai-codex', ?, '{}', 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(
+        `${TEST_PREFIX}-cc-codex-auth-json-cfg`,
+        USER_I,
+        'Codex auth.json config',
+        `${TEST_PREFIX}-cc-codex-auth-json`,
+      )
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_attachments
+       (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
+       VALUES (?, ?, 'agent', 'openai-codex', ?, NULL, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(
+        `${TEST_PREFIX}-cc-codex-auth-json-att`,
+        `${TEST_PREFIX}-cc-codex-auth-json-cfg`,
+        USER_I,
+      )
+      .run();
   });
 
   it('user has no cc_* data before resolution (legacy-only)', async () => {
@@ -544,6 +580,18 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     expect(result!.providerName).toBe('hetzner');
     // The user's own credential is used, NOT the platform default
     expect(result!.credentialSource).toBe('user');
+  });
+
+  it('Codex auth-json CC credential resolves as oauth-token for auth-file injection', async () => {
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(db, USER_I, 'openai-codex', ENCRYPTION_KEY);
+
+    expect(result).not.toBeNull();
+    expect(result!.credential).toContain('codex-access-token');
+    expect(result!.credentialKind).toBe('oauth-token');
+    expect(result!.credentialSource).toBe('user');
+    expect(result!.baseUrl).toBeUndefined();
+    expect(result!.providerDialect).toBeUndefined();
   });
 
   it('compute path: user with NO cloud-provider cred falls through to platform default', async () => {

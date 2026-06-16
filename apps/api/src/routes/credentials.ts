@@ -772,7 +772,10 @@ function mapResolvedToLegacy(
       break;
     case 'auth-json':
       credential = secret.authJson;
-      credentialKind = 'api-key';
+      // auth-json is a file-style credential (Codex ~/.codex/auth.json), so
+      // preserve the VM agent's auth-file injection path rather than treating
+      // the JSON blob as an API key env var.
+      credentialKind = 'oauth-token';
       break;
     case 'openai-compatible':
       credential = secret.apiKey;

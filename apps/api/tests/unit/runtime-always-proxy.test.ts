@@ -472,6 +472,22 @@ describe('runtime.ts always-proxy', () => {
     expect(JSON.stringify(json)).not.toContain('https://custom-openai.example/v1');
   });
 
+  it('returns direct credential when codex has auth-file OAuth credential', async () => {
+    mockWorkspaceOnly();
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: '{"tokens":{"access_token":"codex-access-token"}}',
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+
+    const { res, json } = await readAgentKey('openai-codex');
+
+    expect(res.status).toBe(200);
+    expect(json.apiKey).toContain('codex-access-token');
+    expect(json.credentialKind).toBe('oauth-token');
+    expect(json.inferenceConfig).toBeUndefined();
+  });
+
   it('fails closed instead of injecting an incompatible baseURL-backed credential', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;
