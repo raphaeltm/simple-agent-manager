@@ -69,9 +69,14 @@ describe('useLibraryIndex', () => {
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.files.map((f) => f.id)).toEqual(['a', 'b']);
 
-    // Every sweep call must request ascending order
+    // Every sweep call must request the full library recursively in ascending order.
     for (const call of listLibraryFiles.mock.calls) {
-      expect(call[1]).toMatchObject({ sortOrder: 'asc', sortBy: 'createdAt' });
+      expect(call[1]).toMatchObject({
+        directory: '/',
+        recursive: true,
+        sortOrder: 'asc',
+        sortBy: 'createdAt',
+      });
     }
     // Second page passed the first page's cursor
     expect(listLibraryFiles.mock.calls[1]![1]).toMatchObject({ cursor: 'a' });

@@ -8,6 +8,7 @@
 // ranking live in lib/library-search.ts — this hook never filters.
 //
 // Sweep contract (see tasks/.../library-client-index-search.md):
+//   - request directory='/' with recursive=true so the index covers folders.
 //   - sortOrder MUST be 'asc' (cursor is `id > cursor` ascending ULID; 'desc'
 //     would drop/dupe rows that share a createdAt millisecond).
 //   - loop until cursor === null (NOT count-based), bounded by MAX_SWEEP_PAGES.
@@ -107,6 +108,8 @@ export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
       try {
         for (;;) {
           const resp = await listLibraryFiles(projectId, {
+            directory: '/',
+            recursive: true,
             sortBy: 'createdAt',
             sortOrder: 'asc',
             limit: LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE,
