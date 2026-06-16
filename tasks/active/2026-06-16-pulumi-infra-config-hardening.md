@@ -29,7 +29,7 @@ The Pulumi infra resource slice currently bakes deployment policy into resource 
 - [x] Run `pnpm --filter @simple-agent-manager/infra test`.
 - [x] Run `pnpm --filter @simple-agent-manager/infra typecheck`.
 - [x] Run relevant broader quality checks if touched files require them.
-- [ ] Complete specialist validation for Cloudflare/Pulumi resource behavior, Principle XI compliance, test quality, and task completion before archiving.
+- [x] Complete specialist validation for Cloudflare/Pulumi resource behavior, Principle XI compliance, test quality, and task completion before archiving.
 
 ## Acceptance Criteria
 
