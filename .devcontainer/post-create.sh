@@ -28,6 +28,9 @@ mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 
 echo "=== Installing Claude Code (native) ==="
 try_run "Install Claude Code" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+if [[ -x "$HOME/.local/bin/claude" ]]; then
+	export PATH="$HOME/.local/bin:$PATH"
+fi
 
 echo "=== Installing OpenAI Codex ==="
 try_run "Install OpenAI Codex" npm i -g @openai/codex
@@ -72,7 +75,7 @@ echo "Building packages..."
 try_run "pnpm build" pnpm build
 
 echo ""
-if [ "$FAILURES" -gt 0 ]; then
+if [[ "$FAILURES" -gt 0 ]]; then
 	echo "=== Setup completed with $FAILURES warning(s) ==="
 	echo "Some optional tools failed to install. The workspace is functional."
 	echo "Re-run this script to retry: bash .devcontainer/post-create.sh"
