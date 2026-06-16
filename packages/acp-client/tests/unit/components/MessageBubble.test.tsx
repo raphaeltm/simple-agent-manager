@@ -90,7 +90,7 @@ describe('MessageBubble', () => {
       expect(proseDiv!.className).not.toContain('overflow-hidden');
     });
 
-    it('applies Night Owl theme background to code blocks', () => {
+    it('applies Night Owl theme background and foreground to syntax-highlighted code blocks', () => {
       const markdown = '```python\nprint("hello")\n```';
       const { container } = render(
         <MessageBubble text={markdown} role="agent" />
@@ -100,6 +100,8 @@ describe('MessageBubble', () => {
       expect(pre).not.toBeNull();
       // Night Owl theme uses #011627 as background (JSDOM normalizes to rgb)
       expect(pre!.style.background).toBe('rgb(1, 22, 39)');
+      // Explicit light text color prevents dark-on-dark in light mode
+      expect(pre!.style.color).toBe('rgb(214, 222, 235)');
     });
 
     it('uses explicit light text on language-less fenced code blocks', () => {

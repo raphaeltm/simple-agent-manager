@@ -66,7 +66,7 @@ function HighlightedCode({ code, language }: { code: string; language: string })
       {({ tokens, getLineProps, getTokenProps }) => (
         <pre
           className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
-          style={{ margin: 0, background: NIGHT_OWL_CODE_BACKGROUND, fontFamily: 'monospace', lineHeight: '1.5' }}
+          style={{ margin: 0, background: NIGHT_OWL_CODE_BACKGROUND, color: NIGHT_OWL_CODE_FOREGROUND, fontFamily: 'monospace', lineHeight: '1.5' }}
         >
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
