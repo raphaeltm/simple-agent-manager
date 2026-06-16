@@ -12,6 +12,8 @@ import {
   deleteCCAttachment,
   deleteCCConfiguration,
   deleteCCCredential,
+  updateCCAttachment,
+  updateCCConfiguration,
   updateCCCredential,
 } from '../../../src/lib/api/composable-credentials';
 
@@ -26,6 +28,8 @@ describe('composable credentials API client', () => {
 
     await deleteCCCredential(migratedId);
     await updateCCCredential(migratedId, { isActive: false });
+    await updateCCConfiguration(migratedId, { credentialId: null, isActive: false });
+    await updateCCAttachment(migratedId, { isActive: false });
     await deleteCCConfiguration(migratedId);
     await deleteCCAttachment(migratedId);
 
@@ -38,9 +42,17 @@ describe('composable credentials API client', () => {
       body: JSON.stringify({ isActive: false }),
     });
     expect(mocks.request).toHaveBeenNthCalledWith(3, `/api/cc/configurations/${encoded}`, {
-      method: 'DELETE',
+      method: 'PATCH',
+      body: JSON.stringify({ credentialId: null, isActive: false }),
     });
     expect(mocks.request).toHaveBeenNthCalledWith(4, `/api/cc/attachments/${encoded}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive: false }),
+    });
+    expect(mocks.request).toHaveBeenNthCalledWith(5, `/api/cc/configurations/${encoded}`, {
+      method: 'DELETE',
+    });
+    expect(mocks.request).toHaveBeenNthCalledWith(6, `/api/cc/attachments/${encoded}`, {
       method: 'DELETE',
     });
   });

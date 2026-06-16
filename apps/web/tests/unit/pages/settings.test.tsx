@@ -49,6 +49,7 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu">user-menu</div>,
 }));
 
+import { ToastProvider } from '../../../src/hooks/useToast';
 import { Settings } from '../../../src/pages/Settings';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsConnections } from '../../../src/pages/SettingsConnections';
@@ -56,16 +57,18 @@ import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
 
 function renderSettings(path = '/settings/cloud-provider') {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/settings" element={<Settings />}>
-          <Route index element={<Navigate to="cloud-provider" replace />} />
-          <Route path="cloud-provider" element={<SettingsCloudProvider />} />
-          <Route path="github" element={<SettingsGitHub />} />
-          <Route path="connections" element={<SettingsConnections />} />
-        </Route>
-      </Routes>
-    </MemoryRouter>
+    <ToastProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/settings" element={<Settings />}>
+            <Route index element={<Navigate to="cloud-provider" replace />} />
+            <Route path="cloud-provider" element={<SettingsCloudProvider />} />
+            <Route path="github" element={<SettingsGitHub />} />
+            <Route path="connections" element={<SettingsConnections />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>
   );
 }
 
