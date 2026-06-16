@@ -1,5 +1,5 @@
-import * as pulumi from "@pulumi/pulumi";
-import { vi } from "vitest";
+import * as pulumi from '@pulumi/pulumi';
+import { vi } from 'vitest';
 
 export interface RegisteredResource {
   type: string;
@@ -41,26 +41,21 @@ const resourceRecorder = vi.hoisted(() => {
 
 const registeredResources = resourceRecorder.resources;
 
-vi.mock("@pulumi/cloudflare", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@pulumi/cloudflare")>();
+vi.mock('@pulumi/cloudflare', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pulumi/cloudflare')>();
 
   return {
     ...actual,
     D1Database: class extends actual.D1Database {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record(
-          "cloudflare:index/d1Database:D1Database",
-          name,
-          args,
-          opts
-        );
+        resourceRecorder.record('cloudflare:index/d1Database:D1Database', name, args, opts);
         super(name, args, opts);
       }
     },
     WorkersKvNamespace: class extends actual.WorkersKvNamespace {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
         resourceRecorder.record(
-          "cloudflare:index/workersKvNamespace:WorkersKvNamespace",
+          'cloudflare:index/workersKvNamespace:WorkersKvNamespace',
           name,
           args,
           opts
@@ -70,42 +65,38 @@ vi.mock("@pulumi/cloudflare", async (importOriginal) => {
     },
     R2Bucket: class extends actual.R2Bucket {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record("cloudflare:index/r2Bucket:R2Bucket", name, args, opts);
+        resourceRecorder.record('cloudflare:index/r2Bucket:R2Bucket', name, args, opts);
         super(name, args, opts);
       }
     },
     Record: class extends actual.Record {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record("cloudflare:index/record:Record", name, args, opts);
+        resourceRecorder.record('cloudflare:index/record:Record', name, args, opts);
         super(name, args, opts);
       }
     },
     WorkersRoute: class extends actual.WorkersRoute {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record(
-          "cloudflare:index/workersRoute:WorkersRoute",
-          name,
-          args,
-          opts
-        );
+        resourceRecorder.record('cloudflare:index/workersRoute:WorkersRoute', name, args, opts);
         super(name, args, opts);
       }
     },
     PagesProject: class extends actual.PagesProject {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record(
-          "cloudflare:index/pagesProject:PagesProject",
-          name,
-          args,
-          opts
-        );
+        resourceRecorder.record('cloudflare:index/pagesProject:PagesProject', name, args, opts);
+        super(name, args, opts);
+      }
+    },
+    PagesDomain: class extends actual.PagesDomain {
+      constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
+        resourceRecorder.record('cloudflare:index/pagesDomain:PagesDomain', name, args, opts);
         super(name, args, opts);
       }
     },
     OriginCaCertificate: class extends actual.OriginCaCertificate {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
         resourceRecorder.record(
-          "cloudflare:index/originCaCertificate:OriginCaCertificate",
+          'cloudflare:index/originCaCertificate:OriginCaCertificate',
           name,
           args,
           opts
@@ -116,34 +107,34 @@ vi.mock("@pulumi/cloudflare", async (importOriginal) => {
   };
 });
 
-vi.mock("@pulumi/random", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@pulumi/random")>();
+vi.mock('@pulumi/random', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pulumi/random')>();
 
   return {
     ...actual,
     RandomId: class extends actual.RandomId {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record("random:index/randomId:RandomId", name, args, opts);
+        resourceRecorder.record('random:index/randomId:RandomId', name, args, opts);
         super(name, args, opts);
       }
     },
   };
 });
 
-vi.mock("@pulumi/tls", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@pulumi/tls")>();
+vi.mock('@pulumi/tls', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pulumi/tls')>();
 
   return {
     ...actual,
     PrivateKey: class extends actual.PrivateKey {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record("tls:index/privateKey:PrivateKey", name, args, opts);
+        resourceRecorder.record('tls:index/privateKey:PrivateKey', name, args, opts);
         super(name, args, opts);
       }
     },
     CertRequest: class extends actual.CertRequest {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
-        resourceRecorder.record("tls:index/certRequest:CertRequest", name, args, opts);
+        resourceRecorder.record('tls:index/certRequest:CertRequest', name, args, opts);
         super(name, args, opts);
       }
     },
@@ -154,7 +145,9 @@ type ResourceInputs = Record<string, unknown>;
 
 // Mock Pulumi runtime before any resources are created
 pulumi.runtime.setMocks({
-  newResource: (args: pulumi.runtime.MockResourceArgs): { id: string; state: Record<string, unknown> } => {
+  newResource: (
+    args: pulumi.runtime.MockResourceArgs
+  ): { id: string; state: Record<string, unknown> } => {
     const existing = registeredResources.find(
       (resource) => resource.type === args.type && resource.name === args.name
     );
@@ -172,7 +165,7 @@ pulumi.runtime.setMocks({
 
     // Return mock state based on resource type
     switch (args.type) {
-      case "cloudflare:index/d1Database:D1Database":
+      case 'cloudflare:index/d1Database:D1Database':
         return {
           id,
           state: {
@@ -181,7 +174,7 @@ pulumi.runtime.setMocks({
             name: args.inputs.name || `sam-test`,
           },
         };
-      case "cloudflare:index/workersKvNamespace:WorkersKvNamespace":
+      case 'cloudflare:index/workersKvNamespace:WorkersKvNamespace':
         return {
           id,
           state: {
@@ -190,7 +183,7 @@ pulumi.runtime.setMocks({
             title: args.inputs.title || `sam-test-sessions`,
           },
         };
-      case "cloudflare:index/r2Bucket:R2Bucket":
+      case 'cloudflare:index/r2Bucket:R2Bucket':
         return {
           id,
           state: {
@@ -199,7 +192,7 @@ pulumi.runtime.setMocks({
             name: args.inputs.name || `sam-test-assets`,
           },
         };
-      case "cloudflare:index/pagesProject:PagesProject":
+      case 'cloudflare:index/pagesProject:PagesProject':
         return {
           id,
           state: {
@@ -208,7 +201,15 @@ pulumi.runtime.setMocks({
             subdomain: `${args.name}-actual.pages.dev`,
           },
         };
-      case "cloudflare:index/record:Record":
+      case 'cloudflare:index/pagesDomain:PagesDomain':
+        return {
+          id,
+          state: {
+            ...args.inputs,
+            id,
+          },
+        };
+      case 'cloudflare:index/record:Record':
         return {
           id,
           state: {
@@ -217,7 +218,7 @@ pulumi.runtime.setMocks({
             hostname: `${args.inputs.name}.example.com`,
           },
         };
-      case "random:index/randomId:RandomId":
+      case 'random:index/randomId:RandomId':
         return {
           id,
           state: {
@@ -226,7 +227,7 @@ pulumi.runtime.setMocks({
             b64Std: `${args.name}-mock-secret`,
           },
         };
-      case "tls:index/privateKey:PrivateKey":
+      case 'tls:index/privateKey:PrivateKey':
         return {
           id,
           state: {
@@ -237,7 +238,7 @@ pulumi.runtime.setMocks({
             publicKeyPem: `${args.name}-public-key-pem`,
           },
         };
-      case "tls:index/certRequest:CertRequest":
+      case 'tls:index/certRequest:CertRequest':
         return {
           id,
           state: {
@@ -246,7 +247,7 @@ pulumi.runtime.setMocks({
             certRequestPem: `${args.name}-csr-pem`,
           },
         };
-      case "cloudflare:index/originCaCertificate:OriginCaCertificate":
+      case 'cloudflare:index/originCaCertificate:OriginCaCertificate':
         return {
           id,
           state: {
@@ -269,9 +270,9 @@ pulumi.runtime.setMocks({
 
 // Set mock config values for testing
 // Config key format: "project:key" where project is from Pulumi.yaml name field
-pulumi.runtime.setConfig("project:cloudflareAccountId", "test-account-id-00000000000000000000");
-pulumi.runtime.setConfig("project:cloudflareZoneId", "test-zone-id-000000000000000000000");
-pulumi.runtime.setConfig("project:baseDomain", "example.com");
+pulumi.runtime.setConfig('project:cloudflareAccountId', 'test-account-id-00000000000000000000');
+pulumi.runtime.setConfig('project:cloudflareZoneId', 'test-zone-id-000000000000000000000');
+pulumi.runtime.setConfig('project:baseDomain', 'example.com');
 
 export function getRegisteredResources(): RegisteredResource[] {
   return [...registeredResources];
@@ -283,7 +284,7 @@ export function findRegisteredResource(name: string, type?: string): RegisteredR
   );
 
   if (!resource) {
-    throw new Error(`No registered resource found for ${type ? `${type} ` : ""}${name}`);
+    throw new Error(`No registered resource found for ${type ? `${type} ` : ''}${name}`);
   }
 
   return resource;

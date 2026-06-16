@@ -16,20 +16,20 @@ The Pulumi infra resource slice currently bakes deployment policy into resource 
 
 ## Implementation Checklist
 
-- [ ] Add typed config parsing helpers in `infra/resources/config.ts` for required strings, optional strings, R2 location, and Pages production branch.
-- [ ] Export explicit defaults and supported R2 location values while preserving current behavior: R2 defaults to `WNAM`; Pages production branch defaults to `main`.
-- [ ] Replace empty-string fallbacks for `baseDomain` and `cloudflareZoneId` with fail-fast required config parsing.
-- [ ] Wire the configurable R2 location into `infra/resources/storage.ts`.
-- [ ] Wire the configurable Pages production branch into `infra/resources/pages.ts`.
-- [ ] Update `infra/resources/origin-ca.ts` and `infra/index.ts` to consume central config exports instead of duplicate `new pulumi.Config()` reads.
-- [ ] Add config helper tests for default, override, blank, missing, and unsupported values.
-- [ ] Refactor storage tests to assert bucket inputs, output contract, default location, override location, and invalid location failure before resource creation.
-- [ ] Refactor Pages tests to assert project/domain inputs, default branch, override branch, and blank branch failure.
-- [ ] Refactor KV/database-style low-value presence tests toward resource contract assertions and exported output behavior.
-- [ ] Run `pnpm --filter @simple-agent-manager/infra test`.
-- [ ] Run `pnpm --filter @simple-agent-manager/infra typecheck`.
-- [ ] Run relevant broader quality checks if touched files require them.
-- [ ] Complete specialist validation for Cloudflare/Pulumi resource behavior, Principle XI compliance, test quality, and task completion before archiving.
+- [x] Add typed config parsing helpers in `infra/resources/config.ts` for required strings, optional strings, R2 location, and Pages production branch.
+- [x] Export explicit defaults and supported R2 location values while preserving current behavior: R2 defaults to `WNAM`; Pages production branch defaults to `main`.
+- [x] Replace empty-string fallbacks for `baseDomain` and `cloudflareZoneId` with fail-fast required config parsing.
+- [x] Wire the configurable R2 location into `infra/resources/storage.ts`.
+- [x] Wire the configurable Pages production branch into `infra/resources/pages.ts`.
+- [x] Update `infra/resources/origin-ca.ts` and `infra/index.ts` to consume central config exports instead of duplicate `new pulumi.Config()` reads.
+- [x] Add config helper tests for default, override, blank, missing, and unsupported values.
+- [x] Refactor storage tests to assert bucket inputs, output contract, default location, override location, and invalid location failure before resource creation.
+- [x] Refactor Pages tests to assert project/domain inputs, default branch, override branch, and blank branch failure.
+- [x] Refactor KV/database-style low-value presence tests toward resource contract assertions and exported output behavior.
+- [x] Run `pnpm --filter @simple-agent-manager/infra test`.
+- [x] Run `pnpm --filter @simple-agent-manager/infra typecheck`.
+- [x] Run relevant broader quality checks if touched files require them.
+- [x] Complete specialist validation for Cloudflare/Pulumi resource behavior, Principle XI compliance, test quality, and task completion before archiving.
 
 ## Acceptance Criteria
 
@@ -40,3 +40,10 @@ The Pulumi infra resource slice currently bakes deployment policy into resource 
 - Existing resource names and default production behavior remain stable.
 - Tests cover resource inputs, Pulumi options, exported outputs consumed by deployment scripts, secret marking where applicable, config defaults, overrides, and invalid-config failure modes.
 - Infra test and typecheck commands pass.
+
+## PR & Staging Evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1333.
+- Staging deploy: https://github.com/raphaeltm/simple-agent-manager/actions/runs/27590612543 passed for `sam/remediate-cto-spot-check-01kv74`.
+- Direct staging checks passed: R2 bucket `sam-staging-assets` reports `location: WNAM`; DNS records target staging Workers/Pages hosts; API health returned HTTP 200 healthy; D1 counts returned users=4, projects=25, tasks=142, nodes=61, workspaces=101.
+- GitHub staging Playwright smoke-tests passed in the deploy workflow. A local rerun was attempted, but local browser checks could not launch because Chromium was missing from the local Playwright cache; the install hung after download and was terminated.
