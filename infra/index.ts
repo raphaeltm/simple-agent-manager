@@ -1,4 +1,4 @@
-import * as pulumi from "@pulumi/pulumi";
+import * as pulumi from '@pulumi/pulumi';
 
 // Import all resource modules
 import {
@@ -8,9 +8,9 @@ import {
   observabilityDatabase,
   observabilityDatabaseId,
   observabilityDatabaseName,
-} from "./resources/database";
-import { kvNamespace, kvNamespaceId, kvNamespaceName } from "./resources/kv";
-import { r2Bucket, r2BucketName } from "./resources/storage";
+} from './resources/database';
+import { kvNamespace, kvNamespaceId, kvNamespaceName } from './resources/kv';
+import { r2Bucket, r2BucketName } from './resources/storage';
 import {
   apiDnsRecord,
   appDnsRecord,
@@ -18,18 +18,16 @@ import {
   vmRouteExclusion,
   dnsRecordIds,
   dnsHostnames,
-} from "./resources/dns";
+} from './resources/dns';
 import {
   encryptionKey,
   jwtPrivateKey,
   jwtPublicKey,
   trialClaimTokenSecret,
-} from "./resources/secrets";
-import {
-  originCaCertPem,
-  originCaKeyPem,
-} from "./resources/origin-ca";
-import { pagesProject, pagesProjectName, pagesCustomDomain } from "./resources/pages";
+} from './resources/secrets';
+import { originCaCertPem, originCaKeyPem } from './resources/origin-ca';
+import { pagesProject, pagesProjectName, pagesCustomDomain } from './resources/pages';
+import { accountId, baseDomain } from './resources/config';
 
 // Export resource references for internal use
 export {
@@ -65,10 +63,9 @@ export { encryptionKey, jwtPrivateKey, jwtPublicKey, trialClaimTokenSecret };
 export { originCaCertPem, originCaKeyPem };
 
 // Stack summary output
-const config = new pulumi.Config();
 export const stackSummary = {
   stack: pulumi.getStack(),
-  baseDomain: config.require("baseDomain"),
+  baseDomain,
   resources: {
     d1: d1DatabaseName,
     kv: kvName,
@@ -77,4 +74,4 @@ export const stackSummary = {
 };
 
 // Export Cloudflare account ID for wrangler.toml
-export const cloudflareAccountId = config.require("cloudflareAccountId");
+export const cloudflareAccountId = accountId;

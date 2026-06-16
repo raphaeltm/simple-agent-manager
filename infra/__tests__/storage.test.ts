@@ -1,38 +1,30 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { findRegisteredResource, getOutputValue } from "./setup";
+import { describe, it, expect, beforeAll } from 'vitest';
+import { findRegisteredResource, getOutputValue } from './setup';
 
-describe("R2 Bucket Resource", () => {
-  let storageModule: typeof import("../resources/storage");
-  let configModule: typeof import("../resources/config");
+describe('R2 Bucket Resource', () => {
+  let storageModule: typeof import('../resources/storage');
+  let configModule: typeof import('../resources/config');
 
   beforeAll(async () => {
-    storageModule = await import("../resources/storage");
-    configModule = await import("../resources/config");
+    storageModule = await import('../resources/storage');
+    configModule = await import('../resources/config');
   });
 
-  it("should create an R2 bucket resource", async () => {
-    expect(storageModule.r2Bucket).toBeDefined();
-  });
-
-  it("should export bucket name", async () => {
-    expect(storageModule.r2BucketName).toBeDefined();
-  });
-
-  it("should use assets suffix in naming", async () => {
+  it('exports the bucket name consumed by deployment scripts', async () => {
     const name = await getOutputValue(storageModule.r2BucketName);
-    expect(name).toMatch(/-assets$/);
+    expect(name).toBe(`${configModule.prefix}-${configModule.stack}-assets`);
   });
 
-  it("registers the assets bucket with account wiring and WNAM location", () => {
+  it('registers the assets bucket with account wiring and configured default location', () => {
     const bucket = findRegisteredResource(
       `${configModule.prefix}-r2`,
-      "cloudflare:index/r2Bucket:R2Bucket"
+      'cloudflare:index/r2Bucket:R2Bucket'
     );
 
     expect(bucket.inputs).toMatchObject({
-      accountId: "test-account-id-00000000000000000000",
+      accountId: 'test-account-id-00000000000000000000',
       name: `${configModule.prefix}-${configModule.stack}-assets`,
-      location: "WNAM",
+      location: configModule.DEFAULT_R2_LOCATION,
     });
   });
 });

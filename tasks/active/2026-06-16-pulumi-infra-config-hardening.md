@@ -16,18 +16,18 @@ The Pulumi infra resource slice currently bakes deployment policy into resource 
 
 ## Implementation Checklist
 
-- [ ] Add typed config parsing helpers in `infra/resources/config.ts` for required strings, optional strings, R2 location, and Pages production branch.
-- [ ] Export explicit defaults and supported R2 location values while preserving current behavior: R2 defaults to `WNAM`; Pages production branch defaults to `main`.
-- [ ] Replace empty-string fallbacks for `baseDomain` and `cloudflareZoneId` with fail-fast required config parsing.
-- [ ] Wire the configurable R2 location into `infra/resources/storage.ts`.
-- [ ] Wire the configurable Pages production branch into `infra/resources/pages.ts`.
-- [ ] Update `infra/resources/origin-ca.ts` and `infra/index.ts` to consume central config exports instead of duplicate `new pulumi.Config()` reads.
-- [ ] Add config helper tests for default, override, blank, missing, and unsupported values.
-- [ ] Refactor storage tests to assert bucket inputs, output contract, default location, override location, and invalid location failure before resource creation.
-- [ ] Refactor Pages tests to assert project/domain inputs, default branch, override branch, and blank branch failure.
-- [ ] Refactor KV/database-style low-value presence tests toward resource contract assertions and exported output behavior.
-- [ ] Run `pnpm --filter @simple-agent-manager/infra test`.
-- [ ] Run `pnpm --filter @simple-agent-manager/infra typecheck`.
+- [x] Add typed config parsing helpers in `infra/resources/config.ts` for required strings, optional strings, R2 location, and Pages production branch.
+- [x] Export explicit defaults and supported R2 location values while preserving current behavior: R2 defaults to `WNAM`; Pages production branch defaults to `main`.
+- [x] Replace empty-string fallbacks for `baseDomain` and `cloudflareZoneId` with fail-fast required config parsing.
+- [x] Wire the configurable R2 location into `infra/resources/storage.ts`.
+- [x] Wire the configurable Pages production branch into `infra/resources/pages.ts`.
+- [x] Update `infra/resources/origin-ca.ts` and `infra/index.ts` to consume central config exports instead of duplicate `new pulumi.Config()` reads.
+- [x] Add config helper tests for default, override, blank, missing, and unsupported values.
+- [x] Refactor storage tests to assert bucket inputs, output contract, default location, override location, and invalid location failure before resource creation.
+- [x] Refactor Pages tests to assert project/domain inputs, default branch, override branch, and blank branch failure.
+- [x] Refactor KV/database-style low-value presence tests toward resource contract assertions and exported output behavior.
+- [x] Run `pnpm --filter @simple-agent-manager/infra test`.
+- [x] Run `pnpm --filter @simple-agent-manager/infra typecheck`.
 - [ ] Run relevant broader quality checks if touched files require them.
 - [ ] Complete specialist validation for Cloudflare/Pulumi resource behavior, Principle XI compliance, test quality, and task completion before archiving.
 
