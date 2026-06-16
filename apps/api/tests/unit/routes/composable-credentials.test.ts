@@ -64,7 +64,9 @@ describe('composable credentials routes', () => {
   });
 
   it('updates a configuration by decoded ID and verifies replacement credential ownership', async () => {
-    mockDB.limit.mockResolvedValueOnce([{ id: 'cred-1' }]);
+    mockDB.limit
+      .mockResolvedValueOnce([{ id: 'cred-1' }])
+      .mockResolvedValueOnce([{ consumerKind: 'agent', consumerTarget: 'openai-codex' }]);
     const rawId = 'cfg/user+auth=with/slash';
 
     const res = await app.request(

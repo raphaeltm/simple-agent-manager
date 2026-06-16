@@ -210,17 +210,11 @@ func (h *SessionHost) injectPassthroughProxyCredential(
 		return envVars, settings, fmt.Errorf("passthrough proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
 	}
 
-	baseURL := strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.config.CallbackToken)
-	if agentType == "claude-code" && cred.inferenceConfig.Provider == "anthropic-passthrough" {
-		envVars = appendAnthropicProxyEnv(envVars, baseURL, cred.credential, cred.inferenceConfig.Model, "ANTHROPIC_API_KEY")
-		slog.Info("Claude Code passthrough proxy credential injected",
-			"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-			"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
-		return envVars, settings, nil
-	}
-	if agentType == "openai-codex" && cred.inferenceConfig.Provider == "openai-passthrough" {
-		envVars = appendOpenAIProxyEnv(envVars, baseURL, cred.credential, cred.inferenceConfig.Model)
-		slog.Info("Codex passthrough proxy credential injected",
+	baseURL := h.proxyBaseURL(cred)
+	if descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider); ok {
+		envVars = appendProxyEnv(envVars, descriptor, baseURL, cred.credential, cred.inferenceConfig.Model)
+		slog.Info("Passthrough proxy credential injected",
+			"agentType", agentType, "provider", cred.inferenceConfig.Provider,
 			"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
 			"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
 		return envVars, settings, nil
@@ -244,42 +238,74 @@ func (h *SessionHost) injectPlatformProxyCredential(
 		return envVars, settings, fmt.Errorf("platform AI proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
 	}
 
-	if agentType == "claude-code" && cred.inferenceConfig.Provider == "anthropic-proxy" {
-		envVars = appendAnthropicProxyEnv(envVars, cred.inferenceConfig.BaseURL, h.config.CallbackToken, cred.inferenceConfig.Model, "ANTHROPIC_AUTH_TOKEN")
-		slog.Info("Claude Code AI proxy credential injected",
-			"baseURL", cred.inferenceConfig.BaseURL, "model", cred.inferenceConfig.Model,
-			"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
-		return envVars, settings, nil
-	}
-	if agentType == "openai-codex" && cred.inferenceConfig.Provider == "openai-proxy" {
-		envVars = appendOpenAIProxyEnv(envVars, cred.inferenceConfig.BaseURL, h.config.CallbackToken, cred.inferenceConfig.Model)
-		slog.Info("Codex AI proxy credential injected",
-			"baseURL", cred.inferenceConfig.BaseURL, "model", cred.inferenceConfig.Model,
+	baseURL := h.proxyBaseURL(cred)
+	if descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider); ok {
+		envVars = appendProxyEnv(envVars, descriptor, baseURL, h.config.CallbackToken, cred.inferenceConfig.Model)
+		slog.Info("AI proxy credential injected",
+			"agentType", agentType, "provider", cred.inferenceConfig.Provider,
+			"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
 			"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
 		return envVars, settings, nil
 	}
 
-	envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+cred.inferenceConfig.BaseURL, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
+	envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+baseURL, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
 	settings = configureOpenCodePlatformSettings(settings, cred.inferenceConfig.Model)
 	slog.Info("OpenCode AI proxy credential injected",
-		"baseURL", cred.inferenceConfig.BaseURL, "model", cred.inferenceConfig.Model,
+		"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
 		"settingsModel", settings.Model, "settingsProvider", settings.OpencodeProvider,
 		"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
 	return envVars, settings, nil
 }
 
-func appendAnthropicProxyEnv(envVars []string, baseURL, credential, model, credentialEnv string) []string {
-	envVars = append(envVars, "ANTHROPIC_BASE_URL="+baseURL, credentialEnv+"="+credential)
-	if model != "" {
-		envVars = append(envVars, "ANTHROPIC_MODEL="+model)
+func (h *SessionHost) proxyBaseURL(cred *agentCredential) string {
+	if cred == nil || cred.inferenceConfig == nil {
+		return ""
 	}
-	return envVars
+	return strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.config.CallbackToken)
 }
 
-func appendOpenAIProxyEnv(envVars []string, baseURL, credential, model string) []string {
-	envVars = append(envVars, "OPENAI_BASE_URL="+baseURL, "OPENAI_API_KEY="+credential)
+type proxyEnvDescriptor struct {
+	baseURLEnv    string
+	credentialEnv string
+	modelEnv      string
+}
+
+var proxyEnvDescriptors = map[string]proxyEnvDescriptor{
+	proxyEnvDescriptorKey("claude-code", "anthropic-passthrough"): {
+		baseURLEnv:    "ANTHROPIC_BASE_URL",
+		credentialEnv: "ANTHROPIC_API_KEY",
+		modelEnv:      "ANTHROPIC_MODEL",
+	},
+	proxyEnvDescriptorKey("claude-code", "anthropic-proxy"): {
+		baseURLEnv:    "ANTHROPIC_BASE_URL",
+		credentialEnv: "ANTHROPIC_AUTH_TOKEN",
+		modelEnv:      "ANTHROPIC_MODEL",
+	},
+	proxyEnvDescriptorKey("openai-codex", "openai-passthrough"): {
+		baseURLEnv:    "OPENAI_BASE_URL",
+		credentialEnv: "OPENAI_API_KEY",
+		modelEnv:      "OPENAI_MODEL",
+	},
+	proxyEnvDescriptorKey("openai-codex", "openai-proxy"): {
+		baseURLEnv:    "OPENAI_BASE_URL",
+		credentialEnv: "OPENAI_API_KEY",
+		modelEnv:      "OPENAI_MODEL",
+	},
+}
+
+func proxyEnvDescriptorKey(agentType, provider string) string {
+	return agentType + "\x00" + provider
+}
+
+func proxyEnvDescriptorFor(agentType, provider string) (proxyEnvDescriptor, bool) {
+	descriptor, ok := proxyEnvDescriptors[proxyEnvDescriptorKey(agentType, provider)]
+	return descriptor, ok
+}
+
+func appendProxyEnv(envVars []string, descriptor proxyEnvDescriptor, baseURL, credential, model string) []string {
+	envVars = append(envVars, descriptor.baseURLEnv+"="+baseURL, descriptor.credentialEnv+"="+credential)
 	if model != "" {
-		envVars = append(envVars, "OPENAI_MODEL="+model)
+		envVars = append(envVars, descriptor.modelEnv+"="+model)
 	}
 	return envVars
 }
@@ -386,12 +412,12 @@ func (h *SessionHost) opencodeConfigOverrides(cred *agentCredential) *opencodeCo
 	switch cred.inferenceConfig.APIKeySource {
 	case "callback-token":
 		return &opencodeConfigOverrides{
-			PlatformBaseURL: cred.inferenceConfig.BaseURL,
+			PlatformBaseURL: h.proxyBaseURL(cred),
 			PlatformAPIKey:  h.config.CallbackToken,
 		}
 	case "user-credential":
 		return &opencodeConfigOverrides{
-			PlatformBaseURL: strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.config.CallbackToken),
+			PlatformBaseURL: h.proxyBaseURL(cred),
 			PlatformAPIKey:  cred.credential,
 		}
 	default:

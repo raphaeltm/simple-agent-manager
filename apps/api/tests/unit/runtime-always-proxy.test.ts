@@ -6,7 +6,7 @@
  * the upstream provider.
  *
  * Two modes:
- * - User has upstream-compatible credential → apiKeySource: 'user-credential' (passthrough proxy)
+ * - User has upstream-compatible credential → apiKeySource: 'callback-token' (passthrough proxy)
  * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
  */
 import { Hono } from 'hono';
@@ -230,6 +230,104 @@ beforeEach(() => {
 });
 
 describe('runtime.ts always-proxy', () => {
+  it('preserves current passthrough inferenceConfig outputs by agent type', async () => {
+    const outputs: Record<string, unknown> = {};
+
+    for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
+      vi.clearAllMocks();
+      queryCount = 0;
+      mockKvGet.mockResolvedValue(null);
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+        if (queryCount === 2) return [];
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce({
+        credential: `sk-${agentType}`,
+        credentialKind: 'api-key',
+        credentialSource: 'user',
+        baseUrl: agentType === 'claude-code'
+          ? 'https://anthropic-alt.example/anthropic'
+          : 'https://custom-openai.example/v1',
+        providerDialect: agentType === 'claude-code' ? 'anthropic' : 'openai-compatible',
+      });
+
+      const response = await postAgentKey(agentType);
+      const json = await response.json() as { inferenceConfig?: unknown };
+      expect(response.status).toBe(200);
+      outputs[agentType] = json.inferenceConfig;
+    }
+
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "claude-code": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/anthropic",
+          "model": "claude-sonnet-4-6",
+          "provider": "anthropic-passthrough",
+        },
+        "openai-codex": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+          "model": "gpt-4.1",
+          "provider": "openai-passthrough",
+        },
+        "opencode": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+          "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+          "provider": "openai-passthrough",
+        },
+      }
+    `);
+  });
+
+  it('preserves current platform inferenceConfig outputs by agent type', async () => {
+    const outputs: Record<string, unknown> = {};
+
+    for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
+      vi.clearAllMocks();
+      queryCount = 0;
+      mockKvGet.mockResolvedValue(null);
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+        if (queryCount === 2 && agentType !== 'opencode') return [{ providerMode: 'sam' }];
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+
+      const response = await postAgentKey(agentType);
+      const json = await response.json() as { inferenceConfig?: unknown };
+      expect(response.status).toBe(200);
+      outputs[agentType] = json.inferenceConfig;
+    }
+
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "claude-code": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/anthropic",
+          "model": "claude-sonnet-4-6",
+          "provider": "anthropic-proxy",
+        },
+        "openai-codex": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/v1",
+          "model": "gpt-4.1",
+          "provider": "openai-proxy",
+        },
+        "opencode": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/v1",
+          "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+          "provider": "openai-compatible",
+        },
+      }
+    `);
+  });
+
   it('returns passthrough proxy config when user has claude-code credential and proxy enabled', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;
@@ -241,6 +339,8 @@ describe('runtime.ts always-proxy', () => {
       credential: 'sk-ant-user-key',
       credentialKind: 'api-key',
       credentialSource: 'user',
+      baseUrl: 'https://anthropic-alt.example/anthropic',
+      providerDialect: 'anthropic',
     });
 
     const res = await postAgentKey('claude-code');
@@ -251,11 +351,11 @@ describe('runtime.ts always-proxy', () => {
       credentialKind: string;
       inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
     };
-    expect(json.apiKey).toBe('sk-ant-user-key');
+    expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.credentialKind).toBe('api-key');
     expect(json.inferenceConfig).toBeDefined();
     expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
-    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
   });
 
@@ -367,6 +467,8 @@ describe('runtime.ts always-proxy', () => {
       credential: 'sk-openai-user-key',
       credentialKind: 'api-key',
       credentialSource: 'user',
+      baseUrl: 'https://custom-openai.example/v1',
+      providerDialect: 'openai-compatible',
     });
 
     const res = await postAgentKey('openai-codex');
@@ -374,12 +476,52 @@ describe('runtime.ts always-proxy', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as {
       apiKey: string;
-      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
+      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string; upstreamBaseURL?: string };
     };
-    expect(json.apiKey).toBe('sk-openai-user-key');
+    expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.inferenceConfig.provider).toBe('openai-passthrough');
-    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
+    expect(json.inferenceConfig.upstreamBaseURL).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain('https://custom-openai.example/v1');
+  });
+
+  it('returns direct credential when codex has auth-file OAuth credential', async () => {
+    mockWorkspaceOnly();
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: '{"tokens":{"access_token":"codex-access-token"}}',
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+
+    const { res, json } = await readAgentKey('openai-codex');
+
+    expect(res.status).toBe(200);
+    expect(json.apiKey).toContain('codex-access-token');
+    expect(json.credentialKind).toBe('oauth-token');
+    expect(json.inferenceConfig).toBeUndefined();
+  });
+
+  it('fails closed instead of injecting an incompatible baseURL-backed credential', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'sk-openai-user-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://custom-openai.example/v1',
+      providerDialect: 'openai-compatible',
+    });
+
+    const res = await postAgentKey('claude-code');
+    const json = await res.json() as { message?: string; apiKey?: string };
+
+    expect(res.status).toBe(404);
+    expect(json.message).toBe('Agent credential');
+    expect(json.apiKey).toBeUndefined();
   });
 
   it('returns direct auth-file credential for Codex oauth-token without passthrough proxy', async () => {

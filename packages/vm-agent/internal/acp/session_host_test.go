@@ -2347,38 +2347,64 @@ func TestCredentialMetadataTracking(t *testing.T) {
 	host.Stop()
 }
 
-func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
-	t.Parallel()
-
+func newProxyCredentialTestHost(t *testing.T, callbackToken string) *SessionHost {
+	t.Helper()
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
 			WorkspaceID:   "test-workspace",
-			CallbackToken: "workspace-token",
+			CallbackToken: callbackToken,
 		},
 	})
-	defer host.Stop()
+	t.Cleanup(host.Stop)
+	return host
+}
 
-	cred := &agentCredential{
-		credential: "sk-user",
+func proxyCredentialForTest(credential, provider, baseURL, model, apiKeySource string) *agentCredential {
+	return &agentCredential{
+		credential: credential,
 		inferenceConfig: &inferenceConfig{
-			Provider:     "anthropic-passthrough",
-			BaseURL:      "https://api.example.com/ai/{wstoken}/v1",
-			Model:        "claude-sonnet",
-			APIKeySource: "user-credential",
+			Provider:     provider,
+			BaseURL:      baseURL,
+			Model:        model,
+			APIKeySource: apiKeySource,
 		},
 	}
+}
+
+func injectProxyCredentialForTest(
+	t *testing.T,
+	host *SessionHost,
+	agentType string,
+	cred *agentCredential,
+) ([]string, *agentSettingsPayload) {
+	t.Helper()
 	envVars, settings, err := host.injectAgentCredential(
 		context.Background(),
 		"container-id",
-		"claude-code",
+		agentType,
 		cred,
 		nil,
-		getAgentCommandInfo("claude-code", "api-key"),
+		getAgentCommandInfo(agentType, "api-key"),
 		nil,
 	)
 	if err != nil {
 		t.Fatalf("injectAgentCredential returned error: %v", err)
 	}
+	return envVars, settings
+}
+
+func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
+	t.Parallel()
+
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"anthropic-passthrough",
+		"https://api.example.com/ai/{wstoken}/v1",
+		"claude-sonnet",
+		"user-credential",
+	)
+	envVars, settings := injectProxyCredentialForTest(t, host, "claude-code", cred)
 	if settings != nil {
 		t.Fatalf("settings = %#v, want nil", settings)
 	}
@@ -2387,37 +2413,46 @@ func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
 	assertEnvEntry(t, envVars, "ANTHROPIC_MODEL=claude-sonnet")
 }
 
+func TestInjectAgentCredential_CallbackTokenPassthroughProxyReplacesWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"__sam_proxy__",
+		"openai-passthrough",
+		"https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+		"gpt-4.1",
+		"callback-token",
+	)
+	envVars, settings := injectProxyCredentialForTest(t, host, "openai-codex", cred)
+	if settings != nil {
+		t.Fatalf("settings = %#v, want nil", settings)
+	}
+	assertEnvEntry(t, envVars, "OPENAI_BASE_URL=https://api.example.com/ai/proxy/workspace-token/openai/v1")
+	assertEnvEntry(t, envVars, "OPENAI_API_KEY=workspace-token")
+	assertEnvEntry(t, envVars, "OPENAI_MODEL=gpt-4.1")
+	for _, entry := range envVars {
+		if strings.Contains(entry, "{wstoken}") {
+			t.Fatalf("env var still contains placeholder: %q", entry)
+		}
+		if strings.Contains(entry, "__sam_proxy__") {
+			t.Fatalf("env var leaked proxy sentinel as credential: %q", entry)
+		}
+	}
+}
+
 func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) {
 	t.Parallel()
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			WorkspaceID:   "test-workspace",
-			CallbackToken: "workspace-token",
-		},
-	})
-	defer host.Stop()
-
-	cred := &agentCredential{
-		inferenceConfig: &inferenceConfig{
-			Provider:     "openai-proxy",
-			BaseURL:      "https://api.example.com/ai/v1",
-			Model:        "@cf/meta/llama-4-scout",
-			APIKeySource: "callback-token",
-		},
-	}
-	envVars, settings, err := host.injectAgentCredential(
-		context.Background(),
-		"container-id",
-		"opencode",
-		cred,
-		nil,
-		getAgentCommandInfo("opencode", "api-key"),
-		nil,
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"",
+		"openai-proxy",
+		"https://api.example.com/ai/v1",
+		"@cf/meta/llama-4-scout",
+		"callback-token",
 	)
-	if err != nil {
-		t.Fatalf("injectAgentCredential returned error: %v", err)
-	}
+	envVars, settings := injectProxyCredentialForTest(t, host, "opencode", cred)
 	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_BASE_URL=https://api.example.com/ai/v1")
 	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_API_KEY=workspace-token")
 	if settings == nil {
@@ -2431,22 +2466,44 @@ func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) 
 	}
 }
 
+func TestOpenCodeConfigOverridesCallbackTokenPassthroughReplacesWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"__sam_proxy__",
+		"openai-passthrough",
+		"https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+		"openai/gpt-5.5",
+		"callback-token",
+	)
+
+	overrides := host.opencodeConfigOverrides(cred)
+	if overrides == nil {
+		t.Fatal("opencodeConfigOverrides returned nil")
+	}
+	if overrides.PlatformBaseURL != "https://api.example.com/ai/proxy/workspace-token/openai/v1" {
+		t.Fatalf("PlatformBaseURL = %q", overrides.PlatformBaseURL)
+	}
+	if strings.Contains(overrides.PlatformBaseURL, "{wstoken}") {
+		t.Fatalf("PlatformBaseURL still contains placeholder: %q", overrides.PlatformBaseURL)
+	}
+	if overrides.PlatformAPIKey != "workspace-token" {
+		t.Fatalf("PlatformAPIKey = %q, want callback token", overrides.PlatformAPIKey)
+	}
+}
+
 func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
 	t.Parallel()
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{WorkspaceID: "test-workspace"},
-	})
-	defer host.Stop()
-
-	cred := &agentCredential{
-		credential: "sk-user",
-		inferenceConfig: &inferenceConfig{
-			Provider:     "openai-passthrough",
-			BaseURL:      "https://api.example.com/ai/{wstoken}/v1",
-			APIKeySource: "user-credential",
-		},
-	}
+	host := newProxyCredentialTestHost(t, "")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"openai-passthrough",
+		"https://api.example.com/ai/{wstoken}/v1",
+		"",
+		"user-credential",
+	)
 	_, _, err := host.injectAgentCredential(
 		context.Background(),
 		"container-id",

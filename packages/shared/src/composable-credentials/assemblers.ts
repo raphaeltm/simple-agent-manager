@@ -12,6 +12,11 @@
  * OPENCODE_API_KEY + opencode custom-provider config).
  */
 
+import {
+  HARNESS_CAPABILITIES,
+  type HarnessCapability,
+  resolveHarnessDialect,
+} from '../harness-capabilities';
 import type { ConsumerKind, ResolvedEnvironment } from './types';
 
 /** What an agent consumer needs injected into the workspace. */
@@ -68,26 +73,49 @@ export const agentAssembler: Assembler<EnvInjection> = {
         return { env: { CODEX_AUTH_JSON: secret.authJson }, files: [] };
 
       case 'openai-compatible': {
+        const capability = resolveHarnessDialect(agentType, 'openai-compatible');
+        if (!capability?.proxyRouteSegment) {
+          throw new Error(
+            `agent ${agentType} does not support openai-compatible proxy credentials`
+          );
+        }
         const model = settings.model ?? 'glm-4.6';
         const modelAlias = sanitizeModelAlias(model);
-        return {
-          env: { OPENCODE_API_KEY: secret.apiKey },
-          files: [],
-          opencodeConfig: {
-            model: `custom/${modelAlias}`,
-            provider: {
-              custom: {
-                npm: '@ai-sdk/openai-compatible',
-                name: 'Custom Provider',
-                options: {
-                  baseURL: settings.baseUrl ?? secret.baseUrl,
-                  apiKey: '{env:OPENCODE_API_KEY}',
+        const proxyBaseURL = proxyBaseUrl(capability, settings);
+        const env: Record<string, string> = {
+          [capability.authEnvVar]: PLATFORM_PROXY_SENTINEL,
+        };
+
+        if (capability.usesOpencodeConfig) {
+          // OpenCode custom providers use an AI SDK package plus options.baseURL
+          // and options.apiKey; OpenAI-compatible providers use /v1/chat/completions.
+          // https://opencode.ai/docs/providers/
+          // https://ai-sdk.dev/providers/openai-compatible-providers
+          return {
+            env,
+            files: [],
+            opencodeConfig: {
+              model: `custom/${modelAlias}`,
+              provider: {
+                custom: {
+                  npm: '@ai-sdk/openai-compatible',
+                  name: 'Custom Provider',
+                  options: {
+                    baseURL: proxyBaseURL,
+                    apiKey: `{env:${capability.authEnvVar}}`,
+                  },
+                  models: { [modelAlias]: { name: model } },
                 },
-                models: { [modelAlias]: { name: model } },
               },
             },
-          },
-        };
+          };
+        }
+
+        if (capability.baseUrlEnvVar) {
+          env[capability.baseUrlEnvVar] = proxyBaseURL;
+        }
+
+        return { env, files: [] };
       }
 
       case 'cloud-provider':
@@ -122,7 +150,9 @@ export const computeAssembler: Assembler<ProviderConfig> = {
 
 /** Map an agent type to its primary API-key env var name. */
 function keyEnvVar(agentType: string, value: string): Record<string, string> {
-  const name = API_KEY_ENV[agentType];
+  const name = HARNESS_CAPABILITIES.find(
+    (capability) => capability.agentType === agentType
+  )?.authEnvVar;
   if (!name) throw new Error(`no api-key env var mapping for agent ${agentType}`);
   return { [name]: value };
 }
@@ -134,18 +164,34 @@ function oauthEnvVar(agentType: string, value: string): Record<string, string> {
   return { [name]: value };
 }
 
-const API_KEY_ENV: Record<string, string> = {
-  'claude-code': 'ANTHROPIC_API_KEY',
-  'openai-codex': 'OPENAI_API_KEY',
-  'google-gemini': 'GEMINI_API_KEY',
-  'mistral-vibe': 'MISTRAL_API_KEY',
-  opencode: 'OPENCODE_API_KEY',
-  amp: 'AMP_API_KEY',
-};
-
 const OAUTH_ENV: Record<string, string> = {
   'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
 };
+
+function proxyBaseUrl(capability: HarnessCapability, settings: Record<string, unknown>): string {
+  const base = stringSetting(settings.samProxyBaseUrl) ?? '/ai/proxy/{wstoken}';
+  return `${trimTrailingSlashes(base)}/${trimLeadingSlashes(capability.proxyRouteSegment)}`;
+}
+
+function stringSetting(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
+function trimLeadingSlashes(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === 47) {
+    start++;
+  }
+  return value.slice(start);
+}
 
 /** Mirror of opencode's model-alias sanitization (slashes/spaces → dashes). */
 export function sanitizeModelAlias(model: string): string {

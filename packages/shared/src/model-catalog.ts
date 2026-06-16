@@ -20,6 +20,13 @@ export interface ModelGroup {
   models: ModelDefinition[];
 }
 
+function modelGroup(label: string, models: Array<Omit<ModelDefinition, 'group'>>): ModelGroup {
+  return {
+    label,
+    models: models.map((model) => ({ ...model, group: label })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Claude Code models
 // ---------------------------------------------------------------------------
@@ -27,9 +34,7 @@ export interface ModelGroup {
 const CLAUDE_MODELS: ModelGroup[] = [
   {
     label: 'Claude 5 (Frontier)',
-    models: [
-      { id: 'claude-fable-5', name: 'Claude Fable 5', group: 'Claude 5 (Frontier)' },
-    ],
+    models: [{ id: 'claude-fable-5', name: 'Claude Fable 5', group: 'Claude 5 (Frontier)' }],
   },
   {
     label: 'Claude 4 (Latest)',
@@ -47,7 +52,11 @@ const CLAUDE_MODELS: ModelGroup[] = [
       { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', group: 'Claude 4 (Legacy)' },
       { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1', group: 'Claude 4 (Legacy)' },
       { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', group: 'Claude 4 (Legacy)' },
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4 (retiring Jun 15)', group: 'Claude 4 (Legacy)' },
+      {
+        id: 'claude-sonnet-4-20250514',
+        name: 'Claude Sonnet 4 (retiring Jun 15)',
+        group: 'Claude 4 (Legacy)',
+      },
     ],
   },
 ];
@@ -95,6 +104,32 @@ const CODEX_MODELS: ModelGroup[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// OpenAI-compatible alternative provider models
+// ---------------------------------------------------------------------------
+
+const OPENAI_COMPATIBLE_ALTERNATIVE_MODELS: ModelGroup[] = [
+  modelGroup('Mistral AI (OpenAI-compatible)', [
+    { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5' },
+    { id: 'mistral-small-2603', name: 'Mistral Small 4' },
+    { id: 'mistral-large-2512', name: 'Mistral Large 3' },
+    { id: 'devstral-2512', name: 'Devstral 2' },
+    { id: 'codestral-2508', name: 'Codestral' },
+  ]),
+  modelGroup('Cohere North (OpenAI-compatible)', [
+    { id: 'north-mini-code-1-0', name: 'North Mini Code' },
+    { id: 'command-a-plus-05-2026', name: 'Command A+' },
+    { id: 'command-a-03-2025', name: 'Command A' },
+    { id: 'command-a-reasoning-08-2025', name: 'Command A Reasoning' },
+  ]),
+  modelGroup('Scaleway Generative APIs (OpenAI-compatible)', [
+    { id: 'qwen3-coder-30b-a3b-instruct', name: 'Qwen3 Coder 30B A3B Instruct' },
+    { id: 'qwen3.6-35b-a3b', name: 'Qwen3.6 35B A3B' },
+    { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B A4B IT' },
+    { id: 'gpt-oss-120b', name: 'GPT OSS 120B' },
+  ]),
+];
+
+// ---------------------------------------------------------------------------
 // Mistral Vibe models
 // ---------------------------------------------------------------------------
 
@@ -117,9 +152,7 @@ const MISTRAL_MODELS: ModelGroup[] = [
   },
   {
     label: 'Reasoning',
-    models: [
-      { id: 'magistral-medium-1-2-2509', name: 'Magistral Medium 1.2', group: 'Reasoning' },
-    ],
+    models: [{ id: 'magistral-medium-1-2-2509', name: 'Magistral Medium 1.2', group: 'Reasoning' }],
   },
   {
     label: 'Edge / Efficient',
@@ -152,9 +185,7 @@ const GEMINI_MODELS: ModelGroup[] = [
   },
   {
     label: 'Gemini 2.0 (Legacy)',
-    models: [
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', group: 'Gemini 2.0 (Legacy)' },
-    ],
+    models: [{ id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', group: 'Gemini 2.0 (Legacy)' }],
   },
 ];
 
@@ -168,6 +199,7 @@ const MODEL_CATALOG: Partial<Record<AgentType, ModelGroup[]>> = {
   'openai-codex': CODEX_MODELS,
   'mistral-vibe': MISTRAL_MODELS,
   'google-gemini': GEMINI_MODELS,
+  opencode: OPENAI_COMPATIBLE_ALTERNATIVE_MODELS,
 };
 
 /** Get the model groups for a given agent type. Returns empty array if none defined. */

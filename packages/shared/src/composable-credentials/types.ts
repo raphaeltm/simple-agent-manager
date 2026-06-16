@@ -92,6 +92,8 @@ export interface ConfigurationSettings {
   model?: string;
   /** For openai-compatible agents (z.ai): the provider base URL override. */
   baseUrl?: string;
+  /** Stable provider preset id for analytics and UI labels. */
+  providerId?: string;
   /** Human label for the opencode provider entry, e.g. "zai". */
   providerName?: string;
   permissionMode?: string;

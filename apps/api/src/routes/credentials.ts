@@ -8,9 +8,11 @@ import type {
   CredentialResponse,
   CredentialSource,
   CredentialValidationStatus,
+  Dialect,
 } from '@simple-agent-manager/shared';
 import {
   CREDENTIAL_PROVIDERS,
+  DIALECT_VALUES,
   getAgentDefinition,
   isValidAgentType,
 } from '@simple-agent-manager/shared';
@@ -833,6 +835,8 @@ export async function getDecryptedAgentKey(
   credential: string;
   credentialKind: CredentialKind;
   credentialSource: CredentialSource;
+  baseUrl?: string;
+  providerDialect?: Dialect;
 } | null> {
   // --- Primary path: composable-credentials resolver -------------------------
   const ccResult = await resolveAgentKeyViaCC(db, userId, agentType, encryptionKey, projectId);
@@ -855,7 +859,13 @@ async function resolveAgentKeyViaCC(
   encryptionKey: string,
   projectId?: string | null
 ): Promise<
-  | { credential: string; credentialKind: CredentialKind; credentialSource: CredentialSource }
+  | {
+      credential: string;
+      credentialKind: CredentialKind;
+      credentialSource: CredentialSource;
+      baseUrl?: string;
+      providerDialect?: Dialect;
+    }
   | null
   | undefined
 > {
@@ -912,6 +922,8 @@ function mapResolvedToLegacy(
   credential: string;
   credentialKind: CredentialKind;
   credentialSource: CredentialSource;
+  baseUrl?: string;
+  providerDialect?: Dialect;
 } | null {
   // Platform proxy — no raw credential to return
   if (resolved.source === 'platform-proxy' || !resolved.credential) {
@@ -936,6 +948,9 @@ function mapResolvedToLegacy(
       if (resolved.consumer.kind !== 'agent' || resolved.consumer.agentType !== 'openai-codex') {
         return null;
       }
+      // auth-json is a file-style credential (Codex ~/.codex/auth.json), so
+      // preserve the VM agent's auth-file injection path rather than treating
+      // the JSON blob as an API key env var.
       credentialKind = 'oauth-token';
       break;
     case 'openai-compatible':
@@ -948,7 +963,28 @@ function mapResolvedToLegacy(
   }
 
   const credentialSource = mapSourceToLegacy(resolved.source);
-  return { credential, credentialKind, credentialSource };
+  const settings = resolved.configuration?.settings ?? {};
+  const settingsBaseUrl = typeof settings.baseUrl === 'string' && settings.baseUrl.trim() !== ''
+    ? settings.baseUrl.trim()
+    : undefined;
+  const providerDialect = readProviderDialect(settings.dialect)
+    ?? (secret.kind === 'openai-compatible' ? 'openai-compatible' : undefined);
+  const baseUrl = settingsBaseUrl
+    ?? (secret.kind === 'openai-compatible' && secret.baseUrl ? secret.baseUrl : undefined);
+
+  return {
+    credential,
+    credentialKind,
+    credentialSource,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(providerDialect ? { providerDialect } : {}),
+  };
+}
+
+function readProviderDialect(value: unknown): Dialect | undefined {
+  return typeof value === 'string' && (DIALECT_VALUES as readonly string[]).includes(value)
+    ? value as Dialect
+    : undefined;
 }
 
 function mapSourceToLegacy(source: string): CredentialSource {

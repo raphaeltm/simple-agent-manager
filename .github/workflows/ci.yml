@@ -424,14 +424,8 @@ jobs:
       - name: Install devcontainers CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Pull test images
-        run: |
-          docker pull debian:bookworm-slim &
-          docker pull node:22-bookworm &
-          docker pull mcr.microsoft.com/devcontainers/base:debian &
-          docker pull mcr.microsoft.com/devcontainers/python:3.12 &
-          docker pull mcr.microsoft.com/devcontainers/typescript-node:22-bookworm &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent
@@ -455,10 +449,8 @@ jobs:
       - name: Install devcontainers CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Pull test images
-        run: |
-          docker pull mcr.microsoft.com/devcontainers/base:debian &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run VM Agent E2E tests
         working-directory: packages/vm-agent
@@ -479,6 +471,9 @@ jobs:
 
       - name: Install devcontainer CLI
         run: npm install -g @devcontainers/cli
+
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Validate devcontainer.json syntax
         run: |
@@ -575,8 +570,10 @@ jobs:
             }
 
             echo "=== Post-Create Hook Tools ==="
-            check "Claude Code"   claude --version
-            check "OpenAI Codex"  codex --version
+            # post-create.sh installs these with try_run so transient external
+            # installer failures do not make the workspace invalid.
+            optional_check "Claude Code"   claude --version
+            optional_check "OpenAI Codex"  codex --version
             optional_check "happy-coder"   happy --version
             optional_check "Playwright"    npx playwright --version
 
@@ -639,15 +636,20 @@ jobs:
 
             echo "=== MCP Server Configuration ==="
 
-            # Claude MCP servers configured by post-create.sh
-            for server in playwright sequential-thinking context7 cloudflare-observability; do
-              if claude mcp get "$server" >/dev/null 2>&1; then
-                echo "OK: Claude MCP server '$server' configured"
-              else
-                echo "FAIL: Claude MCP server '$server' not found"
-                FAIL=$((FAIL + 1))
-              fi
-            done
+            # Claude MCP servers are configured only when the non-fatal Claude
+            # install succeeds and the binary is available on PATH.
+            if command -v claude >/dev/null 2>&1; then
+              for server in playwright sequential-thinking context7 cloudflare-observability; do
+                if claude mcp get "$server" >/dev/null 2>&1; then
+                  echo "OK: Claude MCP server '$server' configured"
+                else
+                  echo "FAIL: Claude MCP server '$server' not found"
+                  FAIL=$((FAIL + 1))
+                fi
+              done
+            else
+              echo "WARNING: Claude CLI unavailable; skipping Claude MCP server verification"
+            fi
 
             # Codex Cloudflare Observability MCP is intentionally opt-in after
             # OAuth login. post-create.sh prints the setup commands instead of
@@ -681,12 +683,8 @@ jobs:
       - name: Install devcontainer CLI
         run: npm install -g @devcontainers/cli
 
-      - name: Pull base images
-        run: |
-          docker pull alpine:latest &
-          docker pull mcr.microsoft.com/devcontainers/typescript-node:24-bookworm &
-          docker pull mcr.microsoft.com/devcontainers/base:ubuntu &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run SAM volume mount devcontainer test
         run: bash scripts/ci/test-devcontainer-volume-mount.sh .

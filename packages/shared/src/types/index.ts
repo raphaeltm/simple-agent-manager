@@ -481,6 +481,7 @@ export type {
   UserAiBudgetSettings,
   UserAiUsageByDay,
   UserAiUsageByModel,
+  UserAiUsageByProvider,
   UserAiUsageResponse,
 } from './ai-usage';
 

@@ -1,0 +1,64 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agent assembler harness capability snapshots > preserves current oauth and openai-compatible edge behavior 1`] = `
+{
+  "amp": {
+    "oauthError": "no oauth env var mapping for agent amp",
+    "openaiCompatibleError": "agent amp does not support openai-compatible proxy credentials",
+  },
+  "claude-code": {
+    "oauth": {
+      "env": {
+        "CLAUDE_CODE_OAUTH_TOKEN": "oauth-claude-code",
+      },
+      "files": [],
+    },
+    "openaiCompatibleError": "agent claude-code does not support openai-compatible proxy credentials",
+  },
+  "google-gemini": {
+    "oauthError": "no oauth env var mapping for agent google-gemini",
+    "openaiCompatibleError": "agent google-gemini does not support openai-compatible proxy credentials",
+  },
+  "mistral-vibe": {
+    "oauthError": "no oauth env var mapping for agent mistral-vibe",
+    "openaiCompatibleError": "agent mistral-vibe does not support openai-compatible proxy credentials",
+  },
+  "openai-codex": {
+    "oauthError": "no oauth env var mapping for agent openai-codex",
+    "openaiCompatible": {
+      "env": {
+        "OPENAI_API_KEY": "__platform_proxy__",
+        "OPENAI_BASE_URL": "https://api.sam.example/ai/proxy/{wstoken}/openai/v1",
+      },
+      "files": [],
+    },
+  },
+  "opencode": {
+    "oauthError": "no oauth env var mapping for agent opencode",
+    "openaiCompatible": {
+      "env": {
+        "OPENCODE_API_KEY": "__platform_proxy__",
+      },
+      "files": [],
+      "opencodeConfig": {
+        "model": "custom/glm-4-6",
+        "provider": {
+          "custom": {
+            "models": {
+              "glm-4-6": {
+                "name": "glm-4.6",
+              },
+            },
+            "name": "Custom Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "{env:OPENCODE_API_KEY}",
+              "baseURL": "https://api.sam.example/ai/proxy/{wstoken}/openai/v1",
+            },
+          },
+        },
+      },
+    },
+  },
+}
+`;
