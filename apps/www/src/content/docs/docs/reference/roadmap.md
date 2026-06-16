@@ -1,25 +1,24 @@
 ---
 title: Roadmap
-description: Planned SAM development phases and feature areas.
+description: SAM development phases — what's shipped and what's next.
 ---
 
-## Complete: MVP
+## Complete: Core Platform
 
-Core workspace management with GitHub OAuth:
+Workspace management with GitHub OAuth:
 
 - Create workspaces from git repositories.
 - Authenticate with GitHub OAuth.
 - Use a GitHub App for private repository access.
 - View workspace status.
 - Stop and restart workspaces manually.
-- Shut down idle workspaces automatically.
 - Manage workspaces through the web UI.
 - Persist data in Cloudflare D1.
 - Store user cloud credentials encrypted.
 
-## Complete: Browser Terminal
+## Complete: Browser Terminal & Agent Chat
 
-Browser-based terminal access to running workspaces:
+Browser-based terminal and structured agent interaction:
 
 - Go VM agent with WebSocket terminal support.
 - JWT-based terminal authentication.
@@ -27,72 +26,74 @@ Browser-based terminal access to running workspaces:
 - xterm.js terminal UI.
 - Secure bootstrap token credential delivery.
 - Workspace ownership validation.
-- WebSocket reconnection handling.
-- Pulumi and GitHub Actions deployment.
 - Multi-agent ACP protocol support.
-- UI component governance system.
 
-Planned follow-up work:
+## Complete: Multi-Agent Support
 
-- Better error UX for build failures.
+Run your choice of coding agent:
 
-## Complete: Enhanced UX
+- Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp.
+- Per-agent API key and OAuth credential management.
+- Agent profiles with custom configuration per project.
 
-Reliability and product experience improvements:
+## Complete: Multi-Workspace Nodes
 
-- Deeper file and terminal workflow polish.
-- Custom devcontainer support.
-- Workspace logs and debugging.
-- File browsing, upload, and download.
-- Conversation forking.
+Multiple isolated workspaces per VM:
+
+- Multiple devcontainer workspaces share a single node.
+- Per-workspace isolation and lifecycle control.
+
+## Complete: Project-First Architecture
+
+Projects as the primary organizational unit:
+
+- Projects linked to GitHub repos.
+- Persistent project chat with structured agent output.
+- Activity feeds and task-driven workflows.
+- Project-scoped settings, credentials, and agent configuration.
+
+## Complete: Multi-Cloud & Enhanced UX
+
+Multiple cloud providers and UX improvements:
+
+- Scaleway and GCP cloud provider support (in addition to Hetzner).
+- In-app notifications with filtering.
 - Voice input and text-to-speech playback.
-- In-app notifications.
+- Conversation forking.
+- Warm node pooling for fast workspace reuse.
+- Custom devcontainer support.
+- File browsing, upload, and download.
 - Usage visibility for compute and SAM-managed AI.
-- Per-user API tokens, compute quotas, and activity/audit visibility.
 
-## Planned: Additional Workspace Capabilities
+## Complete: Task Orchestration
 
-Future workspace expansion:
+Multi-agent coordination:
 
-- Retry support for failed workspace builds.
-- Multiple repository sources.
-- Workspace templates.
-- SSH access to workspaces.
-- Persistent storage.
-- Configurable subdomains.
-- VM-side TLS through Caddy for direct workspace access.
+- Missions with agent-to-agent dispatch.
+- Task dependencies and durable messaging.
+- Structured idea capture with execution dispatch.
+- Recurring triggers (daily/weekly schedules).
+- Project knowledge base and policies injected into agent context.
 
-## Planned: Multi-Tenancy
+## Complete: CLI
+
+Command-line interface for SAM:
+
+- Auth, task submission, chat prompts, task status, and runner doctor commands.
+
+## Planned: More Providers
+
+- DigitalOcean, Vultr, AWS, and expanded CLI coverage.
+
+## Planned: Teams & Collaboration
 
 Support for teams and organizations:
 
-- Team management.
+- Team workspaces, shared projects, organization management.
 - Billing integration.
-
-## Planned: Enterprise Features
-
-Features for larger deployments:
-
-- Private networking.
-- Custom domain support.
-- SSO integration.
-- Compliance features.
-- Multi-region support.
-- Custom VM images.
-- API rate limiting.
-
-## Security Improvements
-
-Future security hardening:
-
-- VM callback token exchange flow.
-- Token rotation for long-lived workspaces.
-- Workspace audit logging.
-- Least-privilege Cloudflare credentials split between deployment and runtime.
 
 ## Future Considerations
 
-- Additional cloud providers.
 - VS Code Remote integration.
 - Collaborative editing.
 - Workspace snapshots and restore.

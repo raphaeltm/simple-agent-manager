@@ -372,12 +372,12 @@ export const integrations: Integration[] = [
     features: [
       { title: 'Zero Extra Cost', description: 'Workers AI inference is included with SAM — no API keys needed for built-in features like task titles and TTS.' },
       { title: 'Edge Inference', description: 'Models run at Cloudflare\'s edge — low latency for platform features, no cold starts.' },
-      { title: 'Multiple Models', description: 'Llama 4, Gemma 3, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
+      { title: 'Multiple Models', description: 'Llama 4, Gemma 4, GLM-4.7, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
       { title: 'AI Gateway', description: 'All inference is routed through Cloudflare AI Gateway for rate limiting, analytics, and reliability.' },
     ],
     howItWorks: [
       { step: 'Already Built In', description: 'Workers AI is part of SAM\'s Cloudflare infrastructure — no setup required.' },
-      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each task: Gemma for titles, Deepgram for TTS, Llama for summarization.' },
+      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each task: GLM for titles, Deepgram for TTS, Gemma for summarization.' },
       { step: 'AI Proxy (Optional)', description: 'Enable the AI proxy to route custom inference through Workers AI with rate limiting and token budgets.' },
       { step: 'Monitor Usage', description: 'Track AI usage, costs, and model distribution via the admin analytics dashboard.' },
     ],
@@ -389,7 +389,7 @@ export const integrations: Integration[] = [
     faq: [
       { question: 'Is Workers AI really free?', answer: 'Yes — Cloudflare provides a generous free tier for Workers AI inference. SAM\'s built-in features (task titles, TTS, summarization) use this free tier.' },
       { question: 'Can I use Workers AI for my coding agents?', answer: 'Workers AI powers platform features, not the coding agents themselves. Agents use their own models (Claude, GPT, Gemini, Devstral) via their respective API keys.' },
-      { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, Gemma 3 12B for task titles, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
+      { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, GLM-4.7 Flash for task titles, Gemma 4 26B for context summarization, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
     ],
     relatedSlugs: ['claude-code', 'codex', 'gemini-cli'],
     externalUrl: 'https://ai.cloudflare.com/',
