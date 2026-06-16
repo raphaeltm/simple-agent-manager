@@ -28,6 +28,16 @@ Raphaël reported the following exact symptoms from `https://app.sammy.party/set
 - Code cause: #1320 ConnectFlow writes through legacy `PUT /api/credentials/agent`, but when CC rows already exist, `lazyBackfillIfNeeded()` no-ops and the resolver ignores later legacy writes.
 - Code cause: migrated CC credential IDs include ciphertext-derived characters including `/`; Advanced client interpolates raw IDs into `/api/cc/credentials/${id}`, so delete/update can fail before the route receives the intended ID.
 
+## Production-Readiness Follow-Up
+
+2026-06-16 hardening pass:
+
+- Resolved the `/settings/connections` unit test provider failure by rendering the route inside `ToastProvider`.
+- Split `apps/web/src/pages/ProjectSettings.tsx` into focused project settings sections so the file-size gate passes.
+- Split Advanced credential configuration UI into `ConfigurationSection` and added inline configuration update support; create/delete-only was not enough for expired-key replacement workflows.
+- Added regression tests for configuration create/update/delete, project override removal without deleting user defaults, connection validation handling, and encoded IDs containing `/`, `+`, and `=`.
+- Revalidated Sonar/code-quality risk by reducing duplicate settings UI and keeping credential/configuration behavior covered at the web client and API route layers.
+
 ## Before Journey
 
 ```mermaid
