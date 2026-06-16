@@ -13,7 +13,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 PNPM_VERSION="$(sed -n 's/.*"packageManager"[[:space:]]*:[[:space:]]*"pnpm@\([^"]*\)".*/\1/p' package.json | head -1)"
 
-if [ -z "$PNPM_VERSION" ]; then
+if [[ -z "$PNPM_VERSION" ]]; then
   echo "Could not determine pnpm version from package.json" >&2
   exit 1
 fi
@@ -28,7 +28,7 @@ retry() {
       return 0
     fi
 
-    if [ "$attempt" -ge "$attempts" ]; then
+    if [[ "$attempt" -ge "$attempts" ]]; then
       echo "Command failed after $attempt attempts: $*" >&2
       return 1
     fi
