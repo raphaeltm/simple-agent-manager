@@ -34,14 +34,14 @@ Compare with `SyntaxHighlightedCode` in `MarkdownRenderer.tsx` which correctly s
 
 ## Implementation Checklist
 
-- [ ] Add `color: NIGHT_OWL_CODE_FOREGROUND` to the `HighlightedCode` `<pre>` style in `MessageBubble.tsx`
-- [ ] Add/update test to verify syntax-highlighted code blocks have explicit text color in light mode
-- [ ] Build `acp-client` package to confirm no errors
-- [ ] Run full test suite
+- [x] Add `color: NIGHT_OWL_CODE_FOREGROUND` to the `HighlightedCode` `<pre>` style in `MessageBubble.tsx`
+- [x] Add/update test to verify syntax-highlighted code blocks have explicit text color in light mode
+- [x] Build `acp-client` package to confirm no errors
+- [x] Run full test suite — 449 tests pass
 
 ## Acceptance Criteria
 
-- [ ] Fenced code blocks with language (```typescript, ```bash, etc.) show light text on dark background in light mode
-- [ ] No regression in dark mode rendering
-- [ ] All existing tests pass
-- [ ] acp-client package builds successfully
+- [x] Fenced code blocks with language (```typescript, ```bash, etc.) show light text on dark background in light mode
+- [x] No regression in dark mode rendering
+- [x] All existing tests pass (449/449)
+- [x] acp-client package builds successfully
