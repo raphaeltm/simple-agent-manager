@@ -31,7 +31,7 @@ Review the past two weeks of SAM work and interaction failures, then update dura
 - [x] Update stale SAM ideas via MCP with merge/branch evidence.
 - [x] Update or confirm knowledge/policies only when evidence shows durable changes.
 - [x] Run focused validation for markdown/config-only changes.
-- [ ] Open a draft PR and stop without merging.
+- [x] Open a draft PR and stop without merging.
 
 ## Acceptance Criteria
 
@@ -40,6 +40,7 @@ Review the past two weeks of SAM work and interaction failures, then update dura
 - No idea is marked completed solely because work exists on an unmerged branch.
 - Existing local `.codex` changes are not included in commits.
 - Draft PR is pushed to `sam/workspace-update-01kv7y` and remains unmerged.
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1335
 
 ## Durable State Updates
 
