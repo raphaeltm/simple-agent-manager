@@ -19,8 +19,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HetznerProvider } from '../../src/hetzner';
-import { SAM_VOLUME_MOUNT_PATH_TEMPLATE } from '../../src/types';
 import type { VolumeInstance } from '../../src/types';
+import { SAM_VOLUME_MOUNT_PATH_TEMPLATE } from '../../src/types';
 import { fetchCall, jsonBody } from './test-helpers';
 
 const originalFetch = globalThis.fetch;

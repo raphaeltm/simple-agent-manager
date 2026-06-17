@@ -5,10 +5,10 @@
  * volume refs, route mappings, and resource limits survives the full pipeline
  * with all semantically-meaningful fields preserved.
  *
- * Per rule 02: rendered YAML is parsed with a real YAML parser, not grepped.
+ * This covers the shared half (parse→resolve); renderCompose lives in apps/api
+ * and its YAML-round-trip assertions are exercised there.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { parse as parseYaml } from 'yaml';
 
 import type { ImageResolver } from '../../src/compose-parser';
 import { parseCompose, resolveManifest } from '../../src/compose-parser';
