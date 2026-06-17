@@ -1429,12 +1429,7 @@ func TestBuildOpencodeConfig_DefaultUsesOpenCodeZen(t *testing.T) {
 
 	config := buildOpencodeConfig(nil, nil)
 
-	if got := config["model"]; got != DefaultOpencodeModel {
-		t.Fatalf("model = %v, want %q", got, DefaultOpencodeModel)
-	}
-	if _, ok := config["provider"]; ok {
-		t.Fatalf("provider block present for default OpenCode Zen config: %#v", config["provider"])
-	}
+	assertOpenCodeZenDefaultConfig(t, config)
 }
 
 func TestBuildOpencodeConfig_UnknownProviderFallsBackToOpenCodeZen(t *testing.T) {
@@ -1444,11 +1439,17 @@ func TestBuildOpencodeConfig_UnknownProviderFallsBackToOpenCodeZen(t *testing.T)
 		OpencodeProvider: "unknown-provider",
 	}, nil)
 
+	assertOpenCodeZenDefaultConfig(t, config)
+}
+
+func assertOpenCodeZenDefaultConfig(t *testing.T, config map[string]any) {
+	t.Helper()
+
 	if got := config["model"]; got != DefaultOpencodeModel {
 		t.Fatalf("model = %v, want %q", got, DefaultOpencodeModel)
 	}
 	if _, ok := config["provider"]; ok {
-		t.Fatalf("provider block present for unknown-provider OpenCode fallback: %#v", config["provider"])
+		t.Fatalf("provider block present for OpenCode Zen config: %#v", config["provider"])
 	}
 }
 

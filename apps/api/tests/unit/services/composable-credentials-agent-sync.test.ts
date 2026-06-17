@@ -2,18 +2,28 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { syncAgentCredentialToCC } from '../../../src/services/composable-credentials/agent-sync';
 
+function makeRecordingD1Database() {
+  const prepared: Array<{ sql: string; bindings: unknown[] }> = [];
+  const database = {
+    prepare: vi.fn((sql: string) => ({
+      bind: vi.fn((...bindings: unknown[]) => {
+        prepared.push({ sql, bindings });
+        return { run: vi.fn() };
+      }),
+    })),
+    batch: vi.fn().mockResolvedValue([]),
+  } as unknown as D1Database;
+
+  return { database, prepared };
+}
+
+function findConfigurationInsert(prepared: Array<{ sql: string; bindings: unknown[] }>) {
+  return prepared.find((entry) => entry.sql.includes('INSERT INTO cc_configurations'));
+}
+
 describe('syncAgentCredentialToCC', () => {
   it('stores OpenCode Zen settings when syncing an OpenCode API key', async () => {
-    const prepared: Array<{ sql: string; bindings: unknown[] }> = [];
-    const database = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...bindings: unknown[]) => {
-          prepared.push({ sql, bindings });
-          return { run: vi.fn() };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
+    const { database, prepared } = makeRecordingD1Database();
 
     await syncAgentCredentialToCC(database, {
       userId: 'user-1',
@@ -25,9 +35,7 @@ describe('syncAgentCredentialToCC', () => {
       isActive: true,
     });
 
-    const configurationInsert = prepared.find((entry) =>
-      entry.sql.includes('INSERT INTO cc_configurations')
-    );
+    const configurationInsert = findConfigurationInsert(prepared);
 
     expect(configurationInsert).toBeDefined();
     expect(configurationInsert?.bindings[5]).toBe(
@@ -40,16 +48,7 @@ describe('syncAgentCredentialToCC', () => {
   });
 
   it('leaves non-OpenCode configuration settings empty', async () => {
-    const prepared: Array<{ sql: string; bindings: unknown[] }> = [];
-    const database = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...bindings: unknown[]) => {
-          prepared.push({ sql, bindings });
-          return { run: vi.fn() };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
+    const { database, prepared } = makeRecordingD1Database();
 
     await syncAgentCredentialToCC(database, {
       userId: 'user-1',
@@ -61,9 +60,7 @@ describe('syncAgentCredentialToCC', () => {
       isActive: true,
     });
 
-    const configurationInsert = prepared.find((entry) =>
-      entry.sql.includes('INSERT INTO cc_configurations')
-    );
+    const configurationInsert = findConfigurationInsert(prepared);
 
     expect(configurationInsert?.bindings[5]).toBeNull();
   });
