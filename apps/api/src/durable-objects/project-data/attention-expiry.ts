@@ -66,7 +66,7 @@ async function failTaskAndWorkspace(
 ): Promise<void> {
   if (!env.DATABASE) return;
   await env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`,
+    `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
   ).bind(errorMessage, taskId).run();
   if (workspaceId) await idleCleanup.stopWorkspaceInD1(env.DATABASE, workspaceId);
 }

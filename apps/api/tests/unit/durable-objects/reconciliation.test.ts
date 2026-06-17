@@ -81,12 +81,14 @@ describe('Task Reconciliation Module', () => {
     taskId?: string;
     lastActivityAt?: number;
     acpSessionId?: string;
+    withIdleCleanup?: boolean;
   } = {}) {
     const sessionId = opts.sessionId ?? 'session-1';
     const workspaceId = opts.workspaceId ?? 'ws-1';
     const taskId = opts.taskId ?? 'task-1';
     const lastActivityAt = opts.lastActivityAt ?? (now - FIVE_MINUTES - 1000);
     const acpSessionId = opts.acpSessionId ?? 'acp-1';
+    const withIdleCleanup = opts.withIdleCleanup ?? true;
 
     // Create chat session
     db.prepare(
@@ -94,11 +96,12 @@ describe('Task Reconciliation Module', () => {
        VALUES (?, ?, ?, 'Test', 'active', 0, ?, ?, ?)`,
     ).run(sessionId, workspaceId, taskId, now - 600000, now - 600000, now - 600000);
 
-    // Create idle cleanup schedule entry (task-mode sessions have these)
-    db.prepare(
-      `INSERT INTO idle_cleanup_schedule (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
-       VALUES (?, ?, ?, ?, ?, 0)`,
-    ).run(sessionId, workspaceId, taskId, now + 900000, now - 600000);
+    if (withIdleCleanup) {
+      db.prepare(
+        `INSERT INTO idle_cleanup_schedule (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
+         VALUES (?, ?, ?, ?, ?, 0)`,
+      ).run(sessionId, workspaceId, taskId, now + 900000, now - 600000);
+    }
 
     // Create workspace activity
     db.prepare(
@@ -148,6 +151,22 @@ describe('Task Reconciliation Module', () => {
       expect(candidates[0].workspaceId).toBe('ws-1');
       expect(candidates[0].acpSessionId).toBe('acp-1');
       expect(candidates[0].idleDurationMs).toBeGreaterThan(FIVE_MINUTES);
+    });
+
+    it('selects task-mode sessions even when idle cleanup schedule is missing', async () => {
+      setupTaskSession({ withIdleCleanup: false });
+
+      const candidates = await getReconciliationCandidates(sql, envWithRows({
+        'task-1': { task_mode: 'task', status: 'in_progress' },
+      }));
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        acpSessionId: 'acp-1',
+      });
     });
 
     it('excludes conversation-mode tasks', async () => {
@@ -242,6 +261,11 @@ describe('Task Reconciliation Module', () => {
 
     it('includes delegated tasks', async () => {
       const candidates = await candidatesForTask('task', 'delegated');
+      expect(candidates).toHaveLength(1);
+    });
+
+    it('includes awaiting_followup tasks because they are not complete', async () => {
+      const candidates = await candidatesForTask('task', 'awaiting_followup');
       expect(candidates).toHaveLength(1);
     });
   });
@@ -465,6 +489,14 @@ describe('Task Reconciliation Module', () => {
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
       // Should fire at lastActivityAt + 5 minutes
+      expect(time).toBe((now - 60000) + FIVE_MINUTES);
+    });
+
+    it('returns earliest activity + idle threshold when idle cleanup schedule is missing', () => {
+      setupTaskSession({ lastActivityAt: now - 60000, withIdleCleanup: false });
+      const env = { DATABASE: createMockD1() } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+
+      const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe((now - 60000) + FIVE_MINUTES);
     });
 

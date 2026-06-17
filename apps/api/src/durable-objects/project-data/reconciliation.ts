@@ -50,11 +50,11 @@ export interface ReconciliationCandidate {
  * Find task-mode sessions that are idle and eligible for a SAM check-in.
  *
  * A session is a candidate if:
- * 1. It has an idle cleanup schedule entry with a task_id (task-mode sessions)
+ * 1. It is an active chat session linked to a task and workspace
  * 2. The session has been idle for at least TASK_RECONCILIATION_IDLE_MS
  * 3. There is no active `needs_input` attention marker
  * 4. There is no unresolved `reconciliation_checkin` attention marker
- * 5. The task is still in_progress or delegated in D1 and task_mode = 'task'
+ * 5. The task is still active in D1 and task_mode = 'task'
  */
 export async function getReconciliationCandidates(
   sql: SqlStorage,
@@ -67,14 +67,16 @@ export async function getReconciliationCandidates(
   ) || DEFAULT_TASK_RECONCILIATION_IDLE_MS;
   const idleThreshold = now - idleThresholdMs;
 
-  // Find sessions with scheduled idle cleanup AND a task_id.
+  // Find active task-linked sessions. idle_cleanup_schedule is optional: early
+  // production task sessions predated reliable schedule creation, and
+  // reconciliation must still protect them.
   // Join with workspace_activity to get last activity timestamp.
   // Exclude sessions that already have active needs_input or reconciliation_checkin markers.
   const rows = sql.exec(
     `SELECT
-       ics.session_id,
-       ics.workspace_id,
-       ics.task_id,
+       cs.id AS session_id,
+       COALESCE(ics.workspace_id, cs.workspace_id) AS workspace_id,
+       COALESCE(ics.task_id, cs.task_id) AS task_id,
        COALESCE(
          CASE
            WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
@@ -83,14 +85,19 @@ export async function getReconciliationCandidates(
            ELSE wa.last_message_at
          END,
          wa.created_at,
+         cs.updated_at,
+         cs.created_at,
          ics.created_at
        ) AS last_activity_at
-     FROM idle_cleanup_schedule ics
-     LEFT JOIN workspace_activity wa ON wa.workspace_id = ics.workspace_id
-     WHERE ics.task_id IS NOT NULL
+     FROM chat_sessions cs
+     LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
+     LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
+     WHERE cs.status = 'active'
+       AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
+       AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
        AND NOT EXISTS (
          SELECT 1 FROM session_attention_markers sam
-         WHERE sam.session_id = ics.session_id
+         WHERE sam.session_id = cs.id
            AND sam.resolved_at IS NULL
            AND sam.kind IN ('needs_input', 'reconciliation_checkin')
        )`,
@@ -115,7 +122,7 @@ export async function getReconciliationCandidates(
 
       if (!taskRow) continue;
       if (taskRow.task_mode !== 'task') continue;
-      if (!['in_progress', 'delegated'].includes(taskRow.status)) continue;
+      if (!['in_progress', 'delegated', 'awaiting_followup'].includes(taskRow.status)) continue;
     } catch (err) {
       log.warn('reconciliation.d1_task_query_failed', { taskId, ...serializeError(err) });
       continue;
@@ -289,8 +296,9 @@ async function sendCheckinToAgent(
 /**
  * Compute the next alarm time for reconciliation checks.
  *
- * Looks at active task-mode sessions (those with idle_cleanup_schedule entries
- * that have task_ids) and returns when the next reconciliation check should fire.
+ * Looks at active task-linked sessions and returns when the next reconciliation
+ * check should fire. Task mode is verified when processing candidates; this
+ * alarm calculation intentionally stays DO-local.
  */
 export function computeReconciliationAlarmTime(
   sql: SqlStorage,
@@ -301,8 +309,10 @@ export function computeReconciliationAlarmTime(
     10,
   ) || DEFAULT_TASK_RECONCILIATION_IDLE_MS;
 
-  // Find the earliest activity among task-mode sessions that don't have
-  // an active reconciliation or needs_input marker.
+  // Find the earliest activity among active task-linked sessions that don't
+  // have an active reconciliation or needs_input marker. Join active ACP
+  // sessions so old active chat rows without a running agent do not keep the
+  // ProjectData alarm hot forever.
   const rows = sql.exec(
     `SELECT
        MIN(COALESCE(
@@ -313,14 +323,24 @@ export function computeReconciliationAlarmTime(
            ELSE wa.last_message_at
          END,
          wa.created_at,
+         cs.updated_at,
+         cs.created_at,
          ics.created_at
        )) AS earliest_activity
-     FROM idle_cleanup_schedule ics
-     LEFT JOIN workspace_activity wa ON wa.workspace_id = ics.workspace_id
-     WHERE ics.task_id IS NOT NULL
+     FROM chat_sessions cs
+     LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
+     LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
+     WHERE cs.status = 'active'
+       AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
+       AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM acp_sessions acp
+         WHERE acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
+           AND acp.status IN ('running', 'started')
+       )
        AND NOT EXISTS (
          SELECT 1 FROM session_attention_markers sam
-         WHERE sam.session_id = ics.session_id
+         WHERE sam.session_id = cs.id
            AND sam.resolved_at IS NULL
            AND sam.kind IN ('needs_input', 'reconciliation_checkin')
        )`,

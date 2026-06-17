@@ -347,7 +347,7 @@ export async function completeTaskInD1(db: D1Database, taskId: string): Promise<
   const now = new Date().toISOString();
   try {
     await db.prepare(
-      `UPDATE tasks SET status = 'completed', execution_step = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('in_progress', 'delegated')`
+      `UPDATE tasks SET status = 'completed', execution_step = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
     )
       .bind(now, now, taskId)
       .run();

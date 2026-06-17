@@ -70,6 +70,21 @@ export async function ensureSessionLinked(
       workspaceId,
     );
 
+    if (state.config.taskMode === 'task') {
+      await projectDataService.scheduleIdleCleanup(
+        rc.env,
+        state.projectId,
+        state.stepResults.chatSessionId,
+        workspaceId,
+        state.taskId,
+      );
+      log.info('task_runner_do.session_idle_cleanup_scheduled', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+      });
+    }
+
     log.info('task_runner_do.session_linked_to_workspace', {
       taskId: state.taskId,
       sessionId: state.stepResults.chatSessionId,
