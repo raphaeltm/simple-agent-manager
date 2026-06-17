@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -256,20 +257,29 @@ func TestVerifyVolumeMounts_MultipleVolumes_OneMissing_Refuses(t *testing.T) {
 // Engine integration: mount guard wired into Apply
 // ---------------------------------------------------------------------------
 
-func TestEngine_Apply_VolumeMountGuard_Proceeds(t *testing.T) {
+// guardEngine builds an Engine wired with the given mount checker and fresh
+// signing keys for the volume-mount-guard integration tests. When healthy is
+// true, the compose script reports a healthy `ps --format json` container;
+// otherwise it is a no-op that exits 0.
+func guardEngine(t *testing.T, checker MountChecker, healthy bool) (*Engine, ed25519.PrivateKey) {
+	t.Helper()
 	dir := t.TempDir()
 	disk, err := NewDiskState(filepath.Join(dir, "state"))
 	if err != nil {
 		t.Fatalf("NewDiskState: %v", err)
 	}
 
-	composeScript := filepath.Join(dir, "compose.sh")
-	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+	composeBody := "#!/bin/sh\nexit 0\n"
+	if healthy {
+		composeBody = `#!/bin/sh
 case "$*" in
   *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
 esac
 exit 0
-`), 0755); err != nil {
+`
+	}
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(composeBody), 0755); err != nil {
 		t.Fatalf("write compose script: %v", err)
 	}
 
@@ -277,9 +287,6 @@ exit 0
 	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("write reload script: %v", err)
 	}
-
-	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-1"] = true
 
 	pub, priv := generateTestKeys(t)
 	verifier, _ := NewVerifier(base64.StdEncoding.EncodeToString(pub))
@@ -294,15 +301,12 @@ exit 0
 		HealthPollInterval: 10 * time.Millisecond,
 		MountChecker:       checker,
 	})
+	return engine, priv
+}
 
-	composeYAML := `services:
-  web:
-    image: myapp:v1
-    volumes:
-      - /mnt/sam-env-env-1/volumes/data:/app/data
-    ports:
-      - "127.0.0.1:35000:3000"
-`
+// guardPayload builds and signs a seq-1 ApplyPayload for the given compose YAML.
+func guardPayload(t *testing.T, priv ed25519.PrivateKey, composeYAML string) *ApplyPayload {
+	t.Helper()
 	payload := &ApplyPayload{
 		EnvironmentID: "env-1",
 		NodeID:        "node-1",
@@ -310,12 +314,32 @@ exit 0
 		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
 		ComposeYAML:   composeYAML,
 		Routes: []RouteTarget{{
-			Hostname: "app.example.com", Service: "web",
-			ContainerPort: 3000, HostPort: 35000,
+			Hostname:      "app.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
 		}},
 	}
 	sig, _ := SignPayload(payload, priv)
 	payload.Signature = sig
+	return payload
+}
+
+const guardVolumeComposeYAML = `services:
+  web:
+    image: myapp:v1
+    volumes:
+      - /mnt/sam-env-env-1/volumes/data:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`
+
+func TestEngine_Apply_VolumeMountGuard_Proceeds(t *testing.T) {
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-1"] = true
+
+	engine, priv := guardEngine(t, checker, true)
+	payload := guardPayload(t, priv, guardVolumeComposeYAML)
 
 	if err := engine.Apply(context.Background(), payload); err != nil {
 		t.Fatalf("Apply should succeed when volume is mounted, got: %v", err)
@@ -328,58 +352,14 @@ exit 0
 }
 
 func TestEngine_Apply_VolumeMountGuard_Refuses(t *testing.T) {
-	dir := t.TempDir()
-	disk, err := NewDiskState(filepath.Join(dir, "state"))
-	if err != nil {
-		t.Fatalf("NewDiskState: %v", err)
-	}
-
-	composeScript := filepath.Join(dir, "compose.sh")
-	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write compose script: %v", err)
-	}
-
 	checker := newFakeMountChecker()
 	// Volume path does NOT exist
 	checker.missing["/mnt/sam-env-env-1"] = true
 
-	pub, priv := generateTestKeys(t)
-	verifier, _ := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	engine, priv := guardEngine(t, checker, false)
+	payload := guardPayload(t, priv, guardVolumeComposeYAML)
 
-	engine := NewEngine(disk, verifier, EngineConfig{
-		EnvironmentID:      "env-1",
-		NodeID:             "node-1",
-		ComposeCmd:         composeScript,
-		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
-		CaddyReloadCmd:     "true",
-		HealthTimeout:      1 * time.Second,
-		HealthPollInterval: 10 * time.Millisecond,
-		MountChecker:       checker,
-	})
-
-	composeYAML := `services:
-  web:
-    image: myapp:v1
-    volumes:
-      - /mnt/sam-env-env-1/volumes/data:/app/data
-    ports:
-      - "127.0.0.1:35000:3000"
-`
-	payload := &ApplyPayload{
-		EnvironmentID: "env-1",
-		NodeID:        "node-1",
-		Seq:           1,
-		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
-		ComposeYAML:   composeYAML,
-		Routes: []RouteTarget{{
-			Hostname: "app.example.com", Service: "web",
-			ContainerPort: 3000, HostPort: 35000,
-		}},
-	}
-	sig, _ := SignPayload(payload, priv)
-	payload.Signature = sig
-
-	err = engine.Apply(context.Background(), payload)
+	err := engine.Apply(context.Background(), payload)
 	if err == nil {
 		t.Fatal("Apply should fail when volume is not mounted")
 	}
@@ -395,65 +375,18 @@ func TestEngine_Apply_VolumeMountGuard_Refuses(t *testing.T) {
 }
 
 func TestEngine_Apply_VolumeMountGuard_NoVolumes_Skips(t *testing.T) {
-	dir := t.TempDir()
-	disk, err := NewDiskState(filepath.Join(dir, "state"))
-	if err != nil {
-		t.Fatalf("NewDiskState: %v", err)
-	}
-
-	composeScript := filepath.Join(dir, "compose.sh")
-	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
-case "$*" in
-  *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
-esac
-exit 0
-`), 0755); err != nil {
-		t.Fatalf("write compose script: %v", err)
-	}
-
-	reloadScript := filepath.Join(dir, "reload.sh")
-	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write reload script: %v", err)
-	}
-
-	// No mount checker configured — uses RealMountChecker, but since there
-	// are no SAM volumes in the compose YAML, it should skip the check entirely.
+	// No SAM volumes in the compose YAML, so the mount check is skipped entirely.
 	checker := newFakeMountChecker()
 
-	pub, priv := generateTestKeys(t)
-	verifier, _ := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	engine, priv := guardEngine(t, checker, true)
 
-	engine := NewEngine(disk, verifier, EngineConfig{
-		EnvironmentID:      "env-1",
-		NodeID:             "node-1",
-		ComposeCmd:         composeScript,
-		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
-		CaddyReloadCmd:     reloadScript,
-		HealthTimeout:      1 * time.Second,
-		HealthPollInterval: 10 * time.Millisecond,
-		MountChecker:       checker,
-	})
-
-	// Compose with NO SAM volumes
 	composeYAML := `services:
   web:
     image: nginx:latest
     ports:
       - "127.0.0.1:35000:3000"
 `
-	payload := &ApplyPayload{
-		EnvironmentID: "env-1",
-		NodeID:        "node-1",
-		Seq:           1,
-		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
-		ComposeYAML:   composeYAML,
-		Routes: []RouteTarget{{
-			Hostname: "app.example.com", Service: "web",
-			ContainerPort: 3000, HostPort: 35000,
-		}},
-	}
-	sig, _ := SignPayload(payload, priv)
-	payload.Signature = sig
+	payload := guardPayload(t, priv, composeYAML)
 
 	if err := engine.Apply(context.Background(), payload); err != nil {
 		t.Fatalf("Apply should succeed when no SAM volumes are declared, got: %v", err)
@@ -461,34 +394,11 @@ exit 0
 }
 
 func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing.T) {
-	dir := t.TempDir()
-	disk, err := NewDiskState(filepath.Join(dir, "state"))
-	if err != nil {
-		t.Fatalf("NewDiskState: %v", err)
-	}
-
-	composeScript := filepath.Join(dir, "compose.sh")
-	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write compose script: %v", err)
-	}
-
 	checker := newFakeMountChecker()
 	// Path exists but is NOT a mountpoint — this is the "fell-through empty dir" case
 	checker.mountpoints["/mnt/sam-env-env-1"] = false
 
-	pub, priv := generateTestKeys(t)
-	verifier, _ := NewVerifier(base64.StdEncoding.EncodeToString(pub))
-
-	engine := NewEngine(disk, verifier, EngineConfig{
-		EnvironmentID:      "env-1",
-		NodeID:             "node-1",
-		ComposeCmd:         composeScript,
-		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
-		CaddyReloadCmd:     "true",
-		HealthTimeout:      1 * time.Second,
-		HealthPollInterval: 10 * time.Millisecond,
-		MountChecker:       checker,
-	})
+	engine, priv := guardEngine(t, checker, false)
 
 	composeYAML := `services:
   web:
@@ -496,21 +406,9 @@ func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing
     volumes:
       - /mnt/sam-env-env-1/volumes/data:/app/data
 `
-	payload := &ApplyPayload{
-		EnvironmentID: "env-1",
-		NodeID:        "node-1",
-		Seq:           1,
-		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
-		ComposeYAML:   composeYAML,
-		Routes: []RouteTarget{{
-			Hostname: "app.example.com", Service: "web",
-			ContainerPort: 3000, HostPort: 35000,
-		}},
-	}
-	sig, _ := SignPayload(payload, priv)
-	payload.Signature = sig
+	payload := guardPayload(t, priv, composeYAML)
 
-	err = engine.Apply(context.Background(), payload)
+	err := engine.Apply(context.Background(), payload)
 	if err == nil {
 		t.Fatal("Apply should refuse when volume path exists but is not a mountpoint")
 	}

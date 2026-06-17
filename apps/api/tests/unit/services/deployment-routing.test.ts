@@ -50,7 +50,7 @@ describe('environmentPortOffset', () => {
 
   it('offset is always a multiple of portSpan', () => {
     for (let i = 0; i < 50; i++) {
-      const id = `env-test-${i}-${Math.random().toString(36).slice(2)}`;
+      const id = `env-test-${i}-${i.toString(36).padStart(8, '0')}`;
       const offset = environmentPortOffset(id, 100, 35_000);
       expect(offset % 100).toBe(0);
     }
@@ -58,7 +58,7 @@ describe('environmentPortOffset', () => {
 
   it('resulting port stays within TCP range', () => {
     for (let i = 0; i < 100; i++) {
-      const id = `env-${i}-${Math.random().toString(36).slice(2)}`;
+      const id = `env-${i}-${i.toString(36).padStart(8, '0')}`;
       const offset = environmentPortOffset(id, 100, 35_000);
       const port = 35_000 + offset;
       expect(port).toBeGreaterThanOrEqual(35_000);

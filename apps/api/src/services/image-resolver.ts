@@ -65,6 +65,10 @@ const MANIFEST_ACCEPT = [
 
 const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
 
+// Non-backtracking: the capture group is forced to start with a non-space
+// character so it cannot overlap with the preceding `\s+`.
+const BEARER_CHALLENGE_RE = /^Bearer\s+(\S.*)$/i;
+
 // =============================================================================
 // Registry URL resolution
 // =============================================================================
@@ -94,7 +98,7 @@ function registryBaseUrl(registry: string): string {
  * Parse a WWW-Authenticate: Bearer realm="...",service="...",scope="..." header.
  */
 function parseBearerChallenge(header: string): { realm: string; service?: string; scope?: string } | null {
-  const match = header.match(/^Bearer\s+(.+)$/i);
+  const match = BEARER_CHALLENGE_RE.exec(header);
   if (!match) return null;
 
   const params = match[1]!;
@@ -110,7 +114,7 @@ function parseBearerChallenge(header: string): { realm: string; service?: string
 
 function extractParam(params: string, key: string): string | undefined {
   const re = new RegExp(`${key}="([^"]*)"`, 'i');
-  const m = params.match(re);
+  const m = re.exec(params);
   return m ? m[1] : undefined;
 }
 
@@ -129,7 +133,8 @@ async function fetchBearerToken(
 
   const headers: Record<string, string> = {};
   if (auth) {
-    headers['Authorization'] = `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
+    const basicCredentials = btoa(`${auth.username}:${auth.password}`);
+    headers['Authorization'] = `Basic ${basicCredentials}`;
   }
 
   const resp = await fetchFn(url.toString(), {
@@ -179,7 +184,8 @@ async function resolveTagToDigest(
 
   // Try Basic auth first if credentials provided
   if (opts.auth) {
-    headers['Authorization'] = `Basic ${btoa(`${opts.auth.username}:${opts.auth.password}`)}`;
+    const basicCredentials = btoa(`${opts.auth.username}:${opts.auth.password}`);
+    headers['Authorization'] = `Basic ${basicCredentials}`;
   }
 
   let resp = await fetchFn(manifestUrl, {

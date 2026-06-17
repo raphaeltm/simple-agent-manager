@@ -40,7 +40,7 @@ services:
         x-sam-secret: stripe-api-key
     volumes:
       - app-data:/data
-      - cache:/tmp/cache
+      - cache:/var/cache/app
     deploy:
       resources:
         limits:
@@ -96,7 +96,7 @@ describe('Compose round-trip integrity', () => {
     expect(unresolvedWeb.env['API_KEY']).toEqual({ secret: 'stripe-api-key' });
     expect(unresolvedWeb.volumes).toEqual([
       { name: 'app-data', mountPath: '/data' },
-      { name: 'cache', mountPath: '/tmp/cache' },
+      { name: 'cache', mountPath: '/var/cache/app' },
     ]);
     expect(unresolvedWeb.resources).toEqual({ memoryLimitMb: 512, cpuLimit: 1.5 });
     expect(unresolvedWeb.healthCheck).toEqual({ path: '/health', port: 8080, expectedStatus: 200 });
@@ -145,7 +145,7 @@ describe('Compose round-trip integrity', () => {
     // Volumes
     expect(web.volumes).toEqual([
       { name: 'app-data', mountPath: '/data' },
-      { name: 'cache', mountPath: '/tmp/cache' },
+      { name: 'cache', mountPath: '/var/cache/app' },
     ]);
 
     // Resources

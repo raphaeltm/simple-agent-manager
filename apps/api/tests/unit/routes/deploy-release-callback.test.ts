@@ -91,6 +91,34 @@ function env(): Env {
   } as Env;
 }
 
+/** Seed the three sequential D1 reads for the happy path (node IP, env, release). */
+function stubHappyPathDb() {
+  mockLimit
+    .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+    .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+    .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+}
+
+/** Stub the four CF DNS API calls (two list, two create) for the happy path. */
+function stubDnsFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+/** Issue the standard deploy-release callback request. */
+function requestDeployRelease() {
+  return createTestApp().request(
+    '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+    { headers: { Authorization: 'Bearer callback-token' } },
+    env(),
+  );
+}
+
 describe('deploy release callback route', () => {
   beforeEach(() => {
     mockLimit.mockReset();
@@ -116,23 +144,10 @@ describe('deploy release callback route', () => {
 
   it('returns signed route targets, publishes loopback Compose ports, and creates grey-cloud DNS records', async () => {
     const dateNow = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-    mockLimit
-      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
-      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
-      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    stubHappyPathDb();
+    const fetchMock = stubDnsFetch();
 
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await createTestApp().request(
-      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
-      { headers: { Authorization: 'Bearer callback-token' } },
-      env(),
-    );
+    const response = await requestDeployRelease();
 
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
@@ -247,23 +262,10 @@ describe('deploy release callback route', () => {
 
   it('includes registryCredentials in response when minting succeeds', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-    mockLimit
-      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
-      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
-      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    stubHappyPathDb();
+    stubDnsFetch();
 
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })),
-    );
-
-    const response = await createTestApp().request(
-      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
-      { headers: { Authorization: 'Bearer callback-token' } },
-      env(),
-    );
+    const response = await requestDeployRelease();
 
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
@@ -293,23 +295,10 @@ describe('deploy release callback route', () => {
     );
 
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-    mockLimit
-      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
-      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
-      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    stubHappyPathDb();
+    stubDnsFetch();
 
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })),
-    );
-
-    const response = await createTestApp().request(
-      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
-      { headers: { Authorization: 'Bearer callback-token' } },
-      env(),
-    );
+    const response = await requestDeployRelease();
 
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
@@ -329,23 +318,10 @@ describe('deploy release callback route', () => {
     console.info = (...args: unknown[]) => logEntries.push({ args });
 
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-    mockLimit
-      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
-      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
-      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    stubHappyPathDb();
+    stubDnsFetch();
 
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })),
-    );
-
-    const response = await createTestApp().request(
-      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
-      { headers: { Authorization: 'Bearer callback-token' } },
-      env(),
-    );
+    const response = await requestDeployRelease();
 
     expect(response.status).toBe(200);
 
@@ -382,8 +358,8 @@ describe('deploy-release: Go↔TS contract (registryCredentials JSON shape)', ()
     };
 
     const goExpectedFields = ['server', 'username', 'password'] as const;
-    const tsFields = Object.keys(tsPayload).sort();
-    const goFields = [...goExpectedFields].sort();
+    const tsFields = Object.keys(tsPayload).sort((a, b) => a.localeCompare(b));
+    const goFields = [...goExpectedFields].sort((a, b) => a.localeCompare(b));
 
     expect(tsFields).toEqual(goFields);
   });
@@ -400,7 +376,7 @@ describe('deploy-release: Go↔TS contract (registryCredentials JSON shape)', ()
       'routes',
       'signature',
       'registryCredentials',
-    ].sort();
+    ].sort((a, b) => a.localeCompare(b));
 
     // The TS callback response returns these exact fields
     const tsResponseShape = {
@@ -414,7 +390,7 @@ describe('deploy-release: Go↔TS contract (registryCredentials JSON shape)', ()
       registryCredentials: null,
     };
 
-    const tsFields = Object.keys(tsResponseShape).sort();
+    const tsFields = Object.keys(tsResponseShape).sort((a, b) => a.localeCompare(b));
     expect(tsFields).toEqual(goExpectedTopLevel);
   });
 });
