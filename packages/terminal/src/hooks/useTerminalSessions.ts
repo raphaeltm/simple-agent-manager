@@ -17,6 +17,7 @@ interface PersistedSession {
 interface PersistedState {
   sessions: PersistedSession[];
   counter: number;
+  wsUrl?: string;
 }
 
 /**
@@ -26,6 +27,7 @@ interface PersistedState {
 export function useTerminalSessions(
   maxSessions: number = 10,
   persistenceKey?: string,
+  wsUrl?: string,
 ): UseTerminalSessionsReturn {
   const [sessions, setSessions] = useState<Map<string, TerminalSession>>(new Map());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -48,12 +50,13 @@ export function useTerminalSessions(
           .sort((a, b) => a.order - b.order)
           .map((s) => ({ name: s.name, order: s.order, serverSessionId: s.serverSessionId })),
         counter: sessionCounter.current,
+        wsUrl,
       };
       sessionStorage.setItem(persistenceKey, JSON.stringify(persisted));
     } catch {
       // sessionStorage may be unavailable (private browsing, quota exceeded)
     }
-  }, [persistenceKey]);
+  }, [persistenceKey, wsUrl]);
 
   /** Load persisted session metadata. Returns null if nothing saved. */
   const loadPersistedSessions = useCallback((): PersistedState | null => {
@@ -64,6 +67,11 @@ export function useTerminalSessions(
       const parsed = parseJsonRecord(raw, 'terminal.persisted_sessions');
       const sessions = requireArray(parsed, 'sessions', 'terminal.persisted_sessions');
       if (sessions.length === 0) {
+        return null;
+      }
+      // Reject persisted state if wsUrl doesn't match (scoping)
+      if (wsUrl && typeof parsed.wsUrl === 'string' && parsed.wsUrl !== wsUrl) {
+        try { sessionStorage.removeItem(persistenceKey); } catch { /* ignore */ }
         return null;
       }
       return {
@@ -78,6 +86,10 @@ export function useTerminalSessions(
         counter: typeof parsed.counter === 'number' ? parsed.counter : sessions.length,
       };
     } catch {
+      // Malformed storage — clear it to prevent repeated degradation
+      if (persistenceKey) {
+        try { sessionStorage.removeItem(persistenceKey); } catch { /* ignore */ }
+      }
       return null;
     }
   }, [persistenceKey]);
@@ -158,11 +170,11 @@ export function useTerminalSessions(
 
         updated.delete(sessionId);
 
-        // Reorder remaining sessions
+        // Reorder remaining sessions (immutable)
         let order = 0;
-        updated.forEach((session) => {
-          session.order = order++;
-        });
+        for (const [id, session] of updated) {
+          updated.set(id, { ...session, order: order++ });
+        }
 
         persistSessions(updated);
         return updated;
@@ -184,10 +196,9 @@ export function useTerminalSessions(
           const nextSession = remainingSessions.find((s) => s.order > currentOrder) ||
                              remainingSessions.find((s) => s.order < currentOrder);
 
-          if (nextSession) {
-            setActiveSessionId(nextSession.id);
-          } else {
-            setActiveSessionId(remainingSessions[0]!.id);
+          const fallback = nextSession ?? remainingSessions[0];
+          if (fallback) {
+            setActiveSessionId(fallback.id);
           }
         } else {
           setActiveSessionId(null);
@@ -205,16 +216,14 @@ export function useTerminalSessions(
       setSessions((prev) => {
         const updated = new Map(prev);
 
-        // Deactivate all sessions
-        updated.forEach((session) => {
-          session.isActive = false;
-        });
-
-        // Activate the selected session
-        const session = updated.get(sessionId);
-        if (session) {
-          session.isActive = true;
-          session.lastActivityAt = new Date();
+        // Deactivate all sessions, activate the selected one (immutable)
+        for (const [id, session] of updated) {
+          const shouldBeActive = id === sessionId;
+          if (shouldBeActive) {
+            updated.set(id, { ...session, isActive: true, lastActivityAt: new Date() });
+          } else if (session.isActive) {
+            updated.set(id, { ...session, isActive: false });
+          }
         }
 
         return updated;
@@ -235,7 +244,7 @@ export function useTerminalSessions(
         const session = updated.get(sessionId);
 
         if (session) {
-          session.name = name.slice(0, 50);
+          updated.set(sessionId, { ...session, name: name.slice(0, 50) });
         }
 
         persistSessions(updated);
@@ -265,7 +274,7 @@ export function useTerminalSessions(
         }
 
         sessionsArray.forEach((session, index) => {
-          session.order = index;
+          updated.set(session.id, { ...session, order: index });
         });
 
         persistSessions(updated);
@@ -295,10 +304,11 @@ export function useTerminalSessions(
         const session = updated.get(sessionId);
 
         if (session) {
-          session.status = status;
-          if (status === 'connected') {
-            session.lastActivityAt = new Date();
-          }
+          updated.set(sessionId, {
+            ...session,
+            status,
+            ...(status === 'connected' ? { lastActivityAt: new Date() } : {}),
+          });
         }
 
         return updated;
@@ -317,7 +327,7 @@ export function useTerminalSessions(
         const session = updated.get(sessionId);
 
         if (session) {
-          session.workingDirectory = workingDirectory;
+          updated.set(sessionId, { ...session, workingDirectory });
         }
 
         return updated;
@@ -333,7 +343,7 @@ export function useTerminalSessions(
         const updated = new Map(prev);
         const session = updated.get(sessionId);
         if (session) {
-          session.serverSessionId = serverSessionId;
+          updated.set(sessionId, { ...session, serverSessionId });
         }
         persistSessions(updated);
         return updated;

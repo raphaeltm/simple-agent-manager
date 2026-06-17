@@ -21,7 +21,6 @@ export { ConnectionOverlay } from './ConnectionOverlay';
 export { StatusBar } from './StatusBar';
 
 // Hooks
-export { useTabShortcuts } from './hooks/useTabShortcuts';
 export { useTerminalSessions } from './hooks/useTerminalSessions';
 export { useWebSocket } from './useWebSocket';
 
@@ -34,11 +33,9 @@ export type {
   PersistedSession,
   TabBarProps,
   TabItemProps,
-  TabShortcutActions,
   TerminalConfig,
   TerminalSession,
   TerminalTabState,
-  UseTabShortcutsReturn,
   UseTerminalSessionsReturn,
 } from './types/multi-terminal';
 

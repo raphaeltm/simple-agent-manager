@@ -313,6 +313,47 @@ describe('TabBar', () => {
       fireEvent.keyDown(firstTab, { key: 'ArrowRight' });
       // Implementation would handle focus management
     });
+
+    it('should activate tab on Enter key', () => {
+      const { container } = render(<TabBar {...defaultProps} />);
+
+      const tabs = container.querySelectorAll('[role="tab"]');
+      const secondTab = tabs[1] as HTMLElement;
+      fireEvent.keyDown(secondTab, { key: 'Enter' });
+
+      expect(defaultProps.onTabActivate).toHaveBeenCalledWith('session-2');
+    });
+
+    it('should activate tab on Space key', () => {
+      const { container } = render(<TabBar {...defaultProps} />);
+
+      const tabs = container.querySelectorAll('[role="tab"]');
+      const secondTab = tabs[1] as HTMLElement;
+      fireEvent.keyDown(secondTab, { key: ' ' });
+
+      expect(defaultProps.onTabActivate).toHaveBeenCalledWith('session-2');
+    });
+
+    it('should not activate already-active tab on Enter', () => {
+      const { container } = render(<TabBar {...defaultProps} />);
+
+      const tabs = container.querySelectorAll('[role="tab"]');
+      const firstTab = tabs[0] as HTMLElement;
+      fireEvent.keyDown(firstTab, { key: 'Enter' });
+
+      // Already active tab should not trigger onTabActivate
+      expect(defaultProps.onTabActivate).not.toHaveBeenCalled();
+    });
+
+    it('should have keyboard-accessible close buttons', () => {
+      render(<TabBar {...defaultProps} />);
+
+      const closeButtons = screen.getAllByLabelText(/Close Terminal/);
+      // Close buttons should be focusable (tabIndex >= 0)
+      for (const btn of closeButtons) {
+        expect(btn.tabIndex).toBeGreaterThanOrEqual(0);
+      }
+    });
   });
 
   describe('drag and drop', () => {

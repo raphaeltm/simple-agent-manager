@@ -80,7 +80,7 @@ export interface ClientMessage {
     | 'reattach_session';
 
   /** Message payload */
-  data?: any;
+  data?: unknown;
 }
 
 export interface ServerMessage {
@@ -101,7 +101,7 @@ export interface ServerMessage {
     | 'scrollback';
 
   /** Message payload */
-  data?: any;
+  data?: unknown;
 }
 
 /**
@@ -182,14 +182,6 @@ export interface TerminalConfig {
   /** Memory limit per session in MB (VM Agent) */
   resourceLimitMb?: number;
 
-  /** Keyboard shortcuts configuration */
-  shortcuts: {
-    newTab: string;
-    closeTab: string;
-    nextTab: string;
-    previousTab: string;
-    jumpToTab: string; // Pattern like "Alt+{n}"
-  };
 }
 
 /**
@@ -244,20 +236,6 @@ export interface UseTerminalSessionsReturn {
   getPersistedSessions: () => PersistedSession[] | null;
   /** Clear persisted session state */
   clearPersistedSessions: () => void;
-}
-
-export interface UseTabShortcutsReturn {
-  registerShortcuts: (actions: TabShortcutActions) => void;
-  unregisterShortcuts: () => void;
-  isShortcutPressed: (event: KeyboardEvent) => boolean;
-}
-
-export interface TabShortcutActions {
-  onNewTab: () => void;
-  onCloseTab: () => void;
-  onNextTab: () => void;
-  onPreviousTab: () => void;
-  onJumpToTab: (index: number) => void;
 }
 
 /**

@@ -1,5 +1,6 @@
 import React, { useEffect,useRef, useState } from 'react';
 
+import { colors, dimensions, fonts } from '../terminal-tokens';
 import type { TabBarProps } from '../types/multi-terminal';
 import { TabItem } from './TabItem';
 import { TabOverflowMenu } from './TabOverflowMenu';
@@ -7,9 +8,9 @@ import { TabOverflowMenu } from './TabOverflowMenu';
 const tabBarStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'stretch',
-  backgroundColor: '#16171e',
-  borderBottom: '1px solid #2a2d3a',
-  height: 38,
+  backgroundColor: colors.bgChrome,
+  borderBottom: `1px solid ${colors.border}`,
+  height: dimensions.tabBarHeight,
   flexShrink: 0,
   position: 'relative',
   userSelect: 'none',
@@ -19,10 +20,10 @@ const scrollBtnStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 24,
+  width: dimensions.scrollBtnWidth,
   background: 'none',
   border: 'none',
-  color: '#787c99',
+  color: colors.fgMuted,
   cursor: 'pointer',
   fontSize: 16,
   flexShrink: 0,
@@ -44,11 +45,11 @@ const newTabBtnStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 36,
+  width: dimensions.newTabBtnWidth,
   background: 'none',
   border: 'none',
-  borderLeft: '1px solid #2a2d3a',
-  color: '#787c99',
+  borderLeft: `1px solid ${colors.border}`,
+  color: colors.fgMuted,
   cursor: 'pointer',
   fontSize: 18,
   fontWeight: 300,
@@ -61,13 +62,14 @@ const overflowBtnStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 32,
+  width: dimensions.overflowBtnWidth,
   background: 'none',
   border: 'none',
-  borderLeft: '1px solid #2a2d3a',
-  color: '#787c99',
+  borderLeft: `1px solid ${colors.border}`,
+  color: colors.fgMuted,
   cursor: 'pointer',
   fontSize: 16,
+  fontFamily: fonts.ui,
   flexShrink: 0,
   padding: 0,
   position: 'relative',
@@ -142,7 +144,7 @@ export const TabBar: React.FC<TabBarProps> = ({
   const sortedSessions = [...sessions].sort((a, b) => a.order - b.order);
 
   return (
-    <div style={tabBarStyle}>
+    <div style={tabBarStyle} role="tablist">
       {showLeftScroll && (
         <button
           style={scrollBtnStyle}
@@ -183,11 +185,11 @@ export const TabBar: React.FC<TabBarProps> = ({
           aria-label="Create new terminal"
           title="New Terminal (Ctrl+Shift+T)"
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#a9b1d6';
-            e.currentTarget.style.backgroundColor = '#1e2030';
+            e.currentTarget.style.color = colors.fg;
+            e.currentTarget.style.backgroundColor = colors.bgSurface;
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = '#787c99';
+            e.currentTarget.style.color = colors.fgMuted;
             e.currentTarget.style.backgroundColor = 'transparent';
           }}
         >

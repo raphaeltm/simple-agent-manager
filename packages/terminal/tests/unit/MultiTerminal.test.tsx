@@ -376,11 +376,10 @@ describe('MultiTerminal', () => {
     });
   });
 
-  it('should show appropriate status messages', () => {
-    const { container } = render(<MultiTerminal {...defaultProps} />);
-
-    const connectingMsg = container.querySelector('.terminal-status-message');
-    expect(connectingMsg || container.querySelector('.terminal-empty-state')).toBeDefined();
+  it('should show empty state before any session is created', () => {
+    render(<MultiTerminal {...defaultProps} />);
+    // Before WS opens and creates a session, the component shows the empty state
+    expect(screen.getByText('No terminal sessions')).toBeDefined();
   });
 
   it('uses resolveWsUrl for reconnect attempts', async () => {
@@ -408,5 +407,42 @@ describe('MultiTerminal', () => {
     );
     expect(MockWebSocket.instances[1]?.url).toContain('token=second');
     expect(resolveWsUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears ping interval before creating a new one on reconnect', async () => {
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+
+    render(<MultiTerminal {...defaultProps} />);
+
+    // Wait for initial WebSocket connection and session creation
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+
+    // setInterval should have been called for ping
+    const initialSetIntervalCalls = setIntervalSpy.mock.calls.length;
+    expect(initialSetIntervalCalls).toBeGreaterThanOrEqual(1);
+
+    // Close the connection to trigger reconnect
+    act(() => {
+      MockWebSocket.instances[0]?.close();
+    });
+
+    await waitFor(
+      () => {
+        expect(MockWebSocket.instances.length).toBe(2);
+      },
+      { timeout: 7000 }
+    );
+
+    // clearInterval should have been called to clean up old ping
+    expect(clearIntervalSpy).toHaveBeenCalled();
+
+    // A new setInterval should have been created for the new connection
+    expect(setIntervalSpy.mock.calls.length).toBeGreaterThan(initialSetIntervalCalls);
+
+    clearIntervalSpy.mockRestore();
+    setIntervalSpy.mockRestore();
   });
 });

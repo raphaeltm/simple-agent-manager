@@ -1,5 +1,6 @@
 import React, { useEffect,useRef, useState } from 'react';
 
+import { colors, dimensions, fonts, getStatusColor } from '../terminal-tokens';
 import type { TabItemProps } from '../types/multi-terminal';
 
 const baseTabStyle: React.CSSProperties = {
@@ -7,12 +8,12 @@ const baseTabStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 6,
   padding: '0 12px',
-  minWidth: 100,
-  maxWidth: 180,
+  minWidth: dimensions.tabMinWidth,
+  maxWidth: dimensions.tabMaxWidth,
   cursor: 'pointer',
   fontSize: 13,
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  borderRight: '1px solid #2a2d3a',
+  fontFamily: fonts.ui,
+  borderRight: `1px solid ${colors.border}`,
   position: 'relative',
   transition: 'background-color 0.15s',
   flexShrink: 0,
@@ -21,14 +22,14 @@ const baseTabStyle: React.CSSProperties = {
 
 const activeTabStyle: React.CSSProperties = {
   ...baseTabStyle,
-  backgroundColor: '#1a1b26',
-  color: '#a9b1d6',
+  backgroundColor: colors.bg,
+  color: colors.fg,
 };
 
 const inactiveTabStyle: React.CSSProperties = {
   ...baseTabStyle,
   backgroundColor: 'transparent',
-  color: '#787c99',
+  color: colors.fgMuted,
 };
 
 const activeIndicatorStyle: React.CSSProperties = {
@@ -37,19 +38,19 @@ const activeIndicatorStyle: React.CSSProperties = {
   left: 0,
   right: 0,
   height: 2,
-  backgroundColor: '#7aa2f7',
+  backgroundColor: colors.accent,
 };
 
 const closeBtnStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 20,
-  height: 20,
+  width: dimensions.closeBtnSize,
+  height: dimensions.closeBtnSize,
   borderRadius: 4,
   background: 'none',
   border: 'none',
-  color: '#787c99',
+  color: colors.fgMuted,
   cursor: 'pointer',
   fontSize: 14,
   lineHeight: 1,
@@ -73,10 +74,10 @@ const tabTitleStyle: React.CSSProperties = {
 };
 
 const nameEditorStyle: React.CSSProperties = {
-  background: '#1e2030',
-  border: '1px solid #7aa2f7',
+  background: colors.bgSurface,
+  border: `1px solid ${colors.accent}`,
   borderRadius: 3,
-  color: '#a9b1d6',
+  color: colors.fg,
   fontSize: 13,
   fontFamily: 'inherit',
   padding: '1px 4px',
@@ -121,7 +122,7 @@ export const TabItem: React.FC<TabItemProps> = ({
     setIsEditing(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       handleRename();
     } else if (e.key === 'Escape') {
@@ -141,33 +142,28 @@ export const TabItem: React.FC<TabItemProps> = ({
     }
   };
 
-  const getStatusIcon = () => {
-    switch (session.status) {
-      case 'connecting':
-        return { icon: '●', color: '#e0af68' }; // yellow
-      case 'connected':
-        return { icon: '●', color: '#9ece6a' }; // green
-      case 'disconnected':
-        return { icon: '●', color: '#787c99' }; // grey
-      case 'error':
-        return { icon: '●', color: '#f7768e' }; // red
-      default:
-        return { icon: '●', color: '#787c99' };
+  const handleTabKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!isActive && !isEditing) {
+        onActivate(session.id);
+      }
     }
   };
 
-  const status = getStatusIcon();
+  const statusColor = getStatusColor(session.status);
 
   const tabStyle: React.CSSProperties = isActive
     ? activeTabStyle
     : isHovered
-      ? { ...inactiveTabStyle, backgroundColor: '#1e2030', color: '#a9b1d6' }
+      ? { ...inactiveTabStyle, backgroundColor: colors.bgSurface, color: colors.fg }
       : inactiveTabStyle;
 
   return (
     <div
       style={tabStyle}
       onClick={handleTabClick}
+      onKeyDown={handleTabKeyDown}
       onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -181,7 +177,7 @@ export const TabItem: React.FC<TabItemProps> = ({
       {isActive && <div style={activeIndicatorStyle} />}
 
       {/* Status dot */}
-      <span style={{ ...statusIconStyle, color: status.color }}>{status.icon}</span>
+      <span style={{ ...statusIconStyle, color: statusColor }}>●</span>
 
       {isEditing ? (
         <input
@@ -191,7 +187,7 @@ export const TabItem: React.FC<TabItemProps> = ({
           value={editName}
           onChange={(e) => setEditName(e.target.value)}
           onBlur={handleRename}
-          onKeyDown={handleKeyDown}
+          onKeyDown={handleInputKeyDown}
           maxLength={50}
           aria-label="Tab name editor"
           onClick={(e) => e.stopPropagation()}
@@ -210,14 +206,14 @@ export const TabItem: React.FC<TabItemProps> = ({
         }}
         onClick={handleCloseClick}
         aria-label={`Close ${session.name}`}
-        tabIndex={-1}
+        tabIndex={0}
         onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#33467c';
-          e.currentTarget.style.color = '#a9b1d6';
+          e.currentTarget.style.backgroundColor = colors.bgHighlight;
+          e.currentTarget.style.color = colors.fg;
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.backgroundColor = 'transparent';
-          e.currentTarget.style.color = '#787c99';
+          e.currentTarget.style.color = colors.fgMuted;
         }}
       >
         ×

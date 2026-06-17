@@ -1,4 +1,4 @@
-import { describe, expect,it } from 'vitest';
+import { assert, describe, expect,it } from 'vitest';
 
 import {
   encodeTerminalWsCreateSession,
@@ -89,16 +89,16 @@ describe('isSessionReattachedMessage', () => {
         data: { sessionId: 'sess-1', workingDirectory: '/home/user' },
       })
     );
-    expect(msg).not.toBeNull();
-    expect(isSessionReattachedMessage(msg!)).toBe(true);
+    assert(msg !== null, 'expected parsed message');
+    expect(isSessionReattachedMessage(msg)).toBe(true);
   });
 
   it('returns false for other message types', () => {
     const msg = parseTerminalWsServerMessage(
       JSON.stringify({ type: 'output', data: { data: 'hello' } })
     );
-    expect(msg).not.toBeNull();
-    expect(isSessionReattachedMessage(msg!)).toBe(false);
+    assert(msg !== null, 'expected parsed message');
+    expect(isSessionReattachedMessage(msg)).toBe(false);
   });
 });
 
@@ -111,14 +111,14 @@ describe('isScrollbackMessage', () => {
         data: { data: 'buffered output here' },
       })
     );
-    expect(msg).not.toBeNull();
-    expect(isScrollbackMessage(msg!)).toBe(true);
+    assert(msg !== null, 'expected parsed message');
+    expect(isScrollbackMessage(msg)).toBe(true);
   });
 
   it('returns false for other message types', () => {
     const msg = parseTerminalWsServerMessage(JSON.stringify({ type: 'pong' }));
-    expect(msg).not.toBeNull();
-    expect(isScrollbackMessage(msg!)).toBe(false);
+    assert(msg !== null, 'expected parsed message');
+    expect(isScrollbackMessage(msg)).toBe(false);
   });
 });
 
@@ -140,8 +140,8 @@ describe('isSessionListMessage', () => {
         },
       })
     );
-    expect(msg).not.toBeNull();
-    expect(isSessionListMessage(msg!)).toBe(true);
+    assert(msg !== null, 'expected parsed message');
+    expect(isSessionListMessage(msg)).toBe(true);
   });
 
   it('parses session_list with status field', () => {
@@ -165,13 +165,13 @@ describe('isSessionListMessage', () => {
       },
     });
     const msg = parseTerminalWsServerMessage(raw);
-    expect(msg).not.toBeNull();
-    expect(isSessionListMessage(msg!)).toBe(true);
+    assert(msg !== null, 'expected parsed message');
+    expect(isSessionListMessage(msg)).toBe(true);
 
-    if (isSessionListMessage(msg!) && msg!.data) {
-      expect(msg!.data.sessions).toHaveLength(2);
-      expect(msg!.data.sessions[0]!.status).toBe('running');
-      expect(msg!.data.sessions[1]!.status).toBe('exited');
+    if (isSessionListMessage(msg) && msg.data) {
+      expect(msg.data.sessions).toHaveLength(2);
+      expect(msg.data.sessions[0].status).toBe('running');
+      expect(msg.data.sessions[1].status).toBe('exited');
     }
   });
 
@@ -182,10 +182,10 @@ describe('isSessionListMessage', () => {
         data: { sessions: [] },
       })
     );
-    expect(msg).not.toBeNull();
-    expect(isSessionListMessage(msg!)).toBe(true);
-    if (isSessionListMessage(msg!) && msg!.data) {
-      expect(msg!.data.sessions).toHaveLength(0);
+    assert(msg !== null, 'expected parsed message');
+    expect(isSessionListMessage(msg)).toBe(true);
+    if (isSessionListMessage(msg) && msg.data) {
+      expect(msg.data.sessions).toHaveLength(0);
     }
   });
 });
