@@ -1,5 +1,6 @@
 import React, { useEffect,useRef, useState } from 'react';
 
+import { applyHoverIn, applyHoverOut, chromeButtonBase, colors, dimensions, fonts } from '../terminal-tokens';
 import type { TabBarProps } from '../types/multi-terminal';
 import { TabItem } from './TabItem';
 import { TabOverflowMenu } from './TabOverflowMenu';
@@ -7,26 +8,18 @@ import { TabOverflowMenu } from './TabOverflowMenu';
 const tabBarStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'stretch',
-  backgroundColor: '#16171e',
-  borderBottom: '1px solid #2a2d3a',
-  height: 38,
+  backgroundColor: colors.bgChrome,
+  borderBottom: `1px solid ${colors.border}`,
+  height: dimensions.tabBarHeight,
   flexShrink: 0,
   position: 'relative',
   userSelect: 'none',
 };
 
 const scrollBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 24,
-  background: 'none',
-  border: 'none',
-  color: '#787c99',
-  cursor: 'pointer',
+  ...chromeButtonBase,
+  width: dimensions.scrollBtnWidth,
   fontSize: 16,
-  flexShrink: 0,
-  padding: 0,
 };
 
 const tabsContainerStyle: React.CSSProperties = {
@@ -41,35 +34,20 @@ const tabsContainerStyle: React.CSSProperties = {
 };
 
 const newTabBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 36,
-  background: 'none',
-  border: 'none',
-  borderLeft: '1px solid #2a2d3a',
-  color: '#787c99',
-  cursor: 'pointer',
+  ...chromeButtonBase,
+  width: dimensions.newTabBtnWidth,
+  borderLeft: `1px solid ${colors.border}`,
   fontSize: 18,
   fontWeight: 300,
-  flexShrink: 0,
-  padding: 0,
   transition: 'color 0.15s, background-color 0.15s',
 };
 
 const overflowBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 32,
-  background: 'none',
-  border: 'none',
-  borderLeft: '1px solid #2a2d3a',
-  color: '#787c99',
-  cursor: 'pointer',
+  ...chromeButtonBase,
+  width: dimensions.overflowBtnWidth,
+  borderLeft: `1px solid ${colors.border}`,
   fontSize: 16,
-  flexShrink: 0,
-  padding: 0,
+  fontFamily: fonts.ui,
   position: 'relative',
 };
 
@@ -142,7 +120,7 @@ export const TabBar: React.FC<TabBarProps> = ({
   const sortedSessions = [...sessions].sort((a, b) => a.order - b.order);
 
   return (
-    <div style={tabBarStyle}>
+    <div style={tabBarStyle} role="tablist">
       {showLeftScroll && (
         <button
           style={scrollBtnStyle}
@@ -182,14 +160,8 @@ export const TabBar: React.FC<TabBarProps> = ({
           onClick={onNewTab}
           aria-label="Create new terminal"
           title="New Terminal (Ctrl+Shift+T)"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#a9b1d6';
-            e.currentTarget.style.backgroundColor = '#1e2030';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = '#787c99';
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }}
+          onMouseEnter={(e) => applyHoverIn(e.currentTarget)}
+          onMouseLeave={(e) => applyHoverOut(e.currentTarget)}
         >
           +
         </button>
@@ -201,6 +173,8 @@ export const TabBar: React.FC<TabBarProps> = ({
             style={overflowBtnStyle}
             onClick={() => setShowOverflowMenu(!showOverflowMenu)}
             aria-label="Show all terminals"
+            aria-expanded={showOverflowMenu}
+            aria-haspopup="menu"
             title="All Terminals"
           >
             ⋮

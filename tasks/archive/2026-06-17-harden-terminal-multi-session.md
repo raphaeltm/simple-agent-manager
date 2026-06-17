@@ -47,39 +47,39 @@ CTO-level spot check of `packages/terminal` multi-session/tab-management UI foun
 
 ## Implementation Checklist
 
-- [ ] 1. Create `packages/terminal/src/terminal-tokens.ts` — centralize colors, dimensions, status colors
-- [ ] 2. Remove `useTabShortcuts` hook, its export from `index.ts`, its types from `multi-terminal.ts`, and the dead `config.shortcuts` assembly in `MultiTerminal.tsx`
-- [ ] 3. Fix `multi-terminal.ts` — replace `any` in ClientMessage.data and ServerMessage.data with proper types (unknown or specific union)
-- [ ] 4. Fix `TabItem.tsx` — add `onKeyDown` handler for Enter/Space activation; make close button keyboard-accessible (`tabIndex={0}`); use centralized tokens
-- [ ] 5. Fix `TabBar.tsx` — add `role="tablist"` to container; use centralized tokens
-- [ ] 6. Fix `TabOverflowMenu.tsx` — replace `<div role="menuitem">` with `<button>`; use centralized tokens
-- [ ] 7. Fix `useTerminalSessions.ts` — immutable session object updates (spread instead of mutate); fix non-null assertion
-- [ ] 8. Fix persistence — store wsUrl in persisted state; validate on load; clear on parse failure
-- [ ] 9. Fix `MultiTerminal.tsx` — capture terminalsRef.current in cleanup closure; use per-connection pingInterval cleanup; use centralized tokens
-- [ ] 10. Fix test warnings — replace `!` assertions with proper guards/`expect` chains in `useTerminalSessions.test.ts` and `protocol.test.ts`
-- [ ] 11. Add tests for keyboard tab activation/close behavior
-- [ ] 12. Add tests for persistence scope validation and malformed storage recovery
-- [ ] 13. Add tests for reconnect ping interval cleanup
-- [ ] 14. Remove/rewrite "should show appropriate status messages" test that asserts nonexistent class names
-- [ ] 15. Run `pnpm --filter @simple-agent-manager/terminal lint` — must be 0 warnings
-- [ ] 16. Run `pnpm --filter @simple-agent-manager/terminal typecheck` — must pass
-- [ ] 17. Run `pnpm --filter @simple-agent-manager/terminal test` — must pass
+- [x] 1. Create `packages/terminal/src/terminal-tokens.ts` — centralize colors, dimensions, status colors
+- [x] 2. Remove `useTabShortcuts` hook, its export from `index.ts`, its types from `multi-terminal.ts`, and the dead `config.shortcuts` assembly in `MultiTerminal.tsx`
+- [x] 3. Fix `multi-terminal.ts` — replace `any` in ClientMessage.data and ServerMessage.data with proper types (unknown or specific union)
+- [x] 4. Fix `TabItem.tsx` — add `onKeyDown` handler for Enter/Space activation; make close button keyboard-accessible (`tabIndex={0}`); use centralized tokens
+- [x] 5. Fix `TabBar.tsx` — add `role="tablist"` to container; use centralized tokens
+- [x] 6. Fix `TabOverflowMenu.tsx` — replace `<div role="menuitem">` with `<button>`; use centralized tokens
+- [x] 7. Fix `useTerminalSessions.ts` — immutable session object updates (spread instead of mutate); fix non-null assertion
+- [x] 8. Fix persistence — store wsUrl in persisted state; validate on load; clear on parse failure
+- [x] 9. Fix `MultiTerminal.tsx` — capture terminalsRef.current in cleanup closure; use per-connection pingInterval cleanup; use centralized tokens
+- [x] 10. Fix test warnings — replace `!` assertions with proper guards/`expect` chains in `useTerminalSessions.test.ts` and `protocol.test.ts`
+- [x] 11. Add tests for keyboard tab activation/close behavior
+- [x] 12. Add tests for persistence scope validation and malformed storage recovery
+- [x] 13. Add tests for reconnect ping interval cleanup
+- [x] 14. Remove/rewrite "should show appropriate status messages" test that asserts nonexistent class names
+- [x] 15. Run `pnpm --filter @simple-agent-manager/terminal lint` — must be 0 warnings
+- [x] 16. Run `pnpm --filter @simple-agent-manager/terminal typecheck` — must pass
+- [x] 17. Run `pnpm --filter @simple-agent-manager/terminal test` — must pass (90 tests)
 
 ## Acceptance Criteria
 
-- [ ] `pnpm --filter @simple-agent-manager/terminal lint` reports 0 warnings
-- [ ] `pnpm --filter @simple-agent-manager/terminal typecheck` passes
-- [ ] `pnpm --filter @simple-agent-manager/terminal test` passes
-- [ ] `useTabShortcuts` hook removed from source and exports
-- [ ] Tab items are keyboard-activatable (Enter/Space) and close button is keyboard-accessible
-- [ ] TabBar has `role="tablist"`, TabItem has working `role="tab"` with keyboard handler
-- [ ] TabOverflowMenu items use `<button>` elements instead of `<div role="menuitem">`
-- [ ] Session state updates in `useTerminalSessions` use immutable object spreads
-- [ ] Persistence validates wsUrl scope and clears malformed state
-- [ ] Ping interval is properly scoped per connection with no leak potential
-- [ ] terminalsRef cleanup captures stable reference
-- [ ] Terminal UI tokens centralized in `terminal-tokens.ts`
-- [ ] Tests cover keyboard activation, persistence recovery, and reconnect timer cleanup
+- [x] `pnpm --filter @simple-agent-manager/terminal lint` reports 0 warnings
+- [x] `pnpm --filter @simple-agent-manager/terminal typecheck` passes
+- [x] `pnpm --filter @simple-agent-manager/terminal test` passes (90 tests)
+- [x] `useTabShortcuts` hook removed from source and exports
+- [x] Tab items are keyboard-activatable (Enter/Space) and close button is keyboard-accessible
+- [x] TabBar has `role="tablist"`, TabItem has working `role="tab"` with keyboard handler
+- [x] TabOverflowMenu items use `<button>` elements instead of `<div role="menuitem">`
+- [x] Session state updates in `useTerminalSessions` use immutable object spreads
+- [x] Persistence validates wsUrl scope and clears malformed state
+- [x] Ping interval is properly scoped per connection with no leak potential
+- [x] terminalsRef cleanup captures stable reference
+- [x] Terminal UI tokens centralized in `terminal-tokens.ts`
+- [x] Tests cover keyboard activation, persistence recovery, and reconnect timer cleanup
 
 ## References
 

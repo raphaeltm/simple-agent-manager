@@ -1,5 +1,5 @@
 import { act,renderHook } from '@testing-library/react';
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach,assert, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useTerminalSessions } from '../../../src/hooks/useTerminalSessions';
 
@@ -328,8 +328,8 @@ describe('useTerminalSessions', () => {
 
       // Check sessionStorage contains the serverSessionId
       const raw = sessionStorage.getItem(PERSISTENCE_KEY);
-      expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!);
+      assert(raw !== null, 'expected persisted state');
+      const parsed = JSON.parse(raw);
       expect(parsed.sessions).toHaveLength(1);
       expect(parsed.sessions[0].serverSessionId).toBe('server-abc-123');
       expect(parsed.sessions[0].name).toBe('Tab 1');
@@ -349,12 +349,12 @@ describe('useTerminalSessions', () => {
       const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
 
       const loaded = result.current.getPersistedSessions();
-      expect(loaded).not.toBeNull();
+      assert(loaded !== null, 'expected loaded sessions');
       expect(loaded).toHaveLength(2);
-      expect(loaded![0]!.serverSessionId).toBe('server-111');
-      expect(loaded![0]!.name).toBe('Tab 1');
-      expect(loaded![1]!.serverSessionId).toBe('server-222');
-      expect(loaded![1]!.name).toBe('Tab 2');
+      expect(loaded[0].serverSessionId).toBe('server-111');
+      expect(loaded[0].name).toBe('Tab 1');
+      expect(loaded[1].serverSessionId).toBe('server-222');
+      expect(loaded[1].name).toBe('Tab 2');
     });
 
     it('should restore counter from persisted state', () => {
@@ -421,8 +421,8 @@ describe('useTerminalSessions', () => {
       });
 
       const raw = sessionStorage.getItem(PERSISTENCE_KEY);
-      expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!);
+      assert(raw !== null, 'expected persisted state');
+      const parsed = JSON.parse(raw);
       expect(parsed.sessions).toHaveLength(2);
 
       // Sessions should be persisted in order
@@ -450,17 +450,18 @@ describe('useTerminalSessions', () => {
 
       // Load persisted sessions (as MultiTerminal.tsx would on reconnect)
       const loaded = result.current.getPersistedSessions();
+      assert(loaded !== null, 'expected loaded sessions');
       expect(loaded).toHaveLength(2);
-      expect(loaded![0]!.name).toBe('Dev Server');
-      expect(loaded![1]!.name).toBe('Build');
+      expect(loaded[0].name).toBe('Dev Server');
+      expect(loaded[1].name).toBe('Build');
 
       // Simulate what MultiTerminal does when server returns empty session_list:
       // create fresh sessions with the persisted names
       let freshId1 = '';
       let freshId2 = '';
       act(() => {
-        freshId1 = result.current.createSession(loaded![0]!.name);
-        freshId2 = result.current.createSession(loaded![1]!.name);
+        freshId1 = result.current.createSession(loaded[0].name);
+        freshId2 = result.current.createSession(loaded[1].name);
       });
 
       // Verify sessions were created with the original names
@@ -475,12 +476,228 @@ describe('useTerminalSessions', () => {
 
       // Verify the new serverSessionIds are persisted
       const raw = sessionStorage.getItem(PERSISTENCE_KEY);
-      const parsed = JSON.parse(raw!);
+      assert(raw !== null, 'expected persisted state');
+      const parsed = JSON.parse(raw);
       const sorted = [...parsed.sessions].sort(
         (a: { order: number }, b: { order: number }) => a.order - b.order,
       );
       expect(sorted[0].serverSessionId).toBe('new-srv-AAA');
       expect(sorted[1].serverSessionId).toBe('new-srv-BBB');
+    });
+
+    it('should reject persisted state when wsUrl does not match', () => {
+      const persisted = {
+        sessions: [{ name: 'Tab 1', order: 0, serverSessionId: 'srv-1' }],
+        counter: 2,
+        wsUrl: 'ws://old-host/ws',
+      };
+      sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
+
+      const { result } = renderHook(() =>
+        useTerminalSessions(10, PERSISTENCE_KEY, 'ws://new-host/ws')
+      );
+
+      // Should return null because wsUrl doesn't match
+      const loaded = result.current.getPersistedSessions();
+      expect(loaded).toBeNull();
+      // Storage should have been cleared
+      expect(sessionStorage.getItem(PERSISTENCE_KEY)).toBeNull();
+    });
+
+    it('should accept persisted state when wsUrl matches', () => {
+      const wsUrl = 'ws://same-host/ws';
+      const persisted = {
+        sessions: [{ name: 'Tab 1', order: 0, serverSessionId: 'srv-1' }],
+        counter: 2,
+        wsUrl,
+      };
+      sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
+
+      const { result } = renderHook(() =>
+        useTerminalSessions(10, PERSISTENCE_KEY, wsUrl)
+      );
+
+      const loaded = result.current.getPersistedSessions();
+      assert(loaded !== null, 'expected loaded sessions');
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].name).toBe('Tab 1');
+    });
+
+    it('should clear malformed storage on parse failure', () => {
+      sessionStorage.setItem(PERSISTENCE_KEY, '{invalid json!!!');
+
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      const loaded = result.current.getPersistedSessions();
+      expect(loaded).toBeNull();
+      // Malformed storage should have been cleared
+      expect(sessionStorage.getItem(PERSISTENCE_KEY)).toBeNull();
+    });
+
+    it('should persist wsUrl in storage for scope validation', () => {
+      const wsUrl = 'ws://myhost/ws';
+      const { result } = renderHook(() =>
+        useTerminalSessions(10, PERSISTENCE_KEY, wsUrl)
+      );
+
+      act(() => {
+        result.current.createSession('Tab 1');
+      });
+
+      const raw = sessionStorage.getItem(PERSISTENCE_KEY);
+      assert(raw !== null, 'expected persisted state');
+      const parsed = JSON.parse(raw);
+      expect(parsed.wsUrl).toBe(wsUrl);
+    });
+  });
+
+  describe('immutable updates', () => {
+    it('should not mutate session objects in-place when activating', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id2 = '';
+      act(() => {
+        result.current.createSession('Tab 1');
+        id2 = result.current.createSession('Tab 2');
+      });
+
+      // Get reference to session object before activation
+      const sessionBefore = result.current.sessions.get(id2);
+
+      act(() => {
+        result.current.activateSession(id2);
+      });
+
+      // After activation, the session object in the map should be a new reference
+      const sessionAfter = result.current.sessions.get(id2);
+      expect(sessionAfter).not.toBe(sessionBefore);
+      expect(sessionAfter?.isActive).toBe(true);
+    });
+
+    it('should not mutate session objects in-place when renaming', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id = '';
+      act(() => {
+        id = result.current.createSession('Original');
+      });
+
+      const sessionBefore = result.current.sessions.get(id);
+
+      act(() => {
+        result.current.renameSession(id, 'Renamed');
+      });
+
+      const sessionAfter = result.current.sessions.get(id);
+      expect(sessionAfter).not.toBe(sessionBefore);
+      expect(sessionAfter?.name).toBe('Renamed');
+    });
+
+    it('should not mutate session objects in-place when updating status', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id = '';
+      act(() => {
+        id = result.current.createSession('Tab 1');
+      });
+
+      const sessionBefore = result.current.sessions.get(id);
+
+      act(() => {
+        result.current.updateSessionStatus(id, 'connected');
+      });
+
+      const sessionAfter = result.current.sessions.get(id);
+      expect(sessionAfter).not.toBe(sessionBefore);
+      expect(sessionAfter?.status).toBe('connected');
+    });
+  });
+
+  describe('updateSessionWorkingDirectory', () => {
+    it('should update working directory for a session', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id = '';
+      act(() => {
+        id = result.current.createSession('Tab 1');
+      });
+
+      act(() => {
+        result.current.updateSessionWorkingDirectory(id, '/workspaces/repo');
+      });
+
+      const session = result.current.sessions.get(id);
+      expect(session?.workingDirectory).toBe('/workspaces/repo');
+    });
+
+    it('should not mutate the session object in-place', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id = '';
+      act(() => {
+        id = result.current.createSession('Tab 1');
+      });
+
+      const before = result.current.sessions.get(id);
+
+      act(() => {
+        result.current.updateSessionWorkingDirectory(id, '/new/path');
+      });
+
+      const after = result.current.sessions.get(id);
+      expect(after).not.toBe(before);
+      expect(after?.workingDirectory).toBe('/new/path');
+    });
+  });
+
+  describe('closeSession ordering', () => {
+    it('should activate the next-higher-order session when closing active tab', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id2 = '';
+      let id3 = '';
+      act(() => {
+        result.current.createSession('Tab 1');
+        id2 = result.current.createSession('Tab 2');
+        id3 = result.current.createSession('Tab 3');
+      });
+
+      // Activate the middle session
+      act(() => {
+        result.current.activateSession(id2);
+      });
+      expect(result.current.activeSessionId).toBe(id2);
+
+      // Close the middle session — should activate id3 (next higher order)
+      act(() => {
+        result.current.closeSession(id2);
+      });
+
+      expect(result.current.activeSessionId).toBe(id3);
+      expect(result.current.sessions.has(id2)).toBe(false);
+    });
+
+    it('should fall back to lower-order session when no higher-order exists', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id1 = '';
+      let id2 = '';
+      act(() => {
+        id1 = result.current.createSession('Tab 1');
+        id2 = result.current.createSession('Tab 2');
+      });
+
+      // Activate the last session
+      act(() => {
+        result.current.activateSession(id2);
+      });
+
+      // Close the last session — should fall back to id1 (lower order)
+      act(() => {
+        result.current.closeSession(id2);
+      });
+
+      expect(result.current.activeSessionId).toBe(id1);
     });
   });
 });
