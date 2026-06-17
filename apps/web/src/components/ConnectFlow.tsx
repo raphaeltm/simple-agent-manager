@@ -35,6 +35,48 @@ interface ConnectFlowProps {
   onCancel?: () => void;
 }
 
+type ConnectFlowMode = 'connect' | 'replace' | 'project-override';
+
+function getFlowVerb(mode: ConnectFlowMode): string {
+  switch (mode) {
+    case 'replace':
+      return 'Replace';
+    case 'project-override':
+      return 'Save override';
+    case 'connect':
+      return 'Connect';
+  }
+}
+
+function getSuccessMessage(agentName: string, mode: ConnectFlowMode, isProjectScoped: boolean): string {
+  if (isProjectScoped) {
+    return `${agentName} saved for this project`;
+  }
+  return `${agentName} ${mode === 'replace' ? 'replaced' : 'connected'}`;
+}
+
+function getCredentialLabel(
+  authMethod: CredentialKind,
+  isOpenCodeApiKey: boolean,
+  isCodexAuthJson: boolean
+): string {
+  if (authMethod === 'api-key') {
+    return isOpenCodeApiKey ? 'OpenCode Zen API Key' : 'API Key';
+  }
+  return isCodexAuthJson ? 'Codex auth.json' : 'OAuth Token';
+}
+
+function getCredentialPlaceholder(
+  authMethod: CredentialKind,
+  isOpenCodeApiKey: boolean,
+  envVarName: string
+): string {
+  if (authMethod !== 'api-key') {
+    return 'Paste token...';
+  }
+  return isOpenCodeApiKey ? 'OPENCODE_API_KEY' : envVarName;
+}
+
 export function ConnectFlow({
   projectId,
   initialAgentId,
@@ -54,8 +96,7 @@ export function ConnectFlow({
   const hasOAuth = selectedAgent?.oauthSupport != null;
   const isCodexAuthJson = selectedAgent?.id === 'openai-codex' && authMethod === 'oauth-token';
   const isOpenCodeApiKey = selectedAgent?.id === 'opencode' && authMethod === 'api-key';
-  const flowVerb =
-    mode === 'replace' ? 'Replace' : mode === 'project-override' ? 'Save override' : 'Connect';
+  const flowVerb = getFlowVerb(mode);
 
   const handleSave = async () => {
     if (!agentId || !credential.trim()) return;
@@ -71,13 +112,10 @@ export function ConnectFlow({
     try {
       if (projectId) {
         await saveProjectAgentCredential(projectId, request);
-        toast.success(`${selectedAgent?.name ?? agentId} saved for this project`);
       } else {
         await saveAgentCredential(request);
-        toast.success(
-          `${selectedAgent?.name ?? agentId} ${mode === 'replace' ? 'replaced' : 'connected'}`
-        );
       }
+      toast.success(getSuccessMessage(selectedAgent?.name ?? agentId, mode, Boolean(projectId)));
       onConnected?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save credential');
@@ -169,13 +207,7 @@ export function ConnectFlow({
           {/* Credential input */}
           <div className="flex flex-col gap-1.5">
             <label htmlFor="connect-credential" className="text-xs font-medium text-fg-muted">
-              {authMethod === 'api-key'
-                ? isOpenCodeApiKey
-                  ? 'OpenCode Zen API Key'
-                  : 'API Key'
-                : isCodexAuthJson
-                  ? 'Codex auth.json'
-                  : 'OAuth Token'}
+              {getCredentialLabel(authMethod, isOpenCodeApiKey, isCodexAuthJson)}
             </label>
             {authMethod === 'api-key' && selectedAgent.credentialHelpUrl && (
               <p className="m-0 text-xs text-fg-muted">
@@ -207,13 +239,11 @@ export function ConnectFlow({
               <input
                 id="connect-credential"
                 type="password"
-                placeholder={
-                  authMethod === 'api-key'
-                    ? isOpenCodeApiKey
-                      ? 'OPENCODE_API_KEY'
-                      : selectedAgent.envVarName
-                    : 'Paste token...'
-                }
+                placeholder={getCredentialPlaceholder(
+                  authMethod,
+                  isOpenCodeApiKey,
+                  selectedAgent.envVarName
+                )}
                 value={credential}
                 onChange={(e) => setCredential(e.currentTarget.value)}
                 className="w-full py-2 px-3 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"

@@ -136,7 +136,7 @@ export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
 
 export function resolveOpenCodeProvider(raw: unknown): OpenCodeProvider {
   if (raw === OPENCODE_MANAGED_PROVIDER_ALIAS) return DEFAULT_OPENCODE_PROVIDER;
-  if (typeof raw === 'string' && Object.prototype.hasOwnProperty.call(OPENCODE_PROVIDERS, raw)) {
+  if (typeof raw === 'string' && Object.hasOwn(OPENCODE_PROVIDERS, raw)) {
     return raw as OpenCodeProvider;
   }
   return DEFAULT_OPENCODE_PROVIDER;
