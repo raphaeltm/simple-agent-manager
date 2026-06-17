@@ -203,6 +203,8 @@ export const TabBar: React.FC<TabBarProps> = ({
             style={overflowBtnStyle}
             onClick={() => setShowOverflowMenu(!showOverflowMenu)}
             aria-label="Show all terminals"
+            aria-expanded={showOverflowMenu}
+            aria-haspopup="menu"
             title="All Terminals"
           >
             ⋮

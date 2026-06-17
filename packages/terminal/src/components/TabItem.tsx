@@ -144,8 +144,8 @@ export const TabItem: React.FC<TabItemProps> = ({
 
   const handleTabKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
       if (!isActive && !isEditing) {
+        e.preventDefault();
         onActivate(session.id);
       }
     }

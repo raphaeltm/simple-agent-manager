@@ -27,11 +27,15 @@ export const colors = {
 
   /** Accent / active indicator */
   accent: '#7aa2f7',
+  /** Cursor / selection foreground */
+  cursor: '#c0caf5',
   /** Error / destructive */
   error: '#f7768e',
 
   /** Border between chrome elements */
   border: '#2a2d3a',
+  /** Shadow for elevated surfaces */
+  shadow: 'rgba(0, 0, 0, 0.4)',
 } as const;
 
 // ── Status indicator colors ──
@@ -75,7 +79,7 @@ export const dimensions = {
 export const xtermTheme = {
   background: colors.bg,
   foreground: colors.fg,
-  cursor: '#c0caf5',
+  cursor: colors.cursor,
   selectionBackground: colors.bgHighlight,
   black: '#32344a',
   red: '#f7768e',

@@ -18,7 +18,7 @@ const dropdownStyle: React.CSSProperties = {
   backgroundColor: colors.bgSurface,
   border: `1px solid ${colors.border}`,
   borderRadius: 6,
-  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+  boxShadow: `0 8px 24px ${colors.shadow}`,
   minWidth: dimensions.menuMinWidth,
   maxHeight: dimensions.menuMaxHeight,
   overflowY: 'auto',
