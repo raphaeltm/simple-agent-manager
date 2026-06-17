@@ -104,7 +104,7 @@ export async function handleGetRegistryCredentials(
     );
 
     const instructions = [
-      '1. Run: docker login -u <username> -p <password> <registry>',
+      '1. Run: printf \'%s\' "<password>" | docker login -u <username> --password-stdin <registry>',
       `2. Tag your image: docker tag <image> ${result.registry}/${result.namespace}/<app-name>:<tag>`,
       `3. Push: docker push ${result.registry}/${result.namespace}/<app-name>:<tag>`,
       `4. Credentials expire at ${result.expiresAt}`,

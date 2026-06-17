@@ -94,6 +94,17 @@ describe('handleGetRegistryCredentials', () => {
     expect(parsed.expiresAt).toBe('2026-06-11T12:00:00.000Z');
     expect(parsed.instructions).toBeInstanceOf(Array);
     expect(parsed.instructions.length).toBeGreaterThan(0);
+
+    // Security: the docker login instruction must use --password-stdin and must
+    // never tell the agent to pass the password as an argv flag (-p/--password),
+    // which would leak it into process listings, shell history, and audit logs.
+    const loginInstruction = (parsed.instructions as string[]).find((line) =>
+      line.includes('docker login'),
+    );
+    expect(loginInstruction).toBeDefined();
+    expect(loginInstruction).toContain('--password-stdin');
+    expect(loginInstruction).not.toMatch(/-p\s+<password>/);
+    expect(loginInstruction).not.toMatch(/--password\s+<password>/);
   });
 
   it('returns error when environment does not exist', async () => {
