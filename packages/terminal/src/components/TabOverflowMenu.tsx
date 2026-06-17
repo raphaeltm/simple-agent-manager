@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-import { colors, dimensions, ellipsisText, fonts, getStatusColor } from '../terminal-tokens';
+import { applyHoverIn, applyHoverOut, colors, dimensions, ellipsisText, fonts, getStatusColor } from '../terminal-tokens';
 import type { TerminalSession } from '../types/multi-terminal';
 
 interface TabOverflowMenuProps {
@@ -53,28 +53,23 @@ export const TabOverflowMenu: React.FC<TabOverflowMenuProps> = ({
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close menu when clicking outside
+  // Close on click-outside or Escape key
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
-
-  // Close on Escape key
-  useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
+      if (event.key === 'Escape') onClose();
     };
 
+    document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [onClose]);
 
   return (
@@ -91,18 +86,8 @@ export const TabOverflowMenu: React.FC<TabOverflowMenuProps> = ({
             }}
             onClick={() => onSelect(session.id)}
             role="menuitem"
-            onMouseEnter={(e) => {
-              if (!isActive) {
-                e.currentTarget.style.backgroundColor = colors.bgSurface;
-                e.currentTarget.style.color = colors.fg;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = colors.fgMuted;
-              }
-            }}
+            onMouseEnter={(e) => { if (!isActive) applyHoverIn(e.currentTarget); }}
+            onMouseLeave={(e) => { if (!isActive) applyHoverOut(e.currentTarget); }}
           >
             <span style={{
               fontSize: 8,
