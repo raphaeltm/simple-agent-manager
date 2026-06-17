@@ -6,8 +6,9 @@
  * the upstream provider.
  *
  * Two modes:
- * - User has upstream-compatible credential → apiKeySource: 'callback-token' (passthrough proxy)
- * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
+ * - Claude/Codex user has upstream-compatible credential → passthrough proxy
+ * - Claude/Codex explicit SAM provider or OpenCode explicit platform provider
+ *   with no user credential → platform proxy
  */
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -230,10 +231,10 @@ beforeEach(() => {
 });
 
 describe('runtime.ts always-proxy', () => {
-  it('preserves current passthrough inferenceConfig outputs by agent type', async () => {
+  it('preserves passthrough inferenceConfig outputs for Claude/Codex agents', async () => {
     const outputs: Record<string, unknown> = {};
 
-    for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
+    for (const agentType of ['claude-code', 'openai-codex']) {
       vi.clearAllMocks();
       queryCount = 0;
       mockKvGet.mockResolvedValue(null);
@@ -273,17 +274,11 @@ describe('runtime.ts always-proxy', () => {
           "model": "gpt-4.1",
           "provider": "openai-passthrough",
         },
-        "opencode": {
-          "apiKeySource": "callback-token",
-          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
-          "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
-          "provider": "openai-passthrough",
-        },
       }
     `);
   });
 
-  it('preserves current platform inferenceConfig outputs by agent type', async () => {
+  it('preserves platform inferenceConfig outputs for explicit platform selections by agent type', async () => {
     const outputs: Record<string, unknown> = {};
 
     for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
@@ -293,10 +288,13 @@ describe('runtime.ts always-proxy', () => {
       mockDbLimit.mockImplementation(() => {
         queryCount++;
         if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
-        if (queryCount === 2 && agentType !== 'opencode') return [{ providerMode: 'sam' }];
+        if (queryCount === 2 && agentType === 'opencode') return [{ opencodeProvider: 'platform' }];
+        if (queryCount === 2) return [{ providerMode: 'sam' }];
         return [];
       });
-      mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+      if (agentType !== 'opencode') {
+        mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+      }
 
       const response = await postAgentKey(agentType);
       const json = await response.json() as { inferenceConfig?: unknown };

@@ -9,8 +9,8 @@ import {
   getAgentDefinition,
   HARNESS_CAPABILITIES,
   isValidAgentType,
-  OPENCODE_PROVIDERS,
   resolveHarnessDialect,
+  resolveOpenCodeProvider,
 } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -272,16 +272,11 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         )
       )
       .limit(1);
-    const provider = settingsRows[0]?.opencodeProvider ?? null;
-    selectedOpenCodeProvider =
-      provider && Object.prototype.hasOwnProperty.call(OPENCODE_PROVIDERS, provider)
-        ? provider
-        : null;
+    selectedOpenCodeProvider = resolveOpenCodeProvider(settingsRows[0]?.opencodeProvider ?? null);
   }
 
   const opencodeRequiresDedicatedCredential =
     body.agentType === 'opencode' &&
-    selectedOpenCodeProvider !== null &&
     selectedOpenCodeProvider !== 'platform' &&
     selectedOpenCodeProvider !== 'scaleway';
 
@@ -307,20 +302,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
   // definition specifies a cloud provider whose credential can be used instead.
-  // Currently applies to OpenCode only when the selected provider is default/Scaleway,
-  // which shares SCW_SECRET_KEY with the Scaleway cloud credential.
+  // OpenCode no longer advertises Scaleway as a catalog fallback; retain the legacy
+  // cloud credential reuse only for explicit Scaleway provider selections.
   const agentDef = isValidAgentType(body.agentType)
     ? getAgentDefinition(body.agentType)
     : undefined;
-  const allowCloudProviderFallback =
-    body.agentType !== 'opencode' ||
-    selectedOpenCodeProvider === null ||
-    selectedOpenCodeProvider === 'scaleway';
-  if (!credentialData && allowCloudProviderFallback && agentDef?.fallbackCloudProvider) {
+  const fallbackCloudProvider =
+    body.agentType === 'opencode' && selectedOpenCodeProvider === 'scaleway'
+      ? 'scaleway'
+      : agentDef?.fallbackCloudProvider;
+  if (!credentialData && fallbackCloudProvider) {
     const scalewayToken = await getDecryptedCredential(
       db,
       workspace.userId,
-      agentDef.fallbackCloudProvider,
+      fallbackCloudProvider,
       encryptionKey
     );
     if (scalewayToken) {
@@ -360,12 +355,12 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   // AI proxy: when enabled and agent is eligible, return proxy config when the
   // credential can be forwarded to the upstream provider.
-  // Two modes:
+  // Three modes:
   // - Claude/Codex with no user credential + providerMode='sam' → platform proxy (callback-token auth)
-  // - OpenCode with no user credential → existing platform proxy fallback
+  // - OpenCode with provider='platform' → platform proxy
   // - User has upstream-compatible credential → passthrough proxy (user credential
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
-  // Note: Claude/Codex platform proxy fallback requires explicit providerMode='sam' selection.
+  // Note: platform proxy fallback requires explicit provider selection.
   // Without it, users with no credential get a 404 (agent not configured).
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
   if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
@@ -478,8 +473,19 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       });
     }
 
+    if (body.agentType === 'opencode' && selectedOpenCodeProvider !== 'platform') {
+      log.info('agent_key.opencode_zen_missing_credential', {
+        workspaceId,
+        userId: workspace.userId,
+        agentType: body.agentType,
+        opencodeProvider: selectedOpenCodeProvider,
+      });
+      throw errors.notFound('Agent credential');
+    }
+
     // Claude Code and Codex require an explicit SAM provider selection before
-    // using platform proxy. OpenCode keeps its existing platform fallback path.
+    // using platform proxy. OpenCode also requires explicit platform selection;
+    // default OpenCode is Zen and must not silently fall back to SAM platform AI.
     if (isClaudeCode || isCodex) {
       const providerMode = await getExplicitProviderMode();
 

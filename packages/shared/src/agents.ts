@@ -136,14 +136,13 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
   {
     id: 'opencode',
     name: 'OpenCode',
-    description: 'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.',
+    description: 'Open-source AI coding agent by SST. Uses OpenCode Zen for inference.',
     provider: 'opencode',
-    envVarName: 'SCW_SECRET_KEY',
+    envVarName: 'OPENCODE_API_KEY',
     acpCommand: 'opencode',
     acpArgs: ['acp'],
     supportsAcp: true,
-    credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
-    fallbackCloudProvider: 'scaleway',
+    credentialHelpUrl: 'https://opencode.ai/auth',
     installCommand: 'npm install -g opencode-ai@1.4.3',
   },
   {

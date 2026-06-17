@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   OpenCodeProvider,
 } from '@simple-agent-manager/shared';
+import { resolveOpenCodeProvider } from '@simple-agent-manager/shared';
 
 export type AgentConnectionStatus = 'connected' | 'disconnected';
 
@@ -18,7 +19,7 @@ export interface AgentConnectionSummary {
  * - OpenCode with platform provider or platform catalog fallback
  *   → "Platform AI" (connected, no key needed)
  * - Any active credential → agent-provided label, fallback to kind-based label
- * - Scaleway-cloud fallback (user scope only, OpenCode with scaleway/no-provider)
+ * - Scaleway-cloud fallback (user scope only, OpenCode with explicit scaleway)
  *   → "Using Scaleway Cloud Key" (connected)
  * - Otherwise → "Not Configured" (disconnected)
  *
@@ -33,15 +34,17 @@ export function getAgentConnectionSummary(
 ): AgentConnectionSummary {
   const activeCredential = credentials?.find((c) => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
+  const effectiveOpenCodeProvider =
+    agent.id === 'opencode' ? resolveOpenCodeProvider(opencodeProvider) : null;
 
   const isOpenCodePlatform =
     scope === 'user' &&
     agent.id === 'opencode' &&
-    (opencodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
+    (effectiveOpenCodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
   const usesScalewayFallback =
     scope === 'user' &&
     agent.fallbackCredentialSource === 'scaleway-cloud' &&
-    (!opencodeProvider || opencodeProvider === 'scaleway');
+    effectiveOpenCodeProvider === 'scaleway';
   const usesSamProvider = agent.fallbackCredentialSource === 'platform-sam';
 
   if (isOpenCodePlatform) {

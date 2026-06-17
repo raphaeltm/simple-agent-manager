@@ -1,4 +1,8 @@
-import type { CredentialKind } from '@simple-agent-manager/shared';
+import {
+  type CredentialKind,
+  DEFAULT_OPENCODE_PROVIDER,
+  DEFAULT_OPENCODE_ZEN_MODEL,
+} from '@simple-agent-manager/shared';
 
 import { ulid } from '../../lib/ulid';
 
@@ -39,6 +43,14 @@ function credentialLabel(
 
 function scopeLabel(projectId?: string | null): string {
   return projectId ? 'project override' : 'default';
+}
+
+function configurationSettingsJson(agentType: string): string | null {
+  if (agentType !== 'opencode') return null;
+  return JSON.stringify({
+    providerId: DEFAULT_OPENCODE_PROVIDER,
+    model: DEFAULT_OPENCODE_ZEN_MODEL,
+  });
 }
 
 function deleteAttachmentsSql(projectId?: string | null): string {
@@ -119,12 +131,13 @@ export async function syncAgentCredentialToCC(
       now
     );
 
+  const settingsJson = configurationSettingsJson(input.agentType);
   const configurationStmt = database
     .prepare(
       `INSERT INTO cc_configurations (
        id, owner_id, name, consumer_kind, consumer_target, credential_id,
        settings_json, is_active, created_at, updated_at
-     ) VALUES (?, ?, ?, 'agent', ?, ?, NULL, 1, ?, ?)`
+     ) VALUES (?, ?, ?, 'agent', ?, ?, ?, 1, ?, ?)`
     )
     .bind(
       configurationId,
@@ -132,6 +145,7 @@ export async function syncAgentCredentialToCC(
       `${input.agentName} ${scopeLabel(input.projectId)}`,
       input.agentType,
       credentialId,
+      settingsJson,
       now,
       now
     );

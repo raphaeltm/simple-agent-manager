@@ -53,6 +53,7 @@ export function ConnectFlow({
   const selectedAgent = AGENT_CATALOG.find((a) => a.id === agentId);
   const hasOAuth = selectedAgent?.oauthSupport != null;
   const isCodexAuthJson = selectedAgent?.id === 'openai-codex' && authMethod === 'oauth-token';
+  const isOpenCodeApiKey = selectedAgent?.id === 'opencode' && authMethod === 'api-key';
   const flowVerb =
     mode === 'replace' ? 'Replace' : mode === 'project-override' ? 'Save override' : 'Connect';
 
@@ -169,7 +170,9 @@ export function ConnectFlow({
           <div className="flex flex-col gap-1.5">
             <label htmlFor="connect-credential" className="text-xs font-medium text-fg-muted">
               {authMethod === 'api-key'
-                ? 'API Key'
+                ? isOpenCodeApiKey
+                  ? 'OpenCode Zen API Key'
+                  : 'API Key'
                 : isCodexAuthJson
                   ? 'Codex auth.json'
                   : 'OAuth Token'}
@@ -183,7 +186,7 @@ export function ConnectFlow({
                   rel="noopener noreferrer"
                   className="text-accent"
                 >
-                  {selectedAgent.provider} console
+                  {isOpenCodeApiKey ? 'OpenCode Zen' : `${selectedAgent.provider} console`}
                 </a>
               </p>
             )}
@@ -204,7 +207,13 @@ export function ConnectFlow({
               <input
                 id="connect-credential"
                 type="password"
-                placeholder={authMethod === 'api-key' ? selectedAgent.envVarName : 'Paste token...'}
+                placeholder={
+                  authMethod === 'api-key'
+                    ? isOpenCodeApiKey
+                      ? 'OPENCODE_API_KEY'
+                      : selectedAgent.envVarName
+                    : 'Paste token...'
+                }
                 value={credential}
                 onChange={(e) => setCredential(e.currentTarget.value)}
                 className="w-full py-2 px-3 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"

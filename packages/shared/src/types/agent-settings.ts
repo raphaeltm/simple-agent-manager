@@ -30,11 +30,16 @@ export type AgentPermissionMode =
 export type OpenCodeProvider =
   | 'platform'
   | 'scaleway'
+  | 'opencode-zen'
   | 'opencode-managed'
   | 'google-vertex'
   | 'openai-compatible'
   | 'anthropic'
   | 'custom';
+
+export const DEFAULT_OPENCODE_PROVIDER = 'opencode-zen' as const;
+export const OPENCODE_MANAGED_PROVIDER_ALIAS = 'opencode-managed' as const;
+export const DEFAULT_OPENCODE_ZEN_MODEL = 'opencode/claude-sonnet-4-6' as const;
 
 /** Metadata for an OpenCode provider option */
 export interface OpenCodeProviderMeta {
@@ -68,13 +73,21 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
     keyLabel: 'Scaleway Secret Key',
     keyHelpText: 'Create a Scaleway API key with GenerativeApisModelAccess permission',
   },
-  'opencode-managed': {
-    label: 'OpenCode Managed',
-    modelPlaceholder: 'e.g. opencode-zen/claude-sonnet-4-5 or opencode-go/glm-5',
+  'opencode-zen': {
+    label: 'OpenCode Zen',
+    modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
     requiresBaseUrl: false,
     requiresApiKey: true,
-    keyLabel: 'OpenCode API Key',
-    keyHelpText: 'Enter your opencode.ai API key for managed Zen and Go models',
+    keyLabel: 'OpenCode Zen API Key',
+    keyHelpText: 'Create an OpenCode API key for Zen at opencode.ai/auth',
+  },
+  'opencode-managed': {
+    label: 'OpenCode Zen',
+    modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
+    requiresBaseUrl: false,
+    requiresApiKey: true,
+    keyLabel: 'OpenCode Zen API Key',
+    keyHelpText: 'Create an OpenCode API key for Zen at opencode.ai/auth',
   },
   'google-vertex': {
     label: 'Google Vertex',
@@ -112,14 +125,22 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
 
 /** Ordered list of OpenCode provider values for dropdown rendering */
 export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
+  'opencode-zen',
   'platform',
   'scaleway',
-  'opencode-managed',
   'google-vertex',
   'openai-compatible',
   'anthropic',
   'custom',
 ];
+
+export function resolveOpenCodeProvider(raw: unknown): OpenCodeProvider {
+  if (raw === OPENCODE_MANAGED_PROVIDER_ALIAS) return DEFAULT_OPENCODE_PROVIDER;
+  if (typeof raw === 'string' && Object.prototype.hasOwnProperty.call(OPENCODE_PROVIDERS, raw)) {
+    return raw as OpenCodeProvider;
+  }
+  return DEFAULT_OPENCODE_PROVIDER;
+}
 
 /** Agent settings stored per-user, per-agent in D1 */
 export interface AgentSettings {

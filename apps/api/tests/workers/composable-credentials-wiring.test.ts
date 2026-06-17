@@ -269,6 +269,7 @@ describe('Rule 28: inactive project-scoped attachment halts resolution', () => {
 
 const USER_CODEX_REPLACE = `${TEST_PREFIX}-user-codex-replace`;
 const USER_CODEX_MANUAL = `${TEST_PREFIX}-user-codex-manual`;
+const USER_OPENCODE_SYNC = `${TEST_PREFIX}-user-opencode-sync`;
 
 function codexAuthJson(accessToken: string): string {
   return JSON.stringify({
@@ -284,7 +285,7 @@ function codexAuthJson(accessToken: string): string {
 
 describe('Codex composable credential replacement and runtime mapping', () => {
   beforeAll(async () => {
-    for (const uid of [USER_CODEX_REPLACE, USER_CODEX_MANUAL]) {
+    for (const uid of [USER_CODEX_REPLACE, USER_CODEX_MANUAL, USER_OPENCODE_SYNC]) {
       await env.DATABASE.prepare(
         `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
          VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
@@ -355,6 +356,42 @@ describe('Codex composable credential replacement and runtime mapping', () => {
     expect(result!.credential).toBe(newAuthJson);
     expect(result!.credentialKind).toBe('oauth-token');
     expect(result!.credentialSource).toBe('user');
+  });
+
+  it('OpenCode API key sync creates an OpenCode Zen configuration', async () => {
+    const { syncAgentCredentialToCC } =
+      await import('../../src/services/composable-credentials/agent-sync');
+    const encrypted = await encrypt('sk-opencode-zen', ENCRYPTION_KEY);
+
+    await syncAgentCredentialToCC(env.DATABASE, {
+      userId: USER_OPENCODE_SYNC,
+      agentType: 'opencode',
+      credentialKind: 'api-key',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+      agentName: 'OpenCode',
+      isActive: true,
+    });
+
+    const { results } = await env.DATABASE.prepare(
+      `SELECT cfg.settings_json
+       FROM cc_attachments att
+       JOIN cc_configurations cfg ON cfg.id = att.configuration_id
+       JOIN cc_credentials cred ON cred.id = cfg.credential_id
+       WHERE att.user_id = ?
+         AND att.project_id IS NULL
+         AND att.consumer_kind = 'agent'
+         AND att.consumer_target = 'opencode'
+         AND cred.kind = 'api-key'`
+    )
+      .bind(USER_OPENCODE_SYNC)
+      .all<{ settings_json: string | null }>();
+
+    expect(results).toHaveLength(1);
+    expect(JSON.parse(results[0]?.settings_json ?? '{}')).toEqual({
+      providerId: 'opencode-zen',
+      model: 'opencode/claude-sonnet-4-6',
+    });
   });
 
   it('manual auth-json configuration resolves to oauth-token auth-file mode for Codex', async () => {

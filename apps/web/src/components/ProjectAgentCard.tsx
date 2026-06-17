@@ -14,6 +14,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_OPENCODE_ZEN_MODEL,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, StatusBadge } from '@simple-agent-manager/ui';
@@ -39,7 +40,7 @@ function modelPlaceholderFor(agentId: string): string {
     case 'google-gemini':
       return 'e.g. gemini-2.5-pro';
     case 'opencode':
-      return 'e.g. scaleway/qwen3-coder-30b-a3b-instruct';
+      return `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`;
     default:
       return 'Model identifier (leave empty to inherit)';
   }

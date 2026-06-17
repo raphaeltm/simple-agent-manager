@@ -64,4 +64,26 @@ describe('getAgentConnectionSummary', () => {
     expect(result.status).toBe('disconnected');
     expect(result.label).toBe('Not Configured');
   });
+
+  it('does not treat unset OpenCode provider as Scaleway fallback', () => {
+    const result = getAgentConnectionSummary(
+      makeAgent({ id: 'opencode', fallbackCredentialSource: 'scaleway-cloud' }),
+      [],
+      null,
+      'user',
+    );
+    expect(result.status).toBe('disconnected');
+    expect(result.label).toBe('Not Configured');
+  });
+
+  it('uses Scaleway fallback only when OpenCode provider is explicit Scaleway', () => {
+    const result = getAgentConnectionSummary(
+      makeAgent({ id: 'opencode', fallbackCredentialSource: 'scaleway-cloud' }),
+      [],
+      'scaleway',
+      'user',
+    );
+    expect(result.status).toBe('connected');
+    expect(result.label).toBe('Using Scaleway Cloud Key');
+  });
 });

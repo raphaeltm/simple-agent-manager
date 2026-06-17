@@ -52,6 +52,17 @@ describe('ConnectFlow', () => {
     expect(screen.getByLabelText(/API Key/i)).toBeInTheDocument();
   });
 
+  it('labels the default OpenCode credential as an OpenCode Zen API key', () => {
+    renderFlow({ initialAgentId: 'opencode' });
+
+    expect(screen.getByLabelText('OpenCode Zen API Key')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'OpenCode Zen' })).toHaveAttribute(
+      'href',
+      'https://opencode.ai/auth'
+    );
+    expect(screen.getByPlaceholderText('OPENCODE_API_KEY')).toBeInTheDocument();
+  });
+
   it('save button is disabled when credential is empty', () => {
     renderFlow({ initialAgentId: 'claude-code' });
 

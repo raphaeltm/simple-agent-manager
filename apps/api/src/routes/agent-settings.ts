@@ -7,6 +7,7 @@ import type {
 import {
   isValidAgentType,
   OPENCODE_PROVIDERS,
+  resolveOpenCodeProvider,
   VALID_AGENT_PROVIDER_MODES,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
@@ -82,7 +83,7 @@ function permissionModeFromDb(raw: string | null): AgentPermissionMode | null {
 }
 
 function opencodeProviderFromDb(raw: string | null): OpenCodeProvider | null {
-  return isOpenCodeProvider(raw) ? raw : null;
+  return isOpenCodeProvider(raw) ? resolveOpenCodeProvider(raw) : null;
 }
 
 function isAgentProviderMode(raw: string | null): raw is AgentProviderMode {

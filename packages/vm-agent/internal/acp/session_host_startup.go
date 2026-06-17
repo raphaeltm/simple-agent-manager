@@ -148,8 +148,10 @@ func credentialEnvVarName(agentType string, settings *agentSettingsPayload, info
 		return info.envVarName
 	}
 	switch settings.OpencodeProvider {
-	case "opencode-managed", "openai-compatible", "custom":
+	case "opencode-zen", "opencode-managed", "openai-compatible", "custom":
 		return "OPENCODE_API_KEY"
+	case "scaleway":
+		return "SCW_SECRET_KEY"
 	case "anthropic":
 		return "ANTHROPIC_API_KEY"
 	case "google-vertex":
@@ -389,7 +391,7 @@ func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agen
 	}
 
 	startup.envVars = append(startup.envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
-	provider := "scaleway"
+	provider := DefaultOpencodeProvider
 	if startup.settings != nil && startup.settings.OpencodeProvider != "" {
 		provider = startup.settings.OpencodeProvider
 	}

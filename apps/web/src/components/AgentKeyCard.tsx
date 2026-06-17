@@ -1,5 +1,5 @@
 import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, OpenCodeProvider, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
-import { getAgentDefinition, OPENCODE_PROVIDERS } from '@simple-agent-manager/shared';
+import { getAgentDefinition, OPENCODE_PROVIDERS, resolveOpenCodeProvider } from '@simple-agent-manager/shared';
 import { Alert, Button, Input, StatusBadge } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
@@ -44,6 +44,8 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   // Find active credential
   const activeCredential = credentials?.find(c => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
+  const effectiveOpenCodeProvider =
+    agent.id === 'opencode' ? resolveOpenCodeProvider(opencodeProvider) : null;
   let saveCredentialLabel = 'Save Credential';
   if (hasAnyCredential) saveCredentialLabel = 'Update Credential';
   if (loading) saveCredentialLabel = 'Testing...';
@@ -54,18 +56,18 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   const isOpenCodePlatform =
     scope === 'user' &&
     agent.id === 'opencode' &&
-    (opencodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
+    (effectiveOpenCodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
   const usesScalewayFallback =
     scope === 'user' &&
     agent.fallbackCredentialSource === 'scaleway-cloud' &&
-    (!opencodeProvider || opencodeProvider === 'scaleway');
+    effectiveOpenCodeProvider === 'scaleway';
 
   // Get provider-specific key label for OpenCode
-  const opencodeKeyLabel = agent.id === 'opencode' && opencodeProvider
-    ? OPENCODE_PROVIDERS[opencodeProvider]?.keyLabel || 'API Key'
+  const opencodeKeyLabel = effectiveOpenCodeProvider
+    ? OPENCODE_PROVIDERS[effectiveOpenCodeProvider]?.keyLabel || 'API Key'
     : null;
-  const opencodeKeyHelp = agent.id === 'opencode' && opencodeProvider
-    ? OPENCODE_PROVIDERS[opencodeProvider]?.keyHelpText || ''
+  const opencodeKeyHelp = effectiveOpenCodeProvider
+    ? OPENCODE_PROVIDERS[effectiveOpenCodeProvider]?.keyHelpText || ''
     : null;
 
   const handleSave = async (e: React.FormEvent) => {

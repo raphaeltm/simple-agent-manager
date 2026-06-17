@@ -416,19 +416,19 @@ describe('Agent Settings Routes', () => {
       expect(body.opencodeBaseUrl).toBeNull();
     });
 
-    it('should accept OpenCode managed provider without opencodeBaseUrl', async () => {
+    it('should accept OpenCode Zen provider without opencodeBaseUrl', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
       mockDB.limit.mockResolvedValueOnce([
         {
           id: 'test-ulid',
           userId: 'test-user-id',
           agentType: 'opencode',
-          model: 'opencode-zen/claude-sonnet-4-5',
+          model: 'opencode/claude-sonnet-4-6',
           permissionMode: null,
           allowedTools: null,
           deniedTools: null,
           additionalEnv: null,
-          opencodeProvider: 'opencode-managed',
+          opencodeProvider: 'opencode-zen',
           opencodeBaseUrl: null,
           opencodeProviderName: null,
           createdAt: new Date(),
@@ -437,15 +437,15 @@ describe('Agent Settings Routes', () => {
       ]);
 
       const res = await putSettings('opencode', {
-        opencodeProvider: 'opencode-managed',
-        model: 'opencode-zen/claude-sonnet-4-5',
+        opencodeProvider: 'opencode-zen',
+        model: 'opencode/claude-sonnet-4-6',
       });
 
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.opencodeProvider).toBe('opencode-managed');
+      expect(body.opencodeProvider).toBe('opencode-zen');
       expect(body.opencodeBaseUrl).toBeNull();
-      expect(body.model).toBe('opencode-zen/claude-sonnet-4-5');
+      expect(body.model).toBe('opencode/claude-sonnet-4-6');
     });
 
     it('should accept custom provider with valid HTTPS base URL', async () => {

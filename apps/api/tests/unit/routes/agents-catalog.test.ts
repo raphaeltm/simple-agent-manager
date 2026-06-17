@@ -24,7 +24,7 @@ interface CatalogDbState {
   agentCredentials?: QueryResult;
   scalewayCloudCredentials?: QueryResult;
   platformCloudCredentials?: QueryResult;
-  agentProviderModes?: QueryResult;
+  agentProviderSettings?: QueryResult;
 }
 
 function makeCatalogDb(state: CatalogDbState) {
@@ -33,7 +33,7 @@ function makeCatalogDb(state: CatalogDbState) {
     state.agentCredentials ?? [],
     state.scalewayCloudCredentials ?? [],
     state.platformCloudCredentials ?? [],
-    state.agentProviderModes ?? [],
+    state.agentProviderSettings ?? [],
   ];
 
   return {
@@ -115,10 +115,26 @@ describe('GET /api/agents', () => {
     });
   });
 
-  it('marks OpenCode configured via Scaleway fallback before platform fallback', async () => {
+  it('does not mark OpenCode configured from Scaleway cloud credential by default', async () => {
     vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
       scalewayCloudCredentials: [{ id: 'scw-cred' }],
       platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+    }) as ReturnType<typeof drizzle>);
+
+    const { agents } = await listAgents();
+    const opencode = agents.find((agent) => agent.id === 'opencode');
+
+    expect(opencode).toMatchObject({
+      configured: false,
+      fallbackCredentialSource: null,
+    });
+  });
+
+  it('marks OpenCode configured via Scaleway fallback when Scaleway is explicit', async () => {
+    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
+      scalewayCloudCredentials: [{ id: 'scw-cred' }],
+      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'scaleway' }],
     }) as ReturnType<typeof drizzle>);
 
     const { agents } = await listAgents();
@@ -130,10 +146,31 @@ describe('GET /api/agents', () => {
     });
   });
 
-  it('marks OpenCode configured via platform availability when no user fallback exists', async () => {
+  it('does not mark OpenCode configured via platform availability by default', async () => {
     vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
       agentCredentials: [{ agentType: 'claude-code' }],
       platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+    }) as ReturnType<typeof drizzle>);
+
+    const { agents } = await listAgents();
+    const opencode = agents.find((agent) => agent.id === 'opencode');
+    const claude = agents.find((agent) => agent.id === 'claude-code');
+
+    expect(opencode).toMatchObject({
+      configured: false,
+      fallbackCredentialSource: null,
+    });
+    expect(claude).toMatchObject({
+      configured: true,
+      fallbackCredentialSource: null,
+    });
+  });
+
+  it('marks OpenCode configured via platform availability when platform is explicit', async () => {
+    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
+      agentCredentials: [{ agentType: 'claude-code' }],
+      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
     }) as ReturnType<typeof drizzle>);
 
     const { agents } = await listAgents();
@@ -154,6 +191,7 @@ describe('GET /api/agents', () => {
     vi.mocked(decrypt).mockRejectedValueOnce(new DOMException('decrypt failed', 'OperationError'));
     vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
       platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
     }) as ReturnType<typeof drizzle>);
 
     const { agents } = await listAgents();
@@ -168,6 +206,7 @@ describe('GET /api/agents', () => {
   it('does not mark OpenCode configured when AI proxy is disabled', async () => {
     vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
       platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
     }) as ReturnType<typeof drizzle>);
 
     const { agents } = await listAgents(env({ AI_PROXY_ENABLED: 'false' } as Partial<Env>));

@@ -30,16 +30,15 @@ describe('AGENT_CATALOG', () => {
     expect(opencode).toBeDefined();
     expect(opencode!.name).toBe('OpenCode');
     expect(opencode!.description).toBe(
-      'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.'
+      'Open-source AI coding agent by SST. Uses OpenCode Zen for inference.'
     );
     expect(opencode!.provider).toBe('opencode');
-    expect(opencode!.envVarName).toBe('SCW_SECRET_KEY');
+    expect(opencode!.envVarName).toBe('OPENCODE_API_KEY');
     expect(opencode!.acpCommand).toBe('opencode');
     expect(opencode!.acpArgs).toEqual(['acp']);
     expect(opencode!.supportsAcp).toBe(true);
-    expect(opencode!.credentialHelpUrl).toBe(
-      'https://console.scaleway.com/iam/api-keys'
-    );
+    expect(opencode!.credentialHelpUrl).toBe('https://opencode.ai/auth');
+    expect(opencode!.fallbackCloudProvider).toBeUndefined();
     expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.3');
   });
 

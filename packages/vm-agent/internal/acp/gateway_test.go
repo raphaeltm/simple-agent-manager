@@ -1424,22 +1424,50 @@ func TestAuthFilePathValidation(t *testing.T) {
 	}
 }
 
-func TestBuildOpencodeConfig_OpenCodeManagedUsesBuiltInModelPrefixes(t *testing.T) {
+func TestBuildOpencodeConfig_DefaultUsesOpenCodeZen(t *testing.T) {
+	t.Parallel()
+
+	config := buildOpencodeConfig(nil, nil)
+
+	if got := config["model"]; got != DefaultOpencodeModel {
+		t.Fatalf("model = %v, want %q", got, DefaultOpencodeModel)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for default OpenCode Zen config: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_UnknownProviderFallsBackToOpenCodeZen(t *testing.T) {
+	t.Parallel()
+
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "unknown-provider",
+	}, nil)
+
+	if got := config["model"]; got != DefaultOpencodeModel {
+		t.Fatalf("model = %v, want %q", got, DefaultOpencodeModel)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for unknown-provider OpenCode fallback: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_OpenCodeZenUsesBuiltInModelPrefixes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name  string
 		model string
 	}{
-		{name: "zen prefix", model: "opencode-zen/claude-sonnet-4-5"},
-		{name: "go prefix", model: "opencode-go/glm-5"},
+		{name: "zen model", model: "opencode/claude-sonnet-4-6"},
+		{name: "legacy managed alias model", model: "opencode/claude-sonnet-4-5"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			config := buildOpencodeConfig(&agentSettingsPayload{
-				OpencodeProvider: "opencode-managed",
+				OpencodeProvider: "opencode-zen",
 				Model:            tt.model,
 			}, nil)
 
@@ -1447,7 +1475,7 @@ func TestBuildOpencodeConfig_OpenCodeManagedUsesBuiltInModelPrefixes(t *testing.
 				t.Fatalf("model = %v, want %q", got, tt.model)
 			}
 			if _, ok := config["provider"]; ok {
-				t.Fatalf("provider block present for OpenCode managed built-in provider: %#v", config["provider"])
+				t.Fatalf("provider block present for OpenCode Zen built-in provider: %#v", config["provider"])
 			}
 		})
 	}

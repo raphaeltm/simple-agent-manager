@@ -215,7 +215,7 @@ type GatewayConfig struct {
 	// Values are provider-neutral: "auto", "low", "medium", "high", "xhigh", "max".
 	EffortOverride string
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
-	// Values: "platform", "scaleway", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
+	// Values: "platform", "scaleway", "opencode-zen", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
 	OpencodeProviderOverride string
 	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
 	// (used for "custom" and "openai-compatible" providers).
@@ -854,7 +854,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		return agentCommandInfo{
 			command:       "opencode",
 			args:          []string{"acp"},
-			envVarName:    "SCW_SECRET_KEY",
+			envVarName:    "OPENCODE_API_KEY",
 			installCmd:    "npm install -g opencode-ai@1.4.3",
 			isNpmBased:    true,
 			injectionMode: "",
@@ -1272,7 +1272,8 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 // Default values for OpenCode provider configuration.
 // Each has an env-var override so operators can change them without rebuilding the binary.
 const (
-	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
+	DefaultOpencodeProvider          = "opencode-zen"
+	DefaultOpencodeModel             = "opencode/claude-sonnet-4-6"
 	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
 	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
@@ -1300,7 +1301,7 @@ func getOpencodeDefault(envKey, fallback string) string {
 //   - "models": a map registering model aliases so OpenCode recognises them
 //   - model field: formatted as "providerID/modelAlias"
 //
-// Built-in providers (scaleway, opencode-managed, anthropic) have pre-registered models and
+// Built-in providers (OpenCode Zen, Scaleway, Anthropic) have pre-registered models and
 // don't need the npm/models keys.
 
 // opencodeConfigOverrides holds optional direct values to embed in the config
@@ -1311,7 +1312,7 @@ type opencodeConfigOverrides struct {
 }
 
 func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConfigOverrides) map[string]interface{} {
-	provider := "scaleway" // default provider
+	provider := DefaultOpencodeProvider
 	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
 
 	if settings != nil {
@@ -1384,7 +1385,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 			"fullModelKey", "sam-platform/"+modelAlias,
 			"baseURL", baseURL,
 			"apiKeyLen", len(apiKey))
-	case "opencode-managed":
+	case "opencode-zen", "opencode-managed":
 		config["model"] = model
 	case "scaleway":
 		// Scaleway is a built-in OpenCode provider with pre-registered models.
@@ -1450,16 +1451,9 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 			},
 		}
 	default:
-		// Unknown provider — fallback to scaleway (built-in).
+		// Unknown provider — fail closed to the Zen default. Do not silently
+		// resurrect Scaleway inference from an unset or invalid provider value.
 		config["model"] = model
-		config["provider"] = map[string]interface{}{
-			"scaleway": map[string]interface{}{
-				"options": map[string]interface{}{
-					"baseURL": scalewayBaseURL,
-					"apiKey":  "{env:SCW_SECRET_KEY}",
-				},
-			},
-		}
 	}
 
 	return config

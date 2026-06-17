@@ -1,5 +1,5 @@
 import type { AgentInfo, AgentProviderMode } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG } from '@simple-agent-manager/shared';
+import { AGENT_CATALOG, resolveOpenCodeProvider } from '@simple-agent-manager/shared';
 import { and,eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -56,7 +56,7 @@ agentsCatalogRoutes.get('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Fetch user credentials, provider modes, and platform availability in parallel.
-  const [agentCredentials, scalewayCloudCreds, platformOpencode, agentProviderModes] = await Promise.all([
+  const [agentCredentials, scalewayCloudCreds, platformOpencode, agentProviderSettings] = await Promise.all([
     db
       .select({ agentType: schema.credentials.agentType })
       .from(schema.credentials)
@@ -79,7 +79,11 @@ agentsCatalogRoutes.get('/', async (c) => {
       .limit(1),
     getCatalogPlatformOpencodeAvailability(db, c.env),
     db
-      .select({ agentType: schema.agentSettings.agentType, providerMode: schema.agentSettings.providerMode })
+      .select({
+        agentType: schema.agentSettings.agentType,
+        providerMode: schema.agentSettings.providerMode,
+        opencodeProvider: schema.agentSettings.opencodeProvider,
+      })
       .from(schema.agentSettings)
       .where(eq(schema.agentSettings.userId, userId)),
   ]);
@@ -91,17 +95,25 @@ agentsCatalogRoutes.get('/', async (c) => {
 
   // Build a map of agentType -> providerMode for SAM provider checks.
   const providerModeMap = new Map<string, AgentProviderMode | null>(
-    agentProviderModes.map((s) => [s.agentType, s.providerMode as AgentProviderMode | null])
+    agentProviderSettings.map((s) => [s.agentType, s.providerMode as AgentProviderMode | null])
+  );
+  const opencodeProvider = resolveOpenCodeProvider(
+    agentProviderSettings.find((s) => s.agentType === 'opencode')?.opencodeProvider ?? null
   );
 
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
 
   const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => {
     const hasDedicatedKey = configuredAgents.has(agent.id);
-    // Agents with a fallbackCloudProvider can use the cloud credential when no dedicated key exists
-    const usesScalewayFallback = !!agent.fallbackCloudProvider && !hasDedicatedKey && hasScalewayCloud;
+    // OpenCode can reuse Scaleway cloud credentials only when Scaleway is explicitly selected.
+    const usesScalewayFallback =
+      agent.id === 'opencode' &&
+      opencodeProvider === 'scaleway' &&
+      !hasDedicatedKey &&
+      hasScalewayCloud;
     const usesPlatformFallback =
       agent.id === 'opencode' &&
+      opencodeProvider === 'platform' &&
       !hasDedicatedKey &&
       !usesScalewayFallback &&
       platformOpencode.available;
