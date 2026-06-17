@@ -71,6 +71,24 @@ tests a facsimile was a stale-code false positive).
       returns 403; assert `ImageResolveError` is thrown with an auth-failure
       `statusCode`.
 
+## Go-specialist follow-ups (deferred from PR #1312 go review, 2026-06-17)
+
+Neither blocks #1312. The review's two highest findings were stale-code false
+positives verified against current source: the `cache.DockerLogin` test calls the
+real function (`engine_test.go:955`), and the revert path already tears down the
+partial new release before re-upping the previous one (`engine.go:323-331`).
+
+- [ ] **`docker logout <registry>` after apply (MEDIUM, defense-in-depth).**
+      `cache.DockerLogin` persists creds to `~/.docker/config.json`; nothing removes
+      them on success/failure. Bounded today by short-lived minted token TTL. Add a
+      `cache.DockerLogout(ctx, registry)` helper and a best-effort deferred logout in
+      `engine.go` after a successful login.
+- [ ] **`go mod tidy` for `yaml.v3` (LOW, cosmetic).** `packages/vm-agent/go.mod:23`
+      marks `gopkg.in/yaml.v3 v3.0.1 // indirect`, but `mount_guard.go` imports it
+      directly. Run `go mod tidy` to move it to the direct-require block (prevents a
+      future unexpected CI diff). Not merge-blocking — CI is green and the checksum is
+      valid.
+
 ## References
 
 - PR #1312 security-auditor + cloudflare-specialist review rows
