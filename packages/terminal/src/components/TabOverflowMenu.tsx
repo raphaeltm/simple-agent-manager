@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-import { colors, dimensions, fonts, getStatusColor } from '../terminal-tokens';
+import { colors, dimensions, ellipsisText, fonts, getStatusColor } from '../terminal-tokens';
 import type { TerminalSession } from '../types/multi-terminal';
 
 interface TabOverflowMenuProps {
@@ -112,9 +112,7 @@ export const TabOverflowMenu: React.FC<TabOverflowMenuProps> = ({
               ●
             </span>
             <span style={{
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              ...ellipsisText,
               flex: 1,
             }}>
               {session.name}

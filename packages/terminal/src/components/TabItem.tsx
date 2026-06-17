@@ -1,6 +1,6 @@
 import React, { useEffect,useRef, useState } from 'react';
 
-import { colors, dimensions, fonts, getStatusColor } from '../terminal-tokens';
+import { applyHoverOut, colors, dimensions, ellipsisText, fonts, getStatusColor } from '../terminal-tokens';
 import type { TabItemProps } from '../types/multi-terminal';
 
 const baseTabStyle: React.CSSProperties = {
@@ -66,9 +66,7 @@ const statusIconStyle: React.CSSProperties = {
 };
 
 const tabTitleStyle: React.CSSProperties = {
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  ...ellipsisText,
   flex: 1,
   minWidth: 0,
 };
@@ -211,10 +209,7 @@ export const TabItem: React.FC<TabItemProps> = ({
           e.currentTarget.style.backgroundColor = colors.bgHighlight;
           e.currentTarget.style.color = colors.fg;
         }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = 'transparent';
-          e.currentTarget.style.color = colors.fgMuted;
-        }}
+        onMouseLeave={(e) => applyHoverOut(e.currentTarget)}
       >
         ×
       </button>

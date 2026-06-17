@@ -1,6 +1,6 @@
 import React, { useEffect,useRef, useState } from 'react';
 
-import { colors, dimensions, fonts } from '../terminal-tokens';
+import { applyHoverIn, applyHoverOut, chromeButtonBase, colors, dimensions, fonts } from '../terminal-tokens';
 import type { TabBarProps } from '../types/multi-terminal';
 import { TabItem } from './TabItem';
 import { TabOverflowMenu } from './TabOverflowMenu';
@@ -17,17 +17,9 @@ const tabBarStyle: React.CSSProperties = {
 };
 
 const scrollBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  ...chromeButtonBase,
   width: dimensions.scrollBtnWidth,
-  background: 'none',
-  border: 'none',
-  color: colors.fgMuted,
-  cursor: 'pointer',
   fontSize: 16,
-  flexShrink: 0,
-  padding: 0,
 };
 
 const tabsContainerStyle: React.CSSProperties = {
@@ -42,36 +34,20 @@ const tabsContainerStyle: React.CSSProperties = {
 };
 
 const newTabBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  ...chromeButtonBase,
   width: dimensions.newTabBtnWidth,
-  background: 'none',
-  border: 'none',
   borderLeft: `1px solid ${colors.border}`,
-  color: colors.fgMuted,
-  cursor: 'pointer',
   fontSize: 18,
   fontWeight: 300,
-  flexShrink: 0,
-  padding: 0,
   transition: 'color 0.15s, background-color 0.15s',
 };
 
 const overflowBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  ...chromeButtonBase,
   width: dimensions.overflowBtnWidth,
-  background: 'none',
-  border: 'none',
   borderLeft: `1px solid ${colors.border}`,
-  color: colors.fgMuted,
-  cursor: 'pointer',
   fontSize: 16,
   fontFamily: fonts.ui,
-  flexShrink: 0,
-  padding: 0,
   position: 'relative',
 };
 
@@ -184,14 +160,8 @@ export const TabBar: React.FC<TabBarProps> = ({
           onClick={onNewTab}
           aria-label="Create new terminal"
           title="New Terminal (Ctrl+Shift+T)"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = colors.fg;
-            e.currentTarget.style.backgroundColor = colors.bgSurface;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = colors.fgMuted;
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }}
+          onMouseEnter={(e) => applyHoverIn(e.currentTarget)}
+          onMouseLeave={(e) => applyHoverOut(e.currentTarget)}
         >
           +
         </button>

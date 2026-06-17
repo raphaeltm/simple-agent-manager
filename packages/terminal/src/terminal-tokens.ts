@@ -6,6 +6,8 @@
  * TabOverflowMenu, and MultiTerminal.
  */
 
+import type React from 'react';
+
 // ── Color palette (Tokyo Night–inspired) ──
 
 export const colors = {
@@ -105,3 +107,39 @@ export const fonts = {
   terminal: 'JetBrains Mono, Menlo, Monaco, monospace',
   ui: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
 } as const;
+
+// ── Shared hover handlers ──
+
+/** Standard hover-in: elevate to surface bg + primary fg. */
+export function applyHoverIn(el: HTMLElement): void {
+  el.style.backgroundColor = colors.bgSurface;
+  el.style.color = colors.fg;
+}
+
+/** Standard hover-out: transparent bg + muted fg. */
+export function applyHoverOut(el: HTMLElement): void {
+  el.style.backgroundColor = 'transparent';
+  el.style.color = colors.fgMuted;
+}
+
+// ── Shared style fragments ──
+
+/** Reusable style for chrome buttons (scroll, new-tab, overflow). */
+export const chromeButtonBase: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'none',
+  border: 'none',
+  color: colors.fgMuted,
+  cursor: 'pointer',
+  flexShrink: 0,
+  padding: 0,
+};
+
+/** Reusable style for text that overflows with ellipsis. */
+export const ellipsisText: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
