@@ -612,4 +612,92 @@ describe('useTerminalSessions', () => {
       expect(sessionAfter?.status).toBe('connected');
     });
   });
+
+  describe('updateSessionWorkingDirectory', () => {
+    it('should update working directory for a session', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id = '';
+      act(() => {
+        id = result.current.createSession('Tab 1');
+      });
+
+      act(() => {
+        result.current.updateSessionWorkingDirectory(id, '/workspaces/repo');
+      });
+
+      const session = result.current.sessions.get(id);
+      expect(session?.workingDirectory).toBe('/workspaces/repo');
+    });
+
+    it('should not mutate the session object in-place', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id = '';
+      act(() => {
+        id = result.current.createSession('Tab 1');
+      });
+
+      const before = result.current.sessions.get(id);
+
+      act(() => {
+        result.current.updateSessionWorkingDirectory(id, '/new/path');
+      });
+
+      const after = result.current.sessions.get(id);
+      expect(after).not.toBe(before);
+      expect(after?.workingDirectory).toBe('/new/path');
+    });
+  });
+
+  describe('closeSession ordering', () => {
+    it('should activate the next-higher-order session when closing active tab', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id2 = '';
+      let id3 = '';
+      act(() => {
+        result.current.createSession('Tab 1');
+        id2 = result.current.createSession('Tab 2');
+        id3 = result.current.createSession('Tab 3');
+      });
+
+      // Activate the middle session
+      act(() => {
+        result.current.activateSession(id2);
+      });
+      expect(result.current.activeSessionId).toBe(id2);
+
+      // Close the middle session — should activate id3 (next higher order)
+      act(() => {
+        result.current.closeSession(id2);
+      });
+
+      expect(result.current.activeSessionId).toBe(id3);
+      expect(result.current.sessions.has(id2)).toBe(false);
+    });
+
+    it('should fall back to lower-order session when no higher-order exists', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let id1 = '';
+      let id2 = '';
+      act(() => {
+        id1 = result.current.createSession('Tab 1');
+        id2 = result.current.createSession('Tab 2');
+      });
+
+      // Activate the last session
+      act(() => {
+        result.current.activateSession(id2);
+      });
+
+      // Close the last session — should fall back to id1 (lower order)
+      act(() => {
+        result.current.closeSession(id2);
+      });
+
+      expect(result.current.activeSessionId).toBe(id1);
+    });
+  });
 });
