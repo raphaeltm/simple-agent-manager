@@ -12,6 +12,7 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
   scope: 'node',
 });
 const mockMintProjectRegistryCredential = vi.fn();
+const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -36,6 +37,15 @@ vi.mock('../../../src/services/deploy-signing', () => ({
 
 vi.mock('../../../src/services/registry-credentials', () => ({
   mintProjectRegistryCredential: (...args: unknown[]) => mockMintProjectRegistryCredential(...args),
+}));
+
+// Mock secret resolution so the callback exercises the real
+// collectSecretNames → loadResolvedSecrets → renderCompose path without
+// needing a real encrypted D1 row. getEncryptionKey is the only other export
+// the callback route consumes from this module.
+vi.mock('../../../src/routes/deployment-releases', () => ({
+  getEncryptionKey: () => 'test-encryption-key',
+  loadResolvedSecrets: (...args: unknown[]) => mockLoadResolvedSecrets(...args),
 }));
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
@@ -74,6 +84,22 @@ function manifest() {
       { service: 'worker', port: 9000, mode: 'private' },
       { service: 'web', port: 3001, mode: 'public' },
     ],
+  };
+}
+
+/** Manifest whose `web` service references a secret in its env block. */
+function manifestWithSecret() {
+  return {
+    version: 1,
+    services: {
+      web: {
+        image: { registry: 'docker.io', repository: 'example/web', digest: `sha256:${'a'.repeat(64)}` },
+        env: { API_KEY: { secret: 'API_KEY' }, PLAIN: 'literal-value' },
+        volumes: [],
+      },
+    },
+    volumes: {},
+    routes: [{ service: 'web', port: 3000, mode: 'public' }],
   };
 }
 
@@ -125,6 +151,8 @@ describe('deploy release callback route', () => {
     mockVerifyCallbackToken.mockClear();
     mockSignDeployPayload.mockClear();
     mockMintProjectRegistryCredential.mockReset();
+    mockLoadResolvedSecrets.mockReset();
+    mockLoadResolvedSecrets.mockResolvedValue({});
     mockSignDeployPayload.mockResolvedValue('signed-payload');
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
@@ -307,6 +335,46 @@ describe('deploy release callback route', () => {
     expect(body.registryCredentials).toBeNull();
     expect(body.signature).toBe('signed-payload');
     expect(body.composeYaml).toBeDefined();
+  });
+
+  it('resolves manifest secret references into the signed Compose env block (T5)', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    // Release manifest references a secret named API_KEY.
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifestWithSecret()), version: 7 }]);
+    // The resolver decrypts API_KEY to this plaintext.
+    mockLoadResolvedSecrets.mockResolvedValueOnce({ API_KEY: 'super-secret-value' });
+    // Single public route → one DNS list + one DNS create.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 })),
+    );
+
+    const response = await requestDeployRelease();
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+
+    // Resolver was invoked with the environment id and the collected secret name.
+    expect(mockLoadResolvedSecrets).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      ['API_KEY'],
+      'test-encryption-key',
+    );
+
+    // The decrypted value AND the literal env value land in the rendered Compose,
+    // and the signed payload carries the same resolved YAML.
+    expect(body.composeYaml).toContain('super-secret-value');
+    expect(body.composeYaml).toContain('literal-value');
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ composeYaml: expect.stringContaining('super-secret-value') }),
+      expect.anything(),
+    );
   });
 
   it('credential values are ABSENT from audit log (never logged)', async () => {

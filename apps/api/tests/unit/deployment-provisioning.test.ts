@@ -24,8 +24,23 @@ vi.mock('../../src/lib/logger', () => ({
   serializeError: vi.fn((e: unknown) => ({ error: String(e) })),
 }));
 
+// Structurally mock the drizzle SQL operators so we can assert WHERE-clause
+// *content* (which column, which value) rather than just "a WHERE exists".
+// Safe because all SQL execution is mocked in this test — the operator return
+// values are never handed to a real query engine.
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('drizzle-orm')>();
+  return {
+    ...actual,
+    eq: vi.fn((col: unknown, val: unknown) => ({ op: 'eq', col, val })),
+    isNull: vi.fn((col: unknown) => ({ op: 'isNull', col })),
+    and: vi.fn((...conds: unknown[]) => ({ op: 'and', conds })),
+  };
+});
+
 import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../../src/db/schema';
 import { DEPLOYMENT_DEFAULT_VM_SIZE, provisionDeploymentNode } from '../../src/services/deployment-provisioning';
 import { createNodeRecord, provisionNode } from '../../src/services/nodes';
 
@@ -284,8 +299,38 @@ describe('provisionDeploymentNode', () => {
     // Both updates must have WHERE clauses (tracked via updateWhereArgs)
     expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
 
-    // Both updates must have WHERE clauses
-    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
+    // ---- WHERE-clause CONTENT assertions (T4: nodeId-scoped, not just "exists") ----
+
+    // Initial link WHERE: and(eq(id, envId), isNull(nodeId)) — conditional link
+    // only applies when the env is not already bound to a node.
+    const linkWhere = mockDb._tracker.updateWhereArgs[0]![0] as {
+      op: string;
+      conds: Array<{ op: string; col: unknown; val?: unknown }>;
+    };
+    expect(linkWhere.op).toBe('and');
+    expect(linkWhere.conds).toHaveLength(2);
+    const linkIdCond = linkWhere.conds.find((cond) => cond.op === 'eq')!;
+    expect(linkIdCond.col).toBe(schema.deploymentEnvironments.id);
+    expect(linkIdCond.val).toBe('env-rollback');
+    const linkNodeCond = linkWhere.conds.find((cond) => cond.op === 'isNull')!;
+    expect(linkNodeCond.col).toBe(schema.deploymentEnvironments.nodeId);
+
+    // Rollback WHERE: and(eq(id, envId), eq(nodeId, node.id)) — only clears the
+    // nodeId we set, never another concurrent writer's node binding.
+    const rollbackWhere = mockDb._tracker.updateWhereArgs[1]![0] as {
+      op: string;
+      conds: Array<{ op: string; col: unknown; val?: unknown }>;
+    };
+    expect(rollbackWhere.op).toBe('and');
+    expect(rollbackWhere.conds).toHaveLength(2);
+    const rollbackIdCond = rollbackWhere.conds.find(
+      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.id,
+    )!;
+    expect(rollbackIdCond.val).toBe('env-rollback');
+    const rollbackNodeCond = rollbackWhere.conds.find(
+      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.nodeId,
+    )!;
+    expect(rollbackNodeCond.val).toBe('node-rollback-1');
   });
 
   it('rollback is robust even if the rollback update itself fails', async () => {

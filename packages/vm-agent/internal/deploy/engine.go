@@ -320,6 +320,16 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 	state.Status = StatusFailed
 	_ = e.disk.UpdateState(state)
 
+	// Tear down the partially-started new release before bringing the previous
+	// one back up. Otherwise its containers may still hold the host port and the
+	// revert composeUp fails with "port already in use" — the exact rebind
+	// conflict T1 prevents on the happy path. Best-effort: log and continue.
+	newComposeFile := e.disk.ComposeFilePath(state.Seq)
+	if err := e.composeDown(ctx, newComposeFile); err != nil {
+		slog.Warn("deploy.apply: failed to stop new release before revert",
+			"seq", state.Seq, "error", err)
+	}
+
 	prevComposeFile := e.disk.ComposeFilePath(previousSeq)
 	if err := e.composeUp(ctx, prevComposeFile); err != nil {
 		slog.Error("deploy.apply: revert also failed",

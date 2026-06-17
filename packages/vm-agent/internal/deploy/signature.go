@@ -92,6 +92,12 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 }
 
 // buildSignableBytes constructs the canonical byte representation for signing.
+//
+// RegistryCredentials are deliberately NOT covered by the signature: they are
+// short-lived, server-minted pull-only tokens delivered over TLS from the
+// control plane, and the registry/image they authenticate to is already pinned
+// by the signed ComposeHash. Tampering with the credentials in transit can only
+// cause the pull to fail, not change which image is deployed.
 func buildSignableBytes(payload *ApplyPayload) []byte {
 	composeHash := sha256.Sum256([]byte(payload.ComposeYAML))
 	routes := payload.Routes

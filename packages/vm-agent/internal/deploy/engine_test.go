@@ -6,12 +6,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/cache"
 )
 
 func TestEngine_ReconcileOnStart_NoState(t *testing.T) {
@@ -928,77 +929,47 @@ func TestEngine_RegistryLogin_FailureTriggersRevert(t *testing.T) {
 	}
 }
 
-// TestDockerLogin_PasswordNotInArgv verifies that cache.DockerLogin uses
-// --password-stdin and never passes the password as a command-line argument.
+// TestDockerLogin_PasswordNotInArgv verifies that the production
+// cache.DockerLogin uses --password-stdin and never passes the password as a
+// command-line argument. It exercises the real function (not a facsimile) by
+// overriding PATH so the registry login resolves to a fake docker binary that
+// records its argv.
 func TestDockerLogin_PasswordNotInArgv(t *testing.T) {
-	// This is a source-level verification: cache.DockerLogin constructs the command
-	// with --password-stdin and pipes the password via stdin. We test by inspecting
-	// the behavior through a mock docker binary that logs its argv.
 	dir := t.TempDir()
 	dockerScript := filepath.Join(dir, "docker")
 	argvLog := filepath.Join(dir, "argv.log")
+	// The fake docker reads stdin (so --password-stdin doesn't hang) and logs
+	// only its argv, never the piped password.
 	if err := os.WriteFile(dockerScript, []byte(`#!/bin/sh
+cat > /dev/null
 echo "$@" >> "`+argvLog+`"
 exit 0
 `), 0755); err != nil {
 		t.Fatalf("write docker script: %v", err)
 	}
 
-	// Prepend our fake docker to PATH
-	origPath := os.Getenv("PATH")
-	os.Setenv("PATH", dir+":"+origPath)
-	defer os.Setenv("PATH", origPath)
+	// Prepend our fake docker to PATH so cache.DockerLogin resolves to it.
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
-	// Import and call the real cache.DockerLogin
-	err := testDockerLoginPasswordStdin(t, argvLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func testDockerLoginPasswordStdin(t *testing.T, argvLog string) error {
-	t.Helper()
-	// We can't import cache in a test of the deploy package without creating
-	// a circular dep issue... but cache is not in deploy's deps yet. Actually
-	// we DO import it. Let's use the cache.DockerLogin function directly via
-	// a PATH-based approach to verify --password-stdin behavior.
-
-	// The fake docker script above logs all argv. We call exec.Command with
-	// the same args as cache.DockerLogin does: docker login <server> --username <u> --password-stdin
-	ctx := context.Background()
-	secret := "super-secret-value-12345"
-
-	// Use the engine's DockerLogin path with cache.DockerLogin
-	// Since we override PATH, the real cache.DockerLogin will find our script
-	// Note: we import cache in engine.go, so let's call it through the engine pattern
-	loginFn := func(ctx context.Context, registry, username, password string) error {
-		// Simulate what cache.DockerLogin does: build a command with --password-stdin
-		cmd := exec.CommandContext(ctx, "docker", "login", registry, "--username", username, "--password-stdin")
-		cmd.Stdin = strings.NewReader(password)
-		return cmd.Run()
-	}
-
-	if err := loginFn(ctx, "registry.example.com", "test-user", secret); err != nil {
-		return fmt.Errorf("docker login via script: %w", err)
+	const secret = "super-secret-value-12345"
+	if err := cache.DockerLogin(context.Background(), "registry.example.com", "test-user", secret); err != nil {
+		t.Fatalf("cache.DockerLogin: %v", err)
 	}
 
 	argv, err := os.ReadFile(argvLog)
 	if err != nil {
-		return fmt.Errorf("read argv log: %w", err)
+		t.Fatalf("read argv log: %v", err)
 	}
 	argvStr := string(argv)
 
-	// Password must NOT appear in argv
+	// Password must NOT appear in argv.
 	if strings.Contains(argvStr, secret) {
-		return fmt.Errorf("password leaked to argv: %s", argvStr)
+		t.Fatalf("password leaked to argv: %s", argvStr)
 	}
-
-	// --password-stdin must appear
+	// --password-stdin must appear.
 	if !strings.Contains(argvStr, "--password-stdin") {
-		return fmt.Errorf("--password-stdin not found in argv: %s", argvStr)
+		t.Fatalf("--password-stdin not found in argv: %s", argvStr)
 	}
-
-	return nil
 }
 
 func TestSignPayload_Roundtrip(t *testing.T) {

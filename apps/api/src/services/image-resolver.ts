@@ -82,12 +82,36 @@ function registryBaseUrl(registry: string): string {
   if (registry === 'docker.io' || registry === 'index.docker.io') {
     return 'https://registry-1.docker.io';
   }
-  // If the registry already includes a scheme, use as-is
-  if (registry.startsWith('http://') || registry.startsWith('https://')) {
+  // Reject plaintext HTTP: registry credentials (Basic auth) must never be sent
+  // over an unencrypted channel.
+  if (registry.startsWith('http://')) {
+    throw new Error(
+      `Insecure registry URL rejected: ${registry}. Registry endpoints must use HTTPS.`,
+    );
+  }
+  // If the registry already includes an https scheme, use as-is
+  if (registry.startsWith('https://')) {
     return registry.replace(/\/$/, '');
   }
   // Default to HTTPS
   return `https://${registry}`;
+}
+
+/**
+ * Returns true if the token-realm host is safe to forward registry credentials
+ * to: either it exactly matches the registry host, or it shares the registry's
+ * parent domain (last two labels). This prevents a malicious registry from
+ * redirecting Basic-auth credentials to an attacker-controlled host via a
+ * crafted WWW-Authenticate realm (e.g. Docker Hub's registry-1.docker.io and
+ * auth.docker.io both share docker.io).
+ */
+function realmHostIsTrusted(realmHost: string, registryHost: string): boolean {
+  const realm = realmHost.toLowerCase();
+  const registry = registryHost.toLowerCase();
+  if (realm === registry) return true;
+  const parentDomain = (host: string) => host.split('.').slice(-2).join('.');
+  const realmParent = parentDomain(realm);
+  return realmParent.includes('.') && realmParent === parentDomain(registry);
 }
 
 // =============================================================================
@@ -124,10 +148,29 @@ function extractParam(params: string, key: string): string | undefined {
 async function fetchBearerToken(
   challenge: { realm: string; service?: string; scope?: string },
   auth: RegistryAuth | undefined,
+  registryHost: string,
   fetchFn: typeof fetch,
   timeoutMs: number,
 ): Promise<string> {
   const url = new URL(challenge.realm);
+
+  // The token realm comes from a registry-controlled WWW-Authenticate header.
+  // Require HTTPS so credentials are never sent in cleartext, and — when we have
+  // credentials to forward — require the realm host to belong to the registry's
+  // domain so a malicious registry cannot exfiltrate Basic-auth credentials to
+  // an attacker-controlled host.
+  if (url.protocol !== 'https:') {
+    throw new Error(
+      `Insecure token realm rejected: ${challenge.realm}. Token endpoint must use HTTPS.`,
+    );
+  }
+  if (auth && !realmHostIsTrusted(url.hostname, registryHost)) {
+    throw new Error(
+      `Refusing to send registry credentials to untrusted token realm host ${url.hostname} ` +
+        `(registry host ${registryHost}).`,
+    );
+  }
+
   if (challenge.service) url.searchParams.set('service', challenge.service);
   if (challenge.scope) url.searchParams.set('scope', challenge.scope);
 
@@ -200,7 +243,8 @@ async function resolveTagToDigest(
     if (wwwAuth) {
       const challenge = parseBearerChallenge(wwwAuth);
       if (challenge) {
-        const token = await fetchBearerToken(challenge, opts.auth, fetchFn, timeoutMs);
+        const registryHost = new URL(base).hostname;
+        const token = await fetchBearerToken(challenge, opts.auth, registryHost, fetchFn, timeoutMs);
         headers['Authorization'] = `Bearer ${token}`;
         resp = await fetchFn(manifestUrl, {
           method: 'HEAD',

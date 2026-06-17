@@ -90,9 +90,10 @@ func (d *DiskState) WriteRelease(state *ReleaseState, composeYAML string, caddyf
 		return fmt.Errorf("create release directory: %w", err)
 	}
 
-	// Write compose file
+	// Write compose file with 0600: the compose YAML embeds plaintext resolved
+	// secrets as environment values, so it must not be world-readable on the VM.
 	composePath := filepath.Join(dir, "docker-compose.yml")
-	if err := writeFileAtomic(composePath, composeYAML, 0644); err != nil {
+	if err := writeFileAtomic(composePath, composeYAML, 0600); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
 	}
 

@@ -241,5 +241,59 @@ describe('ImageResolver', () => {
         'https://my-registry.internal:5000/v2/org/app/manifests/v1.0',
       );
     });
+
+    it('rejects plaintext http:// registry URLs (no creds over cleartext)', async () => {
+      const { fetchFn } = mockRegistryFetch();
+      const resolver = createImageResolver({
+        fetchFn,
+        auth: { username: 'user', password: 'pass' },
+      });
+
+      await expect(resolver('http://insecure-registry.internal:5000', 'org/app', 'v1.0'))
+        .rejects.toThrow('Insecure registry URL rejected');
+      // The request must never be sent over plaintext.
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+
+    it('refuses to forward credentials to an untrusted token realm host (exfil guard)', async () => {
+      // Malicious registry redirects the token realm to an attacker host.
+      const { fetchFn } = mockRegistryFetch({
+        needsTokenExchange: true,
+        wwwAuth: 'Bearer realm="https://evil.attacker.com/token",service="registry.example.com",scope="repository:org/app:pull"',
+      });
+      const resolver = createImageResolver({
+        fetchFn,
+        auth: { username: 'user', password: 'pass' },
+      });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v2.0'))
+        .rejects.toThrow('untrusted token realm host');
+    });
+
+    it('rejects a non-https token realm', async () => {
+      const { fetchFn } = mockRegistryFetch({
+        needsTokenExchange: true,
+        wwwAuth: 'Bearer realm="http://auth.example.com/token",service="registry.example.com",scope="repository:org/app:pull"',
+      });
+      const resolver = createImageResolver({ fetchFn });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v2.0'))
+        .rejects.toThrow('Insecure token realm rejected');
+    });
+
+    it('allows a token realm on a sibling subdomain of the registry (docker.io style)', async () => {
+      // registry-1.docker.io and auth.docker.io share the docker.io parent domain.
+      const { fetchFn } = mockRegistryFetch({
+        needsTokenExchange: true,
+        wwwAuth: 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
+      });
+      const resolver = createImageResolver({
+        fetchFn,
+        auth: { username: 'user', password: 'pass' },
+      });
+
+      const digest = await resolver('docker.io', 'library/nginx', 'latest');
+      expect(digest).toBe(REALISTIC_DIGEST);
+    });
   });
 });
