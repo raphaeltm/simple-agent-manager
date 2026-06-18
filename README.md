@@ -19,6 +19,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3%2B-blue?style=flat-square" alt="License" /></a>
+  <a href="https://app.codspeed.io/raphaeltm/simple-agent-manager?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"/></a>
 </p>
 
 <p align="center">
@@ -63,12 +64,12 @@ You: "Add rate limiting to the /api/upload endpoint"
 
 ## Architecture
 
-| Layer | What | How |
-|-------|------|-----|
-| **Control plane** | API, auth, orchestration | Cloudflare Workers + D1 + KV + R2 |
-| **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project) |
-| **Compute** | Workspaces running coding agents | VMs in your own cloud (Hetzner, Scaleway, or GCP) with a Go agent managing Docker containers, WebSocket terminal, and auth |
-| **Warm pool** | Fast workspace starts | Completed VMs stay warm for 30 min for instant reuse |
+| Layer              | What                              | How                                                                                                                        |
+| ------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Control plane**  | API, auth, orchestration          | Cloudflare Workers + D1 + KV + R2                                                                                          |
+| **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project)                                                                         |
+| **Compute**        | Workspaces running coding agents  | VMs in your own cloud (Hetzner, Scaleway, or GCP) with a Go agent managing Docker containers, WebSocket terminal, and auth |
+| **Warm pool**      | Fast workspace starts             | Completed VMs stay warm for 30 min for instant reuse                                                                       |
 
 The control plane is serverless — no servers to manage, no databases to back up. Compute scales to zero when you're not using it.
 
