@@ -154,8 +154,8 @@ export type {
 } from './deployment';
 export {
   createDeploymentEnvironment,
-  deleteDeploymentSecret,
   deleteDeploymentEnvironment,
+  deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
   getDeploymentEnvironmentLogs,
   getDeployOAuthResult,

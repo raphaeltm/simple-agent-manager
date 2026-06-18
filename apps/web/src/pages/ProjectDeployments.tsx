@@ -12,9 +12,9 @@ import { useToast } from '../hooks/useToast';
 import {
   createDeploymentEnvironment,
   deleteDeploymentEnvironment,
+  type DeploymentEnvironment,
   getDeploymentEnvironmentLogs,
   listDeploymentEnvironments,
-  type DeploymentEnvironment,
   updateDeploymentEnvironmentPolicy,
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
