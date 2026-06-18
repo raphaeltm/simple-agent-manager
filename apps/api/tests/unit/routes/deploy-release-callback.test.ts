@@ -13,6 +13,8 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
 });
 const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
+const mockUpdateSet = vi.fn();
+const mockUpdateWhere = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -23,6 +25,12 @@ vi.mock('drizzle-orm/d1', () => ({
           where: () => ({ limit: mockLimit }),
         }),
       }),
+    }),
+    update: () => ({
+      set: (...args: unknown[]) => {
+        mockUpdateSet(...args);
+        return { where: mockUpdateWhere };
+      },
     }),
   }),
 }));
@@ -148,6 +156,9 @@ function requestDeployRelease() {
 describe('deploy release callback route', () => {
   beforeEach(() => {
     mockLimit.mockReset();
+    mockUpdateSet.mockReset();
+    mockUpdateWhere.mockReset();
+    mockUpdateWhere.mockResolvedValue(undefined);
     mockVerifyCallbackToken.mockClear();
     mockSignDeployPayload.mockClear();
     mockMintProjectRegistryCredential.mockReset();
@@ -180,6 +191,8 @@ describe('deploy release callback route', () => {
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
     expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), { expectedScope: 'node' });
+    expect(mockUpdateSet).toHaveBeenCalledWith({ status: 'applying' });
+    expect(mockUpdateWhere).toHaveBeenCalledTimes(1);
 
     // Port base includes per-environment offset to prevent cross-env collisions
     const envOffset = environmentPortOffset('env-1', 10, 36_000);

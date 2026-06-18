@@ -17,11 +17,11 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { jsonValidator, NodeErrorBatchSchema, NodeHeartbeatSchema } from '../schemas';
-import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   buildObservedDeploymentUpdate,
   reconcileDeploymentReleaseStatuses,
 } from '../services/deployment-control';
+import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
   signCallbackToken,

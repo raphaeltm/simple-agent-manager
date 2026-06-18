@@ -1,5 +1,10 @@
 import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, getLocationsForProvider,isValidLocationForProvider } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  getLocationsForProvider,
+  isValidLocationForProvider,
+} from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -287,7 +292,12 @@ nodesRoutes.delete('/:id', async (c) => {
     throw errors.notFound('Node');
   }
 
-  await deleteNodeResources(nodeId, userId, c.env);
+  const cleanup = await deleteNodeResources(nodeId, userId, c.env);
+  if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
+    throw errors.conflict(
+      `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
+    );
+  }
 
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
