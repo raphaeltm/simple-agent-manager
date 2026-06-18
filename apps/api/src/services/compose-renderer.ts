@@ -39,6 +39,17 @@ export interface ComposeRenderContext {
     containerPort: number;
     hostPort: number;
   }>;
+  /**
+   * Container log rotation settings. Applied to every service via the
+   * json-file logging driver to prevent unbounded log growth on
+   * long-lived deployment nodes.
+   *
+   * Defaults: maxSize = "10m", maxFile = "3"
+   */
+  logRotation?: {
+    maxSize?: string;
+    maxFile?: string;
+  };
 }
 
 const DEFAULT_MEMORY_LIMIT_MB = 256;
@@ -111,6 +122,8 @@ interface ServiceBuildContext {
   environmentId: string;
   releaseId: string;
   routeTargets: NonNullable<ComposeRenderContext['routeTargets']>;
+  logMaxSize: string;
+  logMaxFile: string;
 }
 
 function buildService(
@@ -175,6 +188,15 @@ function buildService(
     service.ports = routePorts.map((route) => `127.0.0.1:${route.hostPort}:${route.containerPort}`);
   }
 
+  // Bounded log rotation — prevents unbounded log growth on long-lived nodes
+  service.logging = {
+    driver: 'json-file',
+    options: {
+      'max-size': buildCtx.logMaxSize,
+      'max-file': buildCtx.logMaxFile,
+    },
+  };
+
   return service;
 }
 
@@ -186,6 +208,8 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
     environmentId: ctx.environmentId,
     releaseId: ctx.releaseId,
     routeTargets: ctx.routeTargets ?? [],
+    logMaxSize: ctx.logRotation?.maxSize ?? '10m',
+    logMaxFile: ctx.logRotation?.maxFile ?? '3',
   };
 
   const doc: Record<string, unknown> = {};

@@ -25,6 +25,12 @@ type Engine struct {
 	verifierMu sync.RWMutex
 	verifier   *Verifier
 
+	// Callback token is rotated by the heartbeat goroutine via SetCallbackToken
+	// while fetchRelease (running on the apply goroutine) reads it. Guard it with
+	// its own mutex to avoid a data race on concurrent rotate/read.
+	tokenMu       sync.RWMutex
+	callbackToken string
+
 	// Apply mutex: only one apply at a time. Use TryLock() to reject concurrent applies.
 	applyMu sync.Mutex
 
@@ -87,15 +93,26 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &Engine{
-		disk:     disk,
-		verifier: verifier,
-		cfg:      cfg,
+		disk:          disk,
+		verifier:      verifier,
+		cfg:           cfg,
+		callbackToken: cfg.CallbackToken,
 	}
 }
 
 // SetCallbackToken updates the callback token for control plane requests.
+// Safe to call concurrently with fetchRelease (heartbeat vs apply goroutine).
 func (e *Engine) SetCallbackToken(token string) {
-	e.cfg.CallbackToken = token
+	e.tokenMu.Lock()
+	defer e.tokenMu.Unlock()
+	e.callbackToken = token
+}
+
+// getCallbackToken returns the current callback token under a read lock.
+func (e *Engine) getCallbackToken() string {
+	e.tokenMu.RLock()
+	defer e.tokenMu.RUnlock()
+	return e.callbackToken
 }
 
 // SetVerifierKey updates the signing public key via the verifier's dual-key rotation.
@@ -403,7 +420,7 @@ func (e *Engine) fetchRelease(ctx context.Context, seq int64) (*ApplyPayload, er
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+e.cfg.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+e.getCallbackToken())
 
 	resp, err := e.cfg.HTTPClient.Do(req)
 	if err != nil {
