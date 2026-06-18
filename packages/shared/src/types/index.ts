@@ -56,6 +56,8 @@ export type {
   NodeHealthStatus,
   NodeLifecycleState,
   NodeLifecycleStatus,
+  NodeContainerListResponse,
+  NodeContainerLogTarget,
   NodeLogEntry,
   NodeLogFilter,
   NodeLogLevel,

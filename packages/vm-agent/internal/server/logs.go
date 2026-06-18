@@ -36,6 +36,22 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleContainers serves GET /containers — lists Docker containers for log filtering.
+func (s *Server) handleContainers(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNodeEventAuth(w, r) {
+		return
+	}
+
+	containers, err := s.logReader.ListContainers(r.Context())
+	if err != nil {
+		slog.Error("Failed to list containers", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list containers")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"containers": containers})
+}
+
 // handleLogStream serves GET /logs/stream — real-time log streaming via WebSocket.
 func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	if !s.requireNodeEventAuth(w, r) {

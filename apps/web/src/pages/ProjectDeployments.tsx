@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   DeploymentEnvironmentCard,
   type DeploymentLogState,
+  type DeploymentMetricsState,
 } from '../components/deployments/DeploymentEnvironmentCard';
 import { useAgentProfiles } from '../hooks/useAgentProfiles';
 import { useToast } from '../hooks/useToast';
@@ -15,6 +16,8 @@ import {
   type DeleteDeploymentEnvironmentResponse,
   type DeploymentEnvironment,
   getDeploymentEnvironmentLogs,
+  getDeploymentEnvironmentMetrics,
+  listDeploymentEnvironmentContainers,
   listDeploymentEnvironments,
   updateDeploymentEnvironmentPolicy,
 } from '../lib/api';
@@ -46,6 +49,7 @@ export function ProjectDeployments() {
   const [policySaving, setPolicySaving] = useState<string | null>(null);
   const [logsOpenEnvId, setLogsOpenEnvId] = useState<string | null>(null);
   const [logsByEnv, setLogsByEnv] = useState<Record<string, DeploymentLogState>>({});
+  const [metricsByEnv, setMetricsByEnv] = useState<Record<string, DeploymentMetricsState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeploymentEnvironment | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [cleanupNotice, setCleanupNotice] = useState<{ summary: string; warnings: string[] } | null>(null);
@@ -76,6 +80,68 @@ export function ProjectDeployments() {
   useEffect(() => {
     void loadEnvironments();
   }, [loadEnvironments]);
+
+  const refreshMetrics = useCallback(async (env: DeploymentEnvironment) => {
+    if (env.node?.status !== 'running') {
+      setMetricsByEnv((prev) => ({
+        ...prev,
+        [env.id]: {
+          systemInfo: null,
+          fallbackMetrics: null,
+          loading: false,
+          error: null,
+          unavailableReason: env.node ? 'node_not_running' : 'no_deployment_node',
+        },
+      }));
+      return;
+    }
+
+    setMetricsByEnv((prev) => ({
+      ...prev,
+      [env.id]: {
+        systemInfo: prev[env.id]?.systemInfo ?? null,
+        fallbackMetrics: prev[env.id]?.fallbackMetrics ?? null,
+        loading: true,
+        error: null,
+      },
+    }));
+
+    try {
+      const result = await getDeploymentEnvironmentMetrics(projectId, env.id);
+      setMetricsByEnv((prev) => ({
+        ...prev,
+        [env.id]: {
+          systemInfo: result.systemInfo,
+          fallbackMetrics: result.fallbackMetrics ?? null,
+          loading: false,
+          error: null,
+          unavailableReason: result.unavailableReason,
+        },
+      }));
+    } catch (err) {
+      setMetricsByEnv((prev) => ({
+        ...prev,
+        [env.id]: {
+          systemInfo: prev[env.id]?.systemInfo ?? null,
+          fallbackMetrics: prev[env.id]?.fallbackMetrics ?? null,
+          loading: false,
+          error: err instanceof Error ? err.message : 'Failed to load deployment metrics',
+        },
+      }));
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    const running = sortedEnvironments.filter((env) => env.node?.status === 'running');
+    if (running.length === 0) return;
+
+    running.forEach((env) => void refreshMetrics(env));
+    const interval = window.setInterval(() => {
+      running.forEach((env) => void refreshMetrics(env));
+    }, 15000);
+
+    return () => window.clearInterval(interval);
+  }, [sortedEnvironments, refreshMetrics]);
 
   const replaceEnvironment = useCallback((updated: DeploymentEnvironment) => {
     setEnvironments((prev) => prev.map((env) => (env.id === updated.id ? updated : env)));
@@ -135,7 +201,7 @@ export function ProjectDeployments() {
 
   const handleRefreshLogs = async (
     env: DeploymentEnvironment,
-    opts?: { source?: string; level?: string; search?: string },
+    opts?: { source?: string; level?: string; search?: string; container?: string },
   ) => {
     setLogsOpenEnvId(env.id);
     setLogsByEnv((prev) => ({
@@ -143,16 +209,20 @@ export function ProjectDeployments() {
       [env.id]: { entries: prev[env.id]?.entries ?? [], loading: true, error: null },
     }));
     try {
+      const containersPromise = listDeploymentEnvironmentContainers(projectId, env.id).catch(() => ({ containers: [] }));
       const result = await getDeploymentEnvironmentLogs(projectId, env.id, {
         limit: 80,
         source: opts?.source as never,
         level: opts?.level as never,
+        container: opts?.container,
         search: opts?.search,
       });
+      const containerResult = await containersPromise;
       setLogsByEnv((prev) => ({
         ...prev,
         [env.id]: {
           entries: result.entries ?? [],
+          containers: containerResult.containers ?? [],
           loading: false,
           error: null,
           unavailableReason: result.unavailableReason,
@@ -207,9 +277,10 @@ export function ProjectDeployments() {
       </section>
 
       <form onSubmit={(event) => void handleCreate(event)} className="glass-surface rounded-lg p-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <label className="grid gap-1">
+        <label htmlFor="deployment-env-name" className="grid gap-1">
           <span className="text-sm font-medium text-fg-primary">New Environment</span>
           <Input
+            id="deployment-env-name"
             value={newName}
             onChange={(event) => setNewName(event.currentTarget.value.toLowerCase())}
             placeholder="staging"
@@ -265,6 +336,7 @@ export function ProjectDeployments() {
               profiles={profiles}
               policySaving={policySaving}
               logState={logsByEnv[env.id]}
+              metricsState={metricsByEnv[env.id]}
               logsOpen={logsOpenEnvId === env.id}
               onPolicyEnabledChange={(target, enabled) => void handlePolicyEnabledChange(target, enabled)}
               onProfileToggle={(target, profileId) => void handleProfileToggle(target, profileId)}

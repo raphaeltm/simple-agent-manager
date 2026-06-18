@@ -31,7 +31,11 @@ import {
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
 import { cleanupAppRouteDNSRecords } from '../services/dns';
-import { getNodeLogsFromNode } from '../services/node-agent';
+import {
+  getNodeLogsFromNode,
+  getNodeSystemInfoFromNode,
+  listNodeContainersFromNode,
+} from '../services/node-agent';
 import { deleteNodeResources } from '../services/nodes';
 
 // =============================================================================
@@ -58,6 +62,15 @@ const UpdateEnvironmentPolicySchema = v.object({
 // =============================================================================
 
 const deploymentEnvironmentRoutes = new Hono<{ Bindings: Env }>();
+
+function parseLastMetrics(value: string | null): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * POST /api/projects/:projectId/environments
@@ -337,6 +350,163 @@ deploymentEnvironmentRoutes.get(
         hasMore: false,
         source: 'deployment-node',
         nodeId: node.id,
+        unavailableReason: 'node_agent_unreachable',
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/projects/:projectId/environments/:envId/containers
+ * List deployment-node containers for log filtering.
+ */
+deploymentEnvironmentRoutes.get(
+  '/:projectId/environments/:envId/containers',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('projectId');
+    const envId = c.req.param('envId');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, userId);
+
+    const envRows = await db
+      .select({
+        id: schema.deploymentEnvironments.id,
+        nodeId: schema.deploymentEnvironments.nodeId,
+      })
+      .from(schema.deploymentEnvironments)
+      .where(
+        and(
+          eq(schema.deploymentEnvironments.id, envId),
+          eq(schema.deploymentEnvironments.projectId, projectId),
+        ),
+      )
+      .limit(1);
+
+    const environment = envRows[0];
+    if (!environment) {
+      throw errors.notFound('Deployment environment');
+    }
+
+    if (!environment.nodeId) {
+      return c.json({ containers: [], nodeId: null, unavailableReason: 'no_deployment_node' });
+    }
+
+    const nodeRows = await db
+      .select({ id: schema.nodes.id, status: schema.nodes.status })
+      .from(schema.nodes)
+      .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
+      .limit(1);
+
+    const node = nodeRows[0];
+    if (!node || node.status !== 'running') {
+      return c.json({
+        containers: [],
+        nodeId: environment.nodeId,
+        unavailableReason: node ? 'node_not_running' : 'node_not_found',
+      });
+    }
+
+    try {
+      const result = await listNodeContainersFromNode(node.id, c.env, userId);
+      return c.json({
+        ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
+        nodeId: node.id,
+      });
+    } catch (err) {
+      log.warn('deployment_environment.containers_unavailable', {
+        projectId,
+        envId,
+        nodeId: node.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({
+        containers: [],
+        nodeId: node.id,
+        unavailableReason: 'node_agent_unreachable',
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/projects/:projectId/environments/:envId/metrics
+ * Read deployment-node system and container metrics.
+ */
+deploymentEnvironmentRoutes.get(
+  '/:projectId/environments/:envId/metrics',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('projectId');
+    const envId = c.req.param('envId');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, userId);
+
+    const envRows = await db
+      .select({
+        id: schema.deploymentEnvironments.id,
+        nodeId: schema.deploymentEnvironments.nodeId,
+      })
+      .from(schema.deploymentEnvironments)
+      .where(
+        and(
+          eq(schema.deploymentEnvironments.id, envId),
+          eq(schema.deploymentEnvironments.projectId, projectId),
+        ),
+      )
+      .limit(1);
+
+    const environment = envRows[0];
+    if (!environment) {
+      throw errors.notFound('Deployment environment');
+    }
+
+    if (!environment.nodeId) {
+      return c.json({ systemInfo: null, nodeId: null, fallbackMetrics: null, unavailableReason: 'no_deployment_node' });
+    }
+
+    const nodeRows = await db
+      .select({
+        id: schema.nodes.id,
+        status: schema.nodes.status,
+        lastMetrics: schema.nodes.lastMetrics,
+      })
+      .from(schema.nodes)
+      .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
+      .limit(1);
+
+    const node = nodeRows[0];
+    if (!node || node.status !== 'running') {
+      return c.json({
+        systemInfo: null,
+        nodeId: environment.nodeId,
+        fallbackMetrics: node ? parseLastMetrics(node.lastMetrics) : null,
+        unavailableReason: node ? 'node_not_running' : 'node_not_found',
+      });
+    }
+
+    try {
+      const result = await getNodeSystemInfoFromNode(node.id, c.env, userId);
+      return c.json({
+        systemInfo: result,
+        nodeId: node.id,
+        fallbackMetrics: parseLastMetrics(node.lastMetrics),
+      });
+    } catch (err) {
+      log.warn('deployment_environment.metrics_unavailable', {
+        projectId,
+        envId,
+        nodeId: node.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({
+        systemInfo: null,
+        nodeId: node.id,
+        fallbackMetrics: parseLastMetrics(node.lastMetrics),
         unavailableReason: 'node_agent_unreachable',
       });
     }

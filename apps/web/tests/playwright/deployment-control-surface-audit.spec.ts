@@ -219,36 +219,91 @@ const MOCK_LOGS = {
     {
       timestamp: '2026-06-18T10:13:30.000Z',
       level: 'info',
-      source: 'deployment-agent',
+      source: 'agent',
       message: 'Pulled release image registry.sam.local/deploy-audit:7',
+    },
+    {
+      timestamp: '2026-06-18T10:13:58.000Z',
+      level: 'info',
+      source: 'docker:deploy-audit-web-1',
+      message: 'nginx access log: GET / 200',
     },
     {
       timestamp: '2026-06-18T10:13:55.000Z',
       level: 'info',
-      source: 'caddy',
+      source: 'docker:deploy-audit-worker-1',
       message: 'Route certificate is active for staging.deploy-audit.sammy.party',
     },
     {
       timestamp: '2026-06-18T10:12:00.000Z',
       level: 'error',
-      source: 'deployment-agent',
+      source: 'agent',
       message: 'ThisIsAnExtremelyLongLogMessageWithoutAnySpacesOrBreakPointsThatShouldNotCauseHorizontalOverflowInTheLogsPanel_ErrorCode_DEPLOY_COMPOSE_PULL_TIMEOUT_REGISTRY_UNREACHABLE_0xDEADBEEF',
     },
     {
       timestamp: '2026-06-18T10:11:00.000Z',
       level: 'warn',
-      source: 'caddy',
+      source: 'agent',
       message: 'TLS ACME HTTP-01 challenge timed out for staging.deploy-audit.sammy.party — port 80 may be unreachable from the public internet',
     },
   ],
   nextCursor: null,
 };
 
+const MOCK_CONTAINERS = {
+  containers: [
+    {
+      id: 'container-web',
+      name: 'deploy-audit-web-1',
+      image: 'nginx:alpine',
+      state: 'running',
+      status: 'Up 10 minutes',
+    },
+    {
+      id: 'container-worker',
+      name: 'deploy-audit-worker-1',
+      image: 'worker:latest',
+      state: 'running',
+      status: 'Up 10 minutes',
+    },
+  ],
+};
+
 const MOCK_SYSTEM_INFO = {
   cpu: { numCpu: 4, model: 'AMD EPYC', loadAvg1: 0.42, loadAvg5: 0.38, loadAvg15: 0.31 },
-  memory: { totalBytes: 8_000_000_000, usedBytes: 3_600_000_000, usedPercent: 45 },
-  disk: { totalBytes: 120_000_000_000, usedBytes: 37_000_000_000, usedPercent: 31 },
-  docker: { running: true, version: '26.1.0', containers: [] },
+  memory: { totalBytes: 8_000_000_000, usedBytes: 3_600_000_000, availableBytes: 4_400_000_000, usedPercent: 45 },
+  disk: { totalBytes: 120_000_000_000, usedBytes: 37_000_000_000, availableBytes: 83_000_000_000, usedPercent: 31, mountPath: '/' },
+  network: { interface: 'eth0', rxBytes: 1234, txBytes: 5678 },
+  uptime: { seconds: 3600, humanFormat: '1h' },
+  docker: {
+    running: true,
+    version: '26.1.0',
+    containers: 2,
+    containerList: [
+      {
+        id: 'container-web',
+        name: 'deploy-audit-web-1',
+        image: 'nginx:alpine',
+        status: 'Up 10 minutes',
+        state: 'running',
+        cpuPercent: 1.7,
+        memUsage: '3.5MiB / 256MiB',
+        memPercent: 1.4,
+        createdAt: '2026-06-18T10:00:00.000Z',
+      },
+      {
+        id: 'container-worker',
+        name: 'deploy-audit-worker-1',
+        image: 'worker:latest',
+        status: 'Up 10 minutes',
+        state: 'running',
+        cpuPercent: 0.4,
+        memUsage: '12MiB / 256MiB',
+        memPercent: 4.7,
+        createdAt: '2026-06-18T10:00:00.000Z',
+      },
+    ],
+  },
   software: { node: '22.16.0', docker: '26.1.0' },
   agent: { version: 'audit', status: 'running' },
 };
@@ -295,8 +350,29 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/logs`) {
       return respond(route, 200, { ...MOCK_LOGS, source: 'node', nodeId: NODE_ID });
     }
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/containers`) {
+      return respond(route, 200, { ...MOCK_CONTAINERS, nodeId: NODE_ID });
+    }
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/metrics`) {
+      return respond(route, 200, {
+        systemInfo: MOCK_SYSTEM_INFO,
+        nodeId: NODE_ID,
+        fallbackMetrics: MOCK_NODE.lastMetrics,
+      });
+    }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/logs`) {
       return respond(route, 200, { entries: [], nextCursor: null, unavailableReason: 'node_stale' });
+    }
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/containers`) {
+      return respond(route, 200, { containers: [], nodeId: NODE_STALE_ID, unavailableReason: 'node_stale' });
+    }
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/metrics`) {
+      return respond(route, 200, {
+        systemInfo: null,
+        nodeId: NODE_STALE_ID,
+        fallbackMetrics: MOCK_NODE_STALE.lastMetrics,
+        unavailableReason: 'node_agent_unreachable',
+      });
     }
 
     const allNodes = includeFailingEnv ? [MOCK_NODE, MOCK_NODE_STALE] : [MOCK_NODE];
@@ -308,7 +384,9 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
     if (path === `/api/nodes/${NODE_ID}/events`) return respond(route, 200, { events: [], nextCursor: null });
     if (path === `/api/nodes/${NODE_STALE_ID}/events`) return respond(route, 200, { events: [], nextCursor: null });
     if (path === `/api/nodes/${NODE_ID}/logs`) return respond(route, 200, MOCK_LOGS);
+    if (path === `/api/nodes/${NODE_ID}/containers`) return respond(route, 200, MOCK_CONTAINERS);
     if (path === `/api/nodes/${NODE_STALE_ID}/logs`) return respond(route, 200, { entries: [], nextCursor: null });
+    if (path === `/api/nodes/${NODE_STALE_ID}/containers`) return respond(route, 200, { containers: [] });
     if (path === '/api/workspaces') return respond(route, 200, []);
 
     return respond(route, 200, {});
@@ -322,6 +400,7 @@ test.describe('Deployment control surface audit', () => {
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
+    const stagingCard = page.locator('article').filter({ hasText: 'staging' }).first();
 
     // Operational summary: Serving badge and release version
     await expect(page.getByText('Serving', { exact: true })).toBeVisible();
@@ -334,6 +413,11 @@ test.describe('Deployment control surface audit', () => {
     await expect(page.getByText('Deployment Node', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Agent Policy', { exact: true }).first()).toBeVisible();
 
+    // Deployment metrics panel with node and per-container metrics.
+    await expect(stagingCard.getByText('Metrics', { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(stagingCard.getByText('deploy-audit-web-1')).toBeVisible();
+    await expect(stagingCard.getByText('3.5MiB / 256MiB')).toBeVisible();
+
     // Route hostnames (including long one)
     await expect(page.getByText('staging.deploy-audit.sammy.party')).toBeVisible();
 
@@ -341,9 +425,11 @@ test.describe('Deployment control surface audit', () => {
     await expect(page.getByRole('button', { name: 'Destroy' }).first()).toBeVisible();
 
     // Open logs on the staging card
-    const stagingCard = page.locator('article').filter({ hasText: 'staging' }).first();
     await stagingCard.getByRole('button', { name: 'Logs' }).click();
     await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
+    await stagingCard.locator('#log-source').selectOption('app');
+    await expect(stagingCard.locator('#log-container')).toBeVisible();
+    await expect(stagingCard.locator('#log-container')).toContainText('deploy-audit-web-1');
     // UTC timestamps in logs
     await expect(page.getByText('UTC').first()).toBeVisible();
 
@@ -466,6 +552,9 @@ test.describe('Deployment control surface audit', () => {
     await expect(page.locator('#log-level')).toBeVisible();
     // Search input
     await expect(page.getByPlaceholder('Search logs...')).toBeVisible();
+    await page.locator('#log-source').selectOption('app');
+    await expect(page.locator('#log-container')).toBeVisible();
+    await expect(page.locator('#log-container')).toContainText('deploy-audit-worker-1');
     // Copy button
     await expect(page.getByRole('button', { name: 'Copy' })).toBeVisible();
 

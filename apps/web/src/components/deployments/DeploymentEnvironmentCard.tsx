@@ -1,4 +1,9 @@
-import type { AgentProfile, NodeLogEntry } from '@simple-agent-manager/shared';
+import type {
+  AgentProfile,
+  NodeContainerLogTarget,
+  NodeLogEntry,
+  NodeSystemInfo,
+} from '@simple-agent-manager/shared';
 import { Alert, Button, StatusBadge } from '@simple-agent-manager/ui';
 import {
   AlertTriangle,
@@ -18,6 +23,19 @@ import type { DeploymentEnvironment } from '../../lib/api';
 
 export type DeploymentLogState = {
   entries: NodeLogEntry[];
+  loading: boolean;
+  error: string | null;
+  unavailableReason?: string;
+  containers?: NodeContainerLogTarget[];
+};
+
+export type DeploymentMetricsState = {
+  systemInfo: NodeSystemInfo | null;
+  fallbackMetrics?: {
+    cpuLoadAvg1?: number;
+    memoryPercent?: number;
+    diskPercent?: number;
+  } | null;
   loading: boolean;
   error: string | null;
   unavailableReason?: string;
@@ -75,6 +93,18 @@ function safePercent(value: unknown): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
   return `${n.toFixed(1)}%`;
+}
+
+function formatBytes(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '-';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let next = value;
+  let idx = 0;
+  while (next >= 1024 && idx < units.length - 1) {
+    next /= 1024;
+    idx += 1;
+  }
+  return `${next.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
 function formatReason(reason: string | undefined): string {
@@ -270,26 +300,30 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
 
 // ─── Logs Panel ────────────────────────────────────────────────────────────
 
-const LOG_SOURCES = ['all', 'deployment-agent', 'caddy', 'app'] as const;
+const LOG_SOURCES = ['all', 'deployment-agent', 'app'] as const;
 const LOG_LEVELS = ['all', 'error', 'warn', 'info', 'debug'] as const;
 
 interface LogsPanelProps {
   state: DeploymentLogState | undefined;
   onRefresh: () => void;
-  onRefreshFiltered: (opts: { source?: string; level?: string; search?: string }) => void;
+  onRefreshFiltered: (opts: { source?: string; level?: string; search?: string; container?: string }) => void;
 }
 
 function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
   const [source, setSource] = useState<string>('all');
   const [level, setLevel] = useState<string>('all');
+  const [container, setContainer] = useState('');
   const [search, setSearch] = useState('');
 
-  const applyFilters = (nextSource?: string, nextLevel?: string) => {
+  const applyFilters = (nextSource?: string, nextLevel?: string, nextContainer?: string) => {
     const s = nextSource ?? source;
     const l = nextLevel ?? level;
+    const c = nextContainer ?? container;
+    const apiSource = s === 'app' ? 'docker' : s === 'deployment-agent' ? 'agent' : s;
     onRefreshFiltered({
-      source: s === 'all' ? undefined : s,
+      source: apiSource === 'all' ? undefined : apiSource,
       level: l === 'all' ? undefined : l,
+      container: c || undefined,
       search: search.trim() || undefined,
     });
   };
@@ -351,6 +385,28 @@ function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
             {LOG_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
+        {(source === 'app' || source === 'all') && (
+          <div className="flex items-center gap-1.5">
+            <label className="text-[0.6875rem] uppercase text-fg-muted font-semibold" htmlFor="log-container">Container</label>
+            <select
+              id="log-container"
+              value={container}
+              onChange={(e) => {
+                setContainer(e.target.value);
+                applyFilters(undefined, undefined, e.target.value);
+              }}
+              className="rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5 max-w-[180px]"
+            >
+              <option value="">All containers</option>
+              {(state?.containers ?? []).map((target) => (
+                <option key={target.name} value={target.name}>{target.name}</option>
+              ))}
+              {container && !(state?.containers ?? []).some((target) => target.name === container) && (
+                <option value={container}>{container}</option>
+              )}
+            </select>
+          </div>
+        )}
         <div className="flex items-center gap-1.5 flex-1 min-w-[120px]">
           <Search size={12} className="text-fg-muted shrink-0" />
           <input
@@ -401,6 +457,95 @@ function LogEntries({ state }: { state: DeploymentLogState | undefined }) {
   );
 }
 
+// ─── Metrics Panel ─────────────────────────────────────────────────────────
+
+function DeploymentMetricsPanel({ state }: { state: DeploymentMetricsState | undefined }) {
+  if (!state) return null;
+
+  const info = state.systemInfo;
+  const fallback = state.fallbackMetrics;
+  const containers = info?.docker?.containerList ?? [];
+
+  return (
+    <section className="rounded-md border border-border-default bg-inset px-3 py-3 grid gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-fg-primary font-semibold text-sm">
+          <RefreshCw size={15} />
+          Metrics
+        </div>
+        {state.loading && <span className="text-xs text-fg-muted">Refreshing...</span>}
+      </div>
+
+      {state.error && <Alert variant="error">{state.error}</Alert>}
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-sm border border-border-default px-2 py-1.5">
+          <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">CPU</div>
+          <div className="text-sm text-fg-primary truncate">
+            {info ? info.cpu.loadAvg1.toFixed(2) : fallback?.cpuLoadAvg1?.toFixed(2) ?? '-'}
+          </div>
+        </div>
+        <div className="rounded-sm border border-border-default px-2 py-1.5">
+          <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Memory</div>
+          <div className="text-sm text-fg-primary truncate">
+            {info ? safePercent(info.memory.usedPercent) : safePercent(fallback?.memoryPercent)}
+          </div>
+        </div>
+        <div className="rounded-sm border border-border-default px-2 py-1.5">
+          <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Disk</div>
+          <div className="text-sm text-fg-primary truncate">
+            {info ? safePercent(info.disk.usedPercent) : safePercent(fallback?.diskPercent)}
+          </div>
+        </div>
+      </div>
+
+      {!info && state.unavailableReason && (
+        <div className="text-xs text-fg-muted">
+          Live metrics unavailable: {state.unavailableReason.replace(/_/g, ' ')}.
+        </div>
+      )}
+
+      <div className="grid gap-2">
+        <div className="text-xs font-semibold uppercase text-fg-muted">Containers</div>
+        {containers.length === 0 ? (
+          <div className="text-xs text-fg-muted">No live container metrics available.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-sm border border-border-default">
+            <table className="w-full text-xs border-collapse">
+              <thead className="text-fg-muted">
+                <tr className="border-b border-border-default">
+                  <th className="text-left font-semibold px-2 py-1">Name</th>
+                  <th className="text-right font-semibold px-2 py-1">CPU</th>
+                  <th className="text-right font-semibold px-2 py-1">Memory</th>
+                  <th className="text-left font-semibold px-2 py-1">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {containers.map((container) => (
+                  <tr key={container.id || container.name} className="border-b border-border-default last:border-b-0">
+                    <td className="px-2 py-1 text-fg-primary max-w-[140px] truncate">{container.name}</td>
+                    <td className="px-2 py-1 text-right text-fg-primary tabular-nums">{safePercent(container.cpuPercent)}</td>
+                    <td className="px-2 py-1 text-right text-fg-primary tabular-nums">
+                      {container.memUsage ? container.memUsage : safePercent(container.memPercent)}
+                    </td>
+                    <td className="px-2 py-1 text-fg-muted">{container.state}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {info && (
+        <div className="text-[0.6875rem] text-fg-muted">
+          Node memory {formatBytes(info.memory.usedBytes)} / {formatBytes(info.memory.totalBytes)}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─── Main Card ─────────────────────────────────────────────────────────────
 
 interface DeploymentEnvironmentCardProps {
@@ -408,10 +553,11 @@ interface DeploymentEnvironmentCardProps {
   profiles: AgentProfile[];
   policySaving: string | null;
   logState: DeploymentLogState | undefined;
+  metricsState: DeploymentMetricsState | undefined;
   logsOpen: boolean;
   onPolicyEnabledChange: (env: DeploymentEnvironment, enabled: boolean) => void;
   onProfileToggle: (env: DeploymentEnvironment, profileId: string) => void;
-  onRefreshLogs: (env: DeploymentEnvironment, opts?: { source?: string; level?: string; search?: string }) => void;
+  onRefreshLogs: (env: DeploymentEnvironment, opts?: { source?: string; level?: string; search?: string; container?: string }) => void;
   onDelete: (env: DeploymentEnvironment) => void;
 }
 
@@ -420,6 +566,7 @@ export function DeploymentEnvironmentCard({
   profiles,
   policySaving,
   logState,
+  metricsState,
   logsOpen,
   onPolicyEnabledChange,
   onProfileToggle,
@@ -453,6 +600,8 @@ export function DeploymentEnvironmentCard({
       </header>
 
       <OperationalSummary env={env} />
+
+      <DeploymentMetricsPanel state={metricsState} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-4">
         <section className="grid gap-3 content-start">

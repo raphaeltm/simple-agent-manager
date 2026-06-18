@@ -340,6 +340,20 @@ export interface NodeLogResponse {
   hasMore: boolean;
 }
 
+export interface NodeContainerLogTarget {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+}
+
+export interface NodeContainerListResponse {
+  containers: NodeContainerLogTarget[];
+  nodeId?: string | null;
+  unavailableReason?: string;
+}
+
 // =============================================================================
 // Node Observability — Container Types
 // =============================================================================

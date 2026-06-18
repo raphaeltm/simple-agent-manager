@@ -1,4 +1,10 @@
-import type { NodeLogFilter, NodeLogResponse, NodeResponse } from '@simple-agent-manager/shared';
+import type {
+  NodeContainerListResponse,
+  NodeLogFilter,
+  NodeLogResponse,
+  NodeResponse,
+  NodeSystemInfo,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 import type { GcpProject } from './credentials';
@@ -135,6 +141,35 @@ export async function getDeploymentEnvironmentLogs(
   const qs = params.toString();
   return request<NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }>(
     `/api/projects/${projectId}/environments/${envId}/logs${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function listDeploymentEnvironmentContainers(
+  projectId: string,
+  envId: string,
+): Promise<NodeContainerListResponse> {
+  return request<NodeContainerListResponse>(
+    `/api/projects/${projectId}/environments/${envId}/containers`,
+  );
+}
+
+export interface DeploymentEnvironmentMetricsResponse {
+  systemInfo: NodeSystemInfo | null;
+  nodeId?: string | null;
+  fallbackMetrics?: {
+    cpuLoadAvg1?: number;
+    memoryPercent?: number;
+    diskPercent?: number;
+  } | null;
+  unavailableReason?: string;
+}
+
+export async function getDeploymentEnvironmentMetrics(
+  projectId: string,
+  envId: string,
+): Promise<DeploymentEnvironmentMetricsResponse> {
+  return request<DeploymentEnvironmentMetricsResponse>(
+    `/api/projects/${projectId}/environments/${envId}/metrics`,
   );
 }
 

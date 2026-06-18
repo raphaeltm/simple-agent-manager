@@ -23,6 +23,7 @@ import { getRuntimeLimits } from '../services/limits';
 import {
   getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
+  listNodeContainersFromNode,
   listNodeEventsOnNode,
   nodeAgentRawRequest,
   stopWorkspaceOnNode,
@@ -453,6 +454,34 @@ nodesRoutes.get('/:id/logs', async (c) => {
   } catch {
     // Node agent may be unreachable — return empty rather than 500
     return c.json({ entries: [], nextCursor: null, hasMore: false });
+  }
+});
+
+/**
+ * GET /:id/containers — Proxy Docker container list from the VM Agent.
+ * Used by log filters to offer per-container selection.
+ */
+nodesRoutes.get('/:id/containers', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  if (node.status !== 'running') {
+    return c.json({ containers: [], nodeId, unavailableReason: 'node_not_running' });
+  }
+
+  try {
+    const result = await listNodeContainersFromNode(nodeId, c.env, userId);
+    return c.json({
+      ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
+      nodeId,
+    });
+  } catch {
+    return c.json({ containers: [], nodeId, unavailableReason: 'node_agent_unreachable' }, 503);
   }
 });
 

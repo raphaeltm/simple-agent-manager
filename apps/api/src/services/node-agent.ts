@@ -543,6 +543,17 @@ export async function getNodeLogsFromNode(
   });
 }
 
+export async function listNodeContainersFromNode(
+  nodeId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(nodeId, env, '/containers', {
+    method: 'GET',
+    userId,
+  });
+}
+
 /**
  * Raw binary proxy to a VM agent endpoint.
  * Returns the raw Response (not parsed as JSON) so callers can stream the body.
