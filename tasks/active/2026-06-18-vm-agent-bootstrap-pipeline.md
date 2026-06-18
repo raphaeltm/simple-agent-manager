@@ -27,16 +27,16 @@
 
 ## Implementation Checklist
 
-- [ ] Characterize existing bootstrap behavior and test seams in `packages/vm-agent/internal/bootstrap`.
-- [ ] Introduce a small bootstrap-local context, step result/status model, and cleanup stack.
-- [ ] Add a step runner with explicit ordering, fatal/non-fatal semantics, cleanup-on-failure behavior, and reporter phase handling.
-- [ ] Refactor `Run` and `PrepareWorkspace` to assemble explicit plans from shared steps while preserving behavior.
-- [ ] Decompose `ensureDevcontainerReady` into focused helpers where practical.
-- [ ] Add tests for step ordering and reporter event order.
-- [ ] Add tests for required step failure, optional step warning/continuation, and cleanup behavior.
-- [ ] Add tests for lightweight behavior, cache non-fatal behavior, named devcontainer config failure, and fallback behavior.
-- [ ] Run focused bootstrap tests from `packages/vm-agent`.
-- [ ] Run related/full VM agent package tests if the environment supports it.
+- [x] Characterize existing bootstrap behavior and test seams in `packages/vm-agent/internal/bootstrap`.
+- [x] Introduce a small bootstrap-local context, step result/status model, and cleanup stack.
+- [x] Add a step runner with explicit ordering, fatal/non-fatal semantics, cleanup-on-failure behavior, and reporter phase handling.
+- [x] Refactor `Run` and `PrepareWorkspace` to assemble explicit plans from shared steps while preserving behavior.
+- [x] Decompose `ensureDevcontainerReady` into focused helpers where practical.
+- [x] Add tests for step ordering and reporter event order.
+- [x] Add tests for required step failure, optional step warning/continuation, and cleanup behavior.
+- [x] Add tests for lightweight behavior, cache non-fatal behavior, named devcontainer config failure, and fallback behavior.
+- [x] Run focused bootstrap tests from `packages/vm-agent`.
+- [x] Run related/full VM agent package tests if the environment supports it.
 - [ ] Create a draft/open PR marked `DO NOT MERGE / DO NOT DEPLOY TO STAGING`.
 
 ## Acceptance Criteria
