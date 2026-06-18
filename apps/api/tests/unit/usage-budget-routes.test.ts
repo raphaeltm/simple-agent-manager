@@ -16,8 +16,12 @@ const mockKV = {
     if (val && format === 'json') return JSON.parse(val);
     return val;
   }),
-  put: vi.fn(async (key: string, value: string) => { kvStore.set(key, value); }),
-  delete: vi.fn(async (key: string) => { kvStore.delete(key); }),
+  put: vi.fn(async (key: string, value: string) => {
+    kvStore.set(key, value);
+  }),
+  delete: vi.fn(async (key: string) => {
+    kvStore.delete(key);
+  }),
 };
 
 // ---------------------------------------------------------------------------
@@ -56,8 +60,8 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     KV: mockKV as unknown as KVNamespace,
     AI_GATEWAY_ID: 'test-gw',
-    AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '',
-    AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: '',
+    AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: undefined,
+    AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: undefined,
     ...overrides,
   } as Env;
 }
@@ -109,7 +113,10 @@ describe('GET /api/usage/ai/budget', () => {
 
     // Set daily usage via KV
     const today = new Date().toISOString().split('T')[0];
-    kvStore.set(`ai-budget:user-budget-1:${today}`, JSON.stringify({ inputTokens: 250_000, outputTokens: 100_000 }));
+    kvStore.set(
+      `ai-budget:user-budget-1:${today}`,
+      JSON.stringify({ inputTokens: 250_000, outputTokens: 100_000 })
+    );
 
     const resp = await testApp.request('/api/usage/ai/budget', {}, makeEnv());
     const data = await resp.json();
@@ -123,7 +130,10 @@ describe('GET /api/usage/ai/budget', () => {
     mockIterateGatewayLogs.mockResolvedValue(undefined);
 
     const today = new Date().toISOString().split('T')[0];
-    kvStore.set(`ai-budget:user-budget-1:${today}`, JSON.stringify({ inputTokens: 600_000, outputTokens: 10 }));
+    kvStore.set(
+      `ai-budget:user-budget-1:${today}`,
+      JSON.stringify({ inputTokens: 600_000, outputTokens: 10 })
+    );
 
     const resp = await testApp.request('/api/usage/ai/budget', {}, makeEnv());
     const data = await resp.json();
@@ -136,10 +146,10 @@ describe('GET /api/usage/ai/budget', () => {
     // Simulate gateway returning cost entries for the authenticated user
     mockIterateGatewayLogs.mockImplementation(
       async (_env: unknown, _gw: string, _start: string, cb: (e: unknown) => void) => {
-        cb({ metadata: { userId: 'user-budget-1' }, cost: 1.50 });
+        cb({ metadata: { userId: 'user-budget-1' }, cost: 1.5 });
         cb({ metadata: { userId: 'user-budget-1' }, cost: 0.75 });
-        cb({ metadata: { userId: 'other-user' }, cost: 5.00 }); // different user, excluded
-      },
+        cb({ metadata: { userId: 'other-user' }, cost: 5.0 }); // different user, excluded
+      }
     );
 
     const resp = await testApp.request('/api/usage/ai/budget', {}, makeEnv());
@@ -153,6 +163,18 @@ describe('GET /api/usage/ai/budget', () => {
     const data = await resp.json();
 
     expect(data.monthCostUsd).toBe(0);
+  });
+
+  it('fails when platform daily token limit env is configured as an empty string', async () => {
+    mockIterateGatewayLogs.mockResolvedValue(undefined);
+
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {},
+      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '' })
+    );
+
+    expect(resp.status).toBe(500);
   });
 });
 
@@ -170,29 +192,34 @@ describe('PUT /api/usage/ai/budget', () => {
       alertThresholdPercent: 90,
     };
 
-    const resp = await testApp.request('/api/usage/ai/budget', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, makeEnv());
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      makeEnv()
+    );
 
     expect(resp.status).toBe(200);
     const data = await resp.json();
     expect(data.success).toBe(true);
 
     // Verify KV was written
-    expect(mockKV.put).toHaveBeenCalledWith(
-      'ai-budget-settings:user-budget-1',
-      expect.any(String),
-    );
+    expect(mockKV.put).toHaveBeenCalledWith('ai-budget-settings:user-budget-1', expect.any(String));
   });
 
   it('returns 400 for invalid JSON', async () => {
-    const resp = await testApp.request('/api/usage/ai/budget', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{not valid json',
-    }, makeEnv());
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{not valid json',
+      },
+      makeEnv()
+    );
 
     expect(resp.status).toBe(400);
     const data = await resp.json();
@@ -205,11 +232,15 @@ describe('PUT /api/usage/ai/budget', () => {
       alertThresholdPercent: 80,
     };
 
-    const resp = await testApp.request('/api/usage/ai/budget', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, makeEnv());
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      makeEnv()
+    );
 
     expect(resp.status).toBe(400);
     const data = await resp.json();
@@ -224,11 +255,15 @@ describe('PUT /api/usage/ai/budget', () => {
       alertThresholdPercent: 80,
     };
 
-    const resp = await testApp.request('/api/usage/ai/budget', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, makeEnv());
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      makeEnv()
+    );
 
     expect(resp.status).toBe(200);
     const data = await resp.json();
@@ -243,11 +278,18 @@ describe('DELETE /api/usage/ai/budget', () => {
   });
 
   it('deletes user budget settings and returns success', async () => {
-    kvStore.set('ai-budget-settings:user-budget-1', JSON.stringify({ dailyInputTokenLimit: 100_000 }));
+    kvStore.set(
+      'ai-budget-settings:user-budget-1',
+      JSON.stringify({ dailyInputTokenLimit: 100_000 })
+    );
 
-    const resp = await testApp.request('/api/usage/ai/budget', {
-      method: 'DELETE',
-    }, makeEnv());
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'DELETE',
+      },
+      makeEnv()
+    );
 
     expect(resp.status).toBe(200);
     const data = await resp.json();
@@ -256,9 +298,13 @@ describe('DELETE /api/usage/ai/budget', () => {
   });
 
   it('succeeds even when no settings exist (idempotent)', async () => {
-    const resp = await testApp.request('/api/usage/ai/budget', {
-      method: 'DELETE',
-    }, makeEnv());
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'DELETE',
+      },
+      makeEnv()
+    );
 
     expect(resp.status).toBe(200);
     const data = await resp.json();
