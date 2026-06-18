@@ -22,9 +22,9 @@ import {
 } from '../../services/trial/helpers';
 import { isTrialsEnabled } from '../../services/trial/kill-switch';
 
-const statusRoutes = new Hono<{ Bindings: Env }>();
+const publicTrialStatusRoutes = new Hono<{ Bindings: Env }>();
 
-statusRoutes.get('/status', async (c) => {
+publicTrialStatusRoutes.get('/status', async (c) => {
   const env = c.env;
   const now = Date.now();
   const enabled = await isTrialsEnabled(env, now);
@@ -64,4 +64,4 @@ statusRoutes.get('/status', async (c) => {
   return c.json(resp, 200);
 });
 
-export { statusRoutes };
+export { publicTrialStatusRoutes };

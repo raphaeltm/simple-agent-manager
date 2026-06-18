@@ -42,9 +42,9 @@ function makeCatalogDb(state: CatalogDbState) {
       const result = selectResults[selectCount - 1] ?? [];
       const builder = {
         from: vi.fn(() => builder),
-        where: vi.fn(() => (
+        where: vi.fn(() =>
           selectCount === 1 || selectCount >= 4 ? Promise.resolve(result) : builder
-        )),
+        ),
         limit: vi.fn(() => Promise.resolve(result)),
       };
       return builder;
@@ -84,11 +84,13 @@ describe('GET /api/agents', () => {
   });
 
   it('marks OpenCode configured via a dedicated key before any fallback', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      agentCredentials: [{ agentType: 'opencode' }],
-      scalewayCloudCredentials: [{ id: 'scw-cred' }],
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        agentCredentials: [{ agentType: 'opencode' }],
+        scalewayCloudCredentials: [{ id: 'scw-cred' }],
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');
@@ -100,11 +102,13 @@ describe('GET /api/agents', () => {
   });
 
   it('includes Amp as an API-key agent without proxy fallback', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      agentCredentials: [{ agentType: 'amp' }],
-      scalewayCloudCredentials: [{ id: 'scw-cred' }],
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        agentCredentials: [{ agentType: 'amp' }],
+        scalewayCloudCredentials: [{ id: 'scw-cred' }],
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const amp = agents.find((agent) => agent.id === 'amp');
@@ -116,10 +120,12 @@ describe('GET /api/agents', () => {
   });
 
   it('does not mark OpenCode configured from Scaleway cloud credential by default', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      scalewayCloudCredentials: [{ id: 'scw-cred' }],
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        scalewayCloudCredentials: [{ id: 'scw-cred' }],
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');
@@ -131,11 +137,13 @@ describe('GET /api/agents', () => {
   });
 
   it('marks OpenCode configured via Scaleway fallback when Scaleway is explicit', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      scalewayCloudCredentials: [{ id: 'scw-cred' }],
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'scaleway' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        scalewayCloudCredentials: [{ id: 'scw-cred' }],
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+        agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'scaleway' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');
@@ -147,10 +155,12 @@ describe('GET /api/agents', () => {
   });
 
   it('does not mark OpenCode configured via platform availability by default', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      agentCredentials: [{ agentType: 'claude-code' }],
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        agentCredentials: [{ agentType: 'claude-code' }],
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');
@@ -167,11 +177,13 @@ describe('GET /api/agents', () => {
   });
 
   it('marks OpenCode configured via platform availability when platform is explicit', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      agentCredentials: [{ agentType: 'claude-code' }],
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        agentCredentials: [{ agentType: 'claude-code' }],
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+        agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');
@@ -187,27 +199,31 @@ describe('GET /api/agents', () => {
     });
   });
 
-  it('matches trial semantics for platform credential decryption operation errors', async () => {
+  it('does not mark OpenCode configured when platform credential decryption fails', async () => {
     vi.mocked(decrypt).mockRejectedValueOnce(new DOMException('decrypt failed', 'OperationError'));
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+        agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');
 
     expect(opencode).toMatchObject({
-      configured: true,
-      fallbackCredentialSource: 'platform-opencode',
+      configured: false,
+      fallbackCredentialSource: null,
     });
   });
 
   it('does not mark OpenCode configured when AI proxy is disabled', async () => {
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-      agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+        agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents(env({ AI_PROXY_ENABLED: 'false' } as Partial<Env>));
     const opencode = agents.find((agent) => agent.id === 'opencode');
@@ -232,9 +248,12 @@ describe('GET /api/agents', () => {
 
   it('keeps the catalog available when the non-critical platform check fails', async () => {
     vi.mocked(decrypt).mockRejectedValueOnce(new Error('configuration error'));
-    vi.mocked(drizzle).mockReturnValue(makeCatalogDb({
-      platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
-    }) as ReturnType<typeof drizzle>);
+    vi.mocked(drizzle).mockReturnValue(
+      makeCatalogDb({
+        platformCloudCredentials: [{ id: 'platform-cred', provider: 'scaleway' }],
+        agentProviderSettings: [{ agentType: 'opencode', opencodeProvider: 'platform' }],
+      }) as ReturnType<typeof drizzle>
+    );
 
     const { agents } = await listAgents();
     const opencode = agents.find((agent) => agent.id === 'opencode');

@@ -47,15 +47,18 @@ function createMockKV(): KVNamespace & { _store: Map<string, string> } {
 
 function createAtomicBudgetEnv() {
   const store = new Map<string, { inputTokens: number; outputTokens: number }>();
-  const providerStore = new Map<string, {
-    providerId: string;
-    providerName: string;
-    dialect: string;
-    requests: number;
-    inputTokens: number;
-    outputTokens: number;
-    estimatedCostUsd: number;
-  }>();
+  const providerStore = new Map<
+    string,
+    {
+      providerId: string;
+      providerName: string;
+      dialect: string;
+      requests: number;
+      inputTokens: number;
+      outputTokens: number;
+      estimatedCostUsd: number;
+    }
+  >();
   let queue = Promise.resolve();
   const stub = {
     async get(dateKey: string) {
@@ -78,7 +81,7 @@ function createAtomicBudgetEnv() {
       attribution: { providerId: string; providerName: string; dialect: string },
       inputTokens: number,
       outputTokens: number,
-      estimatedCostUsd: number,
+      estimatedCostUsd: number
     ) {
       const key = `${dateKey}:${attribution.providerId}:${attribution.dialect}`;
       const current = providerStore.get(key) ?? {
@@ -132,12 +135,15 @@ describe('monthly cost cap', () => {
 
   it('fails open when a cap is configured but no cached cost exists', async () => {
     const kv = createMockKV();
-    kv._store.set(buildBudgetSettingsKey('user-cap'), JSON.stringify({
-      dailyInputTokenLimit: null,
-      dailyOutputTokenLimit: null,
-      monthlyCostCapUsd: 10,
-      alertThresholdPercent: 80,
-    }));
+    kv._store.set(
+      buildBudgetSettingsKey('user-cap'),
+      JSON.stringify({
+        dailyInputTokenLimit: null,
+        dailyOutputTokenLimit: null,
+        monthlyCostCapUsd: 10,
+        alertThresholdPercent: 80,
+      })
+    );
 
     const result = await checkMonthlyCostCap(kv, 'user-cap');
     expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: 10 });
@@ -145,12 +151,15 @@ describe('monthly cost cap', () => {
 
   it('blocks when cached monthly cost reaches the configured cap', async () => {
     const kv = createMockKV();
-    kv._store.set(buildBudgetSettingsKey('user-over-cap'), JSON.stringify({
-      dailyInputTokenLimit: null,
-      dailyOutputTokenLimit: null,
-      monthlyCostCapUsd: 10,
-      alertThresholdPercent: 80,
-    }));
+    kv._store.set(
+      buildBudgetSettingsKey('user-over-cap'),
+      JSON.stringify({
+        dailyInputTokenLimit: null,
+        dailyOutputTokenLimit: null,
+        monthlyCostCapUsd: 10,
+        alertThresholdPercent: 80,
+      })
+    );
     kv._store.set(buildMonthlyCostCacheKey('user-over-cap'), '10.000000');
 
     const result = await checkMonthlyCostCap(kv, 'user-over-cap');
@@ -196,22 +205,18 @@ describe('incrementTokenUsage', () => {
   it('stores with default TTL via KV.put', async () => {
     const kv = createMockKV();
     await incrementTokenUsage(kv, 'user-ttl', 10, 5);
-    expect(kv.put).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      { expirationTtl: 86400 + 3600 },
-    );
+    expect(kv.put).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
+      expirationTtl: 86400 + 3600,
+    });
   });
 
   it('respects env var override for TTL', async () => {
     const kv = createMockKV();
     const env = { AI_USAGE_BUDGET_TTL_SECONDS: '7200' } as unknown as Env;
     await incrementTokenUsage(kv, 'user-ttl-custom', 10, 5, env);
-    expect(kv.put).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      { expirationTtl: 7200 },
-    );
+    expect(kv.put).toHaveBeenCalledWith(expect.any(String), expect.any(String), {
+      expirationTtl: 7200,
+    });
   });
 
   it('uses the Durable Object counter for concurrent increments when available', async () => {
@@ -219,7 +224,7 @@ describe('incrementTokenUsage', () => {
     const env = createAtomicBudgetEnv();
 
     await Promise.all(
-      Array.from({ length: 25 }, () => incrementTokenUsage(kv, 'user-atomic', 10, 2, env)),
+      Array.from({ length: 25 }, () => incrementTokenUsage(kv, 'user-atomic', 10, 2, env))
     );
 
     const usage = await getTokenUsage(kv, 'user-atomic', env);
@@ -236,16 +241,28 @@ describe('provider usage', () => {
 
   it('accumulates provider usage by provider and dialect in KV fallback', async () => {
     const kv = createMockKV();
-    await incrementProviderUsage(kv, 'user-provider', {
-      providerId: 'groq',
-      providerName: 'Groq',
-      dialect: 'openai-compatible',
-    }, 100, 20);
-    await incrementProviderUsage(kv, 'user-provider', {
-      providerId: 'groq',
-      providerName: 'Groq',
-      dialect: 'openai-compatible',
-    }, 300, 40);
+    await incrementProviderUsage(
+      kv,
+      'user-provider',
+      {
+        providerId: 'groq',
+        providerName: 'Groq',
+        dialect: 'openai-compatible',
+      },
+      100,
+      20
+    );
+    await incrementProviderUsage(
+      kv,
+      'user-provider',
+      {
+        providerId: 'groq',
+        providerName: 'Groq',
+        dialect: 'openai-compatible',
+      },
+      300,
+      40
+    );
 
     const usage = await getProviderUsage(kv, 'user-provider', new Date());
     expect(usage).toEqual([
@@ -265,13 +282,25 @@ describe('provider usage', () => {
     const kv = createMockKV();
     const env = createAtomicBudgetEnv();
 
-    await incrementProviderUsage(kv, 'user-provider-do', {
-      providerId: 'deepseek-anthropic',
-      providerName: 'DeepSeek Anthropic API',
-      dialect: 'anthropic',
-    }, 50, 10, env);
+    await incrementProviderUsage(
+      kv,
+      'user-provider-do',
+      {
+        providerId: 'deepseek-anthropic',
+        providerName: 'DeepSeek Anthropic API',
+        dialect: 'anthropic',
+      },
+      50,
+      10,
+      env
+    );
 
-    const usage = await getProviderUsage(kv, 'user-provider-do', new Date('2000-01-01T00:00:00Z'), env);
+    const usage = await getProviderUsage(
+      kv,
+      'user-provider-do',
+      new Date('2000-01-01T00:00:00Z'),
+      env
+    );
     expect(usage).toEqual([
       {
         providerId: 'deepseek-anthropic',
@@ -347,7 +376,7 @@ describe('checkTokenBudget', () => {
     const result = await checkTokenBudget(
       kv,
       'user-custom',
-      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '1000' }),
+      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '1000' })
     );
     expect(result.allowed).toBe(true);
     expect(result.inputLimit).toBe(1000);
@@ -357,7 +386,7 @@ describe('checkTokenBudget', () => {
     const result2 = await checkTokenBudget(
       kv,
       'user-custom',
-      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '1000' }),
+      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '1000' })
     );
     expect(result2.allowed).toBe(false);
   });
@@ -365,12 +394,15 @@ describe('checkTokenBudget', () => {
   it('uses user-set budget limits when present', async () => {
     const kv = createMockKV();
     const settingsKey = buildBudgetSettingsKey('user-budgeted');
-    kv._store.set(settingsKey, JSON.stringify({
-      dailyInputTokenLimit: 10_000,
-      dailyOutputTokenLimit: 5_000,
-      monthlyCostCapUsd: null,
-      alertThresholdPercent: 80,
-    }));
+    kv._store.set(
+      settingsKey,
+      JSON.stringify({
+        dailyInputTokenLimit: 10_000,
+        dailyOutputTokenLimit: 5_000,
+        monthlyCostCapUsd: null,
+        alertThresholdPercent: 80,
+      })
+    );
 
     const key = buildBudgetKey('user-budgeted');
     kv._store.set(key, JSON.stringify({ inputTokens: 9_000, outputTokens: 0 }));
@@ -411,13 +443,19 @@ describe('checkAiUsageGate', () => {
 
   it('returns daily-token-budget before checking monthly cap', async () => {
     const kv = createMockKV();
-    kv._store.set(buildBudgetSettingsKey('user-daily'), JSON.stringify({
-      dailyInputTokenLimit: 1_000,
-      dailyOutputTokenLimit: null,
-      monthlyCostCapUsd: 10,
-      alertThresholdPercent: 80,
-    }));
-    kv._store.set(buildBudgetKey('user-daily'), JSON.stringify({ inputTokens: 1_001, outputTokens: 0 }));
+    kv._store.set(
+      buildBudgetSettingsKey('user-daily'),
+      JSON.stringify({
+        dailyInputTokenLimit: 1_000,
+        dailyOutputTokenLimit: null,
+        monthlyCostCapUsd: 10,
+        alertThresholdPercent: 80,
+      })
+    );
+    kv._store.set(
+      buildBudgetKey('user-daily'),
+      JSON.stringify({ inputTokens: 1_001, outputTokens: 0 })
+    );
     kv._store.set(buildMonthlyCostCacheKey('user-daily'), '11.000000');
 
     const result = await checkAiUsageGate(kv, 'user-daily', makeEnv());
@@ -429,12 +467,15 @@ describe('checkAiUsageGate', () => {
 
   it('returns monthly-cost-cap when cached monthly cost exceeds cap', async () => {
     const kv = createMockKV();
-    kv._store.set(buildBudgetSettingsKey('user-monthly'), JSON.stringify({
-      dailyInputTokenLimit: null,
-      dailyOutputTokenLimit: null,
-      monthlyCostCapUsd: 10,
-      alertThresholdPercent: 80,
-    }));
+    kv._store.set(
+      buildBudgetSettingsKey('user-monthly'),
+      JSON.stringify({
+        dailyInputTokenLimit: null,
+        dailyOutputTokenLimit: null,
+        monthlyCostCapUsd: 10,
+        alertThresholdPercent: 80,
+      })
+    );
     kv._store.set(buildMonthlyCostCacheKey('user-monthly'), '10.010000');
 
     const result = await checkAiUsageGate(kv, 'user-monthly', makeEnv());
@@ -507,7 +548,7 @@ describe('resolveEffectiveLimits', () => {
         monthlyCostCapUsd: null,
         alertThresholdPercent: 80,
       },
-      makeEnv(),
+      makeEnv()
     );
     expect(limits.dailyInputTokenLimit).toBe(10_000);
     expect(limits.dailyOutputTokenLimit).toBe(5_000);
@@ -516,7 +557,7 @@ describe('resolveEffectiveLimits', () => {
   it('falls back to platform env vars', () => {
     const limits = resolveEffectiveLimits(
       null,
-      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '250000' }),
+      makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: '250000' })
     );
     expect(limits.dailyInputTokenLimit).toBe(250_000);
     expect(limits.dailyOutputTokenLimit).toBe(200_000);
@@ -528,6 +569,23 @@ describe('resolveEffectiveLimits', () => {
     expect(limits.dailyOutputTokenLimit).toBe(200_000);
   });
 
+  it.each([
+    ['invalid', 'abc'],
+    ['empty', ''],
+    ['zero', '0'],
+    ['negative', '-1'],
+  ])('rejects %s configured platform daily input token limit', (_name, value) => {
+    expect(() =>
+      resolveEffectiveLimits(null, makeEnv({ AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: value }))
+    ).toThrow('AI_PROXY_DAILY_INPUT_TOKEN_LIMIT must be a positive integer');
+  });
+
+  it('rejects invalid configured platform daily output token limit', () => {
+    expect(() =>
+      resolveEffectiveLimits(null, makeEnv({ AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: 'invalid' }))
+    ).toThrow('AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT must be a positive integer');
+  });
+
   it('user null fields fall through to platform defaults', () => {
     const limits = resolveEffectiveLimits(
       {
@@ -536,7 +594,7 @@ describe('resolveEffectiveLimits', () => {
         monthlyCostCapUsd: null,
         alertThresholdPercent: 80,
       },
-      makeEnv(),
+      makeEnv()
     );
     expect(limits.dailyInputTokenLimit).toBe(500_000);
     expect(limits.dailyOutputTokenLimit).toBe(5_000);
@@ -550,7 +608,7 @@ describe('resolveEffectiveLimits', () => {
         monthlyCostCapUsd: null,
         alertThresholdPercent: 80,
       },
-      makeEnv(),
+      makeEnv()
     );
     expect(limits.dailyInputTokenLimit).toBe(500_000);
     expect(limits.dailyOutputTokenLimit).toBe(200_000);
@@ -568,12 +626,15 @@ describe('validateBudgetUpdate', () => {
     }) as unknown as Env;
 
   it('validates a valid budget update', () => {
-    const settings = validateBudgetUpdate({
-      dailyInputTokenLimit: 100_000,
-      dailyOutputTokenLimit: 50_000,
-      monthlyCostCapUsd: 25.5,
-      alertThresholdPercent: 90,
-    }, makeEnv());
+    const settings = validateBudgetUpdate(
+      {
+        dailyInputTokenLimit: 100_000,
+        dailyOutputTokenLimit: 50_000,
+        monthlyCostCapUsd: 25.5,
+        alertThresholdPercent: 90,
+      },
+      makeEnv()
+    );
 
     expect(settings.dailyInputTokenLimit).toBe(100_000);
     expect(settings.dailyOutputTokenLimit).toBe(50_000);
@@ -582,103 +643,164 @@ describe('validateBudgetUpdate', () => {
   });
 
   it('allows null values (remove limit)', () => {
-    const settings = validateBudgetUpdate({
-      dailyInputTokenLimit: null,
-      monthlyCostCapUsd: null,
-    }, makeEnv());
+    const settings = validateBudgetUpdate(
+      {
+        dailyInputTokenLimit: null,
+        monthlyCostCapUsd: null,
+      },
+      makeEnv()
+    );
 
     expect(settings.dailyInputTokenLimit).toBeNull();
     expect(settings.monthlyCostCapUsd).toBeNull();
   });
 
   it('rejects token limit below minimum', () => {
-    expect(() => validateBudgetUpdate({
-      dailyInputTokenLimit: 500,
-    }, makeEnv())).toThrow('dailyInputTokenLimit must be between 1000 and');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          dailyInputTokenLimit: 500,
+        },
+        makeEnv()
+      )
+    ).toThrow('dailyInputTokenLimit must be between 1000 and');
   });
 
   it('rejects token limit above max', () => {
-    expect(() => validateBudgetUpdate({
-      dailyInputTokenLimit: 999_999_999,
-    }, makeEnv())).toThrow('dailyInputTokenLimit must be between 1000 and');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          dailyInputTokenLimit: 999_999_999,
+        },
+        makeEnv()
+      )
+    ).toThrow('dailyInputTokenLimit must be between 1000 and');
   });
 
   it('rejects monthly cost cap below minimum', () => {
-    expect(() => validateBudgetUpdate({
-      monthlyCostCapUsd: 0.001,
-    }, makeEnv())).toThrow('monthlyCostCapUsd must be between 0.01 and');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          monthlyCostCapUsd: 0.001,
+        },
+        makeEnv()
+      )
+    ).toThrow('monthlyCostCapUsd must be between 0.01 and');
   });
 
   it('rejects alert threshold outside 1-100', () => {
-    expect(() => validateBudgetUpdate({
-      alertThresholdPercent: 0,
-    }, makeEnv())).toThrow('alertThresholdPercent must be between 1 and 100');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          alertThresholdPercent: 0,
+        },
+        makeEnv()
+      )
+    ).toThrow('alertThresholdPercent must be between 1 and 100');
 
-    expect(() => validateBudgetUpdate({
-      alertThresholdPercent: 101,
-    }, makeEnv())).toThrow('alertThresholdPercent must be between 1 and 100');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          alertThresholdPercent: 101,
+        },
+        makeEnv()
+      )
+    ).toThrow('alertThresholdPercent must be between 1 and 100');
   });
 
   it('floors token limits to integers', () => {
-    const settings = validateBudgetUpdate({
-      dailyInputTokenLimit: 10_500.7,
-    }, makeEnv());
+    const settings = validateBudgetUpdate(
+      {
+        dailyInputTokenLimit: 10_500.7,
+      },
+      makeEnv()
+    );
     expect(settings.dailyInputTokenLimit).toBe(10_500);
   });
 
   it('rounds monthly cost to 2 decimal places', () => {
-    const settings = validateBudgetUpdate({
-      monthlyCostCapUsd: 25.555,
-    }, makeEnv());
+    const settings = validateBudgetUpdate(
+      {
+        monthlyCostCapUsd: 25.555,
+      },
+      makeEnv()
+    );
     expect(settings.monthlyCostCapUsd).toBe(25.56);
   });
 
   it('rejects non-number token limit (typeof guard)', () => {
-    expect(() => validateBudgetUpdate({
-      dailyInputTokenLimit: '50000' as unknown as number,
-    }, makeEnv())).toThrow('dailyInputTokenLimit must be between');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          dailyInputTokenLimit: '50000' as unknown as number,
+        },
+        makeEnv()
+      )
+    ).toThrow('dailyInputTokenLimit must be between');
   });
 
   it('rejects non-number alert threshold (typeof guard)', () => {
-    expect(() => validateBudgetUpdate({
-      alertThresholdPercent: '90' as unknown as number,
-    }, makeEnv())).toThrow('alertThresholdPercent must be between 1 and 100');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          alertThresholdPercent: '90' as unknown as number,
+        },
+        makeEnv()
+      )
+    ).toThrow('alertThresholdPercent must be between 1 and 100');
   });
 
   it('rejects non-number monthly cost (typeof guard)', () => {
-    expect(() => validateBudgetUpdate({
-      monthlyCostCapUsd: true as unknown as number,
-    }, makeEnv())).toThrow('monthlyCostCapUsd must be between');
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          monthlyCostCapUsd: true as unknown as number,
+        },
+        makeEnv()
+      )
+    ).toThrow('monthlyCostCapUsd must be between');
   });
 
   it('respects env var overrides for max ceiling', () => {
-    const settings = validateBudgetUpdate({
-      dailyInputTokenLimit: 5_000,
-    }, makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' }));
+    const settings = validateBudgetUpdate(
+      {
+        dailyInputTokenLimit: 5_000,
+      },
+      makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' })
+    );
     expect(settings.dailyInputTokenLimit).toBe(5_000);
 
     // Exceeds custom ceiling
-    expect(() => validateBudgetUpdate({
-      dailyInputTokenLimit: 15_000,
-    }, makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' }))).toThrow(
-      'dailyInputTokenLimit must be between 1000 and 10000',
-    );
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          dailyInputTokenLimit: 15_000,
+        },
+        makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' })
+      )
+    ).toThrow('dailyInputTokenLimit must be between 1000 and 10000');
   });
 
   it('respects env var overrides for monthly cost ceiling', () => {
-    expect(() => validateBudgetUpdate({
-      monthlyCostCapUsd: 600,
-    }, makeEnv({ AI_USAGE_MAX_MONTHLY_COST_CAP_USD: '500' }))).toThrow(
-      'monthlyCostCapUsd must be between 0.01 and 500',
-    );
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          monthlyCostCapUsd: 600,
+        },
+        makeEnv({ AI_USAGE_MAX_MONTHLY_COST_CAP_USD: '500' })
+      )
+    ).toThrow('monthlyCostCapUsd must be between 0.01 and 500');
   });
 
   it('respects env var overrides for min floor', () => {
     // Custom min of 5000 — value of 3000 should be rejected
-    expect(() => validateBudgetUpdate({
-      dailyInputTokenLimit: 3_000,
-    }, makeEnv({ AI_USAGE_MIN_DAILY_TOKEN_LIMIT: '5000' }))).toThrow(
-      'dailyInputTokenLimit must be between 5000 and',
-    );
+    expect(() =>
+      validateBudgetUpdate(
+        {
+          dailyInputTokenLimit: 3_000,
+        },
+        makeEnv({ AI_USAGE_MIN_DAILY_TOKEN_LIMIT: '5000' })
+      )
+    ).toThrow('dailyInputTokenLimit must be between 5000 and');
   });
 });

@@ -20,16 +20,16 @@ The same slice lacks focused service tests and silently normalizes malformed `AI
 
 ## Implementation Checklist
 
-- [ ] Move this task to `tasks/active/` on the feature branch.
-- [ ] Change platform OpenCode availability to fail closed on platform credential decryption `OperationError`.
-- [ ] Add an explicit positive-integer parser for AI proxy daily token limits, defaulting only when unset and throwing on malformed, zero, or negative configured values.
-- [ ] Reuse the stricter daily token limit parser in `getTrialStatus()` and `resolveEffectiveLimits()`.
-- [ ] Add focused `platform-trial` service tests for infra credential present/absent, AI proxy enabled/disabled, decryption `OperationError`, non-DOM errors, daily budget defaults/parsing, invalid env values, and token usage propagation.
-- [ ] Add authenticated `/api/trial-status` route tests for current-user availability, fallback response on service/config errors, and route semantics.
-- [ ] Update `/api/agents` catalog tests so decryption failures do not mark OpenCode configured, while generic availability failures keep the catalog response available.
-- [ ] Clarify authenticated `/api/trial-status` vs anonymous `/api/trial/status` naming/comments/test descriptions.
-- [ ] Format/clean the `agents-catalog.ts` helper/import boundaries without broad refactors.
-- [ ] Run targeted tests and relevant lint/typecheck checks.
+- [x] Move this task to `tasks/active/` on the feature branch.
+- [x] Change platform OpenCode availability to fail closed on platform credential decryption `OperationError`.
+- [x] Add an explicit positive-integer parser for AI proxy daily token limits, defaulting only when unset and throwing on malformed, zero, or negative configured values.
+- [x] Reuse the stricter daily token limit parser in `getTrialStatus()` and `resolveEffectiveLimits()`.
+- [x] Add focused `platform-trial` service tests for infra credential present/absent, AI proxy enabled/disabled, decryption `OperationError`, non-DOM errors, daily budget defaults/parsing, invalid env values, and token usage propagation.
+- [x] Add authenticated `/api/trial-status` route tests for current-user availability, fallback response on service/config errors, and route semantics.
+- [x] Update `/api/agents` catalog tests so decryption failures do not mark OpenCode configured, while generic availability failures keep the catalog response available.
+- [x] Clarify authenticated `/api/trial-status` vs anonymous `/api/trial/status` naming/comments/test descriptions.
+- [x] Format/clean the `agents-catalog.ts` helper/import boundaries without broad refactors.
+- [x] Run targeted tests and relevant lint/typecheck checks.
 - [ ] Run `constitution-validator` and `security-auditor` specialist checks before PR.
 - [ ] Deploy and verify on staging unless blocked by project policy.
 - [ ] Open a PR with the spot-check findings and exact checks run.
