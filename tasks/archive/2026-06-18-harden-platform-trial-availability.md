@@ -30,17 +30,17 @@ The same slice lacks focused service tests and silently normalizes malformed `AI
 - [x] Clarify authenticated `/api/trial-status` vs anonymous `/api/trial/status` naming/comments/test descriptions.
 - [x] Format/clean the `agents-catalog.ts` helper/import boundaries without broad refactors.
 - [x] Run targeted tests and relevant lint/typecheck checks.
-- [ ] Run `constitution-validator` and `security-auditor` specialist checks before PR.
+- [x] Run `constitution-validator` and `security-auditor` specialist checks before PR.
 - [ ] Deploy and verify on staging unless blocked by project policy.
 - [ ] Open a PR with the spot-check findings and exact checks run.
 
 ## Acceptance Criteria
 
-- [ ] Platform OpenCode/trial availability does not advertise readiness when the platform credential cannot be decrypted in this path.
-- [ ] Authenticated trial-status and agent catalog behavior have direct regression coverage.
-- [ ] Invalid configured AI proxy daily token limits are not silently accepted as defaults.
-- [ ] Endpoint naming/semantics are clearer in code and test descriptions.
-- [ ] Frontend call sites still hit authenticated `/api/trial-status`.
+- [x] Platform OpenCode/trial availability does not advertise readiness when the platform credential cannot be decrypted in this path.
+- [x] Authenticated trial-status and agent catalog behavior have direct regression coverage.
+- [x] Invalid configured AI proxy daily token limits are not silently accepted as defaults.
+- [x] Endpoint naming/semantics are clearer in code and test descriptions.
+- [x] Frontend call sites still hit authenticated `/api/trial-status`.
 - [ ] PR summary includes the spot-check findings and exact checks run.
 
 ## References
