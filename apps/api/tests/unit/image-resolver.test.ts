@@ -158,6 +158,52 @@ describe('ImageResolver', () => {
       );
     });
 
+    it('sends auth when target registry matches authRegistryHost scope', async () => {
+      const { fetchFn, callLog } = mockRegistryFetch();
+      const resolver = createImageResolver({
+        fetchFn,
+        auth: { username: 'user', password: 'pass' },
+        authRegistryHost: 'registry.cloudflare.com',
+      });
+
+      await resolver('registry.cloudflare.com', 'acct/sam-proj/app', 'latest');
+
+      expect(callLog[0]!.headers['authorization']).toBe(
+        `Basic ${btoa('user:pass')}`,
+      );
+    });
+
+    it('does NOT forward scoped auth to a mismatched (user-controlled) registry', async () => {
+      // Regression: minted SAM-registry credentials must never be sent to an
+      // arbitrary registry named in a manifest (e.g. attacker-controlled host).
+      const { fetchFn, callLog } = mockRegistryFetch();
+      const resolver = createImageResolver({
+        fetchFn,
+        auth: { username: 'user', password: 'pass' },
+        authRegistryHost: 'registry.cloudflare.com',
+      });
+
+      await resolver('evil.attacker.example', 'org/app', 'latest');
+
+      expect(callLog[0]!.url).toBe(
+        'https://evil.attacker.example/v2/org/app/manifests/latest',
+      );
+      expect(callLog[0]!.headers['authorization']).toBeUndefined();
+    });
+
+    it('does NOT forward scoped docker.io auth to an unrelated registry', async () => {
+      const { fetchFn, callLog } = mockRegistryFetch();
+      const resolver = createImageResolver({
+        fetchFn,
+        auth: { username: 'user', password: 'pass' },
+        authRegistryHost: 'docker.io',
+      });
+
+      await resolver('ghcr.io', 'org/app', 'latest');
+
+      expect(callLog[0]!.headers['authorization']).toBeUndefined();
+    });
+
     it('handles token-based auth (401 → token exchange → retry)', async () => {
       const { fetchFn, callLog } = mockRegistryFetch({
         needsTokenExchange: true,

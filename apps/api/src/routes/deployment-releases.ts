@@ -202,18 +202,24 @@ export async function resolveManifestImageTags(
 
   // Mint pull-only credentials for querying private registry manifests
   let registryCreds: { username: string; password: string } | undefined;
+  let registryAuthHost: string | undefined;
   try {
     const creds = await mintProjectRegistryCredential(
       env, projectId, userId, '', undefined,
       { permissions: ['pull'] },
     );
     registryCreds = { username: creds.username, password: creds.password };
+    // Scope the minted credentials to the SAM registry host only. A manifest
+    // may name an arbitrary, user-controlled registry; without this scope the
+    // resolver would forward SAM-minted Basic-auth creds to that host.
+    registryAuthHost = creds.registry;
   } catch {
     // Best-effort: public registries work without auth
   }
 
   const resolver = createImageResolver({
     auth: registryCreds,
+    authRegistryHost: registryAuthHost,
   });
 
   const resolveErrors: Array<{ path: string; message: string }> = [];

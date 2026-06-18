@@ -27,6 +27,14 @@ export interface RegistryAuth {
 export interface ImageResolverOptions {
   /** Optional auth for private registries */
   auth?: RegistryAuth;
+  /**
+   * Registry host the `auth` credentials belong to. When set, `auth` is ONLY
+   * sent to a target registry whose host matches this value — credentials
+   * minted for one registry are never forwarded to an unrelated (potentially
+   * user-controlled) registry named in the manifest. When unset, `auth`
+   * applies to every registry (legacy behavior for explicitly-scoped callers).
+   */
+  authRegistryHost?: string;
   /** Custom fetch implementation (for testing) */
   fetchFn?: typeof fetch;
   /** Request timeout in ms. Default: 10_000 */
@@ -95,6 +103,31 @@ function registryBaseUrl(registry: string): string {
   }
   // Default to HTTPS
   return `https://${registry}`;
+}
+
+/**
+ * Returns true if `auth` credentials scoped to `authRegistryHost` may be sent
+ * to a request targeting `registry`. Credentials are only forwarded when the
+ * target registry host exactly matches the host the credentials were minted
+ * for. When `authRegistryHost` is undefined the caller has explicitly opted
+ * out of host scoping and credentials apply to every registry (legacy
+ * behavior, used only when the caller fully controls the registry value).
+ *
+ * This prevents minted SAM registry credentials from being forwarded to an
+ * arbitrary, user-controlled registry named in a deployment manifest.
+ */
+function authAppliesToRegistry(
+  registry: string,
+  authRegistryHost: string | undefined,
+): boolean {
+  if (!authRegistryHost) return true;
+  try {
+    const targetHost = new URL(registryBaseUrl(registry)).hostname.toLowerCase();
+    const authHost = new URL(registryBaseUrl(authRegistryHost)).hostname.toLowerCase();
+    return targetHost === authHost;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -225,9 +258,14 @@ async function resolveTagToDigest(
     Accept: MANIFEST_ACCEPT,
   };
 
+  // Only use credentials when they were minted for this exact registry host.
+  // Never forward SAM-minted credentials to an unrelated (potentially
+  // user-controlled) registry named in the manifest.
+  const auth = authAppliesToRegistry(registry, opts.authRegistryHost) ? opts.auth : undefined;
+
   // Try Basic auth first if credentials provided
-  if (opts.auth) {
-    const basicCredentials = btoa(`${opts.auth.username}:${opts.auth.password}`);
+  if (auth) {
+    const basicCredentials = btoa(`${auth.username}:${auth.password}`);
     headers['Authorization'] = `Basic ${basicCredentials}`;
   }
 
@@ -244,7 +282,7 @@ async function resolveTagToDigest(
       const challenge = parseBearerChallenge(wwwAuth);
       if (challenge) {
         const registryHost = new URL(base).hostname;
-        const token = await fetchBearerToken(challenge, opts.auth, registryHost, fetchFn, timeoutMs);
+        const token = await fetchBearerToken(challenge, auth, registryHost, fetchFn, timeoutMs);
         headers['Authorization'] = `Bearer ${token}`;
         resp = await fetchFn(manifestUrl, {
           method: 'HEAD',
