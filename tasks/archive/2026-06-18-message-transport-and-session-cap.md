@@ -21,7 +21,7 @@ Human constraint for this task: open/update a draft or clearly do-not-merge PR o
 
 ## Implementation Checklist
 
-- [ ] Create implementation branch/worktree from `main` and move this task to `tasks/active/`.
+- [x] Create implementation branch/worktree from `main` and move this task to `tasks/active/`.
 - [x] Align vm-agent reporter message size defaults with the API individual-message default.
 - [x] Measure marshaled JSON payload bytes for batches, including `toolMetadata`.
 - [x] Add reporter fallback for size-related 400 responses: split/retry safely, then send compact marker if necessary.
@@ -33,7 +33,7 @@ Human constraint for this task: open/update a draft or clearly do-not-merge PR o
 - [x] Add API/worker tests for configurable cap partial crossing, exhausted cap, default `100000`, and route-level 409 behavior.
 - [x] Update env examples/config/docs/tests that encode the old default.
 - [x] Run relevant local tests and quality checks.
-- [ ] Run required specialist reviews, address findings, then create a draft/do-not-merge PR.
+- [x] Run required specialist reviews, address findings, then create a draft/do-not-merge PR.
 
 ## Acceptance Criteria
 

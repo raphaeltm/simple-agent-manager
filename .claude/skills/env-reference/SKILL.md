@@ -170,7 +170,7 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Message Reporting
 
-- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max single persisted message content before truncation (default: 204800)
+- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max single persisted message content before truncation (default: 102400)
 
 ### ACP (Agent Communication Protocol)
 
