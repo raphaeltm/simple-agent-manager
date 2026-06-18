@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('deployment release callback route ordering', () => {
   it('mounts callback-auth deploy release route before session-auth node routes', () => {
-    const source = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf8');
+    const source = readFileSync(join(process.cwd(), 'src/app/register-routes.ts'), 'utf8');
 
     const deployReleaseIndex = source.indexOf("app.route('/api/nodes', deployReleaseCallbackRoute)");
     const nodesIndex = source.indexOf("app.route('/api/nodes', nodesRoutes)");

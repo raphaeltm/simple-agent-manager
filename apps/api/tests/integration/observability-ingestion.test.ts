@@ -24,7 +24,7 @@ describe('observability error ingestion pipeline', () => {
   const observabilityService = readFileSync(resolve(process.cwd(), 'src/services/observability.ts'), 'utf8');
   const observabilitySchema = readFileSync(resolve(process.cwd(), 'src/db/observability-schema.ts'), 'utf8');
   const scheduledPurge = readFileSync(resolve(process.cwd(), 'src/scheduled/observability-purge.ts'), 'utf8');
-  const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  const scheduledFile = readFileSync(resolve(process.cwd(), 'src/app/scheduled.ts'), 'utf8');
 
   // ===========================================================================
   // Schema & Service Layer
@@ -213,17 +213,17 @@ describe('observability error ingestion pipeline', () => {
       expect(scheduledPurge).toContain('deletedByAge: 0, deletedByCount: 0');
     });
 
-    it('index.ts imports runObservabilityPurge', () => {
-      expect(indexFile).toContain("import { runObservabilityPurge } from './scheduled/observability-purge'");
+    it('scheduled app module imports runObservabilityPurge', () => {
+      expect(scheduledFile).toContain("import { runObservabilityPurge } from '../scheduled/observability-purge'");
     });
 
-    it('index.ts calls runObservabilityPurge in the scheduled handler', () => {
-      expect(indexFile).toContain('runObservabilityPurge(env)');
+    it('scheduled app module calls runObservabilityPurge in the scheduled handler', () => {
+      expect(scheduledFile).toContain('runObservabilityPurge(env)');
     });
 
-    it('index.ts logs observability purge results in cron.completed', () => {
-      expect(indexFile).toContain('observabilityPurgedByAge');
-      expect(indexFile).toContain('observabilityPurgedByCount');
+    it('scheduled app module logs observability purge results in cron.completed', () => {
+      expect(scheduledFile).toContain('observabilityPurgedByAge');
+      expect(scheduledFile).toContain('observabilityPurgedByCount');
     });
   });
 

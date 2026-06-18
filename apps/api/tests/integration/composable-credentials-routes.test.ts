@@ -2,7 +2,7 @@
  * Integration tests for composable-credentials CRUD routes and resolver wiring.
  *
  * Validates:
- * - Route registration in index.ts
+ * - Route registration in the API route registry
  * - Route handler delegates to correct schema tables
  * - Auth middleware is applied (requireAuth + requireApproved)
  * - IDOR protection (owner_id / user_id scoping)
@@ -14,7 +14,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+const routeRegistryFile = readFileSync(resolve(process.cwd(), 'src/app/register-routes.ts'), 'utf8');
 const routeFile = readFileSync(resolve(process.cwd(), 'src/routes/composable-credentials.ts'), 'utf8');
 const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
 const resolveFile = readFileSync(resolve(process.cwd(), 'src/services/composable-credentials/resolve.ts'), 'utf8');
@@ -23,11 +23,11 @@ const backfillFile = readFileSync(resolve(process.cwd(), 'src/services/composabl
 
 describe('composable-credentials route registration', () => {
   it('mounts ccRoutes under /api/cc', () => {
-    expect(indexFile).toContain("app.route('/api/cc', ccRoutes)");
+    expect(routeRegistryFile).toContain("app.route('/api/cc', ccRoutes)");
   });
 
   it('imports ccRoutes from composable-credentials module', () => {
-    expect(indexFile).toContain("import { ccRoutes }");
+    expect(routeRegistryFile).toContain("import { ccRoutes }");
   });
 });
 

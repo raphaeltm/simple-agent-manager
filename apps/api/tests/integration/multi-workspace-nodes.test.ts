@@ -11,15 +11,16 @@ describe('multi-workspace nodes integration wiring', () => {
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/agent-sessions.ts'), 'utf8'),
   ].join('\n');
-  const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  const routeRegistryFile = readFileSync(resolve(process.cwd(), 'src/app/register-routes.ts'), 'utf8');
+  const workspaceProxyFile = readFileSync(resolve(process.cwd(), 'src/app/workspace-proxy.ts'), 'utf8');
 
-  it('wires node and workspace routes into API index', () => {
-    expect(indexFile).toContain("app.route('/api/nodes', nodesRoutes)");
-    expect(indexFile).toContain("app.route('/api/workspaces', workspacesRoutes)");
+  it('wires node and workspace routes into the API route registry', () => {
+    expect(routeRegistryFile).toContain("app.route('/api/nodes', nodesRoutes)");
+    expect(routeRegistryFile).toContain("app.route('/api/workspaces', workspacesRoutes)");
   });
 
   it('includes cross-component proxy + node-agent call paths', () => {
-    expect(indexFile).toContain('ws_proxy_route');
+    expect(workspaceProxyFile).toContain('ws_proxy_route');
     expect(workspacesRoute).toContain('createWorkspaceOnNode');
     expect(workspacesRoute).toContain('stopWorkspaceOnNode');
     expect(nodesRoute).toContain('stopWorkspaceOnNode');

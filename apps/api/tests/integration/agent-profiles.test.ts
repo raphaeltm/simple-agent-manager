@@ -10,20 +10,20 @@ import { resolve } from 'node:path';
 
 import { describe, expect,it } from 'vitest';
 
-const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+const routeRegistryFile = readFileSync(resolve(process.cwd(), 'src/app/register-routes.ts'), 'utf8');
 const routeFile = readFileSync(resolve(process.cwd(), 'src/routes/agent-profiles.ts'), 'utf8');
 const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/agent-profiles.ts'), 'utf8');
 const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
 
 describe('agent profiles integration wiring', () => {
   it('registers agent-profiles route under /api/projects/:projectId/', () => {
-    expect(indexFile).toContain(
+    expect(routeRegistryFile).toContain(
       "app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes)"
     );
   });
 
-  it('imports agent profile routes in index', () => {
-    expect(indexFile).toContain("import { agentProfileRoutes }");
+  it('imports agent profile routes in the API route registry', () => {
+    expect(routeRegistryFile).toContain("import { agentProfileRoutes }");
   });
 
   it('route handler delegates all operations to the service layer', () => {
