@@ -367,7 +367,7 @@ test.describe('Deployment control surface audit', () => {
     await expect(failingCard.getByText('failed').first()).toBeVisible();
 
     // NaN guard: Root Disk should show '-' not 'NaN%'
-    const rootDiskText = await failingCard.locator('text=-').count();
+    await expect(failingCard.locator('div').filter({ hasText: /^Root Disk\s*-$/ }).first()).toBeVisible();
     // Verify no NaN text visible anywhere
     const nanCount = await failingCard.locator('text=NaN').count();
     expect(nanCount).toBe(0);

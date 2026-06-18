@@ -52,6 +52,9 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function safePercent(value: unknown): string {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'string' && value.trim() === '') return '-';
+
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
   return `${n.toFixed(1)}%`;
