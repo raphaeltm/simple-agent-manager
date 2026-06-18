@@ -60,8 +60,8 @@ The idea and audit context identify these concrete risks:
 - [x] Add focused tests for session-host shutdown lock discipline.
 - [x] Add reporter idempotency/concurrency tests.
 - [x] Run focused Go tests from `packages/vm-agent`.
-- [ ] Run `go test ./...` from `packages/vm-agent` if environment supports it.
-- [ ] Run race tests for touched packages if feasible.
+- [x] Run `go test ./...` from `packages/vm-agent` if environment supports it.
+- [x] Run race tests for touched packages if feasible.
 
 ## Acceptance Criteria
 
