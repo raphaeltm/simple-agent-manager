@@ -110,6 +110,7 @@ func (r *Reporter) Shutdown() {
 	r.shutdownOnce.Do(func() {
 		close(r.stopC)
 		r.startOnce.Do(func() {
+			r.flush()
 			close(r.doneC)
 		})
 	})

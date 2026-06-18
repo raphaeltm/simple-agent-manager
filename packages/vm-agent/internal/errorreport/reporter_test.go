@@ -172,14 +172,40 @@ func TestShutdownFlushesRemaining(t *testing.T) {
 }
 
 func TestShutdownIsIdempotentBeforeStart(t *testing.T) {
-	r := New("http://localhost", "node-1", "token", Config{
+	var mu sync.Mutex
+	var received []ErrorEntry
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Errors []ErrorEntry `json:"errors"`
+		}
+		json.Unmarshal(body, &payload)
+
+		mu.Lock()
+		received = append(received, payload.Errors...)
+		mu.Unlock()
+
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+
+	r := New(srv.URL, "node-1", "token", Config{
 		FlushInterval: time.Hour,
 		MaxBatchSize:  100,
 		MaxQueueSize:  50,
+		HTTPTimeout:   5 * time.Second,
 	})
+	r.Report(ErrorEntry{Message: "queued-before-start", Source: "test"})
 
 	r.Shutdown()
 	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected queued entry to flush on Shutdown before Start, got %d", len(received))
+	}
 }
 
 func TestShutdownIsConcurrentSafe(t *testing.T) {
