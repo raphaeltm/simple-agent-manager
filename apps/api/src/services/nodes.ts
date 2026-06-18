@@ -15,6 +15,8 @@ import { signNodeCallbackToken } from './jwt';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
 
+const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
+
 export interface CreateNodeInput {
   userId: string;
   name: string;
@@ -245,15 +247,13 @@ export async function provisionNode(
       return;
     }
 
-    // Deployment nodes use pull-based release channel — no DNS record needed.
-    // Workspace nodes need a backend DNS record for CF-proxied traffic.
     let backendDnsRecordId: string | null = null;
-    if (!isDeploymentNode) {
-      try {
-        backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
-      } catch (dnsErr) {
-        log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
-      }
+    let dnsErrorMessage: string | null = null;
+    try {
+      backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
+    } catch (dnsErr) {
+      log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
+      dnsErrorMessage = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
     }
 
     await db
@@ -262,8 +262,11 @@ export async function provisionNode(
         providerInstanceId: vm.id,
         ipAddress: vm.ip,
         backendDnsRecordId,
-        status: 'running',
-        healthStatus: 'stale',
+        status: dnsErrorMessage ? 'error' : 'running',
+        healthStatus: dnsErrorMessage ? 'unhealthy' : 'stale',
+        errorMessage: dnsErrorMessage
+          ? truncateNodeErrorMessage(`Backend DNS record creation failed: ${dnsErrorMessage}`)
+          : null,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
@@ -315,7 +318,7 @@ export async function provisionNode(
       if (isCapacityFailure) {
         await db.delete(schema.nodes).where(eq(schema.nodes.id, node.id));
       } else {
-        const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
+        const truncatedError = truncateNodeErrorMessage(errorMessage);
         await db
           .update(schema.nodes)
           .set({
@@ -330,7 +333,7 @@ export async function provisionNode(
     }
 
     // Legacy mode: store the actual error message (truncated) in the node record.
-    const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
+    const truncatedError = truncateNodeErrorMessage(errorMessage);
     await db
       .update(schema.nodes)
       .set({
@@ -497,4 +500,10 @@ export async function deleteNodeResources(
     ));
 
   return result;
+}
+
+function truncateNodeErrorMessage(message: string): string {
+  return message.length > NODE_ERROR_MESSAGE_MAX_LENGTH
+    ? message.slice(0, NODE_ERROR_MESSAGE_MAX_LENGTH) + '...'
+    : message;
 }

@@ -124,6 +124,38 @@ describe('heartbeat IP backfill', () => {
     expect(heartbeatSection).toContain('heartbeat.dns_update_failed_during_ip_backfill');
   });
 
+  it('self-heals nodes that already have an IP but no backend DNS record', () => {
+    expect(heartbeatSection).toContain('} else if (!node.backendDnsRecordId) {');
+    expect(heartbeatSection).toContain('const dnsIp = heartbeatIp || node.ipAddress');
+    expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, dnsIp');
+    expect(heartbeatSection).toContain('updatePayload.backendDnsRecordId = dnsRecordId');
+    expect(heartbeatSection).toContain('heartbeat.backend_dns_backfilled');
+  });
+
+  it('prefers CF-Connecting-IP over stored IP for backend DNS self-healing', () => {
+    const selfHealBlock = heartbeatSection.slice(
+      heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'),
+      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'))
+    );
+    expect(selfHealBlock).toContain('const dnsIp = heartbeatIp || node.ipAddress');
+    expect(selfHealBlock).toContain("source: heartbeatIp ? 'heartbeat' : 'stored'");
+  });
+
+  it('clears the DNS-specific provisioning error after backend DNS self-healing succeeds', () => {
+    const selfHealBlock = heartbeatSection.slice(
+      heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'),
+      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'))
+    );
+    expect(selfHealBlock).toContain("node.errorMessage?.startsWith('Backend DNS record creation failed:')");
+    expect(selfHealBlock).toContain('updatePayload.errorMessage = sql`NULL`');
+    expect(selfHealBlock).toContain("node.status === 'error'");
+    expect(selfHealBlock).toContain("updatePayload.status = 'running'");
+  });
+
+  it('logs backend DNS self-heal failures without failing the heartbeat', () => {
+    expect(heartbeatSection).toContain('heartbeat.backend_dns_backfill_failed');
+  });
+
   it('imports updateDNSRecord and createNodeBackendDNSRecord', () => {
     const imports = file.slice(0, file.indexOf('const nodeLifecycleRoutes'));
     expect(imports).toContain('updateDNSRecord');

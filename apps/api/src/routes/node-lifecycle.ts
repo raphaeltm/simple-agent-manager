@@ -172,10 +172,11 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     updatePayload.errorMessage = sql`NULL`;
   }
 
+  const heartbeatIp = c.req.header('CF-Connecting-IP');
+
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
   if (!node.ipAddress) {
-    const heartbeatIp = c.req.header('CF-Connecting-IP');
     if (heartbeatIp) {
       log.info('heartbeat.ip_backfilled', {
         nodeId,
@@ -205,6 +206,25 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       } catch (dnsErr) {
         log.error('heartbeat.dns_update_failed_during_ip_backfill', { nodeId, error: String(dnsErr) });
       }
+    }
+  } else if (!node.backendDnsRecordId) {
+    const dnsIp = heartbeatIp || node.ipAddress;
+    try {
+      const dnsRecordId = await createNodeBackendDNSRecord(nodeId, dnsIp, c.env);
+      updatePayload.backendDnsRecordId = dnsRecordId;
+      if (node.errorMessage?.startsWith('Backend DNS record creation failed:')) {
+        updatePayload.errorMessage = sql`NULL`;
+        if (node.status === 'error') {
+          updatePayload.status = 'running';
+        }
+      }
+      log.info('heartbeat.backend_dns_backfilled', {
+        nodeId,
+        ipAddress: dnsIp,
+        source: heartbeatIp ? 'heartbeat' : 'stored',
+      });
+    } catch (dnsErr) {
+      log.error('heartbeat.backend_dns_backfill_failed', { nodeId, error: String(dnsErr) });
     }
   }
 
