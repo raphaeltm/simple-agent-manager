@@ -74,6 +74,48 @@ func TestNew_ValidConfig(t *testing.T) {
 	}
 }
 
+func TestShutdownIsIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new reporter: %v", err)
+	}
+
+	r.Shutdown()
+	r.Shutdown()
+}
+
+func TestShutdownIsConcurrentSafe(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new reporter: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.Shutdown()
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Shutdown calls did not complete")
+	}
+}
+
 func TestNew_NilDB(t *testing.T) {
 	cfg := testConfig("http://localhost", "ws-1")
 	_, err := New(nil, cfg)

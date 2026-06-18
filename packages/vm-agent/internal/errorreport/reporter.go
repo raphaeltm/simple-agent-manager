@@ -47,6 +47,9 @@ type Reporter struct {
 	queue []ErrorEntry
 	stopC chan struct{}
 	doneC chan struct{}
+
+	startOnce    sync.Once
+	shutdownOnce sync.Once
 }
 
 // New creates a Reporter with the given configuration.
@@ -94,7 +97,9 @@ func (r *Reporter) Start() {
 	if r == nil {
 		return
 	}
-	go r.flushLoop()
+	r.startOnce.Do(func() {
+		go r.flushLoop()
+	})
 }
 
 // Shutdown flushes any remaining entries and stops the background goroutine.
@@ -102,7 +107,12 @@ func (r *Reporter) Shutdown() {
 	if r == nil {
 		return
 	}
-	close(r.stopC)
+	r.shutdownOnce.Do(func() {
+		close(r.stopC)
+		r.startOnce.Do(func() {
+			close(r.doneC)
+		})
+	})
 	<-r.doneC
 }
 

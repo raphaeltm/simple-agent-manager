@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -95,6 +96,8 @@ type Server struct {
 	callbackToken       string
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
+	stopOnce            sync.Once
+	stopErr             error
 
 	// Deployment mode — set via SetDeployEngine() when Role=deployment
 	deployEngine *deploy.Engine
@@ -762,15 +765,27 @@ func (s *Server) Start() error {
 // StopAllWorkspacesAndSessions transitions all local workloads to stopped state.
 // This is invoked during node shutdown to ensure no child workloads are left active.
 func (s *Server) StopAllWorkspacesAndSessions() {
+	var ptyManagers []*pty.Manager
+
 	s.workspaceMu.Lock()
 	workspaceIDs := make([]string, 0, len(s.workspaces))
+	seenPTYManagers := make(map[*pty.Manager]struct{}, len(s.workspaces))
 	for id, runtime := range s.workspaces {
-		runtime.PTY.CloseAllSessions()
+		if runtime.PTY != nil {
+			if _, ok := seenPTYManagers[runtime.PTY]; !ok {
+				seenPTYManagers[runtime.PTY] = struct{}{}
+				ptyManagers = append(ptyManagers, runtime.PTY)
+			}
+		}
 		runtime.Status = "stopped"
 		runtime.UpdatedAt = nowUTC()
 		workspaceIDs = append(workspaceIDs, id)
 	}
 	s.workspaceMu.Unlock()
+
+	for _, manager := range ptyManagers {
+		manager.CloseAllSessions()
+	}
 
 	for _, workspaceID := range workspaceIDs {
 		if s.agentSessions != nil {
@@ -790,46 +805,109 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		s.stopErr = s.stop(ctx)
+	})
+	return s.stopErr
+}
+
+func (s *Server) stop(ctx context.Context) error {
+	var errs []error
+
 	// Signal background goroutines to stop.
-	close(s.done)
+	if s.done != nil {
+		close(s.done)
+	}
 
 	// Stop all port scanners
 	s.stopAllPortScanners()
 
 	// Close JWT validator
-	s.jwtValidator.Close()
+	if s.jwtValidator != nil {
+		s.jwtValidator.Close()
+	}
 
-	s.sessionHostMu.Lock()
-	for key, host := range s.sessionHosts {
+	for _, host := range s.removeAllSessionHosts() {
 		if host != nil {
 			host.Stop()
 		}
-		delete(s.sessionHosts, key)
 	}
-	s.sessionHostMu.Unlock()
 
 	// Close all workspace PTY sessions.
-	s.workspaceMu.Lock()
-	for _, runtime := range s.workspaces {
-		runtime.PTY.CloseAllSessions()
+	for _, manager := range s.collectWorkspacePTYManagers() {
+		manager.CloseAllSessions()
 	}
-	s.workspaceMu.Unlock()
 
-	// Flush and stop error reporter
+	// Flush and stop error reporter.
 	s.errorReporter.Shutdown()
 
-	// Flush and stop all per-workspace message reporters
+	// Flush and stop all per-workspace message reporters.
 	s.shutdownAllReporters()
 
-	// Close persistence store
+	// Close server-owned persistence and telemetry stores.
 	if s.store != nil {
 		if err := s.store.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close persistence store: %w", err))
 			slog.Warn("Failed to close persistence store", "error", err)
 		}
 	}
+	if s.eventStore != nil {
+		if err := s.eventStore.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close event store: %w", err))
+			slog.Warn("Failed to close event store", "error", err)
+		}
+	}
+	if s.resourceMonitor != nil {
+		if err := s.resourceMonitor.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close resource monitor: %w", err))
+			slog.Warn("Failed to close resource monitor", "error", err)
+		}
+	}
 
-	// Shutdown HTTP server
-	return s.httpServer.Shutdown(ctx)
+	// Shutdown HTTP server.
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("shutdown http server: %w", err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (s *Server) collectWorkspacePTYManagers() []*pty.Manager {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+
+	seen := make(map[*pty.Manager]struct{}, len(s.workspaces))
+	managers := make([]*pty.Manager, 0, len(s.workspaces))
+	for _, runtime := range s.workspaces {
+		if runtime.PTY == nil {
+			continue
+		}
+		if _, ok := seen[runtime.PTY]; ok {
+			continue
+		}
+		seen[runtime.PTY] = struct{}{}
+		managers = append(managers, runtime.PTY)
+	}
+	return managers
+}
+
+func (s *Server) removeAllSessionHosts() map[string]*acp.SessionHost {
+	s.sessionHostMu.Lock()
+	defer s.sessionHostMu.Unlock()
+
+	hosts := make(map[string]*acp.SessionHost, len(s.sessionHosts))
+	for key, host := range s.sessionHosts {
+		if host != nil {
+			hosts[key] = host
+		}
+		delete(s.sessionHosts, key)
+		delete(s.sessionMcpServers, key)
+		delete(s.sessionProfileOvr, key)
+		delete(s.sessionTaskCtx, key)
+	}
+	return hosts
 }
 
 // setupRoutes configures the HTTP routes.

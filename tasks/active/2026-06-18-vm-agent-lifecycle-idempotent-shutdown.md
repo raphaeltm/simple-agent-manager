@@ -50,16 +50,16 @@ The idea and audit context identify these concrete risks:
 
 ## Implementation Checklist
 
-- [ ] Make `Server.Stop` idempotent and return the first shutdown result on repeated calls.
-- [ ] Ensure `Server.Stop` closes/stops server-owned event store and resource monitor.
-- [ ] Stop ACP session hosts with collect-then-stop semantics outside `sessionHostMu`.
-- [ ] Remove PTY session cleanup from broad `workspaceMu` critical sections where feasible.
-- [ ] Make `errorreport.Reporter.Shutdown` idempotent and safe under concurrent callers.
-- [ ] Make `messagereport.Reporter.Shutdown` idempotent and safe under concurrent callers.
-- [ ] Add focused tests for `Server.Stop` idempotency and owned resource shutdown.
-- [ ] Add focused tests for session-host shutdown lock discipline.
-- [ ] Add reporter idempotency/concurrency tests.
-- [ ] Run focused Go tests from `packages/vm-agent`.
+- [x] Make `Server.Stop` idempotent and return the first shutdown result on repeated calls.
+- [x] Ensure `Server.Stop` closes/stops server-owned event store and resource monitor.
+- [x] Stop ACP session hosts with collect-then-stop semantics outside `sessionHostMu`.
+- [x] Remove PTY session cleanup from broad `workspaceMu` critical sections where feasible.
+- [x] Make `errorreport.Reporter.Shutdown` idempotent and safe under concurrent callers.
+- [x] Make `messagereport.Reporter.Shutdown` idempotent and safe under concurrent callers.
+- [x] Add focused tests for `Server.Stop` idempotency and owned resource shutdown.
+- [x] Add focused tests for session-host shutdown lock discipline.
+- [x] Add reporter idempotency/concurrency tests.
+- [x] Run focused Go tests from `packages/vm-agent`.
 - [ ] Run `go test ./...` from `packages/vm-agent` if environment supports it.
 - [ ] Run race tests for touched packages if feasible.
 

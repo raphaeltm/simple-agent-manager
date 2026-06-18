@@ -50,6 +50,8 @@ type Reporter struct {
 
 	stopC chan struct{}
 	doneC chan struct{}
+
+	shutdownOnce sync.Once
 }
 
 // New creates a Reporter backed by the given SQLite database.
@@ -291,7 +293,9 @@ func (r *Reporter) Shutdown() {
 	if r == nil {
 		return
 	}
-	close(r.stopC)
+	r.shutdownOnce.Do(func() {
+		close(r.stopC)
+	})
 	<-r.doneC
 }
 

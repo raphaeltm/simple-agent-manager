@@ -28,9 +28,11 @@ type EventRecord struct {
 
 // Store is a SQLite-backed event store.
 type Store struct {
-	db     *sql.DB
-	dbPath string
-	mu     sync.Mutex // serializes writes
+	db        *sql.DB
+	dbPath    string
+	mu        sync.Mutex // serializes writes
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // New opens (or creates) a SQLite event store at the given path.
@@ -198,5 +200,8 @@ func (s *Store) DBPath() string {
 
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.closeErr = s.db.Close()
+	})
+	return s.closeErr
 }

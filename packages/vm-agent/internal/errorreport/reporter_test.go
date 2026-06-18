@@ -171,6 +171,47 @@ func TestShutdownFlushesRemaining(t *testing.T) {
 	}
 }
 
+func TestShutdownIsIdempotentBeforeStart(t *testing.T) {
+	r := New("http://localhost", "node-1", "token", Config{
+		FlushInterval: time.Hour,
+		MaxBatchSize:  100,
+		MaxQueueSize:  50,
+	})
+
+	r.Shutdown()
+	r.Shutdown()
+}
+
+func TestShutdownIsConcurrentSafe(t *testing.T) {
+	r := New("http://localhost", "node-1", "token", Config{
+		FlushInterval: time.Hour,
+		MaxBatchSize:  100,
+		MaxQueueSize:  50,
+	})
+	r.Start()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.Shutdown()
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Shutdown calls did not complete")
+	}
+}
+
 func TestSendIncludesAuthHeader(t *testing.T) {
 	var authHeader string
 
