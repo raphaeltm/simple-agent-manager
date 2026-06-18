@@ -47,6 +47,19 @@ function isBackendDnsError(errorMessage: string | null | undefined): boolean {
   return !!errorMessage && errorMessage.startsWith(NODE_BACKEND_DNS_ERROR_PREFIX);
 }
 
+function isValidIPv4Address(value: string | null | undefined): value is string {
+  if (!value) return false;
+
+  const octets = value.split('.');
+  if (octets.length !== 4) return false;
+
+  return octets.every((octet) => {
+    if (!/^\d+$/.test(octet)) return false;
+    const numeric = Number(octet);
+    return numeric >= 0 && numeric <= 255;
+  });
+}
+
 /**
  * POST /:id/token — Issue a node-scoped management token for direct VM Agent access.
  * The browser uses this token to call the VM Agent directly for node-level data
@@ -213,14 +226,15 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   }
 
   if (effectiveNodeIp) {
-    const dnsIp = heartbeatIp || effectiveNodeIp;
+    const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null;
+    const dnsIp = heartbeatIpv4 || effectiveNodeIp;
     try {
       if (node.backendDnsRecordId) {
-        if (heartbeatIp && heartbeatIp !== node.ipAddress) {
-          await updateDNSRecord(node.backendDnsRecordId, heartbeatIp, c.env);
+        if (heartbeatIpv4 && heartbeatIpv4 !== node.ipAddress) {
+          await updateDNSRecord(node.backendDnsRecordId, heartbeatIpv4, c.env);
           log.info('heartbeat.backend_dns_updated', {
             nodeId,
-            ipAddress: heartbeatIp,
+            ipAddress: heartbeatIpv4,
             previousIpAddress: node.ipAddress,
           });
         }
@@ -236,7 +250,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         log.info('heartbeat.backend_dns_backfilled', {
           nodeId,
           ipAddress: dnsIp,
-          source: heartbeatIp ? 'heartbeat' : 'stored',
+          source: heartbeatIpv4 ? 'heartbeat' : 'stored',
         });
       }
     } catch (dnsErr) {

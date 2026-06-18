@@ -127,7 +127,7 @@ describe('heartbeat IP backfill', () => {
   it('self-heals nodes that already have an IP but no backend DNS record', () => {
     expect(heartbeatSection).toContain('let effectiveNodeIp = node.ipAddress');
     expect(heartbeatSection).toContain('if (effectiveNodeIp) {');
-    expect(heartbeatSection).toContain('const dnsIp = heartbeatIp || effectiveNodeIp');
+    expect(heartbeatSection).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
     expect(heartbeatSection).toContain('} else {');
     expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, dnsIp');
     expect(heartbeatSection).toContain('updatePayload.backendDnsRecordId = dnsRecordId');
@@ -139,8 +139,19 @@ describe('heartbeat IP backfill', () => {
       heartbeatSection.indexOf('if (effectiveNodeIp) {'),
       heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
     );
-    expect(selfHealBlock).toContain('const dnsIp = heartbeatIp || effectiveNodeIp');
-    expect(selfHealBlock).toContain("source: heartbeatIp ? 'heartbeat' : 'stored'");
+    expect(selfHealBlock).toContain('const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null');
+    expect(selfHealBlock).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
+    expect(selfHealBlock).toContain("source: heartbeatIpv4 ? 'heartbeat' : 'stored'");
+  });
+
+  it('falls back to stored IP when heartbeat IP is not valid IPv4 for A records', () => {
+    const selfHealBlock = heartbeatSection.slice(
+      heartbeatSection.indexOf('if (effectiveNodeIp) {'),
+      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
+    );
+    expect(file).toContain('function isValidIPv4Address');
+    expect(selfHealBlock).toContain('isValidIPv4Address(heartbeatIp)');
+    expect(selfHealBlock).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
   });
 
   it('clears the DNS-specific provisioning error after backend DNS self-healing succeeds', () => {
@@ -160,8 +171,8 @@ describe('heartbeat IP backfill', () => {
   });
 
   it('updates existing backend DNS when heartbeat IP changes', () => {
-    expect(heartbeatSection).toContain('heartbeatIp && heartbeatIp !== node.ipAddress');
-    expect(heartbeatSection).toContain('updateDNSRecord(node.backendDnsRecordId, heartbeatIp');
+    expect(heartbeatSection).toContain('heartbeatIpv4 && heartbeatIpv4 !== node.ipAddress');
+    expect(heartbeatSection).toContain('updateDNSRecord(node.backendDnsRecordId, heartbeatIpv4');
     expect(heartbeatSection).toContain('heartbeat.backend_dns_updated');
   });
 
