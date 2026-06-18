@@ -98,6 +98,13 @@ export function Nodes() {
   };
 
   const handleDeleteNode = async (id: string) => {
+    const targetNode = nodes.find((n) => n.id === id);
+    if (targetNode?.nodeRole === 'deployment') {
+      const confirmed = window.confirm(
+        `"${targetNode.name}" is a deployment node. Deleting it here will NOT clean up the associated deployment environment, DNS records, or volumes.\n\nFor a full teardown, use the Destroy action on the project Deployments page instead.\n\nContinue with node-only deletion?`
+      );
+      if (!confirmed) return;
+    }
     try {
       await deleteNode(id);
       void loadData();

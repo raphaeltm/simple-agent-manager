@@ -122,10 +122,17 @@ export function Node() {
   const handleDelete = async () => {
     if (!id || !node) return;
 
-    const confirmed = window.confirm(
-      `Delete node "${node.name}"? This permanently deletes the node and all attached workspaces/sessions.`
-    );
-    if (!confirmed) return;
+    if (isDeploymentNode) {
+      const confirmed = window.confirm(
+        `This is a deployment node ("${node.name}"). Deleting it will destroy the node infrastructure but will NOT clean up the associated deployment environment, DNS records, or volumes.\n\nFor a full teardown, use the Destroy action on the project Deployments page instead.\n\nContinue with node-only deletion?`
+      );
+      if (!confirmed) return;
+    } else {
+      const confirmed = window.confirm(
+        `Delete node "${node.name}"? This permanently deletes the node and all attached workspaces/sessions.`
+      );
+      if (!confirmed) return;
+    }
 
     try {
       setDeleting(true);
@@ -233,7 +240,7 @@ export function Node() {
           disabled={stopping || deleting || !node}
           style={{ borderColor: 'var(--sam-color-danger)', color: 'var(--sam-color-danger)' }}
         >
-          {deleting ? 'Deleting...' : 'Delete Node'}
+          {deleting ? 'Deleting...' : isDeploymentNode ? 'Delete Node Only' : 'Delete Node'}
         </Button>
       </div>
 
@@ -280,7 +287,10 @@ export function Node() {
               <div className="min-w-0">
                 <h2 className="m-0 text-sm font-semibold text-fg-primary">Deployment node</h2>
                 <p className="m-0 mt-1 text-sm text-fg-muted">
-                  This node runs a project deployment environment. Logs and system health are available here; environment policy and teardown are managed from the project Deployments page.
+                  This node runs a project deployment environment. Logs and system health are available here; environment policy, full teardown (DNS, volumes, node), and release management are on the project Deployments page.
+                </p>
+                <p className="m-0 mt-1 text-sm text-fg-muted">
+                  To fully destroy this deployment and its resources, use the <strong>Destroy</strong> action on the Deployments page rather than deleting the node directly.
                 </p>
               </div>
             </div>

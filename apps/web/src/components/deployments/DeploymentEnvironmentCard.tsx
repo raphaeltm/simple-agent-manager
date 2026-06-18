@@ -1,13 +1,17 @@
 import type { AgentProfile, NodeLogEntry } from '@simple-agent-manager/shared';
 import { Alert, Button, StatusBadge } from '@simple-agent-manager/ui';
 import {
+  AlertTriangle,
+  Clipboard,
   ExternalLink,
   RefreshCw,
   ScrollText,
+  Search,
   Server,
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 
 import type { DeploymentEnvironment } from '../../lib/api';
@@ -19,16 +23,26 @@ export type DeploymentLogState = {
   unavailableReason?: string;
 };
 
-function formatDateTime(value: string | null | undefined): string {
+// ─── Formatting helpers ────────────────────────────────────────────────────
+
+function formatDateTimeCompact(value: string | null | undefined): string {
   if (!value) return 'Never';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const mon = date.toLocaleString('en', { month: 'short', timeZone: 'UTC' });
+  const day = date.getUTCDate();
+  const h = String(date.getUTCHours()).padStart(2, '0');
+  const m = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${mon} ${day} ${h}:${m} UTC`;
+}
+
+function formatLogTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const h = String(date.getUTCHours()).padStart(2, '0');
+  const m = String(date.getUTCMinutes()).padStart(2, '0');
+  const s = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${h}:${m}:${s} UTC`;
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -37,9 +51,19 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function safePercent(value: unknown): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '-';
+  return `${n.toFixed(1)}%`;
+}
+
 function formatReason(reason: string | undefined): string {
-  if (!reason) return 'Logs unavailable';
-  return reason.replace(/_/g, ' ');
+  if (!reason) return 'Logs unavailable. The node may not be provisioned or reachable yet.';
+  const humanized = reason.replace(/_/g, ' ');
+  if (reason === 'no_node') return 'No deployment node provisioned yet. Logs will appear after the node boots.';
+  if (reason === 'node_stale') return 'Node has not reported recently. Logs may be unavailable until the node reconnects.';
+  if (reason === 'node_stopped') return 'Node is stopped. Start the node to view live logs.';
+  return humanized.charAt(0).toUpperCase() + humanized.slice(1) + '.';
 }
 
 function releaseBadgeStatus(status: string): string {
@@ -56,6 +80,106 @@ function environmentBadgeStatus(status: string): string {
 function profileName(profileId: string, profiles: AgentProfile[]): string {
   return profiles.find((profile) => profile.id === profileId)?.name ?? profileId;
 }
+
+// ─── Operational Summary ───────────────────────────────────────────────────
+
+type ServiceState = 'serving' | 'degraded' | 'not-serving' | 'unknown';
+
+function deriveServiceState(env: DeploymentEnvironment): ServiceState {
+  const ds = objectRecord(env.observedDeployment.deployStatus);
+  if (!ds) return 'unknown';
+  const app = ds.appHealth as string | undefined;
+  const node = (ds.nodeHealth as string | undefined) ?? env.node?.healthStatus;
+  const route = ds.routeCertState as string | undefined;
+  if (app === 'healthy' && (node === 'healthy' || node === 'connected') && route === 'issued') return 'serving';
+  if (app === 'unhealthy' || route === 'pending' || route === 'error' || node === 'stale' || node === 'unhealthy') return 'degraded';
+  if (env.observedDeployment.errorMessage) return 'not-serving';
+  if (app === 'healthy') return 'serving';
+  return 'unknown';
+}
+
+function serviceStateLabel(state: ServiceState): string {
+  if (state === 'serving') return 'Serving';
+  if (state === 'degraded') return 'Degraded';
+  if (state === 'not-serving') return 'Not serving';
+  return 'Unknown';
+}
+
+function serviceStateBadge(state: ServiceState): string {
+  if (state === 'serving') return 'completed';
+  if (state === 'degraded') return 'warning';
+  if (state === 'not-serving') return 'error';
+  return 'stale';
+}
+
+function deriveBlocker(env: DeploymentEnvironment): string | null {
+  const ds = objectRecord(env.observedDeployment.deployStatus);
+  if (env.observedDeployment.errorMessage) return env.observedDeployment.errorMessage;
+  if (!ds) return null;
+  if (ds.routeCertState === 'pending') return 'Route certificate pending. Check node logs for caddy/acme entries.';
+  if (ds.routeCertState === 'error') return 'Route certificate error. Check Caddy logs for ACME failures.';
+  if (ds.appHealth === 'unhealthy') return 'App container unhealthy. Check deployment logs for container errors.';
+  const nodeHealth = (ds.nodeHealth as string | undefined) ?? env.node?.healthStatus;
+  if (nodeHealth === 'stale') return 'Node stale. Control plane has not received a recent heartbeat.';
+  if (nodeHealth === 'unhealthy') return 'Node unhealthy. Check node system resources.';
+  if (ds.providerManageability === 'unmanageable') return 'Provider reports node unmanageable. Destructive actions may not complete.';
+  if (ds.diskPressure === 'high' || ds.diskPressure === 'critical') return 'Disk pressure detected. Consider freeing space or resizing volumes.';
+  if (ds.configDrift === 'drifted') return 'Configuration drift detected. Re-apply the latest release.';
+  return null;
+}
+
+function OperationalSummary({ env }: { env: DeploymentEnvironment }) {
+  const serviceState = deriveServiceState(env);
+  const release = env.latestRelease;
+  const blocker = deriveBlocker(env);
+
+  return (
+    <div className="rounded-md border border-border-default bg-inset px-3 py-2.5 grid gap-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <StatusBadge status={serviceStateBadge(serviceState)} label={serviceStateLabel(serviceState)} />
+        {release && (
+          <span className="text-sm text-fg-primary">
+            Release v{release.version}{' '}
+            <span className="text-fg-muted">{release.status}</span>
+          </span>
+        )}
+        {!release && (
+          <span className="text-sm text-fg-muted">No release</span>
+        )}
+      </div>
+      {blocker && (
+        <div className="flex items-start gap-1.5 text-xs text-warning">
+          <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+          <span className="break-words min-w-0">{blocker}</span>
+        </div>
+      )}
+      <div className="text-[0.6875rem] text-fg-muted">
+        Observed {formatDateTimeCompact(env.observedDeployment.observedAt)}
+      </div>
+    </div>
+  );
+}
+
+// ─── Release Attribution ───────────────────────────────────────────────────
+
+function ReleaseAttribution({ env }: { env: DeploymentEnvironment }) {
+  const release = env.latestRelease;
+  if (!release) return null;
+
+  return (
+    <div className="text-xs text-fg-muted">
+      <span className="text-fg-primary font-medium">Release v{release.version}</span>
+      {' '}
+      <StatusBadge status={releaseBadgeStatus(release.status)} label={release.status} />
+      {' submitted by '}
+      <span className="text-fg-primary">{release.createdBy || 'unknown'}</span>
+      {' on '}
+      <span className="text-fg-primary">{formatDateTimeCompact(release.createdAt)}</span>
+    </div>
+  );
+}
+
+// ─── Status Dimensions ─────────────────────────────────────────────────────
 
 function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
   const deployStatus = objectRecord(env.observedDeployment.deployStatus);
@@ -90,7 +214,7 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
         <div className="rounded-sm border border-border-default bg-inset px-2 py-1.5">
           <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Root Disk</div>
           <div className="text-sm text-fg-primary">
-            {Number(rootDisk.usedPercent).toFixed(1)}%
+            {safePercent(rootDisk.usedPercent)}
           </div>
         </div>
       )}
@@ -98,7 +222,108 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
   );
 }
 
-function LogsPreview({ state }: { state: DeploymentLogState | undefined }) {
+// ─── Logs Panel ────────────────────────────────────────────────────────────
+
+const LOG_SOURCES = ['all', 'deployment-agent', 'caddy', 'app'] as const;
+const LOG_LEVELS = ['all', 'error', 'warn', 'info', 'debug'] as const;
+
+interface LogsPanelProps {
+  state: DeploymentLogState | undefined;
+  onRefresh: () => void;
+  onRefreshFiltered: (opts: { source?: string; level?: string; search?: string }) => void;
+}
+
+function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
+  const [source, setSource] = useState<string>('all');
+  const [level, setLevel] = useState<string>('all');
+  const [search, setSearch] = useState('');
+
+  const applyFilters = (nextSource?: string, nextLevel?: string) => {
+    const s = nextSource ?? source;
+    const l = nextLevel ?? level;
+    onRefreshFiltered({
+      source: s === 'all' ? undefined : s,
+      level: l === 'all' ? undefined : l,
+      search: search.trim() || undefined,
+    });
+  };
+
+  const handleCopyLogs = () => {
+    if (!state?.entries.length) return;
+    const text = state.entries
+      .map((e) => `${e.timestamp} [${e.level}] [${e.source}] ${e.message}`)
+      .join('\n');
+    void navigator.clipboard.writeText(text);
+  };
+
+  return (
+    <section className="grid gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h3 className="m-0 text-sm font-semibold text-fg-primary">Deployment Logs</h3>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleCopyLogs}
+            disabled={!state?.entries.length}
+            title="Copy recent logs to clipboard"
+            className="inline-flex items-center gap-1 rounded-sm border border-border-default bg-transparent px-2 py-1 text-xs text-fg-muted cursor-pointer hover:text-fg-primary disabled:opacity-40 disabled:cursor-default"
+          >
+            <Clipboard size={12} />
+            Copy
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="inline-flex items-center gap-1 rounded-sm border border-border-default bg-transparent px-2 py-1 text-xs text-fg-muted cursor-pointer hover:text-fg-primary"
+          >
+            <RefreshCw size={12} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <label className="text-[0.6875rem] uppercase text-fg-muted font-semibold" htmlFor="log-source">Source</label>
+          <select
+            id="log-source"
+            value={source}
+            onChange={(e) => { setSource(e.target.value); applyFilters(e.target.value, undefined); }}
+            className="rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5"
+          >
+            {LOG_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-[0.6875rem] uppercase text-fg-muted font-semibold" htmlFor="log-level">Level</label>
+          <select
+            id="log-level"
+            value={level}
+            onChange={(e) => { setLevel(e.target.value); applyFilters(undefined, e.target.value); }}
+            className="rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5"
+          >
+            {LOG_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5 flex-1 min-w-[120px]">
+          <Search size={12} className="text-fg-muted shrink-0" />
+          <input
+            type="text"
+            placeholder="Search logs..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+            className="w-full rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5 outline-none focus:border-accent"
+          />
+        </div>
+      </div>
+
+      <LogEntries state={state} />
+    </section>
+  );
+}
+
+function LogEntries({ state }: { state: DeploymentLogState | undefined }) {
   if (!state) return null;
   if (state.loading) {
     return <div className="text-xs text-fg-muted">Loading logs...</div>;
@@ -116,19 +341,21 @@ function LogsPreview({ state }: { state: DeploymentLogState | undefined }) {
 
   return (
     <div className="max-h-64 overflow-y-auto rounded-md border border-border-default bg-inset font-mono text-xs">
-      {state.entries.slice(0, 8).map((entry, index) => (
-        <div key={`${entry.timestamp}-${index}`} className="grid gap-1 px-2 py-1 border-b border-border-default last:border-b-0">
-          <div className="flex items-center gap-2 text-fg-muted">
-            <span>{formatDateTime(entry.timestamp)}</span>
+      {state.entries.slice(0, 20).map((entry, index) => (
+        <div key={`${entry.timestamp}-${index}`} className="grid gap-0.5 px-2 py-1 border-b border-border-default last:border-b-0">
+          <div className="flex items-center gap-2 text-fg-muted flex-wrap">
+            <span className="tabular-nums">{formatLogTimestamp(entry.timestamp)}</span>
             <span className="uppercase font-semibold">{entry.level}</span>
-            <span>{entry.source}</span>
+            <span className="truncate max-w-[120px]">{entry.source}</span>
           </div>
-          <div className="text-fg-primary break-words">{entry.message}</div>
+          <div className="text-fg-primary break-words overflow-hidden">{entry.message}</div>
         </div>
       ))}
     </div>
   );
 }
+
+// ─── Main Card ─────────────────────────────────────────────────────────────
 
 interface DeploymentEnvironmentCardProps {
   env: DeploymentEnvironment;
@@ -138,7 +365,7 @@ interface DeploymentEnvironmentCardProps {
   logsOpen: boolean;
   onPolicyEnabledChange: (env: DeploymentEnvironment, enabled: boolean) => void;
   onProfileToggle: (env: DeploymentEnvironment, profileId: string) => void;
-  onRefreshLogs: (env: DeploymentEnvironment) => void;
+  onRefreshLogs: (env: DeploymentEnvironment, opts?: { source?: string; level?: string; search?: string }) => void;
   onDelete: (env: DeploymentEnvironment) => void;
 }
 
@@ -153,7 +380,6 @@ export function DeploymentEnvironmentCard({
   onRefreshLogs,
   onDelete,
 }: DeploymentEnvironmentCardProps) {
-  const observed = env.observedDeployment;
   const allowedProfiles = env.agentPolicy.allowedDeployProfileIds;
   const policyBusy = policySaving === env.id;
 
@@ -162,21 +388,13 @@ export function DeploymentEnvironmentCard({
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="sam-type-section-heading m-0 text-fg-primary">{env.name}</h2>
+            <h2 className="sam-type-section-heading m-0 text-fg-primary truncate max-w-[200px] sm:max-w-none">{env.name}</h2>
             <StatusBadge status={environmentBadgeStatus(env.status)} label={env.status} />
-            {env.latestRelease && (
-              <StatusBadge
-                status={releaseBadgeStatus(env.latestRelease.status)}
-                label={`v${env.latestRelease.version} ${env.latestRelease.status}`}
-              />
-            )}
           </div>
-          <p className="m-0 mt-1 text-xs text-fg-muted">
-            Updated {formatDateTime(env.updatedAt)} / Observed {formatDateTime(observed.observedAt)}
-          </p>
+          <ReleaseAttribution env={env} />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button size="sm" variant="secondary" onClick={() => onRefreshLogs(env)}>
             <ScrollText size={14} />
             {logsOpen ? 'Refresh Logs' : 'Logs'}
@@ -188,30 +406,11 @@ export function DeploymentEnvironmentCard({
         </div>
       </header>
 
+      <OperationalSummary env={env} />
+
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-4">
         <section className="grid gap-3">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-md border border-border-default bg-inset px-3 py-2">
-              <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Applied Seq</div>
-              <div className="text-lg text-fg-primary tabular-nums">{observed.appliedSeq ?? '-'}</div>
-            </div>
-            <div className="rounded-md border border-border-default bg-inset px-3 py-2">
-              <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Observed Status</div>
-              <div className="text-sm text-fg-primary">{observed.status ?? 'Unknown'}</div>
-            </div>
-            <div className="rounded-md border border-border-default bg-inset px-3 py-2">
-              <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Routes</div>
-              <div className="text-sm text-fg-primary tabular-nums">{env.routeHostnames.length}</div>
-            </div>
-          </div>
-
           <StatusDimensions env={env} />
-
-          {observed.errorMessage && (
-            <div className="rounded-md border border-danger bg-danger-tint px-3 py-2 text-sm text-danger">
-              {observed.errorMessage}
-            </div>
-          )}
 
           {env.routeHostnames.length > 0 && (
             <div className="grid gap-2">
@@ -243,7 +442,7 @@ export function DeploymentEnvironmentCard({
             {env.node ? (
               <div className="grid gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Link to={`/nodes/${env.node.id}`} className="text-accent text-sm no-underline hover:underline">
+                  <Link to={`/nodes/${env.node.id}`} className="text-accent text-sm no-underline hover:underline truncate max-w-[180px]">
                     {env.node.name}
                   </Link>
                   <StatusBadge status={env.node.status} />
@@ -277,7 +476,7 @@ export function DeploymentEnvironmentCard({
 
             <div className="text-xs text-fg-muted">
               {env.agentPolicy.agentDeployEnabled
-                ? `Enabled ${formatDateTime(env.agentPolicy.agentDeployEnabledAt)}`
+                ? `Enabled ${formatDateTimeCompact(env.agentPolicy.agentDeployEnabledAt)}`
                 : 'Disabled until a user enables this environment.'}
             </div>
 
@@ -311,20 +510,11 @@ export function DeploymentEnvironmentCard({
       </div>
 
       {logsOpen && (
-        <section className="grid gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="m-0 text-sm font-semibold text-fg-primary">Deployment Logs</h3>
-            <button
-              type="button"
-              onClick={() => onRefreshLogs(env)}
-              className="inline-flex items-center gap-1 rounded-sm border border-border-default bg-transparent px-2 py-1 text-xs text-fg-muted cursor-pointer hover:text-fg-primary"
-            >
-              <RefreshCw size={12} />
-              Refresh
-            </button>
-          </div>
-          <LogsPreview state={logState} />
-        </section>
+        <LogsPanel
+          state={logState}
+          onRefresh={() => onRefreshLogs(env)}
+          onRefreshFiltered={(opts) => onRefreshLogs(env, opts)}
+        />
       )}
     </article>
   );

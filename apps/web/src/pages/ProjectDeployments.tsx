@@ -12,12 +12,25 @@ import { useToast } from '../hooks/useToast';
 import {
   createDeploymentEnvironment,
   deleteDeploymentEnvironment,
+  type DeleteDeploymentEnvironmentResponse,
   type DeploymentEnvironment,
   getDeploymentEnvironmentLogs,
   listDeploymentEnvironments,
   updateDeploymentEnvironmentPolicy,
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
+
+function formatCleanupSummary(result: DeleteDeploymentEnvironmentResponse): string {
+  const parts: string[] = [];
+  if (result.dnsRecordsDeleted > 0) parts.push(`${result.dnsRecordsDeleted} DNS record${result.dnsRecordsDeleted === 1 ? '' : 's'} deleted`);
+  if (result.volumesDeleted > 0) parts.push(`${result.volumesDeleted} volume${result.volumesDeleted === 1 ? '' : 's'} deleted`);
+  if (result.volumesDetached > 0 && result.volumesDetached !== result.volumesDeleted) {
+    parts.push(`${result.volumesDetached} volume${result.volumesDetached === 1 ? '' : 's'} detached`);
+  }
+  if (result.nodeDeleted) parts.push('node destroyed');
+  if (result.nodeId && !result.nodeDeleted) parts.push('node preserved (was not destroyed)');
+  return parts.length > 0 ? parts.join(', ') : 'Environment removed';
+}
 
 export function ProjectDeployments() {
   const { projectId } = useProjectContext();
@@ -35,6 +48,7 @@ export function ProjectDeployments() {
   const [logsByEnv, setLogsByEnv] = useState<Record<string, DeploymentLogState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeploymentEnvironment | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [cleanupNotice, setCleanupNotice] = useState<{ summary: string; warnings: string[] } | null>(null);
 
   const sortedEnvironments = useMemo(
     () => [...environments].sort((a, b) => a.name.localeCompare(b.name)),
@@ -119,14 +133,22 @@ export function ProjectDeployments() {
     }
   };
 
-  const handleRefreshLogs = async (env: DeploymentEnvironment) => {
+  const handleRefreshLogs = async (
+    env: DeploymentEnvironment,
+    opts?: { source?: string; level?: string; search?: string },
+  ) => {
     setLogsOpenEnvId(env.id);
     setLogsByEnv((prev) => ({
       ...prev,
       [env.id]: { entries: prev[env.id]?.entries ?? [], loading: true, error: null },
     }));
     try {
-      const result = await getDeploymentEnvironmentLogs(projectId, env.id, { limit: 80 });
+      const result = await getDeploymentEnvironmentLogs(projectId, env.id, {
+        limit: 80,
+        source: opts?.source as never,
+        level: opts?.level as never,
+        search: opts?.search,
+      });
       setLogsByEnv((prev) => ({
         ...prev,
         [env.id]: {
@@ -155,11 +177,13 @@ export function ProjectDeployments() {
       const result = await deleteDeploymentEnvironment(projectId, deleteTarget.id);
       setEnvironments((prev) => prev.filter((env) => env.id !== deleteTarget.id));
       setDeleteTarget(null);
-      toast.success(
-        result.nodeDeleted
-          ? 'Deployment environment and node destroyed'
-          : 'Deployment environment destroyed',
-      );
+
+      const summary = formatCleanupSummary(result);
+      toast.success(`Environment destroyed: ${summary}`);
+
+      if (result.warnings.length > 0) {
+        setCleanupNotice({ summary, warnings: result.warnings });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to destroy environment');
     } finally {
@@ -204,6 +228,17 @@ export function ProjectDeployments() {
 
       {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}
 
+      {cleanupNotice && (
+        <Alert variant="warning" onDismiss={() => setCleanupNotice(null)}>
+          <div className="grid gap-1">
+            <strong>Cleanup completed: {cleanupNotice.summary}</strong>
+            {cleanupNotice.warnings.map((w, i) => (
+              <div key={i} className="text-sm">{w}</div>
+            ))}
+          </div>
+        </Alert>
+      )}
+
       {loading ? (
         <div className="grid gap-4">
           <SkeletonCard lines={5} />
@@ -233,7 +268,7 @@ export function ProjectDeployments() {
               logsOpen={logsOpenEnvId === env.id}
               onPolicyEnabledChange={(target, enabled) => void handlePolicyEnabledChange(target, enabled)}
               onProfileToggle={(target, profileId) => void handleProfileToggle(target, profileId)}
-              onRefreshLogs={(target) => void handleRefreshLogs(target)}
+              onRefreshLogs={(target, opts) => void handleRefreshLogs(target, opts)}
               onDelete={setDeleteTarget}
             />
           ))}
@@ -253,9 +288,14 @@ export function ProjectDeployments() {
         message={
           <div className="grid gap-2">
             <p className="m-0">
-              This deletes <strong>{deleteTarget?.name}</strong>, removes its app-route DNS records, deletes attached deployment volumes, and destroys the deployment node when one exists.
+              This destroys the <strong>{deleteTarget?.name}</strong> deployment environment:
             </p>
-            <p className="m-0">This cannot be undone.</p>
+            <ul className="m-0 pl-4 grid gap-1 text-sm">
+              <li>Removes all app-route DNS records</li>
+              <li>Detaches and deletes attached deployment volumes</li>
+              <li>Destroys the deployment node and its infrastructure</li>
+            </ul>
+            <p className="m-0 font-semibold">This cannot be undone.</p>
           </div>
         }
       />
