@@ -5,10 +5,14 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -410,9 +414,9 @@ func TestEngine_RedeployPortRebind(t *testing.T) {
 		name           string
 		currentSeq     int64 // 0 = first release
 		newSeq         int64
-		failComposeUp  bool  // make composeUp of newSeq fail
-		wantDownBefore bool  // expect composeDown(currentSeq) before pull/up(newSeq)
-		wantRevertUp   bool  // expect composeUp(currentSeq) on rollback
+		failComposeUp  bool // make composeUp of newSeq fail
+		wantDownBefore bool // expect composeDown(currentSeq) before pull/up(newSeq)
+		wantRevertUp   bool // expect composeUp(currentSeq) on rollback
 	}
 
 	tests := []testCase{
@@ -969,6 +973,55 @@ exit 0
 	// --password-stdin must appear.
 	if !strings.Contains(argvStr, "--password-stdin") {
 		t.Fatalf("--password-stdin not found in argv: %s", argvStr)
+	}
+}
+
+// TestEngine_CallbackTokenRotation_ThreadSafe is a regression test for the data
+// race where the heartbeat goroutine rotates the callback token via
+// SetCallbackToken while the apply goroutine reads it inside fetchRelease.
+// Run with -race; it must not report a race and the request must carry whatever
+// token was current at read time.
+func TestEngine_CallbackTokenRotation_ThreadSafe(t *testing.T) {
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("Authorization"))
+		// Minimal payload shape so fetchRelease decodes without error.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"environmentId":"env-1","nodeId":"node-1","seq":1,"expiresAt":4102444800,"composeYaml":"","routes":[],"signature":""}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	disk, _ := NewDiskState(dir)
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:   "env-1",
+		NodeID:          "node-1",
+		ControlPlaneURL: srv.URL,
+		CallbackToken:   "initial-token",
+		HTTPClient:      srv.Client(),
+	})
+
+	var wg sync.WaitGroup
+	// Writer: rotate the token repeatedly (heartbeat goroutine).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			engine.SetCallbackToken(fmt.Sprintf("token-%d", i))
+		}
+	}()
+	// Readers: fetch releases concurrently (apply goroutine).
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = engine.fetchRelease(context.Background(), 1)
+		}()
+	}
+	wg.Wait()
+
+	if auth, _ := gotAuth.Load().(string); !strings.HasPrefix(auth, "Bearer ") {
+		t.Errorf("expected a Bearer token to be sent, got %q", auth)
 	}
 }
 
