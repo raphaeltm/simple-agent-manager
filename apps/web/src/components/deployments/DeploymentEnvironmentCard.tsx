@@ -51,6 +51,23 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function serviceRecords(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (v): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v),
+  );
+}
+
+function observedServicesHealthy(value: unknown): boolean {
+  const recs = serviceRecords(value);
+  if (recs.length === 0) return false;
+  return recs.every((svc) => {
+    if (svc.status !== 'running') return false;
+    const h = svc.health as string | undefined;
+    return !h || h === 'healthy' || h === 'none';
+  });
+}
+
 function safePercent(value: unknown): string {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'string' && value.trim() === '') return '-';
@@ -90,14 +107,32 @@ type ServiceState = 'serving' | 'degraded' | 'not-serving' | 'unknown';
 
 function deriveServiceState(env: DeploymentEnvironment): ServiceState {
   const ds = objectRecord(env.observedDeployment.deployStatus);
-  if (!ds) return 'unknown';
-  const app = ds.appHealth as string | undefined;
-  const node = (ds.nodeHealth as string | undefined) ?? env.node?.healthStatus;
-  const route = ds.routeCertState as string | undefined;
-  if (app === 'healthy' && (node === 'healthy' || node === 'connected') && route === 'issued') return 'serving';
-  if (app === 'unhealthy' || route === 'pending' || route === 'error' || node === 'stale' || node === 'unhealthy') return 'degraded';
+  const node = (ds?.nodeHealth as string | undefined) ?? env.node?.healthStatus;
+
   if (env.observedDeployment.errorMessage) return 'not-serving';
-  if (app === 'healthy') return 'serving';
+
+  // No deployStatus yet — infer from observed deployment metadata
+  if (!ds) {
+    const obsStatus = env.observedDeployment.status as string | undefined;
+    if (obsStatus === 'failed' || obsStatus === 'failed-initial' || obsStatus === 'reverted') return 'not-serving';
+    if (
+      obsStatus === 'applied' &&
+      env.latestRelease?.status === 'applied' &&
+      observedServicesHealthy(env.observedDeployment.services) &&
+      (node === 'healthy' || node === 'connected')
+    ) return 'serving';
+    return 'unknown';
+  }
+
+  const app = ds.appHealth as string | undefined;
+  const route = ds.routeCertState as string | undefined;
+  const appOk = app === 'healthy' || (!app && observedServicesHealthy(env.observedDeployment.services));
+  const nodeOk = node === 'healthy' || node === 'connected';
+  const routeOk = route === 'issued' || route === undefined;
+
+  if (appOk && nodeOk && routeOk) return 'serving';
+  if (app === 'unhealthy' || route === 'pending' || route === 'error' || node === 'stale' || node === 'unhealthy') return 'degraded';
+  if (appOk) return 'serving';
   return 'unknown';
 }
 
@@ -189,11 +224,19 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
   const disk = objectRecord(env.observedDeployment.diskTelemetry);
   const rootDisk = objectRecord(disk?.rootDisk);
 
+  const appFallback = !deployStatus?.appHealth && observedServicesHealthy(env.observedDeployment.services) ? 'healthy' : undefined;
+  const routesFallback =
+    !deployStatus?.routeCertState &&
+    env.routeHostnames.length > 0 &&
+    env.latestRelease?.status === 'applied'
+      ? 'published'
+      : undefined;
+
   const rawItems: Array<[string, unknown]> = [
-    ['App', deployStatus?.appHealth],
+    ['App', deployStatus?.appHealth ?? appFallback],
     ['Node', deployStatus?.nodeHealth ?? env.node?.healthStatus],
     ['Provider', deployStatus?.providerManageability],
-    ['Routes', deployStatus?.routeCertState],
+    ['Routes', deployStatus?.routeCertState ?? routesFallback],
     ['Disk', deployStatus?.diskPressure],
     ['Config', deployStatus?.configDrift],
   ];
@@ -412,7 +455,7 @@ export function DeploymentEnvironmentCard({
       <OperationalSummary env={env} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-4">
-        <section className="grid gap-3">
+        <section className="grid gap-3 content-start">
           <StatusDimensions env={env} />
 
           {env.routeHostnames.length > 0 && (

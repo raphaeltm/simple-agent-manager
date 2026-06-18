@@ -324,7 +324,7 @@ test.describe('Deployment control surface audit', () => {
     await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
 
     // Operational summary: Serving badge and release version
-    await expect(page.getByText('Serving')).toBeVisible();
+    await expect(page.getByText('Serving', { exact: true })).toBeVisible();
     await expect(page.getByText('Release v7', { exact: true })).toBeVisible();
 
     // Release attribution
@@ -500,7 +500,7 @@ test.describe('Deployment control surface — mobile', () => {
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
-    await expect(page.getByText('Serving')).toBeVisible();
+    await expect(page.getByText('Serving', { exact: true })).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-healthy');
     await assertNoOverflow(page);
