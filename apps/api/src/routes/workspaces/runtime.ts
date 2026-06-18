@@ -103,6 +103,20 @@ function buildPlatformInferenceConfig(input: {
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
+function waitUntilIfAvailable(
+  c: { executionCtx: ExecutionContext },
+  promise: Promise<unknown> | void
+): void {
+  if (!promise) return;
+  try {
+    c.executionCtx.waitUntil(promise);
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.includes('no ExecutionContext')) {
+      throw err;
+    }
+  }
+}
+
 async function verifyWorkspaceGitHubOwnerAccess(input: {
   env: Env;
   workspaceId: string;
@@ -1183,7 +1197,13 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
   // Delegate to ProjectData DO with structured error handling.
   // On failure, return appropriate status codes so the VM agent outbox
   // can distinguish transient (retry) from permanent (discard) errors.
-  let result: { persisted: number; duplicates: number };
+  let result: {
+    persisted: number;
+    duplicates: number;
+    limitReached?: boolean;
+    maxMessages?: number;
+    remainingCapacity?: number;
+  };
   try {
     result = await projectDataService.persistMessageBatch(
       c.env,
@@ -1200,6 +1220,34 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to persist messages';
+
+    if (message.includes('SESSION_MESSAGE_LIMIT_EXCEEDED') || message.includes('message limit')) {
+      const context = {
+        workspaceId,
+        projectId: workspace.projectId,
+        sessionId,
+        messageCount: body.messages.length,
+        action: 'rejected_session_message_limit',
+      };
+      log.error('message_persistence.session_message_limit_exceeded', context);
+      waitUntilIfAvailable(
+        c,
+        persistError(c.env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: `Session ${sessionId} has reached the message limit`,
+          context,
+          workspaceId,
+        })
+      );
+      return c.json(
+        {
+          error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+          message: 'Session message limit reached; no additional messages can be persisted',
+        },
+        409
+      );
+    }
 
     // Session-not-found and stopped-session errors are permanent — do not retry
     if (message.includes('not found') || message.includes('is stopped')) {
@@ -1224,6 +1272,42 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     return c.json(
       { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
       503
+    );
+  }
+
+  if (result.limitReached) {
+    const context = {
+      workspaceId,
+      projectId: workspace.projectId,
+      sessionId,
+      messageCount: body.messages.length,
+      persisted: result.persisted,
+      duplicates: result.duplicates,
+      maxMessages: result.maxMessages,
+      remainingCapacity: result.remainingCapacity,
+      action: 'partial_persist_session_message_limit',
+    };
+    log.error('message_persistence.session_message_limit_reached', context);
+    waitUntilIfAvailable(
+      c,
+      persistError(c.env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Session ${sessionId} reached the message limit while persisting a batch`,
+        context,
+        workspaceId,
+      })
+    );
+    return c.json(
+      {
+        error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+        message: 'Session message limit reached; only part of the batch was persisted',
+        persisted: result.persisted,
+        duplicates: result.duplicates,
+        maxMessages: result.maxMessages,
+        remainingCapacity: result.remainingCapacity,
+      },
+      409
     );
   }
 

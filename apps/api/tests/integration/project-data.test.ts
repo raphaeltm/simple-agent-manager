@@ -389,7 +389,7 @@ function createMockProjectDataDO(projectId: string) {
       }),
     },
     MAX_SESSIONS_PER_PROJECT: '1000',
-    MAX_MESSAGES_PER_SESSION: '10000',
+    MAX_MESSAGES_PER_SESSION: '100000',
     DO_SUMMARY_SYNC_DEBOUNCE_MS: '0', // Immediate for testing
   };
 

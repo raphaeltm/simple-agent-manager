@@ -117,7 +117,7 @@ describe('agent lifecycle orchestration integration', () => {
     workspaces = { 'ws-1': { node_id: 'node-1', user_id: 'user-1', status: 'running' } };
     env = {
       DATABASE: createMockD1(tasks, workspaces),
-      MAX_MESSAGES_PER_SESSION: '10000',
+      MAX_MESSAGES_PER_SESSION: '100000',
       TASK_RECONCILIATION_IDLE_MS: String(FIVE_MINUTES),
       TASK_RECONCILIATION_RESPONSE_DEADLINE_MS: String(ONE_MINUTE),
     } as unknown as Env;

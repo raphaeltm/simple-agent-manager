@@ -485,7 +485,9 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	}
 	r.SetToken("test-token")
 
-	// Each message content is ~30 bytes, so BatchMaxBytes=50 should yield ~1-2 per batch.
+	// BatchMaxBytes is measured against the full JSON request body. With a
+	// 50-byte limit even one message exceeds the budget, so each row should
+	// be sent alone and the next row must not be added to that oversized batch.
 	for i := 0; i < 5; i++ {
 		_ = r.Enqueue(Message{
 			MessageID: fmt.Sprintf("m%d", i),
@@ -502,18 +504,191 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Each batch should have at most 2 messages (first is always included,
-	// second may fit if content of first + second <= 50).
 	totalSent := 0
 	for _, size := range batchSizes {
+		if size != 1 {
+			t.Fatalf("expected JSON-budgeted single-message batch, got batch size %d in %v", size, batchSizes)
+		}
 		totalSent += size
 	}
 	if totalSent != 5 {
 		t.Fatalf("expected 5 total messages sent, got %d", totalSent)
 	}
-	// There should be multiple batches (at least 3 for 5 messages with ~30 bytes each and 50 byte limit).
-	if len(batchSizes) < 2 {
-		t.Fatalf("expected multiple batches due to byte limit, got %d", len(batchSizes))
+	if len(batchSizes) != 5 {
+		t.Fatalf("expected 5 single-message batches due to JSON byte limit, got %d", len(batchSizes))
+	}
+}
+
+func TestReadBatch_IncludesToolMetadataInJSONByteBudget(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.BatchMaxSize = 10
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	rows := []outboxRow{
+		{id: 1, messageID: "m1", sessionID: "s1", role: "tool", content: "a", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:00Z"},
+		{id: 2, messageID: "m2", sessionID: "s1", role: "tool", content: "b", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:01Z"},
+	}
+	size, err := marshaledBatchSize(rows[:1])
+	if err != nil {
+		t.Fatalf("marshal size: %v", err)
+	}
+	cfg.BatchMaxBytes = size + 1
+	r.cfg.BatchMaxBytes = cfg.BatchMaxBytes
+
+	for _, row := range rows {
+		_, err := db.Exec(
+			`INSERT INTO message_outbox (message_id, session_id, role, content, tool_metadata, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			row.messageID, row.sessionID, row.role, row.content, row.toolMetadata.String, row.createdAt,
+		)
+		if err != nil {
+			t.Fatalf("insert row: %v", err)
+		}
+	}
+
+	batch, err := r.readBatch()
+	if err != nil {
+		t.Fatalf("readBatch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected tool metadata to count toward JSON byte budget, got %d rows", len(batch))
+	}
+}
+
+func TestFlush_Size400RetriesSingleMessagesBeforeDelete(t *testing.T) {
+	var requestSizes []int
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		mu.Lock()
+		requestSizes = append(requestSizes, len(payload.Messages))
+		mu.Unlock()
+		if len(payload.Messages) > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.BatchMaxBytes = 1024 * 1024
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	for i := 0; i < 2; i++ {
+		if err := r.Enqueue(Message{MessageID: fmt.Sprintf("m%d", i), Role: "assistant", Content: "content", Timestamp: fmt.Sprintf("2024-01-01T00:00:0%dZ", i)}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requestSizes) < 3 || requestSizes[0] != 2 || requestSizes[1] != 1 || requestSizes[2] != 1 {
+		t.Fatalf("expected batch retry as singles after payload 400, got request sizes %v", requestSizes)
+	}
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected outbox empty after fallback success, got %d", count)
+	}
+}
+
+func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
+	var received []struct {
+		MessageID    string `json:"messageId"`
+		Role         string `json:"role"`
+		Content      string `json:"content"`
+		ToolMetadata string `json:"toolMetadata"`
+		Timestamp    string `json:"timestamp"`
+	}
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				MessageID    string `json:"messageId"`
+				Role         string `json:"role"`
+				Content      string `json:"content"`
+				ToolMetadata string `json:"toolMetadata"`
+				Timestamp    string `json:"timestamp"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		msg := payload.Messages[0]
+		if msg.Content != omittedMessageMarker {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Individual message content exceeds 102400 byte limit"}`))
+			return
+		}
+		mu.Lock()
+		received = append(received, payload.Messages...)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.MaxMessageContentBytes = 1024
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	if err := r.Enqueue(Message{
+		MessageID:    "oversized-tool",
+		Role:         "assistant",
+		Content:      strings.Repeat("x", 10),
+		ToolMetadata: strings.Repeat("m", 2048),
+		Timestamp:    "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected one omitted marker delivery, got %d", len(received))
+	}
+	msg := received[0]
+	if msg.MessageID != "oversized-tool" || msg.Role != "assistant" || msg.Timestamp != "2024-01-01T00:00:00Z" {
+		t.Fatalf("marker did not preserve identity fields: %+v", msg)
+	}
+	if msg.Content != omittedMessageMarker {
+		t.Fatalf("content = %q, want omitted marker", msg.Content)
+	}
+	if msg.ToolMetadata != "" {
+		t.Fatalf("expected oversized tool metadata omitted, got %q", msg.ToolMetadata)
 	}
 }
 

@@ -16,6 +16,25 @@ import {
 import type { Env } from './types';
 import { generateId } from './types';
 
+export const DEFAULT_MAX_MESSAGES_PER_SESSION = 100000;
+export const SESSION_MESSAGE_LIMIT_EXCEEDED = 'SESSION_MESSAGE_LIMIT_EXCEEDED';
+
+export class SessionMessageLimitExceededError extends Error {
+  readonly code = SESSION_MESSAGE_LIMIT_EXCEEDED;
+  readonly maxMessages: number;
+
+  constructor(maxMessages: number) {
+    super(`Session message limit of ${maxMessages} messages exceeded`);
+    this.name = 'SessionMessageLimitExceededError';
+    this.maxMessages = maxMessages;
+  }
+}
+
+function resolveMaxMessagesPerSession(env: Env): number {
+  const parsed = parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
+}
+
 /**
  * Returns the next monotonic sequence number for a session's messages.
  */
@@ -36,9 +55,9 @@ export function persistMessage(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string,
+  messageId?: string
 ): { id: string; now: number; sequence: number; workspaceId: string | null; inserted: boolean } {
-  const maxMessages = parseInt(env.MAX_MESSAGES_PER_SESSION || '10000', 10);
+  const maxMessages = resolveMaxMessagesPerSession(env);
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
@@ -47,19 +66,19 @@ export function persistMessage(
     throw new Error(`Session ${sessionId} not found`);
   }
   const id = messageId ?? generateId();
-  const existing = sql
-    .exec('SELECT id FROM chat_messages WHERE id = ? LIMIT 1', id)
-    .toArray()[0];
+  const existing = sql.exec('SELECT id FROM chat_messages WHERE id = ? LIMIT 1', id).toArray()[0];
   if (existing) {
     const wsRow = sql
       .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
       .toArray()[0];
-    const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace') : null;
+    const workspaceId = wsRow
+      ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
+      : null;
     return { id, now: Date.now(), sequence: 0, workspaceId, inserted: false };
   }
 
   if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
-    throw new Error(`Maximum ${maxMessages} messages per session exceeded`);
+    throw new SessionMessageLimitExceededError(maxMessages);
   }
 
   const now = Date.now();
@@ -134,6 +153,9 @@ export function persistMessageBatch(
   workspaceId: string | null;
   firstUserContent: string | null;
   hadTopic: boolean;
+  limitReached: boolean;
+  maxMessages: number;
+  remainingCapacity: number;
 } {
   const session = sql
     .exec('SELECT id, message_count, topic, status FROM chat_sessions WHERE id = ?', sessionId)
@@ -147,9 +169,11 @@ export function persistMessageBatch(
     throw new Error(`Session ${sessionId} is stopped and cannot accept messages`);
   }
 
-  const maxMessages = parseInt(env.MAX_MESSAGES_PER_SESSION || '10000', 10);
+  const maxMessages = resolveMaxMessagesPerSession(env);
+  const startingCount = parseMessageCount(session, 'messages.batch_count');
   let persisted = 0;
   let duplicates = 0;
+  let limitReached = false;
   const now = Date.now();
   let nextSeq = nextSequence(sql, sessionId);
   const persistedMessages: Array<{
@@ -205,8 +229,9 @@ export function persistMessageBatch(
       seenUserContent.add(msg.content);
     }
 
-    const currentCount = parseMessageCount(session, 'messages.batch_count') + persisted;
+    const currentCount = startingCount + persisted;
     if (currentCount >= maxMessages) {
+      limitReached = true;
       break;
     }
 
@@ -269,7 +294,22 @@ export function persistMessageBatch(
     workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.batch_workspace') : null;
   }
 
-  return { persisted, duplicates, persistedMessages, workspaceId, firstUserContent, hadTopic };
+  const remainingCapacity = Math.max(0, maxMessages - startingCount - persisted);
+  if (limitReached && persisted === 0 && duplicates === 0 && messages.length > 0) {
+    throw new SessionMessageLimitExceededError(maxMessages);
+  }
+
+  return {
+    persisted,
+    duplicates,
+    persistedMessages,
+    workspaceId,
+    firstUserContent,
+    hadTopic,
+    limitReached,
+    maxMessages,
+    remainingCapacity,
+  };
 }
 
 /**

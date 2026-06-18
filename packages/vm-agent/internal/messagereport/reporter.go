@@ -21,6 +21,8 @@ import (
 // truncationMarker is appended to content that was truncated.
 const truncationMarker = "\n\n[truncated]"
 
+const omittedMessageMarker = "[message omitted: exceeded message transport limit]"
+
 // Message is the unit of work enqueued into the outbox.
 type Message struct {
 	MessageID    string `json:"messageId"`
@@ -257,10 +259,8 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
 
-	// Truncate oversized content to prevent permanent message loss. The
-	// Cloudflare Worker enforces a ~262 KB request body limit; messages
-	// exceeding that cause a 400 which sendBatch() treats as permanent,
-	// deleting the batch from the outbox.
+	// Truncate oversized content to match the API's individual-message limit.
+	// sendBatch still has a size fallback for JSON overhead and tool metadata.
 	maxBytes := r.cfg.MaxMessageContentBytes
 	if len(msg.Content) > maxBytes {
 		slog.Warn("messagereport: truncating oversized message content",
@@ -372,24 +372,69 @@ func (r *Reporter) readBatch() ([]outboxRow, error) {
 	defer rows.Close()
 
 	var batch []outboxRow
-	var totalBytes int
 	for rows.Next() {
 		var row outboxRow
 		if err := rows.Scan(&row.id, &row.messageID, &row.sessionID, &row.role, &row.content, &row.toolMetadata, &row.createdAt); err != nil {
 			return nil, err
 		}
-		rowBytes := len(row.content)
-		if row.toolMetadata.Valid {
-			rowBytes += len(row.toolMetadata.String)
+		candidate := append(append([]outboxRow(nil), batch...), row)
+		payloadBytes, err := marshaledBatchSize(candidate)
+		if err != nil {
+			return nil, err
 		}
-		// Respect byte limit (but always include at least one message).
-		if len(batch) > 0 && totalBytes+rowBytes > r.cfg.BatchMaxBytes {
+		// Respect marshaled payload limit, but always include at least one
+		// message so an oversized row can progress to fallback handling.
+		if len(batch) > 0 && payloadBytes > r.cfg.BatchMaxBytes {
 			break
 		}
 		batch = append(batch, row)
-		totalBytes += rowBytes
 	}
 	return batch, rows.Err()
+}
+
+type apiMessage struct {
+	MessageID    string `json:"messageId"`
+	SessionID    string `json:"sessionId"`
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	ToolMetadata string `json:"toolMetadata,omitempty"`
+	Timestamp    string `json:"timestamp"`
+	Sequence     int64  `json:"sequence"`
+}
+
+func rowToAPIMessage(row outboxRow) apiMessage {
+	m := apiMessage{
+		MessageID: row.messageID,
+		SessionID: row.sessionID,
+		Role:      row.role,
+		Content:   row.content,
+		Timestamp: row.createdAt,
+		Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
+	}
+	if row.toolMetadata.Valid {
+		m.ToolMetadata = row.toolMetadata.String
+	}
+	return m
+}
+
+func buildBatchPayload(messages []apiMessage) ([]byte, error) {
+	return json.Marshal(map[string]interface{}{"messages": messages})
+}
+
+func buildBatchBody(batch []outboxRow) ([]byte, error) {
+	messages := make([]apiMessage, 0, len(batch))
+	for _, row := range batch {
+		messages = append(messages, rowToAPIMessage(row))
+	}
+	return buildBatchPayload(messages)
+}
+
+func marshaledBatchSize(batch []outboxRow) (int, error) {
+	body, err := buildBatchBody(batch)
+	if err != nil {
+		return 0, err
+	}
+	return len(body), nil
 }
 
 // sendBatch POSTs the batch to the control plane with exponential backoff.
@@ -408,37 +453,7 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 		return fmt.Errorf("no workspace ID")
 	}
 
-	// Build the request body matching the API contract.
-	type apiMessage struct {
-		MessageID    string `json:"messageId"`
-		SessionID    string `json:"sessionId"`
-		Role         string `json:"role"`
-		Content      string `json:"content"`
-		ToolMetadata string `json:"toolMetadata,omitempty"`
-		Timestamp    string `json:"timestamp"`
-		Sequence     int64  `json:"sequence"`
-	}
-	messages := make([]apiMessage, 0, len(batch))
-	for _, row := range batch {
-		m := apiMessage{
-			MessageID: row.messageID,
-			SessionID: row.sessionID,
-			Role:      row.role,
-			Content:   row.content,
-			Timestamp: row.createdAt,
-			Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
-		}
-		if row.toolMetadata.Valid {
-			m.ToolMetadata = row.toolMetadata.String
-		}
-		messages = append(messages, m)
-	}
-
-	payload := map[string]interface{}{
-		"messages": messages,
-	}
-
-	body, err := json.Marshal(payload)
+	body, err := buildBatchBody(batch)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
@@ -456,7 +471,14 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 			return nil // success
 		}
 
-		// Permanent client errors — discard the batch.
+		if statusCode == 400 && isPayloadSizeError(responseBody) {
+			if err := r.sendSizeFallback(url, token, batch); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		// Permanent non-size client errors — discard the batch.
 		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
 			slog.Warn("messagereport: permanent error, discarding batch",
 				"statusCode", statusCode,
@@ -499,6 +521,75 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 		// Exponential increase capped at RetryMax.
 		delay = time.Duration(math.Min(float64(delay*2), float64(r.cfg.RetryMax)))
 	}
+}
+
+func isPayloadSizeError(responseBody string) bool {
+	body := strings.ToLower(responseBody)
+	return strings.Contains(body, "payload exceeds") ||
+		strings.Contains(body, "individual message content exceeds") ||
+		strings.Contains(body, "byte limit")
+}
+
+func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error {
+	for _, row := range batch {
+		if err := r.sendSingleWithSizeFallback(url, token, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reporter) sendSingleWithSizeFallback(url, token string, row outboxRow) error {
+	candidates := r.sizeFallbackCandidates(row)
+	for i, candidate := range candidates {
+		body, err := buildBatchPayload([]apiMessage{candidate})
+		if err != nil {
+			return fmt.Errorf("marshal fallback payload: %w", err)
+		}
+		statusCode, responseBody, err := r.doPost(url, token, body)
+		if err == nil && statusCode >= 200 && statusCode < 300 {
+			if i > 0 {
+				slog.Warn("messagereport: delivered oversized message fallback",
+					"messageId", row.messageID,
+					"role", row.role,
+					"fallbackIndex", i,
+				)
+			}
+			return nil
+		}
+		if statusCode == 400 && isPayloadSizeError(responseBody) {
+			continue
+		}
+		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
+			return fmt.Errorf("fallback permanent error status=%d body=%s", statusCode, responseBody)
+		}
+		return fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, err, responseBody)
+	}
+	return fmt.Errorf("fallback candidates exhausted for message %s", row.messageID)
+}
+
+func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
+	trimmed := rowToAPIMessage(row)
+	trimmed.Content = truncateContentToLimit(trimmed.Content, r.cfg.MaxMessageContentBytes)
+
+	withoutMetadata := trimmed
+	withoutMetadata.ToolMetadata = ""
+
+	omitted := withoutMetadata
+	omitted.Content = omittedMessageMarker
+
+	return []apiMessage{trimmed, withoutMetadata, omitted}
+}
+
+func truncateContentToLimit(content string, maxBytes int) string {
+	if maxBytes <= len(truncationMarker) {
+		return truncationMarker
+	}
+	if len(content) <= maxBytes {
+		return content
+	}
+	keep := maxBytes - len(truncationMarker)
+	return content[:keep] + truncationMarker
 }
 
 func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
