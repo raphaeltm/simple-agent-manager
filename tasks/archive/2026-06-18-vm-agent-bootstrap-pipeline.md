@@ -37,7 +37,7 @@
 - [x] Add tests for lightweight behavior, cache non-fatal behavior, named devcontainer config failure, and fallback behavior.
 - [x] Run focused bootstrap tests from `packages/vm-agent`.
 - [x] Run related/full VM agent package tests if the environment supports it.
-- [ ] Create a draft/open PR marked `DO NOT MERGE / DO NOT DEPLOY TO STAGING`.
+- [x] Create a draft/open PR marked `DO NOT MERGE / DO NOT DEPLOY TO STAGING`.
 
 ## Acceptance Criteria
 
