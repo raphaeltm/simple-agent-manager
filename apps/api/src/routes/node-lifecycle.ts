@@ -19,6 +19,10 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import { jsonValidator, NodeErrorBatchSchema, NodeHeartbeatSchema } from '../schemas';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
+  buildObservedDeploymentUpdate,
+  reconcileDeploymentReleaseStatuses,
+} from '../services/deployment-control';
+import {
   shouldRefreshCallbackToken,
   signCallbackToken,
   signNodeCallbackToken,
@@ -276,6 +280,18 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       const envId = envRow[0]?.envId;
 
       if (envId) {
+        await db
+          .update(schema.deploymentEnvironments)
+          .set(buildObservedDeploymentUpdate(body.deployment, now))
+          .where(
+            and(
+              eq(schema.deploymentEnvironments.id, envId),
+              eq(schema.deploymentEnvironments.nodeId, nodeId),
+            ),
+          );
+
+        await reconcileDeploymentReleaseStatuses(db, envId, body.deployment);
+
         const latestRelease = await db
           .select({ version: schema.deploymentReleases.version })
           .from(schema.deploymentReleases)

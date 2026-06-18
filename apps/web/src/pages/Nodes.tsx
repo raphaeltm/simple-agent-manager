@@ -132,7 +132,7 @@ export function Nodes() {
       <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <p className="sam-type-secondary m-0 text-fg-muted">
-            Nodes host one or more workspaces.
+            Nodes host workspaces or project deployment environments.
           </p>
           {isRefreshing && <Spinner size="sm" />}
         </div>

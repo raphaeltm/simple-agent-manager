@@ -2,6 +2,7 @@ import '../styles/workspace-chrome.css';
 
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton } from '@simple-agent-manager/ui';
+import { Rocket } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
@@ -42,6 +43,7 @@ export function Node() {
   const [error, setError] = useState<string | null>(null);
 
   const { systemInfo, loading: sysInfoLoading } = useNodeSystemInfo(id, node?.status);
+  const isDeploymentNode = node?.nodeRole === 'deployment';
 
   const loadNode = useCallback(async () => {
     if (!id) return;
@@ -213,9 +215,11 @@ export function Node() {
 
       {/* Action buttons */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
-          Create Workspace
-        </Button>
+        {!isDeploymentNode && (
+          <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
+            Create Workspace
+          </Button>
+        )}
         <Button
           variant="secondary"
           onClick={handleStop}
@@ -268,6 +272,20 @@ export function Node() {
         <Alert variant="error">Node not found</Alert>
       ) : (
         <div className="flex flex-col gap-6">
+          {isDeploymentNode && (
+            <div className="glass-surface rounded-md p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-sm bg-accent-tint flex items-center justify-center shrink-0">
+                <Rocket size={18} className="text-accent" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="m-0 text-sm font-semibold text-fg-primary">Deployment node</h2>
+                <p className="m-0 mt-1 text-sm text-fg-muted">
+                  This node runs a project deployment environment. Logs and system health are available here; environment policy and teardown are managed from the project Deployments page.
+                </p>
+              </div>
+            </div>
+          )}
+
           <NodeOverviewSection node={node} systemInfo={systemInfo} catalogs={catalogs} />
 
           {node.status === 'running' && (
@@ -288,13 +306,15 @@ export function Node() {
 
           <LogsSection nodeId={id} nodeStatus={node.status} />
 
-          <NodeWorkspacesSection
-            workspaces={workspaces}
-            onCreateWorkspace={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
-            onStop={handleStopWorkspace}
-            onRestart={handleRestartWorkspace}
-            onDelete={handleDeleteWorkspace}
-          />
+          {!isDeploymentNode && (
+            <NodeWorkspacesSection
+              workspaces={workspaces}
+              onCreateWorkspace={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
+              onStop={handleStopWorkspace}
+              onRestart={handleRestartWorkspace}
+              onDelete={handleDeleteWorkspace}
+            />
+          )}
 
           <NodeEventsSection
             events={events}

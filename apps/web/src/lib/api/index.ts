@@ -142,16 +142,30 @@ export {
   validateCredential,
 } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
-export type { DeploymentSecretEntry, ProjectDeploymentGcpResponse } from './deployment';
+export type {
+  DeleteDeploymentEnvironmentResponse,
+  DeploymentAgentPolicy,
+  DeploymentEnvironment,
+  DeploymentEnvironmentNodeSummary,
+  DeploymentObservedState,
+  DeploymentReleaseSummary,
+  DeploymentSecretEntry,
+  ProjectDeploymentGcpResponse,
+} from './deployment';
 export {
+  createDeploymentEnvironment,
   deleteDeploymentSecret,
+  deleteDeploymentEnvironment,
   deleteProjectDeploymentGcp,
+  getDeploymentEnvironmentLogs,
   getDeployOAuthResult,
   getProjectDeploymentGcp,
+  listDeploymentEnvironments,
   listDeploymentSecrets,
   listGcpProjectsForDeploy,
   setDeploymentSecret,
   setupProjectDeploymentGcp,
+  updateDeploymentEnvironmentPolicy,
 } from './deployment';
 export type {
   FileEntry,

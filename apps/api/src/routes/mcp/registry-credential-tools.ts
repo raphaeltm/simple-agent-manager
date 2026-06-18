@@ -7,12 +7,12 @@
  * The credential is minted server-side using the platform CF_API_TOKEN.
  * Credential values are NEVER logged or persisted — only audit metadata.
  */
-import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import {
   getRegistryCredentialRateLimit,
   mintProjectRegistryCredential,
@@ -45,28 +45,22 @@ export async function handleGetRegistryCredentials(
   const rawEnvironment = typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
   const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
 
-  // If an environment name is provided, verify it exists and belongs to this project
-  if (environment) {
-    const db = drizzle(env.DATABASE, { schema });
-    const envRows = await db
-      .select({ id: schema.deploymentEnvironments.id })
-      .from(schema.deploymentEnvironments)
-      .where(
-        and(
-          eq(schema.deploymentEnvironments.projectId, projectId),
-          eq(schema.deploymentEnvironments.name, environment),
-          eq(schema.deploymentEnvironments.status, 'active'),
-        ),
-      )
-      .limit(1);
+  if (!environment) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'A deployment environment name is required before registry credentials can be minted.',
+    );
+  }
 
-    if (envRows.length === 0) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `Deployment environment '${environment}' not found or inactive for this project.`,
-      );
-    }
+  const db = drizzle(env.DATABASE, { schema });
+  const policyResult = await assertAgentDeploymentAllowed(db, projectId, environment, tokenData);
+  if ('error' in policyResult) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      policyResult.error,
+    );
   }
 
   // Rate limit: per-project credential minting using time-bucketed key (no TTL drift).

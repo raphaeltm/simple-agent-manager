@@ -125,6 +125,12 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   if (!release) {
     throw errors.notFound('Deployment release');
   }
+
+  await db
+    .update(schema.deploymentReleases)
+    .set({ status: 'applying' })
+    .where(eq(schema.deploymentReleases.id, release.id));
+
   const manifest = JSON.parse(release.manifest);
 
   const routes = buildDeploymentRouteTargets(manifest, {

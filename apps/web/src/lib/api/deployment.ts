@@ -1,5 +1,142 @@
+import type { NodeLogFilter, NodeLogResponse, NodeResponse } from '@simple-agent-manager/shared';
+
 import { request } from './client';
 import type { GcpProject } from './credentials';
+
+// ─── App Deployment Environments ────────────────────────────────────────────
+
+export interface DeploymentObservedState {
+  appliedSeq: number | null;
+  status: string | null;
+  errorMessage: string | null;
+  services: unknown | null;
+  deployStatus: unknown | null;
+  diskTelemetry: unknown | null;
+  observedAt: string | null;
+}
+
+export interface DeploymentAgentPolicy {
+  agentDeployEnabled: boolean;
+  agentDeployEnabledBy: string | null;
+  agentDeployEnabledAt: string | null;
+  agentDeployDisabledAt: string | null;
+  allowedDeployProfileIds: string[];
+}
+
+export interface DeploymentReleaseSummary {
+  id: string;
+  environmentId: string;
+  version: number;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface DeploymentEnvironmentNodeSummary extends Pick<
+  NodeResponse,
+  | 'id'
+  | 'name'
+  | 'status'
+  | 'healthStatus'
+  | 'cloudProvider'
+  | 'vmSize'
+  | 'vmLocation'
+  | 'nodeRole'
+  | 'ipAddress'
+  | 'lastHeartbeatAt'
+  | 'errorMessage'
+  | 'createdAt'
+  | 'updatedAt'
+> {}
+
+export interface DeploymentEnvironment {
+  id: string;
+  projectId: string;
+  name: string;
+  status: string;
+  nodeId: string | null;
+  provider: string | null;
+  location: string | null;
+  createdAt: string;
+  updatedAt: string;
+  secretsUpdatedAt: string | null;
+  observedDeployment: DeploymentObservedState;
+  agentPolicy: DeploymentAgentPolicy;
+  latestRelease: DeploymentReleaseSummary | null;
+  routeHostnames: string[];
+  node: DeploymentEnvironmentNodeSummary | null;
+}
+
+export interface DeleteDeploymentEnvironmentResponse {
+  id: string;
+  deleted: boolean;
+  nodeId: string | null;
+  nodeDeleted: boolean;
+  volumesDetached: number;
+  volumesDeleted: number;
+  dnsRecordsDeleted: number;
+  warnings: string[];
+}
+
+export async function listDeploymentEnvironments(
+  projectId: string,
+): Promise<{ environments: DeploymentEnvironment[] }> {
+  return request<{ environments: DeploymentEnvironment[] }>(
+    `/api/projects/${projectId}/environments`,
+  );
+}
+
+export async function createDeploymentEnvironment(
+  projectId: string,
+  name: string,
+): Promise<DeploymentEnvironment> {
+  return request<DeploymentEnvironment>(`/api/projects/${projectId}/environments`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateDeploymentEnvironmentPolicy(
+  projectId: string,
+  envId: string,
+  data: { agentDeployEnabled?: boolean; allowedDeployProfileIds?: string[] | null },
+): Promise<DeploymentEnvironment> {
+  return request<DeploymentEnvironment>(
+    `/api/projects/${projectId}/environments/${envId}/policy`,
+    { method: 'PATCH', body: JSON.stringify(data) },
+  );
+}
+
+export async function deleteDeploymentEnvironment(
+  projectId: string,
+  envId: string,
+): Promise<DeleteDeploymentEnvironmentResponse> {
+  return request<DeleteDeploymentEnvironmentResponse>(
+    `/api/projects/${projectId}/environments/${envId}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function getDeploymentEnvironmentLogs(
+  projectId: string,
+  envId: string,
+  filter?: Partial<NodeLogFilter>,
+): Promise<NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }> {
+  const params = new URLSearchParams();
+  if (filter?.source && filter.source !== 'all') params.set('source', filter.source);
+  if (filter?.level) params.set('level', filter.level);
+  if (filter?.container) params.set('container', filter.container);
+  if (filter?.since) params.set('since', filter.since);
+  if (filter?.until) params.set('until', filter.until);
+  if (filter?.search) params.set('search', filter.search);
+  if (filter?.cursor) params.set('cursor', filter.cursor);
+  if (filter?.limit) params.set('limit', String(filter.limit));
+
+  const qs = params.toString();
+  return request<NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }>(
+    `/api/projects/${projectId}/environments/${envId}/logs${qs ? `?${qs}` : ''}`,
+  );
+}
 
 // ─── Environment Secrets (write-only) ──────────────────────────────────────
 

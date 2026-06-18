@@ -414,8 +414,27 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     );
 }
 
-export async function deleteNodeResources(nodeId: string, userId: string, env: Env): Promise<void> {
+export interface DeleteNodeResourcesResult {
+  nodeFound: boolean;
+  providerVmDeleted: boolean;
+  providerVmDeleteSkippedReason: string | null;
+  backendDnsDeleted: boolean;
+  errors: string[];
+}
+
+export async function deleteNodeResources(
+  nodeId: string,
+  userId: string,
+  env: Env,
+): Promise<DeleteNodeResourcesResult> {
   const db = drizzle(env.DATABASE, { schema });
+  const result: DeleteNodeResourcesResult = {
+    nodeFound: false,
+    providerVmDeleted: false,
+    providerVmDeleteSkippedReason: null,
+    backendDnsDeleted: false,
+    errors: [],
+  };
 
   const rows = await db
     .select()
@@ -430,8 +449,9 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
 
   const node = rows[0];
   if (!node) {
-    return;
+    return result;
   }
+  result.nodeFound = true;
 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
@@ -439,10 +459,14 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
     if (providerResult2) {
       try {
         await providerResult2.provider.deleteVM(node.providerInstanceId);
+        result.providerVmDeleted = true;
       } catch (err) {
+        result.errors.push(err instanceof Error ? err.message : String(err));
         log.error('node_delete.delete_vm_failed', { nodeId, ...serializeError(err) });
       }
     } else {
+      result.providerVmDeleteSkippedReason = 'cloud provider credential unavailable';
+      result.errors.push('Cloud provider credential unavailable; provider VM may still exist.');
       log.error('node_cleanup.credential_missing_vm_orphaned', {
         nodeId,
         userId,
@@ -455,7 +479,9 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
   if (node.backendDnsRecordId) {
     try {
       await deleteDNSRecord(node.backendDnsRecordId, env);
+      result.backendDnsDeleted = true;
     } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
       log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
     }
   }
@@ -469,4 +495,6 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
       eq(schema.workspaces.nodeId, nodeId),
       eq(schema.workspaces.userId, userId)
     ));
+
+  return result;
 }
