@@ -34,6 +34,18 @@ import { persistErrorBatch, type PersistErrorInput } from '../services/observabi
 import * as projectDataService from '../services/project-data';
 
 const nodeLifecycleRoutes = new Hono<{ Bindings: Env }>();
+const NODE_DNS_ERROR_MESSAGE_MAX_LENGTH = 500;
+const NODE_BACKEND_DNS_ERROR_PREFIX = 'Backend DNS record creation failed:';
+
+function truncateNodeLifecycleError(value: string): string {
+  return value.length > NODE_DNS_ERROR_MESSAGE_MAX_LENGTH
+    ? `${value.slice(0, NODE_DNS_ERROR_MESSAGE_MAX_LENGTH - 3)}...`
+    : value;
+}
+
+function isBackendDnsError(errorMessage: string | null | undefined): boolean {
+  return !!errorMessage && errorMessage.startsWith(NODE_BACKEND_DNS_ERROR_PREFIX);
+}
 
 /**
  * POST /:id/token — Issue a node-scoped management token for direct VM Agent access.
@@ -176,6 +188,8 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
+  let effectiveNodeIp = node.ipAddress;
+
   if (!node.ipAddress) {
     if (heartbeatIp) {
       log.info('heartbeat.ip_backfilled', {
@@ -184,6 +198,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         action: 'ip_backfilled',
       });
       updatePayload.ipAddress = heartbeatIp;
+      effectiveNodeIp = heartbeatIp;
 
       // Always clear the "Awaiting IP allocation" error when IP is backfilled.
       // Use explicit SQL null to ensure Drizzle/D1 generates SET errorMessage = NULL
@@ -194,37 +209,45 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       if (node.status === 'creating' || node.status === 'error') {
         updatePayload.status = 'running';
       }
-
-      // Update DNS record if we have one, or create a new one
-      try {
-        if (node.backendDnsRecordId) {
-          await updateDNSRecord(node.backendDnsRecordId, heartbeatIp, c.env);
-        } else {
-          const dnsRecordId = await createNodeBackendDNSRecord(nodeId, heartbeatIp, c.env);
-          updatePayload.backendDnsRecordId = dnsRecordId;
-        }
-      } catch (dnsErr) {
-        log.error('heartbeat.dns_update_failed_during_ip_backfill', { nodeId, error: String(dnsErr) });
-      }
     }
-  } else if (!node.backendDnsRecordId) {
-    const dnsIp = heartbeatIp || node.ipAddress;
+  }
+
+  if (effectiveNodeIp) {
+    const dnsIp = heartbeatIp || effectiveNodeIp;
     try {
-      const dnsRecordId = await createNodeBackendDNSRecord(nodeId, dnsIp, c.env);
-      updatePayload.backendDnsRecordId = dnsRecordId;
-      if (node.errorMessage?.startsWith('Backend DNS record creation failed:')) {
-        updatePayload.errorMessage = sql`NULL`;
-        if (node.status === 'error') {
-          updatePayload.status = 'running';
+      if (node.backendDnsRecordId) {
+        if (heartbeatIp && heartbeatIp !== node.ipAddress) {
+          await updateDNSRecord(node.backendDnsRecordId, heartbeatIp, c.env);
+          log.info('heartbeat.backend_dns_updated', {
+            nodeId,
+            ipAddress: heartbeatIp,
+            previousIpAddress: node.ipAddress,
+          });
         }
+      } else {
+        const dnsRecordId = await createNodeBackendDNSRecord(nodeId, dnsIp, c.env);
+        updatePayload.backendDnsRecordId = dnsRecordId;
+        if (isBackendDnsError(node.errorMessage)) {
+          updatePayload.errorMessage = sql`NULL`;
+          if (node.status === 'error') {
+            updatePayload.status = 'running';
+          }
+        }
+        log.info('heartbeat.backend_dns_backfilled', {
+          nodeId,
+          ipAddress: dnsIp,
+          source: heartbeatIp ? 'heartbeat' : 'stored',
+        });
       }
-      log.info('heartbeat.backend_dns_backfilled', {
+    } catch (dnsErr) {
+      const message = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+      updatePayload.errorMessage = truncateNodeLifecycleError(`${NODE_BACKEND_DNS_ERROR_PREFIX} ${message}`);
+      log.error('heartbeat.backend_dns_backfill_failed', {
         nodeId,
         ipAddress: dnsIp,
-        source: heartbeatIp ? 'heartbeat' : 'stored',
+        hasExistingDnsRecord: !!node.backendDnsRecordId,
+        error: String(dnsErr),
       });
-    } catch (dnsErr) {
-      log.error('heartbeat.backend_dns_backfill_failed', { nodeId, error: String(dnsErr) });
     }
   }
 

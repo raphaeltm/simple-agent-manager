@@ -107,7 +107,7 @@ describe('heartbeat IP backfill', () => {
   });
 
   it('creates new DNS record when no backendDnsRecordId exists', () => {
-    expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, heartbeatIp');
+    expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, dnsIp');
   });
 
   it('stores new DNS record ID in update payload', () => {
@@ -121,12 +121,14 @@ describe('heartbeat IP backfill', () => {
   });
 
   it('handles DNS errors gracefully without failing the heartbeat', () => {
-    expect(heartbeatSection).toContain('heartbeat.dns_update_failed_during_ip_backfill');
+    expect(heartbeatSection).toContain('heartbeat.backend_dns_backfill_failed');
   });
 
   it('self-heals nodes that already have an IP but no backend DNS record', () => {
-    expect(heartbeatSection).toContain('} else if (!node.backendDnsRecordId) {');
-    expect(heartbeatSection).toContain('const dnsIp = heartbeatIp || node.ipAddress');
+    expect(heartbeatSection).toContain('let effectiveNodeIp = node.ipAddress');
+    expect(heartbeatSection).toContain('if (effectiveNodeIp) {');
+    expect(heartbeatSection).toContain('const dnsIp = heartbeatIp || effectiveNodeIp');
+    expect(heartbeatSection).toContain('} else {');
     expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, dnsIp');
     expect(heartbeatSection).toContain('updatePayload.backendDnsRecordId = dnsRecordId');
     expect(heartbeatSection).toContain('heartbeat.backend_dns_backfilled');
@@ -134,26 +136,33 @@ describe('heartbeat IP backfill', () => {
 
   it('prefers CF-Connecting-IP over stored IP for backend DNS self-healing', () => {
     const selfHealBlock = heartbeatSection.slice(
-      heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'),
-      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'))
+      heartbeatSection.indexOf('if (effectiveNodeIp) {'),
+      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
     );
-    expect(selfHealBlock).toContain('const dnsIp = heartbeatIp || node.ipAddress');
+    expect(selfHealBlock).toContain('const dnsIp = heartbeatIp || effectiveNodeIp');
     expect(selfHealBlock).toContain("source: heartbeatIp ? 'heartbeat' : 'stored'");
   });
 
   it('clears the DNS-specific provisioning error after backend DNS self-healing succeeds', () => {
     const selfHealBlock = heartbeatSection.slice(
-      heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'),
-      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('} else if (!node.backendDnsRecordId) {'))
+      heartbeatSection.indexOf('if (effectiveNodeIp) {'),
+      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
     );
-    expect(selfHealBlock).toContain("node.errorMessage?.startsWith('Backend DNS record creation failed:')");
+    expect(selfHealBlock).toContain('isBackendDnsError(node.errorMessage)');
     expect(selfHealBlock).toContain('updatePayload.errorMessage = sql`NULL`');
     expect(selfHealBlock).toContain("node.status === 'error'");
     expect(selfHealBlock).toContain("updatePayload.status = 'running'");
   });
 
-  it('logs backend DNS self-heal failures without failing the heartbeat', () => {
+  it('records and logs backend DNS self-heal failures without failing the heartbeat', () => {
+    expect(heartbeatSection).toContain('updatePayload.errorMessage = truncateNodeLifecycleError');
     expect(heartbeatSection).toContain('heartbeat.backend_dns_backfill_failed');
+  });
+
+  it('updates existing backend DNS when heartbeat IP changes', () => {
+    expect(heartbeatSection).toContain('heartbeatIp && heartbeatIp !== node.ipAddress');
+    expect(heartbeatSection).toContain('updateDNSRecord(node.backendDnsRecordId, heartbeatIp');
+    expect(heartbeatSection).toContain('heartbeat.backend_dns_updated');
   });
 
   it('imports updateDNSRecord and createNodeBackendDNSRecord', () => {
