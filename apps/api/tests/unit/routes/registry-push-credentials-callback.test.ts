@@ -161,6 +161,15 @@ describe('registry-push-credentials callback (vertical slice)', () => {
     expect(mintMock).not.toHaveBeenCalled();
   });
 
+  it('rejects node-scoped tokens because the workspace claim is a node id', async () => {
+    verifiedPayload = { workspace: 'node-1', type: 'callback', scope: 'node' };
+    const app = await buildApp();
+    const res = await request(app, 'proj-1');
+
+    expect(res.status).toBe(403);
+    expect(mintMock).not.toHaveBeenCalled();
+  });
+
   it('rate-limits per project once the window count reaches the max', async () => {
     const app = await buildApp();
 

@@ -194,6 +194,15 @@ describe('compose-publish-release callback (vertical slice)', () => {
     expect(inserted).toHaveLength(0);
   });
 
+  it('rejects node-scoped tokens because the workspace claim is a node id', async () => {
+    verifiedPayload = { workspace: 'node-1', type: 'callback', scope: 'node' };
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
   it('rejects a submission missing composeYaml', async () => {
     const app = await buildApp();
     const res = await request(app, 'proj-1', { ...validSubmission, composeYaml: '   ' });

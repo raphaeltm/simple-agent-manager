@@ -20,7 +20,7 @@ import {
  * session cookies (not callback JWTs).
  *
  * Auth: Callback JWT via Bearer token, verified inline with verifyCallbackToken().
- * Accepts workspace-scoped tokens (the VM agent's callback token).
+ * Accepts workspace-scoped tokens (the VM agent's per-workspace callback token).
  *
  * The VM agent's publish orchestrator (internal/publish/controlplane.go:
  * MintPushCredentials) calls this endpoint after capturing a
@@ -47,7 +47,7 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
   const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 
-  if (payload.scope !== 'workspace' && payload.scope !== 'node') {
+  if (payload.scope !== undefined && payload.scope !== 'workspace') {
     log.error('registry_push_cred.invalid_token_scope', {
       scope: payload.scope,
       action: 'rejected',
@@ -58,9 +58,11 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // The callback JWT carries only a workspaceId. Resolve the owning project +
-  // user, then verify the workspace's project matches the route param so a
-  // workspace token cannot mint a credential for another project.
+  // The callback JWT carries only a workspaceId. Node-scoped heartbeat tokens
+  // carry a node ID in the same claim, so they are rejected above before this
+  // lookup. Resolve the owning project + user, then verify the workspace's
+  // project matches the route param so a workspace token cannot mint a
+  // credential for another project.
   const workspaceRows = await db
     .select({
       projectId: schema.workspaces.projectId,

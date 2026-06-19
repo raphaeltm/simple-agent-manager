@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/workspace/vm-agent/internal/oci"
 	"github.com/workspace/vm-agent/internal/publish"
@@ -71,7 +72,7 @@ func (s *Server) stopOCIReceiver(ctx context.Context) {
 // control plane, using the boot workspace's project + callback token.
 func (s *Server) handlePublishCapture(ctx context.Context, cp *oci.CapturedPublish) error {
 	projectID := s.config.ProjectID
-	token := s.getCallbackToken()
+	token := s.publishCallbackToken()
 
 	log := slog.Default().With("component", "oci-receiver", "projectId", projectID)
 	if projectID == "" || token == "" {
@@ -103,4 +104,20 @@ func (s *Server) handlePublishCapture(ctx context.Context, cp *oci.CapturedPubli
 		"version", result.Version,
 		"status", result.Status)
 	return nil
+}
+
+func (s *Server) publishCallbackToken() string {
+	if s == nil || s.config == nil {
+		return ""
+	}
+
+	// Compose-publish callbacks are workspace/project-scoped. The node heartbeat
+	// loop may refresh s.callbackToken to a node-scoped token, so do not use
+	// getCallbackToken() here.
+	if workspaceID := strings.TrimSpace(s.config.WorkspaceID); workspaceID != "" {
+		if token := s.workspaceCallbackToken(workspaceID); token != "" {
+			return token
+		}
+	}
+	return strings.TrimSpace(s.config.CallbackToken)
 }
