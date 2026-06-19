@@ -1,0 +1,22 @@
+# Sample compose app for the publish spike.
+# - `web` builds locally then publishes its image to the spike registry.
+# - `cache` uses a small public image referenced by tag (compose must resolve it).
+# The registry host is parameterized so the harness can point it at the proxy.
+services:
+  web:
+    image: ${SAM_REGISTRY}/sam-proj/web:v1
+    build:
+      context: ./web
+    environment:
+      - GREETING=${GREETING:-hello}
+    ports:
+      - "8080:80"
+    depends_on:
+      - cache
+
+  cache:
+    image: ${SAM_REGISTRY}/sam-proj/cache:v1
+    build:
+      context: ./cache
+    environment:
+      - CACHE_SIZE=${CACHE_SIZE:-64mb}

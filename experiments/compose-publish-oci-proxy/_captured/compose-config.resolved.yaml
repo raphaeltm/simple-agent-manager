@@ -1,0 +1,32 @@
+name: sample-app
+services:
+  cache:
+    build:
+      context: /workspaces/simple-agent-manager/experiments/compose-publish-oci-proxy/sample-app/cache
+      dockerfile: Dockerfile
+    environment:
+      CACHE_SIZE: 128mb
+    image: localhost:5050/sam-proj/cache:v1
+    networks:
+      default: null
+  web:
+    build:
+      context: /workspaces/simple-agent-manager/experiments/compose-publish-oci-proxy/sample-app/web
+      dockerfile: Dockerfile
+    depends_on:
+      cache:
+        condition: service_started
+        required: true
+    environment:
+      GREETING: hello-from-sam
+    image: localhost:5050/sam-proj/web:v1
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 80
+        published: "8080"
+        protocol: tcp
+networks:
+  default:
+    name: sample-app_default

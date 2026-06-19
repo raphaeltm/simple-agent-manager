@@ -1,0 +1,5 @@
+# Don't commit the TLS key, or large image blobs. Keep the small manifest JSON +
+# logs as evidence of what compose publish produced.
+certs/key.pem
+certs/cert.pem
+_captured/blobs/
