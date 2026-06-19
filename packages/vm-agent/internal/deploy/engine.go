@@ -117,6 +117,43 @@ func (e *Engine) EnvironmentID() string {
 	return e.cfg.EnvironmentID
 }
 
+// Teardown stops the current compose project and removes only this
+// environment's active Caddy snippet from the node-level import directory.
+func (e *Engine) Teardown(ctx context.Context) error {
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
+
+	var errs []string
+	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
+		if err := e.composeDown(ctx, composeFile); err != nil {
+			errs = append(errs, fmt.Sprintf("compose down: %v", err))
+		}
+	} else if !strings.Contains(err.Error(), "no current release") {
+		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
+	}
+
+	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("remove Caddy snippet: %v", err))
+	}
+
+	root := GenerateRootCaddyfile(CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
+		errs = append(errs, fmt.Sprintf("write root Caddyfile: %v", err))
+	} else if err := e.reloadActiveCaddyConfig(ctx); err != nil {
+		errs = append(errs, fmt.Sprintf("reload Caddy: %v", err))
+	}
+
+	e.setObserved(ObservedState{})
+	if len(errs) > 0 {
+		return fmt.Errorf("teardown environment %s: %s", e.cfg.EnvironmentID, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // getCallbackToken returns the current callback token under a read lock.
 func (e *Engine) getCallbackToken() string {
 	e.tokenMu.RLock()
@@ -497,6 +534,10 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 		return fmt.Errorf("write active Caddy snippet: %w", err)
 	}
 
+	return e.reloadActiveCaddyConfig(ctx)
+}
+
+func (e *Engine) reloadActiveCaddyConfig(ctx context.Context) error {
 	parts := strings.Fields(e.cfg.CaddyReloadCmd)
 	if len(parts) == 0 {
 		return fmt.Errorf("empty caddy reload command")

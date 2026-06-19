@@ -132,6 +132,32 @@ function createMockEnv() {
   } as any;
 }
 
+function createRawMockEnv(steps: Array<{ all?: unknown; run?: unknown }>) {
+  const statements: Array<{ sql: string; binds: unknown[] }> = [];
+  return {
+    env: {
+      DATABASE: {
+        prepare: vi.fn().mockImplementation((sql: string) => {
+          const step = steps.shift();
+          const statement = {
+            sql,
+            binds: [] as unknown[],
+            bind: vi.fn().mockImplementation((...binds: unknown[]) => {
+              statement.binds = binds;
+              statements.push({ sql, binds });
+              return statement;
+            }),
+            all: vi.fn().mockResolvedValue(step?.all ?? { results: [] }),
+            run: vi.fn().mockResolvedValue(step?.run ?? { meta: { changes: 0 } }),
+          };
+          return statement;
+        }),
+      } as unknown as D1Database,
+    } as any,
+    statements,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -196,6 +222,38 @@ describe('provisionDeploymentNode', () => {
     expect(setValues).toHaveProperty('provider', 'hetzner');
     expect(setValues).toHaveProperty('location', 'fsn1');
     expect(setValues).toHaveProperty('updatedAt');
+  });
+
+  it('does not link to a selected existing node unless it is still running', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-fresh-after-race' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([
+      { all: { results: [{ id: 'node-existing', vm_size: 'small', vm_location: 'fsn1', last_metrics: null }] } },
+      { all: { results: [] } },
+      { run: { meta: { changes: 0 } } },
+      { run: { meta: { changes: 1 } } },
+    ]);
+
+    const result = await provisionDeploymentNode('env-race', 'proj-1', 'user-1', env);
+
+    expect(result?.nodeId).toBe('node-fresh-after-race');
+    expect(createNodeRecord).toHaveBeenCalledTimes(1);
+    expect(provisionNode).toHaveBeenCalledWith(
+      'node-fresh-after-race',
+      expect.anything(),
+      undefined,
+      undefined,
+      { environmentId: 'env-race' },
+    );
+
+    const updateStatements = statements.filter((statement) => statement.sql.includes('UPDATE deployment_environments'));
+    expect(updateStatements).toHaveLength(2);
+    expect(updateStatements[0]!.sql).toContain('AND EXISTS');
+    expect(updateStatements[0]!.binds).toContain('running');
+    expect(updateStatements[1]!.binds).toContain('creating');
   });
 
   it('falls back to platform credentials when user has none', async () => {

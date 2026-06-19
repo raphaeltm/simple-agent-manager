@@ -288,6 +288,73 @@ func TestReloadCaddy_WaitsForReloadCommandToExist(t *testing.T) {
 	}
 }
 
+func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	state := &ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node", Status: StatusApplied}
+	if err := disk.WriteRelease(state, "services: {}\n", "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	activeDir := filepath.Join(dir, "active")
+	sitesDir := filepath.Join(activeDir, "sites")
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		t.Fatalf("mkdir sites: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-a.caddy"), []byte("env-a"), 0644); err != nil {
+		t.Fatalf("write env-a snippet: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-b.caddy"), []byte("env-b"), 0644); err != nil {
+		t.Fatalf("write env-b snippet: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COMPOSE_LOG\"\n"), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+	reloadLog := filepath.Join(dir, "reload.log")
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\necho reloaded > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+	t.Setenv("COMPOSE_LOG", composeLog)
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:      "env-a",
+		ComposeCmd:         composeScript,
+		ComposeProjectName: "sam-env-env-a",
+		CaddyfilePath:      filepath.Join(activeDir, "Caddyfile"),
+		CaddyReloadCmd:     reloadScript + " " + reloadLog,
+	})
+
+	if err := engine.Teardown(t.Context()); err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
+		t.Fatalf("expected env-a snippet removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sitesDir, "env-b.caddy")); err != nil {
+		t.Fatalf("expected env-b snippet preserved: %v", err)
+	}
+	composeArgs, err := os.ReadFile(composeLog)
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if !strings.Contains(string(composeArgs), "--project-name\nsam-env-env-a") || !strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected compose down with project name, got:\n%s", composeArgs)
+	}
+	if _, err := os.ReadFile(reloadLog); err != nil {
+		t.Fatalf("reload command did not run: %v", err)
+	}
+}
+
 func TestGenerateCaddyfile_RejectsUnsafeRouteTargets(t *testing.T) {
 	tests := []struct {
 		name  string

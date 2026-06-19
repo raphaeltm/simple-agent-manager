@@ -216,9 +216,16 @@ func (s *Server) sendNodeHeartbeat() {
 		if hbResp.Deployment.DeployPubKey != "" {
 			deployPubKey = hbResp.Deployment.DeployPubKey
 		}
+		activeEnvironmentIDs := make(map[string]bool, len(hbResp.Deployment.Environments))
 		for _, env := range hbResp.Deployment.Environments {
-			s.ensureDeployEngine(env.EnvironmentID)
+			environmentID := strings.TrimSpace(env.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			activeEnvironmentIDs[environmentID] = true
+			s.ensureDeployEngine(environmentID)
 		}
+		s.retireDeployEngines(activeEnvironmentIDs)
 
 		// Refresh signing public key if provided
 		if deployPubKey != "" {

@@ -99,6 +99,7 @@ type Server struct {
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
 	deployEngines  map[string]*deploy.Engine
+	deployRetiring map[string]bool
 	deployVerifier *deploy.Verifier
 }
 
@@ -464,6 +465,7 @@ func New(cfg *config.Config) (*Server, error) {
 		httpClient:          config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 		done:                make(chan struct{}),
 		deployEngines:       make(map[string]*deploy.Engine),
+		deployRetiring:      make(map[string]bool),
 	}
 
 	// GitTokenFetcher is intentionally left nil at the server level.
@@ -603,6 +605,53 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 	}
 	s.deployEngines[environmentID] = engine
 	return engine
+}
+
+func (s *Server) retireDeployEngines(activeEnvironmentIDs map[string]bool) {
+	s.deployMu.Lock()
+	if s.deployRetiring == nil {
+		s.deployRetiring = make(map[string]bool)
+	}
+	var retired []struct {
+		environmentID string
+		engine        *deploy.Engine
+	}
+	for environmentID, engine := range s.deployEngines {
+		if activeEnvironmentIDs[environmentID] {
+			delete(s.deployRetiring, environmentID)
+			continue
+		}
+		if s.deployRetiring[environmentID] {
+			continue
+		}
+		s.deployRetiring[environmentID] = true
+		retired = append(retired, struct {
+			environmentID string
+			engine        *deploy.Engine
+		}{environmentID: environmentID, engine: engine})
+	}
+	s.deployMu.Unlock()
+
+	for _, item := range retired {
+		go func(environmentID string, engine *deploy.Engine) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := engine.Teardown(ctx); err != nil {
+				s.deployMu.Lock()
+				delete(s.deployRetiring, environmentID)
+				s.deployMu.Unlock()
+				slog.Error("deploy: retired environment teardown failed", "environmentId", environmentID, "error", err)
+				return
+			}
+			s.deployMu.Lock()
+			if s.deployRetiring[environmentID] && s.deployEngines[environmentID] == engine {
+				delete(s.deployEngines, environmentID)
+			}
+			delete(s.deployRetiring, environmentID)
+			s.deployMu.Unlock()
+			slog.Info("deploy: retired environment teardown complete", "environmentId", environmentID)
+		}(item.environmentID, item.engine)
+	}
 }
 
 // GetBootLogBroadcaster returns the broadcaster for a specific workspace.

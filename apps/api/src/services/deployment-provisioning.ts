@@ -167,14 +167,39 @@ async function linkEnvironmentToNode(
   envId: string,
   nodeId: string,
   placement: DeploymentPlacement,
+  userId: string,
+  expectedNodeStatus: 'creating' | 'running',
 ): Promise<boolean> {
   if (typeof env.DATABASE.prepare === 'function') {
     const result = await env.DATABASE.prepare(
       `UPDATE deployment_environments
        SET node_id = ?, provider = ?, location = ?, updated_at = ?
-       WHERE id = ? AND node_id IS NULL`
+       WHERE id = ?
+         AND node_id IS NULL
+         AND EXISTS (
+           SELECT 1 FROM nodes
+           WHERE id = ?
+             AND user_id = ?
+             AND status = ?
+             AND node_role = 'deployment'
+             AND cloud_provider = ?
+             AND vm_location = ?
+             AND vm_size = ?
+         )`
     )
-      .bind(nodeId, placement.provider, placement.location, new Date().toISOString(), envId)
+      .bind(
+        nodeId,
+        placement.provider,
+        placement.location,
+        new Date().toISOString(),
+        envId,
+        nodeId,
+        userId,
+        expectedNodeStatus,
+        placement.provider,
+        placement.location,
+        placement.vmSize,
+      )
       .run();
     return (result.meta?.changes ?? 0) > 0;
   }
@@ -262,7 +287,7 @@ export async function provisionDeploymentNode(
 
   const existingNodeId = await findDeploymentNodeWithCapacity(env, userId, placement);
   if (existingNodeId) {
-    const linked = await linkEnvironmentToNode(env, db, envId, existingNodeId, placement);
+    const linked = await linkEnvironmentToNode(env, db, envId, existingNodeId, placement, userId, 'running');
     if (linked) {
       log.info('deployment_provisioning.placed_existing_node', {
         nodeId: existingNodeId,
@@ -295,7 +320,7 @@ export async function provisionDeploymentNode(
     nodeRole: 'deployment',
   });
 
-  const linkedFreshNode = await linkEnvironmentToNode(env, db, envId, node.id, placement);
+  const linkedFreshNode = await linkEnvironmentToNode(env, db, envId, node.id, placement, userId, 'creating');
   if (!linkedFreshNode) {
     await db
       .delete(schema.nodes)
