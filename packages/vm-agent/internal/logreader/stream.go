@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,8 +14,27 @@ import (
 	"time"
 )
 
+var (
+	// ErrStreamSend means the downstream client failed while receiving a log entry.
+	ErrStreamSend = errors.New("log stream send failed")
+	// ErrStreamScanner means stdout scanning failed, usually due to I/O failure or an oversized line.
+	ErrStreamScanner = errors.New("log stream scanner failed")
+	// ErrFollowProcessExit means journalctl failed before the stream context was cancelled.
+	ErrFollowProcessExit = errors.New("log follow process failed")
+	// ErrFollowCleanExit means journalctl exited cleanly while the stream context was still live.
+	ErrFollowCleanExit = errors.New("log follow process exited")
+)
+
+const (
+	defaultStreamBufferSize = 100
+	defaultFollowDelay      = 2 * time.Second
+)
+
 // StreamBufferSize is the number of recent entries sent as catch-up on connection.
-var StreamBufferSize = envInt("LOG_STREAM_BUFFER_SIZE", 100)
+var StreamBufferSize = envPositiveInt("LOG_STREAM_BUFFER_SIZE", defaultStreamBufferSize)
+
+// FollowRestartDelay is the delay before restarting journalctl after process exits.
+var FollowRestartDelay = envPositiveDuration("LOG_STREAM_RESTART_DELAY", defaultFollowDelay)
 
 // SendFunc is called for each log entry during streaming.
 type SendFunc func(entry LogEntry) error
@@ -62,14 +82,25 @@ func (r *Reader) followLogs(ctx context.Context, filter LogFilter, send SendFunc
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err != nil {
-			slog.Warn("journalctl --follow exited, restarting", "error", err)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(2 * time.Second):
-				// Retry after brief pause
-			}
+		if err == nil {
+			err = ErrFollowCleanExit
+		}
+		if errors.Is(err, ErrStreamSend) || errors.Is(err, ErrStreamScanner) {
+			return err
+		}
+
+		slog.Warn("journalctl --follow exited, restarting", "error", err)
+		delay := FollowRestartDelay
+		if delay <= 0 {
+			delay = defaultFollowDelay
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+			// Retry journalctl after a bounded pause.
 		}
 	}
 }
@@ -88,12 +119,14 @@ func (r *Reader) runFollowProcess(ctx context.Context, filter LogFilter, send Se
 		return fmt.Errorf("start journalctl: %w", err)
 	}
 
+	var primaryErr error
 	scanner := bufio.NewScanner(stdout)
 	// Increase scanner buffer for long log lines
 	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
+			primaryErr = ctx.Err()
 			break
 		}
 
@@ -128,18 +161,39 @@ func (r *Reader) runFollowProcess(ctx context.Context, filter LogFilter, send Se
 		}
 
 		if err := send(*entry); err != nil {
+			primaryErr = fmt.Errorf("%w: %w", ErrStreamSend, err)
 			break
 		}
 	}
 
-	// Kill process if still running
-	if cmd.Process != nil {
+	if primaryErr == nil {
+		if err := scanner.Err(); err != nil {
+			primaryErr = fmt.Errorf("%w: %w", ErrStreamScanner, err)
+		} else if ctx.Err() != nil {
+			primaryErr = ctx.Err()
+		}
+	}
+
+	if primaryErr != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
-	return cmd.Wait()
+	waitErr := cmd.Wait()
+	if primaryErr != nil {
+		return primaryErr
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if waitErr != nil {
+		return fmt.Errorf("%w: %w", ErrFollowProcessExit, waitErr)
+	}
+	return ErrFollowCleanExit
 }
 
 // buildFollowArgs constructs journalctl --follow arguments.
+// For Source=all, follow mode streams unrestricted journald only. It derives
+// agent/systemd/docker sources from journald fields but does not follow
+// cloud-init files; ReadLogs performs that multi-source merge for snapshots.
 func buildFollowArgs(filter LogFilter) []string {
 	args := []string{
 		"--follow",
@@ -158,7 +212,7 @@ func buildFollowArgs(filter LogFilter) []string {
 		} else {
 			args = append(args, "CONTAINER_NAME")
 		}
-	default: // "all" — don't restrict to a specific unit
+	default: // "all" streams unrestricted journald only.
 	}
 
 	if filter.Level != "" {
@@ -172,7 +226,7 @@ func buildFollowArgs(filter LogFilter) []string {
 func journalEntryToLogEntry(raw map[string]interface{}, filterSource string) *LogEntry {
 	entry := &LogEntry{
 		Level:  "info",
-		Source: "agent",
+		Source: defaultJournalSource(filterSource),
 	}
 
 	// Parse timestamp from __REALTIME_TIMESTAMP (microseconds since epoch)
@@ -210,17 +264,31 @@ func journalEntryToLogEntry(raw map[string]interface{}, filterSource string) *Lo
 	return entry
 }
 
+func defaultJournalSource(filterSource string) string {
+	switch filterSource {
+	case "agent":
+		return "agent"
+	case "docker":
+		return "docker"
+	default:
+		return "systemd"
+	}
+}
+
 // StreamCommand creates an exec.Cmd for the given context (used internally).
 // Exported for testing only.
 func StreamCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-func init() {
-	// Allow overriding buffer size from env
-	if v := os.Getenv("LOG_STREAM_BUFFER_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			StreamBufferSize = n
+func envPositiveDuration(key string, defaultVal time.Duration) time.Duration {
+	if defaultVal <= 0 {
+		defaultVal = time.Second
+	}
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
 		}
 	}
+	return defaultVal
 }
