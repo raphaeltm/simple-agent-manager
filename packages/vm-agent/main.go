@@ -184,8 +184,12 @@ func runWorkspaceMode(cfg *config.Config) {
 	// Run system provisioning (firewall, Node.js, devcontainer CLI, etc.)
 	provisionCtx, provisionCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	provisionStatus, provisionErr := provision.Run(provisionCtx, provision.Config{
-		VMAgentPort:      fmt.Sprintf("%d", cfg.Port),
-		CFIPFetchTimeout: "10",
+		VMAgentPort:         fmt.Sprintf("%d", cfg.Port),
+		CFIPFetchTimeout:    "10",
+		OCIReceiverEnabled:  cfg.OCIReceiverEnabled,
+		OCIReceiverCertPath: cfg.OCIReceiverCertPath,
+		OCIReceiverKeyPath:  cfg.OCIReceiverKeyPath,
+		RegistryPublishHost: cfg.RegistryPublishHost,
 	}, srv.GetEventStore())
 	provisionCancel()
 

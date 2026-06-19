@@ -295,6 +295,52 @@ export async function assertAgentDeploymentAllowed(
   return { environmentId: row.id, policy };
 }
 
+/**
+ * Project-level agent-deploy gate for the compose-publish path.
+ *
+ * The publish flow runs from a workspace callback JWT, which carries only a
+ * workspaceId — there is NO environment name and NO taskId. So the
+ * environment-scoped {@link assertAgentDeploymentAllowed} (which requires both)
+ * cannot be used here.
+ *
+ * Instead we treat "the project has at least one ACTIVE deployment environment
+ * with agentDeployEnabled = true" as the project-level opt-in signal. This
+ * reuses the existing per-environment policy as a coarse project gate without
+ * introducing a new project-level schema column. A project that has never
+ * enabled agent deploy on any environment cannot publish.
+ *
+ * @returns true if the project has any active, agent-deploy-enabled environment.
+ */
+export async function getProjectAgentDeployEnvironmentId(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+): Promise<string | null> {
+  // Deterministic: oldest active agent-deploy-enabled environment is the
+  // project's canonical publish target. The compose-publish path has no
+  // environment name (workspace callback JWT), so it records the release
+  // against this environment.
+  const rows = await db
+    .select({ id: schema.deploymentEnvironments.id })
+    .from(schema.deploymentEnvironments)
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.projectId, projectId),
+        eq(schema.deploymentEnvironments.status, 'active'),
+        eq(schema.deploymentEnvironments.agentDeployEnabled, true),
+      ),
+    )
+    .orderBy(schema.deploymentEnvironments.createdAt)
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+export async function isProjectAgentDeployEnabled(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+): Promise<boolean> {
+  return (await getProjectAgentDeployEnvironmentId(db, projectId)) !== null;
+}
+
 export function encodeAllowedDeployProfileIds(profileIds: string[] | null | undefined): string | null {
   const unique = uniqueDeployProfileIds(profileIds);
   if (unique.length === 0) {

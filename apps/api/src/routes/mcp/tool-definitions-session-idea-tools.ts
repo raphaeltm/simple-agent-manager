@@ -235,4 +235,14 @@ export const SESSION_IDEA_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'get_compose_publish_instructions',
+    description:
+      'Get instructions for publishing your project\'s Docker Compose stack to SAM. Use this INSTEAD of get_registry_credentials when the project has a compose file: you run native `docker compose publish` against the local SAM OCI receiver ($SAM_REGISTRY_PUBLISH_HOST) and the SAM workspace agent captures the artifact, re-pushes the built service images into the project-scoped registry namespace, and records a deployment release — all without ever handing you a raw registry credential. Requires agent deployment to be enabled on a deployment environment.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ];

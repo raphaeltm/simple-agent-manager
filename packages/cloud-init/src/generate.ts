@@ -73,6 +73,12 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       errors.push(`cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`);
     }
   }
+  if (variables.ociReceiverPort !== undefined && variables.ociReceiverPort !== '') {
+    const port = Number(variables.ociReceiverPort);
+    if (!NUMERIC_RE.test(variables.ociReceiverPort) || port < 1 || port > 65535) {
+      errors.push(`ociReceiverPort: must be numeric 1-65535 (got ${JSON.stringify(variables.ociReceiverPort)})`);
+    }
+  }
   if (variables.projectId !== undefined && variables.projectId !== '') {
     if (!SAFE_ID_RE.test(variables.projectId)) {
       errors.push(`projectId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.projectId)})`);
@@ -205,6 +211,8 @@ export interface CloudInitVariables {
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
+  /** Local OCI receiver port for `docker compose publish` capture (default: 5050, internal-only) */
+  ociReceiverPort?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
   devcontainerCacheEnabled?: string;
   /** Swap file size in MB (default: 2048). Set to "0" to disable swap. */
@@ -259,6 +267,7 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
+    '{{ oci_receiver_port }}': variables.ociReceiverPort ?? '5050',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',

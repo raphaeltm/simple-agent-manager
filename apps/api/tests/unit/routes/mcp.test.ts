@@ -355,7 +355,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('resume_mission');
       expect(toolNames).toContain('cancel_mission');
       expect(toolNames).toContain('override_task_state');
-      expect(body.result.tools).toHaveLength(90);
+      // Compose-publish (agent-first deployment) tool
+      expect(toolNames).toContain('get_compose_publish_instructions');
+      expect(body.result.tools).toHaveLength(91);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

@@ -167,6 +167,12 @@ write_files:
       # blackouts when any earlier step errored before ACCEPT rules were added.
 
       VM_AGENT_PORT="{{ vm_agent_port }}"
+      # OCI receiver port: the workspace-mode local registry that captures
+      # docker compose publish. It binds 0.0.0.0 so the privileged devcontainer
+      # can reach it via the docker-bridge host-gateway, so it MUST be firewalled
+      # to internal interfaces only -- never the internet (Hetzner has no cloud
+      # firewall, so this iptables chain is the sole ingress gate).
+      OCI_RECEIVER_PORT="{{ oci_receiver_port }}"
       CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
       CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
 
@@ -223,6 +229,9 @@ write_files:
       iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
       iptables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
       iptables -A INPUT -p tcp --dport 22 -j DROP
+      # OCI receiver port: DROP for all interfaces (no CF ACCEPT — never external).
+      iptables -A INPUT -p tcp --dport "$OCI_RECEIVER_PORT" -j DROP
+      iptables -A INPUT -p udp --dport "$OCI_RECEIVER_PORT" -j DROP
 
       # INSERT CF ACCEPT rules for VM_AGENT_PORT at top of chain.
       while IFS= read -r cidr; do
@@ -231,7 +240,10 @@ write_files:
 
       # INSERT trusted-interface ACCEPTs (lo last so it is rule #1 — loopback
       # traffic, including localhost-to-sshd for operator tooling, is never
-      # filtered by the port-22 DROP above).
+      # filtered by the port-22 DROP above). The OCI receiver is reachable only
+      # via docker0/br-+ (devcontainer host-gateway) and lo (host daemon push).
+      iptables -I INPUT 1 -i br-+ -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT
+      iptables -I INPUT 1 -i docker0 -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT
       iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       iptables -I INPUT 1 -i lo -j ACCEPT
@@ -246,11 +258,15 @@ write_files:
         ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
         ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
         ip6tables -A INPUT -p tcp --dport 22 -j DROP
+        ip6tables -A INPUT -p tcp --dport "$OCI_RECEIVER_PORT" -j DROP
+        ip6tables -A INPUT -p udp --dport "$OCI_RECEIVER_PORT" -j DROP
 
         while IFS= read -r cidr; do
           [ -n "$cidr" ] && ip6tables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
         done <<< "$CF_IPV6"
 
+        ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT
+        ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT
         ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
         ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
         ip6tables -I INPUT 1 -i lo -j ACCEPT

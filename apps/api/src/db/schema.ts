@@ -1935,6 +1935,11 @@ export const deploymentReleases = sqliteTable(
     manifest: text('manifest').notNull(),
     version: integer('version').notNull(),
     status: text('status').notNull().default('created'),
+    // Discriminator for how the release was produced (migration 0073).
+    // NULL / 'build-on-node' = manifest is a DeploymentManifest.
+    // 'compose-publish' = manifest is a captured `docker compose publish`
+    //   ReleaseSubmission (compose YAML + image-digests + pushed service refs).
+    source: text('source'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -1948,6 +1953,7 @@ export const deploymentReleases = sqliteTable(
       table.environmentId,
       table.version,
     ),
+    sourceIdx: index('idx_deployment_releases_source').on(table.source),
   }),
 );
 

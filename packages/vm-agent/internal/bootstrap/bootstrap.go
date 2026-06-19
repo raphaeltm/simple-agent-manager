@@ -255,6 +255,16 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
 
+	if cfg.OCIReceiverEnabled {
+		reporter.Log("oci_trust", "started", "Configuring in-container OCI receiver trust")
+		if err := ensureContainerOCITrust(ctx, cfg); err != nil {
+			reporter.Log("oci_trust", "failed", "OCI receiver trust setup failed", err.Error())
+			slog.Warn("In-container OCI receiver trust setup failed (non-fatal)", "error", err)
+		} else {
+			reporter.Log("oci_trust", "completed", "In-container OCI receiver trust configured")
+		}
+	}
+
 	readyStatus := workspaceReadyStatusRunning
 	if recovery, recoveryErr := hasBuildErrorMarker(cfg); recoveryErr != nil {
 		slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", recoveryErr)
@@ -436,6 +446,17 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	} else {
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
+
+	if cfg.OCIReceiverEnabled {
+		reporter.Log("oci_trust", "started", "Configuring in-container OCI receiver trust")
+		if err := ensureContainerOCITrust(ctx, cfg); err != nil {
+			reporter.Log("oci_trust", "failed", "OCI receiver trust setup failed", err.Error())
+			slog.Warn("In-container OCI receiver trust setup failed (non-fatal)", "error", err)
+		} else {
+			reporter.Log("oci_trust", "completed", "In-container OCI receiver trust configured")
+		}
+	}
+
 	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
 		return recoveryMode, err
 	}
@@ -2765,6 +2786,11 @@ func buildSAMEnvScript(cfg *config.Config, _ string) string {
 		{"SAM_REPOSITORY", cfg.Repository},
 		{"SAM_WORKSPACE_ID", cfg.WorkspaceID},
 	}
+	if cfg.OCIReceiverEnabled {
+		// Tell the in-container agent where to `docker compose publish` so the
+		// local SAM-controlled receiver captures the artifact.
+		entries = append(entries, envEntry{"SAM_REGISTRY_PUBLISH_HOST", cfg.RegistryPublishHost})
+	}
 	if baseDomain != "" && cfg.WorkspaceID != "" {
 		entries = append(entries, envEntry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", cfg.WorkspaceID, baseDomain)})
 	}
@@ -2815,6 +2841,11 @@ func buildSAMStaticEnv(cfg *config.Config, _ string) string {
 		{"SAM_TASK_ID", cfg.TaskID},
 		{"SAM_REPOSITORY", cfg.Repository},
 		{"SAM_WORKSPACE_ID", cfg.WorkspaceID},
+	}
+	if cfg.OCIReceiverEnabled {
+		// Tell the in-container agent where to `docker compose publish` so the
+		// local SAM-controlled receiver captures the artifact.
+		entries = append(entries, envEntry{"SAM_REGISTRY_PUBLISH_HOST", cfg.RegistryPublishHost})
 	}
 	if baseDomain != "" && cfg.WorkspaceID != "" {
 		entries = append(entries, envEntry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", cfg.WorkspaceID, baseDomain)})
@@ -2871,6 +2902,77 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken s
 	}
 
 	slog.Info("Configured SAM environment in devcontainer", "containerID", containerID)
+	return nil
+}
+
+// ensureContainerOCITrust makes the in-container compose CLI trust and resolve
+// the local OCI receiver so `docker compose publish` can push the compose
+// artifact to it.
+//
+// Two connection origins exist during a publish: the host docker daemon pushes
+// image *blobs* and reaches the receiver over loopback (already handled by the
+// provision-time installOCIRegistryTrust); the compose CLI pushes the compose
+// *artifact* (compose.yaml + image-digests.yaml) directly over HTTPS, and it
+// runs inside the privileged devcontainer's own network namespace — so it must
+// reach the receiver via the docker-bridge host-gateway, not loopback. This
+// function injects, into the running container:
+//
+//  1. An /etc/hosts entry mapping the registry alias to the container's default
+//     gateway (the host's bridge IP), so the alias resolves from inside.
+//  2. The receiver's self-signed cert into the container CA store (and docker
+//     certs.d), so the compose CLI's HTTPS push validates the chain. TLS still
+//     validates by SNI on the alias regardless of the resolved IP.
+//
+// It is best-effort/non-fatal: a workspace without publish capability remains
+// fully usable.
+func ensureContainerOCITrust(ctx context.Context, cfg *config.Config) error {
+	if !cfg.OCIReceiverEnabled {
+		return nil
+	}
+	alias, _, _ := strings.Cut(cfg.RegistryPublishHost, ":")
+	if alias == "" {
+		return fmt.Errorf("oci-trust: empty registry publish host")
+	}
+	certPEM, err := os.ReadFile(cfg.OCIReceiverCertPath)
+	if err != nil {
+		return fmt.Errorf("oci-trust: read cert: %w", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("oci-trust: locate devcontainer: %w", err)
+	}
+
+	// 1. Resolve the default gateway from inside the container and map the alias
+	//    to it. The container's default route points at the bridge gateway,
+	//    which is the host (host-gateway).
+	hostsScript := fmt.Sprintf(`set -e
+gw=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
+if [ -z "$gw" ]; then echo "no default gateway" >&2; exit 1; fi
+sed -i '/[[:space:]]%s$/d' /etc/hosts
+printf '%%s %s\n' "$gw" >> /etc/hosts
+`, alias, alias)
+	hostsCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", "-i", containerID, "sh", "-c", hostsScript)
+	if output, err := hostsCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("oci-trust: write container hosts entry: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	// 2. Install the cert into the container CA store + docker certs.d so the
+	//    HTTPS push to the receiver validates the self-signed chain. The certs.d
+	//    dir name must match the registry reference exactly (including port).
+	certScript := fmt.Sprintf(`set -e
+mkdir -p /usr/local/share/ca-certificates "/etc/docker/certs.d/%s"
+cat > /usr/local/share/ca-certificates/sam-registry-local.crt
+cp /usr/local/share/ca-certificates/sam-registry-local.crt "/etc/docker/certs.d/%s/ca.crt"
+if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates >/dev/null 2>&1 || true; fi
+`, cfg.RegistryPublishHost, cfg.RegistryPublishHost)
+	certCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", "-i", containerID, "sh", "-c", certScript)
+	certCmd.Stdin = bytes.NewReader(certPEM)
+	if output, err := certCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("oci-trust: install container CA: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("Configured in-container OCI receiver trust", "containerID", containerID, "alias", alias)
 	return nil
 }
 
