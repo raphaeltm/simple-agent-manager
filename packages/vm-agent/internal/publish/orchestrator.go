@@ -178,7 +178,11 @@ func (o *Orchestrator) repushServices(ctx context.Context, cp *oci.CapturedPubli
 	for i := range cp.Services {
 		svc := cp.Services[i]
 		serviceName := serviceSlug(svc, i)
-		source := o.sourceRef(cp.Repository, svc.Digest)
+		sourceRepo := svc.Repository
+		if sourceRepo == "" {
+			sourceRepo = cp.Repository
+		}
+		source := o.sourceRef(sourceRepo, svc.Digest)
 		target := targetRef(creds, serviceName, cp.Reference)
 
 		o.log.Info("re-pushing service image",

@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"hash"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -175,6 +177,9 @@ func (c *Capture) AssembleComposePublish(repo, ref string) (*CapturedPublish, bo
 	if cp.ImageIndex != nil {
 		cp.Services = servicesFromIndex(cp.ImageIndex)
 	}
+	if len(cp.Services) == 0 {
+		cp.Services = c.servicesFromTaggedManifestsLocked(repo, ref)
+	}
 
 	return cp, true
 }
@@ -220,4 +225,49 @@ func servicesFromIndex(index *Manifest) []ServiceImage {
 		})
 	}
 	return services
+}
+
+// servicesFromTaggedManifestsLocked extracts built service images from the
+// shape Docker Compose v2.40 emits when it pushes services as individual
+// repositories (for example "app/worker:latest") before pushing the compose
+// project artifact under the parent repository ("app:latest"). Caller must hold
+// c.mu.
+func (c *Capture) servicesFromTaggedManifestsLocked(repo, ref string) []ServiceImage {
+	prefix := strings.TrimSuffix(repo, "/") + "/"
+	services := make([]ServiceImage, 0)
+	for _, rec := range c.manifests {
+		if rec == nil || rec.Manifest == nil {
+			continue
+		}
+		if rec.Reference != ref || !strings.HasPrefix(rec.Repository, prefix) {
+			continue
+		}
+		if rec.Manifest.MediaType != MediaTypeImageManifest && rec.Manifest.MediaType != MediaTypeDockerManifest {
+			continue
+		}
+		serviceName := strings.TrimPrefix(rec.Repository, prefix)
+		services = append(services, ServiceImage{
+			Repository:  rec.Repository,
+			Digest:      rec.Digest,
+			MediaType:   rec.Manifest.MediaType,
+			Size:        int64(len(rec.Raw)),
+			Platform:    manifestPlatform(rec.Manifest),
+			ServiceName: serviceName,
+			RefName:     rec.Repository + ":" + ref,
+		})
+	}
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].ServiceName == services[j].ServiceName {
+			return services[i].Repository < services[j].Repository
+		}
+		return services[i].ServiceName < services[j].ServiceName
+	})
+	return services
+}
+
+func manifestPlatform(m *Manifest) *Platform {
+	if m == nil || m.Config == nil {
+		return nil
+	}
+	return m.Config.Platform
 }

@@ -152,6 +152,10 @@ func IsDigestReference(ref string) bool {
 // image index. The publish orchestrator re-pushes these into the project
 // namespace.
 type ServiceImage struct {
+	// Repository is the local receiver repository this image manifest was pushed
+	// under. It is empty when the image came from a same-repo image index, in
+	// which case CapturedPublish.Repository is the source repository.
+	Repository  string
 	Digest      string
 	MediaType   string
 	Size        int64
