@@ -2946,11 +2946,18 @@ func ensureContainerOCITrust(ctx context.Context, cfg *config.Config) error {
 	// 1. Resolve the default gateway from inside the container and map the alias
 	//    to it. The container's default route points at the bridge gateway,
 	//    which is the host (host-gateway).
+	//
+	//    /etc/hosts is a bind-mounted file inside the container, so `sed -i`
+	//    (and any rename-over-target edit) fails with EBUSY. Rewrite the file
+	//    in place via a truncating redirect (`cat tmp > /etc/hosts`), which
+	//    keeps the original inode and is safe on the bind mount. The temp file
+	//    avoids the read-and-truncate-same-file race.
 	hostsScript := fmt.Sprintf(`set -e
 gw=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
 if [ -z "$gw" ]; then echo "no default gateway" >&2; exit 1; fi
-sed -i '/[[:space:]]%s$/d' /etc/hosts
-printf '%%s %s\n' "$gw" >> /etc/hosts
+{ grep -v '[[:space:]]%s$' /etc/hosts || true; printf '%%s %s\n' "$gw"; } > /etc/hosts.sam.tmp
+cat /etc/hosts.sam.tmp > /etc/hosts
+rm -f /etc/hosts.sam.tmp
 `, alias, alias)
 	hostsCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", "-i", containerID, "sh", "-c", hostsScript)
 	if output, err := hostsCmd.CombinedOutput(); err != nil {
