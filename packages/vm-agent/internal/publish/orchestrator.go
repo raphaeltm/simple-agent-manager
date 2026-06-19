@@ -1,9 +1,9 @@
-// Package publish turns a captured `docker compose publish` artifact into a real
-// release. When the OCI receiver (internal/oci) finishes capturing a publish, the
-// orchestrator mints short-lived push credentials from the control plane, re-tags
-// the built service images the agent pushed to the local receiver, pushes them
-// into the project-scoped registry namespace ({accountId}/sam-{projectId}), and
-// submits the captured compose topology + image digests as a release.
+// Package publish turns a host-side `docker compose build` artifact into a real
+// release. The vm-agent builds the workspace's compose services on the host
+// docker daemon, then the orchestrator mints short-lived push credentials from
+// the control plane, re-tags the built service images into the project-scoped
+// registry namespace ({accountId}/sam-{projectId}), pushes them, and submits the
+// captured compose topology + image digests as a release.
 //
 // The agent never receives the account-wide registry credential: the orchestrator
 // runs inside the SAM-controlled vm-agent, mints scoped creds with its callback
@@ -16,8 +16,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-
-	"github.com/workspace/vm-agent/internal/oci"
 )
 
 // PushCredentials are the short-lived registry credentials minted by the control
@@ -32,24 +30,21 @@ type PushCredentials struct {
 
 // ServiceRelease records one re-pushed service image for the release submission.
 type ServiceRelease struct {
-	ServiceName string        `json:"serviceName"`
-	SourceRef   string        `json:"sourceRef"`
-	PushedRef   string        `json:"pushedRef"`
-	Digest      string        `json:"digest"`
-	MediaType   string        `json:"mediaType,omitempty"`
-	Size        int64         `json:"size,omitempty"`
-	Platform    *oci.Platform `json:"platform,omitempty"`
+	ServiceName string    `json:"serviceName"`
+	SourceRef   string    `json:"sourceRef"`
+	PushedRef   string    `json:"pushedRef"`
+	Digest      string    `json:"digest"`
+	MediaType   string    `json:"mediaType,omitempty"`
+	Size        int64     `json:"size,omitempty"`
+	Platform    *Platform `json:"platform,omitempty"`
 }
 
 // ReleaseSubmission is the payload sent to the control plane to record a release
-// from a captured compose publish.
+// from a host-built compose artifact.
 type ReleaseSubmission struct {
-	Reference        string           `json:"reference"`
-	ProjectDigest    string           `json:"projectDigest"`
-	ImageIndexDigest string           `json:"imageIndexDigest,omitempty"`
-	ComposeYAML      string           `json:"composeYaml"`
-	ImageDigestsYAML string           `json:"imageDigestsYaml,omitempty"`
-	Services         []ServiceRelease `json:"services"`
+	Reference   string           `json:"reference"`
+	ComposeYAML string           `json:"composeYaml"`
+	Services    []ServiceRelease `json:"services"`
 }
 
 // ReleaseResult is the control plane's response to a release submission.
@@ -76,19 +71,13 @@ type Docker interface {
 type Options struct {
 	ControlPlane ControlPlane
 	Docker       Docker
-	// PublishHost is the registry hostname the agent pushed to (the local
-	// receiver, e.g. "sam-registry.local:5050"). It is the source side of the
-	// re-tag: the built images live in the host daemon as
-	// {PublishHost}/{repository}@{digest}.
-	PublishHost string
-	Logger      *slog.Logger
+	Logger       *slog.Logger
 }
 
-// Orchestrator drives the post-capture publish flow.
+// Orchestrator drives the post-build publish flow.
 type Orchestrator struct {
 	controlPlane ControlPlane
 	docker       Docker
-	publishHost  string
 	log          *slog.Logger
 }
 
@@ -101,17 +90,15 @@ func New(opts Options) *Orchestrator {
 	return &Orchestrator{
 		controlPlane: opts.ControlPlane,
 		docker:       opts.Docker,
-		publishHost:  opts.PublishHost,
 		log:          log.With("component", "publish-orchestrator"),
 	}
 }
 
-// Publish re-pushes the captured built images into the project namespace and
-// records a release. It is the OnPublish callback the receiver fires on a
-// completed publish.
-func (o *Orchestrator) Publish(ctx context.Context, projectID string, cp *oci.CapturedPublish) (*ReleaseResult, error) {
-	if cp == nil {
-		return nil, fmt.Errorf("publish: nil captured publish")
+// Publish re-pushes the host-built images into the project namespace and records
+// a release.
+func (o *Orchestrator) Publish(ctx context.Context, projectID string, art *BuildArtifact) (*ReleaseResult, error) {
+	if art == nil {
+		return nil, fmt.Errorf("publish: nil build artifact")
 	}
 	if projectID == "" {
 		return nil, fmt.Errorf("publish: empty projectID")
@@ -119,13 +106,9 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, cp *oci.Ca
 
 	o.log.Info("publish started",
 		"projectId", projectID,
-		"repository", cp.Repository,
-		"reference", cp.Reference,
-		"projectDigest", cp.ProjectDigest,
-		"imageIndexDigest", cp.ImageIndexDigest,
-		"serviceCount", len(cp.Services),
-		"composeYamlBytes", len(cp.ComposeYAML),
-		"imageDigestsYamlBytes", len(cp.ImageDigestsYAML))
+		"reference", art.Reference,
+		"serviceCount", len(art.Services),
+		"composeYamlBytes", len(art.ComposeYAML))
 
 	creds, err := o.controlPlane.MintPushCredentials(ctx, projectID)
 	if err != nil {
@@ -142,18 +125,15 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, cp *oci.Ca
 	}
 	o.log.Info("registry login succeeded", "registry", creds.Registry)
 
-	services, err := o.repushServices(ctx, cp, creds)
+	services, err := o.repushServices(ctx, art, creds)
 	if err != nil {
 		return nil, err
 	}
 
 	submission := &ReleaseSubmission{
-		Reference:        cp.Reference,
-		ProjectDigest:    cp.ProjectDigest,
-		ImageIndexDigest: cp.ImageIndexDigest,
-		ComposeYAML:      string(cp.ComposeYAML),
-		ImageDigestsYAML: string(cp.ImageDigestsYAML),
-		Services:         services,
+		Reference:   art.Reference,
+		ComposeYAML: string(art.ComposeYAML),
+		Services:    services,
 	}
 
 	result, err := o.controlPlane.SubmitRelease(ctx, projectID, submission)
@@ -170,29 +150,22 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, cp *oci.Ca
 	return result, nil
 }
 
-// repushServices re-tags each captured built service image into the project
-// namespace and pushes it. The source images are content-addressed in the host
-// daemon by the digest the receiver recorded, so re-tagging preserves the digest.
-func (o *Orchestrator) repushServices(ctx context.Context, cp *oci.CapturedPublish, creds *PushCredentials) ([]ServiceRelease, error) {
-	releases := make([]ServiceRelease, 0, len(cp.Services))
-	for i := range cp.Services {
-		svc := cp.Services[i]
+// repushServices re-tags each host-built service image into the project
+// namespace and pushes it. The source images are present in the host daemon by
+// their resolved compose `image:` reference.
+func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, creds *PushCredentials) ([]ServiceRelease, error) {
+	releases := make([]ServiceRelease, 0, len(art.Services))
+	for i := range art.Services {
+		svc := art.Services[i]
 		serviceName := serviceSlug(svc, i)
-		sourceRepo := svc.Repository
-		if sourceRepo == "" {
-			sourceRepo = cp.Repository
-		}
-		source := o.sourceRef(sourceRepo, svc.Digest)
-		if svc.Repository != "" && svc.RefName != "" {
-			source = o.sourceTagRef(svc.RefName)
-		}
-		target := targetRef(creds, serviceName, cp.Reference)
+		source := svc.LocalRef
+		target := targetRef(creds, serviceName, art.Reference)
 
 		o.log.Info("re-pushing service image",
 			"service", serviceName,
 			"source", source,
 			"target", target,
-			"capturedDigest", svc.Digest,
+			"builtDigest", svc.Digest,
 			"mediaType", svc.MediaType,
 			"size", svc.Size)
 
@@ -206,11 +179,11 @@ func (o *Orchestrator) repushServices(ctx context.Context, cp *oci.CapturedPubli
 		}
 
 		// The re-tag preserves content, so the pushed digest should equal the
-		// captured digest. Warn (don't fail) on divergence so staging surfaces it.
+		// built digest. Warn (don't fail) on divergence so staging surfaces it.
 		if pushedDigest != "" && svc.Digest != "" && pushedDigest != svc.Digest {
-			o.log.Warn("pushed digest differs from captured digest",
+			o.log.Warn("pushed digest differs from built digest",
 				"service", serviceName,
-				"capturedDigest", svc.Digest,
+				"builtDigest", svc.Digest,
 				"pushedDigest", pushedDigest)
 		}
 		digest := pushedDigest
@@ -236,39 +209,12 @@ func (o *Orchestrator) repushServices(ctx context.Context, cp *oci.CapturedPubli
 	return releases, nil
 }
 
-// sourceRef is the host-daemon reference for a captured built image. After
-// `docker compose publish`, the daemon holds each built image with a repo-digest
-// of {publishHost}/{repository}@{digest}.
-func (o *Orchestrator) sourceRef(repository, digest string) string {
-	repo := repository
-	if o.publishHost != "" {
-		repo = o.publishHost + "/" + repository
-	}
-	return repo + "@" + digest
-}
-
-// sourceTagRef is the host-daemon tag reference for a service image pushed as
-// its own child repository (for example "crewai/app:latest"). In that shape the
-// daemon already has the tag locally, which is more reliable than assuming the
-// tag's image-index digest is addressable as a local repo-digest.
-func (o *Orchestrator) sourceTagRef(refName string) string {
-	if o.publishHost == "" || hasRegistryHost(refName) {
-		return refName
-	}
-	return o.publishHost + "/" + refName
-}
-
-func hasRegistryHost(ref string) bool {
-	first, _, _ := strings.Cut(ref, "/")
-	return strings.Contains(first, ".") || strings.Contains(first, ":") || first == "localhost"
-}
-
 // targetRef is the project-namespace reference for a re-pushed service image.
 // CF registry paths are {registry}/{accountId}/{repository}:{tag}; the namespace
 // already carries {accountId}/sam-{projectId}, so each service appends "-{name}".
 func targetRef(creds *PushCredentials, serviceName, reference string) string {
 	tag := reference
-	if tag == "" || oci.IsDigestReference(tag) {
+	if tag == "" || IsDigestReference(tag) {
 		tag = "latest"
 	}
 	return fmt.Sprintf("%s/%s-%s:%s", creds.Registry, creds.Namespace, serviceName, tag)
@@ -288,13 +234,9 @@ func pinnedRef(taggedRef, digest string) string {
 }
 
 // serviceSlug derives a stable, registry-safe service name. It prefers the
-// compose service annotation, then the OCI ref-name, then a positional fallback.
-func serviceSlug(svc oci.ServiceImage, index int) string {
-	name := svc.ServiceName
-	if name == "" {
-		name = svc.RefName
-	}
-	name = sanitizeServiceName(name)
+// compose service name, then a positional fallback.
+func serviceSlug(svc BuiltService, index int) string {
+	name := sanitizeServiceName(svc.ServiceName)
 	if name == "" {
 		name = fmt.Sprintf("service-%d", index)
 	}

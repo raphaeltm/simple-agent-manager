@@ -355,8 +355,8 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('resume_mission');
       expect(toolNames).toContain('cancel_mission');
       expect(toolNames).toContain('override_task_state');
-      // Compose-publish (agent-first deployment) tool
-      expect(toolNames).toContain('get_compose_publish_instructions');
+      // Compose build + publish (agent-first deployment) tool
+      expect(toolNames).toContain('build_and_publish');
       expect(body.result.tools).toHaveLength(91);
     });
 

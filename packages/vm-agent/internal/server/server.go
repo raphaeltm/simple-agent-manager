@@ -28,7 +28,6 @@ import (
 	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/messagereport"
-	"github.com/workspace/vm-agent/internal/oci"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
@@ -96,10 +95,6 @@ type Server struct {
 	callbackToken       string
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
-
-	// OCI receiver — local registry endpoint that captures `docker compose
-	// publish` artifacts in workspace mode. nil when OCIReceiverEnabled is false.
-	ociReceiver *oci.Receiver
 
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
@@ -877,11 +872,6 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
-	// Start the local OCI receiver (workspace mode `docker compose publish`
-	// capture). No-op when disabled. Runs on its own loopback listener so the
-	// blocking ListenAndServe below still owns the main agent port.
-	s.startOCIReceiver()
-
 	if s.config.TLSEnabled {
 		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
 		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
@@ -952,9 +942,6 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	// Flush and stop all per-workspace message reporters
 	s.shutdownAllReporters()
-
-	// Stop the OCI receiver (no-op when disabled).
-	s.stopOCIReceiver(ctx)
 
 	// Close persistence store
 	if s.store != nil {
@@ -1029,6 +1016,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/network-info", s.handleMcpNetworkInfo)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/expose-port", s.handleMcpExposePort)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish", s.handleMcpBuildAndPublish)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)

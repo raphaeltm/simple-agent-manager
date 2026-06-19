@@ -117,20 +117,6 @@ type Config struct {
 	SkipNodeJS bool
 	// SkipDocker skips Docker installation (for testing).
 	SkipDocker bool
-
-	// OCIReceiverEnabled gates the local OCI registry host-trust step. When false
-	// (deployment mode or unconfigured) the step is skipped.
-	OCIReceiverEnabled bool
-	// OCIReceiverCertPath is the receiver's SAN cert PEM path. The trust step
-	// generates it if missing (idempotent with the receiver's own EnsureCert) and
-	// installs it into the host docker certs.d + CA store.
-	OCIReceiverCertPath string
-	// OCIReceiverKeyPath is the receiver's SAN key PEM path (needed only so the
-	// trust step can generate the pair if the receiver hasn't yet).
-	OCIReceiverKeyPath string
-	// RegistryPublishHost is the registry hostname:port (e.g. sam-registry.local:5050)
-	// used for the certs.d directory name and the host /etc/hosts entry.
-	RegistryPublishHost string
 }
 
 // Run executes all system provisioning steps. It is safe to call from a goroutine.
@@ -148,7 +134,6 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 			{Name: "devcontainer-cli", Status: "pending"},
 			{Name: "image-prepull", Status: "pending"},
 			{Name: "journald-config", Status: "pending"},
-			{Name: "oci-registry-trust", Status: "pending"},
 			{Name: "docker-restart", Status: "pending"},
 			{Name: "metadata-block", Status: "pending"},
 		},
@@ -289,20 +274,6 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 
 	// Wait for image pull before Docker restart (restart kills in-progress pulls)
 	pullWg.Wait()
-
-	// Step 8b: OCI registry host trust (so the host docker daemon can push the
-	// re-tagged built images to the loopback receiver over TLS). Runs before the
-	// docker restart so certs.d + DNS are in place. Non-fatal: a trust failure
-	// only surfaces at publish time, which the orchestrator logs.
-	if cfg.OCIReceiverEnabled {
-		if err := runStep("oci-registry-trust", func(_ context.Context) error {
-			return installOCIRegistryTrust(cfg.OCIReceiverCertPath, cfg.OCIReceiverKeyPath, cfg.RegistryPublishHost)
-		}); err != nil {
-			slog.Warn("OCI registry trust setup failed, continuing", "error", err)
-		}
-	} else {
-		status.setStep("oci-registry-trust", "skipped")
-	}
 
 	// Step 9: Docker restart (picks up journald log driver + DNS config)
 	if err := runStep("docker-restart", func(ctx context.Context) error {

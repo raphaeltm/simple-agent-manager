@@ -457,7 +457,7 @@ describe('generateCloudInit', () => {
       expect(cfInsertIdx).toBeGreaterThan(dropIdx);
     });
 
-    it('firewall script keeps OCI receiver port internal-only (no Cloudflare ACCEPT)', () => {
+    it('firewall script carries no OCI receiver port plumbing', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -466,28 +466,9 @@ describe('generateCloudInit', () => {
       );
       const content: string = firewallScript.content;
 
-      // Port var is plumbed with the default.
-      expect(content).toContain('OCI_RECEIVER_PORT="5050"');
-
-      // DROP for all interfaces (TCP + UDP, v4 + v6) — the receiver carries a
-      // scoped registry credential and must never be reachable from the internet.
-      expect(content).toContain('iptables -A INPUT -p tcp --dport "$OCI_RECEIVER_PORT" -j DROP');
-      expect(content).toContain('iptables -A INPUT -p udp --dport "$OCI_RECEIVER_PORT" -j DROP');
-      expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$OCI_RECEIVER_PORT" -j DROP');
-      expect(content).toContain('ip6tables -A INPUT -p udp --dport "$OCI_RECEIVER_PORT" -j DROP');
-
-      // Only the docker bridge interfaces are allowed back in (compose CLI inside
-      // the privileged devcontainer reaches us via the host-gateway bridge; the
-      // host docker daemon reaches us via lo, which is blanket-ACCEPTed).
-      expect(content).toContain('iptables -I INPUT 1 -i br-+ -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT');
-      expect(content).toContain('iptables -I INPUT 1 -i docker0 -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT');
-
-      // CRITICAL: there must be NO Cloudflare/source-CIDR ACCEPT for the receiver
-      // port — that would expose the credential-bearing receiver to the edge.
-      // The match is prefix-agnostic so it covers both iptables and ip6tables.
-      expect(content).not.toContain('-s "$cidr" -p tcp --dport "$OCI_RECEIVER_PORT" -j ACCEPT');
+      // The host-side build flow replaced the in-VM OCI receiver entirely, so no
+      // firewall rules or port variable for it should remain.
+      expect(content).not.toContain('OCI_RECEIVER_PORT');
     });
 
     it('firewall script fetches Cloudflare IPs with fallback defaults', () => {

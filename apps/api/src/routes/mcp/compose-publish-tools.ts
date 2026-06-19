@@ -1,82 +1,95 @@
 /**
- * MCP tool handler: get_compose_publish_instructions
+ * MCP tool handler: build_and_publish
  *
- * Tells the agent how to publish its project's compose stack WITHOUT ever
- * receiving a registry credential. Unlike get_registry_credentials (which mints
- * a short-lived push credential the agent uses directly), the compose-publish
- * path keeps the credential entirely inside the SAM-controlled vm-agent: the
- * agent runs native `docker compose publish` against the local OCI receiver
- * ($SAM_REGISTRY_PUBLISH_HOST), and the receiver mints the scoped credential and
- * re-pushes the built service images into the project namespace on the agent's
- * behalf.
+ * Builds the project's Docker Compose stack on the agent-node HOST docker daemon
+ * (from the workspace's cloned repo), re-pushes the built service images into the
+ * project-scoped registry namespace using short-lived control-plane credentials,
+ * and records a deployment release — all server-side. The coding agent runs ZERO
+ * docker or registry commands and never receives a credential: this handler
+ * proxies a single request to the vm-agent, which owns the entire build → push →
+ * release flow.
  *
- * This handler returns ONLY guidance — no secrets. It is gated behind the same
- * phase-D project-level agent-deploy policy as the rest of the publish path.
+ * Gated behind the same phase-D project-level agent-deploy policy as the rest of
+ * the publish path.
  */
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { parsePositiveInt } from '../../lib/route-helpers';
 import { isProjectAgentDeployEnabled } from '../../services/deployment-control';
 import {
+  INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { proxyToVmAgent, requireWorkspace } from './workspace-tools';
 
 /**
- * Handle the get_compose_publish_instructions MCP tool call.
- *
- * No rate limiting: this handler reads policy state and returns static guidance
- * — it mints nothing and touches no upstream API. The credential mint + release
- * ingestion that the receiver triggers downstream are themselves rate-limited.
+ * Host build + registry push + release submission is slow (image build + push).
+ * This bounds the worker→vm-agent proxy wait; the vm-agent applies its own
+ * 20-minute internal cap. Override via BUILD_PUBLISH_TOOL_TIMEOUT_MS.
  */
-export async function handleGetComposePublishInstructions(
-  _requestId: string | number | null,
-  _toolArgs: Record<string, unknown>,
+const DEFAULT_BUILD_PUBLISH_TIMEOUT_MS = 21 * 60 * 1000;
+function getBuildPublishTimeout(env: Env): number {
+  return parsePositiveInt(env.BUILD_PUBLISH_TOOL_TIMEOUT_MS, DEFAULT_BUILD_PUBLISH_TIMEOUT_MS);
+}
+
+/**
+ * Handle the build_and_publish MCP tool call.
+ *
+ * No rate limiting here: the downstream credential mint + release ingestion the
+ * vm-agent triggers are themselves rate-limited at their own endpoints.
+ */
+export async function handleBuildAndPublish(
+  requestId: string | number | null,
+  toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
+  const workspaceErr = requireWorkspace(requestId, tokenData);
+  if (workspaceErr) return workspaceErr;
+
   const { projectId } = tokenData;
   const db = drizzle(env.DATABASE, { schema });
 
   const deployEnabled = await isProjectAgentDeployEnabled(db, projectId);
   if (!deployEnabled) {
     return jsonRpcError(
-      _requestId,
+      requestId,
       INVALID_PARAMS,
       'Agent deployment is disabled for this project. Ask the project owner to enable agent deployment on a deployment environment before publishing.',
     );
   }
 
-  // Static guidance. The receiver hostname lives in the workspace env as
-  // $SAM_REGISTRY_PUBLISH_HOST (set by the vm-agent when the receiver is
-  // serving); we reference the variable rather than hardcoding the host so the
-  // instructions stay correct if the receiver address changes.
-  const instructions = [
-    'Publish your compose stack so SAM can capture and re-push your built images. Do NOT request raw registry credentials — the SAM workspace agent handles credentials for you.',
-    'Step 1. Confirm the publish target is set: `echo "$SAM_REGISTRY_PUBLISH_HOST"` (this is the local SAM OCI receiver — all published images route through it).',
-    'Step 2. From your project directory (where compose.yaml lives), run: `docker compose publish "$SAM_REGISTRY_PUBLISH_HOST/<project-name>"` — built services are pushed to the receiver; pre-built upstream images (e.g. redis:7) stay on their public registry.',
-    'Step 3. The SAM workspace agent captures the published artifact, re-pushes the built service images into your project-scoped registry namespace, and records a deployment release. You do not need to authenticate to any registry or upload images yourself — `docker compose publish` against the receiver is the only command you run.',
-    'Step 4. If publish fails, ensure all buildable services define a `build:` section and that the stack builds cleanly with `docker compose build` first.',
-  ];
+  const reference =
+    typeof toolArgs.reference === 'string' && toolArgs.reference.trim() !== ''
+      ? toolArgs.reference.trim()
+      : undefined;
 
-  return jsonRpcSuccess(_requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            publishHostEnvVar: 'SAM_REGISTRY_PUBLISH_HOST',
-            requestRawCredentials: false,
-            instructions,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  });
+  try {
+    const result = await proxyToVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      projectId,
+      'build-and-publish',
+      'POST',
+      reference ? { reference } : {},
+      getBuildPublishTimeout(env),
+    );
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
+  } catch (e) {
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Build and publish failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }

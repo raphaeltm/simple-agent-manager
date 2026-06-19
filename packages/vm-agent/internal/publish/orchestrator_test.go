@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/workspace/vm-agent/internal/oci"
 )
 
 // fakeControlPlane records mint/submit calls and returns canned responses.
@@ -68,17 +66,14 @@ func (d *fakeDocker) Push(_ context.Context, ref string) (string, error) {
 	return d.pushDigests[ref], nil
 }
 
-func sampleCaptured() *oci.CapturedPublish {
-	return &oci.CapturedPublish{
-		Repository:       "sam/test-one",
-		Reference:        "latest",
-		ProjectDigest:    "sha256:proj",
-		ImageIndexDigest: "sha256:index",
-		ComposeYAML:      []byte("services:\n  api:\n    build: .\n"),
-		ImageDigestsYAML: []byte("services:\n  api:\n    image: x@sha256:aaa\n"),
-		Services: []oci.ServiceImage{
-			{Digest: "sha256:aaa", MediaType: oci.MediaTypeImageManifest, Size: 100, ServiceName: "api"},
-			{Digest: "sha256:bbb", MediaType: oci.MediaTypeImageManifest, Size: 200, ServiceName: "worker"},
+// sampleArtifact builds a two-service host-built artifact.
+func sampleArtifact() *BuildArtifact {
+	return &BuildArtifact{
+		Reference:   "latest",
+		ComposeYAML: []byte("services:\n  api:\n    build: .\n  worker:\n    build: .\n"),
+		Services: []BuiltService{
+			{ServiceName: "api", LocalRef: "myrepo-api", Digest: "sha256:aaa", MediaType: "application/vnd.oci.image.manifest.v1+json", Size: 100},
+			{ServiceName: "worker", LocalRef: "myrepo-worker", Digest: "sha256:bbb", MediaType: "application/vnd.oci.image.manifest.v1+json", Size: 200},
 		},
 	}
 }
@@ -91,7 +86,7 @@ func TestPublishHappyPath(t *testing.T) {
 		Namespace: "acct123/sam-proj1",
 		ExpiresAt: "2026-06-19T00:00:00Z",
 	}
-	cp := sampleCaptured()
+	art := sampleArtifact()
 	docker := &fakeDocker{pushDigests: map[string]string{
 		"registry.cloudflare.com/acct123/sam-proj1-api:latest":    "sha256:aaa",
 		"registry.cloudflare.com/acct123/sam-proj1-worker:latest": "sha256:bbb",
@@ -101,13 +96,9 @@ func TestPublishHappyPath(t *testing.T) {
 		result: &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
 	}
 
-	orch := New(Options{
-		ControlPlane: control,
-		Docker:       docker,
-		PublishHost:  "sam-registry.local:5050",
-	})
+	orch := New(Options{ControlPlane: control, Docker: docker})
 
-	res, err := orch.Publish(context.Background(), "proj1", cp)
+	res, err := orch.Publish(context.Background(), "proj1", art)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -122,11 +113,11 @@ func TestPublishHappyPath(t *testing.T) {
 		t.Errorf("login calls = %d, want 1", docker.loginCalls)
 	}
 
-	// Both built images were re-tagged from the host-daemon source ref into the
+	// Both built images were re-tagged from their host-daemon LocalRef into the
 	// project namespace, then pushed.
 	wantTags := map[string]string{
-		"sam-registry.local:5050/sam/test-one@sha256:aaa": "registry.cloudflare.com/acct123/sam-proj1-api:latest",
-		"sam-registry.local:5050/sam/test-one@sha256:bbb": "registry.cloudflare.com/acct123/sam-proj1-worker:latest",
+		"myrepo-api":    "registry.cloudflare.com/acct123/sam-proj1-api:latest",
+		"myrepo-worker": "registry.cloudflare.com/acct123/sam-proj1-worker:latest",
 	}
 	if len(docker.tags) != 2 {
 		t.Fatalf("tag count = %d, want 2", len(docker.tags))
@@ -137,7 +128,7 @@ func TestPublishHappyPath(t *testing.T) {
 		}
 	}
 
-	// The release submission carries the captured topology and per-service refs.
+	// The release submission carries the resolved compose + per-service refs.
 	if control.submittedProj != "proj1" {
 		t.Errorf("submitted project = %q, want proj1", control.submittedProj)
 	}
@@ -145,10 +136,10 @@ func TestPublishHappyPath(t *testing.T) {
 	if sub == nil {
 		t.Fatal("no release submitted")
 	}
-	if sub.ProjectDigest != "sha256:proj" || sub.ImageIndexDigest != "sha256:index" {
-		t.Errorf("unexpected digests: %+v", sub)
+	if sub.Reference != "latest" {
+		t.Errorf("submitted reference = %q, want latest", sub.Reference)
 	}
-	if string(sub.ComposeYAML) != string(cp.ComposeYAML) {
+	if sub.ComposeYAML != string(art.ComposeYAML) {
 		t.Errorf("compose yaml mismatch")
 	}
 	if len(sub.Services) != 2 {
@@ -158,107 +149,63 @@ func TestPublishHappyPath(t *testing.T) {
 	if api.ServiceName != "api" || api.Digest != "sha256:aaa" {
 		t.Errorf("unexpected api service: %+v", api)
 	}
+	if api.SourceRef != "myrepo-api" {
+		t.Errorf("api sourceRef = %q", api.SourceRef)
+	}
 	if api.PushedRef != "registry.cloudflare.com/acct123/sam-proj1-api@sha256:aaa" {
 		t.Errorf("api pushedRef = %q", api.PushedRef)
 	}
 }
 
-func TestPublishUsesServiceRepositoryWhenPresent(t *testing.T) {
+func TestPublishSanitizesServiceNameInTarget(t *testing.T) {
 	creds := &PushCredentials{
 		Registry:  "registry.cloudflare.com",
 		Username:  "v1",
 		Password:  "secret",
 		Namespace: "acct123/sam-proj1",
 	}
-	cp := sampleCaptured()
-	cp.Services = []oci.ServiceImage{
-		{
-			Repository:  "sam/test-one/api",
-			Digest:      "sha256:aaa",
-			MediaType:   oci.MediaTypeImageManifest,
-			Size:        100,
-			ServiceName: "api",
+	art := &BuildArtifact{
+		Reference: "latest",
+		Services: []BuiltService{
+			{ServiceName: "API Server", LocalRef: "stack-api", Digest: "sha256:aaa"},
 		},
 	}
 	docker := &fakeDocker{pushDigests: map[string]string{
-		"registry.cloudflare.com/acct123/sam-proj1-api:latest": "sha256:aaa",
+		"registry.cloudflare.com/acct123/sam-proj1-api-server:latest": "sha256:aaa",
 	}}
 	control := &fakeControlPlane{
 		creds:  creds,
 		result: &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
 	}
 
-	orch := New(Options{
-		ControlPlane: control,
-		Docker:       docker,
-		PublishHost:  "sam-registry.local:5050",
-	})
+	orch := New(Options{ControlPlane: control, Docker: docker})
 
-	if _, err := orch.Publish(context.Background(), "proj1", cp); err != nil {
+	if _, err := orch.Publish(context.Background(), "proj1", art); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(docker.tags) != 1 {
 		t.Fatalf("tag count = %d, want 1", len(docker.tags))
 	}
 	got := docker.tags[0]
-	if got[0] != "sam-registry.local:5050/sam/test-one/api@sha256:aaa" {
+	if got[0] != "stack-api" {
 		t.Fatalf("source ref = %q", got[0])
 	}
-	if got[1] != "registry.cloudflare.com/acct123/sam-proj1-api:latest" {
+	if got[1] != "registry.cloudflare.com/acct123/sam-proj1-api-server:latest" {
 		t.Fatalf("target ref = %q", got[1])
 	}
 }
 
-func TestPublishUsesServiceTagReferenceWhenPresent(t *testing.T) {
-	creds := &PushCredentials{
-		Registry:  "registry.cloudflare.com",
-		Username:  "v1",
-		Password:  "secret",
-		Namespace: "acct123/sam-proj1",
+func TestPublishNilArtifact(t *testing.T) {
+	orch := New(Options{ControlPlane: &fakeControlPlane{}, Docker: &fakeDocker{}})
+	if _, err := orch.Publish(context.Background(), "proj1", nil); err == nil {
+		t.Fatal("expected error for nil artifact")
 	}
-	cp := sampleCaptured()
-	cp.Services = []oci.ServiceImage{
-		{
-			Repository:  "sam/test-one/api",
-			Digest:      "sha256:index",
-			MediaType:   oci.MediaTypeImageIndex,
-			Size:        100,
-			ServiceName: "api",
-			RefName:     "sam/test-one/api:latest",
-		},
-	}
-	docker := &fakeDocker{pushDigests: map[string]string{
-		"registry.cloudflare.com/acct123/sam-proj1-api:latest": "sha256:index",
-	}}
-	control := &fakeControlPlane{
-		creds:  creds,
-		result: &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
-	}
+}
 
-	orch := New(Options{
-		ControlPlane: control,
-		Docker:       docker,
-		PublishHost:  "sam-registry.local:5050",
-	})
-
-	if _, err := orch.Publish(context.Background(), "proj1", cp); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if len(docker.tags) != 1 {
-		t.Fatalf("tag count = %d, want 1", len(docker.tags))
-	}
-	got := docker.tags[0]
-	if got[0] != "sam-registry.local:5050/sam/test-one/api:latest" {
-		t.Fatalf("source ref = %q", got[0])
-	}
-	if got[1] != "registry.cloudflare.com/acct123/sam-proj1-api:latest" {
-		t.Fatalf("target ref = %q", got[1])
-	}
-	if control.submitted == nil || len(control.submitted.Services) != 1 {
-		t.Fatalf("submitted services = %+v", control.submitted)
-	}
-	if control.submitted.Services[0].Digest != "sha256:index" {
-		t.Fatalf("submitted digest = %q", control.submitted.Services[0].Digest)
+func TestPublishEmptyProjectID(t *testing.T) {
+	orch := New(Options{ControlPlane: &fakeControlPlane{}, Docker: &fakeDocker{}})
+	if _, err := orch.Publish(context.Background(), "", sampleArtifact()); err == nil {
+		t.Fatal("expected error for empty projectID")
 	}
 }
 
@@ -267,7 +214,7 @@ func TestPublishMintFailureStops(t *testing.T) {
 	control := &fakeControlPlane{mintErr: errors.New("rate limited")}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
-	_, err := orch.Publish(context.Background(), "proj1", sampleCaptured())
+	_, err := orch.Publish(context.Background(), "proj1", sampleArtifact())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -281,8 +228,8 @@ func TestPublishPushFailureStops(t *testing.T) {
 	docker := &fakeDocker{pushDigests: map[string]string{}, pushErr: errors.New("push denied")}
 	control := &fakeControlPlane{creds: creds, result: &ReleaseResult{}}
 
-	orch := New(Options{ControlPlane: control, Docker: docker, PublishHost: "h"})
-	_, err := orch.Publish(context.Background(), "proj1", sampleCaptured())
+	orch := New(Options{ControlPlane: control, Docker: docker})
+	_, err := orch.Publish(context.Background(), "proj1", sampleArtifact())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -293,14 +240,14 @@ func TestPublishPushFailureStops(t *testing.T) {
 
 func TestServiceSlugFallbacks(t *testing.T) {
 	cases := []struct {
-		svc   oci.ServiceImage
+		svc   BuiltService
 		index int
 		want  string
 	}{
-		{oci.ServiceImage{ServiceName: "API Server"}, 0, "api-server"},
-		{oci.ServiceImage{RefName: "ghcr.io/x/web:v1"}, 1, "ghcr-io-x-web-v1"},
-		{oci.ServiceImage{}, 2, "service-2"},
-		{oci.ServiceImage{ServiceName: "!!!"}, 3, "service-3"},
+		{BuiltService{ServiceName: "API Server"}, 0, "api-server"},
+		{BuiltService{ServiceName: "web_frontend"}, 1, "web-frontend"},
+		{BuiltService{}, 2, "service-2"},
+		{BuiltService{ServiceName: "!!!"}, 3, "service-3"},
 	}
 	for _, tc := range cases {
 		if got := serviceSlug(tc.svc, tc.index); got != tc.want {
@@ -315,5 +262,23 @@ func TestTargetRefDigestReferenceFallsBackToLatest(t *testing.T) {
 	want := "reg/ns-api:latest"
 	if got != want {
 		t.Errorf("targetRef digest ref = %q, want %q", got, want)
+	}
+}
+
+func TestTargetRefEmptyReferenceFallsBackToLatest(t *testing.T) {
+	creds := &PushCredentials{Registry: "reg", Namespace: "ns"}
+	got := targetRef(creds, "api", "")
+	want := "reg/ns-api:latest"
+	if got != want {
+		t.Errorf("targetRef empty ref = %q, want %q", got, want)
+	}
+}
+
+func TestIsDigestReference(t *testing.T) {
+	if !IsDigestReference("sha256:abc") {
+		t.Error("sha256: prefix should be a digest reference")
+	}
+	if IsDigestReference("latest") {
+		t.Error("latest should not be a digest reference")
 	}
 }

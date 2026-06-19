@@ -412,6 +412,7 @@ export interface Env {
   REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS?: string;  // Rate limit window in seconds (default: 300)
   // Workspace tool proxy configuration (unified from workspace-mcp)
   WORKSPACE_TOOL_TIMEOUT_MS?: string;             // Timeout for VM agent proxy calls (default: 15000)
+  BUILD_PUBLISH_TOOL_TIMEOUT_MS?: string;         // Timeout for build_and_publish VM agent proxy (default: 1260000)
   WORKSPACE_TOOL_GITHUB_TIMEOUT_MS?: string;      // Timeout for GitHub API calls (default: 10000)
   WORKSPACE_TOOL_DNS_TIMEOUT_MS?: string;          // Timeout for DNS check calls (default: 10000)
   WORKSPACE_TOOL_COST_PRICING_JSON?: string;       // VM hourly pricing JSON (default: built-in pricing table)

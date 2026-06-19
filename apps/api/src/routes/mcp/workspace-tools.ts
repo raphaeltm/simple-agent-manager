@@ -39,7 +39,8 @@ type VmAgentToolPath =
   | 'credential-status'
   | 'network-info'
   | 'expose-port'
-  | 'diff-summary';
+  | 'diff-summary'
+  | 'build-and-publish';
 
 // ─── Shared proxy helper ────────────────────────────────────────────────────
 
@@ -47,7 +48,7 @@ type VmAgentToolPath =
  * Look up the workspace's node, generate a JWT, and proxy a request to the VM agent.
  * Returns the parsed JSON response from the VM agent.
  */
-async function proxyToVmAgent(
+export async function proxyToVmAgent(
   env: Env,
   workspaceId: string,
   userId: string,
@@ -55,6 +56,7 @@ async function proxyToVmAgent(
   toolPath: VmAgentToolPath,
   method: 'GET' | 'POST' = 'GET',
   body?: unknown,
+  timeoutOverrideMs?: number,
 ): Promise<unknown> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -94,7 +96,7 @@ async function proxyToVmAgent(
   const port = env.VM_AGENT_PORT || '8443';
   const vmUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
 
-  const timeoutMs = getWorkspaceToolTimeout(env);
+  const timeoutMs = timeoutOverrideMs ?? getWorkspaceToolTimeout(env);
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,

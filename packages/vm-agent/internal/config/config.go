@@ -232,15 +232,6 @@ type Config struct {
 	TLSKeyPath  string // Path to TLS private key PEM (env: TLS_KEY_PATH)
 	TLSEnabled  bool   // Derived: true when both TLSCertPath and TLSKeyPath are set
 
-	// OCI receiver settings (workspace mode only) - the local registry endpoint
-	// the in-container `docker compose publish` pushes to. Configurable per
-	// constitution principle XI.
-	RegistryPublishHost string // Registry hostname:port the agent publishes to, also the source side of the re-push (env: SAM_REGISTRY_PUBLISH_HOST, default: sam-registry.local:5050)
-	OCIReceiverAddr     string // Host loopback listen address for the receiver (env: OCI_RECEIVER_ADDR, default: 127.0.0.1:5050)
-	OCIReceiverCertPath string // Path to the receiver's SAN cert PEM (env: OCI_RECEIVER_CERT_PATH)
-	OCIReceiverKeyPath  string // Path to the receiver's SAN key PEM (env: OCI_RECEIVER_KEY_PATH)
-	OCIReceiverEnabled  bool   // Derived: true when cert, key, and publish host are all set
-
 	// Port scanning settings - configurable per constitution principle XI
 	PortScanEnabled      bool          // Enable port detection (env: PORT_SCAN_ENABLED, default: true)
 	PortScanInterval     time.Duration // Scan interval (env: PORT_SCAN_INTERVAL, default: 5s)
@@ -461,18 +452,6 @@ func Load() (*Config, error) {
 		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
 		TLSKeyPath:  getEnv("TLS_KEY_PATH", ""),
 
-		// OCI receiver settings - configurable per constitution principle XI
-		RegistryPublishHost: getEnv("SAM_REGISTRY_PUBLISH_HOST", "sam-registry.local:5050"),
-		// Bind 0.0.0.0 (not loopback): `docker compose publish` pushes image blobs
-		// via the HOST docker daemon (reaches us on 127.0.0.1) BUT pushes the compose
-		// OCI artifact from the compose CLI INSIDE the privileged devcontainer, which
-		// has its own netns and must reach us via the docker-bridge host-gateway.
-		// A loopback bind cannot serve the bridge. The cloud-init firewall DROPs this
-		// port for all interfaces except lo/docker0/br-+, so 0.0.0.0 is internal-only.
-		OCIReceiverAddr:     getEnv("OCI_RECEIVER_ADDR", "0.0.0.0:5050"),
-		OCIReceiverCertPath: getEnv("OCI_RECEIVER_CERT_PATH", "/etc/sam/oci/registry-cert.pem"),
-		OCIReceiverKeyPath:  getEnv("OCI_RECEIVER_KEY_PATH", "/etc/sam/oci/registry-key.pem"),
-
 		// Port scanning settings - configurable per constitution principle XI
 		PortScanEnabled:      getEnvBool("PORT_SCAN_ENABLED", true),
 		PortScanInterval:     getEnvDuration("PORT_SCAN_INTERVAL", 5*time.Second),
@@ -512,25 +491,6 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("TLS_KEY_PATH %q: %w", cfg.TLSKeyPath, err)
 		}
 	}
-
-	// Derive OCI receiver enabled state. The receiver requires its own SAN cert
-	// (sam-registry.local) and a publish host. Cert and key must be set together;
-	// if neither is set the receiver is simply off (workspace mode without publish).
-	ociCertSet := cfg.OCIReceiverCertPath != ""
-	ociKeySet := cfg.OCIReceiverKeyPath != ""
-	if ociCertSet != ociKeySet {
-		return nil, fmt.Errorf(
-			"OCI receiver misconfiguration: OCI_RECEIVER_CERT_PATH and OCI_RECEIVER_KEY_PATH must both be set or both be empty "+
-				"(cert=%q, key=%q)", cfg.OCIReceiverCertPath, cfg.OCIReceiverKeyPath)
-	}
-	// The receiver only belongs to workspace mode (`docker compose publish` runs
-	// inside a workspace devcontainer); deployment-mode agents never serve it.
-	cfg.OCIReceiverEnabled = ociCertSet && ociKeySet &&
-		cfg.RegistryPublishHost != "" && cfg.Role != RoleDeployment
-	// Note: the cert/key files are NOT required to exist at config-load time. The
-	// receiver generates a self-signed SAN cert at startup (oci.EnsureCert) since
-	// srv.Start() runs before any provision step. Existence is therefore guaranteed
-	// by the receiver, not validated here.
 
 	// Validate required fields
 	if cfg.ControlPlaneURL == "" {
@@ -700,12 +660,6 @@ func (c *Config) BuildSAMEnvFallback() []string {
 		{"SAM_TASK_MODE", c.TaskMode},
 		{"SAM_REPOSITORY", c.Repository},
 		{"SAM_WORKSPACE_ID", c.WorkspaceID},
-	}
-	// Tell the in-container agent where to `docker compose publish` so the local
-	// SAM-controlled receiver captures the artifact. Only injected when the
-	// receiver is actually serving (cert/key/host all configured).
-	if c.OCIReceiverEnabled {
-		entries = append(entries, entry{"SAM_REGISTRY_PUBLISH_HOST", c.RegistryPublishHost})
 	}
 	if baseDomain != "" {
 		entries = append(entries, entry{"SAM_BASE_DOMAIN", baseDomain})
