@@ -242,7 +242,7 @@ func (c *Capture) servicesFromTaggedManifestsLocked(repo, ref string) []ServiceI
 		if rec.Reference != ref || !strings.HasPrefix(rec.Repository, prefix) {
 			continue
 		}
-		if rec.Manifest.MediaType != MediaTypeImageManifest && rec.Manifest.MediaType != MediaTypeDockerManifest {
+		if !isServiceImageManifest(rec.Manifest) {
 			continue
 		}
 		serviceName := strings.TrimPrefix(rec.Repository, prefix)
@@ -263,6 +263,15 @@ func (c *Capture) servicesFromTaggedManifestsLocked(repo, ref string) []ServiceI
 		return services[i].ServiceName < services[j].ServiceName
 	})
 	return services
+}
+
+func isServiceImageManifest(m *Manifest) bool {
+	if m == nil {
+		return false
+	}
+	return m.MediaType == MediaTypeImageManifest ||
+		m.MediaType == MediaTypeDockerManifest ||
+		m.IsImageIndex()
 }
 
 func manifestPlatform(m *Manifest) *Platform {

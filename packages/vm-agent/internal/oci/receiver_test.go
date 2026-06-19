@@ -419,6 +419,134 @@ func TestComposePublishWithoutImageIndexUsesTaggedServiceManifests(t *testing.T)
 	}
 }
 
+func TestComposePublishWithoutImageIndexUsesTaggedServiceIndexes(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		captured *CapturedPublish
+	)
+	handler := func(_ context.Context, cp *CapturedPublish) error {
+		mu.Lock()
+		captured = cp
+		mu.Unlock()
+		return nil
+	}
+	_, _, c := newTestReceiver(t, handler)
+
+	composeYAML := []byte("services:\n  app:\n    build: ./app\n  worker:\n    build: ./app\n")
+	overrideYAML := []byte("services:\n  app:\n    image: sam/test-one/app:latest\n  worker:\n    image: sam/test-one/worker:latest\n")
+	emptyConfig := []byte("{}")
+
+	projectRepo := c.repo
+	composeDigest := c.pushBlob(composeYAML)
+	overrideDigest := c.pushBlob(overrideYAML)
+	configDigest := c.pushBlob(emptyConfig)
+
+	c.repo = projectRepo + "/app"
+	appImageManifest := c.pushManifest("sha256:appimageref", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageManifest,
+		Config:        &Descriptor{MediaType: "application/vnd.oci.image.config.v1+json", Digest: "sha256:appcfg"},
+	})
+	appAttestationManifest := c.pushManifest("sha256:appattestationref", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageManifest,
+		Config:        &Descriptor{MediaType: "application/vnd.oci.image.config.v1+json", Digest: "sha256:appattestationcfg"},
+	})
+	appIndex := c.pushManifest("latest", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageIndex,
+		Manifests: []Descriptor{
+			{
+				MediaType: MediaTypeImageManifest,
+				Digest:    appImageManifest,
+				Platform:  &Platform{Architecture: "amd64", OS: "linux"},
+			},
+			{MediaType: MediaTypeImageManifest, Digest: appAttestationManifest},
+		},
+	})
+
+	c.repo = projectRepo + "/worker"
+	workerImageManifest := c.pushManifest("sha256:workerimageref", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageManifest,
+		Config:        &Descriptor{MediaType: "application/vnd.oci.image.config.v1+json", Digest: "sha256:workercfg"},
+	})
+	workerAttestationManifest := c.pushManifest("sha256:workerattestationref", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageManifest,
+		Config:        &Descriptor{MediaType: "application/vnd.oci.image.config.v1+json", Digest: "sha256:workerattestationcfg"},
+	})
+	workerIndex := c.pushManifest("latest", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageIndex,
+		Manifests: []Descriptor{
+			{
+				MediaType: MediaTypeImageManifest,
+				Digest:    workerImageManifest,
+				Platform:  &Platform{Architecture: "amd64", OS: "linux"},
+			},
+			{MediaType: MediaTypeImageManifest, Digest: workerAttestationManifest},
+		},
+	})
+
+	c.repo = projectRepo
+	projectDigest := c.pushManifest("latest", Manifest{
+		SchemaVersion: 2,
+		MediaType:     MediaTypeImageManifest,
+		ArtifactType:  ArtifactTypeComposeProject,
+		Config:        &Descriptor{MediaType: "application/vnd.oci.empty.v1+json", Digest: configDigest, Size: int64(len(emptyConfig))},
+		Layers: []Descriptor{
+			{
+				MediaType:   MediaTypeComposeFile,
+				Digest:      composeDigest,
+				Size:        int64(len(composeYAML)),
+				Annotations: map[string]string{AnnotationComposeFile: ComposeFileBase},
+			},
+			{
+				MediaType:   MediaTypeComposeFile,
+				Digest:      overrideDigest,
+				Size:        int64(len(overrideYAML)),
+				Annotations: map[string]string{AnnotationComposeFile: "compose.publish.yaml"},
+			},
+		},
+	})
+
+	mu.Lock()
+	cp := captured
+	mu.Unlock()
+	if cp == nil {
+		t.Fatal("publish handler was never invoked on project tag push")
+	}
+	if cp.ProjectDigest != projectDigest {
+		t.Fatalf("project digest: got %q, want %q", cp.ProjectDigest, projectDigest)
+	}
+	if cp.ImageIndex != nil || cp.ImageIndexDigest != "" {
+		t.Fatalf("unexpected image index fallback input: digest=%q", cp.ImageIndexDigest)
+	}
+	if len(cp.Services) != 2 {
+		t.Fatalf("services: got %d, want 2", len(cp.Services))
+	}
+
+	byName := map[string]ServiceImage{}
+	for _, s := range cp.Services {
+		byName[s.ServiceName] = s
+	}
+	app := byName["app"]
+	if app.Repository != projectRepo+"/app" || app.Digest != appIndex || app.MediaType != MediaTypeImageIndex {
+		t.Fatalf("app service = %+v, want repo %q digest %q media %q", app, projectRepo+"/app", appIndex, MediaTypeImageIndex)
+	}
+	if app.RefName != projectRepo+"/app:latest" {
+		t.Fatalf("app refName = %q", app.RefName)
+	}
+	worker := byName["worker"]
+	if worker.Repository != projectRepo+"/worker" || worker.Digest != workerIndex || worker.MediaType != MediaTypeImageIndex {
+		t.Fatalf("worker service = %+v, want repo %q digest %q media %q", worker, projectRepo+"/worker", workerIndex, MediaTypeImageIndex)
+	}
+	if worker.RefName != projectRepo+"/worker:latest" {
+		t.Fatalf("worker refName = %q", worker.RefName)
+	}
+}
+
 func TestTagPushWithoutComposeProjectSkipsHandler(t *testing.T) {
 	var called bool
 	_, _, c := newTestReceiver(t, func(context.Context, *CapturedPublish) error {

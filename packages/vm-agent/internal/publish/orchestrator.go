@@ -183,6 +183,9 @@ func (o *Orchestrator) repushServices(ctx context.Context, cp *oci.CapturedPubli
 			sourceRepo = cp.Repository
 		}
 		source := o.sourceRef(sourceRepo, svc.Digest)
+		if svc.Repository != "" && svc.RefName != "" {
+			source = o.sourceTagRef(svc.RefName)
+		}
 		target := targetRef(creds, serviceName, cp.Reference)
 
 		o.log.Info("re-pushing service image",
@@ -242,6 +245,22 @@ func (o *Orchestrator) sourceRef(repository, digest string) string {
 		repo = o.publishHost + "/" + repository
 	}
 	return repo + "@" + digest
+}
+
+// sourceTagRef is the host-daemon tag reference for a service image pushed as
+// its own child repository (for example "crewai/app:latest"). In that shape the
+// daemon already has the tag locally, which is more reliable than assuming the
+// tag's image-index digest is addressable as a local repo-digest.
+func (o *Orchestrator) sourceTagRef(refName string) string {
+	if o.publishHost == "" || hasRegistryHost(refName) {
+		return refName
+	}
+	return o.publishHost + "/" + refName
+}
+
+func hasRegistryHost(ref string) bool {
+	first, _, _ := strings.Cut(ref, "/")
+	return strings.Contains(first, ".") || strings.Contains(first, ":") || first == "localhost"
 }
 
 // targetRef is the project-namespace reference for a re-pushed service image.

@@ -209,6 +209,59 @@ func TestPublishUsesServiceRepositoryWhenPresent(t *testing.T) {
 	}
 }
 
+func TestPublishUsesServiceTagReferenceWhenPresent(t *testing.T) {
+	creds := &PushCredentials{
+		Registry:  "registry.cloudflare.com",
+		Username:  "v1",
+		Password:  "secret",
+		Namespace: "acct123/sam-proj1",
+	}
+	cp := sampleCaptured()
+	cp.Services = []oci.ServiceImage{
+		{
+			Repository:  "sam/test-one/api",
+			Digest:      "sha256:index",
+			MediaType:   oci.MediaTypeImageIndex,
+			Size:        100,
+			ServiceName: "api",
+			RefName:     "sam/test-one/api:latest",
+		},
+	}
+	docker := &fakeDocker{pushDigests: map[string]string{
+		"registry.cloudflare.com/acct123/sam-proj1-api:latest": "sha256:index",
+	}}
+	control := &fakeControlPlane{
+		creds:  creds,
+		result: &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
+	}
+
+	orch := New(Options{
+		ControlPlane: control,
+		Docker:       docker,
+		PublishHost:  "sam-registry.local:5050",
+	})
+
+	if _, err := orch.Publish(context.Background(), "proj1", cp); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(docker.tags) != 1 {
+		t.Fatalf("tag count = %d, want 1", len(docker.tags))
+	}
+	got := docker.tags[0]
+	if got[0] != "sam-registry.local:5050/sam/test-one/api:latest" {
+		t.Fatalf("source ref = %q", got[0])
+	}
+	if got[1] != "registry.cloudflare.com/acct123/sam-proj1-api:latest" {
+		t.Fatalf("target ref = %q", got[1])
+	}
+	if control.submitted == nil || len(control.submitted.Services) != 1 {
+		t.Fatalf("submitted services = %+v", control.submitted)
+	}
+	if control.submitted.Services[0].Digest != "sha256:index" {
+		t.Fatalf("submitted digest = %q", control.submitted.Services[0].Digest)
+	}
+}
+
 func TestPublishMintFailureStops(t *testing.T) {
 	docker := &fakeDocker{pushDigests: map[string]string{}}
 	control := &fakeControlPlane{mintErr: errors.New("rate limited")}

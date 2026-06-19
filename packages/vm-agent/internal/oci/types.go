@@ -149,8 +149,8 @@ func IsDigestReference(ref string) bool {
 }
 
 // ServiceImage is a single per-service image entry extracted from the captured
-// image index. The publish orchestrator re-pushes these into the project
-// namespace.
+// image index or from an individually tagged service repository. The publish
+// orchestrator re-pushes these into the project namespace.
 type ServiceImage struct {
 	// Repository is the local receiver repository this image manifest was pushed
 	// under. It is empty when the image came from a same-repo image index, in
