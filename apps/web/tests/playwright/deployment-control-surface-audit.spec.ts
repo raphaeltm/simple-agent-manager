@@ -169,6 +169,19 @@ const MOCK_ENV = {
   node: MOCK_NODE,
 };
 
+const MOCK_ENV_PREVIEW = {
+  ...MOCK_ENV,
+  id: 'env-preview',
+  name: 'preview',
+  routeHostnames: ['preview.deploy-audit.sammy.party'],
+  latestRelease: {
+    ...MOCK_ENV.latestRelease,
+    id: 'release-preview-2',
+    environmentId: 'env-preview',
+    version: 2,
+  },
+};
+
 const MOCK_ENV_FAILING = {
   id: ENV_FAIL_ID,
   projectId: PROJECT_ID,
@@ -351,7 +364,7 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
       return respond(route, 200, { items: MOCK_PROFILES });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments` && method === 'GET') {
-      const envs = includeFailingEnv ? [MOCK_ENV, MOCK_ENV_FAILING] : [MOCK_ENV];
+      const envs = includeFailingEnv ? [MOCK_ENV, MOCK_ENV_PREVIEW, MOCK_ENV_FAILING] : [MOCK_ENV, MOCK_ENV_PREVIEW];
       return respond(route, 200, { environments: envs });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/logs`) {
@@ -400,6 +413,10 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
   });
 }
 
+function environmentCard(page: Page, name: string) {
+  return page.locator('article').filter({ has: page.getByRole('heading', { name, exact: true }) }).first();
+}
+
 test.describe('Deployment control surface audit', () => {
   test('project deployments page — healthy environment with attribution, summary, logs', async ({ page }) => {
     await setupMocks(page);
@@ -407,11 +424,11 @@ test.describe('Deployment control surface audit', () => {
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
-    const stagingCard = page.locator('article').filter({ hasText: 'staging' }).first();
+    const stagingCard = environmentCard(page, 'staging');
 
     // Operational summary: Serving badge and release version
-    await expect(page.getByText('Serving', { exact: true })).toBeVisible();
-    await expect(page.getByText('Release v7', { exact: true })).toBeVisible();
+    await expect(stagingCard.getByText('Serving', { exact: true })).toBeVisible();
+    await expect(stagingCard.getByText('Release v7', { exact: true })).toBeVisible();
 
     // Release attribution
     await expect(page.getByText(/submitted by/).first()).toBeVisible();
@@ -490,8 +507,9 @@ test.describe('Deployment control surface audit', () => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-    // Click Destroy on the first (staging) env
-    await page.getByRole('button', { name: 'Destroy' }).first().click();
+    // Click Destroy on the staging env, which shares its node with preview.
+    const stagingCard = environmentCard(page, 'staging');
+    await stagingCard.getByRole('button', { name: 'Destroy' }).click();
 
     // Deployment-specific confirmation copy
     await expect(page.getByText('Removes all app-route DNS records')).toBeVisible();
@@ -528,7 +546,7 @@ test.describe('Deployment control surface audit', () => {
     await expect(page.getByRole('heading', { name: 'Deployment node' })).toBeVisible();
     await expect(page.getByText(/Hosted environments: staging, preview/)).toBeVisible();
     await expect(page.getByText(/environment policy/)).toBeVisible();
-    await expect(page.getByText(/Destroy.*action on the Deployments page/)).toBeVisible();
+    await expect(page.getByText(/use.*Destroy.*on the Deployments page/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create Workspace' })).toHaveCount(0);
     // Deployment-aware delete button label
     await expect(page.getByRole('button', { name: 'Delete Node Only' })).toBeVisible();
@@ -552,7 +570,7 @@ test.describe('Deployment control surface audit', () => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-    const stagingCard = page.locator('article').filter({ hasText: 'staging' }).first();
+    const stagingCard = environmentCard(page, 'staging');
     await stagingCard.getByRole('button', { name: 'Logs' }).click();
 
     // Source filter
@@ -575,7 +593,7 @@ test.describe('Deployment control surface audit', () => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-    const stagingCard = page.locator('article').filter({ hasText: 'staging' }).first();
+    const stagingCard = environmentCard(page, 'staging');
     await stagingCard.getByRole('button', { name: 'Logs' }).click();
     // Wait for logs to load from mock API
     await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
@@ -598,7 +616,7 @@ test.describe('Deployment control surface — mobile', () => {
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
-    await expect(page.getByText('Serving', { exact: true })).toBeVisible();
+    await expect(environmentCard(page, 'staging').getByText('Serving', { exact: true })).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-healthy');
     await assertNoOverflow(page);
@@ -640,7 +658,7 @@ test.describe('Deployment control surface — mobile', () => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-    const stagingCard = page.locator('article').filter({ hasText: 'staging' }).first();
+    const stagingCard = environmentCard(page, 'staging');
     await stagingCard.getByRole('button', { name: 'Logs' }).click();
     await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
 
