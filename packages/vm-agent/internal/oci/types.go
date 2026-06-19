@@ -172,6 +172,14 @@ type CapturedPublish struct {
 	// Reference is the tag the publish targeted (e.g. "latest").
 	Reference string
 
+	// SourceRemoteAddr is the remote address of the terminal tag-manifest push
+	// that completed the compose publish.
+	SourceRemoteAddr string
+	// SourceIP is SourceRemoteAddr normalized to just the remote IP. The VM
+	// agent uses this to bind a publish to the workspace devcontainer that
+	// initiated it.
+	SourceIP string
+
 	// ProjectManifest is the top-level compose project artifact manifest.
 	ProjectManifest *Manifest
 	// ProjectDigest is the content digest of ProjectManifest.

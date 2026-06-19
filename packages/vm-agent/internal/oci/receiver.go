@@ -377,7 +377,7 @@ func (r *Receiver) putManifest(w http.ResponseWriter, req *http.Request, name, r
 	// A tag push (non-digest reference) is the terminal operation of
 	// `docker compose publish`: by now every blob and manifest is present.
 	if !IsDigestReference(reference) {
-		r.completePublish(req.Context(), name, reference)
+		r.completePublish(req.Context(), name, reference, req.RemoteAddr)
 	}
 
 	w.Header().Set("Docker-Content-Digest", dgst)
@@ -385,18 +385,20 @@ func (r *Receiver) putManifest(w http.ResponseWriter, req *http.Request, name, r
 }
 
 // completePublish assembles the captured publish for repo and invokes the handler.
-func (r *Receiver) completePublish(ctx context.Context, name, reference string) {
+func (r *Receiver) completePublish(ctx context.Context, name, reference, remoteAddr string) {
 	cp, ok := r.capture.AssembleComposePublish(name, reference)
 	if !ok {
 		r.log.Info("tag pushed but no compose project artifact captured; skipping publish handler",
 			"repository", name, "reference", reference)
 		return
 	}
+	cp.SourceRemoteAddr = strings.TrimSpace(remoteAddr)
+	cp.SourceIP = remoteIPFromAddr(remoteAddr)
 
 	r.log.Info("publish captured", "repository", name, "reference", reference,
 		"projectDigest", cp.ProjectDigest, "composeYamlBytes", len(cp.ComposeYAML),
 		"imageDigestsYamlBytes", len(cp.ImageDigestsYAML), "imageIndexDigest", cp.ImageIndexDigest,
-		"services", len(cp.Services))
+		"services", len(cp.Services), "sourceIP", cp.SourceIP)
 
 	if r.onPublish == nil {
 		return
@@ -405,6 +407,22 @@ func (r *Receiver) completePublish(ctx context.Context, name, reference string) 
 		r.log.Error("publish handler failed", "repository", name, "reference", reference,
 			"error", err)
 	}
+}
+
+func remoteIPFromAddr(remoteAddr string) string {
+	trimmed := strings.TrimSpace(remoteAddr)
+	if trimmed == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(trimmed)
+	if err == nil {
+		trimmed = host
+	}
+	trimmed = strings.Trim(trimmed, "[]")
+	if ip := net.ParseIP(trimmed); ip != nil {
+		return ip.String()
+	}
+	return trimmed
 }
 
 // getManifest serves a stored manifest by digest or, for a tag, the most recent

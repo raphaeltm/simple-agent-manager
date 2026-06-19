@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -296,6 +297,12 @@ func TestFullComposePublish(t *testing.T) {
 	}
 	if cp.Repository != "sam/test-one" || cp.Reference != "latest" {
 		t.Fatalf("repo/ref: got %q/%q", cp.Repository, cp.Reference)
+	}
+	if cp.SourceRemoteAddr == "" {
+		t.Fatal("source remote addr was not captured")
+	}
+	if net.ParseIP(cp.SourceIP) == nil {
+		t.Fatalf("source IP was not captured as an IP: %q", cp.SourceIP)
 	}
 	if cp.ProjectDigest != projectDigest {
 		t.Fatalf("project digest: got %q, want %q", cp.ProjectDigest, projectDigest)

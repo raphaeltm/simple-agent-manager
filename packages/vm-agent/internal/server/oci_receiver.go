@@ -4,12 +4,35 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/oci"
 	"github.com/workspace/vm-agent/internal/publish"
 )
+
+type publishBridgeIPDiscovery interface {
+	GetBridgeIP() (string, error)
+}
+
+var newPublishBridgeIPDiscovery = func(cfg container.Config) publishBridgeIPDiscovery {
+	return container.NewDiscovery(cfg)
+}
+
+type publishCallbackCredentials struct {
+	ProjectID   string
+	WorkspaceID string
+	Token       string
+}
+
+type publishWorkspaceSnapshot struct {
+	ID                  string
+	ProjectID           string
+	CallbackToken       string
+	ContainerLabelValue string
+}
 
 // startOCIReceiver brings up the local OCI registry receiver that captures
 // `docker compose publish` artifacts from inside the workspace. It is a no-op
@@ -69,12 +92,20 @@ func (s *Server) stopOCIReceiver(ctx context.Context) {
 // handlePublishCapture is the OnPublish callback fired when the receiver finishes
 // capturing a `docker compose publish`. It re-pushes the captured built images
 // into the project-scoped registry namespace and records a release via the
-// control plane, using the boot workspace's project + callback token.
+// control plane, using the callback token for the workspace whose devcontainer
+// initiated the terminal compose artifact push.
 func (s *Server) handlePublishCapture(ctx context.Context, cp *oci.CapturedPublish) error {
-	projectID := s.config.ProjectID
-	token := s.publishCallbackToken()
+	creds := s.publishCallbackCredentials(cp)
+	projectID := creds.ProjectID
+	token := creds.Token
 
 	log := slog.Default().With("component", "oci-receiver", "projectId", projectID)
+	if creds.WorkspaceID != "" {
+		log = log.With("workspaceId", creds.WorkspaceID)
+	}
+	if cp != nil && cp.SourceIP != "" {
+		log = log.With("sourceIP", cp.SourceIP)
+	}
 	if projectID == "" || token == "" {
 		log.Error("cannot process captured publish: missing project context",
 			"hasProjectId", projectID != "",
@@ -106,18 +137,132 @@ func (s *Server) handlePublishCapture(ctx context.Context, cp *oci.CapturedPubli
 	return nil
 }
 
-func (s *Server) publishCallbackToken() string {
+func (s *Server) publishCallbackCredentials(cp *oci.CapturedPublish) publishCallbackCredentials {
 	if s == nil || s.config == nil {
-		return ""
+		return publishCallbackCredentials{}
+	}
+
+	if runtime, ok := s.publishWorkspaceForSource(cp); ok {
+		return publishCallbackCredentials{
+			ProjectID:   firstNonEmpty(runtime.ProjectID, strings.TrimSpace(s.config.ProjectID)),
+			WorkspaceID: runtime.ID,
+			Token:       runtime.CallbackToken,
+		}
 	}
 
 	// Compose-publish callbacks are workspace/project-scoped. The node heartbeat
-	// loop may refresh s.callbackToken to a node-scoped token, so do not use
-	// getCallbackToken() here.
+	// loop may refresh s.callbackToken and config.CallbackToken may be node-scoped
+	// on node-mode VMs, so only fall back to the boot token when the VM was
+	// explicitly configured with a boot workspace.
 	if workspaceID := strings.TrimSpace(s.config.WorkspaceID); workspaceID != "" {
 		if token := s.workspaceCallbackToken(workspaceID); token != "" {
-			return token
+			return publishCallbackCredentials{
+				ProjectID:   s.projectIDForPublishWorkspace(workspaceID),
+				WorkspaceID: workspaceID,
+				Token:       token,
+			}
+		}
+		return publishCallbackCredentials{
+			ProjectID:   s.projectIDForPublishWorkspace(workspaceID),
+			WorkspaceID: workspaceID,
+			Token:       strings.TrimSpace(s.config.CallbackToken),
 		}
 	}
-	return strings.TrimSpace(s.config.CallbackToken)
+
+	return publishCallbackCredentials{ProjectID: strings.TrimSpace(s.config.ProjectID)}
+}
+
+func (s *Server) publishWorkspaceForSource(cp *oci.CapturedPublish) (publishWorkspaceSnapshot, bool) {
+	if s == nil || s.config == nil || cp == nil {
+		return publishWorkspaceSnapshot{}, false
+	}
+
+	sourceIP := normalizePublishIP(firstNonEmpty(cp.SourceIP, cp.SourceRemoteAddr))
+	if sourceIP == "" {
+		return publishWorkspaceSnapshot{}, false
+	}
+
+	runtimes := s.publishWorkspaceSnapshots()
+	var matched publishWorkspaceSnapshot
+	matches := 0
+	for _, runtime := range runtimes {
+		if runtime.CallbackToken == "" || runtime.ContainerLabelValue == "" {
+			continue
+		}
+		discovery := newPublishBridgeIPDiscovery(container.Config{
+			LabelKey:    s.config.ContainerLabelKey,
+			LabelValue:  runtime.ContainerLabelValue,
+			CacheTTL:    s.config.ContainerCacheTTL,
+			BridgeIPTTL: s.config.PortProxyCacheTTL,
+		})
+		bridgeIP, err := discovery.GetBridgeIP()
+		if err != nil {
+			slog.Debug("publish source workspace bridge IP lookup failed",
+				"workspaceId", runtime.ID,
+				"error", err)
+			continue
+		}
+		if normalizePublishIP(bridgeIP) != sourceIP {
+			continue
+		}
+		matched = runtime
+		matches++
+	}
+
+	if matches == 1 {
+		return matched, true
+	}
+	if matches > 1 {
+		slog.Warn("publish source matched multiple workspace runtimes; refusing callback token",
+			"sourceIP", sourceIP,
+			"matches", matches)
+	}
+	return publishWorkspaceSnapshot{}, false
+}
+
+func (s *Server) publishWorkspaceSnapshots() []publishWorkspaceSnapshot {
+	if s == nil {
+		return nil
+	}
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+
+	runtimes := make([]publishWorkspaceSnapshot, 0, len(s.workspaces))
+	for _, runtime := range s.workspaces {
+		if runtime == nil {
+			continue
+		}
+		runtimes = append(runtimes, publishWorkspaceSnapshot{
+			ID:                  strings.TrimSpace(runtime.ID),
+			ProjectID:           strings.TrimSpace(runtime.ProjectID),
+			CallbackToken:       strings.TrimSpace(runtime.CallbackToken),
+			ContainerLabelValue: strings.TrimSpace(runtime.ContainerLabelValue),
+		})
+	}
+	return runtimes
+}
+
+func (s *Server) projectIDForPublishWorkspace(workspaceID string) string {
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		if projectID := strings.TrimSpace(runtime.ProjectID); projectID != "" {
+			return projectID
+		}
+	}
+	return strings.TrimSpace(s.config.ProjectID)
+}
+
+func normalizePublishIP(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(trimmed)
+	if err == nil {
+		trimmed = host
+	}
+	trimmed = strings.Trim(trimmed, "[]")
+	if ip := net.ParseIP(trimmed); ip != nil {
+		return ip.String()
+	}
+	return trimmed
 }
