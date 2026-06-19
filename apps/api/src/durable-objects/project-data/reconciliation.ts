@@ -30,7 +30,8 @@ const log = createModuleLogger('reconciliation');
 /** The check-in prompt sent to the agent. */
 const CHECKIN_PROMPT =
   '[SAM Orchestrator Check-In] Your task appears to have stalled — no activity detected for several minutes. ' +
-  'Please respond with a progress update. If you are finished, call complete_task(). ' +
+  'Please send a brief progress update, then continue working from where you left off if there is still work to do. ' +
+  'Do not stop after the update unless you are finished or need human help. If you are finished, call complete_task(). ' +
   'If you need human help, call request_human_input(). ' +
   'If you do not respond shortly, this task will be marked as failed.';
 

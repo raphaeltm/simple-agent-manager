@@ -206,14 +206,14 @@ describe('agent lifecycle orchestration integration', () => {
       'node-1',
       'ws-1',
       'acp-1',
-      expect.stringContaining('SAM Orchestrator Check-In'),
+      expect.stringContaining('continue working from where you left off'),
       expect.anything(),
       'user-1',
     );
     expect(db.prepare(`SELECT role, content, tool_metadata FROM chat_messages`).all()).toMatchObject([
       {
         role: 'user',
-        content: expect.stringContaining('SAM Orchestrator Check-In'),
+        content: expect.stringContaining('Do not stop after the update'),
         tool_metadata: JSON.stringify({ source: 'sam_orchestrator', kind: 'reconciliation_checkin' }),
       },
     ]);
