@@ -66,6 +66,9 @@ export const NodeCard: FC<NodeCardProps> = ({
   const visibleWorkspaces = workspaces.slice(0, MAX_VISIBLE_WORKSPACES);
   const hiddenCount = workspaces.length - visibleWorkspaces.length;
   const isDeploymentNode = node.nodeRole === 'deployment';
+  const deploymentEnvironments = node.deploymentEnvironments ?? [];
+  const visibleDeploymentEnvironments = deploymentEnvironments.slice(0, MAX_VISIBLE_WORKSPACES);
+  const hiddenDeploymentCount = deploymentEnvironments.length - visibleDeploymentEnvironments.length;
 
   const handleCardClick = () => {
     navigate(`/nodes/${node.id}`);
@@ -180,10 +183,25 @@ export const NodeCard: FC<NodeCardProps> = ({
         {/* Workspaces section */}
         <div className="border-t border-border-default pt-3 flex flex-col gap-2">
           <span className="sam-type-caption text-fg-muted font-medium">
-            {isDeploymentNode ? 'Deployment workloads' : `Workspaces (${workspaces.length})`}
+            {isDeploymentNode
+              ? `Deployment environments (${deploymentEnvironments.length})`
+              : `Workspaces (${workspaces.length})`}
           </span>
 
-          {visibleWorkspaces.length > 0 ? (
+          {isDeploymentNode && visibleDeploymentEnvironments.length > 0 ? (
+            <>
+              {visibleDeploymentEnvironments.map((env) => (
+                <span key={env.id} className="sam-type-caption text-fg-primary pl-3 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {env.name}
+                </span>
+              ))}
+              {hiddenDeploymentCount > 0 && (
+                <span className="sam-type-caption text-fg-muted pl-3">
+                  +{hiddenDeploymentCount} more
+                </span>
+              )}
+            </>
+          ) : visibleWorkspaces.length > 0 ? (
             <>
               {visibleWorkspaces.map((ws) => (
                 <div key={ws.id} onClick={(e) => e.stopPropagation()}>
@@ -198,7 +216,7 @@ export const NodeCard: FC<NodeCardProps> = ({
             </>
           ) : (
             <span className="sam-type-caption text-fg-muted italic">
-              No workspaces
+              {isDeploymentNode ? 'No deployment environments' : 'No workspaces'}
             </span>
           )}
 

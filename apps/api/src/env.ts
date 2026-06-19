@@ -100,6 +100,7 @@ export interface Env {
   DEPLOY_PAYLOAD_EXPIRY_SECONDS?: string;
   DEPLOYMENT_ROUTE_PORT_BASE?: string;
   DEPLOYMENT_ROUTE_PORT_SPAN?: string;
+  MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE?: string;
   // Rate limiting (per hour)
   RATE_LIMIT_WORKSPACE_CREATE?: string;
   RATE_LIMIT_TERMINAL_TOKEN?: string;

@@ -100,8 +100,12 @@ export function Nodes() {
   const handleDeleteNode = async (id: string) => {
     const targetNode = nodes.find((n) => n.id === id);
     if (targetNode?.nodeRole === 'deployment') {
+      const envs = targetNode.deploymentEnvironments ?? [];
+      const envSummary = envs.length > 0
+        ? `${envs.length} deployment environment${envs.length === 1 ? '' : 's'}: ${envs.map((env) => env.name).join(', ')}`
+        : 'deployment environments currently listed on this node';
       const confirmed = window.confirm(
-        `"${targetNode.name}" is a deployment node. Deleting it here will NOT clean up the associated deployment environment, DNS records, or volumes.\n\nFor a full teardown, use the Destroy action on the project Deployments page instead.\n\nContinue with node-only deletion?`
+        `"${targetNode.name}" is a deployment node hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
       );
       if (!confirmed) return;
     }

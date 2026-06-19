@@ -123,7 +123,7 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("NewDiskState: %v", err)
 	}
 	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
-	caddyfile, err := GenerateCaddyfile([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}}, CaddyfileOptions{})
+	caddyfile, err := GenerateCaddySnippet([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}})
 	if err != nil {
 		t.Fatalf("GenerateCaddyfile: %v", err)
 	}
@@ -137,6 +137,7 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("write reload script: %v", err)
 	}
 	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:  "env",
 		CaddyfilePath:  filepath.Join(dir, "active", "Caddyfile"),
 		CaddyReloadCmd: reloadScript + " " + reloadLog,
 	})
@@ -148,8 +149,15 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
-	if string(active) != caddyfile {
-		t.Fatalf("active Caddyfile mismatch: %q", string(active))
+	if !strings.Contains(string(active), "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import: %q", string(active))
+	}
+	snippet, err := os.ReadFile(filepath.Join(filepath.Dir(engine.cfg.CaddyfilePath), "sites", "env.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	if string(snippet) != caddyfile {
+		t.Fatalf("active Caddy snippet mismatch: %q", string(snippet))
 	}
 	logBytes, err := os.ReadFile(reloadLog)
 	if err != nil {
@@ -211,6 +219,7 @@ exit 1
 	}
 
 	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:   "env",
 		CaddyfilePath:   filepath.Join(dir, "active", "Caddyfile"),
 		CaddyReloadCmd:  reloadScript,
 		CaddyRestartCmd: restartScript + " " + restartLog,
@@ -223,8 +232,15 @@ exit 1
 	if err != nil {
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
-	if string(active) != caddyfile {
-		t.Fatalf("active Caddyfile mismatch: %q", string(active))
+	if !strings.Contains(string(active), "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import: %q", string(active))
+	}
+	snippet, err := os.ReadFile(filepath.Join(filepath.Dir(engine.cfg.CaddyfilePath), "sites", "env.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	if string(snippet) != caddyfile {
+		t.Fatalf("active Caddy snippet mismatch: %q", string(snippet))
 	}
 	logBytes, err := os.ReadFile(restartLog)
 	if err != nil {

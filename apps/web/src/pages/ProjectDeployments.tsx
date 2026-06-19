@@ -58,6 +58,12 @@ export function ProjectDeployments() {
     () => [...environments].sort((a, b) => a.name.localeCompare(b.name)),
     [environments],
   );
+  const deleteTargetNodeEnvironments = useMemo(() => {
+    if (!deleteTarget?.nodeId) return [];
+    return environments
+      .filter((env) => env.nodeId === deleteTarget.nodeId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [deleteTarget?.nodeId, environments]);
 
   const loadEnvironments = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -365,7 +371,17 @@ export function ProjectDeployments() {
             <ul className="m-0 pl-4 grid gap-1 text-sm">
               <li>Removes all app-route DNS records</li>
               <li>Detaches and deletes attached deployment volumes</li>
-              <li>Destroys the deployment node and its infrastructure</li>
+              {deleteTarget?.nodeId ? (
+                deleteTargetNodeEnvironments.length > 1 ? (
+                  <li>
+                    Keeps the shared deployment node running for {deleteTargetNodeEnvironments.length - 1} other environment{deleteTargetNodeEnvironments.length === 2 ? '' : 's'}
+                  </li>
+                ) : (
+                  <li>Destroys the deployment node because this is the last environment on it</li>
+                )
+              ) : (
+                <li>No deployment node is currently attached</li>
+              )}
             </ul>
             <p className="m-0 font-semibold">This cannot be undone.</p>
           </div>

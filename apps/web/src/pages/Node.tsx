@@ -44,6 +44,7 @@ export function Node() {
 
   const { systemInfo, loading: sysInfoLoading } = useNodeSystemInfo(id, node?.status);
   const isDeploymentNode = node?.nodeRole === 'deployment';
+  const deploymentEnvironments = node?.deploymentEnvironments ?? [];
 
   const loadNode = useCallback(async () => {
     if (!id) return;
@@ -123,8 +124,11 @@ export function Node() {
     if (!id || !node) return;
 
     if (isDeploymentNode) {
+      const envSummary = deploymentEnvironments.length > 0
+        ? `${deploymentEnvironments.length} deployment environment${deploymentEnvironments.length === 1 ? '' : 's'}: ${deploymentEnvironments.map((env) => env.name).join(', ')}`
+        : 'deployment environments currently listed on this node';
       const confirmed = window.confirm(
-        `This is a deployment node ("${node.name}"). Deleting it will destroy the node infrastructure but will NOT clean up the associated deployment environment, DNS records, or volumes.\n\nFor a full teardown, use the Destroy action on the project Deployments page instead.\n\nContinue with node-only deletion?`
+        `This is a deployment node ("${node.name}") hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
       );
       if (!confirmed) return;
     } else {
@@ -287,10 +291,13 @@ export function Node() {
               <div className="min-w-0">
                 <h2 className="m-0 text-sm font-semibold text-fg-primary">Deployment node</h2>
                 <p className="m-0 mt-1 text-sm text-fg-muted">
-                  This node runs a project deployment environment. Logs and system health are available here; environment policy, full teardown (DNS, volumes, node), and release management are on the project Deployments page.
+                  This node runs {deploymentEnvironments.length || 'one or more'} project deployment environment{deploymentEnvironments.length === 1 ? '' : 's'}. Logs and system health are available here; environment policy, DNS cleanup, volume teardown, and release management are on the project Deployments page.
                 </p>
                 <p className="m-0 mt-1 text-sm text-fg-muted">
-                  To fully destroy this deployment and its resources, use the <strong>Destroy</strong> action on the Deployments page rather than deleting the node directly.
+                  {deploymentEnvironments.length > 0
+                    ? `Hosted environments: ${deploymentEnvironments.map((env) => env.name).join(', ')}. `
+                    : ''}
+                  Deleting the node directly affects every hosted environment; use <strong>Destroy</strong> on the Deployments page for per-environment teardown.
                 </p>
               </div>
             </div>

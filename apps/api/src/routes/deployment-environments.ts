@@ -611,28 +611,53 @@ deploymentEnvironmentRoutes.delete(
 
     let nodeDeleted = false;
     let nodeCleanupWarnings: string[] = [];
-    if (environment.nodeId) {
-      const cleanup = await deleteNodeResources(environment.nodeId, userId, c.env);
-      nodeCleanupWarnings = cleanup.errors;
-
-      if (cleanup.errors.length > 0) {
-        throw errors.conflict(
-          `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
-        );
-      }
-
-      await db
-        .delete(schema.nodes)
-        .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)));
-      nodeDeleted = cleanup.nodeFound;
-    }
-
     const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
 
     // Cascade-delete releases, secrets, volumes, and routes via FK constraints.
     await db
       .delete(schema.deploymentEnvironments)
       .where(eq(schema.deploymentEnvironments.id, envId));
+
+    if (environment.nodeId) {
+      // Race-safe last-environment claim: only the worker that observes no
+      // remaining placements can transition the node out of the scheduling pool.
+      const claim = await c.env.DATABASE.prepare(
+        `UPDATE nodes
+         SET status = 'deleting', updated_at = ?
+         WHERE id = ?
+           AND user_id = ?
+           AND node_role = 'deployment'
+           AND NOT EXISTS (
+             SELECT 1 FROM deployment_environments WHERE node_id = ?
+           )`
+      )
+        .bind(new Date().toISOString(), environment.nodeId, userId, environment.nodeId)
+        .run();
+
+      if ((claim.meta?.changes ?? 0) > 0) {
+        const cleanup = await deleteNodeResources(environment.nodeId, userId, c.env);
+        nodeCleanupWarnings = cleanup.errors;
+
+        if (cleanup.errors.length > 0) {
+          await db
+            .update(schema.nodes)
+            .set({
+              status: 'error',
+              errorMessage: `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
+              updatedAt: new Date().toISOString(),
+            })
+            .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)));
+          throw errors.conflict(
+            `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
+          );
+        }
+
+        await db
+          .delete(schema.nodes)
+          .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)));
+        nodeDeleted = cleanup.nodeFound;
+      }
+    }
 
     log.info('deployment_environment.deleted', {
       projectId,

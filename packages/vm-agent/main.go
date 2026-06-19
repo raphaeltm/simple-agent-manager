@@ -96,13 +96,6 @@ func runDeploymentMode(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Initialize disk state
-	disk, err := deploy.NewDiskState(cfg.DeployBaseDir)
-	if err != nil {
-		slog.Error("Failed to initialize deployment disk state", "error", err)
-		os.Exit(1)
-	}
-
 	// Initialize signature verifier when a boot-time key is available.
 	// If not, heartbeat can refresh the key before the first release is applied.
 	var verifier *deploy.Verifier
@@ -116,35 +109,9 @@ func runDeploymentMode(cfg *config.Config) {
 		slog.Warn("deploy: DEPLOY_SIGNING_PUB_KEY is not set; waiting for heartbeat key refresh")
 	}
 
-	// Create deploy engine
-	engine := deploy.NewEngine(disk, verifier, deploy.EngineConfig{
-		EnvironmentID:   cfg.EnvironmentID,
-		NodeID:          cfg.NodeID,
-		ControlPlaneURL: cfg.ControlPlaneURL,
-		CallbackToken:   cfg.CallbackToken,
-		ComposeCmd:      cfg.DeployComposeCmd,
-		HealthTimeout:   cfg.DeployHealthTimeout,
-		ACMEEmail:       cfg.DeployACMEEmail,
-		ACMECA:          cfg.DeployACMECA,
-	})
-
-	// Non-fatal startup preflight: log the availability of docker, compose, the
-	// caddy binary, and a running caddy admin API so a failed first deploy can be
-	// diagnosed from journalctl alone (the apply path's own failures are otherwise
-	// only surfaced at apply time).
-	preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	engine.LogPreflight(preflightCtx)
-	preflightCancel()
-
-	// Reconcile from disk state (idempotent, never recreates healthy containers)
-	reconcileCtx, reconcileCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	if err := engine.ReconcileOnStart(reconcileCtx); err != nil {
-		slog.Error("Deploy reconcile on start failed", "error", err)
-	}
-	reconcileCancel()
-
-	// Wire deploy engine into server for heartbeat reporting
-	srv.SetDeployEngine(engine)
+	// Wire verifier into the server. Deployment engines are created lazily per
+	// environment after heartbeat returns the node's placement records.
+	srv.SetDeployVerifier(verifier)
 
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)

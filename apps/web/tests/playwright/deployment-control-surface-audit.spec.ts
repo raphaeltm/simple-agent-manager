@@ -87,6 +87,10 @@ const MOCK_NODE = {
     memoryPercent: 46,
     diskPercent: 31,
   },
+  deploymentEnvironments: [
+    { id: ENV_ID, projectId: PROJECT_ID, name: 'staging' },
+    { id: 'env-preview', projectId: PROJECT_ID, name: 'preview' },
+  ],
 };
 
 const MOCK_NODE_STALE = {
@@ -109,6 +113,9 @@ const MOCK_NODE_STALE = {
     memoryPercent: undefined,
     diskPercent: undefined,
   },
+  deploymentEnvironments: [
+    { id: ENV_FAIL_ID, projectId: PROJECT_ID, name: 'production-us-east-very-long-environment-name-that-should-truncate-properly' },
+  ],
 };
 
 const MOCK_ENV = {
@@ -489,7 +496,7 @@ test.describe('Deployment control surface audit', () => {
     // Deployment-specific confirmation copy
     await expect(page.getByText('Removes all app-route DNS records')).toBeVisible();
     await expect(page.getByText('Detaches and deletes attached deployment volumes')).toBeVisible();
-    await expect(page.getByText('Destroys the deployment node')).toBeVisible();
+    await expect(page.getByText(/Keeps the shared deployment node running/)).toBeVisible();
     await expect(page.getByText('This cannot be undone.')).toBeVisible();
 
     await screenshot(page, 'deployment-destroy-dialog');
@@ -502,7 +509,8 @@ test.describe('Deployment control surface audit', () => {
 
     await expect(page.getByText('deploy-staging-01')).toBeVisible();
     await expect(page.getByText('Deployment', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Deployment workloads').first()).toBeVisible();
+    await expect(page.getByText('Deployment environments (2)').first()).toBeVisible();
+    await expect(page.getByText('preview').first()).toBeVisible();
     await expect(page.getByText('Managed from the project deployment environment.').first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create Workspace' })).toHaveCount(0);
 
@@ -518,6 +526,7 @@ test.describe('Deployment control surface audit', () => {
     await page.goto(`/nodes/${NODE_ID}`);
 
     await expect(page.getByRole('heading', { name: 'Deployment node' })).toBeVisible();
+    await expect(page.getByText(/Hosted environments: staging, preview/)).toBeVisible();
     await expect(page.getByText(/environment policy/)).toBeVisible();
     await expect(page.getByText(/Destroy.*action on the Deployments page/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create Workspace' })).toHaveCount(0);

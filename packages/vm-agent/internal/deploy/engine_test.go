@@ -286,11 +286,19 @@ exit 0
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
 	active := string(activeBytes)
-	if !strings.Contains(active, "r1-web-env.apps.example.com") {
-		t.Fatalf("active Caddyfile missing hostname:\n%s", active)
+	if !strings.Contains(active, "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import:\n%s", active)
 	}
-	if !strings.Contains(active, "reverse_proxy 127.0.0.1:35000") {
-		t.Fatalf("active Caddyfile missing upstream:\n%s", active)
+	snippetBytes, err := os.ReadFile(filepath.Join(filepath.Dir(activeCaddyfile), "sites", "env-1.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	snippet := string(snippetBytes)
+	if !strings.Contains(snippet, "r1-web-env.apps.example.com") {
+		t.Fatalf("active Caddy snippet missing hostname:\n%s", snippet)
+	}
+	if !strings.Contains(snippet, "reverse_proxy 127.0.0.1:35000") {
+		t.Fatalf("active Caddy snippet missing upstream:\n%s", snippet)
 	}
 
 	reloadBytes, err := os.ReadFile(reloadLog)

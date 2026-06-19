@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,7 @@ type EngineConfig struct {
 	ControlPlaneURL    string
 	CallbackToken      string
 	ComposeCmd         string // e.g., "docker compose"
+	ComposeProjectName string
 	CaddyfilePath      string
 	CaddyReloadCmd     string
 	CaddyRestartCmd    string
@@ -67,6 +69,9 @@ type EngineConfig struct {
 func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	if cfg.ComposeCmd == "" {
 		cfg.ComposeCmd = "docker compose"
+	}
+	if cfg.ComposeProjectName == "" {
+		cfg.ComposeProjectName = "sam-env-" + SafeEnvironmentFilePart(cfg.EnvironmentID)
 	}
 	if cfg.CaddyfilePath == "" {
 		cfg.CaddyfilePath = "/etc/caddy/Caddyfile"
@@ -106,6 +111,10 @@ func (e *Engine) SetCallbackToken(token string) {
 	e.tokenMu.Lock()
 	defer e.tokenMu.Unlock()
 	e.callbackToken = token
+}
+
+func (e *Engine) EnvironmentID() string {
+	return e.cfg.EnvironmentID
 }
 
 // getCallbackToken returns the current callback token under a read lock.
@@ -210,10 +219,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	// Write release to disk
-	caddyfile, err := GenerateCaddyfile(payload.Routes, CaddyfileOptions{
-		ACMEEmail: e.cfg.ACMEEmail,
-		ACMECA:    e.cfg.ACMECA,
-	})
+	caddyfile, err := GenerateCaddySnippet(payload.Routes)
 	if err != nil {
 		return fmt.Errorf("generate Caddyfile: %w", err)
 	}
@@ -456,7 +462,7 @@ func (e *Engine) composeDown(ctx context.Context, composeFile string) error {
 
 func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...string) error {
 	parts := strings.Fields(e.cfg.ComposeCmd)
-	cmdArgs := append(parts[1:], "-f", composeFile)
+	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile)
 	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
@@ -473,10 +479,22 @@ func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...str
 func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error {
 	content, err := os.ReadFile(releaseCaddyfile)
 	if err != nil {
-		return fmt.Errorf("read release Caddyfile: %w", err)
+		return fmt.Errorf("read release Caddy snippet: %w", err)
 	}
-	if err := writeFileAtomic(e.cfg.CaddyfilePath, string(content), 0644); err != nil {
-		return fmt.Errorf("write active Caddyfile: %w", err)
+	sitesDir := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites")
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		return fmt.Errorf("create caddy sites dir: %w", err)
+	}
+	root := GenerateRootCaddyfile(CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
+		return fmt.Errorf("write root Caddyfile: %w", err)
+	}
+	snippetPath := filepath.Join(sitesDir, SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	if err := writeFileAtomic(snippetPath, string(content), 0644); err != nil {
+		return fmt.Errorf("write active Caddy snippet: %w", err)
 	}
 
 	parts := strings.Fields(e.cfg.CaddyReloadCmd)
@@ -590,7 +608,7 @@ func (e *Engine) inspectServices(ctx context.Context, seq int64) ([]ServiceState
 	composeFile := e.disk.ComposeFilePath(seq)
 
 	parts := strings.Fields(e.cfg.ComposeCmd)
-	cmdArgs := append(parts[1:], "-f", composeFile, "ps", "--format", "json")
+	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile, "ps", "--format", "json")
 
 	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
 	var stdout, stderr bytes.Buffer

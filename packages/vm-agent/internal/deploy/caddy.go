@@ -30,7 +30,29 @@ func GenerateCaddyfile(routes []RouteTarget, opts CaddyfileOptions) (string, err
 	if global := buildGlobalOptionsBlock(opts); global != "" {
 		builder.WriteString(global)
 	}
+	builder.WriteString("\nimport sites/*\n")
 
+	snippet, err := GenerateCaddySnippet(routes)
+	if err != nil {
+		return "", err
+	}
+	builder.WriteString(snippet)
+	return builder.String(), nil
+}
+
+func GenerateRootCaddyfile(opts CaddyfileOptions) string {
+	var builder strings.Builder
+	builder.WriteString("# Managed by SAM deployment agent.\n")
+	if global := buildGlobalOptionsBlock(opts); global != "" {
+		builder.WriteString(global)
+	}
+	builder.WriteString("\nimport sites/*\n")
+	return builder.String()
+}
+
+func GenerateCaddySnippet(routes []RouteTarget) (string, error) {
+	var builder strings.Builder
+	builder.WriteString("# Managed by SAM deployment agent.\n")
 	ordered := append([]RouteTarget(nil), routes...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return ordered[i].Hostname < ordered[j].Hostname
@@ -49,6 +71,16 @@ func GenerateCaddyfile(routes []RouteTarget, opts CaddyfileOptions) (string, err
 	}
 
 	return builder.String(), nil
+}
+
+func SafeEnvironmentFilePart(environmentID string) string {
+	cleaned := strings.ToLower(strings.TrimSpace(environmentID))
+	cleaned = regexp.MustCompile(`[^a-z0-9_-]+`).ReplaceAllString(cleaned, "-")
+	cleaned = strings.Trim(cleaned, "-_")
+	if cleaned == "" {
+		return "environment"
+	}
+	return cleaned
 }
 
 // buildGlobalOptionsBlock renders the Caddy global options block for the given

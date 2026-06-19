@@ -1841,7 +1841,7 @@ export const deploymentEnvironments = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     status: text('status').notNull().default('active'),
-    /** Node hosting this environment (one environment per node for MVP). */
+    /** Deployment node hosting this environment; many environments may share one node. */
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
     /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
     provider: text('provider'),

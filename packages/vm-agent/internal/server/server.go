@@ -96,8 +96,10 @@ type Server struct {
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
 
-	// Deployment mode — set via SetDeployEngine() when Role=deployment
-	deployEngine *deploy.Engine
+	// Deployment mode — one Engine per placed deployment environment.
+	deployMu       sync.Mutex
+	deployEngines  map[string]*deploy.Engine
+	deployVerifier *deploy.Verifier
 }
 
 type cachedWorktreeList struct {
@@ -461,6 +463,7 @@ func New(cfg *config.Config) (*Server, error) {
 		callbackToken:       cfg.CallbackToken,
 		httpClient:          config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 		done:                make(chan struct{}),
+		deployEngines:       make(map[string]*deploy.Engine),
 	}
 
 	// GitTokenFetcher is intentionally left nil at the server level.
@@ -529,7 +532,77 @@ func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 // SetDeployEngine wires the deployment engine into the server for heartbeat reporting
 // and pull-based release channel. Only used in deployment mode.
 func (s *Server) SetDeployEngine(engine *deploy.Engine) {
-	s.deployEngine = engine
+	if engine == nil {
+		return
+	}
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+	s.deployEngines[engine.EnvironmentID()] = engine
+}
+
+// SetDeployVerifier configures the signing verifier used by deployment engines
+// discovered after startup from heartbeat placement responses.
+func (s *Server) SetDeployVerifier(verifier *deploy.Verifier) {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+	s.deployVerifier = verifier
+}
+
+func (s *Server) deploymentEnginesSnapshot() map[string]*deploy.Engine {
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+	snapshot := make(map[string]*deploy.Engine, len(s.deployEngines))
+	for envID, engine := range s.deployEngines {
+		snapshot[envID] = engine
+	}
+	return snapshot
+}
+
+func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
+	environmentID = strings.TrimSpace(environmentID)
+	if environmentID == "" {
+		return nil
+	}
+
+	s.deployMu.Lock()
+	if engine := s.deployEngines[environmentID]; engine != nil {
+		s.deployMu.Unlock()
+		return engine
+	}
+	verifier := s.deployVerifier
+	s.deployMu.Unlock()
+
+	disk, err := deploy.NewDiskState(filepath.Join(s.config.DeployBaseDir, deploy.SafeEnvironmentFilePart(environmentID)))
+	if err != nil {
+		slog.Error("deploy: failed to initialize environment disk state", "environmentId", environmentID, "error", err)
+		return nil
+	}
+
+	engine := deploy.NewEngine(disk, verifier, deploy.EngineConfig{
+		EnvironmentID:      environmentID,
+		NodeID:             s.config.NodeID,
+		ControlPlaneURL:    s.config.ControlPlaneURL,
+		CallbackToken:      s.getCallbackToken(),
+		ComposeCmd:         s.config.DeployComposeCmd,
+		ComposeProjectName: "sam-env-" + deploy.SafeEnvironmentFilePart(environmentID),
+		HealthTimeout:      s.config.DeployHealthTimeout,
+		ACMEEmail:          s.config.DeployACMEEmail,
+		ACMECA:             s.config.DeployACMECA,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	if err := engine.ReconcileOnStart(ctx); err != nil {
+		slog.Error("deploy: reconcile environment on discovery failed", "environmentId", environmentID, "error", err)
+	}
+	cancel()
+
+	s.deployMu.Lock()
+	defer s.deployMu.Unlock()
+	if existing := s.deployEngines[environmentID]; existing != nil {
+		return existing
+	}
+	s.deployEngines[environmentID] = engine
+	return engine
 }
 
 // GetBootLogBroadcaster returns the broadcaster for a specific workspace.

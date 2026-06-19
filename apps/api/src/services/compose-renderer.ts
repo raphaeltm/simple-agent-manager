@@ -117,6 +117,7 @@ function resolveEnvValue(
  */
 interface ServiceBuildContext {
   volumeRoot: string;
+  networkName: string;
   defaultMemMb: number;
   resolvedSecrets: Record<string, string>;
   environmentId: string;
@@ -181,7 +182,7 @@ function buildService(
   };
 
   // Network
-  service.networks = ['sam-internal'];
+  service.networks = [buildCtx.networkName];
 
   const routePorts = buildCtx.routeTargets.filter((route) => route.service === name);
   if (routePorts.length > 0) {
@@ -201,8 +202,10 @@ function buildService(
 }
 
 export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderContext): string {
+  const networkName = `sam-internal-${ctx.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const buildCtx: ServiceBuildContext = {
     volumeRoot: ctx.volumeRoot ?? resolveVolumeMountRoot(ctx.environmentId),
+    networkName,
     defaultMemMb: ctx.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB,
     resolvedSecrets: ctx.resolvedSecrets ?? {},
     environmentId: ctx.environmentId,
@@ -244,7 +247,7 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
   // healthy. Docker has no per-direction internal flag, so to admit the
   // required host ingress the network must be a normal bridge.
   doc.networks = {
-    'sam-internal': {
+    [networkName]: {
       driver: 'bridge',
     },
   };

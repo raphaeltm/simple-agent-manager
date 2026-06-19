@@ -250,6 +250,65 @@ describe('deploy release callback route', () => {
     });
   });
 
+  it('serves distinct payloads for two environments placed on the same node', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const envTwoManifest = {
+      ...manifest(),
+      routes: [{ service: 'web', port: 3000, mode: 'public' }],
+    };
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }])
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-2', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-2', manifest: JSON.stringify(envTwoManifest), version: 3 }]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-a1' } }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-a2' } }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-b1' } }), { status: 200 })),
+    );
+
+    const app = createTestApp();
+    const responseOne = await app.request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+    const responseTwo = await app.request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=3&environmentId=env-2',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env(),
+    );
+
+    const bodyOne = await responseOne.json();
+    const bodyTwo = await responseTwo.json();
+    expect(responseOne.status, JSON.stringify(bodyOne)).toBe(200);
+    expect(responseTwo.status, JSON.stringify(bodyTwo)).toBe(200);
+    expect(bodyOne.environmentId).toBe('env-1');
+    expect(bodyTwo.environmentId).toBe('env-2');
+    expect(bodyOne.seq).toBe(7);
+    expect(bodyTwo.seq).toBe(3);
+    expect(bodyOne.routes[0].hostname).toContain('env-1');
+    expect(bodyTwo.routes[0].hostname).toContain('env-2');
+    expect(bodyOne.routes[0].hostPort).not.toBe(bodyTwo.routes[0].hostPort);
+    expect(bodyOne.composeYaml).toContain('sam-internal-env-1');
+    expect(bodyTwo.composeYaml).toContain('sam-internal-env-2');
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'env-1', nodeId: 'node-deploy-1', seq: 7 }),
+      expect.anything(),
+    );
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'env-2', nodeId: 'node-deploy-1', seq: 3 }),
+      expect.anything(),
+    );
+  });
+
   it('returns conflict before DNS or signing when public routes exist but node IP is not ready', async () => {
     mockLimit
       .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: null }])

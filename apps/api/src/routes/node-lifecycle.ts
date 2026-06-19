@@ -320,34 +320,49 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
   }
 
-  // Deployment mode: include pending release seq and deploy pub key for deployment nodes.
-  // SECURITY: Look up the environment from the authenticated node's placement record —
-  // never trust the environmentId from the request body (IDOR risk).
+  // Deployment mode: include pending release seqs and deploy pub key for deployment nodes.
+  // SECURITY: Look up environments from the authenticated node's placement records —
+  // never trust environment IDs from the request body for authorization (IDOR risk).
   if (node.nodeRole === 'deployment' && body.deployment) {
-    const appliedSeq = body.deployment.appliedSeq ?? 0;
-
-    // Resolve environment from the node's placement record (node_id is indexed)
     try {
-      const envRow = await db
+      const envRows = await db
         .select({ envId: schema.deploymentEnvironments.id })
         .from(schema.deploymentEnvironments)
-        .where(eq(schema.deploymentEnvironments.nodeId, nodeId))
-        .limit(1);
+        .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
+      response.deployment = {
+        environments: envRows.map((row) => ({ environmentId: row.envId })),
+      };
 
-      const envId = envRow[0]?.envId;
+      const bodyStates = Array.isArray(body.deployment.environments)
+        ? body.deployment.environments
+        : [];
+      const stateByEnv = new Map(bodyStates.map((state) => [state.environmentId, state]));
 
-      if (envId) {
-        await db
-          .update(schema.deploymentEnvironments)
-          .set(buildObservedDeploymentUpdate(body.deployment, now))
-          .where(
-            and(
-              eq(schema.deploymentEnvironments.id, envId),
-              eq(schema.deploymentEnvironments.nodeId, nodeId),
-            ),
-          );
+      const pendingReleases: Array<{ environmentId: string; seq: number }> = [];
 
-        await reconcileDeploymentReleaseStatuses(db, envId, body.deployment);
+      for (const envRow of envRows) {
+        const envId = envRow.envId;
+        const bodyState = stateByEnv.get(envId);
+        const deploymentState = bodyState ?? (
+          envRows.length === 1 && body.deployment.appliedSeq !== undefined
+            ? body.deployment
+            : null
+        );
+        const appliedSeq = deploymentState?.appliedSeq ?? 0;
+
+        if (deploymentState) {
+          await db
+            .update(schema.deploymentEnvironments)
+            .set(buildObservedDeploymentUpdate(deploymentState, now))
+            .where(
+              and(
+                eq(schema.deploymentEnvironments.id, envId),
+                eq(schema.deploymentEnvironments.nodeId, nodeId),
+              ),
+            );
+
+          await reconcileDeploymentReleaseStatuses(db, envId, deploymentState);
+        }
 
         const latestRelease = await db
           .select({ version: schema.deploymentReleases.version })
@@ -357,7 +372,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           .limit(1);
 
         if (latestRelease[0] && latestRelease[0].version > appliedSeq) {
-          response.pendingReleaseSeq = latestRelease[0].version;
+          pendingReleases.push({ environmentId: envId, seq: latestRelease[0].version });
+        }
+      }
+
+      if (pendingReleases.length > 0) {
+        response.deployment = {
+          ...(response.deployment as Record<string, unknown>),
+          pendingReleases,
+        };
+        if (pendingReleases.length === 1) {
+          response.pendingReleaseSeq = pendingReleases[0]?.seq;
         }
       }
     } catch (err) {
@@ -370,6 +395,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     // Include deploy signing public key for key refresh
     if (c.env.DEPLOY_SIGNING_PUBLIC_KEY) {
       response.deployPubKey = c.env.DEPLOY_SIGNING_PUBLIC_KEY;
+      response.deployment = {
+        ...(typeof response.deployment === 'object' && response.deployment !== null
+          ? response.deployment as Record<string, unknown>
+          : {}),
+        deployPubKey: c.env.DEPLOY_SIGNING_PUBLIC_KEY,
+      };
     }
   }
 

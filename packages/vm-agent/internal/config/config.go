@@ -522,13 +522,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("NODE_ROLE must be %q or %q, got %q", RoleWorkspace, RoleDeployment, cfg.Role)
 	}
 
-	// Deployment mode requires EnvironmentID
-	if cfg.Role == RoleDeployment {
-		if cfg.EnvironmentID == "" {
-			return nil, fmt.Errorf("ENVIRONMENT_ID is required when NODE_ROLE=%q", RoleDeployment)
-		}
-	}
-
 	// Validate TaskMode enum (workspace mode only)
 	switch cfg.TaskMode {
 	case TaskModeTask, TaskModeConversation:

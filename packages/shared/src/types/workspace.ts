@@ -79,6 +79,11 @@ export interface NodeResponse {
   lastHeartbeatAt: string | null;
   heartbeatStaleAfterSeconds?: number;
   lastMetrics?: NodeMetrics | null;
+  deploymentEnvironments?: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+  }>;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
