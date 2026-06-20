@@ -26,8 +26,8 @@ const taskRunnerSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner.ts'),
   'utf8'
 );
-const indexSource = readFileSync(
-  resolve(process.cwd(), 'src/index.ts'),
+const scheduledAppSource = readFileSync(
+  resolve(process.cwd(), 'src/app/scheduled.ts'),
   'utf8'
 );
 
@@ -189,7 +189,7 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
   });
 
   it('cron handler logs doHealthChecked count', () => {
-    expect(indexSource).toContain('stuckTaskDoHealthChecked: stuckTasks.doHealthChecked');
+    expect(scheduledAppSource).toContain('stuckTaskDoHealthChecked: stuckTasks.doHealthChecked');
   });
 });
 
@@ -285,8 +285,8 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   });
 
   it('cron handler logs orphan counts', () => {
-    expect(indexSource).toContain('orphanedWorkspacesFlagged');
-    expect(indexSource).toContain('orphanedNodesFlagged');
+    expect(scheduledAppSource).toContain('orphanedWorkspacesFlagged');
+    expect(scheduledAppSource).toContain('orphanedNodesFlagged');
   });
 
   it('uses grace period to avoid flagging recently created resources', () => {
@@ -330,7 +330,7 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('cron handler passes OBSERVABILITY_DATABASE to checkProvisioningTimeouts', () => {
-    expect(indexSource).toContain('checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)');
+    expect(scheduledAppSource).toContain('checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)');
   });
 });
 

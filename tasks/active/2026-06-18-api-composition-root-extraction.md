@@ -21,14 +21,14 @@
 
 ## Implementation Checklist
 
-- [ ] Inventory the current `index.ts` responsibilities and route groups.
-- [ ] Extract Hono app creation into `src/app/create-api-app.ts`.
-- [ ] Extract global error handling, middleware, well-known routes, MCP CORS/routes, 404, workspace proxy, Pages proxy, and scheduled handling into explicit modules.
-- [ ] Move route registration into named registration groups that encode order-sensitive behavior.
-- [ ] Keep Durable Object runtime exports in `index.ts`.
-- [ ] Preserve route paths, auth behavior, CORS behavior, response shapes, workspace proxy behavior, and scheduled behavior.
-- [ ] Add or strengthen behavior tests for auth route precedence, project callback precedence, MCP CORS, workspace proxy pass-through/intercept behavior, well-known endpoints, 404, and scheduled delegation.
-- [ ] Run API test, Worker test if relevant, typecheck, and lint.
+- [x] Inventory the current `index.ts` responsibilities and route groups.
+- [x] Extract Hono app creation into `src/app/create-api-app.ts`.
+- [x] Extract global error handling, middleware, well-known routes, MCP CORS/routes, 404, workspace proxy, Pages proxy, and scheduled handling into explicit modules.
+- [x] Move route registration into named registration groups that encode order-sensitive behavior.
+- [x] Keep Durable Object runtime exports in `index.ts`.
+- [x] Preserve route paths, auth behavior, CORS behavior, response shapes, workspace proxy behavior, and scheduled behavior.
+- [x] Add or strengthen behavior tests for auth route precedence, project callback precedence, MCP CORS, workspace proxy pass-through/intercept behavior, well-known endpoints, 404, and scheduled delegation.
+- [x] Run API test, Worker test if relevant, typecheck, and lint.
 - [ ] Open a draft/open PR marked DO NOT MERGE / DO NOT DEPLOY TO STAGING.
 
 ## Acceptance Criteria
@@ -40,3 +40,11 @@
 - Tests cover fragile route-order/auth/CORS/proxy/scheduled behavior.
 - No staging deployment is performed.
 - PR is clearly marked do-not-merge and do-not-deploy.
+
+## Verification Notes
+
+- `pnpm --filter @simple-agent-manager/api test` passed: 330 files, 5470 tests.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
+- `pnpm --filter @simple-agent-manager/api test:workers` was attempted twice. Both runs failed before executing tests because `workerd` crashed with signal 11 and Vitest reported Cloudflare pool errors.
+- No staging deployment was performed.

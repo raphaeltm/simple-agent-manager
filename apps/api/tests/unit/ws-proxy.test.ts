@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('ws proxy source contract', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  const file = readFileSync(resolve(process.cwd(), 'src/app/workspace-proxy.ts'), 'utf8');
 
   it('routes workspace traffic via node backend hostname', () => {
     expect(file).toContain('${routedNodeId}.vm.${baseDomain}');

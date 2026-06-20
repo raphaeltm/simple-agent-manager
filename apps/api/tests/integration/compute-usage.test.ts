@@ -23,7 +23,8 @@ describe('compute usage metering pipeline', () => {
   const stateMachineFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/state-machine.ts'), 'utf8');
   const workspaceStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'), 'utf8');
   const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/compute-usage-cleanup.ts'), 'utf8');
-  const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  const routeRegistryFile = readFileSync(resolve(process.cwd(), 'src/app/register-routes.ts'), 'utf8');
+  const scheduledFile = readFileSync(resolve(process.cwd(), 'src/app/scheduled.ts'), 'utf8');
   const adminUsageRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-usage.ts'), 'utf8');
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
 
@@ -179,7 +180,7 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('cron handler invokes compute usage cleanup', () => {
-      expect(indexFile).toContain('runComputeUsageCleanup');
+      expect(scheduledFile).toContain('runComputeUsageCleanup');
     });
   });
 
@@ -187,14 +188,14 @@ describe('compute usage metering pipeline', () => {
   // API Routes
   // ===========================================================================
   describe('API route wiring', () => {
-    it('admin usage route is mounted in index', () => {
-      expect(indexFile).toContain('adminUsageRoutes');
-      expect(indexFile).toContain('/api/admin/usage');
+    it('admin usage route is mounted in the API route registry', () => {
+      expect(routeRegistryFile).toContain('adminUsageRoutes');
+      expect(routeRegistryFile).toContain('/api/admin/usage');
     });
 
-    it('user usage route is mounted in index', () => {
-      expect(indexFile).toContain('usageRoutes');
-      expect(indexFile).toContain('/api/usage');
+    it('user usage route is mounted in the API route registry', () => {
+      expect(routeRegistryFile).toContain('usageRoutes');
+      expect(routeRegistryFile).toContain('/api/usage');
     });
 
     it('admin usage route requires superadmin', () => {
