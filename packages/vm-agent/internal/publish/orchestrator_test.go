@@ -98,7 +98,8 @@ func TestPublishHappyPath(t *testing.T) {
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
 
-	res, err := orch.Publish(context.Background(), "proj1", art)
+	submittedBy := &ReleaseSubmittedBy{TaskID: "task-1", AgentProfileID: "profile-1"}
+	res, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", art, submittedBy)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -138,6 +139,12 @@ func TestPublishHappyPath(t *testing.T) {
 	}
 	if sub.Reference != "latest" {
 		t.Errorf("submitted reference = %q, want latest", sub.Reference)
+	}
+	if sub.Environment != "staging" || sub.EnvironmentID != "env-1" {
+		t.Errorf("submitted environment = %q/%q, want staging/env-1", sub.Environment, sub.EnvironmentID)
+	}
+	if sub.SubmittedBy != submittedBy {
+		t.Errorf("submittedBy not preserved")
 	}
 	if sub.ComposeYAML != string(art.ComposeYAML) {
 		t.Errorf("compose yaml mismatch")
@@ -180,7 +187,7 @@ func TestPublishSanitizesServiceNameInTarget(t *testing.T) {
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
 
-	if _, err := orch.Publish(context.Background(), "proj1", art); err != nil {
+	if _, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", art, nil); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(docker.tags) != 1 {
@@ -193,18 +200,27 @@ func TestPublishSanitizesServiceNameInTarget(t *testing.T) {
 	if got[1] != "registry.cloudflare.com/acct123/sam-proj1-api-server:latest" {
 		t.Fatalf("target ref = %q", got[1])
 	}
+	if control.submitted == nil || len(control.submitted.Services) != 1 {
+		t.Fatal("expected one submitted service")
+	}
+	if control.submitted.Services[0].ServiceName != "API Server" {
+		t.Fatalf("submitted serviceName = %q, want original compose service name", control.submitted.Services[0].ServiceName)
+	}
+	if control.submitted.Services[0].RegistryServiceName != "api-server" {
+		t.Fatalf("submitted registryServiceName = %q, want api-server", control.submitted.Services[0].RegistryServiceName)
+	}
 }
 
 func TestPublishNilArtifact(t *testing.T) {
 	orch := New(Options{ControlPlane: &fakeControlPlane{}, Docker: &fakeDocker{}})
-	if _, err := orch.Publish(context.Background(), "proj1", nil); err == nil {
+	if _, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", nil, nil); err == nil {
 		t.Fatal("expected error for nil artifact")
 	}
 }
 
 func TestPublishEmptyProjectID(t *testing.T) {
 	orch := New(Options{ControlPlane: &fakeControlPlane{}, Docker: &fakeDocker{}})
-	if _, err := orch.Publish(context.Background(), "", sampleArtifact()); err == nil {
+	if _, err := orch.Publish(context.Background(), "", "staging", "env-1", sampleArtifact(), nil); err == nil {
 		t.Fatal("expected error for empty projectID")
 	}
 }
@@ -214,7 +230,7 @@ func TestPublishMintFailureStops(t *testing.T) {
 	control := &fakeControlPlane{mintErr: errors.New("rate limited")}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
-	_, err := orch.Publish(context.Background(), "proj1", sampleArtifact())
+	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -229,7 +245,7 @@ func TestPublishPushFailureStops(t *testing.T) {
 	control := &fakeControlPlane{creds: creds, result: &ReleaseResult{}}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
-	_, err := orch.Publish(context.Background(), "proj1", sampleArtifact())
+	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

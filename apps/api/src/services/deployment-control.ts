@@ -83,13 +83,14 @@ function normalizeStatus(value: unknown): string | null {
 
 export function buildObservedDeploymentUpdate(
   deployment: DeploymentHeartbeatState,
-  observedAt: string,
+  observedAt: string
 ): Partial<schema.NewDeploymentEnvironmentRow> {
   const appliedSeq = normalizeAppliedSeq(deployment.appliedSeq);
   const status = normalizeStatus(deployment.status);
-  const errorMessage = typeof deployment.errorMessage === 'string'
-    ? truncateString(deployment.errorMessage, MAX_OBSERVED_ERROR_MESSAGE_LENGTH)
-    : null;
+  const errorMessage =
+    typeof deployment.errorMessage === 'string'
+      ? truncateString(deployment.errorMessage, MAX_OBSERVED_ERROR_MESSAGE_LENGTH)
+      : null;
 
   return {
     observedAppliedSeq: appliedSeq,
@@ -113,7 +114,7 @@ export function toObservedDeploymentState(
     | 'observedDeployStatusJson'
     | 'observedDiskTelemetryJson'
     | 'observedAt'
-  >,
+  >
 ): ObservedDeploymentState {
   return {
     appliedSeq: row.observedAppliedSeq ?? null,
@@ -151,7 +152,7 @@ export function toDeploymentAgentPolicy(
     | 'agentDeployEnabledAt'
     | 'agentDeployDisabledAt'
     | 'allowedDeployProfileIdsJson'
-  >,
+  >
 ): DeploymentAgentPolicy {
   return {
     agentDeployEnabled: Boolean(row.agentDeployEnabled),
@@ -165,7 +166,7 @@ export function toDeploymentAgentPolicy(
 export async function reconcileDeploymentReleaseStatuses(
   db: ReturnType<typeof drizzle<typeof schema>>,
   environmentId: string,
-  deployment: DeploymentHeartbeatState,
+  deployment: DeploymentHeartbeatState
 ): Promise<void> {
   const appliedSeq = normalizeAppliedSeq(deployment.appliedSeq) ?? 0;
   const status = normalizeStatus(deployment.status);
@@ -191,8 +192,8 @@ export async function reconcileDeploymentReleaseStatuses(
       .where(
         and(
           eq(schema.deploymentReleases.environmentId, environmentId),
-          eq(schema.deploymentReleases.version, appliedSeq),
-        ),
+          eq(schema.deploymentReleases.version, appliedSeq)
+        )
       );
   }
 
@@ -221,15 +222,15 @@ export async function reconcileDeploymentReleaseStatuses(
       .where(
         and(
           eq(schema.deploymentReleases.environmentId, environmentId),
-          gt(schema.deploymentReleases.version, appliedSeq),
-        ),
+          gt(schema.deploymentReleases.version, appliedSeq)
+        )
       );
   }
 }
 
 async function getTaskAgentProfileId(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  taskId: string,
+  taskId: string
 ): Promise<string | null> {
   if (!taskId) return null;
   const rows = await db
@@ -244,8 +245,11 @@ export async function assertAgentDeploymentAllowed(
   db: ReturnType<typeof drizzle<typeof schema>>,
   projectId: string,
   environmentName: string,
-  tokenData: McpTokenData,
-): Promise<{ environmentId: string; policy: DeploymentAgentPolicy } | { error: string }> {
+  tokenData: McpTokenData
+): Promise<
+  | { environmentId: string; policy: DeploymentAgentPolicy; taskAgentProfileId: string | null }
+  | { error: string }
+> {
   const rows = await db
     .select({
       id: schema.deploymentEnvironments.id,
@@ -260,14 +264,16 @@ export async function assertAgentDeploymentAllowed(
       and(
         eq(schema.deploymentEnvironments.projectId, projectId),
         eq(schema.deploymentEnvironments.name, environmentName),
-        eq(schema.deploymentEnvironments.status, 'active'),
-      ),
+        eq(schema.deploymentEnvironments.status, 'active')
+      )
     )
     .limit(1);
 
   const row = rows[0];
   if (!row) {
-    return { error: `Deployment environment '${environmentName}' not found or inactive for this project.` };
+    return {
+      error: `Deployment environment '${environmentName}' not found or inactive for this project.`,
+    };
   }
 
   const policy = toDeploymentAgentPolicy(row);
@@ -277,14 +283,17 @@ export async function assertAgentDeploymentAllowed(
     };
   }
 
+  const taskAgentProfileId = tokenData.taskId
+    ? await getTaskAgentProfileId(db, tokenData.taskId)
+    : null;
+
   if (policy.allowedDeployProfileIds.length > 0) {
-    const taskProfileId = await getTaskAgentProfileId(db, tokenData.taskId);
-    if (!taskProfileId || !policy.allowedDeployProfileIds.includes(taskProfileId)) {
+    if (!taskAgentProfileId || !policy.allowedDeployProfileIds.includes(taskAgentProfileId)) {
       log.warn('deployment_agent_policy.denied_profile', {
         projectId,
         environmentName,
         taskId: tokenData.taskId || null,
-        taskProfileId,
+        taskProfileId: taskAgentProfileId,
       });
       return {
         error: `This agent profile is not allowed to deploy to environment '${environmentName}'.`,
@@ -292,33 +301,20 @@ export async function assertAgentDeploymentAllowed(
     }
   }
 
-  return { environmentId: row.id, policy };
+  return { environmentId: row.id, policy, taskAgentProfileId };
 }
 
 /**
- * Project-level agent-deploy gate for the compose-publish path.
- *
- * The publish flow runs from a workspace callback JWT, which carries only a
- * workspaceId — there is NO environment name and NO taskId. So the
- * environment-scoped {@link assertAgentDeploymentAllowed} (which requires both)
- * cannot be used here.
- *
- * Instead we treat "the project has at least one ACTIVE deployment environment
- * with agentDeployEnabled = true" as the project-level opt-in signal. This
- * reuses the existing per-environment policy as a coarse project gate without
- * introducing a new project-level schema column. A project that has never
- * enabled agent deploy on any environment cannot publish.
- *
- * @returns true if the project has any active, agent-deploy-enabled environment.
+ * Project-level agent-deploy gate for workspace callback flows that cannot
+ * carry task/profile context, such as the VM-agent's internal registry
+ * credential mint during a server-side build-and-publish. Agent-facing MCP
+ * tools must use environment-scoped {@link assertAgentDeploymentAllowed}
+ * before reaching those callback flows.
  */
 export async function getProjectAgentDeployEnvironmentId(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  projectId: string,
+  projectId: string
 ): Promise<string | null> {
-  // Deterministic: oldest active agent-deploy-enabled environment is the
-  // project's canonical publish target. The compose-publish path has no
-  // environment name (workspace callback JWT), so it records the release
-  // against this environment.
   const rows = await db
     .select({ id: schema.deploymentEnvironments.id })
     .from(schema.deploymentEnvironments)
@@ -326,8 +322,8 @@ export async function getProjectAgentDeployEnvironmentId(
       and(
         eq(schema.deploymentEnvironments.projectId, projectId),
         eq(schema.deploymentEnvironments.status, 'active'),
-        eq(schema.deploymentEnvironments.agentDeployEnabled, true),
-      ),
+        eq(schema.deploymentEnvironments.agentDeployEnabled, true)
+      )
     )
     .orderBy(schema.deploymentEnvironments.createdAt)
     .limit(1);
@@ -336,12 +332,14 @@ export async function getProjectAgentDeployEnvironmentId(
 
 export async function isProjectAgentDeployEnabled(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  projectId: string,
+  projectId: string
 ): Promise<boolean> {
   return (await getProjectAgentDeployEnvironmentId(db, projectId)) !== null;
 }
 
-export function encodeAllowedDeployProfileIds(profileIds: string[] | null | undefined): string | null {
+export function encodeAllowedDeployProfileIds(
+  profileIds: string[] | null | undefined
+): string | null {
   const unique = uniqueDeployProfileIds(profileIds);
   if (unique.length === 0) {
     return null;
@@ -352,7 +350,7 @@ export function encodeAllowedDeployProfileIds(profileIds: string[] | null | unde
 export async function validateAllowedDeployProfiles(
   db: ReturnType<typeof drizzle<typeof schema>>,
   projectId: string,
-  allowedProfileIds: string[],
+  allowedProfileIds: string[]
 ): Promise<void> {
   if (allowedProfileIds.length === 0) return;
 
@@ -362,8 +360,8 @@ export async function validateAllowedDeployProfiles(
     .where(
       and(
         eq(schema.agentProfiles.projectId, projectId),
-        inArray(schema.agentProfiles.id, allowedProfileIds),
-      ),
+        inArray(schema.agentProfiles.id, allowedProfileIds)
+      )
     );
 
   const found = new Set(rows.map((row) => row.id));

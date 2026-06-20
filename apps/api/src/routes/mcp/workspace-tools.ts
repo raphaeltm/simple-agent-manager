@@ -14,7 +14,11 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { signPortAccessToken, signTerminalToken } from '../../services/jwt';
+import {
+  signNodeManagementToken,
+  signPortAccessToken,
+  signTerminalToken,
+} from '../../services/jwt';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -44,20 +48,18 @@ type VmAgentToolPath =
 
 // ─── Shared proxy helper ────────────────────────────────────────────────────
 
-/**
- * Look up the workspace's node, generate a JWT, and proxy a request to the VM agent.
- * Returns the parsed JSON response from the VM agent.
- */
-export async function proxyToVmAgent(
+interface WorkspaceForVmAgent {
+  id: string;
+  status: string;
+  nodeId: string;
+  projectId: string;
+}
+
+async function lookupWorkspaceForVmAgent(
   env: Env,
   workspaceId: string,
-  userId: string,
-  projectId: string,
-  toolPath: VmAgentToolPath,
-  method: 'GET' | 'POST' = 'GET',
-  body?: unknown,
-  timeoutOverrideMs?: number,
-): Promise<unknown> {
+  projectId: string
+): Promise<WorkspaceForVmAgent> {
   const db = drizzle(env.DATABASE, { schema });
 
   // Look up workspace to get nodeId — scoped to project for defense-in-depth
@@ -69,12 +71,7 @@ export async function proxyToVmAgent(
       projectId: schema.workspaces.projectId,
     })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.projectId, projectId),
-      ),
-    )
+    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.projectId, projectId)))
     .limit(1);
 
   if (!workspace) {
@@ -87,20 +84,32 @@ export async function proxyToVmAgent(
     throw new Error('Workspace has no assigned node');
   }
 
-  // Generate workspace token for VM agent auth
-  const { token } = await signTerminalToken(userId, workspaceId, env);
+  return {
+    id: workspace.id,
+    status: workspace.status,
+    nodeId: workspace.nodeId,
+    projectId: workspace.projectId ?? projectId,
+  };
+}
 
-  // Construct VM agent URL (two-level subdomain to bypass CF same-zone routing)
-  // Token sent as Bearer header (not query param) per workspace_routing.go contract
+function vmAgentToolUrl(
+  env: Env,
+  nodeId: string,
+  workspaceId: string,
+  toolPath: VmAgentToolPath
+): string {
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
-  const vmUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
+  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
+}
 
-  const timeoutMs = timeoutOverrideMs ?? getWorkspaceToolTimeout(env);
-
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-  };
+async function fetchVmAgentJson(
+  vmUrl: string,
+  method: 'GET' | 'POST',
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMs: number
+): Promise<unknown> {
   if (body) {
     headers['Content-Type'] = 'application/json';
   }
@@ -125,17 +134,78 @@ export async function proxyToVmAgent(
 }
 
 /**
+ * Look up the workspace's node, generate a JWT, and proxy a request to the VM agent.
+ * Returns the parsed JSON response from the VM agent.
+ */
+export async function proxyToVmAgent(
+  env: Env,
+  workspaceId: string,
+  userId: string,
+  projectId: string,
+  toolPath: VmAgentToolPath,
+  method: 'GET' | 'POST' = 'GET',
+  body?: unknown,
+  timeoutOverrideMs?: number
+): Promise<unknown> {
+  const workspace = await lookupWorkspaceForVmAgent(env, workspaceId, projectId);
+
+  // Generate workspace token for VM agent auth
+  const { token } = await signTerminalToken(userId, workspaceId, env);
+
+  // Construct VM agent URL (two-level subdomain to bypass CF same-zone routing)
+  // Token sent as Bearer header (not query param) per workspace_routing.go contract
+  const vmUrl = vmAgentToolUrl(env, workspace.nodeId, workspaceId, toolPath);
+
+  const timeoutMs = timeoutOverrideMs ?? getWorkspaceToolTimeout(env);
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  };
+
+  return fetchVmAgentJson(vmUrl, method, headers, body, timeoutMs);
+}
+
+/**
+ * Privileged VM-agent proxy for SAM-owned MCP operations. This uses the
+ * node-management audience, not browser/workspace-session auth, so direct
+ * workspace requests cannot trigger privileged host build/publish behavior.
+ */
+export async function proxyToVmAgentWithNodeManagement(
+  env: Env,
+  workspaceId: string,
+  userId: string,
+  projectId: string,
+  toolPath: VmAgentToolPath,
+  method: 'GET' | 'POST' = 'GET',
+  body?: unknown,
+  timeoutOverrideMs?: number
+): Promise<unknown> {
+  const workspace = await lookupWorkspaceForVmAgent(env, workspaceId, projectId);
+  const { token } = await signNodeManagementToken(userId, workspace.nodeId, workspaceId, env);
+  const vmUrl = vmAgentToolUrl(env, workspace.nodeId, workspaceId, toolPath);
+  const timeoutMs = timeoutOverrideMs ?? getWorkspaceToolTimeout(env);
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    'X-SAM-Node-Id': workspace.nodeId,
+    'X-SAM-Workspace-Id': workspaceId,
+  };
+
+  return fetchVmAgentJson(vmUrl, method, headers, body, timeoutMs);
+}
+
+/**
  * Validate that the MCP token has a workspaceId. Returns an error response if not.
  */
 export function requireWorkspace(
   requestId: string | number | null,
-  tokenData: McpTokenData,
+  tokenData: McpTokenData
 ): JsonRpcResponse | null {
   if (!tokenData.workspaceId) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'No active workspace for this session. Workspace tools are only available when a workspace is running.',
+      'No active workspace for this session. Workspace tools are only available when a workspace is running.'
     );
   }
   return null;
@@ -146,45 +216,81 @@ export function requireWorkspace(
 export async function handleGetWorkspaceInfo(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'workspace-info');
-    return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+    const result = await proxyToVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      tokenData.projectId,
+      'workspace-info'
+    );
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get workspace info: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to get workspace info: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
 export async function handleGetCredentialStatus(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'credential-status');
-    return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+    const result = await proxyToVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      tokenData.projectId,
+      'credential-status'
+    );
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get credential status: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to get credential status: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
 export async function handleGetNetworkInfo(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'network-info');
-    return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+    const result = await proxyToVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      tokenData.projectId,
+      'network-info'
+    );
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get network info: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to get network info: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
@@ -192,50 +298,80 @@ export async function handleExposePort(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
 
   const port = params.port;
   if (typeof port !== 'number' || port < 1 || port > 65535) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'port is required and must be between 1 and 65535');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'port is required and must be between 1 and 65535'
+    );
   }
   const label = typeof params.label === 'string' ? params.label : undefined;
 
   try {
-    const result = await proxyToVmAgent(
-      env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'expose-port', 'POST',
-      { port, label },
-    ) as { port?: number; externalUrl?: string; listening?: boolean };
+    const result = (await proxyToVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      tokenData.projectId,
+      'expose-port',
+      'POST',
+      { port, label }
+    )) as { port?: number; externalUrl?: string; listening?: boolean };
 
     // Append port-access token to the external URL for browser auth
     if (result.externalUrl && typeof result.externalUrl === 'string') {
       const portToken = await signPortAccessToken(
-        tokenData.userId, tokenData.workspaceId, port, env,
+        tokenData.userId,
+        tokenData.workspaceId,
+        port,
+        env
       );
       const url = new URL(result.externalUrl);
       url.searchParams.set('port_token', portToken);
       result.externalUrl = url.toString();
     }
 
-    return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to expose port: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to expose port: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
 export async function handleGetWorkspaceDiffSummary(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
-    const result = await proxyToVmAgent(env, tokenData.workspaceId, tokenData.userId, tokenData.projectId, 'diff-summary');
-    return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+    const result = await proxyToVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      tokenData.projectId,
+      'diff-summary'
+    );
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get diff summary: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to get diff summary: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }

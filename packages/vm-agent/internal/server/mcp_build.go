@@ -25,6 +25,11 @@ const buildPublishTimeout = 20 * time.Minute
 
 // McpBuildAndPublishRequest is the body for the build-and-publish endpoint.
 type McpBuildAndPublishRequest struct {
+	// Environment is the deployment environment name already authorized by the
+	// control plane MCP handler.
+	Environment string `json:"environment"`
+	// EnvironmentID is the exact deployment environment id selected by policy.
+	EnvironmentID string `json:"environmentId"`
 	// Reference is the release tag to publish (defaults to "latest").
 	Reference string `json:"reference,omitempty"`
 	// WorkingDir is the coding agent's container-side working directory under the
@@ -33,6 +38,8 @@ type McpBuildAndPublishRequest struct {
 	// workspace's primary repo dir. Optional; ignored if it is not a valid path
 	// under /workspaces or the resolved host path does not exist.
 	WorkingDir string `json:"workingDir,omitempty"`
+	// SubmittedBy carries agent/task/workspace attribution for release history.
+	SubmittedBy *publish.ReleaseSubmittedBy `json:"submittedBy,omitempty"`
 }
 
 // containerWorkspacesRoot is the in-container mount point of the workspace's
@@ -60,7 +67,7 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
 		return
 	}
 
@@ -74,6 +81,16 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 	reference := strings.TrimSpace(req.Reference)
 	if reference == "" {
 		reference = "latest"
+	}
+	environment := strings.TrimSpace(req.Environment)
+	if environment == "" {
+		writeError(w, http.StatusBadRequest, "environment is required")
+		return
+	}
+	environmentID := strings.TrimSpace(req.EnvironmentID)
+	if environmentID == "" {
+		writeError(w, http.StatusBadRequest, "environmentId is required")
+		return
 	}
 
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
@@ -104,6 +121,8 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		"component", "mcp-build-publish",
 		"workspaceId", workspaceID,
 		"projectId", projectID,
+		"environment", environment,
+		"environmentId", environmentID,
 		"reference", reference)
 
 	ctx, cancel := context.WithTimeout(r.Context(), buildPublishTimeout)
@@ -141,7 +160,7 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		Logger: log,
 	})
 
-	result, err := orch.Publish(ctx, projectID, artifact)
+	result, err := orch.Publish(ctx, projectID, environment, environmentID, artifact, req.SubmittedBy)
 	if err != nil {
 		log.Error("publish failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "publish failed: "+err.Error())

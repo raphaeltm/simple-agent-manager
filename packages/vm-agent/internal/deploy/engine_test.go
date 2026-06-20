@@ -412,6 +412,10 @@ exit 0
 	if observed.AppliedSeq != 0 {
 		t.Fatalf("failed initial release must remain retryable in heartbeat, observed applied seq %d", observed.AppliedSeq)
 	}
+	snippetPath := filepath.Join(dir, "active", "sites", "env-1.caddy")
+	if _, err := os.Stat(snippetPath); !os.IsNotExist(err) {
+		t.Fatalf("failed initial release must remove active Caddy snippet, stat err=%v", err)
+	}
 }
 
 // TestEngine_RedeployPortRebind verifies that Apply() tears down the previous

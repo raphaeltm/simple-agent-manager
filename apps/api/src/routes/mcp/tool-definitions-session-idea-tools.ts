@@ -7,7 +7,7 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'update_session_topic',
     description:
-      'Update the topic (title) of your current chat session. Use this when you understand the conversation\'s true subject after a few messages, ' +
+      "Update the topic (title) of your current chat session. Use this when you understand the conversation's true subject after a few messages, " +
       'or when the conversation changes direction. The topic is displayed in the session list and helps users identify what each session is about.',
     inputSchema: {
       type: 'object' as const,
@@ -82,7 +82,16 @@ export const SESSION_IDEA_TOOLS = [
         status: {
           type: 'string',
           description: 'Filter by idea status. Omit for all statuses.',
-          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+          enum: [
+            'draft',
+            'queued',
+            'in_progress',
+            'delegated',
+            'awaiting_followup',
+            'completed',
+            'failed',
+            'cancelled',
+          ],
         },
         limit: {
           type: 'number',
@@ -140,7 +149,8 @@ export const SESSION_IDEA_TOOLS = [
         },
         append: {
           type: 'boolean',
-          description: 'If true (default), append content to existing description. If false, replace it.',
+          description:
+            'If true (default), append content to existing description. If false, replace it.',
         },
         priority: {
           type: 'number',
@@ -238,14 +248,18 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'build_and_publish',
     description:
-      'Build your project\'s Docker Compose stack and publish it to SAM as a deployment release. Use this INSTEAD of get_registry_credentials when the project has a compose file. SAM builds your compose services on the host Docker daemon, re-pushes the built service images into your project-scoped registry namespace, and records a deployment release — entirely server-side. You run ZERO docker or registry commands and never receive a credential. Ensure all buildable services define a `build:` section and the stack builds cleanly first. Requires agent deployment to be enabled on a deployment environment.',
+      "Build your project's Docker Compose stack and publish it to SAM as a deployment release for a specific deployment environment. Use this INSTEAD of get_registry_credentials when the project has a compose file. SAM builds your compose services on the host Docker daemon, re-pushes the built service images into your project-scoped registry namespace, and records a deployment release — entirely server-side. You run ZERO docker or registry commands and never receive a credential. Ensure all buildable services define a `build:` section and the stack builds cleanly first. Requires agent deployment to be enabled on the named deployment environment and this agent profile to be allowed by that environment policy.",
     inputSchema: {
       type: 'object' as const,
       properties: {
-        reference: {
+        environment: {
           type: 'string',
           description:
-            'Optional release tag for the published images (defaults to "latest").',
+            'Deployment environment name (e.g. "staging", "production"). The environment must exist, be active, and have agent deployment enabled by a user.',
+        },
+        reference: {
+          type: 'string',
+          description: 'Optional release tag for the published images (defaults to "latest").',
         },
         workingDir: {
           type: 'string',
@@ -253,6 +267,7 @@ export const SESSION_IDEA_TOOLS = [
             'Optional absolute path to the working directory to build, under /workspaces (e.g. "/workspaces/myrepo" or a git worktree like "/workspaces/myrepo-wt-feature"). Pass your current working directory — especially when working in a git worktree — so SAM builds the source you actually edited. Defaults to the workspace\'s primary repository directory.',
         },
       },
+      required: ['environment'],
       additionalProperties: false,
     },
   },

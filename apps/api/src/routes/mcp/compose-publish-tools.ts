@@ -9,15 +9,15 @@
  * proxies a single request to the vm-agent, which owns the entire build → push →
  * release flow.
  *
- * Gated behind the same phase-D project-level agent-deploy policy as the rest of
- * the publish path.
+ * Gated behind the same phase-D environment-scoped agent-deploy policy as the
+ * registry credential path.
  */
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { isProjectAgentDeployEnabled } from '../../services/deployment-control';
+import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -25,8 +25,9 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  sanitizeUserInput,
 } from './_helpers';
-import { proxyToVmAgent, requireWorkspace } from './workspace-tools';
+import { proxyToVmAgentWithNodeManagement, requireWorkspace } from './workspace-tools';
 
 /**
  * Host build + registry push + release submission is slow (image build + push).
@@ -48,7 +49,7 @@ export async function handleBuildAndPublish(
   requestId: string | number | null,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const workspaceErr = requireWorkspace(requestId, tokenData);
   if (workspaceErr) return workspaceErr;
@@ -56,13 +57,20 @@ export async function handleBuildAndPublish(
   const { projectId } = tokenData;
   const db = drizzle(env.DATABASE, { schema });
 
-  const deployEnabled = await isProjectAgentDeployEnabled(db, projectId);
-  if (!deployEnabled) {
+  const rawEnvironment =
+    typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
+  const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
+  if (!environment) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Agent deployment is disabled for this project. Ask the project owner to enable agent deployment on a deployment environment before publishing.',
+      'A deployment environment name is required before build_and_publish can record a release.'
     );
+  }
+
+  const policyResult = await assertAgentDeploymentAllowed(db, projectId, environment, tokenData);
+  if ('error' in policyResult) {
+    return jsonRpcError(requestId, INVALID_PARAMS, policyResult.error);
   }
 
   const reference =
@@ -79,12 +87,21 @@ export async function handleBuildAndPublish(
       ? toolArgs.workingDir.trim()
       : undefined;
 
-  const proxyBody: Record<string, string> = {};
+  const proxyBody: Record<string, unknown> = {
+    environment,
+    environmentId: policyResult.environmentId,
+    submittedBy: {
+      userId: tokenData.userId,
+      workspaceId: tokenData.workspaceId,
+      taskId: tokenData.taskId || undefined,
+      agentProfileId: policyResult.taskAgentProfileId || undefined,
+    },
+  };
   if (reference) proxyBody.reference = reference;
   if (workingDir) proxyBody.workingDir = workingDir;
 
   try {
-    const result = await proxyToVmAgent(
+    const result = await proxyToVmAgentWithNodeManagement(
       env,
       tokenData.workspaceId,
       tokenData.userId,
@@ -92,7 +109,7 @@ export async function handleBuildAndPublish(
       'build-and-publish',
       'POST',
       proxyBody,
-      getBuildPublishTimeout(env),
+      getBuildPublishTimeout(env)
     );
 
     return jsonRpcSuccess(requestId, {
@@ -102,7 +119,7 @@ export async function handleBuildAndPublish(
     return jsonRpcError(
       requestId,
       INTERNAL_ERROR,
-      `Build and publish failed: ${e instanceof Error ? e.message : String(e)}`,
+      `Build and publish failed: ${e instanceof Error ? e.message : String(e)}`
     );
   }
 }

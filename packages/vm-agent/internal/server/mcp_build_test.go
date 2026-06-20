@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/rsa"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,6 +23,48 @@ import (
 // inspect` on the host daemon, which is not available in unit tests. Build/push
 // behavior is covered by the publish package's orchestrator tests and verified
 // end-to-end on staging.
+
+func mcpBuildTestServer(t *testing.T) (*Server, *rsa.PrivateKey) {
+	t.Helper()
+	s := mcpTestServer(t, "https://api.example.com")
+	validator, key := newWorkspaceCreateJWTValidator(t, s.config.NodeID)
+	s.jwtValidator = validator
+	return s, key
+}
+
+func validMcpBuildRequest() McpBuildAndPublishRequest {
+	return McpBuildAndPublishRequest{
+		Environment:   "staging",
+		EnvironmentID: "env-1",
+	}
+}
+
+func mcpBuildPOST(
+	t *testing.T,
+	s *Server,
+	key *rsa.PrivateKey,
+	path string,
+	workspaceID string,
+	body interface{},
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("mcpBuildPOST: marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, s.config.NodeID, workspaceID))
+	req.Header.Set("X-SAM-Node-Id", s.config.NodeID)
+	req.Header.Set("X-SAM-Workspace-Id", workspaceID)
+	req.SetPathValue("workspaceId", workspaceID)
+
+	rec := httptest.NewRecorder()
+	s.handleMcpBuildAndPublish(rec, req)
+	return rec
+}
 
 func TestMcpBuildAndPublish_MissingWorkspaceID(t *testing.T) {
 	t.Parallel()
@@ -42,24 +87,36 @@ func TestMcpBuildAndPublish_AuthRejection(t *testing.T) {
 	s := mcpTestServer(t, "https://api.example.com")
 
 	rec := mcpPOST(t, s, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", false,
-		McpBuildAndPublishRequest{}, s.handleMcpBuildAndPublish)
+		validMcpBuildRequest(), s.handleMcpBuildAndPublish)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 }
 
-func TestMcpBuildAndPublish_InvalidBody(t *testing.T) {
+func TestMcpBuildAndPublish_WorkspaceSessionCookieRejected(t *testing.T) {
 	t.Parallel()
 	s := mcpTestServer(t, "https://api.example.com")
 
-	cookie := injectSession(t, s.sessionManager, "ws-001")
+	rec := mcpPOST(t, s, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", true,
+		validMcpBuildRequest(), s.handleMcpBuildAndPublish)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for workspace session cookie, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMcpBuildAndPublish_InvalidBody(t *testing.T) {
+	t.Parallel()
+	s, key := mcpBuildTestServer(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-001/mcp/build-and-publish",
 		strings.NewReader("{not-json}"))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, s.config.NodeID, "ws-001"))
+	req.Header.Set("X-SAM-Node-Id", s.config.NodeID)
+	req.Header.Set("X-SAM-Workspace-Id", "ws-001")
 	req.SetPathValue("workspaceId", "ws-001")
-	req.AddCookie(cookie)
 
 	rec := httptest.NewRecorder()
 	s.handleMcpBuildAndPublish(rec, req)
@@ -75,13 +132,49 @@ func TestMcpBuildAndPublish_InvalidBody(t *testing.T) {
 	}
 }
 
+func TestMcpBuildAndPublish_MissingEnvironment(t *testing.T) {
+	t.Parallel()
+	s, key := mcpBuildTestServer(t)
+
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001",
+		McpBuildAndPublishRequest{})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing environment, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var errResp map[string]string
+	decodeJSON(t, rec, &errResp)
+	if !strings.Contains(errResp["error"], "environment is required") {
+		t.Errorf("expected environment-required error, got %q", errResp["error"])
+	}
+}
+
+func TestMcpBuildAndPublish_MissingEnvironmentID(t *testing.T) {
+	t.Parallel()
+	s, key := mcpBuildTestServer(t)
+
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001",
+		McpBuildAndPublishRequest{Environment: "staging"})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing environmentId, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var errResp map[string]string
+	decodeJSON(t, rec, &errResp)
+	if !strings.Contains(errResp["error"], "environmentId is required") {
+		t.Errorf("expected environmentId-required error, got %q", errResp["error"])
+	}
+}
+
 func TestMcpBuildAndPublish_WorkspaceNotFound(t *testing.T) {
 	t.Parallel()
-	s := mcpTestServer(t, "https://api.example.com")
+	s, key := mcpBuildTestServer(t)
 
 	// No workspace registered.
-	rec := mcpPOST(t, s, "/workspaces/ws-missing/mcp/build-and-publish", "ws-missing", true,
-		McpBuildAndPublishRequest{}, s.handleMcpBuildAndPublish)
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-missing/mcp/build-and-publish", "ws-missing",
+		validMcpBuildRequest())
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing workspace, got %d (body: %s)", rec.Code, rec.Body.String())
@@ -96,7 +189,7 @@ func TestMcpBuildAndPublish_WorkspaceNotFound(t *testing.T) {
 
 func TestMcpBuildAndPublish_MissingWorkspaceDir(t *testing.T) {
 	t.Parallel()
-	s := mcpTestServer(t, "https://api.example.com")
+	s, key := mcpBuildTestServer(t)
 
 	// Workspace exists but has no cloned repository path.
 	s.workspaces["ws-001"] = &WorkspaceRuntime{
@@ -106,8 +199,8 @@ func TestMcpBuildAndPublish_MissingWorkspaceDir(t *testing.T) {
 		CallbackToken: "tok",
 	}
 
-	rec := mcpPOST(t, s, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", true,
-		McpBuildAndPublishRequest{}, s.handleMcpBuildAndPublish)
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001",
+		validMcpBuildRequest())
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for missing workspaceDir, got %d (body: %s)", rec.Code, rec.Body.String())
@@ -122,7 +215,7 @@ func TestMcpBuildAndPublish_MissingWorkspaceDir(t *testing.T) {
 
 func TestMcpBuildAndPublish_MissingProjectID(t *testing.T) {
 	t.Parallel()
-	s := mcpTestServer(t, "https://api.example.com")
+	s, key := mcpBuildTestServer(t)
 	// Ensure the config-level fallback projectID is also empty so the runtime
 	// value is the only source.
 	s.config.ProjectID = ""
@@ -134,8 +227,8 @@ func TestMcpBuildAndPublish_MissingProjectID(t *testing.T) {
 		CallbackToken: "tok",
 	}
 
-	rec := mcpPOST(t, s, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", true,
-		McpBuildAndPublishRequest{}, s.handleMcpBuildAndPublish)
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001",
+		validMcpBuildRequest())
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for missing projectID, got %d (body: %s)", rec.Code, rec.Body.String())
@@ -150,7 +243,7 @@ func TestMcpBuildAndPublish_MissingProjectID(t *testing.T) {
 
 func TestMcpBuildAndPublish_MissingCallbackToken(t *testing.T) {
 	t.Parallel()
-	s := mcpTestServer(t, "https://api.example.com")
+	s, key := mcpBuildTestServer(t)
 
 	s.workspaces["ws-001"] = &WorkspaceRuntime{
 		ID:           "ws-001",
@@ -159,8 +252,8 @@ func TestMcpBuildAndPublish_MissingCallbackToken(t *testing.T) {
 		ProjectID:    "proj-1",
 	}
 
-	rec := mcpPOST(t, s, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", true,
-		McpBuildAndPublishRequest{}, s.handleMcpBuildAndPublish)
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001",
+		validMcpBuildRequest())
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for missing callback token, got %d (body: %s)", rec.Code, rec.Body.String())
@@ -180,7 +273,7 @@ func TestMcpBuildAndPublish_MissingCallbackToken(t *testing.T) {
 // fail with the project-link error).
 func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
 	t.Parallel()
-	s := mcpTestServer(t, "https://api.example.com")
+	s, key := mcpBuildTestServer(t)
 	s.config.ProjectID = "proj-from-config"
 
 	s.workspaces["ws-001"] = &WorkspaceRuntime{
@@ -191,8 +284,8 @@ func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
 		CallbackToken: "tok",
 	}
 
-	rec := mcpPOST(t, s, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", true,
-		McpBuildAndPublishRequest{}, s.handleMcpBuildAndPublish)
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001",
+		validMcpBuildRequest())
 
 	// The build step shells out to docker and will fail in CI/unit env, but the
 	// failure must be a build failure, NOT the project-link validation error.

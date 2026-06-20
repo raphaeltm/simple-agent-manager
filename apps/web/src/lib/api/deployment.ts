@@ -36,6 +36,12 @@ export interface DeploymentReleaseSummary {
   status: string;
   createdBy: string;
   createdAt: string;
+  submittedBy?: {
+    userId: string | null;
+    workspaceId: string | null;
+    taskId: string | null;
+    agentProfileId: string | null;
+  } | null;
 }
 
 export interface DeploymentEnvironmentNodeSummary extends Pick<
@@ -85,16 +91,16 @@ export interface DeleteDeploymentEnvironmentResponse {
 }
 
 export async function listDeploymentEnvironments(
-  projectId: string,
+  projectId: string
 ): Promise<{ environments: DeploymentEnvironment[] }> {
   return request<{ environments: DeploymentEnvironment[] }>(
-    `/api/projects/${projectId}/environments`,
+    `/api/projects/${projectId}/environments`
   );
 }
 
 export async function createDeploymentEnvironment(
   projectId: string,
-  name: string,
+  name: string
 ): Promise<DeploymentEnvironment> {
   return request<DeploymentEnvironment>(`/api/projects/${projectId}/environments`, {
     method: 'POST',
@@ -105,29 +111,31 @@ export async function createDeploymentEnvironment(
 export async function updateDeploymentEnvironmentPolicy(
   projectId: string,
   envId: string,
-  data: { agentDeployEnabled?: boolean; allowedDeployProfileIds?: string[] | null },
+  data: { agentDeployEnabled?: boolean; allowedDeployProfileIds?: string[] | null }
 ): Promise<DeploymentEnvironment> {
-  return request<DeploymentEnvironment>(
-    `/api/projects/${projectId}/environments/${envId}/policy`,
-    { method: 'PATCH', body: JSON.stringify(data) },
-  );
+  return request<DeploymentEnvironment>(`/api/projects/${projectId}/environments/${envId}/policy`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
 }
 
 export async function deleteDeploymentEnvironment(
   projectId: string,
-  envId: string,
+  envId: string
 ): Promise<DeleteDeploymentEnvironmentResponse> {
   return request<DeleteDeploymentEnvironmentResponse>(
     `/api/projects/${projectId}/environments/${envId}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }
   );
 }
 
 export async function getDeploymentEnvironmentLogs(
   projectId: string,
   envId: string,
-  filter?: Partial<NodeLogFilter>,
-): Promise<NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }> {
+  filter?: Partial<NodeLogFilter>
+): Promise<
+  NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }
+> {
   const params = new URLSearchParams();
   if (filter?.source && filter.source !== 'all') params.set('source', filter.source);
   if (filter?.level) params.set('level', filter.level);
@@ -139,17 +147,17 @@ export async function getDeploymentEnvironmentLogs(
   if (filter?.limit) params.set('limit', String(filter.limit));
 
   const qs = params.toString();
-  return request<NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }>(
-    `/api/projects/${projectId}/environments/${envId}/logs${qs ? `?${qs}` : ''}`,
-  );
+  return request<
+    NodeLogResponse & { source?: string; nodeId?: string | null; unavailableReason?: string }
+  >(`/api/projects/${projectId}/environments/${envId}/logs${qs ? `?${qs}` : ''}`);
 }
 
 export async function listDeploymentEnvironmentContainers(
   projectId: string,
-  envId: string,
+  envId: string
 ): Promise<NodeContainerListResponse> {
   return request<NodeContainerListResponse>(
-    `/api/projects/${projectId}/environments/${envId}/containers`,
+    `/api/projects/${projectId}/environments/${envId}/containers`
   );
 }
 
@@ -166,10 +174,10 @@ export interface DeploymentEnvironmentMetricsResponse {
 
 export async function getDeploymentEnvironmentMetrics(
   projectId: string,
-  envId: string,
+  envId: string
 ): Promise<DeploymentEnvironmentMetricsResponse> {
   return request<DeploymentEnvironmentMetricsResponse>(
-    `/api/projects/${projectId}/environments/${envId}/metrics`,
+    `/api/projects/${projectId}/environments/${envId}/metrics`
   );
 }
 
@@ -183,10 +191,10 @@ export interface DeploymentSecretEntry {
 
 export async function listDeploymentSecrets(
   projectId: string,
-  envId: string,
+  envId: string
 ): Promise<{ secrets: DeploymentSecretEntry[] }> {
   return request<{ secrets: DeploymentSecretEntry[] }>(
-    `/api/projects/${projectId}/environments/${envId}/secrets`,
+    `/api/projects/${projectId}/environments/${envId}/secrets`
   );
 }
 
@@ -194,22 +202,22 @@ export async function setDeploymentSecret(
   projectId: string,
   envId: string,
   name: string,
-  value: string,
+  value: string
 ): Promise<{ name: string; created: boolean; updatedAt: string }> {
   return request<{ name: string; created: boolean; updatedAt: string }>(
     `/api/projects/${projectId}/environments/${envId}/secrets/${encodeURIComponent(name)}`,
-    { method: 'PUT', body: JSON.stringify({ value }) },
+    { method: 'PUT', body: JSON.stringify({ value }) }
   );
 }
 
 export async function deleteDeploymentSecret(
   projectId: string,
   envId: string,
-  name: string,
+  name: string
 ): Promise<{ deleted: boolean }> {
   return request<{ deleted: boolean }>(
     `/api/projects/${projectId}/environments/${envId}/secrets/${encodeURIComponent(name)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }
   );
 }
 
@@ -223,17 +231,19 @@ export interface ProjectDeploymentGcpResponse {
   createdAt?: string;
 }
 
-export async function getProjectDeploymentGcp(projectId: string): Promise<ProjectDeploymentGcpResponse> {
+export async function getProjectDeploymentGcp(
+  projectId: string
+): Promise<ProjectDeploymentGcpResponse> {
   return request<ProjectDeploymentGcpResponse>(`/api/projects/${projectId}/deployment/gcp`);
 }
 
 export async function setupProjectDeploymentGcp(
   projectId: string,
-  data: { oauthHandle: string; gcpProjectId: string },
+  data: { oauthHandle: string; gcpProjectId: string }
 ): Promise<{ success: boolean; credential: ProjectDeploymentGcpResponse }> {
   return request<{ success: boolean; credential: ProjectDeploymentGcpResponse }>(
     `/api/projects/${projectId}/deployment/gcp/setup`,
-    { method: 'POST', body: JSON.stringify(data) },
+    { method: 'POST', body: JSON.stringify(data) }
   );
 }
 
@@ -245,12 +255,12 @@ export async function deleteProjectDeploymentGcp(projectId: string): Promise<{ s
 
 export async function listGcpProjectsForDeploy(
   projectId: string,
-  oauthHandle: string,
+  oauthHandle: string
 ): Promise<{ projects: GcpProject[] }> {
-  return request<{ projects: GcpProject[] }>(
-    `/api/projects/${projectId}/deployment/gcp/projects`,
-    { method: 'POST', body: JSON.stringify({ oauthHandle }) },
-  );
+  return request<{ projects: GcpProject[] }>(`/api/projects/${projectId}/deployment/gcp/projects`, {
+    method: 'POST',
+    body: JSON.stringify({ oauthHandle }),
+  });
 }
 
 /**
@@ -258,7 +268,5 @@ export async function listGcpProjectsForDeploy(
  * The handle is stored server-side and never appears in the URL.
  */
 export async function getDeployOAuthResult(projectId: string): Promise<{ handle: string }> {
-  return request<{ handle: string }>(
-    `/api/projects/${projectId}/deployment/gcp/oauth-result`,
-  );
+  return request<{ handle: string }>(`/api/projects/${projectId}/deployment/gcp/oauth-result`);
 }

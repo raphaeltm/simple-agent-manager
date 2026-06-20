@@ -119,6 +119,10 @@ write_files:
       Environment=NODE_ROLE={{ role }}
       Environment=ENVIRONMENT_ID={{ environment_id }}
       Environment=DEPLOY_SIGNING_PUB_KEY={{ deploy_signing_pub_key }}
+      Environment=DEPLOY_ACME_EMAIL={{ deploy_acme_email }}
+      Environment=DEPLOY_ACME_CA={{ deploy_acme_ca }}
+      Environment="DEPLOY_COMPOSE_CMD={{ deploy_compose_cmd }}"
+      Environment=DEPLOY_HEALTH_TIMEOUT={{ deploy_health_timeout }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5

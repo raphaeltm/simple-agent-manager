@@ -1,23 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockIsProjectAgentDeployEnabled = vi.fn();
-const mockProxyToVmAgent = vi.fn();
+const mockAssertAgentDeploymentAllowed = vi.fn();
+const mockProxyToVmAgentWithNodeManagement = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({ mocked: true })),
 }));
 
 vi.mock('../../src/services/deployment-control', () => ({
-  isProjectAgentDeployEnabled: (...args: unknown[]) => mockIsProjectAgentDeployEnabled(...args),
+  assertAgentDeploymentAllowed: (...args: unknown[]) => mockAssertAgentDeploymentAllowed(...args),
 }));
 
 vi.mock('../../src/routes/mcp/workspace-tools', async () => {
   const actual = await vi.importActual<typeof import('../../src/routes/mcp/workspace-tools')>(
-    '../../src/routes/mcp/workspace-tools',
+    '../../src/routes/mcp/workspace-tools'
   );
   return {
     ...actual,
-    proxyToVmAgent: (...args: unknown[]) => mockProxyToVmAgent(...args),
+    proxyToVmAgentWithNodeManagement: (...args: unknown[]) =>
+      mockProxyToVmAgentWithNodeManagement(...args),
   };
 });
 
@@ -48,44 +49,82 @@ describe('handleBuildAndPublish', () => {
       'req-1',
       {},
       tokenData({ workspaceId: undefined }),
-      env(),
+      env()
     );
 
     expect(result.error?.message).toContain('No active workspace');
-    expect(mockIsProjectAgentDeployEnabled).not.toHaveBeenCalled();
-    expect(mockProxyToVmAgent).not.toHaveBeenCalled();
+    expect(mockAssertAgentDeploymentAllowed).not.toHaveBeenCalled();
+    expect(mockProxyToVmAgentWithNodeManagement).not.toHaveBeenCalled();
   });
 
-  it('rejects when agent deployment is not enabled for the project', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(false);
-
+  it('rejects when no target environment is provided', async () => {
     const result = await handleBuildAndPublish('req-1', {}, tokenData(), env());
 
+    expect(result.error?.message).toContain('deployment environment name is required');
+    expect(mockAssertAgentDeploymentAllowed).not.toHaveBeenCalled();
+    expect(mockProxyToVmAgentWithNodeManagement).not.toHaveBeenCalled();
+  });
+
+  it('rejects when agent deployment is not enabled for the target environment', async () => {
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      error: 'Agent deployment is disabled for environment staging.',
+    });
+
+    const result = await handleBuildAndPublish(
+      'req-1',
+      { environment: 'staging' },
+      tokenData(),
+      env()
+    );
+
     expect(result.error?.message).toContain('Agent deployment is disabled');
-    expect(mockIsProjectAgentDeployEnabled).toHaveBeenCalledWith(expect.anything(), 'proj-1');
-    expect(mockProxyToVmAgent).not.toHaveBeenCalled();
+    expect(mockAssertAgentDeploymentAllowed).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'staging',
+      tokenData()
+    );
+    expect(mockProxyToVmAgentWithNodeManagement).not.toHaveBeenCalled();
   });
 
   it('proxies to the vm-agent build-and-publish path and returns the release result', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockResolvedValue({
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: { agentDeployEnabled: true, allowedDeployProfileIds: [] },
+      taskAgentProfileId: 'profile-1',
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
       releaseId: 'rel-1',
       version: 1,
       status: 'created',
     });
 
-    const result = await handleBuildAndPublish('req-1', {}, tokenData(), env());
+    const result = await handleBuildAndPublish(
+      'req-1',
+      { environment: ' staging ' },
+      tokenData(),
+      env()
+    );
 
     expect(result.error).toBeUndefined();
-    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
       'build-and-publish',
       'POST',
-      {},
-      expect.any(Number),
+      {
+        environment: 'staging',
+        environmentId: 'env-1',
+        submittedBy: {
+          userId: 'user-1',
+          workspaceId: 'ws-1',
+          taskId: 'task-1',
+          agentProfileId: 'profile-1',
+        },
+      },
+      expect.any(Number)
     );
 
     const text = result.result?.content?.[0]?.text as string;
@@ -95,115 +134,185 @@ describe('handleBuildAndPublish', () => {
   });
 
   it('forwards a trimmed reference argument to the vm-agent', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-2', version: 2, status: 'created' });
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
+      releaseId: 'rel-2',
+      version: 2,
+      status: 'created',
+    });
 
-    await handleBuildAndPublish('req-1', { reference: '  v2  ' }, tokenData(), env());
+    await handleBuildAndPublish(
+      'req-1',
+      { environment: 'staging', reference: '  v2  ' },
+      tokenData(),
+      env()
+    );
 
-    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
       'build-and-publish',
       'POST',
-      { reference: 'v2' },
-      expect.any(Number),
+      expect.objectContaining({ environment: 'staging', environmentId: 'env-1', reference: 'v2' }),
+      expect.any(Number)
     );
   });
 
   it('ignores a blank reference argument', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-3', version: 3, status: 'created' });
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
+      releaseId: 'rel-3',
+      version: 3,
+      status: 'created',
+    });
 
-    await handleBuildAndPublish('req-1', { reference: '   ' }, tokenData(), env());
+    await handleBuildAndPublish(
+      'req-1',
+      { environment: 'staging', reference: '   ' },
+      tokenData(),
+      env()
+    );
 
-    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
       'build-and-publish',
       'POST',
-      {},
-      expect.any(Number),
+      expect.objectContaining({ environment: 'staging', environmentId: 'env-1' }),
+      expect.any(Number)
     );
   });
 
   it('forwards a trimmed workingDir argument to the vm-agent', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-4', version: 4, status: 'created' });
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
+      releaseId: 'rel-4',
+      version: 4,
+      status: 'created',
+    });
 
     await handleBuildAndPublish(
       'req-1',
-      { workingDir: '  /workspaces/crewai-wt-feature  ' },
+      { environment: 'staging', workingDir: '  /workspaces/crewai-wt-feature  ' },
       tokenData(),
-      env(),
+      env()
     );
 
-    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
       'build-and-publish',
       'POST',
-      { workingDir: '/workspaces/crewai-wt-feature' },
-      expect.any(Number),
+      expect.objectContaining({
+        environment: 'staging',
+        environmentId: 'env-1',
+        workingDir: '/workspaces/crewai-wt-feature',
+      }),
+      expect.any(Number)
     );
   });
 
   it('forwards both reference and workingDir when provided together', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-5', version: 5, status: 'created' });
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
+      releaseId: 'rel-5',
+      version: 5,
+      status: 'created',
+    });
 
     await handleBuildAndPublish(
       'req-1',
-      { reference: 'v5', workingDir: '/workspaces/crewai-wt-feature' },
+      { environment: 'staging', reference: 'v5', workingDir: '/workspaces/crewai-wt-feature' },
       tokenData(),
-      env(),
+      env()
     );
 
-    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
       'build-and-publish',
       'POST',
-      { reference: 'v5', workingDir: '/workspaces/crewai-wt-feature' },
-      expect.any(Number),
+      expect.objectContaining({
+        environment: 'staging',
+        environmentId: 'env-1',
+        reference: 'v5',
+        workingDir: '/workspaces/crewai-wt-feature',
+      }),
+      expect.any(Number)
     );
   });
 
   it('ignores a blank or non-string workingDir argument', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-6', version: 6, status: 'created' });
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
+      releaseId: 'rel-6',
+      version: 6,
+      status: 'created',
+    });
 
     await handleBuildAndPublish(
       'req-1',
-      { workingDir: '   ', reference: 42 as unknown as string },
+      { environment: 'staging', workingDir: '   ', reference: 42 as unknown as string },
       tokenData(),
-      env(),
+      env()
     );
 
-    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
       'build-and-publish',
       'POST',
-      {},
-      expect.any(Number),
+      expect.objectContaining({ environment: 'staging', environmentId: 'env-1' }),
+      expect.any(Number)
     );
   });
 
   it('surfaces a vm-agent failure as an internal error', async () => {
-    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
-    mockProxyToVmAgent.mockRejectedValue(new Error('VM agent returned 500: build failed'));
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockRejectedValue(
+      new Error('VM agent returned 500: build failed')
+    );
 
-    const result = await handleBuildAndPublish('req-1', {}, tokenData(), env());
+    const result = await handleBuildAndPublish(
+      'req-1',
+      { environment: 'staging' },
+      tokenData(),
+      env()
+    );
 
     expect(result.error?.message).toContain('Build and publish failed');
     expect(result.error?.message).toContain('build failed');

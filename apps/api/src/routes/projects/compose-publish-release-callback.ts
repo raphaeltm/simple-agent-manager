@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { parse as parseYaml } from 'yaml';
 
@@ -7,7 +7,6 @@ import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
-import { getProjectAgentDeployEnvironmentId } from '../../services/deployment-control';
 import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   provisionDeploymentNode,
@@ -34,10 +33,10 @@ import { verifyWorkspacePublishCallback } from './_callback-auth';
  * declares Docker Model Runner `provider:` services, the node is sized up
  * (medium) so the runner daemon + model weights fit.
  *
- * Releases require a NOT-NULL environmentId, but the publish path has no
- * environment name (the workspace callback JWT carries only a workspaceId). We
- * record the release against the project's canonical agent-deploy environment
- * (oldest active agent-deploy-enabled environment).
+ * Releases require a NOT-NULL environmentId. The MCP handler policy-checks the
+ * named target environment, then the vm-agent carries that environment name/id
+ * through this callback so release recording cannot drift to a different
+ * enabled environment.
  *
  * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
  * See: .claude/rules/34-vm-agent-callback-auth.md
@@ -49,6 +48,15 @@ interface ServiceReleaseInput {
   sourceRef?: unknown;
   pushedRef?: unknown;
   digest?: unknown;
+}
+
+interface SubmittedByInput {
+  taskId?: unknown;
+  agentProfileId?: unknown;
+}
+
+function cleanOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
 /**
@@ -79,40 +87,79 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
     c,
     'compose_publish_release',
-    'Invalid token scope for compose-publish release',
+    'Invalid token scope for compose-publish release'
   );
-
-  // Project-level agent-deploy gate. The publish path has no environment name or
-  // taskId (workspace callback JWT), so we record the release against the
-  // project's canonical active agent-deploy-enabled environment. If none exists,
-  // the project has not opted in to agent deploy and cannot publish.
-  const environmentId = await getProjectAgentDeployEnvironmentId(db, projectId);
-  if (!environmentId) {
-    log.warn('compose_publish_release.deploy_disabled', {
-      projectId,
-      workspaceId,
-      action: 'rejected',
-    });
-    throw errors.forbidden(
-      'Agent deployment is disabled for this project. Enable it on a deployment environment before publishing.',
-    );
-  }
 
   const submission = await c.req.json().catch(() => null);
   if (!submission || typeof submission !== 'object') {
     throw errors.badRequest('Invalid release submission body');
   }
+  const submissionBody = submission as Record<string, unknown>;
 
-  const composeYaml = (submission as { composeYaml?: unknown }).composeYaml;
+  const environment = cleanOptionalString(submissionBody.environment);
+  const environmentId = cleanOptionalString(submissionBody.environmentId);
+  if (!environment || !environmentId) {
+    throw errors.badRequest('Release submission is missing target deployment environment');
+  }
+
+  const envRows = await db
+    .select({
+      id: schema.deploymentEnvironments.id,
+      nodeId: schema.deploymentEnvironments.nodeId,
+      agentDeployEnabled: schema.deploymentEnvironments.agentDeployEnabled,
+    })
+    .from(schema.deploymentEnvironments)
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.deploymentEnvironments.projectId, projectId),
+        eq(schema.deploymentEnvironments.name, environment),
+        eq(schema.deploymentEnvironments.status, 'active')
+      )
+    )
+    .limit(1);
+
+  const environmentRow = envRows[0];
+  if (!environmentRow || !environmentRow.agentDeployEnabled) {
+    log.warn('compose_publish_release.environment_denied', {
+      projectId,
+      workspaceId,
+      environment,
+      environmentId,
+      action: 'rejected',
+    });
+    throw errors.forbidden(
+      `Agent deployment is disabled or unavailable for environment '${environment}'.`
+    );
+  }
+
+  const composeYaml = submissionBody.composeYaml;
   if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
     throw errors.badRequest('Release submission is missing composeYaml');
   }
 
-  const servicesRaw = (submission as { services?: unknown }).services;
+  const servicesRaw = submissionBody.services;
   const services: ServiceReleaseInput[] = Array.isArray(servicesRaw) ? servicesRaw : [];
   if (services.length === 0) {
     throw errors.badRequest('Release submission must include at least one service');
   }
+
+  const submittedByRaw = submissionBody.submittedBy;
+  const submittedBy =
+    submittedByRaw && typeof submittedByRaw === 'object'
+      ? (submittedByRaw as SubmittedByInput)
+      : {};
+  const manifestSubmission: Record<string, unknown> = {
+    ...submissionBody,
+    environment,
+    environmentId,
+    submittedBy: {
+      userId,
+      workspaceId,
+      taskId: cleanOptionalString(submittedBy.taskId),
+      agentProfileId: cleanOptionalString(submittedBy.agentProfileId),
+    },
+  };
 
   // Compute the next version for this environment. The unique (environmentId,
   // version) index makes a concurrent double-publish fail the insert rather than
@@ -133,7 +180,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       environmentId,
       // The captured submission IS the manifest for compose-publish releases;
       // the `source` discriminator tells consumers how to interpret it.
-      manifest: JSON.stringify(submission),
+      manifest: JSON.stringify(manifestSubmission),
       version: nextVersion,
       status: 'created',
       source: 'compose-publish',
@@ -157,25 +204,18 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     releaseId,
     version: nextVersion,
     serviceCount: services.length,
-    reference: (submission as { reference?: unknown }).reference ?? null,
+    reference: submissionBody.reference ?? null,
   });
 
   // Provision a deployment node for this environment if one is not already
   // linked, so the captured release rolls out. Failures here must NOT fail the
   // release recording (the release is already durable); the node can be
   // provisioned on the next release or via the deploy verb.
-  let nodeId: string | null = null;
+  let nodeId: string | null = environmentRow.nodeId ?? null;
   try {
-    const envRows = await db
-      .select({ nodeId: schema.deploymentEnvironments.nodeId })
-      .from(schema.deploymentEnvironments)
-      .where(eq(schema.deploymentEnvironments.id, environmentId))
-      .limit(1);
-    nodeId = envRows[0]?.nodeId ?? null;
-
     if (!nodeId) {
       const vmSizeOverride = composeHasModelProvider(composeYaml)
-        ? (c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE)
+        ? c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE
         : undefined;
 
       const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {

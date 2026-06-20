@@ -9,11 +9,11 @@
  * compose-publish path where the user's INTENT is "run my compose, unchanged".
  *
  * This module takes the opposite posture: validate-and-transform-in-place. It
- * parses the raw `composeYaml` captured at publish time, applies a deny-list
- * pass that WARNS (never hard-errors) while stripping or transforming the few
- * fields SAM must control, and re-emits the same compose with SAM's required
- * injections layered on. The full multi-service topology — including
- * Docker Model Runner `provider:` services — survives.
+ * parses the raw `composeYaml` captured at publish time, hard-rejects unsafe
+ * volume mounts, applies a deny-list pass that WARNS while stripping or
+ * transforming the few fields SAM must control, and re-emits the same compose
+ * with SAM's required injections layered on. The full multi-service topology —
+ * including Docker Model Runner `provider:` services — survives.
  *
  * What the transform does, per service:
  *  - `provider:` model services pass through VERBATIM (Model Runner manages
@@ -30,19 +30,26 @@
  *  - SAM injects: the per-environment bridge network, sam.* labels,
  *    `restart: unless-stopped`, bounded json-file logging, and default resource
  *    limits when the compose omits `deploy.resources`.
- *  - `image:`, `command`, `entrypoint`, `environment`, `volumes`,
+ *  - `image:`, `command`, `entrypoint`, `environment`, safe named `volumes`,
  *    `depends_on`, `healthcheck`, `expose`, and any explicit `deploy.resources`
  *    are PRESERVED.
  *
  * Top-level: `networks` is stripped (warned) and replaced with SAM's bridge;
- * `volumes` are preserved.
+ * safe named `volumes` are preserved.
  *
  * The route hostnames/hostPorts are derived with the SAME primitives the
  * manifest path uses ({@link assignRouteTargets}), so DNS upsert, Caddy
  * routing, and the docker-published loopback bindings all agree.
  */
 
-import { DENIED_SERVICE_FIELDS, DENIED_TOP_LEVEL_FIELDS, extractContainerPort } from '@simple-agent-manager/shared';
+import {
+  DENIED_SERVICE_FIELDS,
+  DENIED_TOP_LEVEL_FIELDS,
+  extractContainerPort,
+  parseServiceVolumes,
+  parseVolumes,
+  type ComposeParseError,
+} from '@simple-agent-manager/shared';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import {
@@ -97,7 +104,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function buildPushedRefMap(submission: ComposePublishSubmission): Map<string, string> {
   const map = new Map<string, string>();
   for (const svc of submission.services ?? []) {
-    if (typeof svc.serviceName === 'string' && typeof svc.pushedRef === 'string' && svc.pushedRef.trim() !== '') {
+    if (
+      typeof svc.serviceName === 'string' &&
+      typeof svc.pushedRef === 'string' &&
+      svc.pushedRef.trim() !== ''
+    ) {
       map.set(svc.serviceName, svc.pushedRef);
     }
   }
@@ -117,6 +128,50 @@ function collectServiceContainerPorts(ports: unknown): number[] {
   return result;
 }
 
+function formatComposeParseErrors(errors: ComposeParseError[]): string {
+  return errors.map((err) => `${err.path}: ${err.message}`).join('; ');
+}
+
+/**
+ * The raw compose-publish path preserves service volume syntax to keep real
+ * Docker Compose files intact. Before doing that, enforce the same safety
+ * posture as the strict SAM compose parser: named volumes only, no host bind
+ * mounts, no Docker socket, no tmpfs, no external volumes, and no custom
+ * volume drivers.
+ */
+function validateSafeNamedVolumes(
+  doc: Record<string, unknown>,
+  rawServices: Record<string, unknown>
+): void {
+  const errors: ComposeParseError[] = [];
+  const volumes = parseVolumes(doc.volumes, errors);
+  const declaredVolumes = new Set(Object.keys(volumes));
+
+  for (const [serviceName, rawService] of Object.entries(rawServices)) {
+    if (!isPlainObject(rawService)) continue;
+
+    const parsedVolumes = parseServiceVolumes(
+      rawService.volumes,
+      `services.${serviceName}`,
+      errors
+    );
+    for (const [index, volume] of parsedVolumes.entries()) {
+      if (!declaredVolumes.has(volume.name)) {
+        errors.push({
+          path: `services.${serviceName}.volumes[${index}]`,
+          message: `Volume "${volume.name}" is not declared in top-level "volumes". Declared volumes: ${[...declaredVolumes].join(', ') || '(none)'}`,
+        });
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Compose-publish volume validation failed: ${formatComposeParseErrors(errors)}`
+    );
+  }
+}
+
 /**
  * Build the SAM injections that EVERY normal (non-provider) service receives.
  * Mirrors the manifest renderer's injections ({@link renderCompose}).
@@ -126,7 +181,7 @@ function applySamServiceInjections(
   name: string,
   opts: ComposePublishApplyOptions,
   networkName: string,
-  defaultMemMb: number,
+  defaultMemMb: number
 ): void {
   // Resource limits — preserve explicit deploy.resources, otherwise default.
   const existingDeploy = isPlainObject(service.deploy) ? service.deploy : {};
@@ -166,7 +221,7 @@ function applySamServiceInjections(
  */
 export function buildComposePublishApplyPayload(
   submission: ComposePublishSubmission,
-  opts: ComposePublishApplyOptions,
+  opts: ComposePublishApplyOptions
 ): ComposePublishApplyResult {
   const warnings: ComposePublishWarning[] = [];
   const defaultMemMb = opts.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB;
@@ -179,13 +234,16 @@ export function buildComposePublishApplyPayload(
     throw new Error(`Failed to parse captured composeYaml: ${message}`);
   }
   if (!isPlainObject(doc)) {
-    throw new Error('Captured composeYaml is not a valid compose document (expected a mapping at the top level)');
+    throw new Error(
+      'Captured composeYaml is not a valid compose document (expected a mapping at the top level)'
+    );
   }
 
   const rawServices = doc.services;
   if (!isPlainObject(rawServices)) {
     throw new Error('Captured composeYaml has no services mapping');
   }
+  validateSafeNamedVolumes(doc, rawServices);
 
   const pushedRefByService = buildPushedRefMap(submission);
   const networkName = `sam-internal-${opts.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -201,7 +259,11 @@ export function buildComposePublishApplyPayload(
   for (const [name, rawService] of Object.entries(rawServices)) {
     if (!isPlainObject(rawService)) {
       // Pass through anything we don't understand verbatim, with a warning.
-      warnings.push({ service: name, field: '(service)', message: 'Service definition is not a mapping; passed through unchanged' });
+      warnings.push({
+        service: name,
+        field: '(service)',
+        message: 'Service definition is not a mapping; passed through unchanged',
+      });
       outServices[name] = rawService;
       continue;
     }
@@ -226,7 +288,8 @@ export function buildComposePublishApplyPayload(
         warnings.push({
           service: name,
           field: 'build',
-          message: 'Service used "build" but no pushed image was found for it; the deployment will fail to pull an image for this service.',
+          message:
+            'Service used "build" but no pushed image was found for it; the deployment will fail to pull an image for this service.',
         });
       }
     } else {
@@ -252,7 +315,11 @@ export function buildComposePublishApplyPayload(
     for (const deniedField of Object.keys(DENIED_SERVICE_FIELDS)) {
       if (deniedField === 'build') continue; // handled above
       if (deniedField in service) {
-        warnings.push({ service: name, field: deniedField, message: DENIED_SERVICE_FIELDS[deniedField]! });
+        warnings.push({
+          service: name,
+          field: deniedField,
+          message: DENIED_SERVICE_FIELDS[deniedField]!,
+        });
         delete service[deniedField];
       }
     }

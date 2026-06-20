@@ -48,13 +48,23 @@ volumes:
   pgdata:
 `;
 
-function makeSubmission(overrides: Partial<ComposePublishSubmission> = {}): ComposePublishSubmission {
+function makeSubmission(
+  overrides: Partial<ComposePublishSubmission> = {}
+): ComposePublishSubmission {
   return {
     reference: 'sam-registry.local:5050/crewai',
     composeYaml: CREWAI_COMPOSE,
     services: [
-      { serviceName: 'app', pushedRef: 'sam-registry.local:5050/proj/app@sha256:aaa', digest: 'sha256:aaa' },
-      { serviceName: 'worker', pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb', digest: 'sha256:bbb' },
+      {
+        serviceName: 'app',
+        pushedRef: 'sam-registry.local:5050/proj/app@sha256:aaa',
+        digest: 'sha256:aaa',
+      },
+      {
+        serviceName: 'worker',
+        pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb',
+        digest: 'sha256:bbb',
+      },
     ],
     ...overrides,
   };
@@ -88,7 +98,11 @@ describe('buildComposePublishApplyPayload', () => {
     const submission = makeSubmission({
       services: [
         // Only `worker` has a pushedRef; `app` (which uses build:) has none.
-        { serviceName: 'worker', pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb', digest: 'sha256:bbb' },
+        {
+          serviceName: 'worker',
+          pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb',
+          digest: 'sha256:bbb',
+        },
       ],
     });
     const result = buildComposePublishApplyPayload(submission, OPTS);
@@ -108,9 +122,7 @@ describe('buildComposePublishApplyPayload', () => {
     expect(route.service).toBe('app');
     expect(route.containerPort).toBe(8000);
     expect(route.hostPort).toBeGreaterThanOrEqual(35_000);
-    expect(route.hostname).toBe(
-      `r1-app-8000-${ENVIRONMENT_ID}.apps.${BASE_DOMAIN}`,
-    );
+    expect(route.hostname).toBe(`r1-app-8000-${ENVIRONMENT_ID}.apps.${BASE_DOMAIN}`);
 
     // app's ports are rewritten to a loopback binding agreeing with the route.
     expect(doc.services.app.ports).toEqual([`127.0.0.1:${route.hostPort}:8000`]);
@@ -130,7 +142,7 @@ describe('buildComposePublishApplyPayload', () => {
 `;
     const result = buildComposePublishApplyPayload(
       makeSubmission({ composeYaml: composeWithDenied, services: [] }),
-      OPTS,
+      OPTS
     );
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
 
@@ -150,7 +162,7 @@ networks:
 `;
     const result = buildComposePublishApplyPayload(
       makeSubmission({ composeYaml: composeWithNetworks, services: [] }),
-      OPTS,
+      OPTS
     );
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
 
@@ -198,7 +210,7 @@ networks:
 `;
     const result = buildComposePublishApplyPayload(
       makeSubmission({ composeYaml: composeWithLimits, services: [] }),
-      OPTS,
+      OPTS
     );
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
     expect(doc.services.app.deploy.resources.limits.memory).toBe('1G');
@@ -212,12 +224,87 @@ networks:
     expect(doc.services.postgres.volumes).toEqual(['pgdata:/var/lib/postgresql/data']);
   });
 
+  it('rejects host bind mounts before rendering compose-publish applies', () => {
+    const composeWithBind = `services:
+  app:
+    image: example/app:1
+    volumes:
+      - /:/host
+    ports:
+      - "8000:8000"
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithBind, services: [] }),
+        OPTS
+      )
+    ).toThrow(/bind mounts are not allowed/i);
+  });
+
+  it('rejects Docker socket mounts before rendering compose-publish applies', () => {
+    const composeWithSocket = `services:
+  app:
+    image: example/app:1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithSocket, services: [] }),
+        OPTS
+      )
+    ).toThrow(/docker socket mounts are not allowed/i);
+  });
+
+  it('rejects external named volumes before rendering compose-publish applies', () => {
+    const composeWithExternalVolume = `services:
+  app:
+    image: example/app:1
+    volumes:
+      - data:/data
+    ports:
+      - "8000:8000"
+volumes:
+  data:
+    external: true
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithExternalVolume, services: [] }),
+        OPTS
+      )
+    ).toThrow(/external volumes are not allowed/i);
+  });
+
+  it('rejects service volume mounts that are not declared as top-level named volumes', () => {
+    const composeWithUndeclaredVolume = `services:
+  app:
+    image: example/app:1
+    volumes:
+      - data:/data
+    ports:
+      - "8000:8000"
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithUndeclaredVolume, services: [] }),
+        OPTS
+      )
+    ).toThrow(/not declared in top-level "volumes"/i);
+  });
+
   it('throws when the captured composeYaml has no services mapping', () => {
     expect(() =>
       buildComposePublishApplyPayload(
         makeSubmission({ composeYaml: 'volumes:\n  data:\n', services: [] }),
-        OPTS,
-      ),
+        OPTS
+      )
     ).toThrow(/no services mapping/i);
   });
 
@@ -289,8 +376,16 @@ volumes:
     const submission = makeSubmission({
       composeYaml: REAL_CREWAI,
       services: [
-        { serviceName: 'app', pushedRef: 'sam-registry.local:5050/proj/app@sha256:aaa', digest: 'sha256:aaa' },
-        { serviceName: 'worker', pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb', digest: 'sha256:bbb' },
+        {
+          serviceName: 'app',
+          pushedRef: 'sam-registry.local:5050/proj/app@sha256:aaa',
+          digest: 'sha256:aaa',
+        },
+        {
+          serviceName: 'worker',
+          pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb',
+          digest: 'sha256:bbb',
+        },
       ],
     });
     const result = buildComposePublishApplyPayload(submission, OPTS);

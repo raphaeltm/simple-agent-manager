@@ -65,14 +65,14 @@ function formatLogTimestamp(value: string): string {
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
 function serviceRecords(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter(
-    (v): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v),
+    (v): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
   );
 }
 
@@ -110,8 +110,10 @@ function formatBytes(value: number | undefined): string {
 function formatReason(reason: string | undefined): string {
   if (!reason) return 'Logs unavailable. The node may not be provisioned or reachable yet.';
   const humanized = reason.replace(/_/g, ' ');
-  if (reason === 'no_node') return 'No deployment node provisioned yet. Logs will appear after the node boots.';
-  if (reason === 'node_stale') return 'Node has not reported recently. Logs may be unavailable until the node reconnects.';
+  if (reason === 'no_node')
+    return 'No deployment node provisioned yet. Logs will appear after the node boots.';
+  if (reason === 'node_stale')
+    return 'Node has not reported recently. Logs may be unavailable until the node reconnects.';
   if (reason === 'node_stopped') return 'Node is stopped. Start the node to view live logs.';
   return humanized.charAt(0).toUpperCase() + humanized.slice(1) + '.';
 }
@@ -131,6 +133,11 @@ function profileName(profileId: string, profiles: AgentProfile[]): string {
   return profiles.find((profile) => profile.id === profileId)?.name ?? profileId;
 }
 
+function shortId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value.length > 12 ? `${value.slice(0, 8)}...` : value;
+}
+
 // ─── Operational Summary ───────────────────────────────────────────────────
 
 type ServiceState = 'serving' | 'degraded' | 'not-serving' | 'unknown';
@@ -144,24 +151,34 @@ function deriveServiceState(env: DeploymentEnvironment): ServiceState {
   // No deployStatus yet — infer from observed deployment metadata
   if (!ds) {
     const obsStatus = env.observedDeployment.status as string | undefined;
-    if (obsStatus === 'failed' || obsStatus === 'failed-initial' || obsStatus === 'reverted') return 'not-serving';
+    if (obsStatus === 'failed' || obsStatus === 'failed-initial' || obsStatus === 'reverted')
+      return 'not-serving';
     if (
       obsStatus === 'applied' &&
       env.latestRelease?.status === 'applied' &&
       observedServicesHealthy(env.observedDeployment.services) &&
       (node === 'healthy' || node === 'connected')
-    ) return 'serving';
+    )
+      return 'serving';
     return 'unknown';
   }
 
   const app = ds.appHealth as string | undefined;
   const route = ds.routeCertState as string | undefined;
-  const appOk = app === 'healthy' || (!app && observedServicesHealthy(env.observedDeployment.services));
+  const appOk =
+    app === 'healthy' || (!app && observedServicesHealthy(env.observedDeployment.services));
   const nodeOk = node === 'healthy' || node === 'connected';
   const routeOk = route === 'issued' || route === undefined;
 
   if (appOk && nodeOk && routeOk) return 'serving';
-  if (app === 'unhealthy' || route === 'pending' || route === 'error' || node === 'stale' || node === 'unhealthy') return 'degraded';
+  if (
+    app === 'unhealthy' ||
+    route === 'pending' ||
+    route === 'error' ||
+    node === 'stale' ||
+    node === 'unhealthy'
+  )
+    return 'degraded';
   if (appOk) return 'serving';
   return 'unknown';
 }
@@ -184,15 +201,22 @@ function deriveBlocker(env: DeploymentEnvironment): string | null {
   const ds = objectRecord(env.observedDeployment.deployStatus);
   if (env.observedDeployment.errorMessage) return env.observedDeployment.errorMessage;
   if (!ds) return null;
-  if (ds.routeCertState === 'pending') return 'Route certificate pending. Check node logs for caddy/acme entries.';
-  if (ds.routeCertState === 'error') return 'Route certificate error. Check Caddy logs for ACME failures.';
-  if (ds.appHealth === 'unhealthy') return 'App container unhealthy. Check deployment logs for container errors.';
+  if (ds.routeCertState === 'pending')
+    return 'Route certificate pending. Check node logs for caddy/acme entries.';
+  if (ds.routeCertState === 'error')
+    return 'Route certificate error. Check Caddy logs for ACME failures.';
+  if (ds.appHealth === 'unhealthy')
+    return 'App container unhealthy. Check deployment logs for container errors.';
   const nodeHealth = (ds.nodeHealth as string | undefined) ?? env.node?.healthStatus;
-  if (nodeHealth === 'stale') return 'Node stale. Control plane has not received a recent heartbeat.';
+  if (nodeHealth === 'stale')
+    return 'Node stale. Control plane has not received a recent heartbeat.';
   if (nodeHealth === 'unhealthy') return 'Node unhealthy. Check node system resources.';
-  if (ds.providerManageability === 'unmanageable') return 'Provider reports node unmanageable. Destructive actions may not complete.';
-  if (ds.diskPressure === 'high' || ds.diskPressure === 'critical') return 'Disk pressure detected. Consider freeing space or resizing volumes.';
-  if (ds.configDrift === 'drifted') return 'Configuration drift detected. Re-apply the latest release.';
+  if (ds.providerManageability === 'unmanageable')
+    return 'Provider reports node unmanageable. Destructive actions may not complete.';
+  if (ds.diskPressure === 'high' || ds.diskPressure === 'critical')
+    return 'Disk pressure detected. Consider freeing space or resizing volumes.';
+  if (ds.configDrift === 'drifted')
+    return 'Configuration drift detected. Re-apply the latest release.';
   return null;
 }
 
@@ -204,16 +228,16 @@ function OperationalSummary({ env }: { env: DeploymentEnvironment }) {
   return (
     <div className="rounded-md border border-border-default bg-inset px-3 py-2.5 grid gap-1.5">
       <div className="flex items-center gap-2 flex-wrap">
-        <StatusBadge status={serviceStateBadge(serviceState)} label={serviceStateLabel(serviceState)} />
+        <StatusBadge
+          status={serviceStateBadge(serviceState)}
+          label={serviceStateLabel(serviceState)}
+        />
         {release && (
           <span className="text-sm text-fg-primary">
-            Release v{release.version}{' '}
-            <span className="text-fg-muted">{release.status}</span>
+            Release v{release.version} <span className="text-fg-muted">{release.status}</span>
           </span>
         )}
-        {!release && (
-          <span className="text-sm text-fg-muted">No release</span>
-        )}
+        {!release && <span className="text-sm text-fg-muted">No release</span>}
       </div>
       {blocker && (
         <div className="flex items-start gap-1.5 text-xs text-warning">
@@ -233,16 +257,27 @@ function OperationalSummary({ env }: { env: DeploymentEnvironment }) {
 function ReleaseAttribution({ env }: { env: DeploymentEnvironment }) {
   const release = env.latestRelease;
   if (!release) return null;
+  const submittedBy = release.submittedBy;
+  const details = [
+    submittedBy?.agentProfileId ? `profile ${shortId(submittedBy.agentProfileId)}` : null,
+    submittedBy?.taskId ? `task ${shortId(submittedBy.taskId)}` : null,
+    submittedBy?.workspaceId ? `workspace ${shortId(submittedBy.workspaceId)}` : null,
+  ].filter(Boolean);
 
   return (
-    <div className="text-xs text-fg-muted">
-      <span className="text-fg-primary font-medium">Release v{release.version}</span>
-      {' '}
-      <StatusBadge status={releaseBadgeStatus(release.status)} label={release.status} />
-      {' submitted by '}
-      <span className="text-fg-primary">{release.createdBy || 'unknown'}</span>
-      {' on '}
-      <span className="text-fg-primary">{formatDateTimeCompact(release.createdAt)}</span>
+    <div className="text-xs text-fg-muted min-w-0">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-fg-primary font-medium">Release v{release.version}</span>
+        <StatusBadge status={releaseBadgeStatus(release.status)} label={release.status} />
+        <span>
+          by{' '}
+          <span className="text-fg-primary">
+            {submittedBy?.userId || release.createdBy || 'unknown'}
+          </span>
+        </span>
+        <span>{formatDateTimeCompact(release.createdAt)}</span>
+      </div>
+      {details.length > 0 && <div className="truncate">{details.join(' / ')}</div>}
     </div>
   );
 }
@@ -254,7 +289,10 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
   const disk = objectRecord(env.observedDeployment.diskTelemetry);
   const rootDisk = objectRecord(disk?.rootDisk);
 
-  const appFallback = !deployStatus?.appHealth && observedServicesHealthy(env.observedDeployment.services) ? 'healthy' : undefined;
+  const appFallback =
+    !deployStatus?.appHealth && observedServicesHealthy(env.observedDeployment.services)
+      ? 'healthy'
+      : undefined;
   const routesFallback =
     !deployStatus?.routeCertState &&
     env.routeHostnames.length > 0 &&
@@ -271,7 +309,7 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
     ['Config', deployStatus?.configDrift],
   ];
   const items: Array<[string, string]> = rawItems.flatMap(([label, value]) =>
-    typeof value === 'string' && value.length > 0 ? [[label, value]] : [],
+    typeof value === 'string' && value.length > 0 ? [[label, value]] : []
   );
 
   if (items.length === 0 && !rootDisk) {
@@ -289,9 +327,7 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
       {rootDisk?.usedPercent !== undefined && (
         <div className="rounded-sm border border-border-default bg-inset px-2 py-1.5">
           <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">Root Disk</div>
-          <div className="text-sm text-fg-primary">
-            {safePercent(rootDisk.usedPercent)}
-          </div>
+          <div className="text-sm text-fg-primary">{safePercent(rootDisk.usedPercent)}</div>
         </div>
       )}
     </div>
@@ -306,7 +342,12 @@ const LOG_LEVELS = ['all', 'error', 'warn', 'info', 'debug'] as const;
 interface LogsPanelProps {
   state: DeploymentLogState | undefined;
   onRefresh: () => void;
-  onRefreshFiltered: (opts: { source?: string; level?: string; search?: string; container?: string }) => void;
+  onRefreshFiltered: (opts: {
+    source?: string;
+    level?: string;
+    search?: string;
+    container?: string;
+  }) => void;
 }
 
 function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
@@ -364,30 +405,59 @@ function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
 
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5">
-          <label className="text-[0.6875rem] uppercase text-fg-muted font-semibold" htmlFor="log-source">Source</label>
+          <label
+            className="text-[0.6875rem] uppercase text-fg-muted font-semibold"
+            htmlFor="log-source"
+          >
+            Source
+          </label>
           <select
             id="log-source"
             value={source}
-            onChange={(e) => { setSource(e.target.value); applyFilters(e.target.value, undefined); }}
+            onChange={(e) => {
+              setSource(e.target.value);
+              applyFilters(e.target.value, undefined);
+            }}
             className="rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5"
           >
-            {LOG_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {LOG_SOURCES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
         </div>
         <div className="flex items-center gap-1.5">
-          <label className="text-[0.6875rem] uppercase text-fg-muted font-semibold" htmlFor="log-level">Level</label>
+          <label
+            className="text-[0.6875rem] uppercase text-fg-muted font-semibold"
+            htmlFor="log-level"
+          >
+            Level
+          </label>
           <select
             id="log-level"
             value={level}
-            onChange={(e) => { setLevel(e.target.value); applyFilters(undefined, e.target.value); }}
+            onChange={(e) => {
+              setLevel(e.target.value);
+              applyFilters(undefined, e.target.value);
+            }}
             className="rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5"
           >
-            {LOG_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            {LOG_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
           </select>
         </div>
         {(source === 'app' || source === 'all') && (
           <div className="flex items-center gap-1.5">
-            <label className="text-[0.6875rem] uppercase text-fg-muted font-semibold" htmlFor="log-container">Container</label>
+            <label
+              className="text-[0.6875rem] uppercase text-fg-muted font-semibold"
+              htmlFor="log-container"
+            >
+              Container
+            </label>
             <select
               id="log-container"
               value={container}
@@ -399,11 +469,14 @@ function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
             >
               <option value="">All containers</option>
               {(state?.containers ?? []).map((target) => (
-                <option key={target.name} value={target.name}>{target.name}</option>
+                <option key={target.name} value={target.name}>
+                  {target.name}
+                </option>
               ))}
-              {container && !(state?.containers ?? []).some((target) => target.name === container) && (
-                <option value={container}>{container}</option>
-              )}
+              {container &&
+                !(state?.containers ?? []).some((target) => target.name === container) && (
+                  <option value={container}>{container}</option>
+                )}
             </select>
           </div>
         )}
@@ -414,7 +487,9 @@ function LogsPanel({ state, onRefresh, onRefreshFiltered }: LogsPanelProps) {
             placeholder="Search logs..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') applyFilters();
+            }}
             className="w-full rounded-sm border border-border-default bg-inset text-fg-primary text-xs px-1.5 py-0.5 outline-none focus:border-accent"
           />
         </div>
@@ -442,17 +517,25 @@ function LogEntries({ state }: { state: DeploymentLogState | undefined }) {
   }
 
   return (
-    <div className="max-h-64 overflow-y-auto rounded-md border border-border-default bg-inset font-mono text-xs">
-      {state.entries.slice(0, 20).map((entry, index) => (
-        <div key={`${entry.timestamp}-${index}`} className="grid gap-0.5 px-2 py-1 border-b border-border-default last:border-b-0">
-          <div className="flex items-center gap-2 text-fg-muted flex-wrap">
-            <span className="tabular-nums">{formatLogTimestamp(entry.timestamp)}</span>
-            <span className="uppercase font-semibold">{entry.level}</span>
-            <span className="truncate max-w-[120px]">{entry.source}</span>
+    <div className="grid gap-1">
+      <div className="text-[0.6875rem] text-fg-muted">
+        Showing {state.entries.length} fetched log entr{state.entries.length === 1 ? 'y' : 'ies'}
+      </div>
+      <div className="max-h-72 overflow-y-auto rounded-md border border-border-default bg-inset font-mono text-xs">
+        {state.entries.map((entry, index) => (
+          <div
+            key={`${entry.timestamp}-${index}`}
+            className="grid gap-0.5 px-2 py-1 border-b border-border-default last:border-b-0"
+          >
+            <div className="flex items-center gap-2 text-fg-muted flex-wrap">
+              <span className="tabular-nums">{formatLogTimestamp(entry.timestamp)}</span>
+              <span className="uppercase font-semibold">{entry.level}</span>
+              <span className="truncate max-w-[120px]">{entry.source}</span>
+            </div>
+            <div className="text-fg-primary break-words overflow-hidden">{entry.message}</div>
           </div>
-          <div className="text-fg-primary break-words overflow-hidden">{entry.message}</div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -482,7 +565,7 @@ function DeploymentMetricsPanel({ state }: { state: DeploymentMetricsState | und
         <div className="rounded-sm border border-border-default px-2 py-1.5">
           <div className="text-[0.6875rem] uppercase text-fg-muted font-semibold">CPU</div>
           <div className="text-sm text-fg-primary truncate">
-            {info ? info.cpu.loadAvg1.toFixed(2) : fallback?.cpuLoadAvg1?.toFixed(2) ?? '-'}
+            {info ? info.cpu.loadAvg1.toFixed(2) : (fallback?.cpuLoadAvg1?.toFixed(2) ?? '-')}
           </div>
         </div>
         <div className="rounded-sm border border-border-default px-2 py-1.5">
@@ -522,9 +605,16 @@ function DeploymentMetricsPanel({ state }: { state: DeploymentMetricsState | und
               </thead>
               <tbody>
                 {containers.map((container) => (
-                  <tr key={container.id || container.name} className="border-b border-border-default last:border-b-0">
-                    <td className="px-2 py-1 text-fg-primary max-w-[140px] truncate">{container.name}</td>
-                    <td className="px-2 py-1 text-right text-fg-primary tabular-nums">{safePercent(container.cpuPercent)}</td>
+                  <tr
+                    key={container.id || container.name}
+                    className="border-b border-border-default last:border-b-0"
+                  >
+                    <td className="px-2 py-1 text-fg-primary max-w-[140px] truncate">
+                      {container.name}
+                    </td>
+                    <td className="px-2 py-1 text-right text-fg-primary tabular-nums">
+                      {safePercent(container.cpuPercent)}
+                    </td>
                     <td className="px-2 py-1 text-right text-fg-primary tabular-nums">
                       {container.memUsage ? container.memUsage : safePercent(container.memPercent)}
                     </td>
@@ -557,7 +647,10 @@ interface DeploymentEnvironmentCardProps {
   logsOpen: boolean;
   onPolicyEnabledChange: (env: DeploymentEnvironment, enabled: boolean) => void;
   onProfileToggle: (env: DeploymentEnvironment, profileId: string) => void;
-  onRefreshLogs: (env: DeploymentEnvironment, opts?: { source?: string; level?: string; search?: string; container?: string }) => void;
+  onRefreshLogs: (
+    env: DeploymentEnvironment,
+    opts?: { source?: string; level?: string; search?: string; container?: string }
+  ) => void;
   onDelete: (env: DeploymentEnvironment) => void;
 }
 
@@ -581,20 +674,22 @@ export function DeploymentEnvironmentCard({
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="sam-type-section-heading m-0 text-fg-primary truncate max-w-[200px] sm:max-w-none">{env.name}</h2>
+            <h2 className="sam-type-section-heading m-0 text-fg-primary truncate max-w-[200px] sm:max-w-none">
+              {env.name}
+            </h2>
             <StatusBadge status={environmentBadgeStatus(env.status)} label={env.status} />
           </div>
           <ReleaseAttribution env={env} />
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:shrink-0">
           <Button size="sm" variant="secondary" onClick={() => onRefreshLogs(env)}>
             <ScrollText size={14} />
             {logsOpen ? 'Refresh Logs' : 'Logs'}
           </Button>
           <Button size="sm" variant="danger" onClick={() => onDelete(env)}>
             <Trash2 size={14} />
-            Destroy
+            Destroy Env
           </Button>
         </div>
       </header>
@@ -637,18 +732,24 @@ export function DeploymentEnvironmentCard({
             {env.node ? (
               <div className="grid gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Link to={`/nodes/${env.node.id}`} className="text-accent text-sm no-underline hover:underline truncate max-w-[180px]">
+                  <Link
+                    to={`/nodes/${env.node.id}`}
+                    className="text-accent text-sm no-underline hover:underline truncate max-w-[180px]"
+                  >
                     {env.node.name}
                   </Link>
                   <StatusBadge status={env.node.status} />
                   <StatusBadge status={env.node.healthStatus || 'stale'} />
                 </div>
                 <div className="text-xs text-fg-muted break-words">
-                  {env.node.cloudProvider ?? 'Unknown provider'} / {env.node.vmSize} / {env.node.vmLocation}
+                  {env.node.cloudProvider ?? 'Unknown provider'} / {env.node.vmSize} /{' '}
+                  {env.node.vmLocation}
                 </div>
               </div>
             ) : (
-              <p className="m-0 text-xs text-fg-muted">No deployment node has been provisioned yet.</p>
+              <p className="m-0 text-xs text-fg-muted">
+                No deployment node has been provisioned yet.
+              </p>
             )}
           </section>
 
@@ -682,7 +783,10 @@ export function DeploymentEnvironmentCard({
               ) : (
                 <div className="grid gap-1">
                   {profiles.map((profile) => (
-                    <label key={profile.id} className="flex items-center gap-2 text-sm text-fg-primary">
+                    <label
+                      key={profile.id}
+                      className="flex items-center gap-2 text-sm text-fg-primary"
+                    >
                       <input
                         type="checkbox"
                         disabled={policyBusy}

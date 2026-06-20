@@ -30,21 +30,34 @@ type PushCredentials struct {
 
 // ServiceRelease records one re-pushed service image for the release submission.
 type ServiceRelease struct {
-	ServiceName string    `json:"serviceName"`
-	SourceRef   string    `json:"sourceRef"`
-	PushedRef   string    `json:"pushedRef"`
-	Digest      string    `json:"digest"`
-	MediaType   string    `json:"mediaType,omitempty"`
-	Size        int64     `json:"size,omitempty"`
-	Platform    *Platform `json:"platform,omitempty"`
+	ServiceName         string    `json:"serviceName"`
+	RegistryServiceName string    `json:"registryServiceName,omitempty"`
+	SourceRef           string    `json:"sourceRef"`
+	PushedRef           string    `json:"pushedRef"`
+	Digest              string    `json:"digest"`
+	MediaType           string    `json:"mediaType,omitempty"`
+	Size                int64     `json:"size,omitempty"`
+	Platform            *Platform `json:"platform,omitempty"`
+}
+
+// ReleaseSubmittedBy records the SAM context that initiated a compose-publish
+// release. The control plane overwrites user/workspace from the callback token.
+type ReleaseSubmittedBy struct {
+	UserID         string `json:"userId,omitempty"`
+	WorkspaceID    string `json:"workspaceId,omitempty"`
+	TaskID         string `json:"taskId,omitempty"`
+	AgentProfileID string `json:"agentProfileId,omitempty"`
 }
 
 // ReleaseSubmission is the payload sent to the control plane to record a release
 // from a host-built compose artifact.
 type ReleaseSubmission struct {
-	Reference   string           `json:"reference"`
-	ComposeYAML string           `json:"composeYaml"`
-	Services    []ServiceRelease `json:"services"`
+	Environment   string              `json:"environment"`
+	EnvironmentID string              `json:"environmentId"`
+	Reference     string              `json:"reference"`
+	ComposeYAML   string              `json:"composeYaml"`
+	Services      []ServiceRelease    `json:"services"`
+	SubmittedBy   *ReleaseSubmittedBy `json:"submittedBy,omitempty"`
 }
 
 // ReleaseResult is the control plane's response to a release submission.
@@ -96,16 +109,24 @@ func New(opts Options) *Orchestrator {
 
 // Publish re-pushes the host-built images into the project namespace and records
 // a release.
-func (o *Orchestrator) Publish(ctx context.Context, projectID string, art *BuildArtifact) (*ReleaseResult, error) {
+func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, environmentID string, art *BuildArtifact, submittedBy *ReleaseSubmittedBy) (*ReleaseResult, error) {
 	if art == nil {
 		return nil, fmt.Errorf("publish: nil build artifact")
 	}
 	if projectID == "" {
 		return nil, fmt.Errorf("publish: empty projectID")
 	}
+	if strings.TrimSpace(environment) == "" {
+		return nil, fmt.Errorf("publish: empty environment")
+	}
+	if strings.TrimSpace(environmentID) == "" {
+		return nil, fmt.Errorf("publish: empty environmentID")
+	}
 
 	o.log.Info("publish started",
 		"projectId", projectID,
+		"environment", environment,
+		"environmentId", environmentID,
 		"reference", art.Reference,
 		"serviceCount", len(art.Services),
 		"composeYamlBytes", len(art.ComposeYAML))
@@ -134,9 +155,12 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, art *Build
 	}
 
 	submission := &ReleaseSubmission{
-		Reference:   art.Reference,
-		ComposeYAML: string(art.ComposeYAML),
-		Services:    services,
+		Environment:   environment,
+		EnvironmentID: environmentID,
+		Reference:     art.Reference,
+		ComposeYAML:   string(art.ComposeYAML),
+		Services:      services,
+		SubmittedBy:   submittedBy,
 	}
 
 	result, err := o.controlPlane.SubmitRelease(ctx, projectID, submission)
@@ -165,12 +189,17 @@ func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, c
 	releases := make([]ServiceRelease, 0, len(art.Services))
 	for i := range art.Services {
 		svc := art.Services[i]
-		serviceName := serviceSlug(svc, i)
+		originalServiceName := strings.TrimSpace(svc.ServiceName)
+		registryServiceName := serviceSlug(svc, i)
+		if originalServiceName == "" {
+			originalServiceName = registryServiceName
+		}
 		source := svc.LocalRef
-		target := targetRef(creds, serviceName, art.Reference)
+		target := targetRef(creds, registryServiceName, art.Reference)
 
 		o.log.Info("re-pushing service image",
-			"service", serviceName,
+			"service", originalServiceName,
+			"registryService", registryServiceName,
 			"source", source,
 			"target", target,
 			"builtDigest", svc.Digest,
@@ -179,14 +208,14 @@ func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, c
 
 		if err := o.docker.Tag(ctx, source, target); err != nil {
 			o.log.Error("docker tag failed",
-				"service", serviceName, "source", source, "target", target, "error", err)
+				"service", originalServiceName, "registryService", registryServiceName, "source", source, "target", target, "error", err)
 			return nil, fmt.Errorf("publish: tag %s -> %s: %w", source, target, err)
 		}
 
 		pushedDigest, err := o.docker.Push(ctx, target)
 		if err != nil {
 			o.log.Error("docker push failed",
-				"service", serviceName, "target", target, "error", err)
+				"service", originalServiceName, "registryService", registryServiceName, "target", target, "error", err)
 			return nil, fmt.Errorf("publish: push %s: %w", target, err)
 		}
 
@@ -194,7 +223,8 @@ func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, c
 		// built digest. Warn (don't fail) on divergence so staging surfaces it.
 		if pushedDigest != "" && svc.Digest != "" && pushedDigest != svc.Digest {
 			o.log.Warn("pushed digest differs from built digest",
-				"service", serviceName,
+				"service", originalServiceName,
+				"registryService", registryServiceName,
 				"builtDigest", svc.Digest,
 				"pushedDigest", pushedDigest)
 		}
@@ -204,18 +234,20 @@ func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, c
 		}
 
 		o.log.Info("service image pushed",
-			"service", serviceName,
+			"service", originalServiceName,
+			"registryService", registryServiceName,
 			"target", target,
 			"digest", digest)
 
 		releases = append(releases, ServiceRelease{
-			ServiceName: serviceName,
-			SourceRef:   source,
-			PushedRef:   pinnedRef(target, digest),
-			Digest:      digest,
-			MediaType:   svc.MediaType,
-			Size:        svc.Size,
-			Platform:    svc.Platform,
+			ServiceName:         originalServiceName,
+			RegistryServiceName: registryServiceName,
+			SourceRef:           source,
+			PushedRef:           pinnedRef(target, digest),
+			Digest:              digest,
+			MediaType:           svc.MediaType,
+			Size:                svc.Size,
+			Platform:            svc.Platform,
 		})
 	}
 	return releases, nil

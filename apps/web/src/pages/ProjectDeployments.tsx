@@ -23,12 +23,20 @@ import {
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
+const DEPLOYMENT_ENVIRONMENT_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
 function formatCleanupSummary(result: DeleteDeploymentEnvironmentResponse): string {
   const parts: string[] = [];
-  if (result.dnsRecordsDeleted > 0) parts.push(`${result.dnsRecordsDeleted} DNS record${result.dnsRecordsDeleted === 1 ? '' : 's'} deleted`);
-  if (result.volumesDeleted > 0) parts.push(`${result.volumesDeleted} volume${result.volumesDeleted === 1 ? '' : 's'} deleted`);
+  if (result.dnsRecordsDeleted > 0)
+    parts.push(
+      `${result.dnsRecordsDeleted} DNS record${result.dnsRecordsDeleted === 1 ? '' : 's'} deleted`
+    );
+  if (result.volumesDeleted > 0)
+    parts.push(`${result.volumesDeleted} volume${result.volumesDeleted === 1 ? '' : 's'} deleted`);
   if (result.volumesDetached > 0 && result.volumesDetached !== result.volumesDeleted) {
-    parts.push(`${result.volumesDetached} volume${result.volumesDetached === 1 ? '' : 's'} detached`);
+    parts.push(
+      `${result.volumesDetached} volume${result.volumesDetached === 1 ? '' : 's'} detached`
+    );
   }
   if (result.nodeDeleted) parts.push('node destroyed');
   if (result.nodeId && !result.nodeDeleted) parts.push('node preserved (was not destroyed)');
@@ -45,6 +53,7 @@ export function ProjectDeployments() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  const [newNameError, setNewNameError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [policySaving, setPolicySaving] = useState<string | null>(null);
   const [logsOpenEnvId, setLogsOpenEnvId] = useState<string | null>(null);
@@ -52,11 +61,14 @@ export function ProjectDeployments() {
   const [metricsByEnv, setMetricsByEnv] = useState<Record<string, DeploymentMetricsState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeploymentEnvironment | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [cleanupNotice, setCleanupNotice] = useState<{ summary: string; warnings: string[] } | null>(null);
+  const [cleanupNotice, setCleanupNotice] = useState<{
+    summary: string;
+    warnings: string[];
+  } | null>(null);
 
   const sortedEnvironments = useMemo(
     () => [...environments].sort((a, b) => a.name.localeCompare(b.name)),
-    [environments],
+    [environments]
   );
   const deleteTargetNodeEnvironments = useMemo(() => {
     if (!deleteTarget?.nodeId) return [];
@@ -65,77 +77,83 @@ export function ProjectDeployments() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [deleteTarget?.nodeId, environments]);
 
-  const loadEnvironments = useCallback(async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    try {
-      setError(null);
-      const result = await listDeploymentEnvironments(projectId);
-      setEnvironments(result.environments);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load deployment environments');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [projectId]);
+  const loadEnvironments = useCallback(
+    async (isRefresh = false) => {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      try {
+        setError(null);
+        const result = await listDeploymentEnvironments(projectId);
+        setEnvironments(result.environments);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load deployment environments');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [projectId]
+  );
 
   useEffect(() => {
     void loadEnvironments();
   }, [loadEnvironments]);
 
-  const refreshMetrics = useCallback(async (env: DeploymentEnvironment) => {
-    if (env.node?.status !== 'running') {
-      setMetricsByEnv((prev) => ({
-        ...prev,
-        [env.id]: {
-          systemInfo: null,
-          fallbackMetrics: null,
-          loading: false,
-          error: null,
-          unavailableReason: env.node ? 'node_not_running' : 'no_deployment_node',
-        },
-      }));
-      return;
-    }
+  const refreshMetrics = useCallback(
+    async (env: DeploymentEnvironment) => {
+      if (env.node?.status !== 'running') {
+        setMetricsByEnv((prev) => ({
+          ...prev,
+          [env.id]: {
+            systemInfo: null,
+            fallbackMetrics: null,
+            loading: false,
+            error: null,
+            unavailableReason: env.node ? 'node_not_running' : 'no_deployment_node',
+          },
+        }));
+        return;
+      }
 
-    setMetricsByEnv((prev) => ({
-      ...prev,
-      [env.id]: {
-        systemInfo: prev[env.id]?.systemInfo ?? null,
-        fallbackMetrics: prev[env.id]?.fallbackMetrics ?? null,
-        loading: true,
-        error: null,
-      },
-    }));
-
-    try {
-      const result = await getDeploymentEnvironmentMetrics(projectId, env.id);
-      setMetricsByEnv((prev) => ({
-        ...prev,
-        [env.id]: {
-          systemInfo: result.systemInfo,
-          fallbackMetrics: result.fallbackMetrics ?? null,
-          loading: false,
-          error: null,
-          unavailableReason: result.unavailableReason,
-        },
-      }));
-    } catch (err) {
       setMetricsByEnv((prev) => ({
         ...prev,
         [env.id]: {
           systemInfo: prev[env.id]?.systemInfo ?? null,
           fallbackMetrics: prev[env.id]?.fallbackMetrics ?? null,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to load deployment metrics',
+          loading: true,
+          error: null,
         },
       }));
-    }
-  }, [projectId]);
+
+      try {
+        const result = await getDeploymentEnvironmentMetrics(projectId, env.id);
+        setMetricsByEnv((prev) => ({
+          ...prev,
+          [env.id]: {
+            systemInfo: result.systemInfo,
+            fallbackMetrics: result.fallbackMetrics ?? null,
+            loading: false,
+            error: null,
+            unavailableReason: result.unavailableReason,
+          },
+        }));
+      } catch (err) {
+        setMetricsByEnv((prev) => ({
+          ...prev,
+          [env.id]: {
+            systemInfo: prev[env.id]?.systemInfo ?? null,
+            fallbackMetrics: prev[env.id]?.fallbackMetrics ?? null,
+            loading: false,
+            error: err instanceof Error ? err.message : 'Failed to load deployment metrics',
+          },
+        }));
+      }
+    },
+    [projectId]
+  );
 
   useEffect(() => {
     const running = sortedEnvironments.filter((env) => env.node?.status === 'running');
@@ -156,9 +174,19 @@ export function ProjectDeployments() {
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = newName.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setNewNameError('Enter an environment name.');
+      return;
+    }
+    if (!DEPLOYMENT_ENVIRONMENT_NAME_RE.test(trimmed)) {
+      setNewNameError(
+        'Use lowercase letters, numbers, and hyphens. Start and end with a letter or number.'
+      );
+      return;
+    }
     setCreating(true);
     try {
+      setNewNameError(null);
       const created = await createDeploymentEnvironment(projectId, trimmed);
       setEnvironments((prev) => [...prev, created]);
       setNewName('');
@@ -207,7 +235,7 @@ export function ProjectDeployments() {
 
   const handleRefreshLogs = async (
     env: DeploymentEnvironment,
-    opts?: { source?: string; level?: string; search?: string; container?: string },
+    opts?: { source?: string; level?: string; search?: string; container?: string }
   ) => {
     setLogsOpenEnvId(env.id);
     setLogsByEnv((prev) => ({
@@ -215,7 +243,9 @@ export function ProjectDeployments() {
       [env.id]: { entries: prev[env.id]?.entries ?? [], loading: true, error: null },
     }));
     try {
-      const containersPromise = listDeploymentEnvironmentContainers(projectId, env.id).catch(() => ({ containers: [] }));
+      const containersPromise = listDeploymentEnvironmentContainers(projectId, env.id).catch(
+        () => ({ containers: [] })
+      );
       const result = await getDeploymentEnvironmentLogs(projectId, env.id, {
         limit: 80,
         source: opts?.source as never,
@@ -276,26 +306,45 @@ export function ProjectDeployments() {
             Manage app environments, deployment nodes, agent policy, logs, and teardown.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => void loadEnvironments(true)} disabled={refreshing}>
+        <Button
+          variant="secondary"
+          onClick={() => void loadEnvironments(true)}
+          disabled={refreshing}
+        >
           <RefreshCw size={15} />
           {refreshing ? 'Refreshing...' : 'Refresh'}
         </Button>
       </section>
 
-      <form onSubmit={(event) => void handleCreate(event)} className="glass-surface rounded-lg p-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+      <form
+        onSubmit={(event) => void handleCreate(event)}
+        className="glass-surface rounded-lg p-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+      >
         <label htmlFor="deployment-env-name" className="grid gap-1">
           <span className="text-sm font-medium text-fg-primary">New Environment</span>
           <Input
             id="deployment-env-name"
             value={newName}
-            onChange={(event) => setNewName(event.currentTarget.value.toLowerCase())}
+            onChange={(event) => {
+              setNewName(event.currentTarget.value.toLowerCase());
+              setNewNameError(null);
+            }}
             placeholder="staging"
             pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
-            aria-describedby="deployment-env-name-help"
+            aria-invalid={Boolean(newNameError)}
+            aria-describedby={
+              newNameError ? 'deployment-env-name-error' : 'deployment-env-name-help'
+            }
           />
-          <span id="deployment-env-name-help" className="text-xs text-fg-muted">
-            Lowercase letters, numbers, and hyphens.
-          </span>
+          {newNameError ? (
+            <span id="deployment-env-name-error" className="text-xs text-danger">
+              {newNameError}
+            </span>
+          ) : (
+            <span id="deployment-env-name-help" className="text-xs text-fg-muted">
+              Lowercase letters, numbers, and hyphens.
+            </span>
+          )}
         </label>
         <Button type="submit" loading={creating} disabled={creating || !newName.trim()}>
           <Plus size={15} />
@@ -303,14 +352,20 @@ export function ProjectDeployments() {
         </Button>
       </form>
 
-      {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}
+      {error && (
+        <Alert variant="error" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
       {cleanupNotice && (
         <Alert variant="warning" onDismiss={() => setCleanupNotice(null)}>
           <div className="grid gap-1">
             <strong>Cleanup completed: {cleanupNotice.summary}</strong>
             {cleanupNotice.warnings.map((w, i) => (
-              <div key={i} className="text-sm">{w}</div>
+              <div key={i} className="text-sm">
+                {w}
+              </div>
             ))}
           </div>
         </Alert>
@@ -344,7 +399,9 @@ export function ProjectDeployments() {
               logState={logsByEnv[env.id]}
               metricsState={metricsByEnv[env.id]}
               logsOpen={logsOpenEnvId === env.id}
-              onPolicyEnabledChange={(target, enabled) => void handlePolicyEnabledChange(target, enabled)}
+              onPolicyEnabledChange={(target, enabled) =>
+                void handlePolicyEnabledChange(target, enabled)
+              }
               onProfileToggle={(target, profileId) => void handleProfileToggle(target, profileId)}
               onRefreshLogs={(target, opts) => void handleRefreshLogs(target, opts)}
               onDelete={setDeleteTarget}
@@ -374,7 +431,9 @@ export function ProjectDeployments() {
               {deleteTarget?.nodeId ? (
                 deleteTargetNodeEnvironments.length > 1 ? (
                   <li>
-                    Keeps the shared deployment node running for {deleteTargetNodeEnvironments.length - 1} other environment{deleteTargetNodeEnvironments.length === 2 ? '' : 's'}
+                    Keeps the shared deployment node running for{' '}
+                    {deleteTargetNodeEnvironments.length - 1} other environment
+                    {deleteTargetNodeEnvironments.length === 2 ? '' : 's'}
                   </li>
                 ) : (
                   <li>Destroys the deployment node because this is the last environment on it</li>
@@ -383,6 +442,27 @@ export function ProjectDeployments() {
                 <li>No deployment node is currently attached</li>
               )}
             </ul>
+            {deleteTarget && deleteTarget.routeHostnames.length > 0 && (
+              <div className="grid gap-1 rounded-sm border border-border-default bg-inset px-2 py-2 text-sm">
+                <div className="font-medium">Routes removed</div>
+                {deleteTarget.routeHostnames.slice(0, 3).map((hostname) => (
+                  <a
+                    key={hostname}
+                    href={`https://${hostname}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent no-underline hover:underline break-all"
+                  >
+                    {hostname}
+                  </a>
+                ))}
+                {deleteTarget.routeHostnames.length > 3 && (
+                  <span className="text-fg-muted">
+                    +{deleteTarget.routeHostnames.length - 3} more
+                  </span>
+                )}
+              </div>
+            )}
             <p className="m-0 font-semibold">This cannot be undone.</p>
           </div>
         }

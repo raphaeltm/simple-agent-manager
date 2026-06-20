@@ -12,13 +12,16 @@ const DEPLOYMENT_RELEASES = {
 const DEPLOYMENT_ENVIRONMENTS = {
   __table: 'deployment_environments',
   id: 'deployment_environments.id',
+  projectId: 'deployment_environments.projectId',
+  name: 'deployment_environments.name',
+  status: 'deployment_environments.status',
   nodeId: 'deployment_environments.nodeId',
+  agentDeployEnabled: 'deployment_environments.agentDeployEnabled',
 };
 
 let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
 let latestVersionRows: Array<{ version: number }> = [];
-let environmentRows: Array<{ nodeId: string | null }> = [{ nodeId: null }];
-let agentDeployEnvironmentId: string | null = 'env-1';
+let environmentRows: Array<{ id: string; nodeId: string | null; agentDeployEnabled: boolean }> = [];
 const inserted: Array<Record<string, unknown>> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -93,10 +96,6 @@ vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => verifiedPayload),
 }));
 
-vi.mock('../../../src/services/deployment-control', () => ({
-  getProjectAgentDeployEnvironmentId: vi.fn(async () => agentDeployEnvironmentId),
-}));
-
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => 'release-ulid-1',
 }));
@@ -106,9 +105,8 @@ vi.mock('../../../src/lib/logger', () => ({
 }));
 
 async function buildApp() {
-  const { composePublishReleaseCallbackRoute } = await import(
-    '../../../src/routes/projects/compose-publish-release-callback'
-  );
+  const { composePublishReleaseCallbackRoute } =
+    await import('../../../src/routes/projects/compose-publish-release-callback');
   const app = new Hono();
   app.onError((err, c) => {
     if (err instanceof AppError) {
@@ -128,16 +126,20 @@ function request(app: Hono, projectId: string, body: unknown) {
       headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    { DATABASE: {} },
+    { DATABASE: {} }
   );
 }
 
 const validSubmission = {
+  environment: 'staging',
+  environmentId: 'env-1',
   reference: 'sam-registry.local:5050/test-one',
   composeYaml: 'services:\n  web:\n    build: .\n',
-  services: [
-    { serviceName: 'web', sourceRef: 'a', pushedRef: 'b', digest: 'sha256:abc' },
-  ],
+  services: [{ serviceName: 'web', sourceRef: 'a', pushedRef: 'b', digest: 'sha256:abc' }],
+  submittedBy: {
+    taskId: 'task-1',
+    agentProfileId: 'profile-1',
+  },
 };
 
 describe('compose-publish-release callback (vertical slice)', () => {
@@ -146,8 +148,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
     inserted.length = 0;
     workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
     latestVersionRows = [{ version: 4 }];
-    environmentRows = [{ nodeId: null }];
-    agentDeployEnvironmentId = 'env-1';
+    environmentRows = [{ id: 'env-1', nodeId: null, agentDeployEnabled: true }];
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });
 
@@ -159,7 +160,12 @@ describe('compose-publish-release callback (vertical slice)', () => {
     const body = await res.json();
     // nodeId is null here: the stubbed provisioner returns null (no node linked),
     // which is the best-effort path that never fails the durable release.
-    expect(body).toEqual({ releaseId: 'release-ulid-1', version: 5, status: 'created', nodeId: null });
+    expect(body).toEqual({
+      releaseId: 'release-ulid-1',
+      version: 5,
+      status: 'created',
+      nodeId: null,
+    });
 
     expect(inserted).toHaveLength(1);
     const row = inserted[0];
@@ -170,8 +176,16 @@ describe('compose-publish-release callback (vertical slice)', () => {
     expect(row.createdBy).toBe('user-1');
     // The full captured submission is stored verbatim in the manifest column.
     expect(JSON.parse(row.manifest as string)).toMatchObject({
+      environment: 'staging',
+      environmentId: 'env-1',
       reference: validSubmission.reference,
       services: validSubmission.services,
+      submittedBy: {
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        agentProfileId: 'profile-1',
+      },
     });
   });
 
@@ -203,12 +217,20 @@ describe('compose-publish-release callback (vertical slice)', () => {
     expect(inserted).toHaveLength(0);
   });
 
-  it('rejects when agent deployment is disabled for the project', async () => {
-    agentDeployEnvironmentId = null;
+  it('rejects when the requested target environment is not enabled for agent deployment', async () => {
+    environmentRows = [{ id: 'env-1', nodeId: null, agentDeployEnabled: false }];
     const app = await buildApp();
     const res = await request(app, 'proj-1', validSubmission);
 
     expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a submission missing the target environment', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', { ...validSubmission, environment: undefined });
+
+    expect(res.status).toBe(400);
     expect(inserted).toHaveLength(0);
   });
 

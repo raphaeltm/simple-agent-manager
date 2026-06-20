@@ -366,6 +366,10 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 			slog.Warn("deploy.apply: failed to stop containers after failed-initial",
 				"error", err)
 		}
+		if err := e.clearActiveCaddySnippet(ctx); err != nil {
+			slog.Warn("deploy.apply: failed to clear Caddy snippet after failed-initial",
+				"error", err)
+		}
 
 		_ = e.disk.UpdateState(state)
 		e.setObserved(ObservedState{
@@ -534,6 +538,22 @@ func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error
 		return fmt.Errorf("write active Caddy snippet: %w", err)
 	}
 
+	return e.reloadActiveCaddyConfig(ctx)
+}
+
+func (e *Engine) clearActiveCaddySnippet(ctx context.Context) error {
+	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove active Caddy snippet: %w", err)
+	}
+
+	root := GenerateRootCaddyfile(CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
+		return fmt.Errorf("write root Caddyfile: %w", err)
+	}
 	return e.reloadActiveCaddyConfig(ctx)
 }
 
