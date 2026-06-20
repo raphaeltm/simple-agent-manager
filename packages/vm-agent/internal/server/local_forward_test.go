@@ -17,12 +17,14 @@ func TestLocalForwardProxyPreservesAppHeadersAndLocalhostAuthority(t *testing.T)
 	var gotCookie string
 	var gotSAMHeader string
 	var gotForwarded string
+	var gotForwardedFor string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHost = r.Host
 		gotAuthorization = r.Header.Get("Authorization")
 		gotCookie = r.Header.Get("Cookie")
 		gotSAMHeader = r.Header.Get("X-SAM-VM-Forward-Token")
 		gotForwarded = r.Header.Get("Forwarded")
+		gotForwardedFor = r.Header.Get("X-Forwarded-For")
 		w.Header().Add("Set-Cookie", "app_one=1; Path=/")
 		w.Header().Add("Set-Cookie", "app_two=2; Path=/")
 		w.WriteHeader(http.StatusOK)
@@ -58,6 +60,9 @@ func TestLocalForwardProxyPreservesAppHeadersAndLocalhostAuthority(t *testing.T)
 	}
 	if gotForwarded != "" {
 		t.Fatalf("Forwarded header reached app: %q", gotForwarded)
+	}
+	if gotForwardedFor != "127.0.0.1" {
+		t.Fatalf("X-Forwarded-For = %q, want loopback", gotForwardedFor)
 	}
 	if got := rr.Result().Header.Values("Set-Cookie"); len(got) != 2 {
 		t.Fatalf("Set-Cookie headers = %v, want both app cookies preserved", got)

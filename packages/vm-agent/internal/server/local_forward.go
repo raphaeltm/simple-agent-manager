@@ -93,21 +93,22 @@ func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.URL.Path = forwardPath
-		req.URL.RawPath = ""
-		req.Host = localAuthority
-		stripLocalForwardRequestHeaders(req.Header)
-		req.Header.Set("Host", localAuthority)
-		req.Header.Set("X-Forwarded-Host", localAuthority)
-		req.Header.Set("X-Forwarded-Proto", "http")
-	}
-	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
-		slog.Error("Local forward upstream error", "target", targetURLStr, "error", proxyErr)
-		writeError(rw, http.StatusBadGateway, fmt.Sprintf("local forward proxy error: %v", proxyErr))
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(targetURL)
+			pr.Out.URL.Path = forwardPath
+			pr.Out.URL.RawPath = ""
+			pr.Out.Host = localAuthority
+			stripLocalForwardRequestHeaders(pr.Out.Header)
+			pr.Out.Header.Set("Host", localAuthority)
+			pr.Out.Header.Set("X-Forwarded-For", "127.0.0.1")
+			pr.Out.Header.Set("X-Forwarded-Host", localAuthority)
+			pr.Out.Header.Set("X-Forwarded-Proto", "http")
+		},
+		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+			slog.Error("Local forward upstream error", "target", targetURLStr, "error", proxyErr)
+			writeError(rw, http.StatusBadGateway, fmt.Sprintf("local forward proxy error: %v", proxyErr))
+		},
 	}
 	proxy.ServeHTTP(w, r)
 }
