@@ -76,6 +76,22 @@ func TestTargetComposeVersionOverride(t *testing.T) {
 	}
 }
 
+func TestTargetModelPluginVersionDefault(t *testing.T) {
+	// Unset means "install the latest available" — an empty pin string.
+	t.Setenv("SAM_DOCKER_MODEL_VERSION", "")
+	if got := targetModelPluginVersion(); got != "" {
+		t.Fatalf("targetModelPluginVersion() = %q, want empty (latest)", got)
+	}
+}
+
+func TestTargetModelPluginVersionOverride(t *testing.T) {
+	// An override pins the apt package version for reproducible builds.
+	t.Setenv("SAM_DOCKER_MODEL_VERSION", "0.1.36")
+	if got := targetModelPluginVersion(); got != "0.1.36" {
+		t.Fatalf("targetModelPluginVersion() = %q, want override 0.1.36", got)
+	}
+}
+
 func TestComposeArchSupported(t *testing.T) {
 	// The provisioner only runs on the architectures we provision (amd64/arm64).
 	switch runtime.GOARCH {

@@ -138,74 +138,63 @@ func composeArch() string {
 	}
 }
 
-// defaultModelCLIVersion pins the docker/model-cli release used to install the
-// `docker model` plugin. Empty means "use the GitHub `latest` release", which
-// avoids a guaranteed-stale pin while still being overridable. Override via
-// SAM_DOCKER_MODEL_VERSION (e.g. "v0.1.32") for reproducible builds
+// targetModelPluginVersion returns an optional apt version pin for the
+// docker-model-plugin package. Empty means "install the latest available",
+// which avoids a guaranteed-stale pin while still being overridable. Override
+// via SAM_DOCKER_MODEL_VERSION (e.g. "0.1.36") for reproducible builds
 // (Constitution Principle XI — no hardcoded values).
-const defaultModelCLIVersion = ""
-
-func targetModelCLIVersion() string {
+func targetModelPluginVersion() string {
 	return strings.TrimSpace(os.Getenv("SAM_DOCKER_MODEL_VERSION"))
 }
 
-// modelCLIArch maps GOARCH to the docker/model-cli release asset suffix
-// (docker-model-linux-<arch>, which uses GOARCH-style names directly).
-func modelCLIArch() string {
-	switch runtime.GOARCH {
-	case "amd64":
-		return "amd64"
-	case "arm64":
-		return "arm64"
-	default:
-		return ""
-	}
-}
-
-// EnsureDockerModelRunner installs the `docker model` CLI plugin (docker/model-cli)
-// and provisions the Model Runner daemon so compose `provider: {type: model}`
-// services can run. It is idempotent: if the plugin is already present and the
-// runner already installed, both checks short-circuit.
+// EnsureDockerModelRunner installs the `docker model` CLI plugin via Docker's
+// official `docker-model-plugin` apt package and provisions the Model Runner
+// daemon so compose `provider: {type: model}` services can run. Installing the
+// plugin registers the Compose model provider, so compose can resolve the
+// `model` provider binary that `provider: {type: model}` services exec.
+//
+// The previous implementation downloaded the plugin binary directly from the
+// docker/model-cli GitHub releases, but that repo is archived and its `latest`
+// release asset now 404s (curl exit 22), which broke every Model Runner deploy.
+// The apt package from download.docker.com is the GA-supported install path.
+//
+// It is idempotent: if the plugin is already present and the runner already
+// installed, both steps short-circuit.
 func EnsureDockerModelRunner(ctx context.Context) error {
 	// Install the CLI plugin if `docker model` is not already available.
 	if err := exec.CommandContext(ctx, container.DockerCLIPath(), "model", "version").Run(); err != nil {
-		arch := modelCLIArch()
-		if arch == "" {
-			return fmt.Errorf("unsupported architecture for model runner: %s", runtime.GOARCH)
+		pkg := "docker-model-plugin"
+		if v := targetModelPluginVersion(); v != "" {
+			pkg = fmt.Sprintf("docker-model-plugin=%s", v)
 		}
-
-		version := targetModelCLIVersion()
-		if version == "" {
-			version = defaultModelCLIVersion
-		}
-		var url string
-		if version == "" {
-			url = fmt.Sprintf(
-				"https://github.com/docker/model-cli/releases/latest/download/docker-model-linux-%s",
-				arch)
-		} else {
-			url = fmt.Sprintf(
-				"https://github.com/docker/model-cli/releases/download/%s/docker-model-linux-%s",
-				version, arch)
-		}
-
-		const dest = "/usr/local/lib/docker/cli-plugins/docker-model"
-		// Download to a temp file then atomically move into place so a partial
-		// download can never leave a broken plugin on PATH.
-		script := fmt.Sprintf(
-			"mkdir -p /usr/local/lib/docker/cli-plugins && "+
-				"curl -fsSL --retry 3 -o %[1]s.tmp %[2]q && "+
-				"chmod +x %[1]s.tmp && "+
-				"mv -f %[1]s.tmp %[1]s",
-			dest, url)
+		// Source /etc/os-release BEFORE referencing $ID so the Docker apt repo
+		// resolves to the actual distro (ubuntu/debian). The deployment-node
+		// base image is Ubuntu, but sourcing keeps this correct across images.
+		// The repo/keyring setup is idempotent: the docker-ce base image may
+		// already have both, in which case install-d and the conditional key
+		// download are no-ops.
+		script := fmt.Sprintf(`
+set -euo pipefail
+. /etc/os-release
+distro="${ID:-ubuntu}"
+codename="${VERSION_CODENAME:-${UBUNTU_CODENAME:-noble}}"
+install -d -m 0755 /etc/apt/keyrings
+if [ ! -s /etc/apt/keyrings/docker.asc ]; then
+  curl -fsSL "https://download.docker.com/linux/${distro}/gpg" -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+fi
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${distro} ${codename} stable" > /etc/apt/sources.list.d/docker.list
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq %s
+`, pkg)
 		if err := runShell(ctx, script); err != nil {
-			return fmt.Errorf("docker model plugin download failed: %w", err)
+			return fmt.Errorf("docker-model-plugin apt install failed: %w", err)
 		}
 
 		if err := exec.CommandContext(ctx, container.DockerCLIPath(), "model", "version").Run(); err != nil {
 			return fmt.Errorf("docker model plugin not usable after install: %w", err)
 		}
-		slog.Info("dockersetup: docker model plugin installed")
+		slog.Info("dockersetup: docker model plugin installed via apt")
 	} else {
 		slog.Info("dockersetup: docker model plugin already installed")
 	}
