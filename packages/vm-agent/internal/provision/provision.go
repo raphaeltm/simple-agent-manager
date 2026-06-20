@@ -130,6 +130,7 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		Steps: []Step{
 			{Name: "packages", Status: "pending"},
 			{Name: "docker", Status: "pending"},
+			{Name: "docker-model-runner", Status: "pending"},
 			{Name: "firewall", Status: "pending"},
 			{Name: "tls-permissions", Status: "pending"},
 			{Name: "nodejs-install", Status: "pending"},
@@ -216,6 +217,22 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		}
 	} else {
 		status.setStep("compose-plugin", "skipped")
+	}
+
+	// Step 2c: Docker Model Runner. Deployment compose files may declare
+	// `provider: {type: model}` services (Docker Model Runner). The runner is a
+	// host-managed daemon + CLI plugin (`docker model`) that serves model
+	// inference and is wired into dependent services via auto-injected
+	// {SERVICE}_URL/{SERVICE}_MODEL env vars. Install is non-fatal: app nodes
+	// without model services still deploy normally if this fails.
+	if !cfg.SkipDocker {
+		if err := runStep("docker-model-runner", func(ctx context.Context) error {
+			return ensureDockerModelRunner(ctx)
+		}); err != nil {
+			slog.Warn("Docker Model Runner install failed, continuing", "error", err)
+		}
+	} else {
+		status.setStep("docker-model-runner", "skipped")
 	}
 
 	// Step 3: Firewall (needed for Cloudflare-only access to vm-agent port)
@@ -479,6 +496,87 @@ func composeArch() string {
 	default:
 		return ""
 	}
+}
+
+// defaultModelCLIVersion pins the docker/model-cli release used to install the
+// `docker model` plugin. Empty means "use the GitHub `latest` release", which
+// avoids a guaranteed-stale pin while still being overridable. Override via
+// SAM_DOCKER_MODEL_VERSION (e.g. "v0.1.32") for reproducible builds
+// (Constitution Principle XI — no hardcoded values).
+const defaultModelCLIVersion = ""
+
+func targetModelCLIVersion() string {
+	return strings.TrimSpace(os.Getenv("SAM_DOCKER_MODEL_VERSION"))
+}
+
+// modelCLIArch maps GOARCH to the docker/model-cli release asset suffix
+// (docker-model-linux-<arch>, which uses GOARCH-style names directly).
+func modelCLIArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "amd64"
+	case "arm64":
+		return "arm64"
+	default:
+		return ""
+	}
+}
+
+// ensureDockerModelRunner installs the `docker model` CLI plugin (docker/model-cli)
+// and provisions the Model Runner daemon so compose `provider: {type: model}`
+// services can run. It is idempotent: if the plugin is already present and the
+// runner already installed, both checks short-circuit.
+func ensureDockerModelRunner(ctx context.Context) error {
+	// Install the CLI plugin if `docker model` is not already available.
+	if err := exec.CommandContext(ctx, "docker", "model", "version").Run(); err != nil {
+		arch := modelCLIArch()
+		if arch == "" {
+			return fmt.Errorf("unsupported architecture for model runner: %s", runtime.GOARCH)
+		}
+
+		version := targetModelCLIVersion()
+		if version == "" {
+			version = defaultModelCLIVersion
+		}
+		var url string
+		if version == "" {
+			url = fmt.Sprintf(
+				"https://github.com/docker/model-cli/releases/latest/download/docker-model-linux-%s",
+				arch)
+		} else {
+			url = fmt.Sprintf(
+				"https://github.com/docker/model-cli/releases/download/%s/docker-model-linux-%s",
+				version, arch)
+		}
+
+		const dest = "/usr/local/lib/docker/cli-plugins/docker-model"
+		// Download to a temp file then atomically move into place so a partial
+		// download can never leave a broken plugin on PATH.
+		script := fmt.Sprintf(
+			"mkdir -p /usr/local/lib/docker/cli-plugins && "+
+				"curl -fsSL --retry 3 -o %[1]s.tmp %[2]q && "+
+				"chmod +x %[1]s.tmp && "+
+				"mv -f %[1]s.tmp %[1]s",
+			dest, url)
+		if err := runShell(ctx, script); err != nil {
+			return fmt.Errorf("docker model plugin download failed: %w", err)
+		}
+
+		if err := exec.CommandContext(ctx, "docker", "model", "version").Run(); err != nil {
+			return fmt.Errorf("docker model plugin not usable after install: %w", err)
+		}
+		slog.Info("Docker Model plugin installed")
+	} else {
+		slog.Info("Docker Model plugin already installed")
+	}
+
+	// Provision the Model Runner daemon (runs as a managed container/service).
+	// `install-runner` is idempotent — a no-op when the runner already exists.
+	if err := runShell(ctx, "docker model install-runner"); err != nil {
+		return fmt.Errorf("docker model install-runner failed: %w", err)
+	}
+	slog.Info("Docker Model Runner provisioned")
+	return nil
 }
 
 func installFirewall(ctx context.Context, vmAgentPort, cfIPFetchTimeout string) error {

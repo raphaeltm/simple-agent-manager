@@ -413,7 +413,7 @@ export function parseRoutes(
   return routes;
 }
 
-function extractContainerPort(portSpec: unknown): number | null {
+export function extractContainerPort(portSpec: unknown): number | null {
   if (typeof portSpec === 'number') return portSpec;
 
   if (typeof portSpec === 'string') {

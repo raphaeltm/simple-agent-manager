@@ -22,10 +22,7 @@ import {
   buildProjectImageResolver,
   resolveManifestImageTags,
 } from './deployment-release-image-resolver';
-import {
-  createDeploymentReleaseFromManifest,
-  validateSlice2Constraints,
-} from './deployment-release-submission';
+import { createDeploymentReleaseFromManifest } from './deployment-release-submission';
 
 // =============================================================================
 // Helpers
@@ -252,11 +249,7 @@ function isYamlContentType(contentType: string): boolean {
   );
 }
 
-export {
-  buildProjectImageResolver,
-  resolveManifestImageTags,
-  validateSlice2Constraints,
-};
+export { buildProjectImageResolver, resolveManifestImageTags };
 
 /**
  * GET /api/projects/:projectId/environments/:envId/releases

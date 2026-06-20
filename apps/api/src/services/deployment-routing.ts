@@ -88,17 +88,30 @@ function sanitizeDnsLabelPart(value: string): string {
   return normalized || 'app';
 }
 
-function buildRouteHostname(environmentId: string, service: string, port: number, routeIndex: number, baseDomain: string): string {
+export function buildRouteHostname(environmentId: string, service: string, port: number, routeIndex: number, baseDomain: string): string {
   const envPart = sanitizeDnsLabelPart(environmentId);
   const servicePart = sanitizeDnsLabelPart(service).slice(0, MAX_SERVICE_LABEL_LENGTH);
   return `r${routeIndex + 1}-${servicePart}-${port}-${envPart}.apps.${baseDomain.toLowerCase()}`;
 }
 
-export function buildDeploymentRouteTargets(
-  manifest: DeploymentManifest,
+/** A public route to publish, identified only by service name and container port. */
+export interface PublicRouteInput {
+  service: string;
+  port: number;
+}
+
+/**
+ * Assign loopback host ports + grey-cloud hostnames to an ordered list of
+ * public routes. This is the shared derivation used by BOTH the normalized
+ * build-on-node manifest path ({@link buildDeploymentRouteTargets}) and the
+ * compose-publish raw-compose apply path. Keeping a single implementation
+ * guarantees the hostnames/hostPorts produced for DNS upsert, Caddy routing,
+ * and the docker-published loopback bindings all agree.
+ */
+export function assignRouteTargets(
+  publicRoutes: PublicRouteInput[],
   opts: DeploymentRouteTargetOptions,
 ): DeploymentRouteTarget[] {
-  const publicRoutes = manifest.routes.filter((route) => route.mode === 'public');
   const portBase = parsePositiveInt(opts.routePortBase, DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE);
   const portSpan = parsePositiveInt(opts.routePortSpan, DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN);
 
@@ -131,6 +144,16 @@ export function buildDeploymentRouteTargets(
     containerPort: route.port,
     hostPort: envPortBase + index,
   }));
+}
+
+export function buildDeploymentRouteTargets(
+  manifest: DeploymentManifest,
+  opts: DeploymentRouteTargetOptions,
+): DeploymentRouteTarget[] {
+  const publicRoutes = manifest.routes
+    .filter((route) => route.mode === 'public')
+    .map((route) => ({ service: route.service, port: route.port }));
+  return assignRouteTargets(publicRoutes, opts);
 }
 
 /**

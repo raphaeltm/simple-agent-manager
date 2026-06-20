@@ -24,6 +24,14 @@ import { createNodeRecord, provisionNode } from './nodes';
 /** Default VM size for deployment nodes — apps are typically smaller than dev workspaces. */
 export const DEPLOYMENT_DEFAULT_VM_SIZE = 'small';
 
+/**
+ * VM size for deployment nodes that must run Docker Model Runner (compose
+ * `provider:` model services). Model weights + the runner daemon need more RAM
+ * than a plain app node, so these are sized up. Override via
+ * env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE.
+ */
+export const DEPLOYMENT_MODEL_RUNNER_VM_SIZE = 'medium';
+
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
 
@@ -237,6 +245,7 @@ export async function provisionDeploymentNode(
   _projectId: string,
   userId: string,
   env: Env,
+  options?: { vmSizeOverride?: string },
 ): Promise<DeploymentNodeResult | null> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -282,7 +291,7 @@ export async function provisionDeploymentNode(
   const placement: DeploymentPlacement = {
     provider: cloudProvider,
     location: vmLocation,
-    vmSize: DEPLOYMENT_DEFAULT_VM_SIZE,
+    vmSize: options?.vmSizeOverride?.trim() || DEPLOYMENT_DEFAULT_VM_SIZE,
   };
 
   const existingNodeId = await findDeploymentNodeWithCapacity(env, userId, placement);

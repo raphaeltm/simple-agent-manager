@@ -11,27 +11,6 @@ import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';
 
-/** Max single-service constraint for slice 2. */
-export const MAX_SERVICES_SLICE_2 = 1;
-
-/**
- * Validate a manifest against slice 2 constraints.
- * Returns null if valid, or an error response object if invalid.
- */
-export function validateSlice2Constraints(manifest: {
-  services: Record<string, { env: Record<string, unknown> }>;
-}): { error: string; message: string } | null {
-  const serviceCount = Object.keys(manifest.services).length;
-  if (serviceCount > MAX_SERVICES_SLICE_2) {
-    return {
-      error: 'MULTI_SERVICE_NOT_SUPPORTED',
-      message: `Multi-service manifests are not yet supported. This manifest defines ${serviceCount} services, but only ${MAX_SERVICES_SLICE_2} is allowed. Multi-service support arrives in a future update.`,
-    };
-  }
-
-  return null;
-}
-
 export type CreateDeploymentReleaseResult = {
   id: string;
   environmentId: string;
@@ -60,11 +39,6 @@ export async function createDeploymentReleaseFromManifest(
     executionCtx?: ExecutionContext;
   },
 ): Promise<CreateDeploymentReleaseOutcome> {
-  const constraintError = validateSlice2Constraints(manifest);
-  if (constraintError) {
-    return { success: false, response: { status: 400, body: constraintError } };
-  }
-
   const secretNames = collectSecretNames(manifest);
   if (secretNames.length > 0) {
     const existingSecrets = await db

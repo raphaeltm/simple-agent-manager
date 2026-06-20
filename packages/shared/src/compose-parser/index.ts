@@ -11,6 +11,7 @@ export {
   TOP_LEVEL_IGNORED,
 } from './constants';
 export { isDigestReference, parseCompose } from './parse';
+export { extractContainerPort } from './parse-fields';
 export { resolveManifest } from './resolve';
 export type {
   ComposeParseError,

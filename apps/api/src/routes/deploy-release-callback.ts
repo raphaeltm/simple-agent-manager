@@ -16,9 +16,10 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
+import { buildComposePublishApplyPayload } from '../services/compose-publish-apply';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
-import { buildDeploymentRouteTargets } from '../services/deployment-routing';
+import { buildDeploymentRouteTargets, type DeploymentRouteTarget } from '../services/deployment-routing';
 import { upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
@@ -131,37 +132,82 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .set({ status: 'applying' })
     .where(eq(schema.deploymentReleases.id, release.id));
 
-  const manifest = JSON.parse(release.manifest);
+  // Two release shapes share this apply path, discriminated by `release.source`:
+  //
+  //  - compose-publish: the stored manifest IS the captured publish submission
+  //    ({ reference, composeYaml, services[] }). We transform the raw compose
+  //    in-place (preserving provider:/healthcheck/depends_on, digest-pinning
+  //    build images via pushedRef) rather than round-tripping through the lossy
+  //    normalized manifest. Routes are derived from each service's `ports:`.
+  //
+  //  - build-on-node (default): the stored manifest is the normalized
+  //    DeploymentManifest. Routes come from manifest.routes and the compose is
+  //    re-rendered from the manifest with secret injection.
+  let routes: DeploymentRouteTarget[];
+  let composeYaml: string;
 
-  const routes = buildDeploymentRouteTargets(manifest, {
-    environmentId,
-    baseDomain: c.env.BASE_DOMAIN,
-    routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-    routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-  });
+  if (release.source === 'compose-publish') {
+    const submission = JSON.parse(release.manifest);
+    const applied = buildComposePublishApplyPayload(submission, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      releaseId: release.id,
+    });
+    routes = applied.routes;
+    composeYaml = applied.composeYaml;
 
-  if (routes.length > 0) {
-    const nodeIp = node.ipAddress;
-    if (!nodeIp) {
-      throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
+    if (applied.warnings.length > 0) {
+      log.warn('deploy_release.compose_publish_warnings', {
+        nodeId,
+        environmentId,
+        seq,
+        releaseId: release.id,
+        warnings: applied.warnings,
+      });
     }
 
-    await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
+    if (routes.length > 0) {
+      const nodeIp = node.ipAddress;
+      if (!nodeIp) {
+        throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
+      }
+      await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
+    }
+  } else {
+    const manifest = JSON.parse(release.manifest);
+
+    routes = buildDeploymentRouteTargets(manifest, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    });
+
+    if (routes.length > 0) {
+      const nodeIp = node.ipAddress;
+      if (!nodeIp) {
+        throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
+      }
+
+      await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
+    }
+
+    // Resolve secret references — inject decrypted values for the node
+    const secretNames = collectSecretNames(manifest);
+    const resolvedSecrets = secretNames.length > 0
+      ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
+      : {};
+
+    // Render the Compose YAML from the manifest
+    composeYaml = renderCompose(manifest, {
+      environmentId,
+      releaseId: release.id,
+      routeTargets: routes,
+      resolvedSecrets,
+    });
   }
-
-  // Resolve secret references — inject decrypted values for the node
-  const secretNames = collectSecretNames(manifest);
-  const resolvedSecrets = secretNames.length > 0
-    ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
-    : {};
-
-  // Render the Compose YAML from the manifest
-  const composeYaml = renderCompose(manifest, {
-    environmentId,
-    releaseId: release.id,
-    routeTargets: routes,
-    resolvedSecrets,
-  });
 
   const expiresAt = Math.floor(Date.now() / 1000) + parsePositiveInt(
     c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS,

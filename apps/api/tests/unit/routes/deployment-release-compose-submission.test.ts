@@ -372,7 +372,10 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
     expect(body.details.missingSecrets).toEqual(['missing-db-url']);
   });
 
-  it('keeps the slice-2 multi-service limit for Compose submissions', async () => {
+  it('accepts multi-service Compose submissions and persists every service in the manifest', async () => {
+    // The slice-2 single-service cap was removed: deployments must run the full
+    // multi-service topology the user authored. A web + worker compose now
+    // succeeds and both services are digest-pinned into the stored manifest.
     const app = await createTestApp();
     const res = await app.request(
       '/api/projects/proj-1/environments/env-1/releases',
@@ -389,9 +392,10 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       mockEnv,
     );
 
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBe('MULTI_SERVICE_NOT_SUPPORTED');
+    expect(res.status).toBe(201);
+    expect(insertedReleases).toHaveLength(1);
+    const manifest = JSON.parse(insertedReleases[0].manifest as string);
+    expect(Object.keys(manifest.services).sort()).toEqual(['web', 'worker']);
   });
 
   it('scopes minted registry credentials to the SAM registry host for both YAML and JSON paths', async () => {

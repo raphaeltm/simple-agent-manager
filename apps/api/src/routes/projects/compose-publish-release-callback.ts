@@ -1,12 +1,17 @@
 import { desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { parse as parseYaml } from 'yaml';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { log } from '../../lib/logger';
+import { log, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import { getProjectAgentDeployEnvironmentId } from '../../services/deployment-control';
+import {
+  DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
+  provisionDeploymentNode,
+} from '../../services/deployment-provisioning';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 /**
@@ -23,12 +28,11 @@ import { verifyWorkspacePublishCallback } from './_callback-auth';
  * It records the captured topology + image digests as a deployment release with
  * source = 'compose-publish'.
  *
- * UNLIKE the build-on-node deploy path (deployment-release-submission.ts), this
- * path:
- *   - does NOT enforce MAX_SERVICES_SLICE_2 (images are already built + pushed,
- *     so the multi-service build-on-node gate does not apply); and
- *   - does NOT provision a deployment node (publish is the snapshot verb; deploy
- *     is a later, separate verb).
+ * Like the build-on-node deploy path (deployment-release-submission.ts), this
+ * path provisions a deployment node for the environment when one is not already
+ * linked, so the captured release actually rolls out. When the captured compose
+ * declares Docker Model Runner `provider:` services, the node is sized up
+ * (medium) so the runner daemon + model weights fit.
  *
  * Releases require a NOT-NULL environmentId, but the publish path has no
  * environment name (the workspace callback JWT carries only a workspaceId). We
@@ -45,6 +49,30 @@ interface ServiceReleaseInput {
   sourceRef?: unknown;
   pushedRef?: unknown;
   digest?: unknown;
+}
+
+/**
+ * Detect whether the captured compose declares any Docker Model Runner
+ * `provider:` service. Best-effort — a parse failure returns false (the apply
+ * path re-parses and surfaces real errors there); detection only affects node
+ * sizing, never release recording.
+ */
+function composeHasModelProvider(composeYaml: string): boolean {
+  let doc: unknown;
+  try {
+    doc = parseYaml(composeYaml);
+  } catch {
+    return false;
+  }
+  if (typeof doc !== 'object' || doc === null) return false;
+  const services = (doc as { services?: unknown }).services;
+  if (typeof services !== 'object' || services === null) return false;
+  for (const svc of Object.values(services as Record<string, unknown>)) {
+    if (typeof svc === 'object' && svc !== null && 'provider' in svc) {
+      return true;
+    }
+  }
+  return false;
 }
 
 composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c) => {
@@ -132,12 +160,55 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     reference: (submission as { reference?: unknown }).reference ?? null,
   });
 
+  // Provision a deployment node for this environment if one is not already
+  // linked, so the captured release rolls out. Failures here must NOT fail the
+  // release recording (the release is already durable); the node can be
+  // provisioned on the next release or via the deploy verb.
+  let nodeId: string | null = null;
+  try {
+    const envRows = await db
+      .select({ nodeId: schema.deploymentEnvironments.nodeId })
+      .from(schema.deploymentEnvironments)
+      .where(eq(schema.deploymentEnvironments.id, environmentId))
+      .limit(1);
+    nodeId = envRows[0]?.nodeId ?? null;
+
+    if (!nodeId) {
+      const vmSizeOverride = composeHasModelProvider(composeYaml)
+        ? (c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE)
+        : undefined;
+
+      const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {
+        vmSizeOverride,
+      });
+      if (result) {
+        nodeId = result.nodeId;
+        c.executionCtx?.waitUntil(result.provisioningPromise);
+        log.info('compose_publish_release.provisioning_triggered', {
+          projectId,
+          environmentId,
+          releaseId,
+          nodeId,
+          vmSizeOverride: vmSizeOverride ?? null,
+        });
+      }
+    }
+  } catch (err) {
+    log.error('compose_publish_release.provisioning_trigger_failed', {
+      projectId,
+      environmentId,
+      releaseId,
+      ...serializeError(err),
+    });
+  }
+
   // Response shape matches the agent's Go ReleaseResult struct
   // (releaseId/version/status).
   return c.json({
     releaseId,
     version: nextVersion,
     status: 'created',
+    nodeId,
   });
 });
 

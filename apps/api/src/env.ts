@@ -101,6 +101,7 @@ export interface Env {
   DEPLOYMENT_ROUTE_PORT_BASE?: string;
   DEPLOYMENT_ROUTE_PORT_SPAN?: string;
   MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE?: string;
+  DEPLOYMENT_MODEL_RUNNER_VM_SIZE?: string; // VM size for deployment nodes running Docker Model Runner (default: medium)
   // Rate limiting (per hour)
   RATE_LIMIT_WORKSPACE_CREATE?: string;
   RATE_LIMIT_TERMINAL_TOKEN?: string;

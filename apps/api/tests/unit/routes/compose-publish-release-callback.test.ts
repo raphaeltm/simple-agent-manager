@@ -9,9 +9,15 @@ const DEPLOYMENT_RELEASES = {
   environmentId: 'deployment_releases.environmentId',
   version: 'deployment_releases.version',
 };
+const DEPLOYMENT_ENVIRONMENTS = {
+  __table: 'deployment_environments',
+  id: 'deployment_environments.id',
+  nodeId: 'deployment_environments.nodeId',
+};
 
 let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
 let latestVersionRows: Array<{ version: number }> = [];
+let environmentRows: Array<{ nodeId: string | null }> = [{ nodeId: null }];
 let agentDeployEnvironmentId: string | null = 'env-1';
 const inserted: Array<Record<string, unknown>> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
@@ -24,11 +30,22 @@ vi.mock('drizzle-orm', () => ({
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
   desc: (col: unknown) => col,
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+  // The provisioning import chain (deployment-provisioning -> observability)
+  // pulls observability-schema.ts, which uses sql`...` at module load time.
+  sql: (strings: TemplateStringsArray, ...exprs: unknown[]) => ({ strings, exprs }),
 }));
 
 vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
   deploymentReleases: DEPLOYMENT_RELEASES,
+  deploymentEnvironments: DEPLOYMENT_ENVIRONMENTS,
+}));
+
+// Node provisioning is best-effort and must never fail the durable release.
+// Stub it so the release-recording slice stays focused; nodeId resolves to null.
+vi.mock('../../../src/services/deployment-provisioning', () => ({
+  DEPLOYMENT_MODEL_RUNNER_VM_SIZE: 'medium',
+  provisionDeploymentNode: vi.fn(async () => null),
 }));
 
 function createMockDb() {
@@ -39,6 +56,13 @@ function createMockDb() {
           return {
             where: vi.fn().mockReturnValue({
               limit: vi.fn().mockResolvedValue(workspaceRows),
+            }),
+          };
+        }
+        if (table === DEPLOYMENT_ENVIRONMENTS) {
+          return {
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(environmentRows),
             }),
           };
         }
@@ -122,6 +146,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
     inserted.length = 0;
     workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
     latestVersionRows = [{ version: 4 }];
+    environmentRows = [{ nodeId: null }];
     agentDeployEnvironmentId = 'env-1';
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });
@@ -132,7 +157,9 @@ describe('compose-publish-release callback (vertical slice)', () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ releaseId: 'release-ulid-1', version: 5, status: 'created' });
+    // nodeId is null here: the stubbed provisioner returns null (no node linked),
+    // which is the best-effort path that never fails the durable release.
+    expect(body).toEqual({ releaseId: 'release-ulid-1', version: 5, status: 'created', nodeId: null });
 
     expect(inserted).toHaveLength(1);
     const row = inserted[0];
