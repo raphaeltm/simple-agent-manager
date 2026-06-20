@@ -7,7 +7,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context,Hono } from 'hono';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
@@ -140,6 +140,51 @@ async function resolveDeploymentNode(
   }
 
   return { kind: 'ready', nodeId: node.id, lastMetrics: node.lastMetrics };
+}
+
+type ReadyDeploymentNode = Extract<ResolvedDeploymentNode, { kind: 'ready' }>;
+type NotReadyDeploymentNode = Exclude<ResolvedDeploymentNode, { kind: 'ready' }>;
+
+/**
+ * Shared driver for the node-proxy GET routes (logs/containers/metrics). Runs
+ * the common ownership + node-resolution preamble, then delegates response
+ * shaping to per-route builders. The not-ready, success, and error response
+ * bodies differ per route, so each route supplies its own builders; the
+ * preamble, error logging, and try/catch wrapping are shared here.
+ */
+async function handleNodeProxyRoute(
+  c: Context<{ Bindings: Env }, '/:projectId/environments/:envId'>,
+  event: string,
+  builders: {
+    notReady: (resolved: NotReadyDeploymentNode) => unknown;
+    fetch: (nodeId: string, userId: string) => Promise<unknown>;
+    onSuccess: (result: unknown, resolved: ReadyDeploymentNode) => unknown;
+    onError: (resolved: ReadyDeploymentNode) => unknown;
+  },
+): Promise<Response> {
+  const projectId = c.req.param('projectId');
+  const envId = c.req.param('envId');
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
+  if (resolved.kind !== 'ready') {
+    return c.json(builders.notReady(resolved));
+  }
+
+  try {
+    const result = await builders.fetch(resolved.nodeId, userId);
+    return c.json(builders.onSuccess(result, resolved));
+  } catch (err) {
+    log.warn(event, {
+      projectId,
+      envId,
+      nodeId: resolved.nodeId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return c.json(builders.onError(resolved));
+  }
 }
 
 /**
@@ -344,50 +389,32 @@ deploymentEnvironmentRoutes.get(
   '/:projectId/environments/:envId/logs',
   requireAuth(),
   requireApproved(),
-  async (c) => {
-    const projectId = c.req.param('projectId');
-    const envId = c.req.param('envId');
-    const userId = getUserId(c);
-    const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
-
-    const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
-    if (resolved.kind !== 'ready') {
-      return c.json({
+  (c) =>
+    handleNodeProxyRoute(c, 'deployment_environment.logs_unavailable', {
+      notReady: (resolved) => ({
         entries: [],
         nextCursor: null,
         hasMore: false,
         source: 'deployment-node',
         nodeId: resolved.kind === 'unavailable' ? resolved.nodeId : null,
         unavailableReason: resolved.kind === 'no_node' ? 'no_deployment_node' : resolved.reason,
-      });
-    }
-
-    const queryString = new URL(c.req.url).searchParams.toString();
-    try {
-      const result = await getNodeLogsFromNode(resolved.nodeId, c.env, userId, queryString);
-      return c.json({
+      }),
+      fetch: (nodeId, userId) =>
+        getNodeLogsFromNode(nodeId, c.env, userId, new URL(c.req.url).searchParams.toString()),
+      onSuccess: (result, resolved) => ({
         ...(typeof result === 'object' && result !== null ? result : { entries: [] }),
         source: 'deployment-node',
         nodeId: resolved.nodeId,
-      });
-    } catch (err) {
-      log.warn('deployment_environment.logs_unavailable', {
-        projectId,
-        envId,
-        nodeId: resolved.nodeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return c.json({
+      }),
+      onError: (resolved) => ({
         entries: [],
         nextCursor: null,
         hasMore: false,
         source: 'deployment-node',
         nodeId: resolved.nodeId,
         unavailableReason: 'node_agent_unreachable',
-      });
-    }
-  },
+      }),
+    }),
 );
 
 /**
@@ -398,42 +425,24 @@ deploymentEnvironmentRoutes.get(
   '/:projectId/environments/:envId/containers',
   requireAuth(),
   requireApproved(),
-  async (c) => {
-    const projectId = c.req.param('projectId');
-    const envId = c.req.param('envId');
-    const userId = getUserId(c);
-    const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
-
-    const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
-    if (resolved.kind !== 'ready') {
-      return c.json({
+  (c) =>
+    handleNodeProxyRoute(c, 'deployment_environment.containers_unavailable', {
+      notReady: (resolved) => ({
         containers: [],
         nodeId: resolved.kind === 'unavailable' ? resolved.nodeId : null,
         unavailableReason: resolved.kind === 'no_node' ? 'no_deployment_node' : resolved.reason,
-      });
-    }
-
-    try {
-      const result = await listNodeContainersFromNode(resolved.nodeId, c.env, userId);
-      return c.json({
+      }),
+      fetch: (nodeId, userId) => listNodeContainersFromNode(nodeId, c.env, userId),
+      onSuccess: (result, resolved) => ({
         ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
         nodeId: resolved.nodeId,
-      });
-    } catch (err) {
-      log.warn('deployment_environment.containers_unavailable', {
-        projectId,
-        envId,
-        nodeId: resolved.nodeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return c.json({
+      }),
+      onError: (resolved) => ({
         containers: [],
         nodeId: resolved.nodeId,
         unavailableReason: 'node_agent_unreachable',
-      });
-    }
-  },
+      }),
+    }),
 );
 
 /**
@@ -444,46 +453,28 @@ deploymentEnvironmentRoutes.get(
   '/:projectId/environments/:envId/metrics',
   requireAuth(),
   requireApproved(),
-  async (c) => {
-    const projectId = c.req.param('projectId');
-    const envId = c.req.param('envId');
-    const userId = getUserId(c);
-    const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
-
-    const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
-    if (resolved.kind !== 'ready') {
-      return c.json({
+  (c) =>
+    handleNodeProxyRoute(c, 'deployment_environment.metrics_unavailable', {
+      notReady: (resolved) => ({
         systemInfo: null,
         nodeId: resolved.kind === 'unavailable' ? resolved.nodeId : null,
         fallbackMetrics:
           resolved.kind === 'unavailable' ? parseLastMetrics(resolved.lastMetrics) : null,
         unavailableReason: resolved.kind === 'no_node' ? 'no_deployment_node' : resolved.reason,
-      });
-    }
-
-    try {
-      const result = await getNodeSystemInfoFromNode(resolved.nodeId, c.env, userId);
-      return c.json({
+      }),
+      fetch: (nodeId, userId) => getNodeSystemInfoFromNode(nodeId, c.env, userId),
+      onSuccess: (result, resolved) => ({
         systemInfo: result,
         nodeId: resolved.nodeId,
         fallbackMetrics: parseLastMetrics(resolved.lastMetrics),
-      });
-    } catch (err) {
-      log.warn('deployment_environment.metrics_unavailable', {
-        projectId,
-        envId,
-        nodeId: resolved.nodeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return c.json({
+      }),
+      onError: (resolved) => ({
         systemInfo: null,
         nodeId: resolved.nodeId,
         fallbackMetrics: parseLastMetrics(resolved.lastMetrics),
         unavailableReason: 'node_agent_unreachable',
-      });
-    }
-  },
+      }),
+    }),
 );
 
 /**
