@@ -29,8 +29,17 @@ vi.mock('../../../src/services/trial/trial-runner', () => ({
 
 const bridge = await import('../../../src/services/trial/bridge');
 
-function makeEnv(): Env {
-  return { BASE_DOMAIN: 'example.com' } as unknown as Env;
+function makeEnv(options: {
+  readyUpdateChanges?: number;
+  currentTrial?: { status: string; expires_at: number; claimed_by_user_id: string | null } | null;
+} = {}): Env {
+  const prepare = vi.fn(() => ({
+    bind: vi.fn(() => ({
+      run: vi.fn(async () => ({ meta: { changes: options.readyUpdateChanges ?? 1 } })),
+      first: vi.fn(async () => options.currentTrial ?? null),
+    })),
+  }));
+  return { BASE_DOMAIN: 'example.com', DATABASE: { prepare } } as unknown as Env;
 }
 
 describe('bridgeAcpSessionTransition', () => {
@@ -45,17 +54,75 @@ describe('bridgeAcpSessionTransition', () => {
   });
 
   it('emits trial.ready with workspaceUrl on running transition', async () => {
+    const env = makeEnv();
     readTrialByProjectMock.mockResolvedValueOnce({
       trialId: 'trial_1',
       projectId: 'proj_1',
       workspaceId: 'ws_1',
     });
-    await bridge.bridgeAcpSessionTransition(makeEnv(), 'proj_1', 'running');
+    await bridge.bridgeAcpSessionTransition(env, 'proj_1', 'running');
     expect(emitTrialEventForProjectMock).toHaveBeenCalledTimes(1);
     const [, , event] = emitTrialEventForProjectMock.mock.calls[0];
     expect(event.type).toBe('trial.ready');
     expect(event.workspaceUrl).toBe('https://ws-ws_1.example.com');
     expect(event.trialId).toBe('trial_1');
+    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'ready'")
+    );
+    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
+      expect.stringContaining('claimed_by_user_id IS NULL')
+    );
+    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
+      expect.stringContaining('expires_at > ?')
+    );
+  });
+
+  it('does not emit trial.ready when D1 refused the transition and the trial is expired', async () => {
+    const env = makeEnv({
+      readyUpdateChanges: 0,
+      currentTrial: { status: 'expired', expires_at: Date.now() - 1, claimed_by_user_id: null },
+    });
+    readTrialByProjectMock.mockResolvedValueOnce({
+      trialId: 'trial_expired',
+      projectId: 'proj_1',
+      workspaceId: 'ws_1',
+    });
+
+    await bridge.bridgeAcpSessionTransition(env, 'proj_1', 'running');
+
+    expect(emitTrialEventForProjectMock).not.toHaveBeenCalled();
+  });
+
+  it('emits trial.ready idempotently when D1 reports the trial is already ready and unexpired', async () => {
+    const env = makeEnv({
+      readyUpdateChanges: 0,
+      currentTrial: { status: 'ready', expires_at: Date.now() + 60_000, claimed_by_user_id: null },
+    });
+    readTrialByProjectMock.mockResolvedValueOnce({
+      trialId: 'trial_ready',
+      projectId: 'proj_1',
+      workspaceId: 'ws_1',
+    });
+
+    await bridge.bridgeAcpSessionTransition(env, 'proj_1', 'running');
+
+    expect(emitTrialEventForProjectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not emit trial.ready idempotently after the trial has been claimed', async () => {
+    const env = makeEnv({
+      readyUpdateChanges: 0,
+      currentTrial: { status: 'ready', expires_at: Date.now() + 60_000, claimed_by_user_id: 'user_1' },
+    });
+    readTrialByProjectMock.mockResolvedValueOnce({
+      trialId: 'trial_claimed',
+      projectId: 'proj_1',
+      workspaceId: 'ws_1',
+    });
+
+    await bridge.bridgeAcpSessionTransition(env, 'proj_1', 'running');
+
+    expect(emitTrialEventForProjectMock).not.toHaveBeenCalled();
   });
 
   it('emits trial.error on failed transition', async () => {

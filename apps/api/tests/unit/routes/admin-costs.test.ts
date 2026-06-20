@@ -147,6 +147,46 @@ describe('admin-costs routes', () => {
     expect(body.periodLabel).toBeTruthy();
   });
 
+  it('accepts the current Cloudflare AI Gateway log response shape', async () => {
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          result: [
+            makeLogEntry({
+              cost: 0.05,
+              tokens_in: 1000,
+              tokens_out: 500,
+              metadata: {
+                userId: 'user-1',
+                projectId: 'proj-1',
+                messageCount: 12,
+                hasTools: false,
+              },
+            }),
+          ],
+          result_info: {
+            page: 1,
+            per_page: 50,
+            count: 1,
+            total_count: 1,
+          },
+          success: true,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.llm.totalRequests).toBe(1);
+    expect(body.llm.totalCostUsd).toBeCloseTo(0.05);
+    expect(body.llm.byUser).toHaveLength(1);
+    expect(body.llm.byUser[0].userId).toBe('user-1');
+  });
+
   it('returns empty data when AI Gateway is not configured', async () => {
     const app = createApp({ AI_GATEWAY_ID: undefined });
     const res = await app.request('/api/admin/costs');

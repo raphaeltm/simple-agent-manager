@@ -94,6 +94,7 @@ export interface Env {
   CALLBACK_TOKEN_EXPIRY_MS?: string;
   PORT_ACCESS_TOKEN_EXPIRY_MS?: string;          // Port access JWT expiry in ms (default: 900000 = 15 min)
   PORT_ACCESS_COOKIE_MAX_AGE_SECONDS?: string;   // Port access cookie Max-Age in seconds (default: 14400 = 4 hr)
+  LOCAL_FORWARD_TOKEN_EXPIRY_MS?: string;        // CLI local-forward JWT expiry in ms (default: 300000 = 5 min)
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
   PROVISIONING_TIMEOUT_MS?: string;
   DNS_TTL_SECONDS?: string;
@@ -604,6 +605,10 @@ export interface Env {
   TRIAL_KILL_SWITCH_CACHE_MS?: string;               // Kill-switch cache TTL in ms (default: 30000)
   TRIAL_REPO_MAX_KB?: string;                        // Max GitHub repo size in KB (default: 512000 = 500 MB)
   TRIAL_GITHUB_TIMEOUT_MS?: string;                  // Timeout for GitHub repo metadata probe (default: 5000)
+  TRIAL_EXPIRE_BATCH_SIZE?: string;                  // Max trial rows to expire per cron sweep (default: 1000)
+  TRIAL_CLEANUP_BATCH_SIZE?: string;                 // Max expired trial projects to inspect per cleanup sweep (default: 25)
+  TRIAL_CLEANUP_DEADLINE_MS?: string;                // Soft wall-clock cleanup budget per sweep (default: 45000)
+  TRIAL_NODE_DELETION_LOCK_STALE_MS?: string;        // Age before retrying a stuck trial node deletion lock (default: 600000)
   TRIAL_COUNTER_KEEP_MONTHS?: string;                // Months of counter rows to retain in DO (default: 3)
   TRIAL_WAITLIST_PURGE_DAYS?: string;                // Days after reset_date before notified waitlist rows are purged (default: 30)
   TRIAL_CRON_ROLLOVER_CRON?: string;                 // Cron expression used by the monthly rollover audit (default: 0 5 1 * *)

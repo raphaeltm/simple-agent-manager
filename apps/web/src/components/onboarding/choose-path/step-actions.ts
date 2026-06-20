@@ -15,7 +15,6 @@ export interface StepFormState {
   apiKey: string;
   selectedAgent: string | null;
   hetznerToken: string;
-  selectedRepoUrl: string;
   selectedRepoName: string;
 }
 
@@ -23,7 +22,6 @@ export const INITIAL_FORM: StepFormState = {
   apiKey: '',
   selectedAgent: null,
   hetznerToken: '',
-  selectedRepoUrl: '',
   selectedRepoName: '',
 };
 

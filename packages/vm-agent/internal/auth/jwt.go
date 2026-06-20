@@ -12,14 +12,20 @@ import (
 
 const nodeManagementAudience = "node-management"
 const workspaceCallbackAudience = "workspace-callback"
+const localForwardAudience = "local-forward"
+const nodeIDMismatchFormat = "node ID mismatch: expected %s, got %s"
 
 // Claims represents JWT claims accepted by the node agent.
 type Claims struct {
 	jwt.RegisteredClaims
-	Workspace string `json:"workspace,omitempty"`
-	Node      string `json:"node,omitempty"`
-	Type      string `json:"type,omitempty"`
-	Scope     string `json:"scope,omitempty"`
+	Workspace      string `json:"workspace,omitempty"`
+	Node           string `json:"node,omitempty"`
+	Type           string `json:"type,omitempty"`
+	Scope          string `json:"scope,omitempty"`
+	UserID         string `json:"userId,omitempty"`
+	RemotePort     int    `json:"remotePort,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	LocalAuthority string `json:"localAuthority,omitempty"`
 }
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.
@@ -73,7 +79,7 @@ func (v *JWTValidator) parse(tokenString string) (*Claims, error) {
 	}
 
 	if claims.Node != "" && claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 
 	return claims, nil
@@ -175,7 +181,7 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 	}
 
 	if claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 
 	// When a specific workspace is requested, the token MUST carry a matching
@@ -185,6 +191,42 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
 	}
 
+	return claims, nil
+}
+
+// ValidateLocalForwardToken validates a non-writing local HTTP forwarding token.
+func (v *JWTValidator) ValidateLocalForwardToken(tokenString, workspaceID string, remotePort int) (*Claims, error) {
+	claims, err := v.parse(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAudience(claims, localForwardAudience); err != nil {
+		return nil, err
+	}
+	if err := validateWorkspaceClaim(claims, workspaceID); err != nil {
+		return nil, err
+	}
+	if claims.ExpiresAt == nil {
+		return nil, fmt.Errorf("expiration claim is required")
+	}
+	if claims.Type != "local-forward" {
+		return nil, fmt.Errorf("local forward token type is required")
+	}
+	if claims.Subject == "" || claims.UserID == "" || claims.Subject != claims.UserID {
+		return nil, fmt.Errorf("local forward user claim is invalid")
+	}
+	if claims.Node != v.nodeID {
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
+	}
+	if claims.RemotePort != remotePort {
+		return nil, fmt.Errorf("remote port mismatch: expected %d, got %d", remotePort, claims.RemotePort)
+	}
+	if claims.Mode != "http" {
+		return nil, fmt.Errorf("local forward mode must be http")
+	}
+	if claims.LocalAuthority == "" {
+		return nil, fmt.Errorf("local authority claim is required")
+	}
 	return claims, nil
 }
 

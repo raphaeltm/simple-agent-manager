@@ -4,6 +4,13 @@
 
 The current `sam workspace <id> forward` path binds a local listener but forwards through the public workspace port route. That rewrites browser-local authority to the public `ws-*--port` hostname, uses public port-access cookies/tokens, and risks consuming or stripping target application auth and cookies. Raphaël requires localhost semantics and auth/cookie isolation for CLI forwarding. The initial slice only needs HTTP forwarding; raw TCP and WebSocket/HMR can be explicitly unsupported.
 
+## Human Constraints
+
+- Stop at an open PR. Do not merge, close, or mark ready for merge unless Raphaël explicitly asks later.
+- Do not deploy to staging and do not run staging deployment or staging smoke validation for this task.
+- Push the SAM output branch early and after coherent implementation slices.
+- Preserve these constraints in the PR body.
+
 ## Research Findings
 
 - The crashed parent SAM session recovered durable idea `01KV99H6RX7B7JKQ63JYP54QA7` and its implementation plan before crashing.
@@ -14,14 +21,14 @@ The current `sam workspace <id> forward` path binds a local listener but forward
 
 ## Implementation Checklist
 
-- [ ] Add dedicated local-forward JWT audiences and helpers with claims for user/workspace/node/port/mode/local authority.
-- [ ] Add `POST /api/workspaces/:id/forwards` to authorize workspace ownership, validate port/local host, and mint a short-lived CLI forwarding token.
-- [ ] Add an API-domain local-forward proxy route that validates `X-SAM-Forward-Token`, rechecks workspace routing, strips spoofable forwarding/internal headers, preserves app auth/cookies, and sends `X-SAM-VM-Forward-Token` to the VM Agent.
-- [ ] Add a VM Agent local-forward handler and token validation path that does not set SAM session cookies, proxies only to the workspace container endpoint, preserves app auth/cookies, and sets localhost authority headers from validated claims.
-- [ ] Rewrite CLI local forwarding to create forward sessions, support `--local-port` and `--local-host`, validate inbound Host, preserve target app headers, strip spoofable headers, and use `X-SAM-Forward-Token` instead of app-visible `Authorization` or cookies.
-- [ ] Return a clear unsupported response for WebSocket upgrade requests if WebSocket proxying is not implemented in this slice.
-- [ ] Add focused CLI Go tests, API Vitest coverage, and VM Agent Go tests for token scope, localhost Host semantics, app `Authorization`/`Cookie`/multiple `Set-Cookie` preservation, and header stripping.
-- [ ] Run relevant tests for touched packages.
+- [x] Add dedicated local-forward JWT audiences and helpers with claims for user/workspace/node/port/mode/local authority.
+- [x] Add `POST /api/workspaces/:id/forwards` to authorize workspace ownership, validate port/local host, and mint a short-lived CLI forwarding token.
+- [x] Add an API-domain local-forward proxy route that validates `X-SAM-Forward-Token`, rechecks workspace routing, strips spoofable forwarding/internal headers, preserves app auth/cookies, and sends `X-SAM-VM-Forward-Token` to the VM Agent.
+- [x] Add a VM Agent local-forward handler and token validation path that does not set SAM session cookies, proxies only to the workspace container endpoint, preserves app auth/cookies, and sets localhost authority headers from validated claims.
+- [x] Rewrite CLI local forwarding to create forward sessions, support `--local-port` and `--local-host`, validate inbound Host, preserve target app headers, strip spoofable headers, and use `X-SAM-Forward-Token` instead of app-visible `Authorization` or cookies.
+- [x] Return a clear unsupported response for WebSocket upgrade requests if WebSocket proxying is not implemented in this slice.
+- [x] Add focused CLI Go tests, API Vitest coverage, and VM Agent Go tests for token scope, localhost Host semantics, app `Authorization`/`Cookie`/multiple `Set-Cookie` preservation, and header stripping.
+- [x] Run relevant tests for touched packages.
 
 ## Acceptance Criteria
 

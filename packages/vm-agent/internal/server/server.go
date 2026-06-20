@@ -1007,6 +1007,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
 	mux.HandleFunc("GET /containers", s.handleContainers)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports", s.handleListWorkspacePorts)
+	mux.HandleFunc("/workspaces/{workspaceId}/local-forward/{port}/{path...}", s.handleWorkspaceLocalForward)
+	mux.HandleFunc("/workspaces/{workspaceId}/local-forward/{port}", s.handleWorkspaceLocalForward)
 	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}/{path...}", s.handleWorkspacePortProxy)
 	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 
