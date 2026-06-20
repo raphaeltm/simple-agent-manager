@@ -180,7 +180,7 @@ export function ChatSettingsPanel({
           ) : (
             <>
               {/* Permission Mode */}
-              <fieldset style={{ border: 'none', margin: 0, padding: 0 }}>
+              <fieldset style={{ border: 'none', margin: 0, padding: 0 }} role="radiogroup">
                 <legend style={{
                   display: 'block',
                   fontSize: '0.75rem',
@@ -192,7 +192,7 @@ export function ChatSettingsPanel({
                 }}>
                   Permission Mode
                 </legend>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }} role="radiogroup" aria-label="Permission Mode">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {permissionModes.map((mode) => (
                     <button
                       key={mode.value}
