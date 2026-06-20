@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
 
@@ -462,7 +463,7 @@ func composeSupportsProvider(major, minor int) bool {
 // composeMajorMinor returns the major and minor version of the installed
 // compose v2 plugin (`docker compose version --short`).
 func composeMajorMinor(ctx context.Context) (int, int, bool) {
-	out, err := exec.CommandContext(ctx, "docker", "compose", "version", "--short").Output()
+	out, err := exec.CommandContext(ctx, container.DockerCLIPath(), "compose", "version", "--short").Output()
 	if err != nil {
 		return 0, 0, false
 	}
@@ -528,7 +529,7 @@ func modelCLIArch() string {
 // runner already installed, both checks short-circuit.
 func ensureDockerModelRunner(ctx context.Context) error {
 	// Install the CLI plugin if `docker model` is not already available.
-	if err := exec.CommandContext(ctx, "docker", "model", "version").Run(); err != nil {
+	if err := exec.CommandContext(ctx, container.DockerCLIPath(), "model", "version").Run(); err != nil {
 		arch := modelCLIArch()
 		if arch == "" {
 			return fmt.Errorf("unsupported architecture for model runner: %s", runtime.GOARCH)
@@ -562,7 +563,7 @@ func ensureDockerModelRunner(ctx context.Context) error {
 			return fmt.Errorf("docker model plugin download failed: %w", err)
 		}
 
-		if err := exec.CommandContext(ctx, "docker", "model", "version").Run(); err != nil {
+		if err := exec.CommandContext(ctx, container.DockerCLIPath(), "model", "version").Run(); err != nil {
 			return fmt.Errorf("docker model plugin not usable after install: %w", err)
 		}
 		slog.Info("Docker Model plugin installed")

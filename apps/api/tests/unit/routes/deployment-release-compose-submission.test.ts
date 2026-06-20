@@ -395,7 +395,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
     expect(res.status).toBe(201);
     expect(insertedReleases).toHaveLength(1);
     const manifest = JSON.parse(insertedReleases[0].manifest as string);
-    expect(Object.keys(manifest.services).sort()).toEqual(['web', 'worker']);
+    expect(Object.keys(manifest.services).sort((a, b) => a.localeCompare(b))).toEqual(['web', 'worker']);
   });
 
   it('scopes minted registry credentials to the SAM registry host for both YAML and JSON paths', async () => {
