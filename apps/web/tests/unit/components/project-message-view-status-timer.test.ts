@@ -103,6 +103,29 @@ function useStatusTimerMirror(
   return { agentActivity, promptStartedAt, onAgentActivity, onAgentMessage, onTerminalIdle };
 }
 
+/** Render the mirror hook with a `verifyActivity` mock resolving (or rejecting) as configured. */
+function setup(
+  verifyResult: 'prompting' | 'idle' | Error = 'prompting',
+  sessionId = 'sess-1',
+) {
+  const verifyActivity =
+    verifyResult instanceof Error
+      ? vi.fn().mockRejectedValue(verifyResult)
+      : vi.fn().mockResolvedValue(verifyResult);
+  const view = renderHook(
+    ({ sid }: { sid: string }) => useStatusTimerMirror(sid, verifyActivity),
+    { initialProps: { sid: sessionId } },
+  );
+  return { verifyActivity, ...view };
+}
+
+/** Advance fake timers and flush the verify promise microtasks. */
+async function advance(ms = IDLE_TIMEOUT_MS) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
 describe('Agent status verify-before-decay timer', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -114,22 +137,21 @@ describe('Agent status verify-before-decay timer', () => {
 
   // T1: status bar persists through long silence while DO still reports prompting
   it('re-arms instead of decaying when DO still reports prompting after timeout', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result, verifyActivity } = setup('prompting');
 
     act(() => { result.current.onAgentActivity('prompting', 1000); });
     expect(result.current.agentActivity).toBe('prompting');
     expect(result.current.promptStartedAt).toBe(1000);
 
     // First 30s silence — timer fires, verifies, sees 'prompting', re-arms.
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS); });
+    await advance();
     expect(verifyActivity).toHaveBeenCalledTimes(1);
     expect(result.current.agentActivity).toBe('prompting');
     // The elapsed-time anchor survives the re-arm (not reset on each verify).
     expect(result.current.promptStartedAt).toBe(1000);
 
     // Second 30s silence — still prompting, still alive (no false idle).
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS); });
+    await advance();
     expect(verifyActivity).toHaveBeenCalledTimes(2);
     expect(result.current.agentActivity).toBe('prompting');
     expect(result.current.promptStartedAt).toBe(1000);
@@ -137,14 +159,13 @@ describe('Agent status verify-before-decay timer', () => {
 
   // T2: decay to idle when DO confirms the prompt is no longer active
   it('decays to idle when DO reports activity is no longer prompting', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('idle' as const);
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result, verifyActivity } = setup('idle');
 
     act(() => { result.current.onAgentActivity('prompting', 1000); });
     expect(result.current.agentActivity).toBe('prompting');
     expect(result.current.promptStartedAt).toBe(1000);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS); });
+    await advance();
     expect(verifyActivity).toHaveBeenCalledTimes(1);
     expect(result.current.agentActivity).toBe('idle');
     // Decay-to-idle must also clear the elapsed-time anchor so the UI timer stops.
@@ -153,8 +174,7 @@ describe('Agent status verify-before-decay timer', () => {
 
   // Regression: an agent message must NOT arm a blind decay timer.
   it('an agent message verifies DO state before decaying (no blind decay)', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result, verifyActivity } = setup('prompting');
 
     // Streaming output arrives — shows 'responding'.
     act(() => { result.current.onAgentMessage(); });
@@ -162,29 +182,27 @@ describe('Agent status verify-before-decay timer', () => {
 
     // 30s of silence after the message: the OLD blind timer would have flipped to 'idle'
     // here. The shared timer verifies DO state first and re-arms because it's still prompting.
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS); });
+    await advance();
     expect(verifyActivity).toHaveBeenCalledTimes(1);
     expect(result.current.agentActivity).not.toBe('idle');
   });
 
   // Regression: message after a prompting event does not clobber the verified timer.
   it('a message during a prompt keeps verifying DO state (timers do not fight)', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result, verifyActivity } = setup('prompting');
 
     act(() => { result.current.onAgentActivity('prompting'); });
     act(() => { result.current.onAgentMessage(); });
 
     // After a full timeout the bar is still alive (verified, not blindly decayed).
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS); });
+    await advance();
     expect(verifyActivity).toHaveBeenCalled();
     expect(result.current.agentActivity).toBe('responding');
   });
 
   // Authoritative idle from the DO stops the timer immediately.
   it('onAgentActivity("idle") clears the timer and does not verify', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result, verifyActivity } = setup('prompting');
 
     act(() => { result.current.onAgentActivity('prompting', 1000); });
     expect(result.current.promptStartedAt).toBe(1000);
@@ -192,25 +210,21 @@ describe('Agent status verify-before-decay timer', () => {
     expect(result.current.agentActivity).toBe('idle');
     expect(result.current.promptStartedAt).toBeNull();
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS * 2); });
+    await advance(IDLE_TIMEOUT_MS * 2);
     expect(verifyActivity).not.toHaveBeenCalled();
     expect(result.current.agentActivity).toBe('idle');
   });
 
   // Timer is cleared on session switch (no cross-session false idle / stale verify).
   it('clears the timer on session switch', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
-    const { result, rerender } = renderHook(
-      ({ sid }: { sid: string }) => useStatusTimerMirror(sid, verifyActivity),
-      { initialProps: { sid: 'sess-1' } },
-    );
+    const { result, rerender, verifyActivity } = setup('prompting');
 
     act(() => { result.current.onAgentActivity('prompting'); });
 
     // Switch sessions before the timer fires.
     rerender({ sid: 'sess-2' });
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS * 2); });
+    await advance(IDLE_TIMEOUT_MS * 2);
     // The pre-switch timer was cleared/aborted, so no verify call leaked through.
     expect(verifyActivity).not.toHaveBeenCalled();
   });
@@ -218,8 +232,7 @@ describe('Agent status verify-before-decay timer', () => {
   // Regression: a terminal idle (session stopped / agent completed) must cancel any pending
   // verify timer so it cannot re-arm and flash the status bar back on after the prompt ends.
   it('terminal idle cancels a pending verify timer (no flash-back-on)', async () => {
-    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result, verifyActivity } = setup('prompting');
 
     act(() => { result.current.onAgentActivity('prompting', 1000); });
     expect(result.current.agentActivity).toBe('prompting');
@@ -230,18 +243,17 @@ describe('Agent status verify-before-decay timer', () => {
     expect(result.current.promptStartedAt).toBeNull();
 
     // The previously-armed timer must NOT fire a verify or re-arm the bar.
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS * 2); });
+    await advance(IDLE_TIMEOUT_MS * 2);
     expect(verifyActivity).not.toHaveBeenCalled();
     expect(result.current.agentActivity).toBe('idle');
   });
 
   // Verify failure decays to idle (fail-safe).
   it('decays to idle when the DO verify call fails', async () => {
-    const verifyActivity = vi.fn().mockRejectedValue(new Error('network'));
-    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+    const { result } = setup(new Error('network'));
 
     act(() => { result.current.onAgentActivity('prompting'); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS); });
+    await advance();
     expect(result.current.agentActivity).toBe('idle');
   });
 });
