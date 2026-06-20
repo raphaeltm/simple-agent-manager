@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -200,6 +202,22 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		status.setStep("docker", "skipped")
 	}
 
+	// Step 2b: Ensure a modern Docker Compose plugin. The Hetzner docker-ce base
+	// image (and the docker.io apt fallback) ship a compose plugin older than
+	// v2.35, which rejects Docker Model Runner `provider:` services during
+	// `docker compose config` — breaking host-side build-and-publish for Model
+	// Runner compose files. Upgrade is non-fatal: a too-old plugin only affects
+	// the newer compose schema, so ordinary deploys still work if this fails.
+	if !cfg.SkipDocker {
+		if err := runStep("compose-plugin", func(ctx context.Context) error {
+			return ensureModernCompose(ctx)
+		}); err != nil {
+			slog.Warn("Docker Compose plugin upgrade failed, continuing", "error", err)
+		}
+	} else {
+		status.setStep("compose-plugin", "skipped")
+	}
+
 	// Step 3: Firewall (needed for Cloudflare-only access to vm-agent port)
 	if !cfg.SkipFirewall {
 		if err := runStep("firewall", func(ctx context.Context) error {
@@ -350,6 +368,117 @@ func installDocker(ctx context.Context) error {
 	_ = runCommand(ctx, "usermod", "-aG", "docker", "workspace")
 
 	return nil
+}
+
+// defaultComposeVersion is the Docker Compose v2 plugin release installed when
+// the host's plugin is too old. v2.35+ is required for Docker Model Runner
+// `provider:` services; we pin a known-good newer release. Overridable via
+// SAM_DOCKER_COMPOSE_VERSION (Constitution Principle XI — no hardcoded values).
+const defaultComposeVersion = "v2.40.3"
+
+// minComposeMinor is the minimum compose v2 minor version (major == 2) that
+// accepts Model Runner `provider:` services. Below this, `docker compose config`
+// errors with "Additional property provider is not allowed".
+const minComposeMinor = 35
+
+func targetComposeVersion() string {
+	if v := strings.TrimSpace(os.Getenv("SAM_DOCKER_COMPOSE_VERSION")); v != "" {
+		return v
+	}
+	return defaultComposeVersion
+}
+
+// ensureModernCompose installs a compose v2 plugin into the local cli-plugins
+// directory (which takes precedence over the apt-installed plugin) when the
+// host's current plugin predates `provider:` support. No-op if already modern.
+func ensureModernCompose(ctx context.Context) error {
+	if major, minor, ok := composeMajorMinor(ctx); ok {
+		if composeSupportsProvider(major, minor) {
+			slog.Info("Docker Compose plugin already modern", "version", fmt.Sprintf("%d.%d", major, minor))
+			return nil
+		}
+		slog.Info("Docker Compose plugin too old, upgrading",
+			"current", fmt.Sprintf("%d.%d", major, minor), "target", targetComposeVersion())
+	} else {
+		slog.Info("Docker Compose plugin not detected, installing", "target", targetComposeVersion())
+	}
+
+	arch := composeArch()
+	if arch == "" {
+		return fmt.Errorf("unsupported architecture for compose upgrade: %s", runtime.GOARCH)
+	}
+
+	version := targetComposeVersion()
+	url := fmt.Sprintf(
+		"https://github.com/docker/compose/releases/download/%s/docker-compose-linux-%s",
+		version, arch)
+	const dest = "/usr/local/lib/docker/cli-plugins/docker-compose"
+	// Download to a temp file then atomically move into place so a partial
+	// download can never leave a broken plugin on PATH.
+	script := fmt.Sprintf(
+		"mkdir -p /usr/local/lib/docker/cli-plugins && "+
+			"curl -fsSL --retry 3 -o %[1]s.tmp %[2]q && "+
+			"chmod +x %[1]s.tmp && "+
+			"mv -f %[1]s.tmp %[1]s",
+		dest, url)
+	if err := runShell(ctx, script); err != nil {
+		return fmt.Errorf("compose plugin download failed: %w", err)
+	}
+
+	major, minor, ok := composeMajorMinor(ctx)
+	if !ok {
+		return fmt.Errorf("compose plugin not detected after upgrade")
+	}
+	if composeSupportsProvider(major, minor) {
+		slog.Info("Docker Compose plugin upgraded", "version", fmt.Sprintf("%d.%d", major, minor))
+		return nil
+	}
+	return fmt.Errorf("compose plugin still too old after upgrade: %d.%d", major, minor)
+}
+
+// composeSupportsProvider reports whether a compose v2 plugin of the given
+// major.minor accepts Docker Model Runner `provider:` services (v2.35+).
+func composeSupportsProvider(major, minor int) bool {
+	return major > 2 || (major == 2 && minor >= minComposeMinor)
+}
+
+// composeMajorMinor returns the major and minor version of the installed
+// compose v2 plugin (`docker compose version --short`).
+func composeMajorMinor(ctx context.Context) (int, int, bool) {
+	out, err := exec.CommandContext(ctx, "docker", "compose", "version", "--short").Output()
+	if err != nil {
+		return 0, 0, false
+	}
+	return parseComposeVersion(string(out))
+}
+
+// parseComposeVersion extracts major.minor from a compose version string such
+// as "2.40.3", "v2.35.0", or "2.40.3-desktop.1".
+func parseComposeVersion(s string) (int, int, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	parts := strings.SplitN(s, ".", 3)
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(strings.SplitN(parts[1], "-", 2)[0])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
+
+// composeArch maps GOARCH to the docker/compose release asset suffix.
+func composeArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	default:
+		return ""
+	}
 }
 
 func installFirewall(ctx context.Context, vmAgentPort, cfIPFetchTimeout string) error {
