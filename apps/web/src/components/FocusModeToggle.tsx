@@ -1,8 +1,8 @@
 import { ArrowLeftRight, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 
 import {
-  type FocusMode,
   FOCUS_MODE_ORDER,
+  type FocusMode,
   focusModeLabel,
   nextFocusMode,
 } from '../lib/focus-mode';

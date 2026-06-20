@@ -3,13 +3,17 @@ import { ChevronDown, ChevronRight, List, Search, Settings, X } from 'lucide-rea
 import { useCallback, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
+import { useAppShell } from '../../components/AppShell';
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { HierarchyModal } from '../../components/task-hierarchy';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
+import { ZenPeekRail } from '../../components/ZenPeekRail';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { sessionWidthForMode } from '../../lib/focus-mode';
 import { ChatInput } from './ChatInput';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
+import { FocusStrip } from './FocusStrip';
 import { getSessionSourceContext } from './lineageUtils';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
@@ -19,6 +23,7 @@ import { useProjectChatState } from './useProjectChatState';
 
 export function ProjectChat() {
   const isMobile = useIsMobile();
+  const { focusMode, setFocusMode } = useAppShell();
   const location = useLocation();
   const navigate = useNavigate();
   const state = useProjectChatState();
@@ -73,15 +78,12 @@ export function ProjectChat() {
     );
   }
 
-  return (
-    <div className="flex flex-1 min-h-0">
-      {/* ================================================================== */}
-      {/* Desktop sidebar                                                    */}
-      {/* ================================================================== */}
-      {!isMobile && (
-        <div className="relative z-20 w-72 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col">
-          {/* Sidebar header: project name + action buttons */}
-          <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
+  // Full session-sidebar content. Reused verbatim by the default-mode panel
+  // and the Zen peek panel so the two never drift.
+  const sidebarInner = (
+    <>
+      {/* Sidebar header: project name + action buttons */}
+      <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
             <span className="text-sm font-semibold text-fg-primary truncate flex-1">
               {state.project?.name || 'Project'}
             </span>
@@ -223,6 +225,38 @@ export function ProjectChat() {
             <div className="flex-1 flex items-center justify-center p-4">
               <span className="text-xs text-fg-muted text-center">No chats yet. Start a new one above.</span>
             </div>
+          )}
+    </>
+  );
+
+  return (
+    <div className="flex flex-1 min-h-0">
+      {/* ================================================================== */}
+      {/* Desktop session sidebar — collapses with Focus Mode                */}
+      {/* default: 288px full panel · focus: 64px status strip · zen: seam   */}
+      {/* ================================================================== */}
+      {!isMobile && focusMode === 'zen' && (
+        <ZenPeekRail edge="sessions" label="Chats" onExpand={() => setFocusMode('default')}>
+          {sidebarInner}
+        </ZenPeekRail>
+      )}
+      {!isMobile && focusMode !== 'zen' && (
+        <div
+          style={{ width: sessionWidthForMode(focusMode) }}
+          className="relative z-20 shrink-0 overflow-hidden glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        >
+          {focusMode === 'focus' ? (
+            <FocusStrip
+              sessions={state.filteredRecent}
+              selectedSessionId={state.sessionId ?? null}
+              onSelect={state.handleSelect}
+              onFork={state.handleFork}
+              taskInfoMap={state.taskInfoMap}
+              onShowHierarchy={handleShowHierarchy}
+              onNewChat={state.handleNewChat}
+            />
+          ) : (
+            sidebarInner
           )}
         </div>
       )}
