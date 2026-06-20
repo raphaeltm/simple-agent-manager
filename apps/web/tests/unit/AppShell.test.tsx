@@ -380,3 +380,128 @@ describe('AppShell (mobile)', () => {
     vi.useRealTimers();
   });
 });
+
+describe('AppShell (Focus Mode — desktop)', () => {
+  // The grid wrapper carries the collapsing nav column as an inline width.
+  // navWidthForMode: default=220, focus=56, zen=0 (see src/lib/focus-mode.ts).
+  function gridColumns(): string {
+    const grid = document.querySelector('div.grid.h-screen') as HTMLElement | null;
+    expect(grid).toBeTruthy();
+    return grid!.style.gridTemplateColumns;
+  }
+
+  beforeEach(() => {
+    matchMediaMatches = false; // desktop — Focus Mode is desktop-only
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('persists mode changes to localStorage and collapses the nav column', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    renderAppShell();
+
+    // Default: full nav rail (220px) and the segmented toggle is visible.
+    expect(gridColumns()).toBe('220px 1fr');
+    expect(screen.getByRole('group', { name: 'Focus Mode' })).toBeInTheDocument();
+
+    // Select Focus -> nav collapses to the 56px icon rail, persisted.
+    fireEvent.click(screen.getByRole('button', { name: 'Focus', exact: true }));
+    expect(setItem).toHaveBeenCalledWith('sam:focus-mode', 'focus');
+    expect(gridColumns()).toBe('56px 1fr');
+
+    // In focus mode the compact cycle control replaces the segmented group.
+    const cycle = screen.getByRole('button', {
+      name: /Focus Mode: Focus\. Activate to switch to Zen/,
+    });
+    fireEvent.click(cycle);
+    expect(setItem).toHaveBeenCalledWith('sam:focus-mode', 'zen');
+    expect(gridColumns()).toBe('0px 1fr');
+  });
+
+  it('hydrates the persisted mode across reloads', () => {
+    // Simulate a prior session that left Focus Mode in "focus".
+    window.localStorage.setItem('sam:focus-mode', 'focus');
+    renderAppShell();
+
+    // The hydration effect reads localStorage on mount and collapses to 56px.
+    expect(gridColumns()).toBe('56px 1fr');
+    // The compact cycle control (not the segmented group) is shown in focus mode.
+    expect(
+      screen.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Focus Mode' })).not.toBeInTheDocument();
+  });
+
+  it('cycles default -> focus -> zen -> default with the F key', () => {
+    renderAppShell();
+    expect(gridColumns()).toBe('220px 1fr');
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(gridColumns()).toBe('56px 1fr');
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(gridColumns()).toBe('0px 1fr');
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(gridColumns()).toBe('220px 1fr');
+  });
+
+  it('disables the column transition under prefers-reduced-motion', () => {
+    renderAppShell();
+    const grid = document.querySelector('div.grid.h-screen') as HTMLElement | null;
+    expect(grid).toBeTruthy();
+    // The grid animates grid-template-columns, but must opt out when the user
+    // requests reduced motion (Tailwind motion-reduce: variant).
+    expect(grid!.className).toContain('transition-[grid-template-columns]');
+    expect(grid!.className).toContain('motion-reduce:transition-none');
+  });
+
+  it('ignores the F key while typing in an input', () => {
+    renderAppShell();
+    const search = screen.getByLabelText('Open command palette');
+    // Focus a text-like element and press F — Focus Mode must not cycle.
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: 'f' });
+    expect(gridColumns()).toBe('220px 1fr');
+    input.remove();
+    expect(search).toBeInTheDocument();
+  });
+});
+
+describe('AppShell (Focus Mode — mobile is disabled)', () => {
+  beforeEach(() => {
+    matchMediaMatches = true; // mobile
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('never renders the Focus Mode toggle and ignores a persisted mode', () => {
+    // Even with a persisted non-default mode, mobile must stay default.
+    window.localStorage.setItem('sam:focus-mode', 'zen');
+    renderAppShell();
+
+    expect(screen.queryByRole('group', { name: 'Focus Mode' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ }),
+    ).not.toBeInTheDocument();
+    // The collapsing desktop grid wrapper is not used on mobile.
+    expect(document.querySelector('div.grid.h-screen')).toBeNull();
+  });
+
+  it('does not cycle Focus Mode when the F key is pressed', () => {
+    renderAppShell();
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(
+      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ }),
+    ).not.toBeInTheDocument();
+  });
+});
