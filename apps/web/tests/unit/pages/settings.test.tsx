@@ -51,6 +51,7 @@ vi.mock('../../../src/components/UserMenu', () => ({
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Settings } from '../../../src/pages/Settings';
+import { SettingsAgents } from '../../../src/pages/SettingsAgents';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsConnections } from '../../../src/pages/SettingsConnections';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
@@ -65,6 +66,7 @@ function renderSettings(path = '/settings/cloud-provider') {
             <Route path="cloud-provider" element={<SettingsCloudProvider />} />
             <Route path="github" element={<SettingsGitHub />} />
             <Route path="connections" element={<SettingsConnections />} />
+            <Route path="agents" element={<SettingsAgents />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -95,6 +97,7 @@ describe('Settings shell', () => {
     expect(screen.getByRole('tab', { name: 'Cloud Provider' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'GitHub' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Connections' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument();
   });
 
@@ -135,6 +138,16 @@ describe('Settings shell', () => {
     });
 
     expect(screen.getByTestId('connections-overview')).toBeInTheDocument();
+  });
+
+  it('renders agents sub-route', async () => {
+    renderSettings('/settings/agents');
+
+    await waitFor(() => {
+      expect(mocks.listCredentials).toHaveBeenCalled();
+    });
+
+    expect(screen.getByTestId('agents-section')).toBeInTheDocument();
   });
 
   it('renders cloud-provider sub-route with scaleway form', async () => {

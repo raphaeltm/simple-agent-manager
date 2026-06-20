@@ -23,6 +23,7 @@ The user explicitly requested this be implemented with `/do` and explicitly requ
 - `packages/vm-agent/internal/acp/session_host_startup.go` maps selected OpenCode providers to credential env vars. `opencode-go` must map to `OPENCODE_API_KEY`.
 - `packages/shared/src/agents.ts` and `packages/vm-agent/internal/acp/gateway.go` both pin the OpenCode install command and both need the version bump.
 - `apps/web/src/components/AgentSettingsCard.tsx` presents provider selection and default copy. The current "Default (auto-detect)" copy is misleading now that default is explicitly Zen.
+- `/settings/agents` redirected to `/settings/connections`, which made the existing user-level provider picker unreachable. The implementation must restore an Agents settings route or the Go provider cannot be selected from the UI.
 - `apps/web/src/components/ConnectFlow.tsx` still labels OpenCode credential capture as Zen-specific. With Go selectable in settings, generic "OpenCode API Key" copy is clearer.
 - Public docs in `apps/www/src/content/docs/docs/guides/agents.md` mention OpenCode Zen and should be updated so users know Go can be selected for GLM 5.2.
 
@@ -57,6 +58,7 @@ The user explicitly requested this be implemented with `/do` and explicitly requ
    - Verify VM start payloads preserve an `opencode-go` override when present.
 9. Update web UI copy and tests:
    - Change misleading provider default copy from auto-detection language to explicit Zen default language.
+   - Restore `/settings/agents` to render the existing unified agent settings cards so the provider picker is reachable.
    - Make Connect Flow OpenCode credential labels generic enough for both Zen and Go.
    - Update provider status helpers/tests so Go appears with the correct label and credential requirements.
    - Run screenshot-backed Playwright visual audit for the agent settings surface.
@@ -88,6 +90,7 @@ The user explicitly requested this be implemented with `/do` and explicitly requ
 
 - `opencode-go` is a valid OpenCode provider in shared types, API validation, UI settings, and VM startup payloads.
 - OpenCode Go appears as a selectable provider in the agent settings UI.
+- The agent settings UI is reachable from `/settings/agents`.
 - Selecting OpenCode Go with no custom model defaults to `opencode-go/glm-5.2`.
 - Selecting OpenCode Go with an explicit model preserves that model.
 - OpenCode Go credentials are injected as `OPENCODE_API_KEY`.
@@ -112,6 +115,39 @@ The user explicitly requested this be implemented with `/do` and explicitly requ
 - `pnpm build`
 - Playwright settings visual audit after local web server startup.
 
+## Implementation Notes
+
+- Added `opencode-go` to shared OpenCode provider metadata and options.
+- Added `DEFAULT_OPENCODE_GO_MODEL = 'opencode-go/glm-5.2'`.
+- Kept Zen as the default OpenCode provider and kept `opencode-managed` backward compatible with Zen.
+- Bumped OpenCode install metadata from `opencode-ai@1.4.3` to `opencode-ai@1.17.8`, which locally exposes `opencode-go/glm-5.2`.
+- Updated VM-agent config generation so `opencode-go` defaults to `opencode-go/glm-5.2`, preserves explicit Go models, and uses `OPENCODE_API_KEY`.
+- Updated API and cross-boundary tests so Go is accepted, preserved in VM startup payloads, and does not use Scaleway or SAM platform fallback.
+- Updated web settings copy, Connect Flow copy, and status tests for a generic OpenCode API key label.
+- Restored `/settings/agents` as a real settings route with an Agents tab so the provider selector is reachable.
+- Updated public docs to explain OpenCode Go and `opencode-go/glm-5.2`.
+
+## Validation Results
+
+- Passed: `pnpm --filter @simple-agent-manager/shared test -- --run tests/unit/agent-settings.test.ts tests/unit/agents.test.ts`
+- Passed: `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/agent-settings.test.ts tests/unit/routes/opencode-credential-fallback.test.ts tests/unit/routes/agents-catalog.test.ts tests/unit/vm-agent-cross-boundary-contract.test.ts`
+- Passed: `pnpm --filter @simple-agent-manager/web test -- --run tests/unit/app-routes.test.tsx tests/unit/pages/settings.test.tsx tests/unit/components/agents-section.test.tsx tests/unit/components/agent-card.test.tsx tests/unit/components/ConnectFlow.test.tsx tests/unit/agent-status-sam.test.ts`
+- Passed: `pnpm typecheck`
+- Passed: `pnpm lint` with existing warnings and no errors.
+- Passed: `pnpm build` with existing bundle-size warnings.
+- Passed: `pnpm test` (19 Turbo tasks, including 193 web test files / 2396 web tests).
+- Passed: `pnpm exec playwright test tests/playwright/agent-settings-audit.spec.ts` (84/84).
+- Passed: `git diff --check`
+- Blocked by environment: `gofmt` and `go test ./internal/acp` could not run because `go` and `gofmt` are not installed in this container.
+
+## Specialist Review Notes
+
+- Go specialist checklist: VM-agent changes are scoped to provider normalization, default model resolution, config generation, and credential env mapping. Go tooling validation is blocked by missing `go`/`gofmt`.
+- Security auditor checklist: Go uses the existing OpenCode credential env var path (`OPENCODE_API_KEY`) and does not introduce a new secret name or log secret material.
+- UI/UX checklist: `/settings/agents` is reachable, the provider select has the Go option, Go keeps a text model input with GLM 5.2 placeholder, and the full Playwright audit passed across mobile and desktop viewports.
+- Doc-sync checklist: public agent docs now list OpenCode Go, the shared OpenCode API key, and `opencode-go/glm-5.2`.
+- Task-completion checklist: acceptance criteria are covered by shared/API/web/Playwright tests except Go runtime tests, which are explicitly environment-blocked.
+
 ## Staging
 
 Skipped by explicit user instruction. Do not deploy or mutate staging for this work.
@@ -129,4 +165,3 @@ Skipped by explicit user instruction. Do not deploy or mutate staging for this w
   - `.claude/rules/41-credential-snapshot-resilience.md`
   - `.claude/rules/17-ui-visual-testing.md`
   - `.claude/rules/01-doc-sync.md`
-

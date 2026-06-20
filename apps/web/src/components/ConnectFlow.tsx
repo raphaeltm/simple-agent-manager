@@ -61,7 +61,7 @@ function getCredentialLabel(
   isCodexAuthJson: boolean
 ): string {
   if (authMethod === 'api-key') {
-    return isOpenCodeApiKey ? 'OpenCode Zen API Key' : 'API Key';
+    return isOpenCodeApiKey ? 'OpenCode API Key' : 'API Key';
   }
   return isCodexAuthJson ? 'Codex auth.json' : 'OAuth Token';
 }
@@ -218,7 +218,7 @@ export function ConnectFlow({
                   rel="noopener noreferrer"
                   className="text-accent"
                 >
-                  {isOpenCodeApiKey ? 'OpenCode Zen' : `${selectedAgent.provider} console`}
+                  {isOpenCodeApiKey ? 'OpenCode' : `${selectedAgent.provider} console`}
                 </a>
               </p>
             )}

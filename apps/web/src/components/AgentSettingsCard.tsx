@@ -193,7 +193,7 @@ export function AgentSettingsCard({
         <div className="mb-4">
           <label htmlFor={`opencode-provider-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Inference Provider</label>
           <div className="text-xs text-fg-muted mb-2">
-            Select the AI provider for OpenCode inference. Leave as &quot;Default&quot; to auto-detect.
+            Select the AI provider for OpenCode inference. Default uses OpenCode Zen.
           </div>
           <select
             id={`opencode-provider-${agent.id}`}
@@ -215,7 +215,7 @@ export function AgentSettingsCard({
             className={formControlClass}
             data-testid="opencode-provider-select"
           >
-            <option value="">Default (auto-detect)</option>
+            <option value="">Default (OpenCode Zen)</option>
             {OPENCODE_PROVIDER_OPTIONS.map((p) => (
               <option key={p} value={p}>
                 {OPENCODE_PROVIDERS[p].label}

@@ -236,8 +236,42 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     expect(body.inferenceConfig).toBeUndefined();
   });
 
+  it('returns dedicated key directly for OpenCode Go instead of routing through platform proxy', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1' }],
+      [{ opencodeProvider: 'opencode-go' }],
+      [
+        {
+          encryptedToken: 'encrypted-go-key',
+          iv: 'iv-go',
+          credentialKind: 'api-key',
+          isActive: true,
+        },
+      ]
+    );
+
+    mockDecrypt.mockResolvedValueOnce('opencode-go-api-key');
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.apiKey).toBe('opencode-go-api-key');
+    expect(body.credentialKind).toBe('api-key');
+    expect(body.inferenceConfig).toBeUndefined();
+  });
+
   it('does not fall back to Scaleway or platform credentials when OpenCode Zen has no key', async () => {
     queueLimitResponses([{ userId: 'user-1' }], [{ opencodeProvider: 'opencode-zen' }], []);
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.message).toBe('Agent credential not found');
+    expect(mockDB.limit).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not fall back to Scaleway or platform credentials when OpenCode Go has no key', async () => {
+    queueLimitResponses([{ userId: 'user-1' }], [{ opencodeProvider: 'opencode-go' }], []);
 
     const resp = await postAgentKey({ agentType: 'opencode' });
     expect(resp.status).toBe(404);

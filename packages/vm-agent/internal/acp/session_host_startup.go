@@ -148,7 +148,7 @@ func credentialEnvVarName(agentType string, settings *agentSettingsPayload, info
 		return info.envVarName
 	}
 	switch settings.OpencodeProvider {
-	case "opencode-zen", "opencode-managed", "openai-compatible", "custom":
+	case "opencode-zen", "opencode-go", "opencode-managed", "openai-compatible", "custom":
 		return "OPENCODE_API_KEY"
 	case "scaleway":
 		return "SCW_SECRET_KEY"

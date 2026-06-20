@@ -215,7 +215,7 @@ type GatewayConfig struct {
 	// Values are provider-neutral: "auto", "low", "medium", "high", "xhigh", "max".
 	EffortOverride string
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
-	// Values: "platform", "scaleway", "opencode-zen", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
+	// Values: "platform", "scaleway", "opencode-zen", "opencode-go", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
 	OpencodeProviderOverride string
 	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
 	// (used for "custom" and "openai-compatible" providers).
@@ -855,7 +855,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g opencode-ai@1.4.3",
+			installCmd:    "npm install -g opencode-ai@1.17.8",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
@@ -1274,6 +1274,7 @@ func resolveVibeActiveModel(settings *agentSettingsPayload) string {
 const (
 	DefaultOpencodeProvider          = "opencode-zen"
 	DefaultOpencodeModel             = "opencode/claude-sonnet-4-6"
+	DefaultOpencodeGoModel           = "opencode-go/glm-5.2"
 	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
 	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
@@ -1293,6 +1294,31 @@ func getOpencodeDefault(envKey, fallback string) string {
 	return fallback
 }
 
+func normalizeOpencodeProvider(provider string) string {
+	switch provider {
+	case "platform", "scaleway", "opencode-zen", "opencode-go", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom":
+		return provider
+	default:
+		return DefaultOpencodeProvider
+	}
+}
+
+func resolveOpencodeDefaultModel(provider string) string {
+	switch provider {
+	case "opencode-go":
+		return getOpencodeDefault("OPENCODE_GO_DEFAULT_MODEL", DefaultOpencodeGoModel)
+	default:
+		return getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
+	}
+}
+
+func resolveOpencodeModel(provider string, settings *agentSettingsPayload) string {
+	if settings != nil && settings.Model != "" {
+		return settings.Model
+	}
+	return resolveOpencodeDefaultModel(provider)
+}
+
 // buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
 // based on the provider selected in agent settings.
 //
@@ -1301,7 +1327,7 @@ func getOpencodeDefault(envKey, fallback string) string {
 //   - "models": a map registering model aliases so OpenCode recognises them
 //   - model field: formatted as "providerID/modelAlias"
 //
-// Built-in providers (OpenCode Zen, Scaleway, Anthropic) have pre-registered models and
+// Built-in providers (OpenCode Zen, OpenCode Go, Scaleway, Anthropic) have pre-registered models and
 // don't need the npm/models keys.
 
 // opencodeConfigOverrides holds optional direct values to embed in the config
@@ -1313,16 +1339,12 @@ type opencodeConfigOverrides struct {
 
 func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConfigOverrides) map[string]interface{} {
 	provider := DefaultOpencodeProvider
-	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
 
-	if settings != nil {
-		if settings.OpencodeProvider != "" {
-			provider = settings.OpencodeProvider
-		}
-		if settings.Model != "" {
-			model = settings.Model
-		}
+	if settings != nil && settings.OpencodeProvider != "" {
+		provider = settings.OpencodeProvider
 	}
+	provider = normalizeOpencodeProvider(provider)
+	model := resolveOpencodeModel(provider, settings)
 
 	slog.Debug("buildOpencodeConfig: input",
 		"provider", provider,
@@ -1385,7 +1407,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 			"fullModelKey", "sam-platform/"+modelAlias,
 			"baseURL", baseURL,
 			"apiKeyLen", len(apiKey))
-	case "opencode-zen", "opencode-managed":
+	case "opencode-zen", "opencode-go", "opencode-managed":
 		config["model"] = model
 	case "scaleway":
 		// Scaleway is a built-in OpenCode provider with pre-registered models.
@@ -1477,7 +1499,7 @@ func opencodeProviderNeedsNpmPackage(provider string) string {
 // OpenCode provider into ~/.cache/opencode/node_modules/ — the exact location
 // where OpenCode resolves provider packages at runtime.
 //
-// OpenCode v1.4.3 embeds Bun and uses it internally for provider package loading.
+// OpenCode embeds Bun and uses it internally for provider package loading.
 // Pre-installing via npm is sufficient — the node_modules structure is compatible
 // with Bun's module resolver. Without pre-installation, OpenCode's embedded Bun
 // would auto-install the package, but this can fail in network-restricted environments.

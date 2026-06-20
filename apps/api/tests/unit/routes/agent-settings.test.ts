@@ -448,6 +448,38 @@ describe('Agent Settings Routes', () => {
       expect(body.model).toBe('opencode/claude-sonnet-4-6');
     });
 
+    it('should accept OpenCode Go provider without opencodeBaseUrl', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'test-ulid',
+          userId: 'test-user-id',
+          agentType: 'opencode',
+          model: 'opencode-go/glm-5.2',
+          permissionMode: null,
+          allowedTools: null,
+          deniedTools: null,
+          additionalEnv: null,
+          opencodeProvider: 'opencode-go',
+          opencodeBaseUrl: null,
+          opencodeProviderName: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+
+      const res = await putSettings('opencode', {
+        opencodeProvider: 'opencode-go',
+        model: 'opencode-go/glm-5.2',
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.opencodeProvider).toBe('opencode-go');
+      expect(body.opencodeBaseUrl).toBeNull();
+      expect(body.model).toBe('opencode-go/glm-5.2');
+    });
+
     it('should accept custom provider with valid HTTPS base URL', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
       mockDB.limit.mockResolvedValueOnce([

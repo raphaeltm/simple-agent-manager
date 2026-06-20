@@ -2729,6 +2729,7 @@ func TestInjectAgentCredential_OpenCodeProviderEnvVarOverrides(t *testing.T) {
 	}{
 		{name: "default uses opencode env", provider: "", wantEnv: "OPENCODE_API_KEY=sk-test"},
 		{name: "zen uses opencode env", provider: "opencode-zen", wantEnv: "OPENCODE_API_KEY=sk-test"},
+		{name: "go uses opencode env", provider: "opencode-go", wantEnv: "OPENCODE_API_KEY=sk-test"},
 		{name: "scaleway keeps legacy env", provider: "scaleway", wantEnv: "SCW_SECRET_KEY=sk-test"},
 		{name: "managed uses opencode env", provider: "opencode-managed", wantEnv: "OPENCODE_API_KEY=sk-test"},
 		{name: "anthropic uses anthropic env", provider: "anthropic", wantEnv: "ANTHROPIC_API_KEY=sk-test"},
