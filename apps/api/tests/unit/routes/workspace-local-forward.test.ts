@@ -32,6 +32,14 @@ function makeDrizzleDB() {
   return { select: vi.fn(makeWorkspaceSelect) };
 }
 
+function firstFetchCall() {
+  const call = vi.mocked(globalThis.fetch).mock.calls.at(0);
+  if (!call) {
+    throw new Error('fetch was not called');
+  }
+  return call;
+}
+
 vi.mock('../../../src/auth', () => ({
   createAuth: vi.fn(() => ({
     api: {
@@ -194,7 +202,7 @@ describe('workspace local-forward routes', () => {
 
     expect(response.status).toBe(200);
     expect(globalThis.fetch).toHaveBeenCalledOnce();
-    const [proxiedUrl, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    const [proxiedUrl, init] = firstFetchCall();
     expect(new URL(String(proxiedUrl)).toString()).toBe(
       'https://node-1.vm.workspaces.example.com:8443/workspaces/ws-1/local-forward/5173/path?x=1',
     );
@@ -207,7 +215,35 @@ describe('workspace local-forward routes', () => {
     expect(headers.get('X-App-Hop')).toBeNull();
     expect(headers.get('X-Forwarded-Host')).toBe('localhost:5173');
     expect(headers.get('X-Forwarded-For')).not.toBe('spoofed');
+    expect(init?.redirect).toBe('manual');
     expect(response.headers.get('Set-Cookie')).toContain('app_session=next');
+  });
+
+  it('returns app redirects without following them with internal forwarding headers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(null, {
+          status: 302,
+          headers: { Location: 'http://localhost:5173/next' },
+        }),
+      ),
+    );
+
+    const response = await worker.default.fetch(
+      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/login', {
+        headers: {
+          'X-SAM-Forward-Token': 'forward-token',
+        },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toBe('http://localhost:5173/next');
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    const [, init] = firstFetchCall();
+    expect(init?.redirect).toBe('manual');
   });
 
   it('returns clear unsupported response for WebSocket upgrades', async () => {

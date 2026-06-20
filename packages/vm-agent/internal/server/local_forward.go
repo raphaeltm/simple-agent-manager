@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 var localForwardHopHeaders = map[string]struct{}{
@@ -63,22 +65,64 @@ func (s *Server) handleWorkspaceLocalForward(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) resolveWorkspaceBridgeIP(workspaceID string) (string, error) {
-	targetHost := "127.0.0.1"
-	discovery := s.containerDiscovery
-	s.portScannerMu.RLock()
-	if wsDisc, ok := s.portDiscoveries[workspaceID]; ok {
-		discovery = wsDisc
+	if s.config == nil {
+		return "", fmt.Errorf("server config unavailable")
 	}
-	s.portScannerMu.RUnlock()
+	if !s.config.ContainerMode {
+		return "127.0.0.1", nil
+	}
 
-	if discovery == nil {
-		return targetHost, nil
+	discovery, err := s.localForwardWorkspaceDiscovery(workspaceID)
+	if err != nil {
+		return "", err
 	}
 	bridgeIP, err := discovery.GetBridgeIP()
 	if err != nil {
 		return "", fmt.Errorf("container bridge IP not available yet: %w", err)
 	}
 	return bridgeIP, nil
+}
+
+func (s *Server) localForwardWorkspaceDiscovery(workspaceID string) (*container.Discovery, error) {
+	s.portScannerMu.RLock()
+	if wsDisc, ok := s.portDiscoveries[workspaceID]; ok && wsDisc != nil {
+		s.portScannerMu.RUnlock()
+		return wsDisc, nil
+	}
+	s.portScannerMu.RUnlock()
+
+	s.workspaceMu.RLock()
+	runtime, ok := s.workspaces[workspaceID]
+	var labelValue string
+	if ok {
+		labelValue = strings.TrimSpace(runtime.ContainerLabelValue)
+	}
+	s.workspaceMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("workspace container route is not registered")
+	}
+	if labelValue == "" {
+		return nil, fmt.Errorf("workspace container route is not available yet")
+	}
+
+	discovery := container.NewDiscovery(container.Config{
+		LabelKey:    s.config.ContainerLabelKey,
+		LabelValue:  labelValue,
+		CacheTTL:    s.config.ContainerCacheTTL,
+		BridgeIPTTL: s.config.PortProxyCacheTTL,
+	})
+
+	s.portScannerMu.Lock()
+	if s.portDiscoveries == nil {
+		s.portDiscoveries = make(map[string]*container.Discovery)
+	}
+	if existing := s.portDiscoveries[workspaceID]; existing != nil {
+		s.portScannerMu.Unlock()
+		return existing, nil
+	}
+	s.portDiscoveries[workspaceID] = discovery
+	s.portScannerMu.Unlock()
+	return discovery, nil
 }
 
 func localForwardEscapedPath(r *http.Request, workspaceID string, portValue string) string {

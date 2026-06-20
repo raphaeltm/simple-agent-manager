@@ -4,9 +4,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 func TestLocalForwardProxyPreservesAppHeadersAndLocalhostAuthority(t *testing.T) {
@@ -110,6 +112,42 @@ func TestLocalForwardProxyPreservesEscapedPathSegments(t *testing.T) {
 		}
 	default:
 		t.Fatal("backend did not receive proxied request")
+	}
+}
+
+func TestResolveWorkspaceBridgeIPUsesHostLoopbackOnlyOutsideContainerMode(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: &config.Config{ContainerMode: false}}
+
+	got, err := s.resolveWorkspaceBridgeIP("ws-1")
+	if err != nil {
+		t.Fatalf("resolveWorkspaceBridgeIP returned error: %v", err)
+	}
+	if got != "127.0.0.1" {
+		t.Fatalf("resolveWorkspaceBridgeIP = %q, want host loopback", got)
+	}
+}
+
+func TestResolveWorkspaceBridgeIPRejectsContainerModeFallback(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{ContainerMode: true},
+		containerDiscovery: container.NewDiscovery(container.Config{
+			LabelKey:   "devcontainer.local_folder",
+			LabelValue: "/workspace/global",
+		}),
+		portDiscoveries: map[string]*container.Discovery{},
+		workspaces:      map[string]*WorkspaceRuntime{},
+	}
+
+	got, err := s.resolveWorkspaceBridgeIP("ws-1")
+	if err == nil {
+		t.Fatalf("resolveWorkspaceBridgeIP = %q, want missing workspace route error", got)
+	}
+	if !strings.Contains(err.Error(), "workspace container route is not registered") {
+		t.Fatalf("resolveWorkspaceBridgeIP error = %q, want workspace route error", err)
 	}
 }
 

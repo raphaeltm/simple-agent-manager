@@ -208,6 +208,7 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
     method: c.req.raw.method,
     headers,
     body: c.req.raw.body,
+    redirect: 'manual',
     // @ts-expect-error Cloudflare Workers support streaming request bodies.
     duplex: c.req.raw.body ? 'half' : undefined,
   });
