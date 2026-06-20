@@ -46,6 +46,7 @@ import { ProjectSkills } from './pages/ProjectSkills';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
+import SidebarCollapsePrototype from './pages/sidebar-collapse-prototype';
 import { Settings } from './pages/Settings';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
@@ -94,6 +95,8 @@ export default function App() {
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
+                {/* Sidebar collapse design prototype — public, no auth */}
+                <Route path="/prototype/sidebar-collapse" element={<SidebarCollapsePrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
