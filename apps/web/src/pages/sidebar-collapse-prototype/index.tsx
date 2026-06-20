@@ -14,6 +14,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { GLOBAL_NAV_ITEMS } from '../../components/NavSidebar';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
@@ -124,10 +125,10 @@ export default function SidebarCollapsePrototype() {
           </>
         ) : (
           <>
-            <ZenPeekRail label="Navigation" offsetLeft={0} panelWidth={220}>
+            <ZenPeekRail label="Navigation" seamAlign="top" panelWidth={220}>
               <NavRailContent iconOnly={false} />
             </ZenPeekRail>
-            <ZenPeekRail label="Chats" offsetLeft={16} panelWidth={288}>
+            <ZenPeekRail label="Chats" seamAlign="bottom" panelWidth={288}>
               <SessionPanelContent
                 selectedSessionId={selectedSessionId}
                 onSelect={setSelectedSessionId}
@@ -261,18 +262,7 @@ function SessionAside({
 }) {
   return (
     <aside
-      className={`relative z-30 shrink-0 glass-chrome border-y-0 border-l-0 flex flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none ${
-        // Strip mode must NOT clip horizontally, or the hover tooltip (which
-        // extends past the 64px rail) gets cut off. `glass-panel-container`
-        // applies `contain: paint`, which paint-clips descendants to the box
-        // even with `overflow-visible` — so we drop it (and overflow-hidden) in
-        // strip mode and let the tooltip escape the rail. Full mode keeps both
-        // for the width-collapse transition. z-30 keeps the strip (and its
-        // escaping tooltip) painted above the conversation column.
-        strip
-          ? 'overflow-visible glass-composited'
-          : 'overflow-hidden glass-panel-container glass-composited'
-      }`}
+      className="relative z-30 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none"
       style={{ width: strip ? 64 : 288 }}
     >
       {strip ? (
@@ -346,11 +336,19 @@ function FocusStrip({
   selectedSessionId: string;
   onSelect: (id: string) => void;
 }) {
+  // The tooltip is rendered via a portal to <body> with FIXED positioning
+  // computed from the hovered icon's bounding rect. A CSS-only `group-hover`
+  // tooltip has to escape several `transform` (glass-composited) and
+  // `contain: paint` (glass-panel-container) ancestors, which silently clip or
+  // mis-stack it. A body portal sidesteps every clipping/stacking ancestor.
+  const [hovered, setHovered] = useState<{
+    session: ChatSessionListItem;
+    top: number;
+    left: number;
+  } | null>(null);
+
   return (
-    // overflow-visible (not overflow-y-auto): a scroll container would force
-    // overflow-x to clip and cut off the hover tooltip. The icon set fits the
-    // desktop height; Focus mode is desktop-only.
-    <div className="flex flex-col items-center gap-1 py-3 overflow-visible">
+    <div className="flex flex-col items-center gap-1 py-3">
       <button
         title="New Chat"
         className="mb-2 h-9 w-9 rounded-sm bg-[var(--sam-chrome-accent-soft)] text-accent flex items-center justify-center hover:bg-[var(--sam-chrome-accent-active)] transition-colors"
@@ -363,11 +361,19 @@ function FocusStrip({
         const cfg = ATTENTION_ICON[attention];
         const Icon = cfg.icon;
         const isSelected = session.id === selectedSessionId;
+        const showCard = (el: HTMLElement) => {
+          const r = el.getBoundingClientRect();
+          setHovered({ session, top: r.top, left: r.right + 8 });
+        };
         return (
-          <div key={session.id} className="group relative w-full flex justify-center">
+          <div key={session.id} className="w-full flex justify-center">
             <button
               type="button"
               onClick={() => onSelect(session.id)}
+              onMouseEnter={(e) => showCard(e.currentTarget)}
+              onMouseLeave={() => setHovered(null)}
+              onFocus={(e) => showCard(e.currentTarget)}
+              onBlur={() => setHovered(null)}
               title={cfg.label}
               aria-label={`${session.topic ?? session.id} — ${cfg.label}`}
               className={`h-9 w-9 rounded-full flex items-center justify-center transition-colors ${
@@ -379,52 +385,69 @@ function FocusStrip({
             >
               <Icon size={16} className={attention === 'active' ? 'motion-safe:animate-spin' : ''} />
             </button>
-
-            {/* Hover tooltip: the full REAL chat card */}
-            <div className="pointer-events-none absolute left-full top-0 ml-2 z-50 hidden w-72 group-hover:block">
-              <div className="glass-chrome glass-panel-container glass-composited rounded-md border border-border-default shadow-2xl overflow-hidden">
-                <SessionTreeItem
-                  session={session}
-                  selectedSessionId={selectedSessionId}
-                  onSelect={noop}
-                  taskInfoMap={MOCK_TASK_INFO}
-                  onShowHierarchy={noop}
-                />
-              </div>
-            </div>
           </div>
         );
       })}
+
+      {hovered &&
+        createPortal(
+          <div
+            data-testid="focus-tooltip"
+            className="pointer-events-none fixed z-[100] w-72"
+            style={{ top: hovered.top, left: hovered.left }}
+          >
+            <div className="glass-chrome glass-panel-container glass-composited rounded-md border border-border-default shadow-2xl overflow-hidden">
+              <SessionTreeItem
+                session={hovered.session}
+                selectedSessionId={selectedSessionId}
+                onSelect={noop}
+                taskInfoMap={MOCK_TASK_INFO}
+                onShowHierarchy={noop}
+              />
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Zen edge seam + peek overlay. The peek panel is a DOM CHILD of the
-// hover wrapper, so moving the mouse from the seam onto the panel does
-// NOT fire mouseleave — eliminating the open/close flicker loop.
+// Zen edge seam + peek overlay.
+//
+// The two seams are stacked VERTICALLY at the same left edge (Navigation =
+// top half, Chats = bottom half) rather than side-by-side. Side-by-side seams
+// caused a hover trap: moving the cursor from one seam rightward into its peek
+// panel crossed the *other* seam, which opened the wrong panel and covered the
+// one you wanted. Stacked, the path from a seam into its panel moves rightward
+// and never crosses the other seam (which lives in the other vertical band).
+//
+// The peek panel is a DOM CHILD of the hover wrapper, so moving the mouse from
+// the seam onto the panel does NOT fire mouseleave — eliminating the
+// open/close flicker loop. The wrapper is only a half-height seam band; the
+// panel uses height:200% to span the full viewport column.
 // ───────────────────────────────────────────────────────────────────
 function ZenPeekRail({
   label,
-  offsetLeft,
+  seamAlign,
   panelWidth,
   children,
 }: {
   label: string;
-  offsetLeft: number;
+  seamAlign: 'top' | 'bottom';
   panelWidth: number;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const top = seamAlign === 'top';
   return (
     <div
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
-      className="group absolute inset-y-0 z-40"
-      style={{ left: offsetLeft }}
+      className={`group absolute left-0 h-1/2 w-3 z-40 ${top ? 'top-0' : 'bottom-0'}`}
     >
-      {/* Seam visual — always present, the hover target */}
-      <div className="relative h-full w-3 cursor-pointer flex items-center justify-center">
+      {/* Seam visual — fills this half-height band, the hover target */}
+      <div className="relative h-full w-full cursor-pointer flex items-center justify-center">
         <span className="absolute inset-y-2 left-1/2 -translate-x-1/2 w-0.5 rounded-full bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow)_0%,transparent_75%)] blur-[0.5px] opacity-70 group-hover:opacity-100 transition-opacity" />
         <span
           className="text-[9px] font-semibold uppercase tracking-widest text-fg-muted group-hover:text-accent transition-colors whitespace-nowrap"
@@ -434,11 +457,14 @@ function ZenPeekRail({
         </span>
       </div>
 
-      {/* Peek panel — child of the hover wrapper (no flicker) */}
+      {/* Peek panel — child of the hover wrapper (no flicker). height:200% of
+          the half-height band = full viewport column. */}
       {open && (
         <aside
-          className="absolute inset-y-0 left-3 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 shadow-2xl flex flex-col overflow-hidden"
-          style={{ width: panelWidth }}
+          className={`absolute left-3 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 shadow-2xl flex flex-col overflow-hidden ${
+            top ? 'top-0' : 'bottom-0'
+          }`}
+          style={{ width: panelWidth, height: '200%' }}
         >
           {children}
         </aside>

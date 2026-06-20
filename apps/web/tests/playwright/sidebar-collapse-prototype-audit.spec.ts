@@ -77,36 +77,27 @@ test.describe('Sidebar Collapse Prototype — Desktop', () => {
       await stripButtons.nth(2).hover();
     }
     await page.waitForTimeout(400);
-    // The tooltip renders the real SessionTreeItem (it has a "Continue" fork
-    // button for terminated sessions, but every card shows the topic). Assert
-    // the hovered card's full topic text becomes visible — proves the tooltip
-    // escapes the strip's overflow clipping.
-    const tooltip = page
-      .locator('.group:hover div:has-text("Fix the agent status bar")')
-      .first();
+    // The tooltip is rendered through a portal to <body> with fixed positioning
+    // (see FocusStrip), so it is a direct child of <body> — NOT a descendant of
+    // the rail aside. This is what makes it immune to the glass ancestors'
+    // `contain: paint` / `transform` clipping that previously hid it. Assert it
+    // is visible and shows the hovered card's real topic text.
+    const tooltip = page.getByTestId('focus-tooltip');
     await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText('Fix the agent status bar');
 
-    // toBeVisible() and elementFromPoint() BOTH miss paint-clipping: the former
-    // only checks display/visibility/non-empty box, and the tooltip is
-    // pointer-events:none so elementFromPoint always returns what's behind it.
-    // The real regression was `glass-panel-container` (contain: paint) on the
-    // rail aside, which paint-clips descendants to the box even with
-    // overflow-visible. Assert directly that NO ancestor of the tooltip applies
-    // paint containment AND that the tooltip's painted region escapes the rail's
-    // right edge (proving it is not clipped to the 64px strip).
+    // The portal escapes all clipping/stacking ancestors. Verify directly:
+    //  - it is parented to <body> (no glass clipping ancestor between)
+    //  - its painted box sits to the RIGHT of the 64px rail (anchored to the
+    //    hovered icon's right edge), proving it is not clipped to the strip.
     const tipDiag = await page.evaluate(() => {
-      const all = Array.from(document.querySelectorAll('div'));
-      const tip = all.find(
-        (d) =>
-          d.className.includes('group-hover:block') &&
-          d.textContent?.includes('Fix the agent status bar'),
-      );
+      const tip = document.querySelector<HTMLElement>('[data-testid="focus-tooltip"]');
       if (!tip) return { found: false as const };
-      const rail = tip.closest('aside');
+      const rail = document.querySelector('aside');
       const railRight = rail ? rail.getBoundingClientRect().right : 0;
       const tipRect = tip.getBoundingClientRect();
       // Walk ancestors looking for any paint-containing context that would clip.
-      let el: HTMLElement | null = tip as HTMLElement;
+      let el: HTMLElement | null = tip.parentElement;
       let clippingAncestor: string | null = null;
       while (el) {
         const contain = getComputedStyle(el).contain;
@@ -118,16 +109,18 @@ test.describe('Sidebar Collapse Prototype — Desktop', () => {
       }
       return {
         found: true as const,
+        parentedToBody: tip.parentElement === document.body,
         clippingAncestor,
-        escapesRail: tipRect.right > railRight,
-        tipRight: tipRect.right,
+        escapesRail: tipRect.left >= railRight,
+        tipLeft: tipRect.left,
         railRight,
       };
     });
     expect(tipDiag.found).toBe(true);
-    // No paint-clipping ancestor — this is the regression guard.
+    expect(tipDiag.parentedToBody).toBe(true);
+    // No paint-clipping ancestor between the tooltip and <body>.
     expect(tipDiag.clippingAncestor).toBeNull();
-    // The tooltip extends past the rail's right edge (not clipped to 64px).
+    // The tooltip sits to the right of the rail (anchored to the icon edge).
     expect(tipDiag.escapesRail).toBe(true);
 
     await shot(page, 'sc-desktop-focus-tooltip');
