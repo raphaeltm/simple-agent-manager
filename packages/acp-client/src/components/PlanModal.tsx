@@ -1,3 +1,4 @@
+import { CheckSquare, X } from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
 
 import type { PlanItem } from '../hooks/useAcpMessages';
@@ -11,14 +12,27 @@ export interface PlanModalProps {
 /**
  * Modal overlay showing the full agent plan with status indicators.
  * Uses the glassmorphic design system: dark glass background, green accents, strong blur.
+ *
+ * Focus behavior: focuses the dialog container on open, restores focus on close,
+ * closes on Escape and backdrop click. Prevents body scroll while open.
  */
 export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Focus trap + Escape key
+  // Focus dialog on open; restore focus on close
   useEffect(() => {
     if (!isOpen) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus();
+    };
+  }, [isOpen]);
+
+  // Escape key
+  useEffect(() => {
+    if (!isOpen) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -46,17 +60,25 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
       aria-modal="true"
       aria-label="Agent plan progress"
     >
-      {/* Backdrop with blur */}
-      <div
+      {/* Backdrop with blur — button for keyboard/lint compliance */}
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close plan overlay"
         style={{
           position: 'fixed',
           inset: 0,
+          width: '100%',
+          height: '100%',
           backgroundColor: 'var(--sam-glass-backdrop-dim)',
           backdropFilter: 'blur(4px)',
           WebkitBackdropFilter: 'blur(4px)',
           transition: 'opacity 0.15s',
+          border: 'none',
+          padding: 0,
+          cursor: 'default',
         }}
-        onClick={onClose}
+        tabIndex={-1}
       />
 
       {/* Centered modal */}
@@ -88,10 +110,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(34, 197, 94, 0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 11l3 3L22 4" />
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-              </svg>
+              <CheckSquare size={16} style={{ color: 'rgba(34, 197, 94, 0.7)' }} />
               <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)', margin: 0 }}>Plan</h3>
               <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>{completed} of {total} complete</span>
             </div>
@@ -111,10 +130,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
               }}
               aria-label="Close plan"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <X size={16} />
             </button>
           </div>
 
@@ -124,6 +140,7 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
               {plan.entries.map((entry, idx) => (
                 <li key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.875rem' }}>
                   <span
+                    aria-hidden="true"
                     style={{
                       display: 'inline-block',
                       height: 10,
@@ -154,7 +171,14 @@ export const PlanModal: React.FC<PlanModalProps> = ({ plan, isOpen, onClose }) =
 
           {/* Progress bar */}
           <div style={{ padding: '0 16px 12px' }}>
-            <div style={{ height: 6, backgroundColor: 'rgba(34, 197, 94, 0.1)', borderRadius: 9999, overflow: 'hidden' }}>
+            <div
+              role="progressbar"
+              aria-valuenow={completed}
+              aria-valuemin={0}
+              aria-valuemax={total}
+              aria-label={`Plan progress: ${completed} of ${total} complete`}
+              style={{ height: 6, backgroundColor: 'rgba(34, 197, 94, 0.1)', borderRadius: 9999, overflow: 'hidden' }}
+            >
               <div
                 style={{
                   height: '100%',

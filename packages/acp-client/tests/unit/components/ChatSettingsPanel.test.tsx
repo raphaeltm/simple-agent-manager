@@ -29,33 +29,55 @@ describe('ChatSettingsPanel', () => {
     vi.clearAllMocks();
   });
 
-  it('renders as a fixed bottom sheet dialog', () => {
+  it('renders as a fixed bottom sheet dialog with aria-modal', () => {
     renderPanel();
-    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const dialog = screen.getByRole('dialog');
     expect(dialog).not.toBeNull();
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.style.position).toBe('fixed');
     expect(dialog.style.bottom).toBe('0px');
   });
 
+  it('links dialog to heading via aria-labelledby', () => {
+    renderPanel();
+    const dialog = screen.getByRole('dialog');
+    const headingId = dialog.getAttribute('aria-labelledby');
+    expect(headingId).toBeTruthy();
+    const heading = document.getElementById(headingId!);
+    expect(heading).not.toBeNull();
+    expect(heading?.textContent).toBe('Agent Settings');
+  });
+
   it('renders a backdrop overlay', () => {
     renderPanel();
-    // Backdrop is the element before the dialog
-    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const dialog = screen.getByRole('dialog');
     const backdrop = dialog.previousElementSibling;
     expect(backdrop).not.toBeNull();
     expect(backdrop?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('renders permission mode buttons', () => {
+  it('renders permission mode buttons with radiogroup semantics', () => {
     renderPanel();
-    expect(screen.getByText('Default')).not.toBeNull();
-    expect(screen.getByText('Accept Edits')).not.toBeNull();
-    expect(screen.getByText('Bypass Permissions')).not.toBeNull();
+    const radiogroup = screen.getByRole('radiogroup', { name: /permission mode/i });
+    expect(radiogroup).toBeTruthy();
+    const radios = screen.getAllByRole('radio');
+    expect(radios.length).toBe(3);
   });
 
-  it('renders model input', () => {
+  it('marks the selected permission mode as checked', () => {
+    renderPanel({ settings: { model: null, permissionMode: 'acceptEdits' } });
+    const acceptRadio = screen.getByRole('radio', { name: 'Accept Edits' });
+    expect(acceptRadio.getAttribute('aria-checked')).toBe('true');
+
+    const defaultRadio = screen.getByRole('radio', { name: 'Default' });
+    expect(defaultRadio.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('renders model input with associated label', () => {
     renderPanel();
-    expect(screen.getByPlaceholderText('Default (agent decides)')).not.toBeNull();
+    const input = screen.getByLabelText('Model');
+    expect(input).toBeTruthy();
+    expect(input.getAttribute('type')).toBe('text');
   });
 
   it('renders loading state', () => {
@@ -65,8 +87,7 @@ describe('ChatSettingsPanel', () => {
 
   it('visually distinguishes the selected permission mode', () => {
     renderPanel({ settings: { model: null, permissionMode: 'acceptEdits' } });
-    const acceptBtn = screen.getByText('Accept Edits');
-    // Selected mode uses accent color border
+    const acceptBtn = screen.getByRole('radio', { name: 'Accept Edits' });
     expect(acceptBtn.style.borderColor).toContain('accent-primary');
   });
 
@@ -83,14 +104,14 @@ describe('ChatSettingsPanel', () => {
 
   it('enables Save button when permission mode changes', () => {
     renderPanel({ settings: { model: null, permissionMode: 'default' } });
-    fireEvent.click(screen.getByText('Accept Edits'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Accept Edits' }));
     const saveBtn = screen.getByText('Save') as HTMLButtonElement;
     expect(saveBtn.disabled).toBe(false);
   });
 
   it('enables Save button when model changes', () => {
     renderPanel({ settings: { model: null, permissionMode: 'default' } });
-    fireEvent.change(screen.getByPlaceholderText('Default (agent decides)'), {
+    fireEvent.change(screen.getByLabelText('Model'), {
       target: { value: 'claude-opus-4-6' },
     });
     const saveBtn = screen.getByText('Save') as HTMLButtonElement;
@@ -102,7 +123,7 @@ describe('ChatSettingsPanel', () => {
       settings: { model: null, permissionMode: 'default' },
     });
 
-    fireEvent.click(screen.getByText('Accept Edits'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Accept Edits' }));
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => {
@@ -114,6 +135,22 @@ describe('ChatSettingsPanel', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('shows error message when save fails', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('Network error'));
+    renderPanel({
+      settings: { model: null, permissionMode: 'default' },
+      onSave,
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Accept Edits' }));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeTruthy();
+      expect(screen.getByText(/failed to save/i)).toBeTruthy();
+    });
+  });
+
   it('calls onClose when close button is clicked', () => {
     const { onClose } = renderPanel();
     fireEvent.click(screen.getByLabelText('Close settings'));
@@ -122,7 +159,7 @@ describe('ChatSettingsPanel', () => {
 
   it('calls onClose when backdrop is clicked', () => {
     const { onClose } = renderPanel();
-    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const dialog = screen.getByRole('dialog');
     const backdrop = dialog.previousElementSibling as HTMLElement;
     fireEvent.click(backdrop);
     expect(onClose).toHaveBeenCalled();
@@ -136,19 +173,19 @@ describe('ChatSettingsPanel', () => {
 
   it('populates model field from existing settings', () => {
     renderPanel({ settings: { model: 'gpt-5-codex', permissionMode: 'default' } });
-    const input = screen.getByPlaceholderText('Default (agent decides)') as HTMLInputElement;
+    const input = screen.getByLabelText('Model') as HTMLInputElement;
     expect(input.value).toBe('gpt-5-codex');
   });
 
   it('constrains max width for desktop readability', () => {
     renderPanel();
-    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const dialog = screen.getByRole('dialog');
     expect(dialog.style.maxWidth).toBe('480px');
   });
 
   it('constrains max height to 80vh for scroll safety', () => {
     renderPanel();
-    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const dialog = screen.getByRole('dialog');
     expect(dialog.style.maxHeight).toBe('80vh');
   });
 });

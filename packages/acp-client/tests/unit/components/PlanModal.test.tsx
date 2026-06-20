@@ -45,12 +45,8 @@ describe('PlanModal', () => {
 
   it('calls onClose when backdrop clicked', () => {
     const onClose = vi.fn();
-    const { container } = render(
-      <PlanModal plan={makePlan()} isOpen={true} onClose={onClose} />
-    );
-    // Backdrop is the first child div inside the dialog
-    const backdrop = container.querySelector('[role="dialog"] > div');
-    fireEvent.click(backdrop!);
+    render(<PlanModal plan={makePlan()} isOpen={true} onClose={onClose} />);
+    fireEvent.click(screen.getByLabelText('Close plan overlay'));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -104,5 +100,18 @@ describe('PlanModal', () => {
     ]);
     render(<PlanModal plan={plan} isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByText('2 of 2 complete')).toBeTruthy();
+  });
+
+  it('renders a progress bar with correct aria attributes', () => {
+    render(<PlanModal plan={makePlan()} isOpen={true} onClose={vi.fn()} />);
+    const progressbar = screen.getByRole('progressbar');
+    expect(progressbar.getAttribute('aria-valuenow')).toBe('1');
+    expect(progressbar.getAttribute('aria-valuemin')).toBe('0');
+    expect(progressbar.getAttribute('aria-valuemax')).toBe('3');
+  });
+
+  it('prevents body scroll while open', () => {
+    render(<PlanModal plan={makePlan()} isOpen={true} onClose={vi.fn()} />);
+    expect(document.body.style.overflow).toBe('hidden');
   });
 });
