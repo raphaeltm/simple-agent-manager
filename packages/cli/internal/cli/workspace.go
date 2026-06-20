@@ -381,11 +381,7 @@ func isAllowedLocalForwardHost(host string, localHost string, localPort int) boo
 	if port != strconv.Itoa(localPort) {
 		return false
 	}
-	if hostname == localHost {
-		return true
-	}
-	return (localHost == "localhost" && hostname == "127.0.0.1") ||
-		(localHost == "127.0.0.1" && hostname == "localhost")
+	return hostname == localHost
 }
 
 func singleJoiningSlash(a string, b string) string {
@@ -402,6 +398,7 @@ func singleJoiningSlash(a string, b string) string {
 }
 
 func stripProxyRequestHeaders(headers http.Header) {
+	stripConnectionListedHeaders(headers)
 	for name := range headers {
 		lower := strings.ToLower(name)
 		if strings.HasPrefix(lower, "x-sam-") ||
@@ -409,6 +406,16 @@ func stripProxyRequestHeaders(headers http.Header) {
 			lower == "forwarded" ||
 			isHopByHopHeader(lower) {
 			headers.Del(name)
+		}
+	}
+}
+
+func stripConnectionListedHeaders(headers http.Header) {
+	for _, value := range headers.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if name := strings.TrimSpace(token); name != "" {
+				headers.Del(name)
+			}
 		}
 	}
 }

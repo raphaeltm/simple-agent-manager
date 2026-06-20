@@ -436,6 +436,9 @@ func TestHelpIncludesWorkspaceCommands(t *testing.T) {
 	if !strings.Contains(output, "forward") || !strings.Contains(output, "ports") {
 		t.Fatalf("help text should mention forward and ports, got: %s", output)
 	}
+	if !strings.Contains(output, "--local-port") || !strings.Contains(output, "--local-host") {
+		t.Fatalf("help text should mention local forward flags, got: %s", output)
+	}
 }
 
 func TestTokenCacheRefreshesExpiredToken(t *testing.T) {
@@ -765,6 +768,79 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("remote server did not receive proxied request")
+	}
+}
+
+func TestAllowedLocalForwardHostRequiresExactAuthority(t *testing.T) {
+	tests := []struct {
+		name      string
+		host      string
+		localHost string
+		want      bool
+	}{
+		{
+			name:      "localhost listener accepts localhost authority",
+			host:      "localhost:3000",
+			localHost: "localhost",
+			want:      true,
+		},
+		{
+			name:      "localhost listener rejects loopback IP alias",
+			host:      "127.0.0.1:3000",
+			localHost: "localhost",
+			want:      false,
+		},
+		{
+			name:      "loopback IP listener accepts loopback IP authority",
+			host:      "127.0.0.1:3000",
+			localHost: "127.0.0.1",
+			want:      true,
+		},
+		{
+			name:      "loopback IP listener rejects localhost alias",
+			host:      "localhost:3000",
+			localHost: "127.0.0.1",
+			want:      false,
+		},
+		{
+			name:      "matching host with wrong port is rejected",
+			host:      "localhost:3001",
+			localHost: "localhost",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isAllowedLocalForwardHost(tt.host, tt.localHost, 3000)
+			if got != tt.want {
+				t.Fatalf("isAllowedLocalForwardHost(%q, %q, 3000) = %v, want %v", tt.host, tt.localHost, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripProxyRequestHeadersRemovesConnectionListedHeaders(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer app-token")
+	headers.Set("Cookie", "app_session=abc")
+	headers.Set("Connection", "X-App-Hop, X-Forwarded-For")
+	headers.Set("X-App-Hop", "must-strip")
+	headers.Set("X-Forwarded-For", "spoofed")
+	headers.Set("X-SAM-Forward-Token", "spoofed")
+
+	stripProxyRequestHeaders(headers)
+
+	if got := headers.Get("Authorization"); got != "Bearer app-token" {
+		t.Fatalf("Authorization = %q, want app token preserved", got)
+	}
+	if got := headers.Get("Cookie"); got != "app_session=abc" {
+		t.Fatalf("Cookie = %q, want app cookie preserved", got)
+	}
+	for _, name := range []string{"Connection", "X-App-Hop", "X-Forwarded-For", "X-SAM-Forward-Token"} {
+		if got := headers.Get(name); got != "" {
+			t.Fatalf("%s reached stripped headers: %q", name, got)
+		}
 	}
 }
 

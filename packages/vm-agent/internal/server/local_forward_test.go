@@ -71,3 +71,29 @@ func TestLocalForwardProxyPreservesAppHeadersAndLocalhostAuthority(t *testing.T)
 		t.Fatal("local-forward must not set SAM session cookies")
 	}
 }
+
+func TestStripLocalForwardRequestHeadersRemovesConnectionListedHeaders(t *testing.T) {
+	t.Parallel()
+
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer app-token")
+	headers.Set("Cookie", "app_session=abc")
+	headers.Set("Connection", "X-App-Hop, X-Forwarded-For")
+	headers.Set("X-App-Hop", "must-strip")
+	headers.Set("X-Forwarded-For", "spoofed")
+	headers.Set("X-SAM-VM-Forward-Token", "must-strip")
+
+	stripLocalForwardRequestHeaders(headers)
+
+	if got := headers.Get("Authorization"); got != "Bearer app-token" {
+		t.Fatalf("Authorization = %q, want app token preserved", got)
+	}
+	if got := headers.Get("Cookie"); got != "app_session=abc" {
+		t.Fatalf("Cookie = %q, want app cookie preserved", got)
+	}
+	for _, name := range []string{"Connection", "X-App-Hop", "X-Forwarded-For", "X-SAM-VM-Forward-Token"} {
+		if got := headers.Get(name); got != "" {
+			t.Fatalf("%s reached stripped headers: %q", name, got)
+		}
+	}
+}

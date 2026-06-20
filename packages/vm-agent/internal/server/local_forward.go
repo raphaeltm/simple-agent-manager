@@ -114,6 +114,7 @@ func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, 
 }
 
 func stripLocalForwardRequestHeaders(headers http.Header) {
+	stripLocalForwardConnectionHeaders(headers)
 	for name := range headers {
 		lower := strings.ToLower(name)
 		if strings.HasPrefix(lower, "x-sam-") ||
@@ -121,6 +122,16 @@ func stripLocalForwardRequestHeaders(headers http.Header) {
 			lower == "forwarded" ||
 			hasLocalForwardHopHeader(lower) {
 			headers.Del(name)
+		}
+	}
+}
+
+func stripLocalForwardConnectionHeaders(headers http.Header) {
+	for _, value := range headers.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if name := strings.TrimSpace(token); name != "" {
+				headers.Del(name)
+			}
 		}
 	}
 }

@@ -133,14 +133,40 @@ describe('workspace local-forward routes', () => {
     expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'localhost:abc',
+    'localhost:5173/path',
+    'localhost:5173?x=1',
+    'user@localhost:5173',
+  ])('rejects malformed local authority %s during session creation', async (localAuthority) => {
+    const response = await worker.default.fetch(
+      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/forwards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          remotePort: 5173,
+          mode: 'http',
+          localAuthority,
+        }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
+  });
+
   it('proxies with internal VM token and strips spoofable browser headers', async () => {
     const response = await worker.default.fetch(
       new Request('https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/path?x=1', {
         headers: {
           Authorization: 'Bearer app-token',
           Cookie: 'app_cookie=abc',
+          Connection: 'X-App-Hop, X-Forwarded-For',
+          'X-App-Hop': 'must-strip',
           'X-SAM-Forward-Token': 'forward-token',
           'X-SAM-VM-Forward-Token': 'spoofed',
+          'X-Forwarded-For': 'spoofed',
           'X-Forwarded-Host': 'evil.example.com',
           Forwarded: 'for=evil',
         },
@@ -160,7 +186,9 @@ describe('workspace local-forward routes', () => {
     expect(headers.get('X-SAM-VM-Forward-Token')).toBe('forward-token');
     expect(headers.get('X-SAM-Forward-Token')).toBeNull();
     expect(headers.get('Forwarded')).toBeNull();
+    expect(headers.get('X-App-Hop')).toBeNull();
     expect(headers.get('X-Forwarded-Host')).toBe('localhost:5173');
+    expect(headers.get('X-Forwarded-For')).not.toBe('spoofed');
     expect(response.headers.get('Set-Cookie')).toContain('app_session=next');
   });
 

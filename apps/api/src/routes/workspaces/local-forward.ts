@@ -40,7 +40,15 @@ function parseLocalAuthority(value: unknown): string {
     throw errors.badRequest('localAuthority is required');
   }
   const authority = value.trim();
-  const parsed = new URL(`http://${authority}`);
+  let parsed: URL;
+  try {
+    parsed = new URL(`http://${authority}`);
+  } catch {
+    throw errors.badRequest('localAuthority must be host:port using localhost or 127.0.0.1');
+  }
+  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw errors.badRequest('localAuthority must be host:port only');
+  }
   if (!LOOPBACK_HOSTS.has(parsed.hostname)) {
     throw errors.badRequest('localAuthority must use localhost or 127.0.0.1');
   }
@@ -51,8 +59,22 @@ function parseLocalAuthority(value: unknown): string {
   return `${parsed.hostname}:${port}`;
 }
 
+function deleteConnectionListedHeaders(headers: Headers): void {
+  const connection = headers.get('Connection');
+  if (!connection) {
+    return;
+  }
+  for (const token of connection.split(',')) {
+    const name = token.trim();
+    if (name) {
+      headers.delete(name);
+    }
+  }
+}
+
 function stripUntrustedForwardHeaders(headers: Headers): Headers {
   const clean = new Headers(headers);
+  deleteConnectionListedHeaders(clean);
   for (const name of Array.from(clean.keys())) {
     const lower = name.toLowerCase();
     if (
