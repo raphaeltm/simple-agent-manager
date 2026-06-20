@@ -75,8 +75,16 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 
 	cfg, err := loadComposeConfig(ctx, composeCmd, opts.WorkspaceDir)
 	if err != nil {
+		// `docker compose config --format json` is the validation gate. If it
+		// fails the error wraps the compose CLI stderr (invalid schema,
+		// unsupported field, parse error) — log it so the real failure is
+		// captured without re-running.
+		log.Error("compose config validation failed",
+			"composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir, "error", err)
 		return nil, err
 	}
+	log.Debug("compose config validated",
+		"project", cfg.Name, "serviceCount", len(cfg.Services))
 
 	// Only services with a `build` section produce images we re-push. Services
 	// without build (e.g. postgres:15) are pulled by the deployment node.
@@ -85,11 +93,37 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		image   string
 	}
 	var targets []buildTarget
-	for name, svc := range cfg.Services {
-		if len(svc.Build) == 0 || string(svc.Build) == "null" {
+	// skipped records every service that lacks a build section, with the reason,
+	// so a failed build (no targets) can explain itself with hard data instead
+	// of a bare error. Sorted names keep the diagnostic stable across runs.
+	type skippedService struct {
+		service string
+		image   string
+		reason  string
+	}
+	var skipped []skippedService
+	serviceNames := make([]string, 0, len(cfg.Services))
+	for name := range cfg.Services {
+		serviceNames = append(serviceNames, name)
+	}
+	sort.Strings(serviceNames)
+	for _, name := range serviceNames {
+		svc := cfg.Services[name]
+		image := strings.TrimSpace(svc.Image)
+		hasBuild := len(svc.Build) > 0 && string(svc.Build) != "null"
+		log.Debug("compose service parsed",
+			"project", cfg.Name,
+			"service", name,
+			"image", image,
+			"hasBuild", hasBuild)
+		if !hasBuild {
+			reason := "no build section"
+			if image == "" {
+				reason = "no build section and no image"
+			}
+			skipped = append(skipped, skippedService{service: name, image: image, reason: reason})
 			continue
 		}
-		image := strings.TrimSpace(svc.Image)
 		if image == "" {
 			// Compose's default generated name when `image:` is omitted.
 			image = fmt.Sprintf("%s-%s", cfg.Name, name)
@@ -97,18 +131,42 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		targets = append(targets, buildTarget{service: name, image: image})
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("build: no compose services with a build section in %s", opts.WorkspaceDir)
+		// Emit the full service inventory at Error level: this is the single
+		// most common real-repo failure (every service is image:/provider:-only
+		// with no build section), and the inventory is the hard data needed to
+		// diagnose it without re-running.
+		inventory := make([]string, 0, len(skipped))
+		for _, s := range skipped {
+			inventory = append(inventory, fmt.Sprintf("%s(image=%q, %s)", s.service, s.image, s.reason))
+		}
+		log.Error("compose build has no buildable services",
+			"project", cfg.Name,
+			"workspaceDir", opts.WorkspaceDir,
+			"serviceCount", len(cfg.Services),
+			"services", strings.Join(serviceNames, ","),
+			"skipped", strings.Join(inventory, "; "))
+		return nil, fmt.Errorf(
+			"build: no compose services with a build section in %s (services: %s)",
+			opts.WorkspaceDir, strings.Join(inventory, "; "))
 	}
-	// Deterministic order for stable logs and release records.
-	sort.Slice(targets, func(i, j int) bool { return targets[i].service < targets[j].service })
+	// targets is already in deterministic (sorted) order because it is built by
+	// iterating the pre-sorted serviceNames slice above.
+	log.Debug("compose build targets resolved",
+		"project", cfg.Name,
+		"targetCount", len(targets),
+		"skippedCount", len(skipped))
 
+	log.Debug("running compose build", "composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir)
 	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, "build"); err != nil {
+		log.Error("compose build command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose build: %w", err)
 	}
 	log.Info("host compose build complete", "serviceCount", len(targets))
 
+	log.Debug("capturing resolved compose config", "composeCmd", composeCmd)
 	composeYAML, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, "config")
 	if err != nil {
+		log.Error("compose config command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose config: %w", err)
 	}
 

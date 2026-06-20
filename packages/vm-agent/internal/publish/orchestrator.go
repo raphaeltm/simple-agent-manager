@@ -112,6 +112,7 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, art *Build
 
 	creds, err := o.controlPlane.MintPushCredentials(ctx, projectID)
 	if err != nil {
+		o.log.Error("mint push credentials failed", "projectId", projectID, "error", err)
 		return nil, fmt.Errorf("publish: mint push credentials: %w", err)
 	}
 	o.log.Info("push credentials minted",
@@ -121,12 +122,14 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, art *Build
 		"expiresAt", creds.ExpiresAt)
 
 	if err := o.docker.Login(ctx, creds.Registry, creds.Username, creds.Password); err != nil {
+		o.log.Error("registry login failed", "registry", creds.Registry, "error", err)
 		return nil, fmt.Errorf("publish: docker login %s: %w", creds.Registry, err)
 	}
 	o.log.Info("registry login succeeded", "registry", creds.Registry)
 
 	services, err := o.repushServices(ctx, art, creds)
 	if err != nil {
+		o.log.Error("re-push services failed", "projectId", projectID, "error", err)
 		return nil, err
 	}
 
@@ -138,6 +141,11 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID string, art *Build
 
 	result, err := o.controlPlane.SubmitRelease(ctx, projectID, submission)
 	if err != nil {
+		o.log.Error("submit release failed",
+			"projectId", projectID,
+			"reference", art.Reference,
+			"services", len(services),
+			"error", err)
 		return nil, fmt.Errorf("publish: submit release: %w", err)
 	}
 	o.log.Info("release recorded",
@@ -170,11 +178,15 @@ func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, c
 			"size", svc.Size)
 
 		if err := o.docker.Tag(ctx, source, target); err != nil {
+			o.log.Error("docker tag failed",
+				"service", serviceName, "source", source, "target", target, "error", err)
 			return nil, fmt.Errorf("publish: tag %s -> %s: %w", source, target, err)
 		}
 
 		pushedDigest, err := o.docker.Push(ctx, target)
 		if err != nil {
+			o.log.Error("docker push failed",
+				"service", serviceName, "target", target, "error", err)
 			return nil, fmt.Errorf("publish: push %s: %w", target, err)
 		}
 
