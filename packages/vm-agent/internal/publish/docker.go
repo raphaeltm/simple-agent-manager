@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/cache"
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 // HostDocker drives the host docker daemon via the docker CLI. It is the
@@ -28,7 +29,7 @@ func (d *HostDocker) Login(ctx context.Context, registry, username, password str
 
 // Tag re-tags a source image (already in the daemon) under a new reference.
 func (d *HostDocker) Tag(ctx context.Context, source, target string) error {
-	cmd := exec.CommandContext(ctx, "docker", "tag", source, target)
+	cmd := exec.CommandContext(ctx, container.DockerCLIPath(), "tag", source, target)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker tag %s -> %s: %w: %s", source, target, err, strings.TrimSpace(string(out)))
 	}
@@ -44,7 +45,7 @@ var pushDigestRe = regexp.MustCompile(`digest:\s*(sha256:[0-9a-f]{64})`)
 // one; the orchestrator falls back to the captured digest in that case.
 func (d *HostDocker) Push(ctx context.Context, ref string) (string, error) {
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "docker", "push", ref)
+	cmd := exec.CommandContext(ctx, container.DockerCLIPath(), "push", ref)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("docker push %s: %w: %s (after %s)", ref, err, strings.TrimSpace(string(out)), time.Since(start).Round(time.Millisecond))

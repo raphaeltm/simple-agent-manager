@@ -72,6 +72,76 @@ function parseLastMetrics(value: string | null): unknown {
   }
 }
 
+type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
+
+/**
+ * Result of resolving the deployment node backing an environment, used by the
+ * node-proxy GET routes (logs/containers/metrics). Each route maps these
+ * variants to its own response shape; the lookup and ownership checks are
+ * shared here. Throws `notFound` when the environment itself does not exist.
+ */
+type ResolvedDeploymentNode =
+  | { kind: 'no_node' }
+  | {
+      kind: 'unavailable';
+      nodeId: string;
+      reason: 'node_not_running' | 'node_not_found';
+      lastMetrics: string | null;
+    }
+  | { kind: 'ready'; nodeId: string; lastMetrics: string | null };
+
+async function resolveDeploymentNode(
+  db: DeploymentDb,
+  projectId: string,
+  envId: string,
+  userId: string,
+): Promise<ResolvedDeploymentNode> {
+  const envRows = await db
+    .select({
+      id: schema.deploymentEnvironments.id,
+      nodeId: schema.deploymentEnvironments.nodeId,
+    })
+    .from(schema.deploymentEnvironments)
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        eq(schema.deploymentEnvironments.projectId, projectId),
+      ),
+    )
+    .limit(1);
+
+  const environment = envRows[0];
+  if (!environment) {
+    throw errors.notFound('Deployment environment');
+  }
+
+  if (!environment.nodeId) {
+    return { kind: 'no_node' };
+  }
+
+  const nodeRows = await db
+    .select({
+      id: schema.nodes.id,
+      status: schema.nodes.status,
+      lastMetrics: schema.nodes.lastMetrics,
+    })
+    .from(schema.nodes)
+    .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
+    .limit(1);
+
+  const node = nodeRows[0];
+  if (!node || node.status !== 'running') {
+    return {
+      kind: 'unavailable',
+      nodeId: environment.nodeId,
+      reason: node ? 'node_not_running' : 'node_not_found',
+      lastMetrics: node ? node.lastMetrics : null,
+    };
+  }
+
+  return { kind: 'ready', nodeId: node.id, lastMetrics: node.lastMetrics };
+}
+
 /**
  * POST /api/projects/:projectId/environments
  * Create a deployment environment.
@@ -281,67 +351,31 @@ deploymentEnvironmentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const envRows = await db
-      .select({
-        id: schema.deploymentEnvironments.id,
-        nodeId: schema.deploymentEnvironments.nodeId,
-      })
-      .from(schema.deploymentEnvironments)
-      .where(
-        and(
-          eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId),
-        ),
-      )
-      .limit(1);
-
-    const environment = envRows[0];
-    if (!environment) {
-      throw errors.notFound('Deployment environment');
-    }
-
-    if (!environment.nodeId) {
+    const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
+    if (resolved.kind !== 'ready') {
       return c.json({
         entries: [],
         nextCursor: null,
         hasMore: false,
         source: 'deployment-node',
-        nodeId: null,
-        unavailableReason: 'no_deployment_node',
-      });
-    }
-
-    const nodeRows = await db
-      .select({ id: schema.nodes.id, status: schema.nodes.status })
-      .from(schema.nodes)
-      .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
-      .limit(1);
-
-    const node = nodeRows[0];
-    if (!node || node.status !== 'running') {
-      return c.json({
-        entries: [],
-        nextCursor: null,
-        hasMore: false,
-        source: 'deployment-node',
-        nodeId: environment.nodeId,
-        unavailableReason: node ? 'node_not_running' : 'node_not_found',
+        nodeId: resolved.kind === 'unavailable' ? resolved.nodeId : null,
+        unavailableReason: resolved.kind === 'no_node' ? 'no_deployment_node' : resolved.reason,
       });
     }
 
     const queryString = new URL(c.req.url).searchParams.toString();
     try {
-      const result = await getNodeLogsFromNode(node.id, c.env, userId, queryString);
+      const result = await getNodeLogsFromNode(resolved.nodeId, c.env, userId, queryString);
       return c.json({
         ...(typeof result === 'object' && result !== null ? result : { entries: [] }),
         source: 'deployment-node',
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
       });
     } catch (err) {
       log.warn('deployment_environment.logs_unavailable', {
         projectId,
         envId,
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({
@@ -349,7 +383,7 @@ deploymentEnvironmentRoutes.get(
         nextCursor: null,
         hasMore: false,
         source: 'deployment-node',
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
         unavailableReason: 'node_agent_unreachable',
       });
     }
@@ -371,60 +405,31 @@ deploymentEnvironmentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const envRows = await db
-      .select({
-        id: schema.deploymentEnvironments.id,
-        nodeId: schema.deploymentEnvironments.nodeId,
-      })
-      .from(schema.deploymentEnvironments)
-      .where(
-        and(
-          eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId),
-        ),
-      )
-      .limit(1);
-
-    const environment = envRows[0];
-    if (!environment) {
-      throw errors.notFound('Deployment environment');
-    }
-
-    if (!environment.nodeId) {
-      return c.json({ containers: [], nodeId: null, unavailableReason: 'no_deployment_node' });
-    }
-
-    const nodeRows = await db
-      .select({ id: schema.nodes.id, status: schema.nodes.status })
-      .from(schema.nodes)
-      .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
-      .limit(1);
-
-    const node = nodeRows[0];
-    if (!node || node.status !== 'running') {
+    const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
+    if (resolved.kind !== 'ready') {
       return c.json({
         containers: [],
-        nodeId: environment.nodeId,
-        unavailableReason: node ? 'node_not_running' : 'node_not_found',
+        nodeId: resolved.kind === 'unavailable' ? resolved.nodeId : null,
+        unavailableReason: resolved.kind === 'no_node' ? 'no_deployment_node' : resolved.reason,
       });
     }
 
     try {
-      const result = await listNodeContainersFromNode(node.id, c.env, userId);
+      const result = await listNodeContainersFromNode(resolved.nodeId, c.env, userId);
       return c.json({
         ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
       });
     } catch (err) {
       log.warn('deployment_environment.containers_unavailable', {
         projectId,
         envId,
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({
         containers: [],
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
         unavailableReason: 'node_agent_unreachable',
       });
     }
@@ -446,67 +451,35 @@ deploymentEnvironmentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const envRows = await db
-      .select({
-        id: schema.deploymentEnvironments.id,
-        nodeId: schema.deploymentEnvironments.nodeId,
-      })
-      .from(schema.deploymentEnvironments)
-      .where(
-        and(
-          eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId),
-        ),
-      )
-      .limit(1);
-
-    const environment = envRows[0];
-    if (!environment) {
-      throw errors.notFound('Deployment environment');
-    }
-
-    if (!environment.nodeId) {
-      return c.json({ systemInfo: null, nodeId: null, fallbackMetrics: null, unavailableReason: 'no_deployment_node' });
-    }
-
-    const nodeRows = await db
-      .select({
-        id: schema.nodes.id,
-        status: schema.nodes.status,
-        lastMetrics: schema.nodes.lastMetrics,
-      })
-      .from(schema.nodes)
-      .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
-      .limit(1);
-
-    const node = nodeRows[0];
-    if (!node || node.status !== 'running') {
+    const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
+    if (resolved.kind !== 'ready') {
       return c.json({
         systemInfo: null,
-        nodeId: environment.nodeId,
-        fallbackMetrics: node ? parseLastMetrics(node.lastMetrics) : null,
-        unavailableReason: node ? 'node_not_running' : 'node_not_found',
+        nodeId: resolved.kind === 'unavailable' ? resolved.nodeId : null,
+        fallbackMetrics:
+          resolved.kind === 'unavailable' ? parseLastMetrics(resolved.lastMetrics) : null,
+        unavailableReason: resolved.kind === 'no_node' ? 'no_deployment_node' : resolved.reason,
       });
     }
 
     try {
-      const result = await getNodeSystemInfoFromNode(node.id, c.env, userId);
+      const result = await getNodeSystemInfoFromNode(resolved.nodeId, c.env, userId);
       return c.json({
         systemInfo: result,
-        nodeId: node.id,
-        fallbackMetrics: parseLastMetrics(node.lastMetrics),
+        nodeId: resolved.nodeId,
+        fallbackMetrics: parseLastMetrics(resolved.lastMetrics),
       });
     } catch (err) {
       log.warn('deployment_environment.metrics_unavailable', {
         projectId,
         envId,
-        nodeId: node.id,
+        nodeId: resolved.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({
         systemInfo: null,
-        nodeId: node.id,
-        fallbackMetrics: parseLastMetrics(node.lastMetrics),
+        nodeId: resolved.nodeId,
+        fallbackMetrics: parseLastMetrics(resolved.lastMetrics),
         unavailableReason: 'node_agent_unreachable',
       });
     }
