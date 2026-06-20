@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -86,26 +85,18 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 		return fail(runtime.Stderr, fmt.Errorf("workspace is %s, not running", workspace.Status))
 	}
 
-	// Determine which ports to forward
-	ports := requestedPorts
-	if len(ports) == 0 {
-		// Auto-detect ports from workspace
-		portsResp, err := client.GetWorkspacePorts(ctx, workspaceID)
-		if err != nil {
-			return fail(runtime.Stderr, fmt.Errorf("failed to detect ports: %w", err))
-		}
-		for _, p := range portsResp.Ports {
-			ports = append(ports, p.Port)
-		}
-		if len(ports) == 0 {
-			return fail(runtime.Stderr, errors.New("no ports detected on workspace. Use --port to specify ports manually"))
-		}
+	ports, err := resolveForwardPorts(ctx, client, workspaceID, requestedPorts)
+	if err != nil {
+		return fail(runtime.Stderr, err)
 	}
 
-	// Extract base domain from workspace URL
-	baseDomain, err := extractBaseDomain(workspace.URL)
+	localHost, err := parseLocalHostFlag(parsed)
 	if err != nil {
-		return fail(runtime.Stderr, fmt.Errorf("cannot determine base domain: %w", err))
+		return fail(runtime.Stderr, err)
+	}
+	localPort, err := parseLocalPortFlag(parsed, ports)
+	if err != nil {
+		return fail(runtime.Stderr, err)
 	}
 
 	// Set up signal handling for graceful shutdown
@@ -124,7 +115,7 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 	}()
 
 	// Start forwarding
-	forwarders, err := startForwarders(ctx, runtime, client, workspaceID, baseDomain, ports)
+	forwarders, err := startForwarders(ctx, runtime, client, workspaceID, localHost, localPort, ports)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -132,7 +123,7 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 	// Print forwarding table
 	fmt.Fprintf(runtime.Stderr, "\nForwarding %d port(s) for workspace %s:\n", len(forwarders), workspaceID)
 	for _, f := range forwarders {
-		fmt.Fprintf(runtime.Stderr, "  localhost:%d -> %s\n", f.localPort, f.remoteURL)
+		fmt.Fprintf(runtime.Stderr, "  http://%s:%d -> remote port %d\n", f.localHost, f.localPort, f.remotePort)
 	}
 	fmt.Fprintln(runtime.Stderr, "\nPress Ctrl+C to stop.")
 
@@ -157,6 +148,34 @@ func parsePortFlags(parsed parsedArgs) ([]int, error) {
 	return ports, nil
 }
 
+func parseLocalPortFlag(parsed parsedArgs, remotePorts []int) (int, error) {
+	raw := flagValue(parsed.Flags, "local-port")
+	if raw == "" {
+		return 0, nil
+	}
+	if len(remotePorts) != 1 {
+		return 0, errors.New("--local-port can only be used when forwarding exactly one --port")
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid local port: %s (must be 1-65535)", raw)
+	}
+	return port, nil
+}
+
+func parseLocalHostFlag(parsed parsedArgs) (string, error) {
+	raw := flagValue(parsed.Flags, "local-host")
+	if raw == "" {
+		return "localhost", nil
+	}
+	switch raw {
+	case "localhost", "127.0.0.1":
+		return raw, nil
+	default:
+		return "", fmt.Errorf("invalid local host: %s (must be localhost or 127.0.0.1)", raw)
+	}
+}
+
 func extractBaseDomain(workspaceURL string) (string, error) {
 	if workspaceURL == "" {
 		return "", errors.New("workspace has no URL")
@@ -176,50 +195,95 @@ func extractBaseDomain(workspaceURL string) (string, error) {
 }
 
 type portForwarder struct {
-	localPort int
-	remoteURL string
-	listener  net.Listener
+	localPort  int
+	localHost  string
+	remotePort int
+	targetURL  string
+	listener   net.Listener
 }
 
-func startForwarders(ctx context.Context, runtime Runtime, client APIClient, workspaceID string, baseDomain string, ports []int) ([]portForwarder, error) {
+type acceptConnectionsConfig struct {
+	workspaceID string
+	remotePort  int
+	localHost   string
+	localPort   int
+	listener    net.Listener
+	remoteURL   string
+}
+
+func resolveForwardPorts(ctx context.Context, client APIClient, workspaceID string, requestedPorts []int) ([]int, error) {
+	if len(requestedPorts) > 0 {
+		return requestedPorts, nil
+	}
+
+	portsResp, err := client.GetWorkspacePorts(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect ports: %w", err)
+	}
+	ports := make([]int, 0, len(portsResp.Ports))
+	for _, p := range portsResp.Ports {
+		ports = append(ports, p.Port)
+	}
+	if len(ports) == 0 {
+		return nil, errors.New("no ports detected on workspace. Use --port to specify ports manually")
+	}
+	return ports, nil
+}
+
+func startForwarders(ctx context.Context, runtime Runtime, client APIClient, workspaceID string, localHost string, localPortOverride int, ports []int) ([]portForwarder, error) {
 	// Phase 1: bind all listeners before launching any goroutines
 	var forwarders []portForwarder
-	for _, port := range ports {
-		remoteURL := fmt.Sprintf("https://ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
+	for _, remotePort := range ports {
+		localPort := remotePort
+		if localPortOverride != 0 {
+			localPort = localPortOverride
+		}
 
-		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", localHost, localPort))
 		if err != nil {
 			for _, f := range forwarders {
 				f.listener.Close()
 			}
-			return nil, fmt.Errorf("failed to listen on port %d: %w", port, err)
+			return nil, fmt.Errorf("failed to listen on %s:%d: %w", localHost, localPort, err)
 		}
 
+		targetURL := strings.TrimRight(client.config.APIURL, "/") +
+			fmt.Sprintf("/api/workspaces/%s/local-forward/%d", url.PathEscape(workspaceID), remotePort)
 		forwarders = append(forwarders, portForwarder{
-			localPort: port,
-			remoteURL: remoteURL,
-			listener:  listener,
+			localHost:  localHost,
+			localPort:  localPort,
+			remotePort: remotePort,
+			targetURL:  targetURL,
+			listener:   listener,
 		})
 	}
 
 	// Phase 2: all listeners bound successfully, now launch goroutines
 	for _, f := range forwarders {
-		go acceptConnections(ctx, runtime, client, workspaceID, f.localPort, f.listener, f.remoteURL)
+		go acceptConnections(ctx, runtime, client, acceptConnectionsConfig{
+			workspaceID: workspaceID,
+			remotePort:  f.remotePort,
+			localHost:   f.localHost,
+			localPort:   f.localPort,
+			listener:    f.listener,
+			remoteURL:   f.targetURL,
+		})
 	}
 	return forwarders, nil
 }
 
-func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, workspaceID string, port int, listener net.Listener, remoteURL string) {
+func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, cfg acceptConnectionsConfig) {
 	// Token cache with refresh
 	tc := &tokenCache{
-		client:      client,
-		workspaceID: workspaceID,
-		port:        port,
+		client:         client,
+		workspaceID:    cfg.workspaceID,
+		remotePort:     cfg.remotePort,
+		localAuthority: fmt.Sprintf("%s:%d", cfg.localHost, cfg.localPort),
 	}
 
-	target, err := url.Parse(remoteURL)
+	target, err := url.Parse(cfg.remoteURL)
 	if err != nil {
-		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", remoteURL, err)
+		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", cfg.remoteURL, err)
 		return
 	}
 
@@ -227,20 +291,17 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
+			setEscapedURLPath(req.URL, singleJoiningSlash(target.EscapedPath(), req.URL.EscapedPath()))
 			req.Host = target.Host
 
-			// Authenticate directly with the port proxy. Browser flows use
-			// port_token to bootstrap this cookie via a redirect; the CLI needs
-			// localhost requests to proxy transparently without exposing that 302.
+			stripProxyRequestHeaders(req.Header)
 			token, tokenErr := tc.getToken(req.Context())
 			if tokenErr != nil {
 				fmt.Fprintf(runtime.Stderr, "  [%s] token error: %v\n", time.Now().Format("15:04:05"), tokenErr)
 				return
 			}
-			req.AddCookie(&http.Cookie{Name: "sam_port_access", Value: token})
-		},
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			req.Header.Set("X-SAM-Forward-Token", token)
+			req.Header.Set("X-SAM-Local-Authority", tc.localAuthority)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, proxyErr error) {
 			fmt.Fprintf(runtime.Stderr, "  [%s] proxy error for %s %s: %v\n",
@@ -251,8 +312,16 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !isAllowedLocalForwardHost(r.Host, cfg.localHost, cfg.localPort) {
+				http.Error(w, "invalid Host for local forward listener", http.StatusBadRequest)
+				return
+			}
+			if isWebSocketUpgrade(r) {
+				http.Error(w, "WebSocket upgrades are not supported by CLI local forwarding yet", http.StatusNotImplemented)
+				return
+			}
 			fmt.Fprintf(runtime.Stderr, "  [%s] %s %s -> localhost:%d\n",
-				time.Now().Format("15:04:05"), r.Method, r.URL.Path, port)
+				time.Now().Format("15:04:05"), r.Method, r.URL.Path, cfg.remotePort)
 			proxy.ServeHTTP(w, r)
 		}),
 		ReadTimeout:  30 * time.Second,
@@ -267,14 +336,15 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 		server.Shutdown(shutdownCtx)
 	}()
 
-	_ = server.Serve(listener)
+	_ = server.Serve(cfg.listener)
 }
 
 // tokenCache manages port access token refresh.
 type tokenCache struct {
-	client      APIClient
-	workspaceID string
-	port        int
+	client         APIClient
+	workspaceID    string
+	remotePort     int
+	localAuthority string
 
 	mu        sync.Mutex
 	token     string
@@ -292,15 +362,111 @@ func (tc *tokenCache) getToken(ctx context.Context) (string, error) {
 	}
 	tc.mu.Unlock()
 
-	resp, err := tc.client.GetPortToken(ctx, tc.workspaceID, tc.port)
+	resp, err := tc.client.CreateLocalForwardSession(ctx, tc.workspaceID, LocalForwardSessionRequest{
+		RemotePort:     tc.remotePort,
+		Mode:           "http",
+		LocalAuthority: tc.localAuthority,
+	})
 	if err != nil {
 		return "", err
 	}
 
 	tc.mu.Lock()
 	tc.token = resp.Token
-	// Refresh 2 minutes before the 15-minute expiry
-	tc.expiresAt = time.Now().Add(13 * time.Minute)
+	tc.expiresAt = localForwardRefreshTime(resp.ExpiresAt)
 	tc.mu.Unlock()
 	return tc.token, nil
+}
+
+func localForwardRefreshTime(expiresAt string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return time.Now().Add(time.Minute)
+	}
+	refreshAt := parsed.Add(-1 * time.Minute)
+	if refreshAt.Before(time.Now()) {
+		return time.Now().Add(5 * time.Second)
+	}
+	return refreshAt
+}
+
+func isAllowedLocalForwardHost(host string, localHost string, localPort int) bool {
+	if host == "" {
+		return false
+	}
+	hostname, port, err := net.SplitHostPort(host)
+	if err != nil {
+		if strings.Contains(err.Error(), "missing port in address") {
+			return false
+		}
+		return false
+	}
+	if port != strconv.Itoa(localPort) {
+		return false
+	}
+	return hostname == localHost
+}
+
+func singleJoiningSlash(a, b string) string {
+	aslash := strings.HasSuffix(a, "/")
+	bslash := strings.HasPrefix(b, "/")
+	switch {
+	case aslash && bslash:
+		return a + b[1:]
+	case !aslash && !bslash:
+		return a + "/" + b
+	default:
+		return a + b
+	}
+}
+
+func setEscapedURLPath(u *url.URL, escapedPath string) {
+	path, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		u.Path = escapedPath
+		u.RawPath = ""
+		return
+	}
+	u.Path = path
+	if (&url.URL{Path: path}).EscapedPath() == escapedPath {
+		u.RawPath = ""
+		return
+	}
+	u.RawPath = escapedPath
+}
+
+func stripProxyRequestHeaders(headers http.Header) {
+	stripConnectionListedHeaders(headers)
+	for name := range headers {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-sam-") ||
+			strings.HasPrefix(lower, "x-forwarded-") ||
+			lower == "forwarded" ||
+			isHopByHopHeader(lower) {
+			headers.Del(name)
+		}
+	}
+}
+
+func stripConnectionListedHeaders(headers http.Header) {
+	for _, value := range headers.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if name := strings.TrimSpace(token); name != "" {
+				headers.Del(name)
+			}
+		}
+	}
+}
+
+func isHopByHopHeader(name string) bool {
+	switch name {
+	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+		return true
+	default:
+		return false
+	}
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }
