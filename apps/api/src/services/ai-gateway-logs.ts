@@ -102,7 +102,7 @@ const gatewayLogEntrySchema = v.object({
   cached: v.boolean(),
   created_at: v.string(),
   duration: v.number(),
-  metadata: v.nullable(v.record(v.string(), v.string())),
+  metadata: v.nullable(v.record(v.string(), v.unknown())),
 });
 
 const gatewayLogsResponseSchema = v.object({
@@ -115,10 +115,30 @@ const gatewayLogsResponseSchema = v.object({
     total_pages: v.optional(v.number()),
   }),
   success: v.boolean(),
-  errors: v.nullable(v.array(v.unknown())),
+  errors: v.optional(v.nullable(v.array(v.unknown()))),
 });
 
 type RawGatewayLogsResponse = v.InferOutput<typeof gatewayLogsResponseSchema>;
+type RawGatewayLogEntry = RawGatewayLogsResponse['result'][number];
+
+function normalizeGatewayMetadata(metadata: RawGatewayLogEntry['metadata']): Record<string, string> | null {
+  if (!metadata) return null;
+
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value === null || value === undefined) continue;
+    normalized[key] = typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  return normalized;
+}
+
+function normalizeGatewayLogEntry(entry: RawGatewayLogEntry): AIGatewayLogEntry {
+  return {
+    ...entry,
+    metadata: normalizeGatewayMetadata(entry.metadata),
+  };
+}
 
 function normalizeGatewayLogsResponse(resp: RawGatewayLogsResponse): AIGatewayLogsResponse {
   const perPage = Math.max(1, resp.result_info.per_page);
@@ -127,6 +147,7 @@ function normalizeGatewayLogsResponse(resp: RawGatewayLogsResponse): AIGatewayLo
 
   return {
     ...resp,
+    result: resp.result.map(normalizeGatewayLogEntry),
     result_info: {
       ...resp.result_info,
       total_pages: totalPages,
