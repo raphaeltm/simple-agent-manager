@@ -130,6 +130,75 @@ describe('handleBuildAndPublish', () => {
     );
   });
 
+  it('forwards a trimmed workingDir argument to the vm-agent', async () => {
+    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
+    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-4', version: 4, status: 'created' });
+
+    await handleBuildAndPublish(
+      'req-1',
+      { workingDir: '  /workspaces/crewai-wt-feature  ' },
+      tokenData(),
+      env(),
+    );
+
+    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      'ws-1',
+      'user-1',
+      'proj-1',
+      'build-and-publish',
+      'POST',
+      { workingDir: '/workspaces/crewai-wt-feature' },
+      expect.any(Number),
+    );
+  });
+
+  it('forwards both reference and workingDir when provided together', async () => {
+    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
+    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-5', version: 5, status: 'created' });
+
+    await handleBuildAndPublish(
+      'req-1',
+      { reference: 'v5', workingDir: '/workspaces/crewai-wt-feature' },
+      tokenData(),
+      env(),
+    );
+
+    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      'ws-1',
+      'user-1',
+      'proj-1',
+      'build-and-publish',
+      'POST',
+      { reference: 'v5', workingDir: '/workspaces/crewai-wt-feature' },
+      expect.any(Number),
+    );
+  });
+
+  it('ignores a blank or non-string workingDir argument', async () => {
+    mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
+    mockProxyToVmAgent.mockResolvedValue({ releaseId: 'rel-6', version: 6, status: 'created' });
+
+    await handleBuildAndPublish(
+      'req-1',
+      { workingDir: '   ', reference: 42 as unknown as string },
+      tokenData(),
+      env(),
+    );
+
+    expect(mockProxyToVmAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      'ws-1',
+      'user-1',
+      'proj-1',
+      'build-and-publish',
+      'POST',
+      {},
+      expect.any(Number),
+    );
+  });
+
   it('surfaces a vm-agent failure as an internal error', async () => {
     mockIsProjectAgentDeployEnabled.mockResolvedValue(true);
     mockProxyToVmAgent.mockRejectedValue(new Error('VM agent returned 500: build failed'));

@@ -27,7 +27,19 @@ const buildPublishTimeout = 20 * time.Minute
 type McpBuildAndPublishRequest struct {
 	// Reference is the release tag to publish (defaults to "latest").
 	Reference string `json:"reference,omitempty"`
+	// WorkingDir is the coding agent's container-side working directory under the
+	// /workspaces volume (e.g. a git worktree at /workspaces/{repo}-wt-{branch}).
+	// When set, the build uses the source at this directory instead of the
+	// workspace's primary repo dir. Optional; ignored if it is not a valid path
+	// under /workspaces or the resolved host path does not exist.
+	WorkingDir string `json:"workingDir,omitempty"`
 }
+
+// containerWorkspacesRoot is the in-container mount point of the workspace's
+// named Docker volume (sam-ws-{workspaceId}). Both the primary repo
+// (/workspaces/{repo}) and any git worktrees (/workspaces/{repo}-wt-{branch})
+// live directly under it. See bootstrap.go (target=/workspaces).
+const containerWorkspacesRoot = "/workspaces"
 
 // McpBuildAndPublishResponse reports the recorded release.
 type McpBuildAndPublishResponse struct {
@@ -102,8 +114,9 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 	// volume (sam-ws-{workspaceId}) mounted at /workspaces — which is never
 	// re-synced back to the host clone. Building the host clone publishes the
 	// stale boot-time tree, so resolve the agent's actual working tree from the
-	// named volume before building.
-	buildDir := s.resolveBuildSourceDir(ctx, workspaceID, runtime, log)
+	// named volume before building. req.WorkingDir lets the agent point at a git
+	// worktree (a sibling dir of the primary repo) rather than the primary repo.
+	buildDir := s.resolveBuildSourceDir(ctx, workspaceID, runtime, req.WorkingDir, log)
 
 	log.Info("host build starting", "buildDir", buildDir, "hostClone", workspaceDir)
 	artifact, err := publish.Build(ctx, publish.BuildOptions{
@@ -154,23 +167,53 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 // The coding agent's source lives inside the devcontainer's Docker named volume
 // (sam-ws-{workspaceId}), mounted at /workspaces. That volume's data is on the
 // host at the path reported by `docker volume inspect`, so the host docker daemon
-// (which runs the compose build) can read it directly. We append the repo
-// subdirectory — the same one mounted as the container work dir — to reach the
-// compose project root.
+// (which runs the compose build) can read it directly. We map the agent's
+// container-side working directory (under /workspaces) to its host path under the
+// volume mountpoint.
 //
-// If the volume cannot be resolved for any reason, we fall back to
+// requestedWorkingDir (from the caller) takes precedence so an agent working in a
+// git worktree — a sibling dir of the primary repo, e.g.
+// /workspaces/{repo}-wt-{branch} — builds that worktree rather than the primary
+// repo. When it is empty we fall back to the workspace's primary container work
+// dir, then to a path derived from the repository name.
+//
+// If the volume or path cannot be resolved for any reason, we fall back to
 // runtime.WorkspaceDir so the publish still attempts a build rather than failing
 // outright.
-func (s *Server) resolveBuildSourceDir(ctx context.Context, workspaceID string, runtime *WorkspaceRuntime, log *slog.Logger) string {
+func (s *Server) resolveBuildSourceDir(ctx context.Context, workspaceID string, runtime *WorkspaceRuntime, requestedWorkingDir string, log *slog.Logger) string {
 	fallback := strings.TrimSpace(runtime.WorkspaceDir)
 
-	repoDir := filepath.Base(strings.TrimSpace(runtime.ContainerWorkDir))
-	if repoDir == "" || repoDir == "." || repoDir == string(filepath.Separator) {
-		repoDir = repositoryDirName(runtime.Repository)
+	// Candidate container-side working dirs in priority order. The explicit
+	// caller-supplied dir wins (an agent working in a git worktree, a sibling of
+	// the primary repo under /workspaces), then the workspace's primary container
+	// work dir, then a path derived from the repository name. The first candidate
+	// that is a safe path under /workspaces is used. A non-empty but unsafe
+	// requestedWorkingDir (outside /workspaces, traversal) is skipped rather than
+	// forcing a host-clone fallback — so a bad arg still publishes the primary
+	// repo from the live volume instead of the stale boot-time clone.
+	candidates := []string{
+		strings.TrimSpace(requestedWorkingDir),
+		strings.TrimSpace(runtime.ContainerWorkDir),
 	}
-	if repoDir == "" {
-		log.Warn("build source: could not derive repo dir; using host clone",
-			"containerWorkDir", runtime.ContainerWorkDir, "repository", runtime.Repository, "fallback", fallback)
+	if repoDir := repositoryDirName(runtime.Repository); repoDir != "" {
+		candidates = append(candidates, containerWorkspacesRoot+"/"+repoDir)
+	}
+
+	var rel, containerDir string
+	var ok bool
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if r, valid := containerPathRelativeToWorkspaces(c); valid {
+			rel, containerDir, ok = r, c, true
+			break
+		}
+	}
+	if !ok {
+		log.Warn("build source: could not resolve a /workspaces working dir; using host clone",
+			"requestedWorkingDir", requestedWorkingDir, "containerWorkDir", runtime.ContainerWorkDir,
+			"repository", runtime.Repository, "fallback", fallback)
 		return fallback
 	}
 
@@ -189,14 +232,36 @@ func (s *Server) resolveBuildSourceDir(ctx context.Context, workspaceID string, 
 		return fallback
 	}
 
-	buildDir := filepath.Join(mountpoint, repoDir)
+	buildDir := filepath.Join(mountpoint, rel)
 	if _, err := os.Stat(buildDir); err != nil {
 		log.Warn("build source: resolved volume path not accessible; using host clone",
-			"buildDir", buildDir, "error", err, "fallback", fallback)
+			"buildDir", buildDir, "containerDir", containerDir, "error", err, "fallback", fallback)
 		return fallback
 	}
 
 	log.Info("build source resolved from workspace volume",
-		"volume", volName, "mountpoint", mountpoint, "repoDir", repoDir, "buildDir", buildDir)
+		"volume", volName, "mountpoint", mountpoint, "containerDir", containerDir, "buildDir", buildDir)
 	return buildDir
+}
+
+// containerPathRelativeToWorkspaces validates that p is a clean container path
+// strictly under the /workspaces volume mount and returns its path relative to
+// that root. It rejects empty paths, paths outside /workspaces, and any path
+// containing a traversal segment ("..") or NUL — so a caller-supplied working dir
+// can never escape the workspace volume.
+func containerPathRelativeToWorkspaces(p string) (string, bool) {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.ContainsRune(p, 0) || strings.Contains(p, "..") {
+		return "", false
+	}
+	clean := filepath.Clean(p)
+	prefix := containerWorkspacesRoot + "/"
+	if !strings.HasPrefix(clean, prefix) {
+		return "", false
+	}
+	rel := strings.TrimPrefix(clean, prefix)
+	if rel == "" {
+		return "", false
+	}
+	return rel, true
 }

@@ -251,7 +251,7 @@ func TestResolveBuildSourceDir_ResolvesFromVolume(t *testing.T) {
 		Repository:       "https://github.com/acme/crewai",
 	}
 
-	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, "", discardBuildLogger())
 	if got != repoDir {
 		t.Fatalf("expected volume-backed build dir %q, got %q", repoDir, got)
 	}
@@ -274,7 +274,7 @@ func TestResolveBuildSourceDir_FallsBackWhenVolumePathMissing(t *testing.T) {
 		Repository:       "https://github.com/acme/crewai",
 	}
 
-	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, "", discardBuildLogger())
 	if got != "/workspace/ws-1" {
 		t.Fatalf("expected fallback to host clone, got %q", got)
 	}
@@ -292,7 +292,7 @@ func TestResolveBuildSourceDir_FallsBackWhenDockerFails(t *testing.T) {
 		Repository:       "https://github.com/acme/crewai",
 	}
 
-	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, "", discardBuildLogger())
 	if got != "/workspace/ws-1" {
 		t.Fatalf("expected fallback to host clone when docker fails, got %q", got)
 	}
@@ -310,7 +310,7 @@ func TestResolveBuildSourceDir_FallsBackWhenNoRepoDir(t *testing.T) {
 		WorkspaceDir: "/workspace/ws-1",
 	}
 
-	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, "", discardBuildLogger())
 	if got != "/workspace/ws-1" {
 		t.Fatalf("expected fallback to host clone when repo dir underivable, got %q", got)
 	}
@@ -333,8 +333,92 @@ func TestResolveBuildSourceDir_DerivesRepoDirFromRepository(t *testing.T) {
 		Repository:   "https://github.com/acme/crewai",
 	}
 
-	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, "", discardBuildLogger())
 	if got != repoDir {
 		t.Fatalf("expected build dir %q derived from repository, got %q", repoDir, got)
+	}
+}
+
+func TestResolveBuildSourceDir_PrefersRequestedWorktreeDir(t *testing.T) {
+	// The agent is working in a git worktree (a sibling of the primary repo under
+	// /workspaces). The explicit working dir must win over runtime.ContainerWorkDir
+	// so the build publishes the worktree's source, not the primary repo's.
+	tmp := t.TempDir()
+	mountpoint := filepath.Join(tmp, "vol-data")
+	worktree := filepath.Join(mountpoint, "crewai-wt-feature")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatalf("mkdir worktree dir: %v", err)
+	}
+	// Also create the primary repo dir to prove it is NOT chosen.
+	if err := os.MkdirAll(filepath.Join(mountpoint, "crewai"), 0o755); err != nil {
+		t.Fatalf("mkdir primary repo dir: %v", err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, mountpoint, false))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:               "ws-1",
+		WorkspaceDir:     "/workspace/ws-1",
+		ContainerWorkDir: "/workspaces/crewai",
+		Repository:       "https://github.com/acme/crewai",
+	}
+
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, "/workspaces/crewai-wt-feature", discardBuildLogger())
+	if got != worktree {
+		t.Fatalf("expected worktree build dir %q, got %q", worktree, got)
+	}
+}
+
+func TestResolveBuildSourceDir_RejectsWorkingDirOutsideWorkspaces(t *testing.T) {
+	// A caller-supplied working dir that is not under /workspaces (or attempts
+	// traversal) must be ignored in favor of the safe primary-repo resolution.
+	tmp := t.TempDir()
+	mountpoint := filepath.Join(tmp, "vol-data")
+	repoDir := filepath.Join(mountpoint, "crewai")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo dir: %v", err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, mountpoint, false))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:               "ws-1",
+		WorkspaceDir:     "/workspace/ws-1",
+		ContainerWorkDir: "/workspaces/crewai",
+		Repository:       "https://github.com/acme/crewai",
+	}
+
+	for _, bad := range []string{"/etc/passwd", "/workspaces/../etc", "relative/path", "/workspaces"} {
+		got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, bad, discardBuildLogger())
+		if got != repoDir {
+			t.Fatalf("working dir %q should be rejected and fall through to primary repo %q, got %q", bad, repoDir, got)
+		}
+	}
+}
+
+func TestContainerPathRelativeToWorkspaces(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in      string
+		wantRel string
+		wantOK  bool
+	}{
+		{"/workspaces/crewai", "crewai", true},
+		{"/workspaces/crewai-wt-feature", "crewai-wt-feature", true},
+		{"/workspaces/crewai/", "crewai", true},
+		{"  /workspaces/crewai  ", "crewai", true},
+		{"/workspaces", "", false},
+		{"/workspaces/", "", false},
+		{"/etc/passwd", "", false},
+		{"relative/crewai", "", false},
+		{"/workspaces/../etc/passwd", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		gotRel, gotOK := containerPathRelativeToWorkspaces(c.in)
+		if gotOK != c.wantOK || gotRel != c.wantRel {
+			t.Errorf("containerPathRelativeToWorkspaces(%q) = (%q, %v), want (%q, %v)",
+				c.in, gotRel, gotOK, c.wantRel, c.wantOK)
+		}
 	}
 }

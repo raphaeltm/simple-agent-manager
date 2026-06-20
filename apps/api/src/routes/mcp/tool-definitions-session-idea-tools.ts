@@ -247,6 +247,11 @@ export const SESSION_IDEA_TOOLS = [
           description:
             'Optional release tag for the published images (defaults to "latest").',
         },
+        workingDir: {
+          type: 'string',
+          description:
+            'Optional absolute path to the working directory to build, under /workspaces (e.g. "/workspaces/myrepo" or a git worktree like "/workspaces/myrepo-wt-feature"). Pass your current working directory — especially when working in a git worktree — so SAM builds the source you actually edited. Defaults to the workspace\'s primary repository directory.',
+        },
       },
       additionalProperties: false,
     },

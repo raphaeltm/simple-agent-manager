@@ -70,6 +70,19 @@ export async function handleBuildAndPublish(
       ? toolArgs.reference.trim()
       : undefined;
 
+  // Optional: the agent's current working directory (e.g. a git worktree under
+  // /workspaces). When set, the vm-agent builds the source at this directory
+  // instead of the workspace's primary repo. The vm-agent validates it is a path
+  // under /workspaces and ignores anything that isn't.
+  const workingDir =
+    typeof toolArgs.workingDir === 'string' && toolArgs.workingDir.trim() !== ''
+      ? toolArgs.workingDir.trim()
+      : undefined;
+
+  const proxyBody: Record<string, string> = {};
+  if (reference) proxyBody.reference = reference;
+  if (workingDir) proxyBody.workingDir = workingDir;
+
   try {
     const result = await proxyToVmAgent(
       env,
@@ -78,7 +91,7 @@ export async function handleBuildAndPublish(
       projectId,
       'build-and-publish',
       'POST',
-      reference ? { reference } : {},
+      proxyBody,
       getBuildPublishTimeout(env),
     );
 
