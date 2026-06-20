@@ -21,14 +21,14 @@ The current `sam workspace <id> forward` path binds a local listener but forward
 
 ## Implementation Checklist
 
-- [ ] Add dedicated local-forward JWT audiences and helpers with claims for user/workspace/node/port/mode/local authority.
-- [ ] Add `POST /api/workspaces/:id/forwards` to authorize workspace ownership, validate port/local host, and mint a short-lived CLI forwarding token.
-- [ ] Add an API-domain local-forward proxy route that validates `X-SAM-Forward-Token`, rechecks workspace routing, strips spoofable forwarding/internal headers, preserves app auth/cookies, and sends `X-SAM-VM-Forward-Token` to the VM Agent.
-- [ ] Add a VM Agent local-forward handler and token validation path that does not set SAM session cookies, proxies only to the workspace container endpoint, preserves app auth/cookies, and sets localhost authority headers from validated claims.
-- [ ] Rewrite CLI local forwarding to create forward sessions, support `--local-port` and `--local-host`, validate inbound Host, preserve target app headers, strip spoofable headers, and use `X-SAM-Forward-Token` instead of app-visible `Authorization` or cookies.
-- [ ] Return a clear unsupported response for WebSocket upgrade requests if WebSocket proxying is not implemented in this slice.
-- [ ] Add focused CLI Go tests, API Vitest coverage, and VM Agent Go tests for token scope, localhost Host semantics, app `Authorization`/`Cookie`/multiple `Set-Cookie` preservation, and header stripping.
-- [ ] Run relevant tests for touched packages.
+- [x] Add dedicated local-forward JWT audiences and helpers with claims for user/workspace/node/port/mode/local authority.
+- [x] Add `POST /api/workspaces/:id/forwards` to authorize workspace ownership, validate port/local host, and mint a short-lived CLI forwarding token.
+- [x] Add an API-domain local-forward proxy route that validates `X-SAM-Forward-Token`, rechecks workspace routing, strips spoofable forwarding/internal headers, preserves app auth/cookies, and sends `X-SAM-VM-Forward-Token` to the VM Agent.
+- [x] Add a VM Agent local-forward handler and token validation path that does not set SAM session cookies, proxies only to the workspace container endpoint, preserves app auth/cookies, and sets localhost authority headers from validated claims.
+- [x] Rewrite CLI local forwarding to create forward sessions, support `--local-port` and `--local-host`, validate inbound Host, preserve target app headers, strip spoofable headers, and use `X-SAM-Forward-Token` instead of app-visible `Authorization` or cookies.
+- [x] Return a clear unsupported response for WebSocket upgrade requests if WebSocket proxying is not implemented in this slice.
+- [x] Add focused CLI Go tests, API Vitest coverage, and VM Agent Go tests for token scope, localhost Host semantics, app `Authorization`/`Cookie`/multiple `Set-Cookie` preservation, and header stripping.
+- [x] Run relevant tests for touched packages.
 
 ## Acceptance Criteria
 

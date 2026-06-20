@@ -374,14 +374,15 @@ func TestTokenCacheRefreshesExpiredToken(t *testing.T) {
 	calls := 0
 	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
-		return jsonResponse(`{"token":"tok-`+string(rune('0'+calls))+`","url":"https://example.com","port":3000}`, http.StatusOK), nil
+		return jsonResponse(`{"token":"tok-`+string(rune('0'+calls))+`","expiresAt":"2026-06-20T00:00:00Z","remotePort":3000,"mode":"http","localAuthority":"localhost:3000"}`, http.StatusOK), nil
 	})
 	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
 
 	tc := &tokenCache{
-		client:      client,
-		workspaceID: "ws-1",
-		port:        3000,
+		client:         client,
+		workspaceID:    "ws-1",
+		remotePort:     3000,
+		localAuthority: "localhost:3000",
 	}
 
 	// First call should fetch a token
@@ -428,9 +429,10 @@ func TestTokenCacheReturnsErrorOnAPIFailure(t *testing.T) {
 	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
 
 	tc := &tokenCache{
-		client:      client,
-		workspaceID: "ws-1",
-		port:        3000,
+		client:         client,
+		workspaceID:    "ws-1",
+		remotePort:     3000,
+		localAuthority: "localhost:3000",
 	}
 
 	_, err := tc.getToken(context.Background())
@@ -504,7 +506,7 @@ func TestStartForwardersBindsListenersAndReturnsForwarders(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	forwarders, err := startForwarders(ctx, runtime, client, "ws-ABC", "example.com", []int{port1, port2})
+	forwarders, err := startForwarders(ctx, runtime, client, "ws-ABC", "localhost", 0, []int{port1, port2})
 	if err != nil {
 		t.Fatalf("startForwarders failed: %v", err)
 	}
@@ -514,10 +516,9 @@ func TestStartForwardersBindsListenersAndReturnsForwarders(t *testing.T) {
 		t.Fatalf("expected 2 forwarders, got %d", len(forwarders))
 	}
 
-	// Verify remoteURL construction (lowercase workspaceID, double-dash port separator)
-	expectedURL1 := fmt.Sprintf("https://ws-ws-abc--%d.example.com", port1)
-	if forwarders[0].remoteURL != expectedURL1 {
-		t.Fatalf("expected remoteURL %q, got %q", expectedURL1, forwarders[0].remoteURL)
+	expectedURL1 := fmt.Sprintf("https://api.example.com/api/workspaces/ws-ABC/local-forward/%d", port1)
+	if forwarders[0].targetURL != expectedURL1 {
+		t.Fatalf("expected targetURL %q, got %q", expectedURL1, forwarders[0].targetURL)
 	}
 	if forwarders[0].localPort != port1 {
 		t.Fatalf("expected localPort %d, got %d", port1, forwarders[0].localPort)
@@ -544,7 +545,7 @@ func TestStartForwardersCleanupOnPartialFailure(t *testing.T) {
 	defer cancel()
 
 	// First port succeeds, second port (blocked) fails — should clean up the first
-	_, err = startForwarders(ctx, runtime, client, "ws-1", "example.com", []int{availablePort, port1})
+	_, err = startForwarders(ctx, runtime, client, "ws-1", "127.0.0.1", 0, []int{availablePort, port1})
 	if err == nil {
 		t.Fatal("expected error when port is already bound")
 	}
@@ -564,9 +565,8 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	tokenCalls := 0
 	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		tokenCalls++
-		return jsonResponse(`{"token":"test-port-token","url":"https://example.com","port":3000}`, http.StatusOK), nil
+		return jsonResponse(`{"token":"test-forward-token","expiresAt":"2026-06-20T00:00:00Z","remotePort":3000,"mode":"http","localAuthority":"127.0.0.1:3000"}`, http.StatusOK), nil
 	})
-	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
 
 	remoteRequests := make(chan *http.Request, 1)
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -574,19 +574,18 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 		clone.Header = r.Header.Clone()
 		remoteRequests <- clone
 
-		if r.URL.Query().Get("port_token") != "" {
-			http.Redirect(w, r, "/", http.StatusFound)
-			return
-		}
-		if _, err := r.Cookie("sam_port_access"); err != nil {
+		if r.Header.Get("X-SAM-Forward-Token") != "test-forward-token" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
+		w.Header().Add("Set-Cookie", "app_one=1; Path=/")
+		w.Header().Add("Set-Cookie", "app_two=2; Path=/")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("proxied-ok"))
 	}))
 	defer remote.Close()
+	client := NewAPIClient(CLIConfig{APIURL: remote.URL, SessionCookie: "test"}, doer)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -598,12 +597,20 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	defer cancel()
 
 	runtime := Runtime{Stderr: io.Discard}
-	go acceptConnections(ctx, runtime, client, "ws-test", port, ln, remote.URL)
+	go acceptConnections(ctx, runtime, client, "ws-test", 3000, "127.0.0.1", port, ln, remote.URL+"/api/workspaces/ws-test/local-forward/3000")
 
 	// Give the server a moment to start
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/test-path?client_query=1", port))
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/test-path?client_query=1", port), nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer app-token")
+	req.Header.Set("Cookie", "app_session=abc")
+	req.Header.Set("X-SAM-Forward-Token", "spoofed")
+	req.Header.Set("X-Forwarded-Host", "evil.example.com")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("failed to connect to proxy: %v", err)
 	}
@@ -622,18 +629,26 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	if tokenCalls != 1 {
 		t.Fatalf("expected 1 token API call, got %d", tokenCalls)
 	}
+	if got := resp.Header.Values("Set-Cookie"); len(got) != 2 {
+		t.Fatalf("expected multiple app Set-Cookie headers to be preserved, got %v", got)
+	}
 
 	select {
 	case req := <-remoteRequests:
-		cookie, err := req.Cookie("sam_port_access")
-		if err != nil {
-			t.Fatalf("expected sam_port_access cookie: %v", err)
+		if got := req.Header.Get("X-SAM-Forward-Token"); got != "test-forward-token" {
+			t.Fatalf("expected internal forward token, got %q", got)
 		}
-		if cookie.Value != "test-port-token" {
-			t.Fatalf("expected token cookie value, got %q", cookie.Value)
+		if _, err := req.Cookie("sam_port_access"); err == nil {
+			t.Fatal("did not expect sam_port_access cookie")
 		}
-		if got := req.URL.Query().Get("port_token"); got != "" {
-			t.Fatalf("expected no port_token query parameter, got %q", got)
+		if got := req.Header.Get("Authorization"); got != "Bearer app-token" {
+			t.Fatalf("expected app Authorization header to be preserved, got %q", got)
+		}
+		if got := req.Header.Get("Cookie"); got != "app_session=abc" {
+			t.Fatalf("expected app Cookie header to be preserved, got %q", got)
+		}
+		if got := req.Header.Get("X-Forwarded-Host"); got != "" {
+			t.Fatalf("expected spoofed X-Forwarded-Host stripped, got %q", got)
 		}
 		if got := req.URL.Query().Get("client_query"); got != "1" {
 			t.Fatalf("expected client query to be preserved, got %q", got)
@@ -645,7 +660,7 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 
 func TestAcceptConnectionsShutdownOnContextCancel(t *testing.T) {
 	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return jsonResponse(`{"token":"tok","url":"https://example.com","port":3000}`, http.StatusOK), nil
+		return jsonResponse(`{"token":"tok","expiresAt":"2026-06-20T00:00:00Z","remotePort":3000,"mode":"http","localAuthority":"127.0.0.1:3000"}`, http.StatusOK), nil
 	})
 	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
 
@@ -660,7 +675,7 @@ func TestAcceptConnectionsShutdownOnContextCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		acceptConnections(ctx, runtime, client, "ws-test", port, ln, fmt.Sprintf("https://ws-test--%d.example.com", port))
+		acceptConnections(ctx, runtime, client, "ws-test", 3000, "127.0.0.1", port, ln, fmt.Sprintf("https://api.example.com/api/workspaces/ws-test/local-forward/%d", 3000))
 		close(done)
 	}()
 

@@ -1,5 +1,5 @@
 import { DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS } from '@simple-agent-manager/shared';
-import { decodeJwt, exportJWK, importPKCS8, importSPKI,jwtVerify, SignJWT } from 'jose';
+import { decodeJwt, exportJWK, importPKCS8, importSPKI, jwtVerify, SignJWT } from 'jose';
 
 import type { Env } from '../env';
 
@@ -11,6 +11,7 @@ const TERMINAL_AUDIENCE = 'workspace-terminal';
 const CALLBACK_AUDIENCE = 'workspace-callback';
 const NODE_MANAGEMENT_AUDIENCE = 'node-management';
 const PORT_ACCESS_AUDIENCE = 'port-access';
+const LOCAL_FORWARD_AUDIENCE = 'local-forward';
 const IDENTITY_TOKEN_TYPE = 'identity';
 
 /**
@@ -193,6 +194,16 @@ export interface PortAccessTokenPayload {
   subject: string;
 }
 
+export interface LocalForwardTokenPayload {
+  userId: string;
+  workspaceId: string;
+  nodeId: string;
+  remotePort: number;
+  mode: 'http';
+  localAuthority: string;
+  subject: string;
+}
+
 /**
  * Verify a callback token from VM Agent.
  * Returns the payload including the optional scope claim.
@@ -284,6 +295,11 @@ function getPortAccessTokenExpiry(env: Env): number {
   return envValue ? parseInt(envValue, 10) : 15 * 60 * 1000;
 }
 
+function getLocalForwardTokenExpiry(env: Env): number {
+  const envValue = env.LOCAL_FORWARD_TOKEN_EXPIRY_MS;
+  return envValue ? parseInt(envValue, 10) : 5 * 60 * 1000;
+}
+
 /**
  * Sign a port access token for exposed port authentication.
  * Embedded in the expose_port URL; validated once, then exchanged for a cookie.
@@ -346,6 +362,86 @@ export async function verifyPortAccessToken(
   return {
     workspace: payload.workspace,
     port: payload.port,
+    subject: payload.sub,
+  };
+}
+
+export async function signLocalForwardToken(
+  claims: Omit<LocalForwardTokenPayload, 'subject'>,
+  env: Env
+): Promise<{ token: string; expiresAt: string }> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expiry = getLocalForwardTokenExpiry(env);
+  const expiresAt = new Date(Date.now() + expiry);
+  const issuer = getIssuer(env);
+
+  const token = await new SignJWT({
+    type: 'local-forward',
+    userId: claims.userId,
+    workspace: claims.workspaceId,
+    node: claims.nodeId,
+    remotePort: claims.remotePort,
+    mode: claims.mode,
+    localAuthority: claims.localAuthority,
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(issuer)
+    .setSubject(claims.userId)
+    .setAudience(LOCAL_FORWARD_AUDIENCE)
+    .setExpirationTime(expiresAt)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return {
+    token,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+export async function verifyLocalForwardToken(
+  token: string,
+  env: Env
+): Promise<LocalForwardTokenPayload> {
+  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  const issuer = getIssuer(env);
+
+  const { payload } = await jwtVerify(token, publicKey, {
+    issuer,
+    audience: LOCAL_FORWARD_AUDIENCE,
+  });
+
+  if (payload.type !== 'local-forward') {
+    throw new Error('Invalid token type');
+  }
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new Error('Missing subject claim');
+  }
+  if (typeof payload.userId !== 'string' || payload.userId !== payload.sub) {
+    throw new Error('Invalid user claim');
+  }
+  if (typeof payload.workspace !== 'string') {
+    throw new Error('Missing workspace claim');
+  }
+  if (typeof payload.node !== 'string') {
+    throw new Error('Missing node claim');
+  }
+  if (typeof payload.remotePort !== 'number' || payload.remotePort < 1 || payload.remotePort > 65535) {
+    throw new Error('Invalid remote port claim');
+  }
+  if (payload.mode !== 'http') {
+    throw new Error('Invalid local forward mode');
+  }
+  if (typeof payload.localAuthority !== 'string' || payload.localAuthority.length === 0) {
+    throw new Error('Missing local authority claim');
+  }
+
+  return {
+    userId: payload.userId,
+    workspaceId: payload.workspace,
+    nodeId: payload.node,
+    remotePort: payload.remotePort,
+    mode: payload.mode,
+    localAuthority: payload.localAuthority,
     subject: payload.sub,
   };
 }

@@ -94,6 +94,7 @@ export interface Env {
   CALLBACK_TOKEN_EXPIRY_MS?: string;
   PORT_ACCESS_TOKEN_EXPIRY_MS?: string;          // Port access JWT expiry in ms (default: 900000 = 15 min)
   PORT_ACCESS_COOKIE_MAX_AGE_SECONDS?: string;   // Port access cookie Max-Age in seconds (default: 14400 = 4 hr)
+  LOCAL_FORWARD_TOKEN_EXPIRY_MS?: string;        // CLI local-forward JWT expiry in ms (default: 300000 = 5 min)
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
   PROVISIONING_TIMEOUT_MS?: string;
   DNS_TTL_SECONDS?: string;
