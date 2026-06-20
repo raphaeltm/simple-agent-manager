@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os/exec"
 
+	"github.com/workspace/vm-agent/internal/dockersetup"
 	"github.com/workspace/vm-agent/internal/errorreport"
 )
 
@@ -29,6 +30,24 @@ func EnsureRuntime(ctx context.Context, reporter *errorreport.Reporter) error {
 		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_caddy"})
 		return err
 	}
+
+	// Docker Model Runner support: the Hetzner docker-ce base image ships a
+	// Compose plugin older than v2.35, which rejects compose `provider:`
+	// services with "Additional property provider is not allowed". Deployment
+	// nodes that apply Model Runner compose files therefore need the same
+	// compose upgrade + `docker model` runner install that workspace
+	// provisioning performs. Both steps are idempotent and non-fatal: a deploy
+	// without `provider:` services must still proceed if either step fails, so
+	// we log-and-continue rather than aborting EnsureRuntime.
+	if err := dockersetup.EnsureModernCompose(ctx); err != nil {
+		slog.Warn("deploy.runtime: compose upgrade failed; provider services may not validate", "error", err)
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_modern_compose", "fatal": false})
+	}
+	if err := dockersetup.EnsureDockerModelRunner(ctx); err != nil {
+		slog.Warn("deploy.runtime: model runner install failed; provider services may not run", "error", err)
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_docker_model_runner", "fatal": false})
+	}
+
 	reporter.ReportInfo("deploy.runtime: host dependencies ready", runtimeReportSource, "", nil)
 	return nil
 }
