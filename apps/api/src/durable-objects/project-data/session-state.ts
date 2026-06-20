@@ -157,12 +157,28 @@ export function reconcileStaleActivity(
   const cutoff = Date.now() - threshold;
   const now = Date.now();
 
-  // Identify stale sessions for broadcast notification.
-  // Heal prompting, error, and recovering states that have been stuck too long.
+  // Identify stale sessions for broadcast notification. Task-linked prompting
+  // states are intentionally excluded: task reconciliation uses them to decide
+  // whether to defer, observe, or cancel an in-flight prompt.
   const staleRows = sql
     .exec(
       `SELECT session_id FROM session_state
-       WHERE activity IN ('prompting', 'error', 'recovering') AND activity_at < ?`,
+       WHERE activity_at < ?
+         AND (
+           activity IN ('error', 'recovering')
+           OR (
+             activity = 'prompting'
+             AND NOT EXISTS (
+               SELECT 1
+               FROM acp_sessions acp
+               JOIN chat_sessions cs ON cs.id = acp.chat_session_id
+               LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
+               WHERE acp.id = session_state.session_id
+                 AND acp.status IN ('running', 'started')
+                 AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
+             )
+           )
+         )`,
       cutoff,
     )
     .toArray();
@@ -172,7 +188,22 @@ export function reconcileStaleActivity(
   // Bulk-heal all stale sessions in a single atomic statement
   sql.exec(
     `UPDATE session_state SET activity = 'idle', activity_at = ?
-     WHERE activity IN ('prompting', 'error', 'recovering') AND activity_at < ?`,
+     WHERE activity_at < ?
+       AND (
+         activity IN ('error', 'recovering')
+         OR (
+           activity = 'prompting'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM acp_sessions acp
+             JOIN chat_sessions cs ON cs.id = acp.chat_session_id
+             LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
+             WHERE acp.id = session_state.session_id
+               AND acp.status IN ('running', 'started')
+               AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
+           )
+         )
+       )`,
     now,
     cutoff,
   );

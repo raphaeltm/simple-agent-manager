@@ -25,6 +25,7 @@ import { createSqlStorage } from './sql-storage-test-utils';
 // Mock the node-agent service to prevent real HTTP calls
 vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: vi.fn().mockResolvedValue(undefined),
+  cancelAgentSessionOnNode: vi.fn().mockResolvedValue({ success: true, status: 200 }),
 }));
 
 /** Helper to create a D1Database mock with configurable task queries */
@@ -52,6 +53,8 @@ function createMockD1(taskRows: Record<string, { task_mode: string; status: stri
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 const ONE_MINUTE = 60 * 1000;
+const THIRTY_MINUTES = 30 * 60 * 1000;
+const TWO_HOURS = 2 * 60 * 60 * 1000;
 type ProjectDataEnv = import('../../../src/durable-objects/project-data/types').Env;
 
 describe('Task Reconciliation Module', () => {
@@ -66,6 +69,7 @@ describe('Task Reconciliation Module', () => {
     db = new Database(':memory:');
     sql = createSqlStorage(db);
     runMigrations(sql);
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -139,6 +143,26 @@ describe('Task Reconciliation Module', () => {
     db.prepare(
       `UPDATE acp_sessions SET node_id = 'node-1', last_heartbeat_at = ? WHERE id = ?`,
     ).run(heartbeatAt, acpSessionId);
+  }
+
+  function setSessionActivity(opts: {
+    acpSessionId?: string;
+    activity?: string;
+    activityAt?: number;
+    promptStartedAt?: number | null;
+  } = {}) {
+    const acpSessionId = opts.acpSessionId ?? 'acp-1';
+    const activity = opts.activity ?? 'prompting';
+    const activityAt = opts.activityAt ?? now;
+    const promptStartedAt = opts.promptStartedAt ?? activityAt;
+    db.prepare(
+      `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, restart_count)
+       VALUES (?, ?, ?, ?, 0)
+       ON CONFLICT(session_id) DO UPDATE SET
+         activity = excluded.activity,
+         activity_at = excluded.activity_at,
+         prompt_started_at = excluded.prompt_started_at`,
+    ).run(acpSessionId, activity, activityAt, promptStartedAt);
   }
 
   describe('getReconciliationCandidates', () => {
@@ -267,6 +291,54 @@ describe('Task Reconciliation Module', () => {
     it('includes awaiting_followup tasks because they are not complete', async () => {
       const candidates = await candidatesForTask('task', 'awaiting_followup');
       expect(candidates).toHaveLength(1);
+    });
+
+    it('defers check-in while a task prompt is in flight below the soft threshold', async () => {
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - 10 * 60 * 1000 });
+
+      const candidates = await getReconciliationCandidates(sql, {
+        ...envWithRows({ 'task-1': { task_mode: 'task', status: 'in_progress' } }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv);
+
+      expect(candidates).toHaveLength(0);
+    });
+
+    it('observes but does not interrupt prompts between soft and hard thresholds', async () => {
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - THIRTY_MINUTES - 1000 });
+
+      const candidates = await getReconciliationCandidates(sql, {
+        ...envWithRows({ 'task-1': { task_mode: 'task', status: 'in_progress' } }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv);
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        action: 'observe_prompt',
+        promptStartedAt: now - THIRTY_MINUTES - 1000,
+      });
+      expect(candidates[0].promptAgeMs).toBe(THIRTY_MINUTES + 1000);
+    });
+
+    it('marks prompts beyond the hard threshold for cancellation', async () => {
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
+
+      const candidates = await getReconciliationCandidates(sql, {
+        ...envWithRows({ 'task-1': { task_mode: 'task', status: 'in_progress' } }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv);
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        action: 'cancel_prompt',
+        promptStartedAt: now - TWO_HOURS - 1000,
+      });
     });
   });
 
@@ -475,6 +547,98 @@ describe('Task Reconciliation Module', () => {
       ).all();
       expect(markers).toHaveLength(2);
     });
+
+    it('does not create a visible check-in for an in-flight prompt below the hard threshold', async () => {
+      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - THIRTY_MINUTES - 1000 });
+      const env = {
+        ...envWithRows(
+          { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        ),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv;
+      const broadcastEvent = vi.fn();
+
+      const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
+
+      expect(processed).toBe(1);
+      expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
+      expect(vi.mocked(cancelAgentSessionOnNode)).not.toHaveBeenCalled();
+      expect(db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1')).toHaveLength(0);
+      expect(db.prepare(`SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`).all()).toHaveLength(0);
+      expect(db.prepare(
+        `SELECT * FROM activity_events WHERE event_type = 'reconciliation.prompt_in_flight_observed'`,
+      ).all()).toHaveLength(1);
+    });
+
+    it('requests prompt cancellation before creating any check-in marker for hard-stalled prompts', async () => {
+      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
+      const env = {
+        ...envWithRows(
+          { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        ),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv;
+      const broadcastEvent = vi.fn();
+
+      const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
+
+      expect(processed).toBe(1);
+      expect(vi.mocked(cancelAgentSessionOnNode)).toHaveBeenCalledWith(
+        'node-1',
+        'ws-1',
+        'acp-1',
+        expect.anything(),
+        'user-1',
+      );
+      expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
+      expect(db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1')).toHaveLength(0);
+      expect(db.prepare(`SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`).all()).toHaveLength(0);
+      expect(db.prepare(
+        `SELECT * FROM activity_events WHERE event_type = 'reconciliation.prompt_cancel_requested'`,
+      ).all()).toHaveLength(1);
+    });
+
+    it('repairs stale prompting mirror when the VM reports no prompt in flight during hard-stall cancel', async () => {
+      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      vi.mocked(cancelAgentSessionOnNode).mockResolvedValueOnce({ success: false, status: 409 });
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
+      const env = {
+        ...envWithRows(
+          { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        ),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv;
+      const broadcastEvent = vi.fn();
+
+      const firstPass = await processReconciliationCandidates(sql, env, broadcastEvent);
+      expect(firstPass).toBe(1);
+      expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
+      expect(db.prepare(`SELECT activity FROM session_state WHERE session_id = 'acp-1'`).get()).toMatchObject({
+        activity: 'idle',
+      });
+
+      const secondPass = await processReconciliationCandidates(sql, env, broadcastEvent);
+      expect(secondPass).toBe(1);
+      expect(vi.mocked(sendPromptToAgentOnNode)).toHaveBeenCalledWith(
+        'node-1',
+        'ws-1',
+        'acp-1',
+        expect.stringContaining('continue working from where you left off'),
+        expect.anything(),
+        'user-1',
+      );
+    });
   });
 
   describe('computeReconciliationAlarmTime', () => {
@@ -538,6 +702,34 @@ describe('Task Reconciliation Module', () => {
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe((now - 60000) + customIdleMs);
+    });
+
+    it('schedules prompt-in-flight sessions at the soft threshold first', () => {
+      setupTaskSession({ lastActivityAt: now - 10 * 60 * 1000 });
+      setSessionActivity({ promptStartedAt: now - 10 * 60 * 1000 });
+      const env = {
+        DATABASE: createMockD1(),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as unknown as ProjectDataEnv;
+
+      const time = computeReconciliationAlarmTime(sql, env);
+
+      expect(time).toBe(now - 10 * 60 * 1000 + THIRTY_MINUTES);
+    });
+
+    it('schedules observed prompt-in-flight sessions at the hard threshold', () => {
+      setupTaskSession({ lastActivityAt: now - 40 * 60 * 1000 });
+      setSessionActivity({ promptStartedAt: now - 40 * 60 * 1000 });
+      const env = {
+        DATABASE: createMockD1(),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as unknown as ProjectDataEnv;
+
+      const time = computeReconciliationAlarmTime(sql, env);
+
+      expect(time).toBe(now - 40 * 60 * 1000 + TWO_HOURS);
     });
   });
 

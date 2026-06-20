@@ -42,6 +42,23 @@ describe('reconcileStaleActivity', () => {
     return row?.activity as string | undefined;
   }
 
+  function createTaskLinkedAcpSession(acpSessionId: string): void {
+    sql.exec(
+      `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES ('chat-task', 'ws-task', 'task-1', 'Task', 'active', 0, ?, ?, ?)`,
+      now,
+      now,
+      now,
+    );
+    sql.exec(
+      `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+       VALUES (?, 'chat-task', 'ws-task', 'running', 'claude_code', ?, ?)`,
+      acpSessionId,
+      now,
+      now,
+    );
+  }
+
   it.each(['prompting', 'error', 'recovering'] as const)(
     'heals stale %s sessions',
     (activity) => {
@@ -69,6 +86,17 @@ describe('reconcileStaleActivity', () => {
     const healed = reconcileStaleActivity(sql);
     expect(healed).toHaveLength(0);
     expect(getActivity('sess-fresh')).toBe('prompting');
+  });
+
+  it('does not heal stale task-linked prompting sessions', () => {
+    createTaskLinkedAcpSession('acp-task');
+    upsertActivityState(sql, 'acp-task', { activity: 'prompting' });
+
+    vi.setSystemTime(now + FIVE_MINUTES + 1000);
+    const healed = reconcileStaleActivity(sql);
+
+    expect(healed).not.toContain('acp-task');
+    expect(getActivity('acp-task')).toBe('prompting');
   });
 
   it('heals multiple stale states in one call', () => {
