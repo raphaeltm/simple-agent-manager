@@ -7,9 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootstrap"
+	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/publish"
 )
 
@@ -92,9 +97,17 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), buildPublishTimeout)
 	defer cancel()
 
-	log.Info("host build starting", "workspaceDir", workspaceDir)
+	// runtime.WorkspaceDir is a host clone captured at workspace boot. The coding
+	// agent edits and commits its real source inside the devcontainer's named
+	// volume (sam-ws-{workspaceId}) mounted at /workspaces — which is never
+	// re-synced back to the host clone. Building the host clone publishes the
+	// stale boot-time tree, so resolve the agent's actual working tree from the
+	// named volume before building.
+	buildDir := s.resolveBuildSourceDir(ctx, workspaceID, runtime, log)
+
+	log.Info("host build starting", "buildDir", buildDir, "hostClone", workspaceDir)
 	artifact, err := publish.Build(ctx, publish.BuildOptions{
-		WorkspaceDir: workspaceDir,
+		WorkspaceDir: buildDir,
 		Reference:    reference,
 		Logger:       log,
 	})
@@ -132,4 +145,58 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		Version:   result.Version,
 		Status:    result.Status,
 	})
+}
+
+// resolveBuildSourceDir returns the host filesystem path of the agent's actual
+// working tree so the build publishes the agent's committed source rather than
+// the boot-time host clone.
+//
+// The coding agent's source lives inside the devcontainer's Docker named volume
+// (sam-ws-{workspaceId}), mounted at /workspaces. That volume's data is on the
+// host at the path reported by `docker volume inspect`, so the host docker daemon
+// (which runs the compose build) can read it directly. We append the repo
+// subdirectory — the same one mounted as the container work dir — to reach the
+// compose project root.
+//
+// If the volume cannot be resolved for any reason, we fall back to
+// runtime.WorkspaceDir so the publish still attempts a build rather than failing
+// outright.
+func (s *Server) resolveBuildSourceDir(ctx context.Context, workspaceID string, runtime *WorkspaceRuntime, log *slog.Logger) string {
+	fallback := strings.TrimSpace(runtime.WorkspaceDir)
+
+	repoDir := filepath.Base(strings.TrimSpace(runtime.ContainerWorkDir))
+	if repoDir == "" || repoDir == "." || repoDir == string(filepath.Separator) {
+		repoDir = repositoryDirName(runtime.Repository)
+	}
+	if repoDir == "" {
+		log.Warn("build source: could not derive repo dir; using host clone",
+			"containerWorkDir", runtime.ContainerWorkDir, "repository", runtime.Repository, "fallback", fallback)
+		return fallback
+	}
+
+	volName := bootstrap.VolumeNameForWorkspace(workspaceID)
+	out, err := exec.CommandContext(ctx, container.DockerCLIPath(),
+		"volume", "inspect", volName, "--format", "{{.Mountpoint}}").Output()
+	if err != nil {
+		log.Warn("build source: docker volume inspect failed; using host clone",
+			"volume", volName, "error", err, "fallback", fallback)
+		return fallback
+	}
+	mountpoint := strings.TrimSpace(string(out))
+	if mountpoint == "" {
+		log.Warn("build source: empty volume mountpoint; using host clone",
+			"volume", volName, "fallback", fallback)
+		return fallback
+	}
+
+	buildDir := filepath.Join(mountpoint, repoDir)
+	if _, err := os.Stat(buildDir); err != nil {
+		log.Warn("build source: resolved volume path not accessible; using host clone",
+			"buildDir", buildDir, "error", err, "fallback", fallback)
+		return fallback
+	}
+
+	log.Info("build source resolved from workspace volume",
+		"volume", volName, "mountpoint", mountpoint, "repoDir", repoDir, "buildDir", buildDir)
+	return buildDir
 }

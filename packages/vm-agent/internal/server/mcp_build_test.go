@@ -1,8 +1,13 @@
 package server
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -195,5 +200,141 @@ func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
 	decodeJSON(t, rec, &errResp)
 	if strings.Contains(errResp["error"], "workspace is not linked to a project") {
 		t.Errorf("config projectID should satisfy the project check, got %q", errResp["error"])
+	}
+}
+
+// ---------- resolveBuildSourceDir ----------
+//
+// The coding agent's real source lives in the devcontainer's named volume
+// (sam-ws-{workspaceId}), not in runtime.WorkspaceDir (a host clone frozen at
+// boot). resolveBuildSourceDir must return the volume-backed path so the build
+// publishes the agent's committed source — and must fall back to the host clone
+// whenever the volume cannot be resolved, so the publish still attempts a build.
+
+// fakeDockerCLI writes an executable shell script that emulates
+// `docker volume inspect <name> --format {{.Mountpoint}}` by echoing mountpoint
+// (or exiting non-zero when fail is set). Returns its absolute path for use as
+// SAM_DOCKER_CLI_PATH.
+func fakeDockerCLI(t *testing.T, dir, mountpoint string, fail bool) string {
+	t.Helper()
+	body := "#!/bin/sh\n"
+	if fail {
+		body += "exit 1\n"
+	} else {
+		body += "echo \"" + mountpoint + "\"\n"
+	}
+	path := filepath.Join(dir, "docker")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake docker cli: %v", err)
+	}
+	return path
+}
+
+func discardBuildLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestResolveBuildSourceDir_ResolvesFromVolume(t *testing.T) {
+	tmp := t.TempDir()
+	mountpoint := filepath.Join(tmp, "vol-data")
+	repoDir := filepath.Join(mountpoint, "crewai")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo dir: %v", err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, mountpoint, false))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:               "ws-1",
+		WorkspaceDir:     "/workspace/ws-1",
+		ContainerWorkDir: "/workspaces/crewai",
+		Repository:       "https://github.com/acme/crewai",
+	}
+
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	if got != repoDir {
+		t.Fatalf("expected volume-backed build dir %q, got %q", repoDir, got)
+	}
+}
+
+func TestResolveBuildSourceDir_FallsBackWhenVolumePathMissing(t *testing.T) {
+	tmp := t.TempDir()
+	mountpoint := filepath.Join(tmp, "vol-data")
+	if err := os.MkdirAll(mountpoint, 0o755); err != nil {
+		t.Fatalf("mkdir mountpoint: %v", err)
+	}
+	// Note: the "crewai" subdir is deliberately NOT created.
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, mountpoint, false))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:               "ws-1",
+		WorkspaceDir:     "/workspace/ws-1",
+		ContainerWorkDir: "/workspaces/crewai",
+		Repository:       "https://github.com/acme/crewai",
+	}
+
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	if got != "/workspace/ws-1" {
+		t.Fatalf("expected fallback to host clone, got %q", got)
+	}
+}
+
+func TestResolveBuildSourceDir_FallsBackWhenDockerFails(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, "", true))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:               "ws-1",
+		WorkspaceDir:     "/workspace/ws-1",
+		ContainerWorkDir: "/workspaces/crewai",
+		Repository:       "https://github.com/acme/crewai",
+	}
+
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	if got != "/workspace/ws-1" {
+		t.Fatalf("expected fallback to host clone when docker fails, got %q", got)
+	}
+}
+
+func TestResolveBuildSourceDir_FallsBackWhenNoRepoDir(t *testing.T) {
+	// No ContainerWorkDir and no Repository -> cannot derive a repo subdir, so
+	// the resolver falls back without ever invoking docker.
+	tmp := t.TempDir()
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, "/should/not/matter", false))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:           "ws-1",
+		WorkspaceDir: "/workspace/ws-1",
+	}
+
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	if got != "/workspace/ws-1" {
+		t.Fatalf("expected fallback to host clone when repo dir underivable, got %q", got)
+	}
+}
+
+func TestResolveBuildSourceDir_DerivesRepoDirFromRepository(t *testing.T) {
+	// ContainerWorkDir empty, but Repository yields repo dir "crewai".
+	tmp := t.TempDir()
+	mountpoint := filepath.Join(tmp, "vol-data")
+	repoDir := filepath.Join(mountpoint, "crewai")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo dir: %v", err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, mountpoint, false))
+
+	s := &Server{}
+	rt := &WorkspaceRuntime{
+		ID:           "ws-1",
+		WorkspaceDir: "/workspace/ws-1",
+		Repository:   "https://github.com/acme/crewai",
+	}
+
+	got := s.resolveBuildSourceDir(context.Background(), "ws-1", rt, discardBuildLogger())
+	if got != repoDir {
+		t.Fatalf("expected build dir %q derived from repository, got %q", repoDir, got)
 	}
 }
