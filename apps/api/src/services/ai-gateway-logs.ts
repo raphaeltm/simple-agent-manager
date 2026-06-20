@@ -112,11 +112,28 @@ const gatewayLogsResponseSchema = v.object({
     per_page: v.number(),
     count: v.number(),
     total_count: v.number(),
-    total_pages: v.number(),
+    total_pages: v.optional(v.number()),
   }),
   success: v.boolean(),
-  errors: v.array(v.unknown()),
+  errors: v.nullable(v.array(v.unknown())),
 });
+
+type RawGatewayLogsResponse = v.InferOutput<typeof gatewayLogsResponseSchema>;
+
+function normalizeGatewayLogsResponse(resp: RawGatewayLogsResponse): AIGatewayLogsResponse {
+  const perPage = Math.max(1, resp.result_info.per_page);
+  const totalPages = resp.result_info.total_pages
+    ?? Math.ceil(resp.result_info.total_count / perPage);
+
+  return {
+    ...resp,
+    result_info: {
+      ...resp.result_info,
+      total_pages: totalPages,
+    },
+    errors: resp.errors ?? [],
+  };
+}
 
 export interface GatewayPaginationOptions {
   defaultMaxPages?: number;
@@ -195,7 +212,8 @@ export async function fetchGatewayLogs(
     throw errors.internal(`AI Gateway API error (${resp.status})`);
   }
 
-  return readResponseJson(resp, gatewayLogsResponseSchema, 'ai_gateway.logs');
+  const data = await readResponseJson(resp, gatewayLogsResponseSchema, 'ai_gateway.logs');
+  return normalizeGatewayLogsResponse(data);
 }
 
 /**

@@ -211,6 +211,33 @@ describe('resolveGatewayPagination', () => {
 // ---------------------------------------------------------------------------
 
 describe('iterateGatewayLogs', () => {
+  it('accepts Cloudflare responses with null errors and no total_pages', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '3',
+    } as never;
+    const entries = [makeEntry({ id: 'log-1' }), makeEntry({ id: 'log-2' })];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      result: entries,
+      result_info: { page: 1, per_page: 3, count: 2, total_count: 2 },
+      success: true,
+      errors: null,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(
+      env,
+      'gateway-1',
+      '2026-05-01T00:00:00.000Z',
+      (entry) => visited.push(entry),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2']);
+  });
+
   it('warns when pagination reaches maxPages while more pages exist', async () => {
     const env = {
       CF_ACCOUNT_ID: 'account-1',
