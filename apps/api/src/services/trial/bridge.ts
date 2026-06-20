@@ -42,6 +42,19 @@ export async function bridgeAcpSessionTransition(
       const workspaceUrl =
         opts.workspaceUrl ??
         (record.workspaceId ? `https://ws-${record.workspaceId}.${env.BASE_DOMAIN}` : '');
+      await env.DATABASE.prepare(
+        `UPDATE trials
+         SET status = 'ready',
+             project_id = COALESCE(project_id, ?)
+         WHERE id = ?
+           AND status = 'pending'`
+      ).bind(projectId, record.trialId).run().catch((err) => {
+        log.warn('trial_bridge.ready_d1_update_failed', {
+          trialId: record.trialId,
+          projectId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       await emitTrialEventForProject(env, projectId, {
         type: 'trial.ready',
         trialId: record.trialId,

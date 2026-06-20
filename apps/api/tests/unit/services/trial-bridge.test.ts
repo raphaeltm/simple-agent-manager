@@ -30,7 +30,12 @@ vi.mock('../../../src/services/trial/trial-runner', () => ({
 const bridge = await import('../../../src/services/trial/bridge');
 
 function makeEnv(): Env {
-  return { BASE_DOMAIN: 'example.com' } as unknown as Env;
+  const prepare = vi.fn(() => ({
+    bind: vi.fn(() => ({
+      run: vi.fn(async () => ({})),
+    })),
+  }));
+  return { BASE_DOMAIN: 'example.com', DATABASE: { prepare } } as unknown as Env;
 }
 
 describe('bridgeAcpSessionTransition', () => {
@@ -45,17 +50,21 @@ describe('bridgeAcpSessionTransition', () => {
   });
 
   it('emits trial.ready with workspaceUrl on running transition', async () => {
+    const env = makeEnv();
     readTrialByProjectMock.mockResolvedValueOnce({
       trialId: 'trial_1',
       projectId: 'proj_1',
       workspaceId: 'ws_1',
     });
-    await bridge.bridgeAcpSessionTransition(makeEnv(), 'proj_1', 'running');
+    await bridge.bridgeAcpSessionTransition(env, 'proj_1', 'running');
     expect(emitTrialEventForProjectMock).toHaveBeenCalledTimes(1);
     const [, , event] = emitTrialEventForProjectMock.mock.calls[0];
     expect(event.type).toBe('trial.ready');
     expect(event.workspaceUrl).toBe('https://ws-ws_1.example.com');
     expect(event.trialId).toBe('trial_1');
+    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'ready'")
+    );
   });
 
   it('emits trial.error on failed transition', async () => {

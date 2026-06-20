@@ -812,6 +812,10 @@ export default {
       triggerExecCleanupErrors: triggerCleanup.errors,
       computeUsageOrphansClosed: computeUsageClosed,
       trialExpired: trialExpire.expired,
+      trialProjectsLinked: trialExpire.projectsLinked,
+      trialWorkspacesDeleted: trialExpire.workspacesDeleted,
+      trialNodesDeleted: trialExpire.nodesDeleted,
+      trialCleanupErrors: trialExpire.cleanupErrors,
     });
   },
 };

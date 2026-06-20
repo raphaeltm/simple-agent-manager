@@ -99,6 +99,25 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
     throw errors.conflict('Trial project is no longer available to claim');
   }
 
+  const claimedAt = Date.now();
+  try {
+    await c.env.DATABASE.prepare(
+      `UPDATE trials
+       SET status = 'claimed',
+           claimed_by_user_id = ?,
+           claimed_at = ?,
+           project_id = COALESCE(project_id, ?)
+       WHERE id = ?`
+    ).bind(userId, claimedAt, projectId, trialId).run();
+  } catch (err) {
+    log.warn('trial_claim.d1_mark_claimed_failed', {
+      trialId,
+      projectId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // Mark trial as claimed in KV (best-effort — the D1 write is the source of truth)
   try {
     await markTrialClaimed(c.env, trialId);
@@ -109,7 +128,6 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
     });
   }
 
-  const claimedAt = Date.now();
   log.info('trial_claim.success', { trialId, projectId, userId, claimedAt });
 
   // Clear the claim cookie. Domain attribute MUST match what was set when the

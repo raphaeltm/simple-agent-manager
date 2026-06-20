@@ -79,8 +79,14 @@ function setDrizzleUpdateChanges(changes: number) {
 }
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
+  const prepare = vi.fn(() => ({
+    bind: vi.fn(() => ({
+      run: vi.fn(async () => ({ meta: { changes: 1 } })),
+    })),
+  }));
+
   return {
-    DATABASE: {} as D1Database,
+    DATABASE: { prepare } as unknown as D1Database,
     TRIAL_CLAIM_TOKEN_SECRET: SECRET,
     ...overrides,
   } as unknown as Env;
@@ -207,6 +213,7 @@ describe('POST /api/trial/claim', () => {
   it('returns 200 and clears claim cookie on successful re-parent', async () => {
     const app = makeApp();
     const token = await signClaimToken(futurePayload(), SECRET);
+    const env = makeEnv();
     readTrialMock.mockResolvedValueOnce({
       trialId: 'trial_good',
       projectId: 'proj_good',
@@ -219,7 +226,7 @@ describe('POST /api/trial/claim', () => {
     });
     const { run, chain } = setDrizzleUpdateChanges(1);
 
-    const resp = await postClaim(app, token);
+    const resp = await postClaim(app, token, env);
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as { projectId: string; claimedAt: number };
     expect(body.projectId).toBe('proj_good');
@@ -231,6 +238,9 @@ describe('POST /api/trial/claim', () => {
     );
     expect(run).toHaveBeenCalledTimes(1);
     expect(markTrialClaimedMock).toHaveBeenCalledWith(expect.anything(), 'trial_good');
+    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'claimed'")
+    );
 
     // Set-Cookie should clear the claim cookie
     const setCookie = resp.headers.get('Set-Cookie');
