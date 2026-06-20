@@ -220,4 +220,121 @@ networks:
       ),
     ).toThrow(/no services mapping/i);
   });
+
+  // Regression: the REAL `docker compose publish` artifact emits LONG-syntax
+  // ports/volumes, a list-valued provider model, per-service networks:{default:null},
+  // and named top-level networks/volumes. The short-syntax fixtures above did not
+  // exercise this shape; this case mirrors the captured CrewAI release verbatim.
+  it('transforms the real long-syntax CrewAI publish artifact', () => {
+    const REAL_CREWAI = `name: crewai
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - mode: ingress
+        target: 8000
+        published: "8000"
+        protocol: tcp
+    environment:
+      DATABASE_URL: postgres://db
+    networks:
+      default: null
+  chat:
+    provider:
+      type: model
+      options:
+        model:
+          - ai/gemma3:1B-Q4_K_M
+    x-defang-llm: true
+  embedding:
+    provider:
+      type: model
+      options:
+        model:
+          - ai/mxbai-embed-large
+    x-defang-llm: true
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - type: volume
+        source: pgdata
+        target: /var/lib/postgresql/data
+        volume: {}
+    networks:
+      default: null
+  redis:
+    image: redis:7-alpine
+    networks:
+      default: null
+  worker:
+    build:
+      context: .
+    command:
+      - sh
+      - -c
+      - echo worker started
+    networks:
+      default: null
+networks:
+  default:
+    name: crewai_default
+volumes:
+  pgdata:
+    name: crewai_pgdata
+`;
+    const submission = makeSubmission({
+      composeYaml: REAL_CREWAI,
+      services: [
+        { serviceName: 'app', pushedRef: 'sam-registry.local:5050/proj/app@sha256:aaa', digest: 'sha256:aaa' },
+        { serviceName: 'worker', pushedRef: 'sam-registry.local:5050/proj/worker@sha256:bbb', digest: 'sha256:bbb' },
+      ],
+    });
+    const result = buildComposePublishApplyPayload(submission, OPTS);
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+    const networkName = `sam-internal-${ENVIRONMENT_ID}`;
+
+    // Both model-provider services survive verbatim and flag the runner.
+    expect(result.hasModelProvider).toBe(true);
+    expect(doc.services.chat.provider.options.model).toEqual(['ai/gemma3:1B-Q4_K_M']);
+    expect(doc.services.embedding.provider.options.model).toEqual(['ai/mxbai-embed-large']);
+    expect(doc.services.chat.networks).toBeUndefined();
+    expect(doc.services.embedding.networks).toBeUndefined();
+
+    // build services digest-pinned from pushedRef.
+    expect(doc.services.app.build).toBeUndefined();
+    expect(doc.services.app.image).toBe('sam-registry.local:5050/proj/app@sha256:aaa');
+    expect(doc.services.worker.build).toBeUndefined();
+    expect(doc.services.worker.image).toBe('sam-registry.local:5050/proj/worker@sha256:bbb');
+
+    // The long-syntax port (target: 8000) becomes a single public route + loopback.
+    expect(result.routes).toHaveLength(1);
+    const route = result.routes[0]!;
+    expect(route.service).toBe('app');
+    expect(route.containerPort).toBe(8000);
+    expect(route.hostname).toBe(`r1-app-8000-${ENVIRONMENT_ID}.apps.${BASE_DOMAIN}`);
+    expect(doc.services.app.ports).toEqual([`127.0.0.1:${route.hostPort}:8000`]);
+
+    // Every normal service is re-networked to the SAM bridge (per-service
+    // networks:{default:null} is replaced, not merged).
+    for (const name of ['app', 'postgres', 'redis', 'worker']) {
+      expect(doc.services[name].networks).toEqual([networkName]);
+      expect(doc.services[name].restart).toBe('unless-stopped');
+      expect(doc.services[name].labels['sam.service']).toBe(name);
+    }
+
+    // Long-syntax volume mount preserved verbatim; named top-level volume kept.
+    expect(doc.services.postgres.volumes).toEqual([
+      { type: 'volume', source: 'pgdata', target: '/var/lib/postgresql/data', volume: {} },
+    ]);
+    expect(doc.volumes).toEqual({ pgdata: { name: 'crewai_pgdata' } });
+
+    // Top-level named network is stripped (warned) and replaced with SAM's bridge.
+    expect(result.warnings.some((w) => w.field === 'networks')).toBe(true);
+    expect(Object.keys(doc.networks)).toEqual([networkName]);
+    expect(doc.networks[networkName]).toEqual({ driver: 'bridge' });
+  });
 });
