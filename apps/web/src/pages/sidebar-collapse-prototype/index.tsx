@@ -1,13 +1,26 @@
-import { ArrowLeftRight, ChevronLeft, Maximize2, Minimize2, Plus, Search, Sparkles } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeftRight,
+  CheckCircle2,
+  ChevronLeft,
+  CirclePause,
+  HelpCircle,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Plus,
+  Search,
+  Sparkles,
+  XCircle,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  GLOBAL_NAV,
-  MOCK_CONVERSATION,
-  MOCK_SESSIONS,
-  type MockSession,
-  type SessionStatus,
-} from './mock-data';
+import { GLOBAL_NAV_ITEMS } from '../../components/NavSidebar';
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import { type AttentionState, getAttentionState } from '../../lib/chat-session-utils';
+import { SessionList } from '../project-chat/SessionList';
+import { SessionTreeItem } from '../project-chat/SessionTreeItem';
+import { MOCK_CONVERSATION, MOCK_SESSIONS, MOCK_TASK_INFO } from './mock-data';
 
 /**
  * Sidebar Collapse Prototype — Focus Mode
@@ -17,29 +30,42 @@ import {
  * BOTH desktop sidebars (main nav + project chat sessions) together:
  *
  *   Default → full 220px nav rail + 288px session list (today's layout)
- *   Focus   → 56px icon rail nav + slim live status strip sessions
+ *   Focus   → 56px icon rail nav + slim status strip using the REAL chat-card
+ *             status icons; hover an icon to peek the full real card
  *   Zen     → both tucked to glowing edge seams; hover a seam to peek
  *
- * Self-contained: no API calls, no auth, mock data only.
+ * Uses the production SessionList / SessionItem components with mock data shaped
+ * to the real ChatSessionListItem + TaskInfo types. Self-contained: no API
+ * calls, no auth.
  */
 
 type FocusMode = 'default' | 'focus' | 'zen';
 
 const MODE_ORDER: FocusMode[] = ['default', 'focus', 'zen'];
 
-const STATUS_DOT: Record<SessionStatus, string> = {
-  running: 'bg-[var(--sam-color-accent-primary,#16a34a)]',
-  done: 'bg-fg-muted',
-  failed: 'bg-danger-fg',
-  idle: 'bg-border-default',
+const noop = () => {};
+
+/**
+ * Mirror of ATTENTION_ICON_MAP in project-chat/SessionItem.tsx so the Focus
+ * strip uses the exact same icons + colors as the real chat cards.
+ */
+const ATTENTION_ICON: Record<AttentionState, { icon: typeof HelpCircle; color: string; label: string }> = {
+  needs_input: { icon: HelpCircle, color: 'var(--sam-color-warning, #f59e0b)', label: 'Needs input' },
+  error: { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Error' },
+  active: { icon: Loader2, color: 'var(--sam-color-success)', label: 'Running' },
+  idle: { icon: CirclePause, color: 'var(--sam-color-warning, #f59e0b)', label: 'Idle' },
+  completed: { icon: CheckCircle2, color: 'var(--sam-color-fg-muted)', label: 'Completed' },
+  failed: { icon: XCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Failed' },
+  stopped: { icon: CirclePause, color: 'var(--sam-color-fg-muted)', label: 'Stopped' },
 };
 
-const STATUS_RING: Record<SessionStatus, string> = {
-  running: 'ring-[var(--sam-color-accent-primary,#16a34a)]',
-  done: 'ring-transparent',
-  failed: 'ring-danger-fg',
-  idle: 'ring-transparent',
-};
+/** Enrich a list item with its task embed (mirrors SessionTreeItem) so the
+ * attention-state helpers can distinguish completed/failed/cancelled tasks. */
+function enrich(session: ChatSessionListItem): ChatSessionResponse {
+  const info = session.taskId ? MOCK_TASK_INFO.get(session.taskId) : undefined;
+  if (!info) return session;
+  return { ...session, task: { id: info.id, status: info.status, taskMode: info.taskMode } };
+}
 
 function modeLabel(mode: FocusMode): string {
   if (mode === 'default') return 'Default';
@@ -54,8 +80,7 @@ function nextMode(mode: FocusMode): FocusMode {
 
 export default function SidebarCollapsePrototype() {
   const [mode, setMode] = useState<FocusMode>('default');
-  const [peekNav, setPeekNav] = useState(false);
-  const [peekSessions, setPeekSessions] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>('s1');
 
   const cycle = useCallback(() => setMode((m) => nextMode(m)), []);
 
@@ -73,14 +98,8 @@ export default function SidebarCollapsePrototype() {
     return () => window.removeEventListener('keydown', onKey);
   }, [cycle]);
 
-  // ── Derived widths ────────────────────────────────────────────────
-  // Nav: 220 default, 56 focus, 0 zen (peek overlays at 220).
   const navIconOnly = mode === 'focus';
-  const navHidden = mode === 'zen' && !peekNav;
-
-  // Sessions: 288 default, 64 strip in focus, 0 zen (peek overlays at 288).
   const sessionsStrip = mode === 'focus';
-  const sessionsHidden = mode === 'zen' && !peekSessions;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-canvas text-fg-primary flex flex-col">
@@ -94,39 +113,29 @@ export default function SidebarCollapsePrototype() {
       </header>
 
       <div className="relative flex-1 min-h-0 flex">
-        {/* ── Main nav sidebar ─────────────────────────────────────── */}
-        <NavRail iconOnly={navIconOnly} hidden={navHidden} peeking={peekNav} mode={mode} />
-
-        {/* Zen seam for nav — hover to peek */}
-        {mode === 'zen' && (
-          <EdgeSeam
-            side="left"
-            label="Navigation"
-            onEnter={() => setPeekNav(true)}
-            onLeave={() => setPeekNav(false)}
-          />
+        {mode !== 'zen' ? (
+          <>
+            <NavAside iconOnly={navIconOnly} />
+            <SessionAside
+              strip={sessionsStrip}
+              selectedSessionId={selectedSessionId}
+              onSelect={setSelectedSessionId}
+            />
+          </>
+        ) : (
+          <>
+            <ZenPeekRail label="Navigation" offsetLeft={0} panelWidth={220}>
+              <NavRailContent iconOnly={false} />
+            </ZenPeekRail>
+            <ZenPeekRail label="Chats" offsetLeft={16} panelWidth={288}>
+              <SessionPanelContent
+                selectedSessionId={selectedSessionId}
+                onSelect={setSelectedSessionId}
+              />
+            </ZenPeekRail>
+          </>
         )}
 
-        {/* ── Project chat sessions sidebar ───────────────────────── */}
-        <SessionPanel
-          strip={sessionsStrip}
-          hidden={sessionsHidden}
-          peeking={peekSessions}
-          mode={mode}
-        />
-
-        {/* Zen seam for sessions — hover to peek */}
-        {mode === 'zen' && (
-          <EdgeSeam
-            side="left"
-            label="Chats"
-            inset
-            onEnter={() => setPeekSessions(true)}
-            onLeave={() => setPeekSessions(false)}
-          />
-        )}
-
-        {/* ── Conversation column ─────────────────────────────────── */}
         <ConversationColumn mode={mode} />
       </div>
     </div>
@@ -181,31 +190,22 @@ function FocusModeToggle({
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Nav rail — 220px → 56px icon rail → hidden (zen)
+// Nav rail — 220px → 56px icon rail. Uses the real GLOBAL_NAV_ITEMS.
 // ───────────────────────────────────────────────────────────────────
-function NavRail({
-  iconOnly,
-  hidden,
-  peeking,
-  mode,
-}: {
-  iconOnly: boolean;
-  hidden: boolean;
-  peeking: boolean;
-  mode: FocusMode;
-}) {
-  // Width: 220 default, 56 focus, 0 zen-collapsed, 220 zen-peek (overlay).
-  const width = hidden ? 0 : iconOnly ? 56 : 220;
-  const overlay = mode === 'zen' && peeking;
-
+function NavAside({ iconOnly }: { iconOnly: boolean }) {
   return (
     <aside
-      className={`relative z-30 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none ${
-        overlay ? 'absolute inset-y-0 left-0 shadow-2xl' : ''
-      }`}
-      style={{ width }}
-      aria-hidden={hidden || undefined}
+      className="relative z-30 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none"
+      style={{ width: iconOnly ? 56 : 220 }}
     >
+      <NavRailContent iconOnly={iconOnly} />
+    </aside>
+  );
+}
+
+function NavRailContent({ iconOnly }: { iconOnly: boolean }) {
+  return (
+    <>
       <div className="p-4 border-b border-border-default flex items-center gap-2 min-w-0">
         <div className="h-6 w-6 rounded bg-accent/20 flex items-center justify-center text-accent text-xs font-bold shrink-0">
           S
@@ -214,23 +214,23 @@ function NavRail({
       </div>
 
       <nav className="flex flex-col gap-1 p-2">
-        {GLOBAL_NAV.map((item) => {
-          const Icon = item.icon;
+        {GLOBAL_NAV_ITEMS.map((item) => {
+          const active = item.path === '/projects';
           return (
-            <button
+            <div
               key={item.label}
               title={iconOnly ? item.label : undefined}
-              className={`flex items-center gap-3 rounded-sm border-l-2 py-2 text-sm font-medium transition-all duration-150 ${
+              className={`flex items-center gap-3 rounded-sm border-l-2 py-2 text-sm font-medium transition-all duration-150 cursor-pointer ${
                 iconOnly ? 'justify-center px-0' : 'pl-[10px] pr-3'
               } ${
-                item.active
+                active
                   ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
                   : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
               }`}
             >
-              <Icon size={18} />
+              {item.icon}
               {!iconOnly && <span className="truncate">{item.label}</span>}
-            </button>
+            </div>
           );
         })}
       </nav>
@@ -243,151 +243,206 @@ function NavRail({
           <span className="text-xs text-fg-muted truncate">raphael</span>
         </div>
       )}
-    </aside>
+    </>
   );
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Session panel — 288px → 64px status strip → hidden (zen)
+// Session panel — full 288px list (real SessionList) → 64px focus strip
 // ───────────────────────────────────────────────────────────────────
-function SessionPanel({
+function SessionAside({
   strip,
-  hidden,
-  peeking,
-  mode,
+  selectedSessionId,
+  onSelect,
 }: {
   strip: boolean;
-  hidden: boolean;
-  peeking: boolean;
-  mode: FocusMode;
+  selectedSessionId: string;
+  onSelect: (id: string) => void;
 }) {
-  const [query, setQuery] = useState('');
-  const width = hidden ? 0 : strip ? 64 : 288;
-  const overlay = mode === 'zen' && peeking;
-
-  const filtered = MOCK_SESSIONS.filter((s) =>
-    s.title.toLowerCase().includes(query.toLowerCase()),
-  );
-
   return (
     <aside
-      className={`relative z-20 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none ${
-        overlay ? 'absolute inset-y-0 left-0 shadow-2xl' : ''
+      className={`relative z-30 shrink-0 glass-chrome border-y-0 border-l-0 flex flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none ${
+        // Strip mode must NOT clip horizontally, or the hover tooltip (which
+        // extends past the 64px rail) gets cut off. `glass-panel-container`
+        // applies `contain: paint`, which paint-clips descendants to the box
+        // even with `overflow-visible` — so we drop it (and overflow-hidden) in
+        // strip mode and let the tooltip escape the rail. Full mode keeps both
+        // for the width-collapse transition. z-30 keeps the strip (and its
+        // escaping tooltip) painted above the conversation column.
+        strip
+          ? 'overflow-visible glass-composited'
+          : 'overflow-hidden glass-panel-container glass-composited'
       }`}
-      style={{ width, left: overlay ? 56 : undefined }}
-      aria-hidden={hidden || undefined}
+      style={{ width: strip ? 64 : 288 }}
     >
       {strip ? (
-        <StatusStrip sessions={MOCK_SESSIONS} />
+        <FocusStrip selectedSessionId={selectedSessionId} onSelect={onSelect} />
       ) : (
-        <>
-          <div className="p-3 border-b border-border-default">
-            <div className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-2 truncate">
-              Collapsible Sidebars
-            </div>
-            <button className="flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-[var(--sam-chrome-accent-soft)] text-accent text-sm font-medium hover:bg-[var(--sam-chrome-accent-active)] transition-colors">
-              <Plus size={16} />
-              New Chat
-            </button>
-          </div>
-          <div className="px-3 py-2 border-b border-border-default">
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-sm bg-inset border border-border-default">
-              <Search size={13} className="text-fg-muted shrink-0" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search chats…"
-                className="flex-1 min-w-0 bg-transparent text-xs text-fg-primary placeholder:text-fg-muted outline-none border-none"
-              />
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
-            {filtered.map((s) => (
-              <SessionRow key={s.id} session={s} />
-            ))}
-            {filtered.length === 0 && (
-              <div className="text-xs text-fg-muted text-center py-6">No chats match “{query}”.</div>
-            )}
-          </div>
-        </>
+        <SessionPanelContent selectedSessionId={selectedSessionId} onSelect={onSelect} />
       )}
     </aside>
   );
 }
 
-function SessionRow({ session }: { session: MockSession }) {
+/** Full session list using the production SessionList component. */
+function SessionPanelContent({
+  selectedSessionId,
+  onSelect,
+}: {
+  selectedSessionId: string;
+  onSelect: (id: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const filtered = MOCK_SESSIONS.filter((s) =>
+    (s.topic ?? '').toLowerCase().includes(query.toLowerCase()),
+  );
+
   return (
-    <button
-      className={`group flex items-start gap-2 w-full px-2 py-2 rounded-sm text-left transition-colors hover:bg-[var(--sam-chrome-accent-hover-subtle)] ${
-        session.stale ? 'opacity-60' : ''
-      }`}
-    >
-      <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${STATUS_DOT[session.status]}`} />
-      <span className="flex-1 min-w-0">
-        <span className="block text-xs text-fg-primary truncate group-hover:text-clip">{session.title}</span>
-        <span className="block text-[10px] text-fg-muted mt-0.5">{session.when}</span>
-      </span>
-    </button>
+    <>
+      <div className="p-3 border-b border-border-default">
+        <div className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-2 truncate">
+          Collapsible Sidebars
+        </div>
+        <button className="flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-[var(--sam-chrome-accent-soft)] text-accent text-sm font-medium hover:bg-[var(--sam-chrome-accent-active)] transition-colors">
+          <Plus size={16} />
+          New Chat
+        </button>
+      </div>
+      <div className="px-3 py-2 border-b border-border-default">
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-sm bg-inset border border-border-default">
+          <Search size={13} className="text-fg-muted shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search chats…"
+            className="flex-1 min-w-0 bg-transparent text-xs text-fg-primary placeholder:text-fg-muted outline-none border-none"
+          />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <SessionList
+          sessions={filtered}
+          selectedSessionId={selectedSessionId}
+          onSelect={onSelect}
+          taskInfoMap={MOCK_TASK_INFO}
+          onShowHierarchy={noop}
+        />
+        {filtered.length === 0 && (
+          <div className="text-xs text-fg-muted text-center py-6">No chats match “{query}”.</div>
+        )}
+      </div>
+    </>
   );
 }
 
-// Slim 64px strip: just colored status dots, hover to reveal title tooltip.
-function StatusStrip({ sessions }: { sessions: MockSession[] }) {
+// ───────────────────────────────────────────────────────────────────
+// Focus strip — 64px rail of REAL chat-card status icons; hover an icon
+// to peek the full real chat card as a tooltip.
+// ───────────────────────────────────────────────────────────────────
+function FocusStrip({
+  selectedSessionId,
+  onSelect,
+}: {
+  selectedSessionId: string;
+  onSelect: (id: string) => void;
+}) {
   return (
-    <div className="flex flex-col items-center gap-1 py-3 overflow-y-auto">
+    // overflow-visible (not overflow-y-auto): a scroll container would force
+    // overflow-x to clip and cut off the hover tooltip. The icon set fits the
+    // desktop height; Focus mode is desktop-only.
+    <div className="flex flex-col items-center gap-1 py-3 overflow-visible">
       <button
         title="New Chat"
         className="mb-2 h-9 w-9 rounded-sm bg-[var(--sam-chrome-accent-soft)] text-accent flex items-center justify-center hover:bg-[var(--sam-chrome-accent-active)] transition-colors"
       >
         <Plus size={16} />
       </button>
-      {sessions.map((s) => (
-        <button
-          key={s.id}
-          title={`${s.title} · ${s.when}`}
-          className={`relative h-9 w-9 rounded-full flex items-center justify-center transition-transform hover:scale-110 ${
-            s.stale ? 'opacity-50' : ''
-          }`}
-        >
-          <span className={`h-2.5 w-2.5 rounded-full ring-2 ring-offset-2 ring-offset-transparent ${STATUS_DOT[s.status]} ${STATUS_RING[s.status]}`} />
-        </button>
-      ))}
+      {MOCK_SESSIONS.map((session) => {
+        const enriched = enrich(session);
+        const attention = getAttentionState(enriched);
+        const cfg = ATTENTION_ICON[attention];
+        const Icon = cfg.icon;
+        const isSelected = session.id === selectedSessionId;
+        return (
+          <div key={session.id} className="group relative w-full flex justify-center">
+            <button
+              type="button"
+              onClick={() => onSelect(session.id)}
+              title={cfg.label}
+              aria-label={`${session.topic ?? session.id} — ${cfg.label}`}
+              className={`h-9 w-9 rounded-full flex items-center justify-center transition-colors ${
+                isSelected
+                  ? 'bg-[var(--sam-chrome-accent-active-subtle)]'
+                  : 'hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
+              }`}
+              style={{ color: cfg.color }}
+            >
+              <Icon size={16} className={attention === 'active' ? 'motion-safe:animate-spin' : ''} />
+            </button>
+
+            {/* Hover tooltip: the full REAL chat card */}
+            <div className="pointer-events-none absolute left-full top-0 ml-2 z-50 hidden w-72 group-hover:block">
+              <div className="glass-chrome glass-panel-container glass-composited rounded-md border border-border-default shadow-2xl overflow-hidden">
+                <SessionTreeItem
+                  session={session}
+                  selectedSessionId={selectedSessionId}
+                  onSelect={noop}
+                  taskInfoMap={MOCK_TASK_INFO}
+                  onShowHierarchy={noop}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Zen edge seam — a glowing strip you hover to peek a hidden panel
+// Zen edge seam + peek overlay. The peek panel is a DOM CHILD of the
+// hover wrapper, so moving the mouse from the seam onto the panel does
+// NOT fire mouseleave — eliminating the open/close flicker loop.
 // ───────────────────────────────────────────────────────────────────
-function EdgeSeam({
-  side,
+function ZenPeekRail({
   label,
-  inset,
-  onEnter,
-  onLeave,
+  offsetLeft,
+  panelWidth,
+  children,
 }: {
-  side: 'left' | 'right';
   label: string;
-  inset?: boolean;
-  onEnter: () => void;
-  onLeave: () => void;
+  offsetLeft: number;
+  panelWidth: number;
+  children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <div
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      className="group relative z-30 h-full w-3 shrink-0 cursor-pointer flex items-center justify-center"
-      style={{ [side]: inset ? 3 : 0 }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      className="group absolute inset-y-0 z-40"
+      style={{ left: offsetLeft }}
     >
-      {/* Glow seam */}
-      <span className="absolute inset-y-2 left-1/2 -translate-x-1/2 w-0.5 rounded-full bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow)_0%,transparent_75%)] blur-[0.5px] opacity-70 group-hover:opacity-100 transition-opacity" />
-      {/* Vertical label */}
-      <span
-        className="text-[9px] font-semibold uppercase tracking-widest text-fg-muted group-hover:text-accent transition-colors whitespace-nowrap"
-        style={{ writingMode: 'vertical-rl' }}
-      >
-        {label}
-      </span>
+      {/* Seam visual — always present, the hover target */}
+      <div className="relative h-full w-3 cursor-pointer flex items-center justify-center">
+        <span className="absolute inset-y-2 left-1/2 -translate-x-1/2 w-0.5 rounded-full bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow)_0%,transparent_75%)] blur-[0.5px] opacity-70 group-hover:opacity-100 transition-opacity" />
+        <span
+          className="text-[9px] font-semibold uppercase tracking-widest text-fg-muted group-hover:text-accent transition-colors whitespace-nowrap"
+          style={{ writingMode: 'vertical-rl' }}
+        >
+          {label}
+        </span>
+      </div>
+
+      {/* Peek panel — child of the hover wrapper (no flicker) */}
+      {open && (
+        <aside
+          className="absolute inset-y-0 left-3 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 shadow-2xl flex flex-col overflow-hidden"
+          style={{ width: panelWidth }}
+        >
+          {children}
+        </aside>
+      )}
     </div>
   );
 }
@@ -425,11 +480,14 @@ function ConversationColumn({ mode }: { mode: FocusMode }) {
           ))}
 
           <div className="mt-4 rounded-lg border border-dashed border-border-default p-4 text-xs text-fg-muted">
-            <div className="font-semibold text-fg-primary mb-1">Reading width now: {mode === 'default' ? '~64%' : mode === 'focus' ? '~82%' : '~96%'} of the window</div>
+            <div className="font-semibold text-fg-primary mb-1">
+              Reading width now: {mode === 'default' ? '~64%' : mode === 'focus' ? '~82%' : '~96%'} of the window
+            </div>
             Current mode <span className="text-accent font-medium">{modeLabel(mode)}</span>. Press{' '}
             <kbd className="font-mono bg-inset border border-border-default rounded px-1">F</kbd> or use the
-            toggle to cycle Default → Focus → Zen. In Zen, hover the glowing seams on the left edge to peek a
-            panel without reflowing this column.
+            toggle to cycle Default → Focus → Zen. In Focus, hover a status icon to see the full real chat
+            card. In Zen, hover the glowing seams on the left edge to peek a panel without reflowing this
+            column.
           </div>
         </div>
       </div>
