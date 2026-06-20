@@ -97,10 +97,14 @@ localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async
   }
 
   const workspace = await requireRoutedWorkspace(c, workspaceId, userId);
+  const nodeId = workspace.nodeId;
+  if (!nodeId) {
+    throw errors.badRequest('Workspace has no node assigned');
+  }
   const { token, expiresAt } = await signLocalForwardToken({
     userId,
     workspaceId,
-    nodeId: workspace.nodeId!,
+    nodeId,
     remotePort,
     mode: 'http',
     localAuthority,
@@ -110,7 +114,7 @@ localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async
     token,
     expiresAt,
     workspaceId,
-    nodeId: workspace.nodeId,
+    nodeId,
     remotePort,
     mode: 'http',
     localAuthority,
