@@ -350,9 +350,21 @@ func (tc *tokenCache) getToken(ctx context.Context) (string, error) {
 
 	tc.mu.Lock()
 	tc.token = resp.Token
-	tc.expiresAt = time.Now().Add(4 * time.Minute)
+	tc.expiresAt = localForwardRefreshTime(resp.ExpiresAt)
 	tc.mu.Unlock()
 	return tc.token, nil
+}
+
+func localForwardRefreshTime(expiresAt string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return time.Now().Add(time.Minute)
+	}
+	refreshAt := parsed.Add(-1 * time.Minute)
+	if refreshAt.Before(time.Now()) {
+		return time.Now().Add(5 * time.Second)
+	}
+	return refreshAt
 }
 
 func isAllowedLocalForwardHost(host string, localHost string, localPort int) bool {

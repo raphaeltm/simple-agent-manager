@@ -444,6 +444,20 @@ func TestTokenCacheReturnsErrorOnAPIFailure(t *testing.T) {
 	}
 }
 
+func TestLocalForwardRefreshTimeUsesAPIExpiry(t *testing.T) {
+	expiresAt := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
+	refreshAt := localForwardRefreshTime(expiresAt)
+	if time.Until(refreshAt) < 8*time.Minute || time.Until(refreshAt) > 10*time.Minute {
+		t.Fatalf("expected refresh roughly one minute before API expiry, got %s", refreshAt)
+	}
+
+	stale := time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339)
+	refreshAt = localForwardRefreshTime(stale)
+	if time.Until(refreshAt) > 10*time.Second {
+		t.Fatalf("expected near-immediate refresh for short/stale expiry, got %s", refreshAt)
+	}
+}
+
 // Verify the workspace client methods construct correct URLs.
 func TestClientGetWorkspaceURL(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"id":"ws-abc","status":"running"}`, http.StatusOK)
