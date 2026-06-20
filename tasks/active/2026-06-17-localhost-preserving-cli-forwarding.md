@@ -4,6 +4,13 @@
 
 The current `sam workspace <id> forward` path binds a local listener but forwards through the public workspace port route. That rewrites browser-local authority to the public `ws-*--port` hostname, uses public port-access cookies/tokens, and risks consuming or stripping target application auth and cookies. Raphaël requires localhost semantics and auth/cookie isolation for CLI forwarding. The initial slice only needs HTTP forwarding; raw TCP and WebSocket/HMR can be explicitly unsupported.
 
+## Human Constraints
+
+- Stop at an open PR. Do not merge, close, or mark ready for merge unless Raphaël explicitly asks later.
+- Do not deploy to staging and do not run staging deployment or staging smoke validation for this task.
+- Push the SAM output branch early and after coherent implementation slices.
+- Preserve these constraints in the PR body.
+
 ## Research Findings
 
 - The crashed parent SAM session recovered durable idea `01KV99H6RX7B7JKQ63JYP54QA7` and its implementation plan before crashing.
