@@ -53,22 +53,22 @@ The verify-before-decay fix from 2026-06-11 is effectively dead during streaming
 
 ## Implementation Checklist
 
-- [ ] **1.** Extract the verify-before-decay timer into a shared `startVerifyDecayTimer`
+- [x] **1.** Extract the verify-before-decay timer into a shared `startVerifyDecayTimer`
   callback (stable via `useCallback([projectId, sessionId, clearActivity])`) defined
   before `useChatWebSocket`. It clears `idleTimerRef`, aborts any prior `verifyAbortRef`,
   creates a fresh `AbortController`, and arms the recursive verify timer (re-arm while
   DO `state.activity === 'prompting'`, else `clearActivity()`).
-- [ ] **2.** Convert `clearActivity` to a stable `useCallback`.
-- [ ] **3.** `onAgentActivity('prompting')`: set state then call `startVerifyDecayTimer()`.
+- [x] **2.** Convert `clearActivity` to a stable `useCallback`.
+- [x] **3.** `onAgentActivity('prompting')`: set state then call `startVerifyDecayTimer()`.
   `onAgentActivity('idle')`: clear timer + abort verify.
-- [ ] **4.** `onMessage` (non-user message): set `agentActivity = 'responding'`, keep
+- [x] **4.** `onMessage` (non-user message): set `agentActivity = 'responding'`, keep
   `promptStartedAt` intact, then call `startVerifyDecayTimer()` instead of the blind
   `setTimeout(... 'idle')`. The shared timer now verifies DO state before any decay.
-- [ ] **5.** Keep the session-change cleanup effect (lines 192-199) clearing the timer
+- [x] **5.** Keep the session-change cleanup effect clearing the timer
   and aborting verify on `sessionId` change.
-- [ ] **6.** Add React timer tests (the deferred T1/T2) under
-  `tests/unit/components/` using `renderHook` + fake timers, mirroring the established
-  `project-message-view-recovery.test.ts` pattern.
+- [x] **6.** Add React timer tests (the deferred T1/T2) under
+  `tests/unit/components/project-message-view-status-timer.test.ts` using `renderHook` +
+  fake timers, mirroring the established `project-message-view-recovery.test.ts` pattern.
 
 ## Acceptance Criteria
 
