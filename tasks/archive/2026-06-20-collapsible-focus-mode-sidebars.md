@@ -3,6 +3,11 @@
 **SAM idea:** `01KVK5TMZXFA1YQC1M8KYEGZ2F`
 **Note:** This branch forked clean off `main`; the validated prototype design
 was implemented directly (no prototype page/route/spec exists here — Phase 8 N/A).
+**Wording clarification (validator LOW):** the `FocusModeToggle` lives at the
+bottom of the desktop nav `<aside>` (`mt-auto` footer), not a top "header" bar —
+the desktop layout has no top chrome. `FocusStrip` stays in `pages/project-chat/`
+(not `components/`) because it depends on `SessionTreeItem`; moving it would create
+a `components/`→`pages/` back-reference. Both are functionally complete.
 
 ## Problem Statement
 
