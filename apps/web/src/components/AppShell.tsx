@@ -7,8 +7,8 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { useProjectList } from '../hooks/useProjectData';
 import { signOut } from '../lib/auth';
 import {
-  type FocusMode,
   FOCUS_MODE_STORAGE_KEY,
+  type FocusMode,
   isFocusMode,
   navWidthForMode,
   nextFocusMode,
