@@ -710,7 +710,14 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	defer cancel()
 
 	runtime := Runtime{Stderr: io.Discard}
-	go acceptConnections(ctx, runtime, client, "ws-test", 3000, "127.0.0.1", port, ln, remote.URL+"/api/workspaces/ws-test/local-forward/3000")
+	go acceptConnections(ctx, runtime, client, acceptConnectionsConfig{
+		workspaceID: "ws-test",
+		remotePort:  3000,
+		localHost:   "127.0.0.1",
+		localPort:   port,
+		listener:    ln,
+		remoteURL:   remote.URL + "/api/workspaces/ws-test/local-forward/3000",
+	})
 
 	// Give the server a moment to start
 	time.Sleep(50 * time.Millisecond)
@@ -746,29 +753,7 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 		t.Fatalf("expected multiple app Set-Cookie headers to be preserved, got %v", got)
 	}
 
-	select {
-	case req := <-remoteRequests:
-		if got := req.Header.Get("X-SAM-Forward-Token"); got != "test-forward-token" {
-			t.Fatalf("expected internal forward token, got %q", got)
-		}
-		if _, err := req.Cookie("sam_port_access"); err == nil {
-			t.Fatal("did not expect sam_port_access cookie")
-		}
-		if got := req.Header.Get("Authorization"); got != "Bearer app-token" {
-			t.Fatalf("expected app Authorization header to be preserved, got %q", got)
-		}
-		if got := req.Header.Get("Cookie"); got != "app_session=abc" {
-			t.Fatalf("expected app Cookie header to be preserved, got %q", got)
-		}
-		if got := req.Header.Get("X-Forwarded-Host"); got != "" {
-			t.Fatalf("expected spoofed X-Forwarded-Host stripped, got %q", got)
-		}
-		if got := req.URL.Query().Get("client_query"); got != "1" {
-			t.Fatalf("expected client query to be preserved, got %q", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("remote server did not receive proxied request")
-	}
+	assertTokenForwardedRequest(t, receiveRemoteRequest(t, remoteRequests))
 }
 
 func TestAcceptConnectionsPreservesEscapedPathSegments(t *testing.T) {
@@ -794,7 +779,14 @@ func TestAcceptConnectionsPreservesEscapedPathSegments(t *testing.T) {
 	defer cancel()
 
 	runtime := Runtime{Stderr: io.Discard}
-	go acceptConnections(ctx, runtime, client, "ws-test", 3000, "127.0.0.1", port, ln, remote.URL+"/api/workspaces/ws-test/local-forward/3000")
+	go acceptConnections(ctx, runtime, client, acceptConnectionsConfig{
+		workspaceID: "ws-test",
+		remotePort:  3000,
+		localHost:   "127.0.0.1",
+		localPort:   port,
+		listener:    ln,
+		remoteURL:   remote.URL + "/api/workspaces/ws-test/local-forward/3000",
+	})
 	time.Sleep(50 * time.Millisecond)
 
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/a%%2Fb/c?client_query=a%%2Fb", port))
@@ -814,6 +806,39 @@ func TestAcceptConnectionsPreservesEscapedPathSegments(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("remote server did not receive proxied request")
+	}
+}
+
+func receiveRemoteRequest(t *testing.T, remoteRequests <-chan *http.Request) *http.Request {
+	t.Helper()
+	select {
+	case req := <-remoteRequests:
+		return req
+	case <-time.After(2 * time.Second):
+		t.Fatal("remote server did not receive proxied request")
+		return nil
+	}
+}
+
+func assertTokenForwardedRequest(t *testing.T, req *http.Request) {
+	t.Helper()
+	if got := req.Header.Get("X-SAM-Forward-Token"); got != "test-forward-token" {
+		t.Fatalf("expected internal forward token, got %q", got)
+	}
+	if _, err := req.Cookie("sam_port_access"); err == nil {
+		t.Fatal("did not expect sam_port_access cookie")
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer app-token" {
+		t.Fatalf("expected app Authorization header to be preserved, got %q", got)
+	}
+	if got := req.Header.Get("Cookie"); got != "app_session=abc" {
+		t.Fatalf("expected app Cookie header to be preserved, got %q", got)
+	}
+	if got := req.Header.Get("X-Forwarded-Host"); got != "" {
+		t.Fatalf("expected spoofed X-Forwarded-Host stripped, got %q", got)
+	}
+	if got := req.URL.Query().Get("client_query"); got != "1" {
+		t.Fatalf("expected client query to be preserved, got %q", got)
 	}
 }
 
@@ -907,7 +932,14 @@ func TestAcceptConnectionsShutdownOnContextCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		acceptConnections(ctx, runtime, client, "ws-test", 3000, "127.0.0.1", port, ln, fmt.Sprintf("https://api.example.com/api/workspaces/ws-test/local-forward/%d", 3000))
+		acceptConnections(ctx, runtime, client, acceptConnectionsConfig{
+			workspaceID: "ws-test",
+			remotePort:  3000,
+			localHost:   "127.0.0.1",
+			localPort:   port,
+			listener:    ln,
+			remoteURL:   fmt.Sprintf("https://api.example.com/api/workspaces/ws-test/local-forward/%d", 3000),
+		})
 		close(done)
 	}()
 

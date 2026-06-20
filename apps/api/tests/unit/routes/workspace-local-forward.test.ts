@@ -5,6 +5,33 @@ const mockSignLocalForwardToken = vi.fn();
 const mockVerifyLocalForwardToken = vi.fn();
 let workspaceResult: { id?: string; nodeId: string | null; status: string; userId?: string } | null = null;
 
+class MockDurableObject {
+  readonly __mock = true;
+}
+
+class MockSandbox {
+  readonly __mock = true;
+}
+
+function makeWorkspaceWhere() {
+  return {
+    limit: vi.fn(async () => (workspaceResult ? [workspaceResult] : [])),
+    get: vi.fn(async () => workspaceResult),
+  };
+}
+
+function makeWorkspaceFrom() {
+  return { where: vi.fn(makeWorkspaceWhere) };
+}
+
+function makeWorkspaceSelect() {
+  return { from: vi.fn(makeWorkspaceFrom) };
+}
+
+function makeDrizzleDB() {
+  return { select: vi.fn(makeWorkspaceSelect) };
+}
+
 vi.mock('../../../src/auth', () => ({
   createAuth: vi.fn(() => ({
     api: {
@@ -22,24 +49,15 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 vi.mock('cloudflare:workers', () => ({
-  DurableObject: class {},
+  DurableObject: MockDurableObject,
 }), { virtual: true });
 
 vi.mock('@cloudflare/sandbox', () => ({
-  Sandbox: class {},
+  Sandbox: MockSandbox,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => ({
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => (workspaceResult ? [workspaceResult] : [])),
-          get: vi.fn(async () => workspaceResult),
-        })),
-      })),
-    })),
-  })),
+  drizzle: vi.fn(makeDrizzleDB),
 }));
 
 const worker = await import('../../../src/index');

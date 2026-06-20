@@ -13,6 +13,7 @@ import (
 const nodeManagementAudience = "node-management"
 const workspaceCallbackAudience = "workspace-callback"
 const localForwardAudience = "local-forward"
+const nodeIDMismatchFormat = "node ID mismatch: expected %s, got %s"
 
 // Claims represents JWT claims accepted by the node agent.
 type Claims struct {
@@ -78,7 +79,7 @@ func (v *JWTValidator) parse(tokenString string) (*Claims, error) {
 	}
 
 	if claims.Node != "" && claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 
 	return claims, nil
@@ -180,7 +181,7 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 	}
 
 	if claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 
 	// When a specific workspace is requested, the token MUST carry a matching
@@ -215,7 +216,7 @@ func (v *JWTValidator) ValidateLocalForwardToken(tokenString, workspaceID string
 		return nil, fmt.Errorf("local forward user claim is invalid")
 	}
 	if claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 	if claims.RemotePort != remotePort {
 		return nil, fmt.Errorf("remote port mismatch: expected %d, got %d", remotePort, claims.RemotePort)

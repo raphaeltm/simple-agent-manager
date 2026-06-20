@@ -85,20 +85,9 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 		return fail(runtime.Stderr, fmt.Errorf("workspace is %s, not running", workspace.Status))
 	}
 
-	// Determine which ports to forward
-	ports := requestedPorts
-	if len(ports) == 0 {
-		// Auto-detect ports from workspace
-		portsResp, err := client.GetWorkspacePorts(ctx, workspaceID)
-		if err != nil {
-			return fail(runtime.Stderr, fmt.Errorf("failed to detect ports: %w", err))
-		}
-		for _, p := range portsResp.Ports {
-			ports = append(ports, p.Port)
-		}
-		if len(ports) == 0 {
-			return fail(runtime.Stderr, errors.New("no ports detected on workspace. Use --port to specify ports manually"))
-		}
+	ports, err := resolveForwardPorts(ctx, client, workspaceID, requestedPorts)
+	if err != nil {
+		return fail(runtime.Stderr, err)
 	}
 
 	localHost, err := parseLocalHostFlag(parsed)
@@ -213,6 +202,34 @@ type portForwarder struct {
 	listener   net.Listener
 }
 
+type acceptConnectionsConfig struct {
+	workspaceID string
+	remotePort  int
+	localHost   string
+	localPort   int
+	listener    net.Listener
+	remoteURL   string
+}
+
+func resolveForwardPorts(ctx context.Context, client APIClient, workspaceID string, requestedPorts []int) ([]int, error) {
+	if len(requestedPorts) > 0 {
+		return requestedPorts, nil
+	}
+
+	portsResp, err := client.GetWorkspacePorts(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect ports: %w", err)
+	}
+	ports := make([]int, 0, len(portsResp.Ports))
+	for _, p := range portsResp.Ports {
+		ports = append(ports, p.Port)
+	}
+	if len(ports) == 0 {
+		return nil, errors.New("no ports detected on workspace. Use --port to specify ports manually")
+	}
+	return ports, nil
+}
+
 func startForwarders(ctx context.Context, runtime Runtime, client APIClient, workspaceID string, localHost string, localPortOverride int, ports []int) ([]portForwarder, error) {
 	// Phase 1: bind all listeners before launching any goroutines
 	var forwarders []portForwarder
@@ -243,23 +260,30 @@ func startForwarders(ctx context.Context, runtime Runtime, client APIClient, wor
 
 	// Phase 2: all listeners bound successfully, now launch goroutines
 	for _, f := range forwarders {
-		go acceptConnections(ctx, runtime, client, workspaceID, f.remotePort, f.localHost, f.localPort, f.listener, f.targetURL)
+		go acceptConnections(ctx, runtime, client, acceptConnectionsConfig{
+			workspaceID: workspaceID,
+			remotePort:  f.remotePort,
+			localHost:   f.localHost,
+			localPort:   f.localPort,
+			listener:    f.listener,
+			remoteURL:   f.targetURL,
+		})
 	}
 	return forwarders, nil
 }
 
-func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, workspaceID string, remotePort int, localHost string, localPort int, listener net.Listener, remoteURL string) {
+func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, cfg acceptConnectionsConfig) {
 	// Token cache with refresh
 	tc := &tokenCache{
 		client:         client,
-		workspaceID:    workspaceID,
-		remotePort:     remotePort,
-		localAuthority: fmt.Sprintf("%s:%d", localHost, localPort),
+		workspaceID:    cfg.workspaceID,
+		remotePort:     cfg.remotePort,
+		localAuthority: fmt.Sprintf("%s:%d", cfg.localHost, cfg.localPort),
 	}
 
-	target, err := url.Parse(remoteURL)
+	target, err := url.Parse(cfg.remoteURL)
 	if err != nil {
-		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", remoteURL, err)
+		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", cfg.remoteURL, err)
 		return
 	}
 
@@ -288,7 +312,7 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !isAllowedLocalForwardHost(r.Host, localHost, localPort) {
+			if !isAllowedLocalForwardHost(r.Host, cfg.localHost, cfg.localPort) {
 				http.Error(w, "invalid Host for local forward listener", http.StatusBadRequest)
 				return
 			}
@@ -297,7 +321,7 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 				return
 			}
 			fmt.Fprintf(runtime.Stderr, "  [%s] %s %s -> localhost:%d\n",
-				time.Now().Format("15:04:05"), r.Method, r.URL.Path, remotePort)
+				time.Now().Format("15:04:05"), r.Method, r.URL.Path, cfg.remotePort)
 			proxy.ServeHTTP(w, r)
 		}),
 		ReadTimeout:  30 * time.Second,
@@ -312,7 +336,7 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 		server.Shutdown(shutdownCtx)
 	}()
 
-	_ = server.Serve(listener)
+	_ = server.Serve(cfg.listener)
 }
 
 // tokenCache manages port access token refresh.
@@ -383,7 +407,7 @@ func isAllowedLocalForwardHost(host string, localHost string, localPort int) boo
 	return hostname == localHost
 }
 
-func singleJoiningSlash(a string, b string) string {
+func singleJoiningSlash(a, b string) string {
 	aslash := strings.HasSuffix(a, "/")
 	bslash := strings.HasPrefix(b, "/")
 	switch {

@@ -67,7 +67,7 @@ func TestLocalForwardProxyPreservesAppHeadersAndLocalhostAuthority(t *testing.T)
 	if got := rr.Result().Header.Values("Set-Cookie"); len(got) != 2 {
 		t.Fatalf("Set-Cookie headers = %v, want both app cookies preserved", got)
 	}
-	if got := rr.Result().Header.Get("Set-Cookie"); got == "sam_port_access" {
+	if rr.Result().Header.Get("Set-Cookie") == "sam_port_access" {
 		t.Fatal("local-forward must not set SAM session cookies")
 	}
 }

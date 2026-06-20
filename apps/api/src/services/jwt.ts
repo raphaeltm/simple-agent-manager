@@ -297,7 +297,7 @@ function getPortAccessTokenExpiry(env: Env): number {
 
 function getLocalForwardTokenExpiry(env: Env): number {
   const envValue = env.LOCAL_FORWARD_TOKEN_EXPIRY_MS;
-  return envValue ? parseInt(envValue, 10) : 5 * 60 * 1000;
+  return envValue ? Number.parseInt(envValue, 10) : 5 * 60 * 1000;
 }
 
 /**
@@ -420,10 +420,10 @@ export async function verifyLocalForwardToken(
     throw new Error('Invalid user claim');
   }
   if (typeof payload.workspace !== 'string') {
-    throw new Error('Missing workspace claim');
+    throw new TypeError('Missing workspace claim');
   }
   if (typeof payload.node !== 'string') {
-    throw new Error('Missing node claim');
+    throw new TypeError('Missing node claim');
   }
   if (typeof payload.remotePort !== 'number' || payload.remotePort < 1 || payload.remotePort > 65535) {
     throw new Error('Invalid remote port claim');
