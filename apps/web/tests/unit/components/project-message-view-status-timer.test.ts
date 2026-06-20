@@ -83,6 +83,15 @@ function useStatusTimerMirror(
     startVerifyDecayTimer();
   }, [startVerifyDecayTimer]);
 
+  // onSessionStopped / onAgentCompleted — authoritative idle that must also kill the verify timer.
+  const onTerminalIdle = useCallback(() => {
+    setAgentActivity('idle');
+    setPromptStartedAt(null);
+    clearTimeout(idleTimerRef.current);
+    verifyAbortRef.current?.abort();
+    verifyAbortRef.current = null;
+  }, []);
+
   // Session-change cleanup effect
   useEffect(() => {
     clearTimeout(idleTimerRef.current);
@@ -91,7 +100,7 @@ function useStatusTimerMirror(
     return () => { clearTimeout(idleTimerRef.current); verifyAbortRef.current?.abort(); };
   }, [sessionId]);
 
-  return { agentActivity, promptStartedAt, onAgentActivity, onAgentMessage };
+  return { agentActivity, promptStartedAt, onAgentActivity, onAgentMessage, onTerminalIdle };
 }
 
 describe('Agent status verify-before-decay timer', () => {
@@ -204,6 +213,26 @@ describe('Agent status verify-before-decay timer', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS * 2); });
     // The pre-switch timer was cleared/aborted, so no verify call leaked through.
     expect(verifyActivity).not.toHaveBeenCalled();
+  });
+
+  // Regression: a terminal idle (session stopped / agent completed) must cancel any pending
+  // verify timer so it cannot re-arm and flash the status bar back on after the prompt ends.
+  it('terminal idle cancels a pending verify timer (no flash-back-on)', async () => {
+    const verifyActivity = vi.fn().mockResolvedValue('prompting' as const);
+    const { result } = renderHook(() => useStatusTimerMirror('sess-1', verifyActivity));
+
+    act(() => { result.current.onAgentActivity('prompting', 1000); });
+    expect(result.current.agentActivity).toBe('prompting');
+
+    // Session is stopped / agent completes while a verify timer is still armed.
+    act(() => { result.current.onTerminalIdle(); });
+    expect(result.current.agentActivity).toBe('idle');
+    expect(result.current.promptStartedAt).toBeNull();
+
+    // The previously-armed timer must NOT fire a verify or re-arm the bar.
+    await act(async () => { await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS * 2); });
+    expect(verifyActivity).not.toHaveBeenCalled();
+    expect(result.current.agentActivity).toBe('idle');
   });
 
   // Verify failure decays to idle (fail-safe).

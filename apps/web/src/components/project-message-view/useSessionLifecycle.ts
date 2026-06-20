@@ -165,6 +165,11 @@ export function useSessionLifecycle(
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
       setAgentActivity('idle');
+      setPromptStartedAt(null);
+      // Stop any pending verify timer so it can't re-arm and flash the bar back on.
+      clearTimeout(idleTimerRef.current);
+      verifyAbortRef.current?.abort();
+      verifyAbortRef.current = null;
     }, []),
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
       setSession(catchUpSession);
@@ -174,6 +179,11 @@ export function useSessionLifecycle(
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
       setAgentActivity('idle');
+      setPromptStartedAt(null);
+      // Stop any pending verify timer so it can't re-arm and flash the bar back on.
+      clearTimeout(idleTimerRef.current);
+      verifyAbortRef.current?.abort();
+      verifyAbortRef.current = null;
     }, []),
     onAgentActivity: useCallback((activity: 'prompting' | 'idle', promptStartedAt?: number | null) => {
       setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
