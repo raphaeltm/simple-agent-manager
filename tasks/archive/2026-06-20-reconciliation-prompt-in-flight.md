@@ -1,6 +1,6 @@
 # Reconciliation Prompt-In-Flight Handling
 
-**Status:** active
+**Status:** archived
 **Priority:** high
 **Created:** 2026-06-20
 
