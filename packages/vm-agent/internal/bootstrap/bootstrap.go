@@ -124,162 +124,8 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		return nil
 	}
 
-	state, err := loadState(cfg.BootstrapStatePath)
-	if err != nil {
-		return fmt.Errorf("failed to load bootstrap state: %w", err)
-	}
-
-	if state != nil {
-		if state.WorkspaceID != cfg.WorkspaceID {
-			return fmt.Errorf("bootstrap state workspace mismatch: expected %s, found %s", cfg.WorkspaceID, state.WorkspaceID)
-		}
-		slog.Info("Using cached bootstrap state", "path", cfg.BootstrapStatePath)
-		cfg.CallbackToken = state.CallbackToken
-		reporter.SetToken(state.CallbackToken)
-	} else {
-		reporter.Log("bootstrap_redeem", "started", "Redeeming bootstrap credentials")
-		state, err = redeemBootstrapTokenWithRetry(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		cfg.CallbackToken = state.CallbackToken
-		reporter.SetToken(state.CallbackToken)
-		reporter.Log("bootstrap_redeem", "completed", "Bootstrap credentials redeemed")
-		if err := saveState(cfg.BootstrapStatePath, state); err != nil {
-			return fmt.Errorf("failed to persist bootstrap state: %w", err)
-		}
-	}
-
-	if cfg.CallbackToken == "" {
-		return errors.New("callback token is missing after bootstrap")
-	}
-
-	// Create a named Docker volume for container-mode workspaces.
-	// The volume replaces the host bind-mount, eliminating permission issues.
-	volumeName := ""
-	if cfg.ContainerMode {
-		reporter.Log("volume_create", "started", "Creating workspace volume")
-		var volErr error
-		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
-		if volErr != nil {
-			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
-			return volErr
-		}
-		reporter.Log("volume_create", "completed", "Workspace volume ready")
-	}
-
-	reporter.Log("git_clone", "started", "Cloning repository")
-	if err := ensureRepositoryReady(ctx, cfg, state, volumeName); err != nil {
-		reporter.Log("git_clone", "failed", "Repository clone failed", err.Error())
-		return err
-	}
-	reporter.Log("git_clone", "completed", "Repository cloned")
-
-	// Pre-generate credential helper on the VM host so it can be bind-mounted
-	// into the container. This makes git authentication available during
-	// devcontainer lifecycle hooks (postCreateCommand, postStartCommand, etc.).
-	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
-	if credErr != nil {
-		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
-		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
-	}
-	bootstrapSucceeded := false
-	if credHelperHostPath != "" {
-		defer func() {
-			// Clean up the host-side file if bootstrap fails; on success the
-			// file stays for the lifetime of the workspace and is removed in
-			// handleDeleteWorkspace via RemoveCredentialHelperFromHost.
-			if !bootstrapSucceeded {
-				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
-			}
-		}()
-	}
-
-	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
-	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	// DevcontainerConfigName is not available in the bootstrap-token path because
-	// bootstrapState (from redeemBootstrapToken) does not carry it. Named
-	// devcontainer configs are only supported via the control-plane POST /workspaces
-	// flow (PrepareWorkspace), which threads state.DevcontainerConfigName directly.
-	// The bootstrap-token path does not support caching (no DevcontainerConfigName,
-	// limited token context). Pass empty cacheRef to disable.
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, "", "")
-	if err != nil {
-		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
-		return err
-	}
-	if usedFallback {
-		reporter.Log("devcontainer_up", "completed", "Devcontainer ready (fallback to default image)")
-	} else {
-		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
-	}
-
-	// Inject apt retry config (all providers) and mirror config (provider-specific) before package installs.
-	// Non-fatal: if injection fails, apt will use default settings.
-	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
-		injectAptRetryConfig(ctx, containerID)
-		injectAptMirrorConfig(ctx, cfg, containerID)
-	} else {
-		slog.Debug("Could not find devcontainer for apt config injection (non-fatal)", "error", findErr)
-	}
-
-	// Ensure gh CLI is available (install if missing from custom devcontainers).
-	// Non-fatal: workspace still works without gh, just can't create PRs.
-	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
-	if err := ensureGitHubCLI(ctx, cfg); err != nil {
-		reporter.Log("gh_cli", "failed", "GitHub CLI install failed (non-fatal)", err.Error())
-		slog.Warn("GitHub CLI install failed (non-fatal)", "error", err)
-	} else {
-		reporter.Log("gh_cli", "completed", "GitHub CLI available")
-	}
-
-	reporter.Log("git_creds", "started", "Configuring git credentials")
-	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
-		reporter.Log("git_creds", "failed", "Git credential setup failed", err.Error())
-		return err
-	}
-	reporter.Log("git_creds", "completed", "Git credentials configured")
-
-	reporter.Log("git_identity", "started", "Configuring git identity")
-	if err := ensureGitIdentity(ctx, cfg, state); err != nil {
-		reporter.Log("git_identity", "failed", "Git identity setup failed", err.Error())
-		return err
-	}
-	reporter.Log("git_identity", "completed", "Git identity configured")
-
-	reporter.Log("sam_env", "started", "Configuring SAM environment")
-	if err := ensureSAMEnvironment(ctx, cfg, state.GitHubToken); err != nil {
-		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
-		slog.Warn("SAM environment setup failed (non-fatal)", "error", err)
-	} else {
-		reporter.Log("sam_env", "completed", "SAM environment configured")
-	}
-
-	readyStatus := workspaceReadyStatusRunning
-	if recovery, recoveryErr := hasBuildErrorMarker(cfg); recoveryErr != nil {
-		slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", recoveryErr)
-	} else if recovery {
-		readyStatus = workspaceReadyStatusRecovery
-	}
-	if usedFallback {
-		readyStatus = workspaceReadyStatusRecovery
-	}
-
-	// The container is fully provisioned at this point. Mark the credential
-	// helper as persistent so it is NOT cleaned up by the deferred function,
-	// even if the markWorkspaceReady callback fails (CallbackError). A
-	// CallbackError means the workspace is running but the control plane was
-	// not notified — the credential file must persist for the running container.
-	bootstrapSucceeded = true
-
-	reporter.Log("workspace_ready", "started", "Marking workspace ready")
-	if err := markWorkspaceReady(ctx, cfg, readyStatus, ""); err != nil {
-		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
-		return &CallbackError{Err: err, Status: readyStatus}
-	}
-	reporter.Log("workspace_ready", "completed", "Workspace is ready")
-
-	return nil
+	bootstrapCtx := &workspaceBootstrapContext{cfg: cfg, reporter: reporter}
+	return runBootstrapPlan(ctx, bootstrapTokenPlan(), bootstrapCtx)
 }
 
 // PrepareWorkspace provisions a workspace repository/devcontainer and configures
@@ -296,169 +142,9 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		return false, errors.New("config is required")
 	}
 
-	bootstrap := &bootstrapState{
-		WorkspaceID:   cfg.WorkspaceID,
-		CallbackToken: cfg.CallbackToken,
-		GitHubToken:   strings.TrimSpace(state.GitHubToken),
-		GitUserName:   strings.TrimSpace(state.GitUserName),
-		GitUserEmail:  strings.TrimSpace(state.GitUserEmail),
-		GitHubID:      strings.TrimSpace(state.GitHubID),
-	}
-
-	// Create a named Docker volume for container-mode workspaces.
-	volumeName := ""
-	if cfg.ContainerMode {
-		reporter.Log("volume_create", "started", "Creating workspace volume")
-		var volErr error
-		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
-		if volErr != nil {
-			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
-			return false, volErr
-		}
-		reporter.Log("volume_create", "completed", "Workspace volume ready")
-	}
-
-	reporter.Log("git_clone", "started", "Cloning repository")
-	if err := ensureRepositoryReady(ctx, cfg, bootstrap, volumeName); err != nil {
-		reporter.Log("git_clone", "failed", "Repository clone failed", err.Error())
-		return false, err
-	}
-	reporter.Log("git_clone", "completed", "Repository cloned")
-
-	repoHasDevcontainerConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
-	effectiveWorkspaceProfile := ""
-	if state.Lightweight || (state.DevcontainerConfigName == "" && !repoHasDevcontainerConfig) {
-		effectiveWorkspaceProfile = "lightweight"
-	}
-
-	// Pre-generate credential helper on the VM host so it can be bind-mounted
-	// into the container during devcontainer lifecycle hooks.
-	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
-	if credErr != nil {
-		slog.Warn("Failed to write credential helper to host (non-fatal)", "error", credErr)
-		reporter.Log("git_credential_helper", "failed", "Credential helper setup failed — git auth may be unavailable in lifecycle hooks", credErr.Error())
-	}
-	prepareSucceeded := false
-	if credHelperHostPath != "" {
-		defer func() {
-			if !prepareSucceeded {
-				RemoveCredentialHelperFromHost(cfg.WorkspaceID)
-			}
-		}()
-	}
-
-	// Resolve devcontainer cache ref (best-effort, only for non-lightweight workspaces).
-	cacheRef := ""
-	if cfg.DevcontainerCacheEnabled && !state.Lightweight && repoHasDevcontainerConfig {
-		var cacheErr error
-		cacheRef, cacheErr = prepareDevcontainerCache(ctx, cfg, bootstrap.GitHubToken, state.DevcontainerConfigName)
-		if cacheErr != nil {
-			slog.Warn("Cache registry login failed (caching disabled for this build)", "registry", cfg.DevcontainerCacheRegistry, "error", cacheErr)
-			cacheRef = ""
-		}
-		if cacheRef != "" {
-			reporter.Log("devcontainer_cache", "started", "Checking devcontainer cache")
-		}
-	}
-
-	var usedFallback bool
-	var recoveryMode bool
-	if state.Lightweight {
-		// Lightweight profile: skip devcontainer build entirely, use fallback image.
-		// This saves 30-120 seconds by avoiding the project's .devcontainer build.
-		reporter.Log("devcontainer_up", "started", "Starting lightweight container (skipping devcontainer build)")
-		slog.Info("Lightweight mode: forcing fallback image, skipping devcontainer build", "workspaceID", cfg.WorkspaceID)
-		var fallbackErr error
-		usedFallback, fallbackErr = ensureDevcontainerFallback(ctx, cfg, volumeName, credHelperHostPath)
-		if fallbackErr != nil {
-			reporter.Log("devcontainer_up", "failed", "Lightweight container startup failed", fallbackErr.Error())
-			return false, fallbackErr
-		}
-		reporter.Log("devcontainer_up", "completed", "Lightweight container ready")
-	} else {
-		reporter.Log("devcontainer_up", "started", "Building devcontainer")
-		var devErr error
-		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName, credHelperHostPath, state.DevcontainerConfigName, cacheRef)
-		if devErr != nil {
-			reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", devErr.Error())
-			return false, devErr
-		}
-		if usedFallback {
-			reporter.Log("devcontainer_up", "completed", "Devcontainer ready (fallback to default image)")
-		} else {
-			reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
-		}
-
-		recoveryMode = usedFallback
-		if markerFound, markerErr := hasBuildErrorMarker(cfg); markerErr != nil {
-			slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", markerErr)
-		} else if markerFound {
-			recoveryMode = true
-		}
-	}
-
-	// Inject apt retry config (all providers) and mirror config (provider-specific) before package installs.
-	// Non-fatal: if injection fails, apt will use default settings.
-	if containerID, findErr := findDevcontainerID(ctx, cfg); findErr == nil {
-		injectAptRetryConfig(ctx, containerID)
-		injectAptMirrorConfig(ctx, cfg, containerID)
-	} else {
-		slog.Debug("Could not find devcontainer for apt config injection (non-fatal)", "error", findErr)
-	}
-
-	// Ensure gh CLI is available (install if missing from custom devcontainers).
-	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
-	if err := ensureGitHubCLI(ctx, cfg); err != nil {
-		reporter.Log("gh_cli", "failed", "GitHub CLI install failed (non-fatal)", err.Error())
-		slog.Warn("GitHub CLI install failed (non-fatal)", "error", err)
-	} else {
-		reporter.Log("gh_cli", "completed", "GitHub CLI available")
-	}
-
-	reporter.Log("git_creds", "started", "Configuring git credentials")
-	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
-		reporter.Log("git_creds", "failed", "Git credential setup failed", err.Error())
-		return recoveryMode, err
-	}
-	reporter.Log("git_creds", "completed", "Git credentials configured")
-
-	reporter.Log("git_identity", "started", "Configuring git identity")
-	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
-		reporter.Log("git_identity", "failed", "Git identity setup failed", err.Error())
-		return recoveryMode, err
-	}
-	reporter.Log("git_identity", "completed", "Git identity configured")
-
-	reporter.Log("sam_env", "started", "Configuring SAM environment")
-	if err := ensureSAMEnvironment(ctx, cfg, bootstrap.GitHubToken); err != nil {
-		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
-		slog.Warn("SAM environment setup failed (non-fatal)", "error", err)
-	} else {
-		reporter.Log("sam_env", "completed", "SAM environment configured")
-	}
-	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
-		return recoveryMode, err
-	}
-
-	// Container is fully provisioned — keep the credential helper file even if
-	// markWorkspaceReady fails (CallbackError means workspace is running).
-	prepareSucceeded = true
-
-	reporter.Log("workspace_ready", "started", "Marking workspace ready")
-	readyStatus := workspaceReadyStatusRunning
-	if recoveryMode {
-		readyStatus = workspaceReadyStatusRecovery
-	}
-	if err := markWorkspaceReady(ctx, cfg, readyStatus, effectiveWorkspaceProfile); err != nil {
-		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
-		// Workspace is fully provisioned — only the callback to the control plane
-		// failed. Return a CallbackError so the caller can distinguish this from
-		// a real provisioning failure and retry the callback later.
-		return recoveryMode, &CallbackError{Err: err, Status: readyStatus}
-	}
-	reporter.Log("workspace_ready", "completed", "Workspace is ready")
-
-	return recoveryMode, nil
+	bootstrapCtx := &workspaceBootstrapContext{cfg: cfg, reporter: reporter, provision: state}
+	err := runBootstrapPlan(ctx, prepareWorkspacePlan(), bootstrapCtx)
+	return bootstrapCtx.recoveryMode, err
 }
 
 func prepareDevcontainerCache(ctx context.Context, cfg *config.Config, githubToken, devcontainerConfigName string) (string, error) {
@@ -920,154 +606,178 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 // it is injected into override configs as a cacheFrom source and the built image
 // is pushed to this ref asynchronously after a successful build.
 func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName, cacheRef string) (bool, error) {
-	if _, err := findDevcontainerID(ctx, cfg); err == nil {
-		slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
-		ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
-		if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
-			return false, err
-		}
-		return false, nil
+	if found, err := findExistingDevcontainerAndRepair(ctx, cfg, devcontainerConfigName); found || err != nil {
+		return false, err
 	}
-
-	if devcontainerConfigName != "" {
-		configPath := namedDevcontainerConfigPath(cfg.WorkspaceDir, devcontainerConfigName)
-		if _, err := os.Stat(configPath); err != nil {
-			if os.IsNotExist(err) {
-				return false, fmt.Errorf("devcontainer config %q not found at %s", devcontainerConfigName, configPath)
-			}
-			return false, fmt.Errorf("failed to inspect devcontainer config %q at %s: %w", devcontainerConfigName, configPath, err)
-		}
+	if err := validateNamedDevcontainerConfig(cfg, devcontainerConfigName); err != nil {
+		return false, err
 	}
-
-	// Wait for devcontainer CLI to be available. Cloud-init installs Node.js and
-	// devcontainer CLI asynchronously AFTER the VM Agent starts — there is a race
-	// where the agent tries to run "devcontainer up" before the CLI exists.
-	if err := waitForCommand(ctx, "devcontainer"); err != nil {
-		return false, fmt.Errorf("devcontainer CLI never became available: %w", err)
+	if err := waitForDevcontainerCLI(ctx); err != nil {
+		return false, err
 	}
 
 	slog.Info("Starting devcontainer for workspace", "workspaceDir", cfg.WorkspaceDir)
 
-	// Best-effort cache pull: try to pull the cached image so Docker can use
-	// its layers during the build. Failures are non-fatal.
-	cacheImagePulled := false
-	if cacheRef != "" {
-		if pullErr := cache.PullCacheImage(ctx, cacheRef); pullErr != nil {
-			slog.Info("No cache image available (building from scratch)", "ref", cacheRef, "reason", pullErr)
-		} else {
-			slog.Info("Cache hit: pulled devcontainer cache image", "ref", cacheRef)
-			cacheImagePulled = true
-		}
-	}
-	// Only inject cacheFrom if we actually pulled the image.
-	effectiveCacheRef := ""
-	if cacheImagePulled {
-		effectiveCacheRef = cacheRef
-	}
-
+	effectiveCacheRef := resolveEffectiveCacheRef(ctx, cacheRef)
 	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
 	usedFallback := false
 
 	if hasConfig {
-		// Try with repo's own devcontainer config first.
-		// When using a volume, resolve the repo config through `devcontainer
-		// read-configuration` and inject workspaceMount/workspaceFolder into the
-		// merged config so required fields (image/dockerFile/dockerComposeFile)
-		// remain intact.
-		var overridePath string
-		if volumeName != "" {
-			var mountErr error
-			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef)
-			if mountErr != nil {
-				slog.Warn("Failed to prepare repo mount override config, falling back to default image", "error", mountErr)
-				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
-				var fallbackErr error
-				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, mountErr, fallbackOutput)
-				if fallbackErr != nil {
-					return false, fallbackErr
-				}
-			}
-			defer os.Remove(overridePath)
-		} else if credHelperHostPath != "" {
-			// Repo has config but no volume — use a credential-only override.
-			var credErr error
-			overridePath, credErr = writeCredentialOverrideConfig(credHelperHostPath, effectiveCacheRef)
-			if credErr != nil {
-				slog.Warn("Failed to write credential override config", "error", credErr)
-				// Non-fatal: continue without pre-mounted credential helper.
-			}
-			if overridePath != "" {
-				defer os.Remove(overridePath)
-			}
-		} else if effectiveCacheRef != "" {
-			// No volume, no credential helper, but we have a cache ref —
-			// write a cache-only override config.
-			var cacheErr error
-			overridePath, cacheErr = writeCacheOnlyOverrideConfig(effectiveCacheRef)
-			if cacheErr != nil {
-				slog.Warn("Failed to write cache override config", "error", cacheErr)
-			}
-			if overridePath != "" {
-				defer os.Remove(overridePath)
-			}
-		}
-
-		if !usedFallback {
-			args := devcontainerUpArgs(cfg, overridePath, devcontainerConfigName)
-			if cfg.AdditionalFeatures != "" {
-				slog.Info("Repo has its own devcontainer config, skipping additional-features injection")
-			}
-
-			buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
-			cmd := exec.CommandContext(buildCtx, "devcontainer", args...)
-			output, err := cmd.CombinedOutput()
-			buildCancel() // Release timer immediately; fallback uses parent ctx.
-			if err != nil {
-				// Repo config failed — log the error and fall back to default image.
-				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)), "timedOut", buildCtx.Err() == context.DeadlineExceeded)
-				var fallbackErr error
-				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, err, output)
-				if fallbackErr != nil {
-					return false, fallbackErr
-				}
-			}
-		}
-	} else {
-		// No config — use the lightweight default image. Repos without a
-		// devcontainer have nothing project-specific to build, so avoid
-		// devcontainer Features and the slower build path entirely.
-		slog.Info("No repo devcontainer config found; using lightweight default image", "workspaceDir", cfg.WorkspaceDir)
-		buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
-		_, err := runLightweightDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
-		buildCancel()
+		var err error
+		usedFallback, err = startRepoDevcontainerWithFallback(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef)
 		if err != nil {
 			return false, err
 		}
+	} else if err := startDefaultDevcontainerForNoConfig(ctx, cfg, volumeName, credHelperHostPath); err != nil {
+		return false, err
 	}
 
+	if err := ensurePostDevcontainerState(ctx, cfg, volumeName, devcontainerConfigName, usedFallback); err != nil {
+		return false, err
+	}
+	pushDevcontainerCacheAsync(cacheRef, usedFallback, hasConfig, cfg.ContainerLabelKey, cfg.ContainerLabelValue)
+	return usedFallback, nil
+}
+
+func findExistingDevcontainerAndRepair(ctx context.Context, cfg *config.Config, devcontainerConfigName string) (bool, error) {
+	if _, err := findDevcontainerID(ctx, cfg); err != nil {
+		return false, nil
+	}
+	slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
+	ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
+	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func validateNamedDevcontainerConfig(cfg *config.Config, devcontainerConfigName string) error {
+	if devcontainerConfigName == "" {
+		return nil
+	}
+	configPath := namedDevcontainerConfigPath(cfg.WorkspaceDir, devcontainerConfigName)
+	if _, err := os.Stat(configPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("devcontainer config %q not found at %s", devcontainerConfigName, configPath)
+		}
+		return fmt.Errorf("failed to inspect devcontainer config %q at %s: %w", devcontainerConfigName, configPath, err)
+	}
+	return nil
+}
+
+func waitForDevcontainerCLI(ctx context.Context) error {
+	// Cloud-init installs Node.js and devcontainer CLI asynchronously AFTER the
+	// VM Agent starts, so bootstrap can race the CLI installation.
+	if err := waitForCommand(ctx, "devcontainer"); err != nil {
+		return fmt.Errorf("devcontainer CLI never became available: %w", err)
+	}
+	return nil
+}
+
+func resolveEffectiveCacheRef(ctx context.Context, cacheRef string) string {
+	if cacheRef == "" {
+		return ""
+	}
+	if pullErr := cache.PullCacheImage(ctx, cacheRef); pullErr != nil {
+		slog.Info("No cache image available (building from scratch)", "ref", cacheRef, "reason", pullErr)
+		return ""
+	}
+	slog.Info("Cache hit: pulled devcontainer cache image", "ref", cacheRef)
+	return cacheRef
+}
+
+func startRepoDevcontainerWithFallback(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef string) (bool, error) {
+	overridePath, usedFallback, err := prepareRepoDevcontainerOverride(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef)
+	if overridePath != "" {
+		defer os.Remove(overridePath)
+	}
+	if err != nil {
+		return false, err
+	}
+	if usedFallback {
+		return true, nil
+	}
+	return runRepoDevcontainerUp(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, overridePath)
+}
+
+func prepareRepoDevcontainerOverride(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef string) (string, bool, error) {
+	if volumeName != "" {
+		overridePath, mountErr := writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef)
+		if mountErr != nil {
+			slog.Warn("Failed to prepare repo mount override config, falling back to default image", "error", mountErr)
+			fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
+			usedFallback, fallbackErr := fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, mountErr, fallbackOutput)
+			if fallbackErr != nil {
+				return "", false, fallbackErr
+			}
+			return "", usedFallback, nil
+		}
+		return overridePath, false, nil
+	}
+	if credHelperHostPath != "" {
+		overridePath, credErr := writeCredentialOverrideConfig(credHelperHostPath, effectiveCacheRef)
+		if credErr != nil {
+			slog.Warn("Failed to write credential override config", "error", credErr)
+			return "", false, nil
+		}
+		return overridePath, false, nil
+	}
+	if effectiveCacheRef != "" {
+		overridePath, cacheErr := writeCacheOnlyOverrideConfig(effectiveCacheRef)
+		if cacheErr != nil {
+			slog.Warn("Failed to write cache override config", "error", cacheErr)
+			return "", false, nil
+		}
+		return overridePath, false, nil
+	}
+	return "", false, nil
+}
+
+func runRepoDevcontainerUp(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath, devcontainerConfigName, overridePath string) (bool, error) {
+	args := devcontainerUpArgs(cfg, overridePath, devcontainerConfigName)
+	if cfg.AdditionalFeatures != "" {
+		slog.Info("Repo has its own devcontainer config, skipping additional-features injection")
+	}
+
+	buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
+	cmd := exec.CommandContext(buildCtx, "devcontainer", args...)
+	output, err := cmd.CombinedOutput()
+	buildCancel()
+	if err == nil {
+		return false, nil
+	}
+
+	slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)), "timedOut", buildCtx.Err() == context.DeadlineExceeded)
+	return fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, err, output)
+}
+
+func startDefaultDevcontainerForNoConfig(ctx context.Context, cfg *config.Config, volumeName, credHelperHostPath string) error {
+	slog.Info("No repo devcontainer config found; using lightweight default image", "workspaceDir", cfg.WorkspaceDir)
+	buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
+	_, err := runLightweightDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
+	buildCancel()
+	return err
+}
+
+func ensurePostDevcontainerState(ctx context.Context, cfg *config.Config, volumeName, devcontainerConfigName string, usedFallback bool) error {
 	if !usedFallback {
 		clearBuildErrorArtifacts(ctx, cfg, volumeName)
 	}
-
-	// Best-effort async cache push: tag and push the built image in the background.
-	// Only push when the build succeeded with the repo's own config (not fallback).
-	if cacheRef != "" && !usedFallback && hasConfig {
-		labelKey := cfg.ContainerLabelKey
-		labelValue := cfg.ContainerLabelValue
-		go func() {
-			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer pushCancel()
-			if pushErr := cache.PushCacheImage(pushCtx, labelKey, labelValue, cacheRef); pushErr != nil {
-				slog.Warn("Cache image push failed (non-fatal)", "ref", cacheRef, "error", pushErr)
-			}
-		}()
-	}
-
 	ensureContainerUserResolved(ctx, cfg, devcontainerConfigName)
-	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
-		return false, err
+	return ensureWorkspaceOwnership(ctx, cfg)
+}
+
+func pushDevcontainerCacheAsync(cacheRef string, usedFallback, hasConfig bool, labelKey, labelValue string) {
+	if cacheRef == "" || usedFallback || !hasConfig {
+		return
 	}
-	return usedFallback, nil
+	go func() {
+		pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer pushCancel()
+		if pushErr := cache.PushCacheImage(pushCtx, labelKey, labelValue, cacheRef); pushErr != nil {
+			slog.Warn("Cache image push failed (non-fatal)", "ref", cacheRef, "error", pushErr)
+		}
+	}()
 }
 
 // devcontainerBuildContext wraps the parent context with a DevcontainerBuildTimeout deadline.

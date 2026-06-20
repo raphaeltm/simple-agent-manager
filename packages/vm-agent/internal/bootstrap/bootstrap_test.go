@@ -2108,6 +2108,99 @@ func TestPrepareWorkspaceReturnsFallbackFlag(t *testing.T) {
 	}
 }
 
+func TestPrepareWorkspaceLightweightSkipsRepoDevcontainerBuild(t *testing.T) {
+	mockBinDir := t.TempDir()
+	callLog := filepath.Join(t.TempDir(), "devcontainer-calls.log")
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+if [ "$1" = "up" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "--override-config" ]; then
+      exit 0
+    fi
+  done
+  echo "repo build should have been skipped" >&2
+  exit 1
+fi
+exit 0
+`, callLog)
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+
+	workspaceID := "ws-prepare-lightweight"
+	workspaceDir := t.TempDir()
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0o755); err != nil {
+		t.Fatalf("failed to create devcontainer dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(`{"image":"node:20"}`), 0o644); err != nil {
+		t.Fatalf("failed to write devcontainer config: %v", err)
+	}
+
+	readyWorkspaceProfile := ""
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/ready") {
+			var payload struct {
+				WorkspaceProfile string `json:"workspaceProfile"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("failed to decode ready payload: %v", err)
+			}
+			readyWorkspaceProfile = payload.WorkspaceProfile
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer controlPlane.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:               controlPlane.URL,
+		WorkspaceID:                   workspaceID,
+		CallbackToken:                 "cb-token",
+		WorkspaceDir:                  workspaceDir,
+		ContainerMode:                 false,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{Lightweight: true}, nil)
+	if err != nil {
+		t.Fatalf("PrepareWorkspace returned error: %v", err)
+	}
+	if recoveryMode {
+		t.Fatal("expected lightweight startup to report recoveryMode=false")
+	}
+	if readyWorkspaceProfile != "lightweight" {
+		t.Fatalf("expected ready payload workspaceProfile=lightweight, got %q", readyWorkspaceProfile)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("failed to read devcontainer calls: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
+	upCalls := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "up ") {
+			upCalls++
+			if !strings.Contains(line, "--override-config") {
+				t.Fatalf("expected lightweight devcontainer up to use default override config, got %q", line)
+			}
+		}
+	}
+	if upCalls != 1 {
+		t.Fatalf("expected exactly one lightweight devcontainer up call, got %d calls:\n%s", upCalls, string(calls))
+	}
+}
+
 func TestEnsureDevcontainerReadyFallsBackOnRepoConfigFailure(t *testing.T) {
 	// Mock devcontainer CLI that fails on first call (repo config)
 	// but succeeds on second call (default config).
