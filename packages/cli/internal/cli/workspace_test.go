@@ -253,6 +253,74 @@ func TestWorkspaceForwardRejectsInvalidPort(t *testing.T) {
 	}
 }
 
+func TestWorkspaceForwardParsesLocalForwardFlags(t *testing.T) {
+	parsed, err := parseArgs([]string{"workspace", "ws-123", "forward", "--port", "5173", "--local-port", "3000", "--local-host", "127.0.0.1"})
+	if err != nil {
+		t.Fatalf("parseArgs failed: %v", err)
+	}
+	remotePorts, err := parsePortFlags(parsed)
+	if err != nil {
+		t.Fatalf("parsePortFlags failed: %v", err)
+	}
+	localPort, err := parseLocalPortFlag(parsed, remotePorts)
+	if err != nil {
+		t.Fatalf("parseLocalPortFlag failed: %v", err)
+	}
+	localHost, err := parseLocalHostFlag(parsed)
+	if err != nil {
+		t.Fatalf("parseLocalHostFlag failed: %v", err)
+	}
+	if localPort != 3000 {
+		t.Fatalf("local port = %d, want 3000", localPort)
+	}
+	if localHost != "127.0.0.1" {
+		t.Fatalf("local host = %q, want 127.0.0.1", localHost)
+	}
+}
+
+func TestWorkspaceForwardRejectsInvalidLocalForwardFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "local port with multiple remote ports",
+			args: []string{"workspace", "ws-123", "forward", "--port", "5173", "--port", "8080", "--local-port", "3000"},
+			want: "--local-port can only be used",
+		},
+		{
+			name: "invalid local host",
+			args: []string{"workspace", "ws-123", "forward", "--port", "5173", "--local-host", "0.0.0.0"},
+			want: "invalid local host",
+		},
+		{
+			name: "invalid local port",
+			args: []string{"workspace", "ws-123", "forward", "--port", "5173", "--local-port", "70000"},
+			want: "invalid local port",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := parseArgs(tt.args)
+			if err != nil {
+				t.Fatalf("parseArgs failed: %v", err)
+			}
+			remotePorts, err := parsePortFlags(parsed)
+			if err != nil {
+				t.Fatalf("parsePortFlags failed: %v", err)
+			}
+			_, localPortErr := parseLocalPortFlag(parsed, remotePorts)
+			_, localHostErr := parseLocalHostFlag(parsed)
+			combined := fmt.Sprint(localPortErr, localHostErr)
+			if !strings.Contains(combined, tt.want) {
+				t.Fatalf("expected error containing %q, got port=%v host=%v", tt.want, localPortErr, localHostErr)
+			}
+		})
+	}
+}
+
 func TestWorkspaceForwardNoPortsDetected(t *testing.T) {
 	doer := &multiResponseDoer{
 		responses: []orderedResponse{
@@ -505,6 +573,34 @@ func TestClientGetPortTokenSetsAcceptJSON(t *testing.T) {
 	_, _ = client.GetPortToken(context.Background(), "ws-abc", 3000)
 	if captured.Headers.Get("Accept") != "application/json" {
 		t.Fatalf("expected Accept: application/json, got: %s", captured.Headers.Get("Accept"))
+	}
+}
+
+func TestClientCreateLocalForwardSessionContract(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"token":"tok","expiresAt":"2026-06-20T00:00:00Z","workspaceId":"ws-abc","nodeId":"node-1","remotePort":5173,"mode":"http","localAuthority":"localhost:3000","forwardPath":"/api/workspaces/ws-abc/local-forward/5173"}`, http.StatusOK)
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com", SessionCookie: "test"}, doer)
+
+	resp, err := client.CreateLocalForwardSession(context.Background(), "ws-abc", LocalForwardSessionRequest{
+		RemotePort:     5173,
+		Mode:           "http",
+		LocalAuthority: "localhost:3000",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if captured.Method != http.MethodPost {
+		t.Fatalf("method = %s, want POST", captured.Method)
+	}
+	if captured.URL != "https://api.example.com/api/workspaces/ws-abc/forwards" {
+		t.Fatalf("unexpected URL: %s", captured.URL)
+	}
+	if captured.JSON["remotePort"] != float64(5173) ||
+		captured.JSON["mode"] != "http" ||
+		captured.JSON["localAuthority"] != "localhost:3000" {
+		t.Fatalf("unexpected request JSON: %+v", captured.JSON)
+	}
+	if resp.Token != "tok" || resp.RemotePort != 5173 || resp.LocalAuthority != "localhost:3000" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 
