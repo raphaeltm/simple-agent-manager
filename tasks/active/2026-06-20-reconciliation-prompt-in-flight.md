@@ -38,6 +38,7 @@ The fix must distinguish an idle/ready agent from an agent that is still prompti
 - `pnpm typecheck` passed.
 - `pnpm test` passed.
 - `pnpm build` passed.
+- `pnpm --filter @simple-agent-manager/www build` passed after updating the public configuration reference.
 
 ## Acceptance Criteria
 

@@ -171,6 +171,10 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `TASK_CALLBACK_TIMEOUT_MS`         | `10000`            | Callback response timeout                  |
 | `TASK_CALLBACK_RETRY_MAX_ATTEMPTS` | `3`                | Max callback retry attempts                |
 | `TASK_RUN_CLEANUP_DELAY_MS`        | `5000`             | Delay before task cleanup                  |
+| `TASK_RECONCILIATION_IDLE_MS`      | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in |
+| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS` | `60000` (1 min) | Response deadline after a visible task check-in |
+| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
+| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` | `7200000` (2 hr) | In-flight prompt hard-stall threshold before SAM requests prompt cancellation |
 
 ## Node & Workspace Readiness
 
