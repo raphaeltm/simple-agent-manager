@@ -676,6 +676,19 @@ describe('Task Reconciliation Module', () => {
       expect(time!).toBeGreaterThanOrEqual(now + 10_000);
     });
 
+    it('uses configurable minimum alarm delay from env', () => {
+      setupTaskSession({ lastActivityAt: now - 10 * 60 * 1000 });
+      const customDelayMs = 30_000;
+      const env = {
+        DATABASE: createMockD1(),
+        TASK_RECONCILIATION_MIN_ALARM_DELAY_MS: String(customDelayMs),
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+
+      const time = computeReconciliationAlarmTime(sql, env);
+
+      expect(time).toBe(now + customDelayMs);
+    });
+
     it('excludes sessions with active markers from alarm calculation', () => {
       setupTaskSession();
       createAttentionMarker(sql, {

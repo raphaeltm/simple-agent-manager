@@ -307,6 +307,7 @@ export interface Env {
   TASK_RECONCILIATION_RESPONSE_DEADLINE_MS?: string; // Response deadline after check-in (default: 60000 = 1 minute)
   TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS?: string; // In-flight prompt observation threshold (default: 1800000 = 30 minutes)
   TASK_RECONCILIATION_PROMPT_HARD_STALL_MS?: string; // In-flight prompt cancel threshold (default: 7200000 = 2 hours)
+  TASK_RECONCILIATION_MIN_ALARM_DELAY_MS?: string; // Minimum reconciliation alarm delay (default: 10000 = 10 seconds)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string;                 // Ack timeout before re-delivery (default: 300000)
   MAILBOX_REDELIVERY_MAX_ATTEMPTS?: string;        // Max delivery attempts before expiry (default: 5)

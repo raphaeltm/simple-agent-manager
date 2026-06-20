@@ -39,6 +39,12 @@ The fix must distinguish an idle/ready agent from an agent that is still prompti
 - `pnpm test` passed.
 - `pnpm build` passed.
 - `pnpm --filter @simple-agent-manager/www build` passed after updating the public configuration reference.
+- After adding `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`, `pnpm --filter @simple-agent-manager/shared build` completed so focused API tests used the latest shared constant export.
+- Final focused reconciliation/session-state unit tests passed after the minimum alarm delay change.
+- Final `pnpm typecheck` passed.
+- Final `pnpm lint` passed with existing warnings only.
+- Final `pnpm test` passed.
+- Final `pnpm build` passed with existing build warnings only.
 
 ## Acceptance Criteria
 

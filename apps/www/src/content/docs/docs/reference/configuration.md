@@ -175,6 +175,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS` | `60000` (1 min) | Response deadline after a visible task check-in |
 | `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
 | `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` | `7200000` (2 hr) | In-flight prompt hard-stall threshold before SAM requests prompt cancellation |
+| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` | `10000` (10 sec) | Minimum delay before the next reconciliation alarm can fire |
 
 ## Node & Workspace Readiness
 

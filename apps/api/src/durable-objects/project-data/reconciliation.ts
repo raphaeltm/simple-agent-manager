@@ -14,6 +14,7 @@
  */
 import {
   DEFAULT_TASK_RECONCILIATION_IDLE_MS,
+  DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
   DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
@@ -29,7 +30,6 @@ import { upsertActivityState } from './session-state';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('reconciliation');
-const MIN_RECONCILIATION_ALARM_DELAY_MS = 10 * 1000;
 
 /** The check-in prompt sent to the agent. */
 const CHECKIN_PROMPT =
@@ -98,6 +98,14 @@ function promptHardStallMs(env: DOEnv): number {
     DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS,
   );
   return Math.max(hardMs, softMs);
+}
+
+function minReconciliationAlarmDelayMs(env: DOEnv): number {
+  return envNumber(
+    env,
+    'TASK_RECONCILIATION_MIN_ALARM_DELAY_MS',
+    DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
+  );
 }
 
 /**
@@ -509,6 +517,7 @@ export function computeReconciliationAlarmTime(
   const idleThresholdMs = reconciliationIdleMs(env);
   const softPromptMs = promptSoftStallMs(env);
   const hardPromptMs = promptHardStallMs(env);
+  const minAlarmDelayMs = minReconciliationAlarmDelayMs(env);
 
   // Find the earliest activity among active task-linked sessions that don't
   // have an active reconciliation or needs_input marker. Join active ACP
@@ -574,6 +583,6 @@ export function computeReconciliationAlarmTime(
 
   if (nextCheck === null) return null;
 
-  // Ensure we don't schedule in the past — at minimum 10s in the future
-  return Math.max(nextCheck, now + MIN_RECONCILIATION_ALARM_DELAY_MS);
+  // Ensure we don't schedule in the past.
+  return Math.max(nextCheck, now + minAlarmDelayMs);
 }

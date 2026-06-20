@@ -23,3 +23,6 @@ export const DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS = 30 * 60 * 1000; 
  * treats the prompt as hard-stalled and requests cancellation.
  */
 export const DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/** Minimum delay before the next reconciliation alarm is allowed to fire. */
+export const DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS = 10 * 1000; // 10 seconds
