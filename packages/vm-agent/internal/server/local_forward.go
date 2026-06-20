@@ -51,12 +51,7 @@ func (s *Server) handleWorkspaceLocalForward(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	forwardPath := r.PathValue("path")
-	if forwardPath == "" {
-		forwardPath = "/"
-	} else if forwardPath[0] != '/' {
-		forwardPath = "/" + forwardPath
-	}
+	escapedForwardPath := localForwardEscapedPath(r, workspaceID, portValue)
 
 	targetURL := fmt.Sprintf("http://%s:%d", targetHost, port)
 	slog.Info("Local forward proxying",
@@ -64,7 +59,7 @@ func (s *Server) handleWorkspaceLocalForward(w http.ResponseWriter, r *http.Requ
 		"port", port,
 		"target", targetURL,
 		"localAuthority", claims.LocalAuthority)
-	s.serveLocalForwardProxy(w, r, targetURL, forwardPath, claims.LocalAuthority)
+	s.serveLocalForwardProxy(w, r, targetURL, escapedForwardPath, claims.LocalAuthority)
 }
 
 func (s *Server) resolveWorkspaceBridgeIP(workspaceID string) (string, error) {
@@ -86,7 +81,27 @@ func (s *Server) resolveWorkspaceBridgeIP(workspaceID string) (string, error) {
 	return bridgeIP, nil
 }
 
-func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, targetURLStr string, forwardPath string, localAuthority string) {
+func localForwardEscapedPath(r *http.Request, workspaceID string, portValue string) string {
+	prefix := "/workspaces/" + url.PathEscape(workspaceID) + "/local-forward/" + url.PathEscape(portValue)
+	escapedPath := r.URL.EscapedPath()
+	if escapedPath == prefix {
+		return "/"
+	}
+	if strings.HasPrefix(escapedPath, prefix+"/") {
+		return escapedPath[len(prefix):]
+	}
+
+	forwardPath := r.PathValue("path")
+	if forwardPath == "" {
+		return "/"
+	}
+	if forwardPath[0] != '/' {
+		forwardPath = "/" + forwardPath
+	}
+	return (&url.URL{Path: forwardPath}).EscapedPath()
+}
+
+func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, targetURLStr string, escapedForwardPath string, localAuthority string) {
 	targetURL, err := url.Parse(targetURLStr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to build local forward target")
@@ -96,8 +111,7 @@ func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, 
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(targetURL)
-			pr.Out.URL.Path = forwardPath
-			pr.Out.URL.RawPath = ""
+			setEscapedLocalForwardPath(pr.Out.URL, escapedForwardPath)
 			pr.Out.Host = localAuthority
 			stripLocalForwardRequestHeaders(pr.Out.Header)
 			pr.Out.Header.Set("Host", localAuthority)
@@ -111,6 +125,21 @@ func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, 
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+func setEscapedLocalForwardPath(u *url.URL, escapedPath string) {
+	path, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		u.Path = escapedPath
+		u.RawPath = ""
+		return
+	}
+	u.Path = path
+	if (&url.URL{Path: path}).EscapedPath() == escapedPath {
+		u.RawPath = ""
+		return
+	}
+	u.RawPath = escapedPath
 }
 
 func stripLocalForwardRequestHeaders(headers http.Header) {

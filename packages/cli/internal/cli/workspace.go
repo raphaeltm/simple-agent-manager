@@ -267,8 +267,7 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, w
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
-			req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
-			req.URL.RawPath = ""
+			setEscapedURLPath(req.URL, singleJoiningSlash(target.EscapedPath(), req.URL.EscapedPath()))
 			req.Host = target.Host
 
 			stripProxyRequestHeaders(req.Header)
@@ -395,6 +394,21 @@ func singleJoiningSlash(a string, b string) string {
 	default:
 		return a + b
 	}
+}
+
+func setEscapedURLPath(u *url.URL, escapedPath string) {
+	path, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		u.Path = escapedPath
+		u.RawPath = ""
+		return
+	}
+	u.Path = path
+	if (&url.URL{Path: path}).EscapedPath() == escapedPath {
+		u.RawPath = ""
+		return
+	}
+	u.RawPath = escapedPath
 }
 
 func stripProxyRequestHeaders(headers http.Header) {

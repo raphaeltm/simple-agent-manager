@@ -72,6 +72,47 @@ func TestLocalForwardProxyPreservesAppHeadersAndLocalhostAuthority(t *testing.T)
 	}
 }
 
+func TestLocalForwardEscapedPathPreservesEncodedSegments(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "https://node.example.com/workspaces/ws-1/local-forward/5173/a%2Fb/c?x=a%2Fb", nil)
+
+	if got := localForwardEscapedPath(req, "ws-1", "5173"); got != "/a%2Fb/c" {
+		t.Fatalf("escaped forward path = %q, want /a%%2Fb/c", got)
+	}
+}
+
+func TestLocalForwardProxyPreservesEscapedPathSegments(t *testing.T) {
+	t.Parallel()
+
+	requestURIs := make(chan string, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURIs <- r.RequestURI
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	s := &Server{config: &config.Config{ControlPlaneURL: "https://api.example.com"}}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "https://node.example.com/workspaces/ws-1/local-forward/5173/ignored?x=a%2Fb", nil)
+
+	s.serveLocalForwardProxy(rr, req, backend.URL, "/app/a%2Fb/c", "localhost:5173")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+
+	select {
+	case got := <-requestURIs:
+		want := "/app/a%2Fb/c?x=a%2Fb"
+		if got != want {
+			t.Fatalf("backend RequestURI = %q, want %q", got, want)
+		}
+	default:
+		t.Fatal("backend did not receive proxied request")
+	}
+}
+
 func TestStripLocalForwardRequestHeadersRemovesConnectionListedHeaders(t *testing.T) {
 	t.Parallel()
 

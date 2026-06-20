@@ -771,6 +771,52 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	}
 }
 
+func TestAcceptConnectionsPreservesEscapedPathSegments(t *testing.T) {
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(`{"token":"test-forward-token","expiresAt":"2026-06-20T00:00:00Z","remotePort":3000,"mode":"http","localAuthority":"127.0.0.1:3000"}`, http.StatusOK), nil
+	})
+
+	remoteRequestURIs := make(chan string, 1)
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		remoteRequestURIs <- r.RequestURI
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer remote.Close()
+	client := NewAPIClient(CLIConfig{APIURL: remote.URL, SessionCookie: "test"}, doer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runtime := Runtime{Stderr: io.Discard}
+	go acceptConnections(ctx, runtime, client, "ws-test", 3000, "127.0.0.1", port, ln, remote.URL+"/api/workspaces/ws-test/local-forward/3000")
+	time.Sleep(50 * time.Millisecond)
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/a%%2Fb/c?client_query=a%%2Fb", port))
+	if err != nil {
+		t.Fatalf("failed to connect to proxy: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from proxy, got %d", resp.StatusCode)
+	}
+
+	select {
+	case got := <-remoteRequestURIs:
+		want := "/api/workspaces/ws-test/local-forward/3000/a%2Fb/c?client_query=a%2Fb"
+		if got != want {
+			t.Fatalf("proxied RequestURI = %q, want %q", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("remote server did not receive proxied request")
+	}
+}
+
 func TestAllowedLocalForwardHostRequiresExactAuthority(t *testing.T) {
 	tests := []struct {
 		name      string
