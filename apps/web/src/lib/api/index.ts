@@ -1,6 +1,7 @@
 export type {
   AdminErrorsFilter,
   AdminLogQueryParams,
+  AdminTrialsConfigResponse,
   AIProxyConfigResponse,
   BillingMode,
   CostByModel,
@@ -40,6 +41,7 @@ export {
   fetchAdminErrorTrends,
   fetchAdminHealth,
   fetchAdminNodeUsage,
+  fetchAdminTrialsConfig,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,
   fetchAdminUserQuota,
@@ -61,6 +63,7 @@ export {
   removeAdminUserQuota,
   resetAIProxyConfig,
   updateAdminDefaultQuota,
+  updateAdminTrialsConfig,
   updateAdminUserQuota,
   updateAIProxyBillingMode,
   updateAIProxyConfig,

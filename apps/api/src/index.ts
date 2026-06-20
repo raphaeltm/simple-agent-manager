@@ -43,6 +43,7 @@ import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-b
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
+import { adminTrialsRoutes } from './routes/admin-trials';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
@@ -602,6 +603,7 @@ app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/analytics/ai-usage', adminAiUsageRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
+app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);

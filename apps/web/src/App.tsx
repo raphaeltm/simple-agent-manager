@@ -20,6 +20,7 @@ import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
 import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
 import { AdminStream } from './pages/AdminStream';
+import { AdminTrials } from './pages/AdminTrials';
 import { AdminUsers } from './pages/AdminUsers';
 import { AgentContextPage } from './pages/AgentContextPage';
 import { Chats } from './pages/Chats';
@@ -152,6 +153,7 @@ export default function App() {
                     <Route path="users" element={<AdminUsers />} />
                     <Route path="credentials" element={<AdminPlatformCredentials />} />
                     <Route path="ai-proxy" element={<AdminAIProxy />} />
+                    <Route path="trials" element={<AdminTrials />} />
                     <Route path="costs" element={<AdminCosts />} />
                     <Route path="usage" element={<AdminComputeUsage />} />
                     <Route path="quotas" element={<AdminComputeQuotas />} />

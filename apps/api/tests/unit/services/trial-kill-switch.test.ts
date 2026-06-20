@@ -10,6 +10,7 @@
  *   - KV read errors → fails CLOSED (disabled)
  *   - Custom KV key via env.TRIALS_ENABLED_KV_KEY
  *   - Custom TTL via env.TRIAL_KILL_SWITCH_CACHE_MS
+ *   - Admin writes update KV and the in-memory cache
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,10 +30,15 @@ import type { Env } from '../../../src/env';
 import {
   __resetKillSwitchCacheForTest,
   isTrialsEnabled,
+  resolveTrialKillSwitchCacheMs,
+  setTrialsEnabled,
 } from '../../../src/services/trial/kill-switch';
 
 function makeEnv(
-  kv: { get: (key: string) => Promise<string | null> },
+  kv: {
+    get: (key: string) => Promise<string | null>;
+    put?: (key: string, value: string) => Promise<void>;
+  },
   overrides: Partial<Env> = {}
 ): Env {
   return {
@@ -127,5 +133,43 @@ describe('trial kill-switch', () => {
     // Past 1s TTL → re-read
     expect(await isTrialsEnabled(env, 1_500)).toBe(false);
     expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the default TTL when env.TRIAL_KILL_SWITCH_CACHE_MS is invalid', () => {
+    const env = makeEnv({ get: vi.fn() }, {
+      TRIAL_KILL_SWITCH_CACHE_MS: 'not-a-number',
+    } as unknown as Partial<Env>);
+
+    expect(resolveTrialKillSwitchCacheMs(env)).toBe(30_000);
+  });
+
+  it('writes the admin-selected state and updates the read cache immediately', async () => {
+    const get = vi.fn().mockResolvedValue('false');
+    const put = vi.fn().mockResolvedValue(undefined);
+    const env = makeEnv({ get, put });
+
+    const updated = await setTrialsEnabled(env, true, 0);
+
+    expect(updated).toEqual({
+      enabled: true,
+      kvKey: 'trials:enabled',
+      cacheTtlMs: 30_000,
+    });
+    expect(put).toHaveBeenCalledWith('trials:enabled', 'true');
+
+    expect(await isTrialsEnabled(env, 1_000)).toBe(true);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('writes false for disabled and honours a custom admin KV key', async () => {
+    const put = vi.fn().mockResolvedValue(undefined);
+    const env = makeEnv({ get: vi.fn(), put }, {
+      TRIALS_ENABLED_KV_KEY: 'custom:trial-flag',
+    } as unknown as Partial<Env>);
+
+    await setTrialsEnabled(env, false, 0);
+
+    expect(put).toHaveBeenCalledWith('custom:trial-flag', 'false');
+    expect(await isTrialsEnabled(env, 1_000)).toBe(false);
   });
 });
