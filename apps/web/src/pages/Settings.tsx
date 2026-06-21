@@ -10,6 +10,7 @@ const BASE_TABS = [
   { id: 'cloud-provider', label: 'Cloud Provider', path: 'cloud-provider' },
   { id: 'github', label: 'GitHub', path: 'github' },
   { id: 'connections', label: 'Connections', path: 'connections' },
+  { id: 'agents', label: 'Agents', path: 'agents' },
   { id: 'advanced', label: 'Advanced', path: 'advanced' },
   { id: 'notifications', label: 'Notifications', path: 'notifications' },
   { id: 'usage', label: 'Usage', path: 'usage' },

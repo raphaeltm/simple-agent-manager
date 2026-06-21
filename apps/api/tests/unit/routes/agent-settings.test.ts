@@ -88,6 +88,27 @@ describe('Agent Settings Routes', () => {
     return app.request(`/api/agent-settings/${agentType}`, { method: 'DELETE' }, bindings());
   }
 
+  function queueSavedOpenCodeSettings(provider: string, model: string | null): void {
+    mockDB.limit.mockResolvedValueOnce([]);
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'test-ulid',
+        userId: 'test-user-id',
+        agentType: 'opencode',
+        model,
+        permissionMode: null,
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider: provider,
+        opencodeBaseUrl: null,
+        opencodeProviderName: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+  }
+
   describe('GET /api/agent-settings/:agentType', () => {
     it('should return default empty settings when no row exists', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
@@ -388,64 +409,20 @@ describe('Agent Settings Routes', () => {
       expect(body.message).toContain('HTTPS');
     });
 
-    it('should accept scaleway provider without opencodeBaseUrl', async () => {
-      mockDB.limit.mockResolvedValueOnce([]);
-      mockDB.limit.mockResolvedValueOnce([
-        {
-          id: 'test-ulid',
-          userId: 'test-user-id',
-          agentType: 'opencode',
-          model: null,
-          permissionMode: null,
-          allowedTools: null,
-          deniedTools: null,
-          additionalEnv: null,
-          opencodeProvider: 'scaleway',
-          opencodeBaseUrl: null,
-          opencodeProviderName: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ]);
+    it.each([
+      { label: 'scaleway', provider: 'scaleway', model: null },
+      { label: 'OpenCode Zen', provider: 'opencode-zen', model: 'opencode/claude-sonnet-4-6' },
+      { label: 'OpenCode Go', provider: 'opencode-go', model: 'opencode-go/glm-5.2' },
+    ])('should accept $label provider without opencodeBaseUrl', async ({ provider, model }) => {
+      queueSavedOpenCodeSettings(provider, model);
 
-      const res = await putSettings('opencode', { opencodeProvider: 'scaleway' });
+      const res = await putSettings('opencode', { opencodeProvider: provider, model });
 
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.opencodeProvider).toBe('scaleway');
+      expect(body.opencodeProvider).toBe(provider);
       expect(body.opencodeBaseUrl).toBeNull();
-    });
-
-    it('should accept OpenCode Zen provider without opencodeBaseUrl', async () => {
-      mockDB.limit.mockResolvedValueOnce([]);
-      mockDB.limit.mockResolvedValueOnce([
-        {
-          id: 'test-ulid',
-          userId: 'test-user-id',
-          agentType: 'opencode',
-          model: 'opencode/claude-sonnet-4-6',
-          permissionMode: null,
-          allowedTools: null,
-          deniedTools: null,
-          additionalEnv: null,
-          opencodeProvider: 'opencode-zen',
-          opencodeBaseUrl: null,
-          opencodeProviderName: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ]);
-
-      const res = await putSettings('opencode', {
-        opencodeProvider: 'opencode-zen',
-        model: 'opencode/claude-sonnet-4-6',
-      });
-
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.opencodeProvider).toBe('opencode-zen');
-      expect(body.opencodeBaseUrl).toBeNull();
-      expect(body.model).toBe('opencode/claude-sonnet-4-6');
+      expect(body.model).toBe(model);
     });
 
     it('should accept custom provider with valid HTTPS base URL', async () => {

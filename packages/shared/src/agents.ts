@@ -136,14 +136,14 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
   {
     id: 'opencode',
     name: 'OpenCode',
-    description: 'Open-source AI coding agent by SST. Uses OpenCode Zen for inference.',
+    description: 'Open-source AI coding agent by SST. Uses OpenCode managed inference.',
     provider: 'opencode',
     envVarName: 'OPENCODE_API_KEY',
     acpCommand: 'opencode',
     acpArgs: ['acp'],
     supportsAcp: true,
     credentialHelpUrl: 'https://opencode.ai/auth',
-    installCommand: 'npm install -g opencode-ai@1.4.3',
+    installCommand: 'npm install -g opencode-ai@1.17.8',
   },
   {
     id: 'amp',

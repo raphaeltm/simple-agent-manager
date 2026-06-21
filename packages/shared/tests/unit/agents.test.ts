@@ -1,4 +1,4 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   AGENT_CATALOG,
@@ -30,7 +30,7 @@ describe('AGENT_CATALOG', () => {
     expect(opencode).toBeDefined();
     expect(opencode!.name).toBe('OpenCode');
     expect(opencode!.description).toBe(
-      'Open-source AI coding agent by SST. Uses OpenCode Zen for inference.'
+      'Open-source AI coding agent by SST. Uses OpenCode managed inference.'
     );
     expect(opencode!.provider).toBe('opencode');
     expect(opencode!.envVarName).toBe('OPENCODE_API_KEY');
@@ -39,7 +39,7 @@ describe('AGENT_CATALOG', () => {
     expect(opencode!.supportsAcp).toBe(true);
     expect(opencode!.credentialHelpUrl).toBe('https://opencode.ai/auth');
     expect(opencode!.fallbackCloudProvider).toBeUndefined();
-    expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.3');
+    expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.17.8');
   });
 
   it('includes Gemini CLI as a supported ACP agent', () => {

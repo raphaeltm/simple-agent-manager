@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_OPENCODE_GO_MODEL,
   DEFAULT_OPENCODE_PROVIDER,
   DEFAULT_OPENCODE_ZEN_MODEL,
   OPENCODE_PROVIDER_OPTIONS,
@@ -9,9 +10,10 @@ import {
 } from '../../src/types/agent-settings';
 
 describe('OpenCode provider settings', () => {
-  it('includes OpenCode Zen provider metadata first in dropdown order', () => {
+  it('includes OpenCode managed provider metadata first in dropdown order', () => {
     expect(OPENCODE_PROVIDER_OPTIONS).toEqual([
       'opencode-zen',
+      'opencode-go',
       'platform',
       'scaleway',
       'google-vertex',
@@ -25,7 +27,15 @@ describe('OpenCode provider settings', () => {
       modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
       requiresBaseUrl: false,
       requiresApiKey: true,
-      keyLabel: 'OpenCode Zen API Key',
+      keyLabel: 'OpenCode API Key',
+    });
+
+    expect(OPENCODE_PROVIDERS['opencode-go']).toMatchObject({
+      label: 'OpenCode Go',
+      modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_GO_MODEL}`,
+      requiresBaseUrl: false,
+      requiresApiKey: true,
+      keyLabel: 'OpenCode API Key',
     });
   });
 
@@ -35,6 +45,7 @@ describe('OpenCode provider settings', () => {
     expect(resolveOpenCodeProvider(undefined)).toBe('opencode-zen');
     expect(resolveOpenCodeProvider('not-a-provider')).toBe('opencode-zen');
     expect(resolveOpenCodeProvider('opencode-managed')).toBe('opencode-zen');
+    expect(resolveOpenCodeProvider('opencode-go')).toBe('opencode-go');
     expect(resolveOpenCodeProvider('scaleway')).toBe('scaleway');
   });
 });
