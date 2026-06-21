@@ -152,6 +152,7 @@ export async function provisionNode(
   }
 
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+  let attemptedProvider = targetProvider;
 
   try {
     const providerResult = await createProviderForUser(db, node.userId, getCredentialEncryptionKey(env), env, targetProvider);
@@ -162,14 +163,18 @@ export async function provisionNode(
           : 'Cloud provider account not connected',
       );
     }
+    attemptedProvider = providerResult.providerName;
 
-    // Track credential source on the node record
-    if (providerResult.credentialSource === 'platform') {
-      await db
-        .update(schema.nodes)
-        .set({ credentialSource: 'platform' })
-        .where(eq(schema.nodes.id, node.id));
-    }
+    // Persist the resolved provider identity before external provisioning so
+    // cleanup never has to guess which third-party API owns the VM.
+    await db
+      .update(schema.nodes)
+      .set({
+        cloudProvider: providerResult.providerName,
+        credentialSource: providerResult.credentialSource,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.nodes.id, node.id));
 
     const callbackToken = await signNodeCallbackToken(node.id, env);
 
@@ -181,7 +186,7 @@ export async function provisionNode(
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
       callbackToken,
-      provider: targetProvider,
+      provider: providerResult.providerName,
       logJournalMaxUse: env.LOG_JOURNAL_MAX_USE,
       logJournalKeepFree: env.LOG_JOURNAL_KEEP_FREE,
       logJournalMaxRetention: env.LOG_JOURNAL_MAX_RETENTION,
@@ -208,7 +213,7 @@ export async function provisionNode(
     const provider = providerResult.provider;
 
     const baseImageOverride = resolveHetznerBaseImageOverride(
-      targetProvider,
+      providerResult.providerName,
       env.HETZNER_BASE_IMAGE,
     );
 
@@ -236,6 +241,8 @@ export async function provisionNode(
       await db
         .update(schema.nodes)
         .set({
+          cloudProvider: providerResult.providerName,
+          credentialSource: providerResult.credentialSource,
           providerInstanceId: vm.id,
           status: 'creating',
           errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
@@ -259,6 +266,8 @@ export async function provisionNode(
     await db
       .update(schema.nodes)
       .set({
+        cloudProvider: providerResult.providerName,
+        credentialSource: providerResult.credentialSource,
         providerInstanceId: vm.id,
         ipAddress: vm.ip,
         backendDnsRecordId,
@@ -272,7 +281,7 @@ export async function provisionNode(
     const errorMessage = err instanceof GcpApiError
       ? sanitizeGcpError(err, 'node-provisioning')
       : (err instanceof Error ? err.message : String(err));
-    const providerName = targetProvider ?? 'unknown';
+    const providerName = attemptedProvider ?? 'unknown';
     const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
 
     log.error('node_provisioning.failed', {
@@ -469,4 +478,86 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
       eq(schema.workspaces.nodeId, nodeId),
       eq(schema.workspaces.userId, userId)
     ));
+}
+
+/**
+ * Strict node teardown for cleanup paths where hiding a failed cloud delete is
+ * worse than surfacing a stale D1 row. Unlike deleteNodeResources(), this does
+ * not cascade workspace status; callers must update workspace rows only after
+ * external resources have actually been removed.
+ */
+export async function deleteNodeResourcesStrict(nodeId: string, userId: string, env: Env): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+
+  const rows = await db
+    .select()
+    .from(schema.nodes)
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const node = rows[0];
+  if (!node) {
+    throw new Error(`Node ${nodeId} not found for strict deletion`);
+  }
+
+  if (node.providerInstanceId) {
+    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+    const providerResult = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
+    if (!providerResult) {
+      throw new Error(
+        `Cloud provider credentials missing for strict node deletion: node=${nodeId} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
+      );
+    }
+
+    if (!targetProvider) {
+      const vm = await providerResult.provider.getVM(node.providerInstanceId);
+      if (!vm) {
+        throw new Error(
+          `Cannot strictly delete node ${nodeId}: provider ${providerResult.providerName} does not contain VM ${node.providerInstanceId}`
+        );
+      }
+    }
+
+    await db
+      .update(schema.nodes)
+      .set({
+        cloudProvider: providerResult.providerName,
+        credentialSource: providerResult.credentialSource,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.nodes.id, node.id));
+
+    await providerResult.provider.deleteVM(node.providerInstanceId);
+  }
+
+  if (node.backendDnsRecordId) {
+    try {
+      await deleteDNSRecord(node.backendDnsRecordId, env);
+    } catch (err) {
+      log.error('node_delete.strict_dns_cleanup_failed', { nodeId, ...serializeError(err) });
+      try {
+        await persistError(env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: `Strict node DNS cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            component: 'node-deletion',
+            recoveryType: 'strict_node_dns_cleanup_failure',
+            nodeId,
+            backendDnsRecordId: node.backendDnsRecordId,
+          },
+          nodeId,
+          userId,
+        });
+      } catch (obsErr) {
+        log.error('node_delete.strict_dns_observability_failed', { nodeId, ...serializeError(obsErr) });
+      }
+    }
+  }
 }

@@ -388,6 +388,29 @@ export async function resetAIProxyConfig(): Promise<{
 }
 
 // =============================================================================
+// Admin Trials Config
+// =============================================================================
+
+export interface AdminTrialsConfigResponse {
+  enabled: boolean;
+  kvKey: string;
+  cacheTtlMs: number;
+}
+
+export async function fetchAdminTrialsConfig(): Promise<AdminTrialsConfigResponse> {
+  return request<AdminTrialsConfigResponse>('/api/admin/trials/config');
+}
+
+export async function updateAdminTrialsConfig(
+  enabled: boolean,
+): Promise<AdminTrialsConfigResponse> {
+  return request<AdminTrialsConfigResponse>('/api/admin/trials/config', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// =============================================================================
 // Admin Platform Credentials
 // =============================================================================
 

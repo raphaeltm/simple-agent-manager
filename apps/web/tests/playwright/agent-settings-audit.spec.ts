@@ -278,6 +278,14 @@ test.describe('Unified Agent Cards — Mobile', () => {
     const providerSelect = page.getByTestId('opencode-provider-select');
     await expect(providerSelect).toBeVisible();
     await expect(providerSelect).toHaveValue('');
+    const providerOptions = await providerSelect.evaluate((el) =>
+      Array.from((el as HTMLSelectElement).options).map((option) => ({
+        value: option.value,
+        text: option.textContent ?? '',
+      }))
+    );
+    expect(providerOptions[0]).toEqual({ value: '', text: 'Default (OpenCode Zen)' });
+    expect(providerOptions.map((option) => option.value)).toContain('opencode-go');
 
     // Model is a text input when no platform provider is selected
     const modelInput = page.getByTestId('model-input-opencode');
@@ -679,6 +687,26 @@ test.describe('Unified Agent Cards — Mobile', () => {
     // Provider name NOT shown (only for 'custom')
     await expect(page.getByTestId('opencode-provider-name-input')).not.toBeVisible();
   });
+
+  test('OpenCode Go provider: keeps model as text input with GLM 5.2 placeholder', async ({ page }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_OPENCODE],
+      settingsMap: {
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
+      },
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-opencode"]');
+    await takeScreenshot(page, 'agent-settings-mobile-opencode-go-provider');
+    await assertNoOverflow(page);
+
+    await expect(page.getByTestId('opencode-provider-select')).toHaveValue('opencode-go');
+    const modelInput = page.getByTestId('model-input-opencode');
+    await expect(modelInput).toBeVisible();
+    await expect(modelInput).toHaveAttribute('placeholder', 'e.g. opencode-go/glm-5.2');
+    const tagName = await modelInput.evaluate((el) => el.tagName.toLowerCase());
+    expect(tagName).toBe('input');
+  });
 });
 
 // ===========================================================================
@@ -706,7 +734,7 @@ test.describe('Unified Agent Cards — Desktop', () => {
   });
 
   test('all providers: layout holds on desktop for each provider', async ({ page }) => {
-    const providers = ['platform', 'scaleway', 'google-vertex', 'anthropic', 'custom', 'openai-compatible'];
+    const providers = ['opencode-go', 'platform', 'scaleway', 'google-vertex', 'anthropic', 'custom', 'openai-compatible'];
     for (const provider of providers) {
       await setupApiMocks(page, {
         agents: [MOCK_AGENT_OPENCODE],

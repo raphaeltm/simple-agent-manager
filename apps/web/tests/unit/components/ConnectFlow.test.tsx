@@ -52,11 +52,11 @@ describe('ConnectFlow', () => {
     expect(screen.getByLabelText(/API Key/i)).toBeInTheDocument();
   });
 
-  it('labels the default OpenCode credential as an OpenCode Zen API key', () => {
+  it('labels the OpenCode credential as a generic OpenCode API key', () => {
     renderFlow({ initialAgentId: 'opencode' });
 
-    expect(screen.getByLabelText('OpenCode Zen API Key')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'OpenCode Zen' })).toHaveAttribute(
+    expect(screen.getByLabelText('OpenCode API Key')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'OpenCode' })).toHaveAttribute(
       'href',
       'https://opencode.ai/auth'
     );

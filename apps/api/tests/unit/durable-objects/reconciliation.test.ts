@@ -289,6 +289,8 @@ describe('Task Reconciliation Module', () => {
       const msg = messages[0] as Record<string, unknown>;
       expect(msg.role).toBe('user');
       expect(msg.content).toContain('SAM Orchestrator Check-In');
+      expect(msg.content).toContain('continue working from where you left off');
+      expect(msg.content).toContain('Do not stop after the update');
       expect(msg.content).toContain('complete_task()');
 
       // Check metadata
@@ -410,7 +412,7 @@ describe('Task Reconciliation Module', () => {
         'node-1',
         'ws-1',
         'acp-1',
-        expect.stringContaining('SAM Orchestrator Check-In'),
+        expect.stringContaining('continue working from where you left off'),
         expect.anything(),
         'user-1',
       );

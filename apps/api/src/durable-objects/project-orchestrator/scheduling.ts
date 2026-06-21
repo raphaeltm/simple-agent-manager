@@ -6,6 +6,8 @@
  * log decisions.
  */
 import type { DecisionAction } from '@simple-agent-manager/shared';
+import type { HandoffFact } from '@simple-agent-manager/shared';
+import type { HandoffPacket } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
 import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import {
@@ -32,6 +34,17 @@ interface TaskRow {
   scheduler_state: string | null;
   mission_id: string | null;
   updated_at: string;
+}
+
+type RoutableHandoff = Pick<
+  HandoffPacket,
+  'id' | 'summary' | 'facts' | 'openQuestions' | 'suggestedActions'
+>;
+
+interface TaskSessionRow extends Record<string, unknown> {
+  id: string;
+  taskId: string;
+  status: 'active';
 }
 
 // ── Scheduling Cycle ──────────────────────────────────────────────────────────
@@ -363,9 +376,12 @@ async function routeHandoffsForTask(
   if (alreadyRouted.length > 0) return;
 
   // Get handoff packets from the completed task
-  let handoffs;
+  let handoffs: RoutableHandoff[];
   try {
-    handoffs = await projectDataService.getHandoffPacketsForTask(env, projectId, completedTaskId);
+    const rawHandoffs = await projectDataService.getHandoffPacketsForTask(env, projectId, completedTaskId);
+    handoffs = rawHandoffs
+      .map(parseRoutableHandoff)
+      .filter((handoff): handoff is RoutableHandoff => handoff !== null);
   } catch {
     return; // No handoffs to route
   }
@@ -381,17 +397,39 @@ async function routeHandoffsForTask(
   const dependentTaskIds = (depsResult.results ?? []).map((r) => r.task_id);
   if (dependentTaskIds.length === 0) return;
 
+  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(env, projectId, dependentTaskIds);
+  let routeIncomplete = false;
+
   // Route each handoff to dependent tasks via durable messages
   for (const depTaskId of dependentTaskIds) {
     // Find the chat session for the dependent task (needed for mailbox targeting)
     const depTask = allTasks.find((t) => t.id === depTaskId);
     if (!depTask || depTask.status === 'completed' || depTask.status === 'cancelled') continue;
 
+    const targetSessionId = sessionResolutions.get(depTaskId) ?? null;
+    if (!targetSessionId) {
+      const reason = 'No active chat session found for dependent task; handoff not enqueued';
+      log.warn('orchestrator.handoff_target_session_missing', {
+        projectId,
+        missionId,
+        fromTaskId: completedTaskId,
+        toTaskId: depTaskId,
+        reason,
+      });
+      logDecision(sql, missionId, depTaskId, 'skip', reason, now, {
+        fromTaskId: completedTaskId,
+        toTaskId: depTaskId,
+        reason: 'missing_target_session',
+      });
+      routeIncomplete = true;
+      continue;
+    }
+
     for (const handoff of handoffs) {
       try {
         const content = buildHandoffContent(completedTaskId, handoff);
         await projectDataService.enqueueMailboxMessage(env, projectId, {
-          targetSessionId: depTaskId, // Use task ID as target — resolved to session at delivery time
+          targetSessionId,
           sourceTaskId: completedTaskId,
           senderType: 'orchestrator' as const,
           senderId: `orchestrator:${projectId}`,
@@ -400,6 +438,7 @@ async function routeHandoffsForTask(
           metadata: { handoffId: handoff.id, fromTaskId: completedTaskId },
         });
       } catch (err) {
+        routeIncomplete = true;
         log.warn('orchestrator.handoff_route_failed', {
           projectId, missionId, fromTaskId: completedTaskId,
           toTaskId: depTaskId, handoffId: handoff.id,
@@ -409,29 +448,106 @@ async function routeHandoffsForTask(
     }
   }
 
+  if (routeIncomplete) {
+    logDecision(sql, missionId, completedTaskId, 'retry',
+      `Handoff routing deferred: one or more dependent task sessions were unavailable`, now, {
+        handoffCount: handoffs.length,
+        dependentTaskCount: dependentTaskIds.length,
+        reason: 'handoff_route_incomplete',
+      });
+    return;
+  }
+
   logDecision(sql, missionId, completedTaskId, 'handoff_routed',
     `Routed ${handoffs.length} handoff(s) to ${dependentTaskIds.length} dependent task(s)`, now);
 }
 
 /** Build a readable content string from a handoff packet for durable message delivery. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildHandoffContent(fromTaskId: string, handoff: any): string {
+function buildHandoffContent(fromTaskId: string, handoff: RoutableHandoff): string {
   const parts: string[] = [`Handoff from task ${fromTaskId}:`, '', `**Summary:** ${handoff.summary}`];
-  if (handoff.facts?.length) {
-    const facts = (handoff.facts as Array<string | Record<string, string>>)
-      .map((f) => `- ${typeof f === 'string' ? f : f.fact}`)
+  if (handoff.facts.length > 0) {
+    const facts = handoff.facts
+      .map((fact) => `- ${fact.key}: ${fact.value}`)
       .join('\n');
     parts.push('', `**Key Facts:**\n${facts}`);
   }
-  if (handoff.openQuestions?.length) {
-    const qs = (handoff.openQuestions as string[]).map((q) => `- ${q}`).join('\n');
+  if (handoff.openQuestions.length > 0) {
+    const qs = handoff.openQuestions.map((q) => `- ${q}`).join('\n');
     parts.push('', `**Open Questions:**\n${qs}`);
   }
-  if (handoff.suggestedActions?.length) {
-    const acts = (handoff.suggestedActions as string[]).map((a) => `- ${a}`).join('\n');
+  if (handoff.suggestedActions.length > 0) {
+    const acts = handoff.suggestedActions.map((a) => `- ${a}`).join('\n');
     parts.push('', `**Suggested Actions:**\n${acts}`);
   }
   return parts.join('\n');
+}
+
+function parseRoutableHandoff(value: unknown): RoutableHandoff | null {
+  if (!isRecord(value)) return null;
+  const id = typeof value.id === 'string' ? value.id : null;
+  const summary = typeof value.summary === 'string' ? value.summary : null;
+  if (!id || !summary) return null;
+
+  return {
+    id,
+    summary,
+    facts: readHandoffFacts(value.facts),
+    openQuestions: readStringArray(value.openQuestions),
+    suggestedActions: readStringArray(value.suggestedActions),
+  };
+}
+
+function readHandoffFacts(value: unknown): HandoffFact[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): HandoffFact[] => {
+    if (typeof item === 'string') {
+      return [{ key: 'fact', value: item }];
+    }
+    if (!isRecord(item)) return [];
+    const key = typeof item.key === 'string'
+      ? item.key
+      : (typeof item.fact === 'string' ? 'fact' : null);
+    const factValue = typeof item.value === 'string'
+      ? item.value
+      : (typeof item.fact === 'string' ? item.fact : null);
+    return key && factValue ? [{ key, value: factValue }] : [];
+  });
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function resolveActiveSessionIdsForTaskIds(
+  env: Env,
+  projectId: string,
+  taskIds: string[],
+): Promise<Map<string, string>> {
+  const uniqueTaskIds = [...new Set(taskIds)];
+  const sessions = await projectDataService.getSessionsByTaskIds(env, projectId, uniqueTaskIds);
+  const resolved = new Map<string, string>();
+
+  for (const taskId of uniqueTaskIds) {
+    const session = sessions.find((candidate) => isActiveSessionForTask(candidate, taskId));
+    if (session) {
+      resolved.set(taskId, session.id);
+    }
+  }
+
+  return resolved;
+}
+
+function isActiveSessionForTask(
+  candidate: Record<string, unknown>,
+  taskId: string,
+): candidate is TaskSessionRow {
+  return candidate.taskId === taskId
+    && candidate.status === 'active'
+    && typeof candidate.id === 'string';
 }
 
 // ── Stall Detection ───────────────────────────────────────────────────────────
@@ -454,6 +570,9 @@ async function detectStalls(
     (t) => t.status === 'running' || t.status === 'delegated',
   );
 
+  const runningTaskIds = runningTasks.map((task) => task.id);
+  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(env, projectId, runningTaskIds);
+
   for (const task of runningTasks) {
     const updatedAt = new Date(task.updated_at).getTime();
     if (updatedAt > stallThreshold) continue;
@@ -469,9 +588,25 @@ async function detectStalls(
     if (recentStall.length > 0) continue;
 
     // Send interrupt message to the stalled task
+    const targetSessionId = sessionResolutions.get(task.id) ?? null;
+    if (!targetSessionId) {
+      const reason = 'No active chat session found for stalled task; interrupt not enqueued';
+      log.warn('orchestrator.stall_target_session_missing', {
+        projectId,
+        missionId,
+        taskId: task.id,
+        reason,
+      });
+      logDecision(sql, missionId, task.id, 'skip', reason, now, {
+        reason: 'missing_target_session',
+        stallDurationMs: now - updatedAt,
+      });
+      continue;
+    }
+
     try {
       await projectDataService.enqueueMailboxMessage(env, projectId, {
-        targetSessionId: task.id,
+        targetSessionId,
         sourceTaskId: null,
         senderType: 'orchestrator' as const,
         senderId: `orchestrator:${projectId}`,

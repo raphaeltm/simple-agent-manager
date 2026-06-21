@@ -61,13 +61,9 @@ export function ProjectSelector({
             onChange={(e) => {
               const repo = repos.find((r) => r.fullName === e.target.value);
               if (repo) {
-                const repoUrl = `https://github.com/${repo.fullName}.git`;
-                // Validate constructed URL to prevent malformed fullName from breaking clone
-                const parsed = new URL(repoUrl);
-                if (parsed.hostname !== 'github.com') return;
-                setForm((prev) => ({ ...prev, selectedRepoUrl: repoUrl, selectedRepoName: repo.fullName }));
+                setForm((prev) => ({ ...prev, selectedRepoName: repo.fullName }));
               } else {
-                setForm((prev) => ({ ...prev, selectedRepoUrl: '', selectedRepoName: '' }));
+                setForm((prev) => ({ ...prev, selectedRepoName: '' }));
               }
             }}
           >
@@ -85,7 +81,7 @@ export function ProjectSelector({
           variant="primary"
           size="md"
           onClick={onCreateProject}
-          disabled={loading || !form.selectedRepoUrl}
+          disabled={loading || !form.selectedRepoName}
         >
           {loading ? (
             <>

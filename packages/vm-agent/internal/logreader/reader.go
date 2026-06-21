@@ -45,11 +45,18 @@ type LogResponse struct {
 	HasMore    bool       `json:"hasMore"`
 }
 
+const (
+	defaultRetrievalLimit = 200
+	defaultMaxLimit       = 1000
+)
+
+var configuredLimits = loadLimitConfig()
+
 // DefaultLimit is the default number of log entries per page.
-var DefaultLimit = envInt("LOG_RETRIEVAL_DEFAULT_LIMIT", 200)
+var DefaultLimit = configuredLimits.defaultLimit
 
 // MaxLimit is the maximum number of log entries per page.
-var MaxLimit = envInt("LOG_RETRIEVAL_MAX_LIMIT", 1000)
+var MaxLimit = configuredLimits.maxLimit
 
 // CommandExecutor abstracts exec.Command for testing.
 type CommandExecutor func(ctx context.Context, name string, args ...string) *exec.Cmd
@@ -443,6 +450,15 @@ func parseJournalJSON(output, defaultSource string) ([]LogEntry, *string) {
 // Helper functions
 
 func clampLimit(limit int) int {
+	if MaxLimit <= 0 {
+		MaxLimit = defaultMaxLimit
+	}
+	if DefaultLimit <= 0 {
+		DefaultLimit = defaultRetrievalLimit
+	}
+	if DefaultLimit > MaxLimit {
+		DefaultLimit = MaxLimit
+	}
 	if limit <= 0 {
 		return DefaultLimit
 	}
@@ -644,11 +660,35 @@ func filterByTimeRange(entries []LogEntry, since, until string) []LogEntry {
 	return result
 }
 
-func envInt(key string, defaultVal int) int {
+type limitConfig struct {
+	defaultLimit int
+	maxLimit     int
+}
+
+func loadLimitConfig() limitConfig {
+	maxLimit := envPositiveInt("LOG_RETRIEVAL_MAX_LIMIT", defaultMaxLimit)
+	defaultLimit := envPositiveInt("LOG_RETRIEVAL_DEFAULT_LIMIT", defaultRetrievalLimit)
+	if defaultLimit > maxLimit {
+		defaultLimit = maxLimit
+	}
+	return limitConfig{
+		defaultLimit: defaultLimit,
+		maxLimit:     maxLimit,
+	}
+}
+
+func envPositiveInt(key string, defaultVal int) int {
+	if defaultVal <= 0 {
+		defaultVal = 1
+	}
 	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			return i
 		}
 	}
 	return defaultVal
+}
+
+func envInt(key string, defaultVal int) int {
+	return envPositiveInt(key, defaultVal)
 }

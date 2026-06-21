@@ -202,6 +202,30 @@ func TestClampLimit(t *testing.T) {
 	}
 }
 
+func TestClampLimitRepairsInvalidConfiguredValues(t *testing.T) {
+	origDefault := DefaultLimit
+	origMax := MaxLimit
+	defer func() {
+		DefaultLimit = origDefault
+		MaxLimit = origMax
+	}()
+
+	DefaultLimit = -10
+	MaxLimit = 0
+	if got := clampLimit(0); got != defaultRetrievalLimit {
+		t.Fatalf("clampLimit with invalid globals = %d, want %d", got, defaultRetrievalLimit)
+	}
+
+	DefaultLimit = 500
+	MaxLimit = 100
+	if got := clampLimit(0); got != 100 {
+		t.Fatalf("clampLimit with default > max = %d, want 100", got)
+	}
+	if got := clampLimit(500); got != 100 {
+		t.Fatalf("clampLimit explicit over max = %d, want 100", got)
+	}
+}
+
 func TestParseCloudInitLog(t *testing.T) {
 	// Create temp file with cloud-init style content
 	dir := t.TempDir()
@@ -415,9 +439,9 @@ func TestJournalEntryToLogEntry(t *testing.T) {
 			name: "agent entry",
 			raw: map[string]interface{}{
 				"__REALTIME_TIMESTAMP": "1708700000000000",
-				"MESSAGE":             "test",
-				"PRIORITY":            "6",
-				"_SYSTEMD_UNIT":       "vm-agent.service",
+				"MESSAGE":              "test",
+				"PRIORITY":             "6",
+				"_SYSTEMD_UNIT":        "vm-agent.service",
 			},
 			source: "agent",
 			want: &LogEntry{
@@ -430,9 +454,9 @@ func TestJournalEntryToLogEntry(t *testing.T) {
 			name: "docker entry",
 			raw: map[string]interface{}{
 				"__REALTIME_TIMESTAMP": "1708700000000000",
-				"MESSAGE":             "container log",
-				"PRIORITY":            "6",
-				"CONTAINER_NAME":      "ws-abc",
+				"MESSAGE":              "container log",
+				"PRIORITY":             "6",
+				"CONTAINER_NAME":       "ws-abc",
 			},
 			source: "docker",
 			want: &LogEntry{
@@ -445,8 +469,8 @@ func TestJournalEntryToLogEntry(t *testing.T) {
 			name: "empty message returns nil",
 			raw: map[string]interface{}{
 				"__REALTIME_TIMESTAMP": "1708700000000000",
-				"MESSAGE":             "",
-				"PRIORITY":            "6",
+				"MESSAGE":              "",
+				"PRIORITY":             "6",
 			},
 			source: "agent",
 			want:   nil,
@@ -534,6 +558,18 @@ func TestEnvInt(t *testing.T) {
 	got = envInt("TEST_ENV_INT_BAD", 42)
 	if got != 42 {
 		t.Errorf("envInt bad value = %d, want 42 (default)", got)
+	}
+
+	t.Setenv("TEST_ENV_INT_ZERO", "0")
+	got = envInt("TEST_ENV_INT_ZERO", 42)
+	if got != 42 {
+		t.Errorf("envInt zero value = %d, want 42 (default)", got)
+	}
+
+	t.Setenv("TEST_ENV_INT_NEGATIVE", "-5")
+	got = envInt("TEST_ENV_INT_NEGATIVE", 42)
+	if got != 42 {
+		t.Errorf("envInt negative value = %d, want 42 (default)", got)
 	}
 }
 

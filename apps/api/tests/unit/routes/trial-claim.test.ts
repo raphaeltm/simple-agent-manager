@@ -14,7 +14,6 @@
  *   - 200 happy path — D1 re-parented, KV markTrialClaimed called,
  *     Set-Cookie clears sam_trial_claim
  */
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,9 +24,6 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_: unknown, next: () => Promise<unknown>) => next()),
   getUserId: () => 'user_claim_1',
 }));
-
-// drizzle-orm/d1 — stub to control UPDATE outcome
-vi.mock('drizzle-orm/d1');
 
 // Trial-store — control the record returned
 const { readTrialMock, markTrialClaimedMock } = vi.hoisted(() => ({
@@ -65,25 +61,55 @@ function makeApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
-function setDrizzleUpdateChanges(changes: number) {
-  const run = vi.fn().mockResolvedValue({ meta: { changes } });
-  const chain = {
-    set: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    run,
-  };
-  (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-    update: vi.fn().mockReturnValue(chain),
-  });
-  return { run, chain };
+interface MockD1Statement {
+  sql: string;
+  binds: unknown[];
+  run: ReturnType<typeof vi.fn>;
 }
 
-function makeEnv(overrides: Partial<Env> = {}): Env {
+interface ClaimTestEnv extends Env {
+  __statements: MockD1Statement[];
+}
+
+function makeEnv(
+  overrides: Partial<Env> = {},
+  options: {
+    projectUpdateChanges?: number;
+    trialUpdateChanges?: number;
+    batchReject?: Error;
+    rollbackChanges?: number;
+  } = {},
+): ClaimTestEnv {
+  const statements: MockD1Statement[] = [];
+  const prepare = vi.fn((sql: string) => ({
+    bind: vi.fn((...binds: unknown[]) => {
+      const statement: MockD1Statement = {
+        sql,
+        binds,
+        run: vi.fn(async () => {
+          return { meta: { changes: options.rollbackChanges ?? 1 } };
+        }),
+      };
+      statements.push(statement);
+      return statement;
+    }),
+  }));
+  const batch = vi.fn(async () => {
+    if (options.batchReject) {
+      throw options.batchReject;
+    }
+    return [
+      { meta: { changes: options.projectUpdateChanges ?? 1 } },
+      { meta: { changes: options.trialUpdateChanges ?? 1 } },
+    ];
+  });
+
   return {
-    DATABASE: {} as D1Database,
+    DATABASE: { prepare, batch } as unknown as D1Database,
     TRIAL_CLAIM_TOKEN_SECRET: SECRET,
+    __statements: statements,
     ...overrides,
-  } as unknown as Env;
+  } as unknown as ClaimTestEnv;
 }
 
 async function postClaim(
@@ -118,11 +144,27 @@ function futurePayload(
   };
 }
 
+function trialRecord(
+  overrides: Partial<{
+    trialId: string;
+    projectId: string;
+    claimed: boolean;
+    expiresAt: number;
+  }> = {}
+) {
+  return {
+    trialId: 'trial_good',
+    projectId: 'proj_good',
+    claimed: false,
+    expiresAt: Date.now() + 3600_000,
+    ...overrides,
+  };
+}
+
 describe('POST /api/trial/claim', () => {
   beforeEach(() => {
     readTrialMock.mockReset();
     markTrialClaimedMock.mockReset();
-    vi.mocked(drizzle).mockReset();
   });
 
   it('returns 500 when TRIAL_CLAIM_TOKEN_SECRET is unset', async () => {
@@ -170,11 +212,10 @@ describe('POST /api/trial/claim', () => {
       futurePayload({ projectId: 'proj_cookie' }),
       SECRET
     );
-    readTrialMock.mockResolvedValueOnce({
+    readTrialMock.mockResolvedValueOnce(trialRecord({
       trialId: 'trial_good',
       projectId: 'proj_record_different',
-      claimed: false,
-    });
+    }));
     const resp = await postClaim(app, token);
     expect(resp.status).toBe(400);
   });
@@ -182,55 +223,78 @@ describe('POST /api/trial/claim', () => {
   it('returns 409 when trial is already claimed in KV', async () => {
     const app = makeApp();
     const token = await signClaimToken(futurePayload(), SECRET);
-    readTrialMock.mockResolvedValueOnce({
-      trialId: 'trial_good',
-      projectId: 'proj_good',
-      claimed: true,
-    });
+    readTrialMock.mockResolvedValueOnce(trialRecord({ claimed: true }));
     const resp = await postClaim(app, token);
     expect(resp.status).toBe(409);
   });
 
-  it('returns 409 when D1 UPDATE affects zero rows (race)', async () => {
+  it('returns 409 when the KV trial record has expired', async () => {
     const app = makeApp();
     const token = await signClaimToken(futurePayload(), SECRET);
-    readTrialMock.mockResolvedValueOnce({
-      trialId: 'trial_good',
-      projectId: 'proj_good',
-      claimed: false,
-    });
-    setDrizzleUpdateChanges(0);
+    readTrialMock.mockResolvedValueOnce(trialRecord({ expiresAt: Date.now() - 1 }));
     const resp = await postClaim(app, token);
     expect(resp.status).toBe(409);
+  });
+
+  it('returns 409 when project re-parent affects zero rows (race)', async () => {
+    const app = makeApp();
+    const token = await signClaimToken(futurePayload(), SECRET);
+    const env = makeEnv({}, { projectUpdateChanges: 0, trialUpdateChanges: 0 });
+    readTrialMock.mockResolvedValueOnce(trialRecord());
+    const resp = await postClaim(app, token, env);
+    expect(resp.status).toBe(409);
+  });
+
+  it('returns 500 and rolls back when D1 refuses the trial claimed transition after re-parent', async () => {
+    const app = makeApp();
+    const token = await signClaimToken(futurePayload(), SECRET);
+    const env = makeEnv({}, { projectUpdateChanges: 1, trialUpdateChanges: 0 });
+    readTrialMock.mockResolvedValueOnce(trialRecord());
+
+    const resp = await postClaim(app, token, env);
+
+    expect(resp.status).toBe(500);
+    expect(markTrialClaimedMock).not.toHaveBeenCalled();
+    const rollback = env.__statements.find((stmt) =>
+      stmt.sql.includes('UPDATE projects') && stmt.sql.includes('WHERE id = ?') && stmt.binds[0] === 'system_anonymous_trials'
+    );
+    expect(rollback).toBeDefined();
+    expect(rollback?.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 500 when D1 cannot record the batched claim transition', async () => {
+    const app = makeApp();
+    const token = await signClaimToken(futurePayload(), SECRET);
+    const env = makeEnv({}, { batchReject: new Error('D1 unavailable') });
+    readTrialMock.mockResolvedValueOnce(trialRecord());
+
+    const resp = await postClaim(app, token, env);
+
+    expect(resp.status).toBe(500);
+    expect(markTrialClaimedMock).not.toHaveBeenCalled();
   });
 
   it('returns 200 and clears claim cookie on successful re-parent', async () => {
     const app = makeApp();
     const token = await signClaimToken(futurePayload(), SECRET);
-    readTrialMock.mockResolvedValueOnce({
-      trialId: 'trial_good',
-      projectId: 'proj_good',
-      claimed: false,
-    });
+    const env = makeEnv();
+    readTrialMock.mockResolvedValueOnce(trialRecord());
     markTrialClaimedMock.mockResolvedValueOnce({
       trialId: 'trial_good',
       projectId: 'proj_good',
       claimed: true,
     });
-    const { run, chain } = setDrizzleUpdateChanges(1);
 
-    const resp = await postClaim(app, token);
+    const resp = await postClaim(app, token, env);
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as { projectId: string; claimedAt: number };
     expect(body.projectId).toBe('proj_good');
     expect(body.claimedAt).toBeGreaterThan(0);
 
-    // Drizzle was called: update with set + where + run
-    expect(chain.set).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user_claim_1' })
-    );
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(env.DATABASE.batch).toHaveBeenCalledTimes(1);
     expect(markTrialClaimedMock).toHaveBeenCalledWith(expect.anything(), 'trial_good');
+    expect(env.__statements.some((stmt) => stmt.sql.includes("SET status = 'claimed'"))).toBe(true);
+    expect(env.__statements.some((stmt) => stmt.sql.includes('AND EXISTS'))).toBe(true);
 
     // Set-Cookie should clear the claim cookie
     const setCookie = resp.headers.get('Set-Cookie');
@@ -241,13 +305,8 @@ describe('POST /api/trial/claim', () => {
   it('still returns 200 when markTrialClaimed fails (best-effort)', async () => {
     const app = makeApp();
     const token = await signClaimToken(futurePayload(), SECRET);
-    readTrialMock.mockResolvedValueOnce({
-      trialId: 'trial_good',
-      projectId: 'proj_good',
-      claimed: false,
-    });
+    readTrialMock.mockResolvedValueOnce(trialRecord());
     markTrialClaimedMock.mockRejectedValueOnce(new Error('KV outage'));
-    setDrizzleUpdateChanges(1);
 
     const resp = await postClaim(app, token);
     expect(resp.status).toBe(200);
