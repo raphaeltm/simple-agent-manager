@@ -151,6 +151,28 @@ function createMockDb() {
   };
 }
 
+async function postHeartbeat(
+  payload: unknown,
+  env: Record<string, unknown> = { DATABASE: {}, DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key' }
+) {
+  const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
+  const app = new Hono();
+  app.route('/api/nodes', nodeLifecycleRoutes);
+  return app.request(
+    '/api/nodes/node-deploy-1/heartbeat',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer node-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+    env,
+    { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+  );
+}
+
 describe('node lifecycle deployment heartbeat contract', () => {
   beforeEach(() => {
     updates.length = 0;
@@ -161,37 +183,15 @@ describe('node lifecycle deployment heartbeat contract', () => {
   });
 
   it('returns per-environment pending releases and explicit retirement for reported environments not placed on the node', async () => {
-    const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
-    const app = new Hono();
-    app.route('/api/nodes', nodeLifecycleRoutes);
-
-    const res = await app.request(
-      '/api/nodes/node-deploy-1/heartbeat',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer node-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deployment: {
-            environments: [
-              { environmentId: 'env-a', appliedSeq: 4, status: 'applied' },
-              { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
-              { environmentId: 'env-evil', appliedSeq: 0, status: 'applied' },
-            ],
-          },
-        }),
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [
+          { environmentId: 'env-a', appliedSeq: 4, status: 'applied' },
+          { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
+          { environmentId: 'env-evil', appliedSeq: 0, status: 'applied' },
+        ],
       },
-      {
-        DATABASE: {},
-        DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
-      },
-      {
-        waitUntil: vi.fn(),
-        passThroughOnException: vi.fn(),
-      }
-    );
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -215,36 +215,15 @@ describe('node lifecycle deployment heartbeat contract', () => {
 
   it('does not reissue a failed newer release after the node reports rollback', async () => {
     latestByEnvironment.set('env-a', { version: 6, status: 'failed' });
-    const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
-    const app = new Hono();
-    app.route('/api/nodes', nodeLifecycleRoutes);
 
-    const res = await app.request(
-      '/api/nodes/node-deploy-1/heartbeat',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer node-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deployment: {
-            environments: [
-              { environmentId: 'env-a', appliedSeq: 5, status: 'reverted' },
-              { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
-            ],
-          },
-        }),
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [
+          { environmentId: 'env-a', appliedSeq: 5, status: 'reverted' },
+          { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
+        ],
       },
-      {
-        DATABASE: {},
-        DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
-      },
-      {
-        waitUntil: vi.fn(),
-        passThroughOnException: vi.fn(),
-      }
-    );
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -254,36 +233,15 @@ describe('node lifecycle deployment heartbeat contract', () => {
 
   it('does not reissue an applying release while the node reports it is already applying', async () => {
     latestByEnvironment.set('env-a', { version: 6, status: 'applying' });
-    const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
-    const app = new Hono();
-    app.route('/api/nodes', nodeLifecycleRoutes);
 
-    const res = await app.request(
-      '/api/nodes/node-deploy-1/heartbeat',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer node-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deployment: {
-            environments: [
-              { environmentId: 'env-a', appliedSeq: 5, status: 'applying' },
-              { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
-            ],
-          },
-        }),
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [
+          { environmentId: 'env-a', appliedSeq: 5, status: 'applying' },
+          { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
+        ],
       },
-      {
-        DATABASE: {},
-        DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
-      },
-      {
-        waitUntil: vi.fn(),
-        passThroughOnException: vi.fn(),
-      }
-    );
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -293,33 +251,12 @@ describe('node lifecycle deployment heartbeat contract', () => {
 
   it('reissues an applying release when the node reports no state for that environment', async () => {
     latestByEnvironment.set('env-a', { version: 6, status: 'applying' });
-    const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
-    const app = new Hono();
-    app.route('/api/nodes', nodeLifecycleRoutes);
 
-    const res = await app.request(
-      '/api/nodes/node-deploy-1/heartbeat',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer node-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deployment: {
-            environments: [{ environmentId: 'env-b', appliedSeq: 8, status: 'applied' }],
-          },
-        }),
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-b', appliedSeq: 8, status: 'applied' }],
       },
-      {
-        DATABASE: {},
-        DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
-      },
-      {
-        waitUntil: vi.fn(),
-        passThroughOnException: vi.fn(),
-      }
-    );
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -329,32 +266,15 @@ describe('node lifecycle deployment heartbeat contract', () => {
   it('ignores legacy top-level deployment state without an environment id', async () => {
     deploymentPlacements = [{ envId: 'env-a' }];
     latestByEnvironment.set('env-a', { version: 5, status: 'applied' });
-    const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
-    const app = new Hono();
-    app.route('/api/nodes', nodeLifecycleRoutes);
 
-    const res = await app.request(
-      '/api/nodes/node-deploy-1/heartbeat',
+    const res = await postHeartbeat(
       {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer node-token',
-          'Content-Type': 'application/json',
+        deployment: {
+          appliedSeq: 5,
+          status: 'applied',
         },
-        body: JSON.stringify({
-          deployment: {
-            appliedSeq: 5,
-            status: 'applied',
-          },
-        }),
       },
-      {
-        DATABASE: {},
-      },
-      {
-        waitUntil: vi.fn(),
-        passThroughOnException: vi.fn(),
-      }
+      { DATABASE: {} }
     );
 
     expect(res.status).toBe(200);
