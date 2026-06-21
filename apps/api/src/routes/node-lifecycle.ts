@@ -329,13 +329,26 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         .select({ envId: schema.deploymentEnvironments.id })
         .from(schema.deploymentEnvironments)
         .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-      response.deployment = {
-        environments: envRows.map((row) => ({ environmentId: row.envId })),
-      };
-
+      const placedEnvIds = new Set(envRows.map((row) => row.envId));
       const bodyStates = Array.isArray(body.deployment.environments)
         ? body.deployment.environments
         : [];
+      const reportedEnvIds = Array.from(
+        new Set(
+          bodyStates
+            .map((state) => state.environmentId.trim())
+            .filter((environmentId) => environmentId.length > 0)
+        )
+      );
+      const retireEnvironments = reportedEnvIds
+        .filter((environmentId) => !placedEnvIds.has(environmentId))
+        .map((environmentId) => ({ environmentId }));
+
+      response.deployment = {
+        environments: envRows.map((row) => ({ environmentId: row.envId })),
+        ...(retireEnvironments.length > 0 ? { retireEnvironments } : {}),
+      };
+
       const stateByEnv = new Map(bodyStates.map((state) => [state.environmentId, state]));
 
       const pendingReleases: Array<{ environmentId: string; seq: number }> = [];

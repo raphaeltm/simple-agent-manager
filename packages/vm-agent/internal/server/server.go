@@ -607,7 +607,11 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 	return engine
 }
 
-func (s *Server) retireDeployEngines(activeEnvironmentIDs map[string]bool) {
+func (s *Server) retireDeployEngines(retireEnvironmentIDs map[string]bool) {
+	if len(retireEnvironmentIDs) == 0 {
+		return
+	}
+
 	s.deployMu.Lock()
 	if s.deployRetiring == nil {
 		s.deployRetiring = make(map[string]bool)
@@ -617,11 +621,7 @@ func (s *Server) retireDeployEngines(activeEnvironmentIDs map[string]bool) {
 		engine        *deploy.Engine
 	}
 	for environmentID, engine := range s.deployEngines {
-		if activeEnvironmentIDs[environmentID] {
-			delete(s.deployRetiring, environmentID)
-			continue
-		}
-		if s.deployRetiring[environmentID] {
+		if !retireEnvironmentIDs[environmentID] || s.deployRetiring[environmentID] {
 			continue
 		}
 		s.deployRetiring[environmentID] = true

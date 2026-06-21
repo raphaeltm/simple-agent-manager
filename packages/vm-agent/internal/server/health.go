@@ -99,6 +99,22 @@ func (s *Server) sendNodeReady() {
 	}
 }
 
+type deploymentEnvironmentResponse struct {
+	EnvironmentID string `json:"environmentId"`
+}
+
+type deploymentPendingReleaseResponse struct {
+	EnvironmentID string `json:"environmentId"`
+	Seq           int64  `json:"seq"`
+}
+
+type deploymentHeartbeatResponse struct {
+	Environments       *[]deploymentEnvironmentResponse   `json:"environments,omitempty"`
+	RetireEnvironments []deploymentEnvironmentResponse    `json:"retireEnvironments,omitempty"`
+	PendingReleases    []deploymentPendingReleaseResponse `json:"pendingReleases,omitempty"`
+	DeployPubKey       string                             `json:"deployPubKey,omitempty"`
+}
+
 // heartbeatResponse is the expected JSON response from the heartbeat endpoint.
 type heartbeatResponse struct {
 	Status          string `json:"status"`
@@ -107,18 +123,9 @@ type heartbeatResponse struct {
 	RefreshedToken  string `json:"refreshedToken,omitempty"`
 
 	// Deployment mode fields
-	PendingReleaseSeq int64  `json:"pendingReleaseSeq,omitempty"`
-	DeployPubKey      string `json:"deployPubKey,omitempty"` // Refreshed signing public key (base64)
-	Deployment        struct {
-		Environments []struct {
-			EnvironmentID string `json:"environmentId"`
-		} `json:"environments,omitempty"`
-		PendingReleases []struct {
-			EnvironmentID string `json:"environmentId"`
-			Seq           int64  `json:"seq"`
-		} `json:"pendingReleases,omitempty"`
-		DeployPubKey string `json:"deployPubKey,omitempty"`
-	} `json:"deployment,omitempty"`
+	PendingReleaseSeq int64                       `json:"pendingReleaseSeq,omitempty"`
+	DeployPubKey      string                      `json:"deployPubKey,omitempty"` // Refreshed signing public key (base64)
+	Deployment        deploymentHeartbeatResponse `json:"deployment,omitempty"`
 }
 
 func (s *Server) sendNodeHeartbeat() {
@@ -216,16 +223,27 @@ func (s *Server) sendNodeHeartbeat() {
 		if hbResp.Deployment.DeployPubKey != "" {
 			deployPubKey = hbResp.Deployment.DeployPubKey
 		}
-		activeEnvironmentIDs := make(map[string]bool, len(hbResp.Deployment.Environments))
-		for _, env := range hbResp.Deployment.Environments {
+		if hbResp.Deployment.Environments != nil {
+			for _, env := range *hbResp.Deployment.Environments {
+				environmentID := strings.TrimSpace(env.EnvironmentID)
+				if environmentID == "" {
+					continue
+				}
+				s.ensureDeployEngine(environmentID)
+			}
+		}
+
+		retireEnvironmentIDs := make(map[string]bool, len(hbResp.Deployment.RetireEnvironments))
+		for _, env := range hbResp.Deployment.RetireEnvironments {
 			environmentID := strings.TrimSpace(env.EnvironmentID)
 			if environmentID == "" {
 				continue
 			}
-			activeEnvironmentIDs[environmentID] = true
-			s.ensureDeployEngine(environmentID)
+			retireEnvironmentIDs[environmentID] = true
 		}
-		s.retireDeployEngines(activeEnvironmentIDs)
+		if len(retireEnvironmentIDs) > 0 {
+			s.retireDeployEngines(retireEnvironmentIDs)
+		}
 
 		// Refresh signing public key if provided
 		if deployPubKey != "" {
@@ -241,15 +259,19 @@ func (s *Server) sendNodeHeartbeat() {
 		pendingReleases := hbResp.Deployment.PendingReleases
 		if hbResp.PendingReleaseSeq > 0 {
 			if s.config.EnvironmentID != "" {
-				pendingReleases = append(pendingReleases, struct {
-					EnvironmentID string `json:"environmentId"`
-					Seq           int64  `json:"seq"`
-				}{EnvironmentID: s.config.EnvironmentID, Seq: hbResp.PendingReleaseSeq})
+				pendingReleases = append(pendingReleases, deploymentPendingReleaseResponse{
+					EnvironmentID: s.config.EnvironmentID,
+					Seq:           hbResp.PendingReleaseSeq,
+				})
 			}
 		}
 
 		for _, pending := range pendingReleases {
-			engine := s.ensureDeployEngine(pending.EnvironmentID)
+			environmentID := strings.TrimSpace(pending.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			engine := s.ensureDeployEngine(environmentID)
 			if engine == nil {
 				continue
 			}
@@ -258,7 +280,7 @@ func (s *Server) sendNodeHeartbeat() {
 				continue
 			}
 			slog.Info("deploy: pending release detected",
-				"environmentId", pending.EnvironmentID,
+				"environmentId", environmentID,
 				"pendingSeq", pending.Seq,
 				"appliedSeq", observed.AppliedSeq)
 			go func(environmentID string, seq int64, engine *deploy.Engine) {
@@ -268,7 +290,7 @@ func (s *Server) sendNodeHeartbeat() {
 					slog.Error("deploy: fetch and apply failed",
 						"environmentId", environmentID, "seq", seq, "error", err)
 				}
-			}(pending.EnvironmentID, pending.Seq, engine)
+			}(environmentID, pending.Seq, engine)
 		}
 	}
 

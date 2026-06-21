@@ -155,7 +155,7 @@ describe('node lifecycle deployment heartbeat contract', () => {
     latestByEnvironment.set('env-b', 8);
   });
 
-  it('returns per-environment pending releases and ignores body environments not placed on the node', async () => {
+  it('returns per-environment pending releases and explicit retirement for reported environments not placed on the node', async () => {
     const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
     const app = new Hono();
     app.route('/api/nodes', nodeLifecycleRoutes);
@@ -189,11 +189,9 @@ describe('node lifecycle deployment heartbeat contract', () => {
       { environmentId: 'env-a' },
       { environmentId: 'env-b' },
     ]);
-    expect(body.deployment.pendingReleases).toEqual([
-      { environmentId: 'env-a', seq: 5 },
-    ]);
+    expect(body.deployment.retireEnvironments).toEqual([{ environmentId: 'env-evil' }]);
+    expect(body.deployment.pendingReleases).toEqual([{ environmentId: 'env-a', seq: 5 }]);
     expect(body.deployment.deployPubKey).toBe('pub-key');
-    expect(JSON.stringify(body)).not.toContain('env-evil');
 
     const deploymentUpdates = updates.filter((update) =>
       update.table && typeof update.table === 'object' && 'observedDeployment' in update.table

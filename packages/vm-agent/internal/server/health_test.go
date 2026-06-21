@@ -177,7 +177,15 @@ func TestHeartbeatNoRefreshOnServerError(t *testing.T) {
 	}
 }
 
-func TestDeploymentHeartbeatRetiresUnplacedEnvironment(t *testing.T) {
+type deploymentHeartbeatHarness struct {
+	server     *Server
+	sitesDir   string
+	composeLog string
+}
+
+func newDeploymentHeartbeatHarness(t *testing.T, configureResponse func(*heartbeatResponse)) *deploymentHeartbeatHarness {
+	t.Helper()
+
 	dir := t.TempDir()
 	activeDir := filepath.Join(dir, "active")
 	sitesDir := filepath.Join(activeDir, "sites")
@@ -221,13 +229,11 @@ func TestDeploymentHeartbeatRetiresUnplacedEnvironment(t *testing.T) {
 			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
 			HealthStatus:    "healthy",
 		}
-		resp.Deployment.Environments = []struct {
-			EnvironmentID string `json:"environmentId"`
-		}{{EnvironmentID: "env-b"}}
+		configureResponse(&resp)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))
-	defer ts.Close()
+	t.Cleanup(ts.Close)
 
 	cfg := &config.Config{
 		ControlPlaneURL:   ts.URL,
@@ -258,33 +264,103 @@ func TestDeploymentHeartbeatRetiresUnplacedEnvironment(t *testing.T) {
 		CaddyReloadCmd:     reloadScript + " " + reloadLog,
 	}))
 
-	s.sendNodeHeartbeat()
+	return &deploymentHeartbeatHarness{
+		server:     s,
+		sitesDir:   sitesDir,
+		composeLog: composeLog,
+	}
+}
+
+func TestDeploymentHeartbeatMissingEnvironmentListDoesNotRetireExistingEnvironment(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		resp.DeployPubKey = ""
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-a")
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineExists(t, h.server, "env-a")
+	assertDeployEngineMissing(t, h.server, "env-b")
+	assertNoComposeDown(t, h.composeLog)
+}
+
+func TestDeploymentHeartbeatDiscoversActiveEnvironmentWithoutRetiringOmittedEngine(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		environments := []deploymentEnvironmentResponse{{EnvironmentID: "env-b"}}
+		resp.Deployment.Environments = &environments
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-a")
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineExists(t, h.server, "env-a")
+	assertDeployEngineExists(t, h.server, "env-b")
+	assertNoComposeDown(t, h.composeLog)
+}
+
+func TestDeploymentHeartbeatExplicitRetireEnvironment(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		resp.Deployment.RetireEnvironments = []deploymentEnvironmentResponse{{EnvironmentID: "env-a"}}
+	})
+
+	h.server.sendNodeHeartbeat()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(sitesDir, "env-a.caddy")); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy")); os.IsNotExist(err) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := os.Stat(filepath.Join(sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
 		t.Fatalf("expected env-a snippet removed after retirement, stat err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(sitesDir, "env-b.caddy")); err != nil {
-		t.Fatalf("expected env-b snippet preserved: %v", err)
-	}
-	if _, ok := s.deploymentEnginesSnapshot()["env-a"]; ok {
-		t.Fatal("expected env-a engine removed from server")
-	}
-	if _, ok := s.deploymentEnginesSnapshot()["env-b"]; !ok {
-		t.Fatal("expected env-b engine discovered from heartbeat")
-	}
-	composeArgs, err := os.ReadFile(composeLog)
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineMissing(t, h.server, "env-a")
+
+	composeArgs, err := os.ReadFile(h.composeLog)
 	if err != nil {
 		t.Fatalf("read compose log: %v", err)
 	}
 	if !strings.Contains(string(composeArgs), "--project-name\nsam-env-env-a") || !strings.Contains(string(composeArgs), "\ndown\n") {
 		t.Fatalf("expected retired env compose down, got:\n%s", composeArgs)
+	}
+}
+
+func assertDeploymentSnippetExists(t *testing.T, sitesDir, environmentID string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(sitesDir, environmentID+".caddy")); err != nil {
+		t.Fatalf("expected %s snippet preserved: %v", environmentID, err)
+	}
+}
+
+func assertDeployEngineExists(t *testing.T, s *Server, environmentID string) {
+	t.Helper()
+	if _, ok := s.deploymentEnginesSnapshot()[environmentID]; !ok {
+		t.Fatalf("expected %s engine present on server", environmentID)
+	}
+}
+
+func assertDeployEngineMissing(t *testing.T, s *Server, environmentID string) {
+	t.Helper()
+	if _, ok := s.deploymentEnginesSnapshot()[environmentID]; ok {
+		t.Fatalf("expected %s engine absent from server", environmentID)
+	}
+}
+
+func assertNoComposeDown(t *testing.T, composeLog string) {
+	t.Helper()
+	composeArgs, err := os.ReadFile(composeLog)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected no compose down call, got:\n%s", composeArgs)
 	}
 }
 
