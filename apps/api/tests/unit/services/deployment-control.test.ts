@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import {
   assertAgentDeploymentAllowed,
+  assertAgentDeploymentAllowedForProfile,
   buildObservedDeploymentUpdate,
   encodeAllowedDeployProfileIds,
   parseAllowedDeployProfileIds,
@@ -11,7 +12,9 @@ import {
   toObservedDeploymentState,
 } from '../../../src/services/deployment-control';
 
-function tokenData(overrides: Partial<import('../../../src/services/mcp-token').McpTokenData> = {}) {
+function tokenData(
+  overrides: Partial<import('../../../src/services/mcp-token').McpTokenData> = {}
+) {
   return {
     taskId: 'task-1',
     projectId: 'proj-1',
@@ -78,14 +81,17 @@ function createReleaseDb(latestRows: Array<{ id: string; version: number; status
 
 describe('deployment-control observed state helpers', () => {
   it('normalizes deployment heartbeat state into bounded DB fields', () => {
-    const update = buildObservedDeploymentUpdate({
-      appliedSeq: 2.8,
-      status: ' APPLIED ',
-      errorMessage: 'x'.repeat(5000),
-      services: [{ name: 'web', status: 'running', health: 'healthy' }],
-      deployStatus: { appHealth: 'healthy' },
-      diskTelemetry: { rootDisk: { usedPercent: 42 } },
-    }, '2026-06-18T10:00:00Z');
+    const update = buildObservedDeploymentUpdate(
+      {
+        appliedSeq: 2.8,
+        status: ' APPLIED ',
+        errorMessage: 'x'.repeat(5000),
+        services: [{ name: 'web', status: 'running', health: 'healthy' }],
+        deployStatus: { appHealth: 'healthy' },
+        diskTelemetry: { rootDisk: { usedPercent: 42 } },
+      },
+      '2026-06-18T10:00:00Z'
+    );
 
     expect(update.observedAppliedSeq).toBe(2);
     expect(update.observedStatus).toBe('applied');
@@ -146,14 +152,16 @@ describe('assertAgentDeploymentAllowed', () => {
 
   it('denies by default until the user enables agent deployment', async () => {
     const db = createPolicyDb({
-      envRows: [{
-        id: 'env-1',
-        agentDeployEnabled: false,
-        agentDeployEnabledBy: null,
-        agentDeployEnabledAt: null,
-        agentDeployDisabledAt: null,
-        allowedDeployProfileIdsJson: null,
-      }],
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: false,
+          agentDeployEnabledBy: null,
+          agentDeployEnabledAt: null,
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: null,
+        },
+      ],
     });
 
     const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
@@ -162,14 +170,16 @@ describe('assertAgentDeploymentAllowed', () => {
 
   it('allows when enabled and no profile restriction is configured', async () => {
     const db = createPolicyDb({
-      envRows: [{
-        id: 'env-1',
-        agentDeployEnabled: true,
-        agentDeployEnabledBy: 'user-1',
-        agentDeployEnabledAt: '2026-06-18T10:01:00Z',
-        agentDeployDisabledAt: null,
-        allowedDeployProfileIdsJson: null,
-      }],
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: true,
+          agentDeployEnabledBy: 'user-1',
+          agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: null,
+        },
+      ],
     });
 
     const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
@@ -178,19 +188,49 @@ describe('assertAgentDeploymentAllowed', () => {
 
   it('enforces allowed agent profile IDs when configured', async () => {
     const db = createPolicyDb({
-      envRows: [{
-        id: 'env-1',
-        agentDeployEnabled: true,
-        agentDeployEnabledBy: 'user-1',
-        agentDeployEnabledAt: '2026-06-18T10:01:00Z',
-        agentDeployDisabledAt: null,
-        allowedDeployProfileIdsJson: '["profile-allowed"]',
-      }],
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: true,
+          agentDeployEnabledBy: 'user-1',
+          agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: '["profile-allowed"]',
+        },
+      ],
       taskRows: [{ agentProfileHint: 'profile-other' }],
     });
 
     const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
     expect('error' in result ? result.error : '').toContain('not allowed to deploy');
+  });
+
+  it('allows callback flows to validate a direct agent profile id', async () => {
+    const db = createPolicyDb({
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: true,
+          agentDeployEnabledBy: 'user-1',
+          agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: '["profile-allowed"]',
+        },
+      ],
+    });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db as any,
+      'proj-1',
+      'staging',
+      'profile-allowed',
+      { taskId: 'task-1' }
+    );
+
+    expect(result).toMatchObject({
+      environmentId: 'env-1',
+      taskAgentProfileId: 'profile-allowed',
+    });
   });
 });
 

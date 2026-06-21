@@ -59,9 +59,11 @@ import {
   type PublicRouteInput,
 } from './deployment-routing';
 
-const DEFAULT_MEMORY_LIMIT_MB = 256;
-const DEFAULT_LOG_MAX_SIZE = '10m';
-const DEFAULT_LOG_MAX_FILE = '3';
+export const DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB = 256;
+export const DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE = '10m';
+export const DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE = '3';
+const ALLOWED_TOP_LEVEL_VOLUME_KEYS = new Set(['x-sam-size-hint-mb']);
+const STRIPPED_TOP_LEVEL_VOLUME_KEYS = new Set(['name']);
 
 /** A captured release submission (compose-publish source). */
 export interface ComposePublishSubmission {
@@ -86,6 +88,10 @@ export interface ComposePublishApplyOptions extends DeploymentRouteTargetOptions
   releaseId: string;
   /** Default per-service memory limit (MB) when compose omits deploy.resources. */
   defaultMemoryLimitMb?: number;
+  /** Default json-file log max-size when compose omits logging. */
+  defaultLogMaxSize?: string;
+  /** Default json-file log max-file when compose omits logging. */
+  defaultLogMaxFile?: string;
 }
 
 export interface ComposePublishApplyResult {
@@ -132,6 +138,53 @@ function formatComposeParseErrors(errors: ComposeParseError[]): string {
   return errors.map((err) => `${err.path}: ${err.message}`).join('; ');
 }
 
+function validateTopLevelVolumeOptions(value: unknown, errors: ComposeParseError[]): void {
+  if (value === undefined || value === null) return;
+  if (!isPlainObject(value)) return;
+
+  for (const [name, config] of Object.entries(value)) {
+    if (config === null || config === undefined) continue;
+    if (!isPlainObject(config)) {
+      errors.push({
+        path: `volumes.${name}`,
+        message: `Volume "${name}" must be declared as null or an object with SAM extension keys only.`,
+      });
+      continue;
+    }
+
+    for (const key of Object.keys(config)) {
+      if (!ALLOWED_TOP_LEVEL_VOLUME_KEYS.has(key) && !STRIPPED_TOP_LEVEL_VOLUME_KEYS.has(key)) {
+        errors.push({
+          path: `volumes.${name}.${key}`,
+          message: `Unsupported top-level volume option "${key}" is not allowed in compose-publish deployments.`,
+        });
+      }
+    }
+
+    const sizeHint = config['x-sam-size-hint-mb'];
+    if (
+      sizeHint !== undefined &&
+      (typeof sizeHint !== 'number' || !Number.isFinite(sizeHint) || sizeHint <= 0)
+    ) {
+      errors.push({
+        path: `volumes.${name}.x-sam-size-hint-mb`,
+        message: 'Volume size hints must be positive numbers.',
+      });
+    }
+  }
+}
+
+function sanitizedVolumeDeclarations(
+  volumes: Record<string, { sizeHintMb?: number }>
+): Record<string, null | { 'x-sam-size-hint-mb': number }> {
+  const sanitized: Record<string, null | { 'x-sam-size-hint-mb': number }> = {};
+  for (const [name, volume] of Object.entries(volumes)) {
+    sanitized[name] =
+      volume.sizeHintMb !== undefined ? { 'x-sam-size-hint-mb': volume.sizeHintMb } : null;
+  }
+  return sanitized;
+}
+
 /**
  * The raw compose-publish path preserves service volume syntax to keep real
  * Docker Compose files intact. Before doing that, enforce the same safety
@@ -142,9 +195,10 @@ function formatComposeParseErrors(errors: ComposeParseError[]): string {
 function validateSafeNamedVolumes(
   doc: Record<string, unknown>,
   rawServices: Record<string, unknown>
-): void {
+): Record<string, null | { 'x-sam-size-hint-mb': number }> {
   const errors: ComposeParseError[] = [];
   const volumes = parseVolumes(doc.volumes, errors);
+  validateTopLevelVolumeOptions(doc.volumes, errors);
   const declaredVolumes = new Set(Object.keys(volumes));
 
   for (const [serviceName, rawService] of Object.entries(rawServices)) {
@@ -170,6 +224,8 @@ function validateSafeNamedVolumes(
       `Compose-publish volume validation failed: ${formatComposeParseErrors(errors)}`
     );
   }
+
+  return sanitizedVolumeDeclarations(volumes);
 }
 
 /**
@@ -209,8 +265,8 @@ function applySamServiceInjections(
   service.logging = {
     driver: 'json-file',
     options: {
-      'max-size': DEFAULT_LOG_MAX_SIZE,
-      'max-file': DEFAULT_LOG_MAX_FILE,
+      'max-size': DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+      'max-file': DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
     },
   };
 }
@@ -224,7 +280,9 @@ export function buildComposePublishApplyPayload(
   opts: ComposePublishApplyOptions
 ): ComposePublishApplyResult {
   const warnings: ComposePublishWarning[] = [];
-  const defaultMemMb = opts.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB;
+  const defaultMemMb = opts.defaultMemoryLimitMb ?? DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB;
+  const logMaxSize = opts.defaultLogMaxSize ?? DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE;
+  const logMaxFile = opts.defaultLogMaxFile ?? DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE;
 
   let doc: unknown;
   try {
@@ -243,7 +301,7 @@ export function buildComposePublishApplyPayload(
   if (!isPlainObject(rawServices)) {
     throw new Error('Captured composeYaml has no services mapping');
   }
-  validateSafeNamedVolumes(doc, rawServices);
+  const sanitizedVolumes = validateSafeNamedVolumes(doc, rawServices);
 
   const pushedRefByService = buildPushedRefMap(submission);
   const networkName = `sam-internal-${opts.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -325,6 +383,14 @@ export function buildComposePublishApplyPayload(
     }
 
     applySamServiceInjections(service, name, opts, networkName, defaultMemMb);
+    const logging = service.logging;
+    if (isPlainObject(logging) && isPlainObject(logging.options)) {
+      logging.options = {
+        ...logging.options,
+        'max-size': logMaxSize,
+        'max-file': logMaxFile,
+      };
+    }
 
     outServices[name] = service;
   }
@@ -355,9 +421,10 @@ export function buildComposePublishApplyPayload(
   const outDoc: Record<string, unknown> = {};
   outDoc.services = outServices;
 
-  // Preserve top-level volumes (named volume declarations) verbatim.
-  if (doc.volumes !== undefined) {
-    outDoc.volumes = doc.volumes;
+  // Re-emit only sanitized named volume declarations. The raw top-level volume
+  // object can encode host bind mounts through local-driver options.
+  if (Object.keys(sanitizedVolumes).length > 0) {
+    outDoc.volumes = sanitizedVolumes;
   }
 
   // Strip denied top-level fields (WARN). networks is replaced with SAM's bridge.

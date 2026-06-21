@@ -3,6 +3,7 @@ package publish
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -11,14 +12,18 @@ type fakeControlPlane struct {
 	creds         *PushCredentials
 	mintErr       error
 	mintCalls     int
+	mintProject   string
+	mintRequest   PushCredentialsRequest
 	submitErr     error
 	submitted     *ReleaseSubmission
 	submittedProj string
 	result        *ReleaseResult
 }
 
-func (f *fakeControlPlane) MintPushCredentials(_ context.Context, _ string) (*PushCredentials, error) {
+func (f *fakeControlPlane) MintPushCredentials(_ context.Context, projectID string, req PushCredentialsRequest) (*PushCredentials, error) {
 	f.mintCalls++
+	f.mintProject = projectID
+	f.mintRequest = req
 	if f.mintErr != nil {
 		return nil, f.mintErr
 	}
@@ -110,6 +115,12 @@ func TestPublishHappyPath(t *testing.T) {
 	if control.mintCalls != 1 {
 		t.Errorf("mint calls = %d, want 1", control.mintCalls)
 	}
+	if control.mintProject != "proj1" {
+		t.Errorf("mint project = %q, want proj1", control.mintProject)
+	}
+	if control.mintRequest.Environment != "staging" || control.mintRequest.AgentProfileID != "profile-1" {
+		t.Errorf("mint request = %+v, want staging/profile-1", control.mintRequest)
+	}
 	if docker.loginCalls != 1 {
 		t.Errorf("login calls = %d, want 1", docker.loginCalls)
 	}
@@ -187,7 +198,8 @@ func TestPublishSanitizesServiceNameInTarget(t *testing.T) {
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
 
-	if _, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", art, nil); err != nil {
+	submittedBy := &ReleaseSubmittedBy{TaskID: "task-1", AgentProfileID: "profile-1"}
+	if _, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", art, submittedBy); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(docker.tags) != 1 {
@@ -230,7 +242,7 @@ func TestPublishMintFailureStops(t *testing.T) {
 	control := &fakeControlPlane{mintErr: errors.New("rate limited")}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
-	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), nil)
+	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), &ReleaseSubmittedBy{AgentProfileID: "profile-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -245,12 +257,29 @@ func TestPublishPushFailureStops(t *testing.T) {
 	control := &fakeControlPlane{creds: creds, result: &ReleaseResult{}}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
-	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), nil)
+	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), &ReleaseSubmittedBy{AgentProfileID: "profile-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if control.submitted != nil {
 		t.Errorf("release should not be submitted after push failure")
+	}
+}
+
+func TestPublishRequiresAgentProfileID(t *testing.T) {
+	docker := &fakeDocker{pushDigests: map[string]string{}}
+	control := &fakeControlPlane{creds: &PushCredentials{}}
+
+	orch := New(Options{ControlPlane: control, Docker: docker})
+	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "agentProfileID") {
+		t.Fatalf("error = %q, want agentProfileID context", err)
+	}
+	if control.mintCalls != 0 || docker.loginCalls != 0 {
+		t.Fatalf("publish touched external dependencies before profile validation")
 	}
 }
 

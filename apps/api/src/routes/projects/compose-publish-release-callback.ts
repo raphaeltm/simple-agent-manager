@@ -7,6 +7,7 @@ import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
+import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   provisionDeploymentNode,
@@ -102,34 +103,57 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest('Release submission is missing target deployment environment');
   }
 
-  const envRows = await db
-    .select({
-      id: schema.deploymentEnvironments.id,
-      nodeId: schema.deploymentEnvironments.nodeId,
-      agentDeployEnabled: schema.deploymentEnvironments.agentDeployEnabled,
-    })
-    .from(schema.deploymentEnvironments)
-    .where(
-      and(
-        eq(schema.deploymentEnvironments.id, environmentId),
-        eq(schema.deploymentEnvironments.projectId, projectId),
-        eq(schema.deploymentEnvironments.name, environment),
-        eq(schema.deploymentEnvironments.status, 'active')
-      )
-    )
-    .limit(1);
+  const submittedByRaw = submissionBody.submittedBy;
+  const submittedBy =
+    submittedByRaw && typeof submittedByRaw === 'object'
+      ? (submittedByRaw as SubmittedByInput)
+      : {};
+  const taskId = cleanOptionalString(submittedBy.taskId);
+  const agentProfileId = cleanOptionalString(submittedBy.agentProfileId);
+  if (!agentProfileId) {
+    throw errors.badRequest('Release submission is missing agentProfileId');
+  }
 
-  const environmentRow = envRows[0];
-  if (!environmentRow || !environmentRow.agentDeployEnabled) {
+  const policyResult = await assertAgentDeploymentAllowedForProfile(
+    db,
+    projectId,
+    environment,
+    agentProfileId,
+    { taskId: taskId ?? null }
+  );
+  if ('error' in policyResult || policyResult.environmentId !== environmentId) {
     log.warn('compose_publish_release.environment_denied', {
       projectId,
       workspaceId,
       environment,
       environmentId,
+      agentProfileId,
       action: 'rejected',
     });
     throw errors.forbidden(
-      `Agent deployment is disabled or unavailable for environment '${environment}'.`
+      'error' in policyResult
+        ? policyResult.error
+        : `Deployment environment '${environment}' did not match the submitted environment id.`
+    );
+  }
+
+  const envRows = await db
+    .select({
+      nodeId: schema.deploymentEnvironments.nodeId,
+    })
+    .from(schema.deploymentEnvironments)
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.deploymentEnvironments.projectId, projectId)
+      )
+    )
+    .limit(1);
+
+  const environmentRow = envRows[0];
+  if (!environmentRow) {
+    throw errors.conflict(
+      `Deployment environment '${environment}' changed while recording the release. Please retry.`
     );
   }
 
@@ -144,11 +168,6 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest('Release submission must include at least one service');
   }
 
-  const submittedByRaw = submissionBody.submittedBy;
-  const submittedBy =
-    submittedByRaw && typeof submittedByRaw === 'object'
-      ? (submittedByRaw as SubmittedByInput)
-      : {};
   const manifestSubmission: Record<string, unknown> = {
     ...submissionBody,
     environment,
@@ -156,8 +175,8 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     submittedBy: {
       userId,
       workspaceId,
-      taskId: cleanOptionalString(submittedBy.taskId),
-      agentProfileId: cleanOptionalString(submittedBy.agentProfileId),
+      taskId,
+      agentProfileId,
     },
   };
 

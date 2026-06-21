@@ -900,6 +900,38 @@ exit 0
 	}
 }
 
+func TestMatchedServiceUsesExplicitServiceOrExactNameOnly(t *testing.T) {
+	required := map[string]bool{"api": true}
+
+	if got, ok := matchedService(ServiceState{Name: "sam-env-worker-api-1", Service: "worker"}, required); ok {
+		t.Fatalf("matchedService fuzzy-matched container name substring as %q", got)
+	}
+
+	if got, ok := matchedService(ServiceState{Name: "sam-env-api-1", Service: "api"}, required); !ok || got != "api" {
+		t.Fatalf("matchedService explicit Service match = %q/%v, want api/true", got, ok)
+	}
+
+	if got, ok := matchedService(ServiceState{Name: "api", Service: ""}, required); !ok || got != "api" {
+		t.Fatalf("matchedService exact Name match = %q/%v, want api/true", got, ok)
+	}
+}
+
+func TestWaitForHealthSkipsContainerPollingWhenNoRoutes(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(dir)
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         filepath.Join(dir, "missing-compose"),
+		HealthTimeout:      time.Second,
+		HealthPollInterval: time.Millisecond,
+	})
+
+	if err := engine.waitForHealth(context.Background(), 1, nil); err != nil {
+		t.Fatalf("waitForHealth with no routes = %v, want nil", err)
+	}
+}
+
 // TestEngine_RegistryLogin_SkippedWhenNil verifies that when RegistryCredentials
 // are nil, docker login is NOT called (public images work without login).
 func TestEngine_RegistryLogin_SkippedWhenNil(t *testing.T) {

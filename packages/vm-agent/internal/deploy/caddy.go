@@ -23,23 +23,6 @@ type CaddyfileOptions struct {
 	ACMECA string
 }
 
-func GenerateCaddyfile(routes []RouteTarget, opts CaddyfileOptions) (string, error) {
-	var builder strings.Builder
-	builder.WriteString("# Managed by SAM deployment agent.\n")
-
-	if global := buildGlobalOptionsBlock(opts); global != "" {
-		builder.WriteString(global)
-	}
-	builder.WriteString("\nimport sites/*\n")
-
-	snippet, err := GenerateCaddySnippet(routes)
-	if err != nil {
-		return "", err
-	}
-	builder.WriteString(snippet)
-	return builder.String(), nil
-}
-
 func GenerateRootCaddyfile(opts CaddyfileOptions) string {
 	var builder strings.Builder
 	builder.WriteString("# Managed by SAM deployment agent.\n")

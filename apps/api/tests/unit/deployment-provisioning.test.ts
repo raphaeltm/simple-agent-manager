@@ -41,7 +41,10 @@ vi.mock('drizzle-orm', async (importOriginal) => {
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../src/db/schema';
-import { DEPLOYMENT_DEFAULT_VM_SIZE, provisionDeploymentNode } from '../../src/services/deployment-provisioning';
+import {
+  DEPLOYMENT_DEFAULT_VM_SIZE,
+  provisionDeploymentNode,
+} from '../../src/services/deployment-provisioning';
 import { createNodeRecord, provisionNode } from '../../src/services/nodes';
 
 // ---------------------------------------------------------------------------
@@ -66,9 +69,7 @@ function createMockDb(options: {
   };
 
   // Build credential rows
-  const userCredRows = options.userCredProvider
-    ? [{ provider: options.userCredProvider }]
-    : [];
+  const userCredRows = options.userCredProvider ? [{ provider: options.userCredProvider }] : [];
   const platformCredRows = options.platformCredProvider
     ? [{ provider: options.platformCredProvider }]
     : [];
@@ -105,9 +106,15 @@ function createMockDb(options: {
   return mockDb;
 }
 
-function makeNodeResult(overrides: Partial<{
-  id: string; userId: string; name: string; cloudProvider: string; vmLocation: string;
-}> = {}) {
+function makeNodeResult(
+  overrides: Partial<{
+    id: string;
+    userId: string;
+    name: string;
+    cloudProvider: string;
+    vmLocation: string;
+  }> = {}
+) {
   return {
     id: overrides.id ?? 'node-deploy-1',
     userId: overrides.userId ?? 'user-1',
@@ -126,9 +133,10 @@ function makeNodeResult(overrides: Partial<{
   };
 }
 
-function createMockEnv() {
+function createMockEnv(overrides: Record<string, unknown> = {}) {
   return {
     DATABASE: {} as D1Database,
+    ...overrides,
   } as any;
 }
 
@@ -177,7 +185,7 @@ describe('provisionDeploymentNode', () => {
       'env-12345678-abcd',
       'proj-1',
       'user-1',
-      createMockEnv(),
+      createMockEnv()
     );
 
     expect(result).not.toBeNull();
@@ -192,7 +200,7 @@ describe('provisionDeploymentNode', () => {
         vmSize: DEPLOYMENT_DEFAULT_VM_SIZE,
         cloudProvider: 'hetzner',
         heartbeatStaleAfterSeconds: 300,
-      }),
+      })
     );
 
     // Verify provisionNode was called with deployment context
@@ -201,7 +209,7 @@ describe('provisionDeploymentNode', () => {
       expect.anything(),
       undefined, // no taskContext
       undefined, // no options
-      { environmentId: 'env-12345678-abcd' }, // deployment context
+      { environmentId: 'env-12345678-abcd' } // deployment context
     );
   });
 
@@ -231,7 +239,13 @@ describe('provisionDeploymentNode', () => {
     vi.mocked(provisionNode).mockResolvedValue();
 
     const { env, statements } = createRawMockEnv([
-      { all: { results: [{ id: 'node-existing', vm_size: 'small', vm_location: 'fsn1', last_metrics: null }] } },
+      {
+        all: {
+          results: [
+            { id: 'node-existing', vm_size: 'small', vm_location: 'fsn1', last_metrics: null },
+          ],
+        },
+      },
       { all: { results: [] } },
       { run: { meta: { changes: 0 } } },
       { run: { meta: { changes: 1 } } },
@@ -246,10 +260,12 @@ describe('provisionDeploymentNode', () => {
       expect.anything(),
       undefined,
       undefined,
-      { environmentId: 'env-race' },
+      { environmentId: 'env-race' }
     );
 
-    const updateStatements = statements.filter((statement) => statement.sql.includes('UPDATE deployment_environments'));
+    const updateStatements = statements.filter((statement) =>
+      statement.sql.includes('UPDATE deployment_environments')
+    );
     expect(updateStatements).toHaveLength(2);
     expect(updateStatements[0]!.sql).toContain('AND EXISTS');
     expect(updateStatements[0]!.binds).toContain('running');
@@ -263,7 +279,7 @@ describe('provisionDeploymentNode', () => {
     });
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(
-      makeNodeResult({ id: 'node-deploy-2', cloudProvider: 'scaleway', vmLocation: 'par1' }),
+      makeNodeResult({ id: 'node-deploy-2', cloudProvider: 'scaleway', vmLocation: 'par1' })
     );
     vi.mocked(provisionNode).mockResolvedValue();
 
@@ -271,7 +287,7 @@ describe('provisionDeploymentNode', () => {
       'env-abcdefgh',
       'proj-1',
       'user-1',
-      createMockEnv(),
+      createMockEnv()
     );
 
     expect(result).not.toBeNull();
@@ -280,7 +296,7 @@ describe('provisionDeploymentNode', () => {
       expect.objectContaining({
         cloudProvider: 'scaleway',
         nodeRole: 'deployment',
-      }),
+      })
     );
   });
 
@@ -295,7 +311,7 @@ describe('provisionDeploymentNode', () => {
       'env-nocreds',
       'proj-1',
       'user-1',
-      createMockEnv(),
+      createMockEnv()
     );
 
     expect(result).toBeNull();
@@ -306,18 +322,32 @@ describe('provisionDeploymentNode', () => {
     expect(DEPLOYMENT_DEFAULT_VM_SIZE).toBe('small');
   });
 
+  it('uses DEPLOYMENT_DEFAULT_VM_SIZE env override when creating a deployment node', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-medium' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    await provisionDeploymentNode(
+      'env-medium',
+      'proj-1',
+      'user-1',
+      createMockEnv({ DEPLOYMENT_DEFAULT_VM_SIZE: 'medium' })
+    );
+
+    expect(createNodeRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ vmSize: 'medium' })
+    );
+  });
+
   it('provisioning promise catches errors without throwing', async () => {
     const mockDb = createMockDb({ userCredProvider: 'hetzner' });
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-err' }));
     vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
 
-    const result = await provisionDeploymentNode(
-      'env-fail',
-      'proj-1',
-      'user-1',
-      createMockEnv(),
-    );
+    const result = await provisionDeploymentNode('env-fail', 'proj-1', 'user-1', createMockEnv());
 
     expect(result).not.toBeNull();
     // The provisioning promise should not throw — it has a .catch()
@@ -334,7 +364,7 @@ describe('provisionDeploymentNode', () => {
       'env-rollback',
       'proj-1',
       'user-1',
-      createMockEnv(),
+      createMockEnv()
     );
 
     expect(result).not.toBeNull();
@@ -382,18 +412,22 @@ describe('provisionDeploymentNode', () => {
     expect(rollbackWhere.op).toBe('and');
     expect(rollbackWhere.conds).toHaveLength(2);
     const rollbackIdCond = rollbackWhere.conds.find(
-      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.id,
+      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.id
     )!;
     expect(rollbackIdCond.val).toBe('env-rollback');
     const rollbackNodeCond = rollbackWhere.conds.find(
-      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.nodeId,
+      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.nodeId
     )!;
     expect(rollbackNodeCond.val).toBe('node-rollback-1');
   });
 
   it('rollback is robust even if the rollback update itself fails', async () => {
     // Create a DB where the second update call throws
-    const tracker = { selectCalls: 0, updateSetValues: [] as Record<string, unknown>[], updateWhereArgs: [] as unknown[][] };
+    const tracker = {
+      selectCalls: 0,
+      updateSetValues: [] as Record<string, unknown>[],
+      updateWhereArgs: [] as unknown[][],
+    };
     let updateCallCount = 0;
     const mockDb = {
       select: vi.fn().mockImplementation(() => {
@@ -430,7 +464,7 @@ describe('provisionDeploymentNode', () => {
       'env-rollback-fail',
       'proj-1',
       'user-1',
-      createMockEnv(),
+      createMockEnv()
     );
 
     expect(result).not.toBeNull();

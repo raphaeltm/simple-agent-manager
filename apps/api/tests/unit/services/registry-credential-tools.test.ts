@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the registry-credentials service
 vi.mock('../../../src/services/registry-credentials', () => ({
-  getRegistryCredentialRateLimit: vi.fn(),
+  consumeRegistryCredentialRateLimit: vi.fn(),
   mintProjectRegistryCredential: vi.fn(),
 }));
 
@@ -22,11 +22,11 @@ vi.mock('drizzle-orm/d1', () => ({
 import type { Env } from '../../../src/env';
 import { handleGetRegistryCredentials } from '../../../src/routes/mcp/registry-credential-tools';
 import {
-  getRegistryCredentialRateLimit,
+  consumeRegistryCredentialRateLimit,
   mintProjectRegistryCredential,
 } from '../../../src/services/registry-credentials';
 
-const mockGetRateLimit = vi.mocked(getRegistryCredentialRateLimit);
+const mockConsumeRateLimit = vi.mocked(consumeRegistryCredentialRateLimit);
 const mockMintCredential = vi.mocked(mintProjectRegistryCredential);
 
 function makeTokenData(overrides: Record<string, unknown> = {}) {
@@ -78,8 +78,18 @@ function setupDrizzleResults(resultSets: Array<Array<Record<string, unknown>>>) 
   });
 }
 
+function taskProfile(agentProfileHint: string | null = null) {
+  return [{ agentProfileHint }];
+}
+
 function setupSuccessfulMint() {
-  mockGetRateLimit.mockReturnValue({ maxRequests: 10, windowSeconds: 300 });
+  mockConsumeRateLimit.mockResolvedValue({
+    allowed: true,
+    maxRequests: 10,
+    windowSeconds: 300,
+    count: 1,
+    retryAfterSeconds: 300,
+  });
   mockMintCredential.mockResolvedValue({
     registry: 'registry.cloudflare.com',
     username: 'cf-user',
@@ -94,7 +104,7 @@ describe('handleGetRegistryCredentials', () => {
     vi.clearAllMocks();
   });
 
-  it('requires an environment before policy, KV, rate-limit, or minting work', async () => {
+  it('requires an environment before policy, rate-limit, or minting work', async () => {
     const kv = makeKV();
     const env = makeEnv({ KV: kv });
 
@@ -106,34 +116,32 @@ describe('handleGetRegistryCredentials', () => {
     expect(error.message).toContain('deployment environment name is required');
     expect(mockSelect).not.toHaveBeenCalled();
     expect(kv.get).not.toHaveBeenCalled();
-    expect(mockGetRateLimit).not.toHaveBeenCalled();
+    expect(mockConsumeRateLimit).not.toHaveBeenCalled();
     expect(mockMintCredential).not.toHaveBeenCalled();
   });
 
-  it('denies a disabled environment before KV, rate-limit, or minting work', async () => {
+  it('denies a disabled environment before rate-limit or minting work', async () => {
     const kv = makeKV();
     const env = makeEnv({ KV: kv });
-    setupDrizzleResults([
-      [enabledEnvironment({ agentDeployEnabled: false })],
-    ]);
+    setupDrizzleResults([taskProfile(), [enabledEnvironment({ agentDeployEnabled: false })]]);
 
     const result = await handleGetRegistryCredentials(
       'req-1',
       { environment: 'production' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('error');
     const error = (result as { error: { message: string } }).error;
     expect(error.message).toContain("Agent deployment is disabled for environment 'production'");
     expect(kv.get).not.toHaveBeenCalled();
-    expect(mockGetRateLimit).not.toHaveBeenCalled();
+    expect(mockConsumeRateLimit).not.toHaveBeenCalled();
     expect(mockMintCredential).not.toHaveBeenCalled();
   });
 
   it('allows an enabled environment without a profile allowlist to mint credentials', async () => {
-    setupDrizzleResults([[enabledEnvironment()]]);
+    setupDrizzleResults([taskProfile(), [enabledEnvironment()]]);
     setupSuccessfulMint();
 
     const env = makeEnv();
@@ -141,7 +149,7 @@ describe('handleGetRegistryCredentials', () => {
       'req-1',
       { environment: 'staging' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('result');
@@ -154,47 +162,44 @@ describe('handleGetRegistryCredentials', () => {
     expect(parsed.instructions).toBeInstanceOf(Array);
 
     const loginInstruction = (parsed.instructions as string[]).find((line) =>
-      line.includes('docker login'),
+      line.includes('docker login')
     );
     expect(loginInstruction).toBeDefined();
     expect(loginInstruction).toContain('--password-stdin');
     expect(loginInstruction).not.toMatch(/-p\s+<password>/);
     expect(loginInstruction).not.toMatch(/--password\s+<password>/);
-    expect(mockMintCredential).toHaveBeenCalledWith(
-      env,
-      'proj-1',
-      'user-1',
-      'task-1',
-      'staging',
-    );
+    expect(mockMintCredential).toHaveBeenCalledWith(env, 'proj-1', 'user-1', 'task-1', 'staging');
   });
 
   it('denies an enabled environment when the task profile is not in the allowlist', async () => {
     const kv = makeKV();
     const env = makeEnv({ KV: kv });
     setupDrizzleResults([
-      [enabledEnvironment({ allowedDeployProfileIdsJson: JSON.stringify(['profile-allowed']) })],
       [{ agentProfileHint: 'profile-other' }],
+      [enabledEnvironment({ allowedDeployProfileIdsJson: JSON.stringify(['profile-allowed']) })],
     ]);
 
     const result = await handleGetRegistryCredentials(
       'req-1',
       { environment: 'production' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('error');
     const error = (result as { error: { message: string } }).error;
-    expect(error.message).toContain("This agent profile is not allowed to deploy to environment 'production'");
+    expect(error.message).toContain(
+      "This agent profile is not allowed to deploy to environment 'production'"
+    );
     expect(kv.get).not.toHaveBeenCalled();
+    expect(mockConsumeRateLimit).not.toHaveBeenCalled();
     expect(mockMintCredential).not.toHaveBeenCalled();
   });
 
   it('allows an enabled environment when the task profile is in the allowlist', async () => {
     setupDrizzleResults([
-      [enabledEnvironment({ allowedDeployProfileIdsJson: JSON.stringify(['profile-allowed']) })],
       [{ agentProfileHint: 'profile-allowed' }],
+      [enabledEnvironment({ allowedDeployProfileIdsJson: JSON.stringify(['profile-allowed']) })],
     ]);
     setupSuccessfulMint();
 
@@ -203,7 +208,7 @@ describe('handleGetRegistryCredentials', () => {
       'req-1',
       { environment: 'production' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('result');
@@ -212,63 +217,73 @@ describe('handleGetRegistryCredentials', () => {
       'proj-1',
       'user-1',
       'task-1',
-      'production',
+      'production'
     );
   });
 
   it('enforces rate limiting after the environment policy passes', async () => {
-    const kv = makeKV('10');
+    const kv = makeKV();
     const env = makeEnv({ KV: kv });
-    setupDrizzleResults([[enabledEnvironment()]]);
-    mockGetRateLimit.mockReturnValue({ maxRequests: 10, windowSeconds: 300 });
+    setupDrizzleResults([taskProfile(), [enabledEnvironment()]]);
+    mockConsumeRateLimit.mockResolvedValue({
+      allowed: false,
+      maxRequests: 10,
+      windowSeconds: 300,
+      count: null,
+      retryAfterSeconds: 300,
+    });
 
     const result = await handleGetRegistryCredentials(
       'req-1',
       { environment: 'staging' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('error');
     const error = (result as { error: { code: number; message: string } }).error;
     expect(error.code).toBe(-32000);
     expect(error.message).toContain('rate limit exceeded');
-    expect(kv.get).toHaveBeenCalled();
+    expect(mockConsumeRateLimit).toHaveBeenCalledWith(env, 'proj-1');
+    expect(kv.get).not.toHaveBeenCalled();
     expect(kv.put).not.toHaveBeenCalled();
     expect(mockMintCredential).not.toHaveBeenCalled();
   });
 
-  it('increments the rate limit counter before minting after policy passes', async () => {
-    const kv = makeKV('3');
+  it('consumes the atomic rate limit before minting after policy passes', async () => {
+    const kv = makeKV();
     const env = makeEnv({ KV: kv });
-    setupDrizzleResults([[enabledEnvironment()]]);
+    setupDrizzleResults([taskProfile(), [enabledEnvironment()]]);
     setupSuccessfulMint();
 
-    await handleGetRegistryCredentials(
-      'req-1',
-      { environment: 'staging' },
-      makeTokenData(),
-      env,
-    );
+    await handleGetRegistryCredentials('req-1', { environment: 'staging' }, makeTokenData(), env);
 
-    const putCall = kv.put.mock.calls[0];
-    expect(putCall[0]).toMatch(/^registry-cred-rate:proj-1:\d+$/);
-    expect(putCall[1]).toBe('4');
-    expect(putCall[2]).toEqual({ expirationTtl: 360 });
+    expect(mockConsumeRateLimit).toHaveBeenCalledWith(env, 'proj-1');
+    expect(kv.get).not.toHaveBeenCalled();
+    expect(kv.put).not.toHaveBeenCalled();
+    expect(mockConsumeRateLimit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockMintCredential.mock.invocationCallOrder[0]
+    );
   });
 
   it('returns a generic error when mint fails and does not leak internals', async () => {
-    const kv = makeKV('5');
+    const kv = makeKV();
     const env = makeEnv({ KV: kv });
-    setupDrizzleResults([[enabledEnvironment()]]);
-    mockGetRateLimit.mockReturnValue({ maxRequests: 10, windowSeconds: 300 });
+    setupDrizzleResults([taskProfile(), [enabledEnvironment()]]);
+    mockConsumeRateLimit.mockResolvedValue({
+      allowed: true,
+      maxRequests: 10,
+      windowSeconds: 300,
+      count: 1,
+      retryAfterSeconds: 300,
+    });
     mockMintCredential.mockRejectedValue(new Error('CF API timeout with account acct-secret'));
 
     const result = await handleGetRegistryCredentials(
       'req-1',
       { environment: 'staging' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('error');
@@ -276,13 +291,11 @@ describe('handleGetRegistryCredentials', () => {
     expect(error.message).toContain('temporarily unavailable');
     expect(error.message).not.toContain('CF API timeout');
     expect(error.message).not.toContain('acct-secret');
-
-    const putCall = kv.put.mock.calls[0];
-    expect(putCall[1]).toBe('6');
+    expect(kv.put).not.toHaveBeenCalled();
   });
 
   it('trims whitespace from the required environment parameter', async () => {
-    setupDrizzleResults([[enabledEnvironment()]]);
+    setupDrizzleResults([taskProfile(), [enabledEnvironment()]]);
     setupSuccessfulMint();
 
     const env = makeEnv();
@@ -290,27 +303,21 @@ describe('handleGetRegistryCredentials', () => {
       'req-1',
       { environment: '  staging  ' },
       makeTokenData(),
-      env,
+      env
     );
 
     expect(result).toHaveProperty('result');
-    expect(mockMintCredential).toHaveBeenCalledWith(
-      env,
-      'proj-1',
-      'user-1',
-      'task-1',
-      'staging',
-    );
+    expect(mockMintCredential).toHaveBeenCalledWith(env, 'proj-1', 'user-1', 'task-1', 'staging');
   });
 
   it('returns a policy error when the environment is not active for the project', async () => {
-    setupDrizzleResults([[]]);
+    setupDrizzleResults([taskProfile(), []]);
 
     const result = await handleGetRegistryCredentials(
       'req-1',
       { environment: 'missing' },
       makeTokenData(),
-      makeEnv(),
+      makeEnv()
     );
 
     expect(result).toHaveProperty('error');

@@ -60,7 +60,9 @@ function parseEnvInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function parseMetrics(value: string | null): { cpuLoadAvg1?: number; memoryPercent?: number } | null {
+function parseMetrics(
+  value: string | null
+): { cpuLoadAvg1?: number; memoryPercent?: number } | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value);
@@ -73,22 +75,22 @@ function parseMetrics(value: string | null): { cpuLoadAvg1?: number; memoryPerce
 async function findDeploymentNodeWithCapacity(
   env: Env,
   userId: string,
-  placement: DeploymentPlacement,
+  placement: DeploymentPlacement
 ): Promise<string | null> {
   if (typeof env.DATABASE.prepare !== 'function') {
     return null;
   }
   const maxEnvironments = parseEnvInt(
     env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
-    DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
+    DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
   );
   const cpuThreshold = parseEnvInt(
     env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-    DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
+    DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT
   );
   const memThreshold = parseEnvInt(
     env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-    DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+    DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
   );
 
   const nodes = await env.DATABASE.prepare(
@@ -137,7 +139,10 @@ async function findDeploymentNodeWithCapacity(
         score: cpu * 0.4 + mem * 0.6,
       };
     })
-    .filter((node): node is { id: string; vmSize: string; vmLocation: string; score: number | null } => node !== null);
+    .filter(
+      (node): node is { id: string; vmSize: string; vmLocation: string; score: number | null } =>
+        node !== null
+    );
 
   if (scored.length === 0) return null;
 
@@ -159,7 +164,7 @@ async function findDeploymentNodeWithCapacity(
 
 async function readEnvironmentNodeId(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  envId: string,
+  envId: string
 ): Promise<string | null> {
   const rows = await db
     .select({ nodeId: schema.deploymentEnvironments.nodeId })
@@ -176,7 +181,7 @@ async function linkEnvironmentToNode(
   nodeId: string,
   placement: DeploymentPlacement,
   userId: string,
-  expectedNodeStatus: 'creating' | 'running',
+  expectedNodeStatus: 'creating' | 'running'
 ): Promise<boolean> {
   if (typeof env.DATABASE.prepare === 'function') {
     const result = await env.DATABASE.prepare(
@@ -206,7 +211,7 @@ async function linkEnvironmentToNode(
         expectedNodeStatus,
         placement.provider,
         placement.location,
-        placement.vmSize,
+        placement.vmSize
       )
       .run();
     return (result.meta?.changes ?? 0) > 0;
@@ -221,10 +226,7 @@ async function linkEnvironmentToNode(
       updatedAt: new Date().toISOString(),
     })
     .where(
-      and(
-        eq(schema.deploymentEnvironments.id, envId),
-        isNull(schema.deploymentEnvironments.nodeId),
-      ),
+      and(eq(schema.deploymentEnvironments.id, envId), isNull(schema.deploymentEnvironments.nodeId))
     );
 
   return true;
@@ -245,7 +247,7 @@ export async function provisionDeploymentNode(
   _projectId: string,
   userId: string,
   env: Env,
-  options?: { vmSizeOverride?: string },
+  options?: { vmSizeOverride?: string }
 ): Promise<DeploymentNodeResult | null> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -259,8 +261,8 @@ export async function provisionDeploymentNode(
       and(
         eq(schema.credentials.userId, userId),
         eq(schema.credentials.credentialType, 'cloud-provider'),
-        eq(schema.credentials.isActive, true),
-      ),
+        eq(schema.credentials.isActive, true)
+      )
     )
     .limit(1);
 
@@ -275,8 +277,8 @@ export async function provisionDeploymentNode(
       .where(
         and(
           eq(schema.platformCredentials.credentialType, 'cloud-provider'),
-          eq(schema.platformCredentials.isEnabled, true),
-        ),
+          eq(schema.platformCredentials.isEnabled, true)
+        )
       )
       .limit(1);
 
@@ -288,15 +290,24 @@ export async function provisionDeploymentNode(
   }
 
   const vmLocation = getDefaultLocationForProvider(cloudProvider) ?? DEFAULT_VM_LOCATION;
+  const defaultVmSize = env.DEPLOYMENT_DEFAULT_VM_SIZE?.trim() || DEPLOYMENT_DEFAULT_VM_SIZE;
   const placement: DeploymentPlacement = {
     provider: cloudProvider,
     location: vmLocation,
-    vmSize: options?.vmSizeOverride?.trim() || DEPLOYMENT_DEFAULT_VM_SIZE,
+    vmSize: options?.vmSizeOverride?.trim() || defaultVmSize,
   };
 
   const existingNodeId = await findDeploymentNodeWithCapacity(env, userId, placement);
   if (existingNodeId) {
-    const linked = await linkEnvironmentToNode(env, db, envId, existingNodeId, placement, userId, 'running');
+    const linked = await linkEnvironmentToNode(
+      env,
+      db,
+      envId,
+      existingNodeId,
+      placement,
+      userId,
+      'running'
+    );
     if (linked) {
       log.info('deployment_provisioning.placed_existing_node', {
         nodeId: existingNodeId,
@@ -329,11 +340,25 @@ export async function provisionDeploymentNode(
     nodeRole: 'deployment',
   });
 
-  const linkedFreshNode = await linkEnvironmentToNode(env, db, envId, node.id, placement, userId, 'creating');
+  const linkedFreshNode = await linkEnvironmentToNode(
+    env,
+    db,
+    envId,
+    node.id,
+    placement,
+    userId,
+    'creating'
+  );
   if (!linkedFreshNode) {
     await db
       .delete(schema.nodes)
-      .where(and(eq(schema.nodes.id, node.id), eq(schema.nodes.userId, userId), ne(schema.nodes.status, 'running')));
+      .where(
+        and(
+          eq(schema.nodes.id, node.id),
+          eq(schema.nodes.userId, userId),
+          ne(schema.nodes.status, 'running')
+        )
+      );
 
     const currentNodeId = await readEnvironmentNodeId(db, envId);
     if (currentNodeId) {
@@ -356,13 +381,9 @@ export async function provisionDeploymentNode(
   });
 
   // Return the provisioning promise for the caller to pass to waitUntil()
-  const provisioningPromise = provisionNode(
-    node.id,
-    env,
-    undefined,
-    undefined,
-    { environmentId: envId },
-  ).catch(async (err) => {
+  const provisioningPromise = provisionNode(node.id, env, undefined, undefined, {
+    environmentId: envId,
+  }).catch(async (err) => {
     log.error('deployment_provisioning.provision_failed', {
       nodeId: node.id,
       envId,
@@ -380,8 +401,8 @@ export async function provisionDeploymentNode(
         .where(
           and(
             eq(schema.deploymentEnvironments.id, envId),
-            eq(schema.deploymentEnvironments.nodeId, node.id),
-          ),
+            eq(schema.deploymentEnvironments.nodeId, node.id)
+          )
         );
       log.info('deployment_provisioning.nodeId_rolled_back', { envId, nodeId: node.id });
     } catch (rollbackErr) {

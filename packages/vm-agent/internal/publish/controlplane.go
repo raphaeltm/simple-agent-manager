@@ -60,9 +60,9 @@ func NewHTTPControlPlane(opts HTTPControlPlaneOptions) *HTTPControlPlane {
 
 // MintPushCredentials requests short-lived scoped registry push credentials for
 // the project. The returned credential values are never logged.
-func (c *HTTPControlPlane) MintPushCredentials(ctx context.Context, projectID string) (*PushCredentials, error) {
+func (c *HTTPControlPlane) MintPushCredentials(ctx context.Context, projectID string, req PushCredentialsRequest) (*PushCredentials, error) {
 	var creds PushCredentials
-	if err := c.do(ctx, projectID, routeMintPushCredentials, nil, &creds); err != nil {
+	if err := c.do(ctx, projectID, routeMintPushCredentials, req, &creds); err != nil {
 		return nil, err
 	}
 	if creds.Registry == "" || creds.Namespace == "" {

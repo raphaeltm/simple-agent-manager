@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -371,18 +372,31 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 				"error", err)
 		}
 
-		_ = e.disk.UpdateState(state)
+		var persistenceErrs []error
+		if err := e.disk.UpdateState(state); err != nil {
+			slog.Error("deploy.apply: failed to persist failed-initial state",
+				"seq", state.Seq, "error", err)
+			persistenceErrs = append(persistenceErrs, fmt.Errorf("persist failed-initial state: %w", err))
+		}
 		e.setObserved(ObservedState{
 			AppliedSeq:   0,
 			Status:       StatusFailedInitial,
 			ErrorMessage: applyErr.Error(),
 		})
-		return fmt.Errorf("apply failed (no previous release to revert): %w", applyErr)
+		return errors.Join(
+			fmt.Errorf("apply failed (no previous release to revert): %w", applyErr),
+			errors.Join(persistenceErrs...),
+		)
 	}
 
 	// Revert to previous release
+	var recoveryErrs []error
 	state.Status = StatusFailed
-	_ = e.disk.UpdateState(state)
+	if err := e.disk.UpdateState(state); err != nil {
+		slog.Error("deploy.apply: failed to persist failed release state",
+			"seq", state.Seq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("persist failed release state: %w", err))
+	}
 
 	// Tear down the partially-started new release before bringing the previous
 	// one back up. Otherwise its containers may still hold the host port and the
@@ -403,22 +417,38 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 			Status:       StatusFailed,
 			ErrorMessage: applyErr.Error(),
 		})
-		return fmt.Errorf("apply failed and revert failed: apply=%w, revert=%v", applyErr, err)
+		return errors.Join(
+			fmt.Errorf("apply failed and revert failed: apply=%w, revert=%v", applyErr, err),
+			errors.Join(recoveryErrs...),
+		)
 	}
 
 	if err := e.reloadCaddy(ctx, e.disk.CaddyfilePath(previousSeq)); err != nil {
 		slog.Error("deploy.apply: caddy reload for reverted release failed",
 			"prevSeq", previousSeq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("reload reverted caddy: %w", err))
 	}
 
 	// Restore current pointer to previous
-	_ = e.disk.SetCurrent(previousSeq)
+	if err := e.disk.SetCurrent(previousSeq); err != nil {
+		slog.Error("deploy.apply: failed to restore current pointer after revert",
+			"prevSeq", previousSeq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("restore current pointer after revert: %w", err))
+	}
 
 	// Update previous release state to show it was reverted-to
 	prevState, err := e.disk.ReadState(previousSeq)
 	if err == nil {
 		prevState.Status = StatusApplied
-		_ = e.disk.UpdateState(prevState)
+		if err := e.disk.UpdateState(prevState); err != nil {
+			slog.Error("deploy.apply: failed to persist reverted release state",
+				"prevSeq", previousSeq, "error", err)
+			recoveryErrs = append(recoveryErrs, fmt.Errorf("persist reverted release state: %w", err))
+		}
+	} else {
+		slog.Error("deploy.apply: failed to read previous release state after revert",
+			"prevSeq", previousSeq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("read previous release state after revert: %w", err))
 	}
 
 	services, _ := e.inspectServices(ctx, previousSeq)
@@ -431,7 +461,10 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 	slog.Info("deploy.apply: reverted to previous release",
 		"failedSeq", state.Seq, "revertedTo", previousSeq)
-	return fmt.Errorf("apply failed, reverted to seq %d: %w", previousSeq, applyErr)
+	return errors.Join(
+		fmt.Errorf("apply failed, reverted to seq %d: %w", previousSeq, applyErr),
+		errors.Join(recoveryErrs...),
+	)
 }
 
 // GetObserved returns the current observed deployment state (thread-safe).
@@ -628,11 +661,15 @@ func (e *Engine) waitForReloadCommand(ctx context.Context, command string) error
 }
 
 func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTarget) error {
+	requiredServices := routeServiceSet(routes)
+	if len(requiredServices) == 0 {
+		return nil
+	}
+
 	deadline := time.NewTimer(e.cfg.HealthTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(e.cfg.HealthPollInterval)
 	defer ticker.Stop()
-	requiredServices := routeServiceSet(routes)
 
 	for {
 		select {
@@ -647,14 +684,7 @@ func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTar
 				continue
 			}
 
-			if len(requiredServices) > 0 {
-				if routedServicesHealthy(services, requiredServices) {
-					return nil
-				}
-				continue
-			}
-
-			if allServicesHealthy(services) {
+			if routedServicesHealthy(services, requiredServices) {
 				return nil
 			}
 		}
@@ -670,18 +700,6 @@ func routeServiceSet(routes []RouteTarget) map[string]bool {
 		}
 	}
 	return services
-}
-
-func allServicesHealthy(services []ServiceState) bool {
-	if len(services) == 0 {
-		return false
-	}
-	for _, svc := range services {
-		if !serviceHealthy(svc) {
-			return false
-		}
-	}
-	return true
 }
 
 func routedServicesHealthy(services []ServiceState, requiredServices map[string]bool) bool {
@@ -707,19 +725,7 @@ func matchedService(svc ServiceState, requiredServices map[string]bool) (string,
 	if requiredServices[svc.Name] {
 		return svc.Name, true
 	}
-	for service := range requiredServices {
-		if composeContainerNameMatchesService(svc.Name, service) {
-			return service, true
-		}
-	}
 	return "", false
-}
-
-func composeContainerNameMatchesService(containerName, service string) bool {
-	return strings.Contains(containerName, "-"+service+"-") ||
-		strings.Contains(containerName, "_"+service+"_") ||
-		strings.HasPrefix(containerName, service+"-") ||
-		strings.HasPrefix(containerName, service+"_")
 }
 
 func serviceHealthy(svc ServiceState) bool {

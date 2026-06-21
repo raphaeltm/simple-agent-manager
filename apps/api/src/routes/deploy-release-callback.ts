@@ -16,7 +16,12 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
-import { buildComposePublishApplyPayload } from '../services/compose-publish-apply';
+import {
+  buildComposePublishApplyPayload,
+  DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
+  DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+  DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB,
+} from '../services/compose-publish-apply';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
 import {
@@ -155,6 +160,14 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
       routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
       releaseId: release.id,
+      defaultMemoryLimitMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB
+      ),
+      defaultLogMaxSize:
+        c.env.DEPLOYMENT_LOG_MAX_SIZE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+      defaultLogMaxFile:
+        c.env.DEPLOYMENT_LOG_MAX_FILE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
     });
     routes = applied.routes;
     composeYaml = applied.composeYaml;

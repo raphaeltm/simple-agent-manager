@@ -250,6 +250,29 @@ export async function assertAgentDeploymentAllowed(
   | { environmentId: string; policy: DeploymentAgentPolicy; taskAgentProfileId: string | null }
   | { error: string }
 > {
+  const taskAgentProfileId = tokenData.taskId
+    ? await getTaskAgentProfileId(db, tokenData.taskId)
+    : null;
+
+  return assertAgentDeploymentAllowedForProfile(
+    db,
+    projectId,
+    environmentName,
+    taskAgentProfileId,
+    { taskId: tokenData.taskId || null }
+  );
+}
+
+export async function assertAgentDeploymentAllowedForProfile(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+  environmentName: string,
+  taskAgentProfileId: string | null | undefined,
+  context: { taskId?: string | null } = {}
+): Promise<
+  | { environmentId: string; policy: DeploymentAgentPolicy; taskAgentProfileId: string | null }
+  | { error: string }
+> {
   const rows = await db
     .select({
       id: schema.deploymentEnvironments.id,
@@ -283,17 +306,15 @@ export async function assertAgentDeploymentAllowed(
     };
   }
 
-  const taskAgentProfileId = tokenData.taskId
-    ? await getTaskAgentProfileId(db, tokenData.taskId)
-    : null;
+  const normalizedProfileId = taskAgentProfileId?.trim() || null;
 
   if (policy.allowedDeployProfileIds.length > 0) {
-    if (!taskAgentProfileId || !policy.allowedDeployProfileIds.includes(taskAgentProfileId)) {
+    if (!normalizedProfileId || !policy.allowedDeployProfileIds.includes(normalizedProfileId)) {
       log.warn('deployment_agent_policy.denied_profile', {
         projectId,
         environmentName,
-        taskId: tokenData.taskId || null,
-        taskProfileId: taskAgentProfileId,
+        taskId: context.taskId ?? null,
+        taskProfileId: normalizedProfileId,
       });
       return {
         error: `This agent profile is not allowed to deploy to environment '${environmentName}'.`,
@@ -301,7 +322,7 @@ export async function assertAgentDeploymentAllowed(
     }
   }
 
-  return { environmentId: row.id, policy, taskAgentProfileId };
+  return { environmentId: row.id, policy, taskAgentProfileId: normalizedProfileId };
 }
 
 /**

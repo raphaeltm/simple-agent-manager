@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockAssertAgentDeploymentAllowed = vi.fn();
+const mockConsumeRegistryCredentialRateLimit = vi.fn();
 const mockMintProjectRegistryCredential = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -12,7 +13,8 @@ vi.mock('../../src/services/deployment-control', () => ({
 }));
 
 vi.mock('../../src/services/registry-credentials', () => ({
-  getRegistryCredentialRateLimit: vi.fn(() => ({ maxRequests: 10, windowSeconds: 300 })),
+  consumeRegistryCredentialRateLimit: (...args: unknown[]) =>
+    mockConsumeRegistryCredentialRateLimit(...args),
   mintProjectRegistryCredential: (...args: unknown[]) => mockMintProjectRegistryCredential(...args),
 }));
 
@@ -20,7 +22,8 @@ vi.mock('../../src/lib/logger', () => ({
   log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-const { handleGetRegistryCredentials } = await import('../../src/routes/mcp/registry-credential-tools');
+const { handleGetRegistryCredentials } =
+  await import('../../src/routes/mcp/registry-credential-tools');
 
 function tokenData() {
   return {
@@ -35,10 +38,6 @@ function tokenData() {
 function env() {
   return {
     DATABASE: {},
-    KV: {
-      get: vi.fn().mockResolvedValue(null),
-      put: vi.fn().mockResolvedValue(undefined),
-    },
   } as any;
 }
 
@@ -65,11 +64,11 @@ describe('handleGetRegistryCredentials policy gate', () => {
       'req-1',
       { environment: 'staging' },
       tokenData(),
-      mockEnv,
+      mockEnv
     );
 
     expect(result.error?.message).toContain('Agent deployment is disabled');
-    expect(mockEnv.KV.get).not.toHaveBeenCalled();
+    expect(mockConsumeRegistryCredentialRateLimit).not.toHaveBeenCalled();
     expect(mockMintProjectRegistryCredential).not.toHaveBeenCalled();
   });
 });

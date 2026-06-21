@@ -28,6 +28,13 @@ type PushCredentials struct {
 	ExpiresAt string `json:"expiresAt"`
 }
 
+// PushCredentialsRequest is the policy context required to mint registry push
+// credentials for a compose-publish release.
+type PushCredentialsRequest struct {
+	Environment    string `json:"environment"`
+	AgentProfileID string `json:"agentProfileId"`
+}
+
 // ServiceRelease records one re-pushed service image for the release submission.
 type ServiceRelease struct {
 	ServiceName         string    `json:"serviceName"`
@@ -69,7 +76,7 @@ type ReleaseResult struct {
 
 // ControlPlane mints push credentials and submits the captured release.
 type ControlPlane interface {
-	MintPushCredentials(ctx context.Context, projectID string) (*PushCredentials, error)
+	MintPushCredentials(ctx context.Context, projectID string, req PushCredentialsRequest) (*PushCredentials, error)
 	SubmitRelease(ctx context.Context, projectID string, req *ReleaseSubmission) (*ReleaseResult, error)
 }
 
@@ -122,6 +129,13 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 	if strings.TrimSpace(environmentID) == "" {
 		return nil, fmt.Errorf("publish: empty environmentID")
 	}
+	agentProfileID := ""
+	if submittedBy != nil {
+		agentProfileID = strings.TrimSpace(submittedBy.AgentProfileID)
+	}
+	if agentProfileID == "" {
+		return nil, fmt.Errorf("publish: empty agentProfileID")
+	}
 
 	o.log.Info("publish started",
 		"projectId", projectID,
@@ -131,7 +145,10 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		"serviceCount", len(art.Services),
 		"composeYamlBytes", len(art.ComposeYAML))
 
-	creds, err := o.controlPlane.MintPushCredentials(ctx, projectID)
+	creds, err := o.controlPlane.MintPushCredentials(ctx, projectID, PushCredentialsRequest{
+		Environment:    strings.TrimSpace(environment),
+		AgentProfileID: agentProfileID,
+	})
 	if err != nil {
 		o.log.Error("mint push credentials failed", "projectId", projectID, "error", err)
 		return nil, fmt.Errorf("publish: mint push credentials: %w", err)

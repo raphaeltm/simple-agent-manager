@@ -3,9 +3,9 @@ import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
-import { isProjectAgentDeployEnabled } from '../../services/deployment-control';
+import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
-  getRegistryCredentialRateLimit,
+  consumeRegistryCredentialRateLimit,
   mintProjectRegistryCredential,
 } from '../../services/registry-credentials';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
@@ -30,75 +30,74 @@ import { verifyWorkspacePublishCallback } from './_callback-auth';
  *
  * SECURITY: Credential values are NEVER logged or persisted (only audit
  * metadata, inside mintProjectRegistryCredential). The callback JWT carries only
- * a workspaceId, so we resolve the project + user from the workspace record and
- * verify it matches the :id route param before minting.
+ * a workspaceId, so we resolve the project + user from the workspace record,
+ * verify it matches the :id route param, and require the vm-agent to send the
+ * already policy-checked environment + agent profile context before minting.
  *
  * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
  * See: .claude/rules/34-vm-agent-callback-auth.md
  */
 const registryPushCredentialsCallbackRoute = new Hono<{ Bindings: Env }>();
 
+function cleanOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
 registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', async (c) => {
   const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
     c,
     'registry_push_cred',
-    'Invalid token scope for registry push credentials',
+    'Invalid token scope for registry push credentials'
   );
 
-  // Project-level agent-deploy gate. The publish path has no environment name or
-  // taskId (workspace callback JWT), so the environment-scoped
-  // assertAgentDeploymentAllowed cannot apply — we require the project to have at
-  // least one active, agent-deploy-enabled environment instead.
-  const deployEnabled = await isProjectAgentDeployEnabled(db, projectId);
-  if (!deployEnabled) {
-    log.warn('registry_push_cred.deploy_disabled', {
-      projectId,
-      workspaceId,
-      action: 'rejected',
-    });
-    throw errors.forbidden(
-      'Agent deployment is disabled for this project. Enable it on a deployment environment before publishing.',
+  const requestBody = await c.req.json().catch(() => null);
+  if (!requestBody || typeof requestBody !== 'object') {
+    throw errors.badRequest('Registry credential request body is required');
+  }
+  const body = requestBody as Record<string, unknown>;
+  const environment = cleanOptionalString(body.environment);
+  const agentProfileId = cleanOptionalString(body.agentProfileId);
+  if (!environment || !agentProfileId) {
+    throw errors.badRequest(
+      'Registry credential request must include environment and agentProfileId.'
     );
   }
 
-  // Rate limit: per-project credential minting using a time-bucketed KV key (no
-  // TTL drift). KV has no atomic read-modify-write — under high concurrency in
-  // the same window, parallel requests may both pass the gate. Acceptable: the
-  // overshoot is bounded by concurrency and the window is wide (300s default).
-  // Mirrors routes/mcp/registry-credential-tools.ts.
-  const rateLimit = getRegistryCredentialRateLimit(c.env);
-  const now = Math.floor(Date.now() / 1000);
-  const windowStart = Math.floor(now / rateLimit.windowSeconds) * rateLimit.windowSeconds;
-  const rateLimitKey = `registry-cred-rate:${projectId}:${windowStart}`;
-  const currentCount = await c.env.KV.get(rateLimitKey).then((v) => (v ? parseInt(v, 10) : 0));
-  if (currentCount >= rateLimit.maxRequests) {
+  const policyResult = await assertAgentDeploymentAllowedForProfile(
+    db,
+    projectId,
+    environment,
+    agentProfileId
+  );
+  if ('error' in policyResult) {
+    log.warn('registry_push_cred.policy_denied', {
+      projectId,
+      workspaceId,
+      environment,
+      agentProfileId,
+      action: 'rejected',
+    });
+    throw errors.forbidden(policyResult.error);
+  }
+
+  const rateLimit = await consumeRegistryCredentialRateLimit(c.env, projectId);
+  if (!rateLimit.allowed) {
     log.warn('registry_push_cred.rate_limited', {
       projectId,
       maxRequests: rateLimit.maxRequests,
       windowSeconds: rateLimit.windowSeconds,
     });
     throw errors.tooManyRequests(
-      `Registry credential rate limit exceeded (${rateLimit.maxRequests} per ${rateLimit.windowSeconds}s). Try again later.`,
+      `Registry credential rate limit exceeded (${rateLimit.maxRequests} per ${rateLimit.windowSeconds}s). Try again later.`
     );
   }
-
-  // Increment BEFORE minting — failed CF API calls still consume quota to bound
-  // upstream calls during an incident (increment-first pattern).
-  await c.env.KV.put(rateLimitKey, String(currentCount + 1), {
-    expirationTtl: rateLimit.windowSeconds + 60,
-  });
 
   try {
     // taskId is '' — the publish path has no task context. permissions include
     // 'pull' so the daemon can resolve the source layers it re-tags.
-    const result = await mintProjectRegistryCredential(
-      c.env,
-      projectId,
-      userId,
-      '',
-      undefined,
-      { permissions: ['pull', 'push'] },
-    );
+    const result = await mintProjectRegistryCredential(c.env, projectId, userId, '', environment, {
+      permissions: ['pull', 'push'],
+    });
 
     // Response shape matches the agent's Go PushCredentials struct
     // (registry/username/password/namespace/expiresAt). The Go decode rejects
@@ -118,7 +117,7 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
       error: internalMessage,
     });
     throw errors.internal(
-      'Registry credential minting is temporarily unavailable. Please try again later.',
+      'Registry credential minting is temporarily unavailable. Please try again later.'
     );
   }
 });

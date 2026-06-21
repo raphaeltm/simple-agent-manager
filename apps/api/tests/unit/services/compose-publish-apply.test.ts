@@ -199,6 +199,22 @@ networks:
     }
   });
 
+  it('applies configured default memory and log limits', () => {
+    const result = buildComposePublishApplyPayload(makeSubmission(), {
+      ...OPTS,
+      defaultMemoryLimitMb: 512,
+      defaultLogMaxSize: '25m',
+      defaultLogMaxFile: '7',
+    });
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(doc.services.app.deploy.resources.limits.memory).toBe('512M');
+    expect(doc.services.app.logging).toEqual({
+      driver: 'json-file',
+      options: { 'max-size': '25m', 'max-file': '7' },
+    });
+  });
+
   it('preserves an explicit deploy.resources.limits.memory', () => {
     const composeWithLimits = `services:
   app:
@@ -279,6 +295,31 @@ volumes:
         OPTS
       )
     ).toThrow(/external volumes are not allowed/i);
+  });
+
+  it('rejects local-driver top-level volume options that can bind host paths', () => {
+    const composeWithDriverOpts = `services:
+  app:
+    image: example/app:1
+    volumes:
+      - data:/data
+    ports:
+      - "8000:8000"
+volumes:
+  data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithDriverOpts, services: [] }),
+        OPTS
+      )
+    ).toThrow(/driver_opts/i);
   });
 
   it('rejects service volume mounts that are not declared as top-level named volumes', () => {
@@ -421,11 +462,12 @@ volumes:
       expect(doc.services[name].labels['sam.service']).toBe(name);
     }
 
-    // Long-syntax volume mount preserved verbatim; named top-level volume kept.
+    // Long-syntax volume mount preserved verbatim; Compose's global volume name
+    // is stripped so the deploy node creates an environment-scoped local volume.
     expect(doc.services.postgres.volumes).toEqual([
       { type: 'volume', source: 'pgdata', target: '/var/lib/postgresql/data', volume: {} },
     ]);
-    expect(doc.volumes).toEqual({ pgdata: { name: 'crewai_pgdata' } });
+    expect(doc.volumes).toEqual({ pgdata: null });
 
     // Top-level named network is stripped (warned) and replaced with SAM's bridge.
     expect(result.warnings.some((w) => w.field === 'networks')).toBe(true);

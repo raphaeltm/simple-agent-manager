@@ -17,11 +17,23 @@ const DEPLOYMENT_ENVIRONMENTS = {
   status: 'deployment_environments.status',
   nodeId: 'deployment_environments.nodeId',
   agentDeployEnabled: 'deployment_environments.agentDeployEnabled',
+  agentDeployEnabledBy: 'deployment_environments.agentDeployEnabledBy',
+  agentDeployEnabledAt: 'deployment_environments.agentDeployEnabledAt',
+  agentDeployDisabledAt: 'deployment_environments.agentDeployDisabledAt',
+  allowedDeployProfileIdsJson: 'deployment_environments.allowedDeployProfileIdsJson',
 };
 
 let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
 let latestVersionRows: Array<{ version: number }> = [];
-let environmentRows: Array<{ id: string; nodeId: string | null; agentDeployEnabled: boolean }> = [];
+let environmentRows: Array<{
+  id: string;
+  nodeId: string | null;
+  agentDeployEnabled: boolean;
+  agentDeployEnabledBy?: string | null;
+  agentDeployEnabledAt?: string | null;
+  agentDeployDisabledAt?: string | null;
+  allowedDeployProfileIdsJson?: string | null;
+}> = [];
 const inserted: Array<Record<string, unknown>> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -148,7 +160,17 @@ describe('compose-publish-release callback (vertical slice)', () => {
     inserted.length = 0;
     workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
     latestVersionRows = [{ version: 4 }];
-    environmentRows = [{ id: 'env-1', nodeId: null, agentDeployEnabled: true }];
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });
 
@@ -223,6 +245,33 @@ describe('compose-publish-release callback (vertical slice)', () => {
     const res = await request(app, 'proj-1', validSubmission);
 
     expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects when the submitted agent profile is not allowed for the environment', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        agentDeployEnabled: true,
+        allowedDeployProfileIdsJson: JSON.stringify(['profile-allowed']),
+      },
+    ];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a submission missing agentProfileId', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      submittedBy: { taskId: 'task-1' },
+    });
+
+    expect(res.status).toBe(400);
     expect(inserted).toHaveLength(0);
   });
 

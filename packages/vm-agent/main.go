@@ -3,13 +3,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"fmt"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
@@ -71,7 +70,7 @@ func runDeploymentMode(cfg *config.Config) {
 		"environmentId": cfg.EnvironmentID,
 	})
 
-	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), cfg.DeployRuntimeTimeout)
 	if err := deploy.EnsureRuntime(runtimeCtx, bootReporter); err != nil {
 		runtimeCancel()
 		// Report and flush synchronously before exiting so the failure is visible

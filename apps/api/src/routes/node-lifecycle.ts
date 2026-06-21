@@ -167,11 +167,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   const body = c.req.valid('json');
 
   // Read the node first to check if IP backfill is needed
-  const rows = await db
-    .select()
-    .from(schema.nodes)
-    .where(eq(schema.nodes.id, nodeId))
-    .limit(1);
+  const rows = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
 
   const node = rows[0];
   if (!node) {
@@ -255,7 +251,9 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       }
     } catch (dnsErr) {
       const message = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
-      updatePayload.errorMessage = truncateNodeLifecycleError(`${NODE_BACKEND_DNS_ERROR_PREFIX} ${message}`);
+      updatePayload.errorMessage = truncateNodeLifecycleError(
+        `${NODE_BACKEND_DNS_ERROR_PREFIX} ${message}`
+      );
       log.error('heartbeat.backend_dns_backfill_failed', {
         nodeId,
         ipAddress: dnsIp,
@@ -265,10 +263,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     }
   }
 
-  await db
-    .update(schema.nodes)
-    .set(updatePayload)
-    .where(eq(schema.nodes.id, nodeId));
+  await db.update(schema.nodes).set(updatePayload).where(eq(schema.nodes.id, nodeId));
 
   // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the
   // VM agent via POST /api/projects/:id/node-acp-heartbeat. Retained as safety net.
@@ -280,14 +275,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           .select({ id: schema.workspaces.id, projectId: schema.workspaces.projectId })
           .from(schema.workspaces)
           .where(
-            and(
-              eq(schema.workspaces.nodeId, nodeId),
-              eq(schema.workspaces.status, 'running'),
-            )
+            and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.status, 'running'))
           );
 
-        const projectIds = [...new Set(workspaces.map((w) => w.projectId).filter(Boolean))] as string[];
-        log.debug('heartbeat.acp_sweep', { nodeId, workspaces: workspaces.length, projects: projectIds.length });
+        const projectIds = [
+          ...new Set(workspaces.map((w) => w.projectId).filter(Boolean)),
+        ] as string[];
+        log.debug('heartbeat.acp_sweep', {
+          nodeId,
+          workspaces: workspaces.length,
+          projects: projectIds.length,
+        });
 
         await Promise.all(
           projectIds.map(async (projectId) => {
@@ -298,9 +296,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
                   setTimeout(() => reject(new Error('acp_sweep_timeout')), acpSweepTimeoutMs)
                 ),
               ]);
-              log.debug('heartbeat.acp_sweep_updated', { nodeId, projectId, updatedSessions: updated });
+              log.debug('heartbeat.acp_sweep_updated', {
+                nodeId,
+                projectId,
+                updatedSessions: updated,
+              });
             } catch (err) {
-              log.warn('heartbeat.acp_session_update_failed', { nodeId, projectId, error: String(err) });
+              log.warn('heartbeat.acp_session_update_failed', {
+                nodeId,
+                projectId,
+                error: String(err),
+              });
             }
           })
         );
@@ -356,11 +362,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       for (const envRow of envRows) {
         const envId = envRow.envId;
         const bodyState = stateByEnv.get(envId);
-        const deploymentState = bodyState ?? (
-          envRows.length === 1 && body.deployment.appliedSeq !== undefined
-            ? body.deployment
-            : null
-        );
+        const deploymentState = bodyState ?? null;
         const appliedSeq = deploymentState?.appliedSeq ?? 0;
 
         if (deploymentState) {
@@ -370,8 +372,8 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
             .where(
               and(
                 eq(schema.deploymentEnvironments.id, envId),
-                eq(schema.deploymentEnvironments.nodeId, nodeId),
-              ),
+                eq(schema.deploymentEnvironments.nodeId, nodeId)
+              )
             );
 
           await reconcileDeploymentReleaseStatuses(db, envId, deploymentState);
@@ -387,12 +389,14 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           .orderBy(desc(schema.deploymentReleases.version))
           .limit(1);
 
+        const latest = latestRelease[0];
+        const nodeAlreadyApplying = deploymentState?.status === 'applying';
         if (
-          latestRelease[0] &&
-          latestRelease[0].version > appliedSeq &&
-          (latestRelease[0].status === 'created' || latestRelease[0].status === 'applying')
+          latest &&
+          latest.version > appliedSeq &&
+          (latest.status === 'created' || (latest.status === 'applying' && !nodeAlreadyApplying))
         ) {
-          pendingReleases.push({ environmentId: envId, seq: latestRelease[0].version });
+          pendingReleases.push({ environmentId: envId, seq: latest.version });
         }
       }
 
@@ -417,7 +421,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       response.deployPubKey = c.env.DEPLOY_SIGNING_PUBLIC_KEY;
       response.deployment = {
         ...(typeof response.deployment === 'object' && response.deployment !== null
-          ? response.deployment as Record<string, unknown>
+          ? (response.deployment as Record<string, unknown>)
           : {}),
         deployPubKey: c.env.DEPLOY_SIGNING_PUBLIC_KEY,
       };
@@ -447,9 +451,7 @@ function isVMAgentReportLevel(value: unknown): value is VMAgentReportLevel {
 }
 
 function normalizeVMAgentReportLevel(value: unknown): VMAgentReportLevel {
-  return isVMAgentReportLevel(value)
-    ? value
-    : 'error';
+  return isVMAgentReportLevel(value) ? value : 'error';
 }
 
 function truncateString(value: string, maxLength: number): string {
@@ -522,7 +524,8 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
       level,
       message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
       source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),
-      stack: typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
+      stack:
+        typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
       workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
       timestamp: typeof e.timestamp === 'string' ? e.timestamp : null,
       context: maybeJsonRecord(e.context),
@@ -538,15 +541,28 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
       context: maybeJsonRecord(e.context),
       nodeId,
       workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
-      timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() || Date.now() : Date.now(),
+      timestamp:
+        typeof e.timestamp === 'string'
+          ? new Date(e.timestamp).getTime() || Date.now()
+          : Date.now(),
     });
   }
 
   // Persist to observability D1 (fire-and-forget, fail-silent)
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
-    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
-      .catch((e) => { log.error('observability.persist_error_batch_failed', { count: persistInputs.length, error: String(e) }); });
-    try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
+    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env).catch(
+      (e) => {
+        log.error('observability.persist_error_batch_failed', {
+          count: persistInputs.length,
+          error: String(e),
+        });
+      }
+    );
+    try {
+      c.executionCtx.waitUntil(promise);
+    } catch {
+      /* no exec ctx (e.g. tests) */
+    }
   }
 
   return c.body(null, 204);
@@ -554,7 +570,10 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
 
 // --- Internal helpers ---
 
-async function verifyNodeCallbackAuth(c: import('hono').Context<{ Bindings: Env }>, nodeId: string): Promise<void> {
+async function verifyNodeCallbackAuth(
+  c: import('hono').Context<{ Bindings: Env }>,
+  nodeId: string
+): Promise<void> {
   const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 

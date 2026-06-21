@@ -189,7 +189,11 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `DEPLOYMENT_ROUTE_PORT_BASE`           | `35000`          | First node-local loopback port reserved for app routes                |
 | `DEPLOYMENT_ROUTE_PORT_SPAN`           | `100`            | Number of loopback ports reserved per deployment environment          |
 | `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE` | `5`              | Maximum deployment environments to place on one deployment node       |
+| `DEPLOYMENT_DEFAULT_VM_SIZE`           | `small`          | Default VM size for deployment nodes                                  |
 | `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`      | `medium`         | VM size for deployment nodes that need Docker Model Runner            |
+| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`   | `256`            | Default per-service memory limit for compose-publish releases         |
+| `DEPLOYMENT_LOG_MAX_SIZE`              | `10m`            | Default json-file log max-size for compose-publish releases           |
+| `DEPLOYMENT_LOG_MAX_FILE`              | `3`              | Default json-file log max-file for compose-publish releases           |
 | `BUILD_PUBLISH_TOOL_TIMEOUT_MS`        | `1260000`        | Worker-to-VM proxy timeout for `build_and_publish`                    |
 | `DEPLOY_ACME_EMAIL`                    | _(unset)_        | Optional ACME contact email emitted into deployment-node Caddy config |
 | `DEPLOY_ACME_CA`                       | _(unset)_        | Optional ACME CA directory override, useful for Let's Encrypt staging |

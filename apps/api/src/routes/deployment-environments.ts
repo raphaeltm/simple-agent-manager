@@ -7,7 +7,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context,Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
@@ -48,7 +48,7 @@ const ENV_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const CreateEnvironmentSchema = v.object({
   name: v.pipe(
     v.string('name is required'),
-    v.regex(ENV_NAME_RE, 'Name must be lowercase alphanumeric with optional hyphens, 1-63 chars'),
+    v.regex(ENV_NAME_RE, 'Name must be lowercase alphanumeric with optional hyphens, 1-63 chars')
   ),
 });
 
@@ -94,7 +94,7 @@ async function resolveDeploymentNode(
   db: DeploymentDb,
   projectId: string,
   envId: string,
-  userId: string,
+  userId: string
 ): Promise<ResolvedDeploymentNode> {
   const envRows = await db
     .select({
@@ -105,8 +105,8 @@ async function resolveDeploymentNode(
     .where(
       and(
         eq(schema.deploymentEnvironments.id, envId),
-        eq(schema.deploymentEnvironments.projectId, projectId),
-      ),
+        eq(schema.deploymentEnvironments.projectId, projectId)
+      )
     )
     .limit(1);
 
@@ -160,7 +160,7 @@ async function handleNodeProxyRoute(
     fetch: (nodeId: string, userId: string) => Promise<unknown>;
     onSuccess: (result: unknown, resolved: ReadyDeploymentNode) => unknown;
     onError: (resolved: ReadyDeploymentNode) => unknown;
-  },
+  }
 ): Promise<Response> {
   const projectId = c.req.param('projectId');
   const envId = c.req.param('envId');
@@ -212,8 +212,8 @@ deploymentEnvironmentRoutes.post(
       .where(
         and(
           eq(schema.deploymentEnvironments.projectId, projectId),
-          eq(schema.deploymentEnvironments.name, name),
-        ),
+          eq(schema.deploymentEnvironments.name, name)
+        )
       )
       .limit(1);
 
@@ -238,7 +238,7 @@ deploymentEnvironmentRoutes.post(
       .limit(1);
 
     return c.json(await buildDeploymentEnvironmentResponse(db, c.env, created!), 201);
-  },
+  }
 );
 
 /**
@@ -262,11 +262,11 @@ deploymentEnvironmentRoutes.get(
       .orderBy(schema.deploymentEnvironments.createdAt);
 
     const environments = await Promise.all(
-      rows.map((row) => buildDeploymentEnvironmentResponse(db, c.env, row)),
+      rows.map((row) => buildDeploymentEnvironmentResponse(db, c.env, row))
     );
 
     return c.json({ environments });
-  },
+  }
 );
 
 /**
@@ -290,8 +290,8 @@ deploymentEnvironmentRoutes.get(
       .where(
         and(
           eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId),
-        ),
+          eq(schema.deploymentEnvironments.projectId, projectId)
+        )
       )
       .limit(1);
 
@@ -300,7 +300,7 @@ deploymentEnvironmentRoutes.get(
     }
 
     return c.json(await buildDeploymentEnvironmentResponse(db, c.env, rows[0]!));
-  },
+  }
 );
 
 /**
@@ -325,8 +325,8 @@ deploymentEnvironmentRoutes.patch(
       .where(
         and(
           eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId),
-        ),
+          eq(schema.deploymentEnvironments.projectId, projectId)
+        )
       )
       .limit(1);
 
@@ -378,7 +378,7 @@ deploymentEnvironmentRoutes.patch(
     });
 
     return c.json(await buildDeploymentEnvironmentResponse(db, c.env, updated!));
-  },
+  }
 );
 
 /**
@@ -414,7 +414,7 @@ deploymentEnvironmentRoutes.get(
         nodeId: resolved.nodeId,
         unavailableReason: 'node_agent_unreachable',
       }),
-    }),
+    })
 );
 
 /**
@@ -442,7 +442,7 @@ deploymentEnvironmentRoutes.get(
         nodeId: resolved.nodeId,
         unavailableReason: 'node_agent_unreachable',
       }),
-    }),
+    })
 );
 
 /**
@@ -474,7 +474,7 @@ deploymentEnvironmentRoutes.get(
         fallbackMetrics: parseLastMetrics(resolved.lastMetrics),
         unavailableReason: 'node_agent_unreachable',
       }),
-    }),
+    })
 );
 
 /**
@@ -504,8 +504,8 @@ deploymentEnvironmentRoutes.delete(
       .where(
         and(
           eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId),
-        ),
+          eq(schema.deploymentEnvironments.projectId, projectId)
+        )
       )
       .limit(1);
 
@@ -528,7 +528,7 @@ deploymentEnvironmentRoutes.delete(
         baseDomain: c.env.BASE_DOMAIN,
         routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
         routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      },
+      }
     );
 
     const volumes = await listEnvironmentVolumes(db, envId);
@@ -550,12 +550,12 @@ deploymentEnvironmentRoutes.delete(
             c.env,
             userId,
             envId,
-            providerInstanceId,
+            providerInstanceId
           );
           volumesDetached = detached.length;
         } catch (err) {
           throw errors.conflict(
-            `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`,
+            `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`
           );
         }
       }
@@ -568,7 +568,7 @@ deploymentEnvironmentRoutes.delete(
         volumesDeleted += 1;
       } catch (err) {
         throw errors.conflict(
-          `Could not delete deployment volume "${volume.name}": ${err instanceof Error ? err.message : String(err)}`,
+          `Could not delete deployment volume "${volume.name}": ${err instanceof Error ? err.message : String(err)}`
         );
       }
     }
@@ -591,6 +591,7 @@ deploymentEnvironmentRoutes.delete(
          WHERE id = ?
            AND user_id = ?
            AND node_role = 'deployment'
+           AND status NOT IN ('deleting', 'deleted')
            AND NOT EXISTS (
              SELECT 1 FROM deployment_environments WHERE node_id = ?
            )`
@@ -612,7 +613,7 @@ deploymentEnvironmentRoutes.delete(
             })
             .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)));
           throw errors.conflict(
-            `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
+            `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`
           );
         }
 
@@ -644,7 +645,7 @@ deploymentEnvironmentRoutes.delete(
       dnsRecordsDeleted,
       warnings: nodeCleanupWarnings,
     });
-  },
+  }
 );
 
 export { deploymentEnvironmentRoutes };
