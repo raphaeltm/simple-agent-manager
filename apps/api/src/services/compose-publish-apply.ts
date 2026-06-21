@@ -43,12 +43,12 @@
  */
 
 import {
+  type ComposeParseError,
   DENIED_SERVICE_FIELDS,
   DENIED_TOP_LEVEL_FIELDS,
   extractContainerPort,
   parseServiceVolumes,
   parseVolumes,
-  type ComposeParseError,
 } from '@simple-agent-manager/shared';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 

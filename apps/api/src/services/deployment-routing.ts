@@ -1,4 +1,4 @@
-import { extractContainerPort, type DeploymentManifest } from '@simple-agent-manager/shared';
+import { type DeploymentManifest, extractContainerPort } from '@simple-agent-manager/shared';
 import { parse as parseYaml } from 'yaml';
 
 /** Default loopback port base for app routes published to node-local Caddy. */
