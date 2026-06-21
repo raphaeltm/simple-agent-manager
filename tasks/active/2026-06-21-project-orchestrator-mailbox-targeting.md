@@ -16,23 +16,23 @@ A CTO spot check found that `ProjectOrchestrator` routes handoff and stall mailb
 
 ## Implementation Checklist
 
-- [ ] Add a scheduler helper that resolves task IDs to active chat session IDs through `projectDataService.getSessionsByTaskIds`.
-- [ ] Use the helper for handoff routing so `deliver` messages target dependent tasks' real chat session IDs.
-- [ ] Use the helper for stall detection so `interrupt` messages target stalled tasks' real chat session IDs.
-- [ ] Log observable decision/warning entries for missing target sessions without writing mailbox rows under task IDs.
-- [ ] Replace untyped handoff handling with a local typed/validated shape and defensive content formatting.
-- [ ] Strengthen scheduler tests to assert handoff mailbox targets are session IDs and missing sessions skip enqueue with a decision.
-- [ ] Strengthen scheduler tests to assert stall mailbox targets are session IDs and missing sessions skip enqueue with a decision.
-- [ ] Strengthen auto-dispatch tests to assert `startTaskRunnerDO` receives the created chat session ID and task description is persisted to that session.
-- [ ] Keep changes scoped to ProjectOrchestrator scheduling, ProjectData service usage, and focused tests.
+- [x] Add a scheduler helper that resolves task IDs to active chat session IDs through `projectDataService.getSessionsByTaskIds`.
+- [x] Use the helper for handoff routing so `deliver` messages target dependent tasks' real chat session IDs.
+- [x] Use the helper for stall detection so `interrupt` messages target stalled tasks' real chat session IDs.
+- [x] Log observable decision/warning entries for missing target sessions without writing mailbox rows under task IDs.
+- [x] Replace untyped handoff handling with a local typed/validated shape and defensive content formatting.
+- [x] Strengthen scheduler tests to assert handoff mailbox targets are session IDs and missing sessions skip enqueue with a decision.
+- [x] Strengthen scheduler tests to assert stall mailbox targets are session IDs and missing sessions skip enqueue with a decision.
+- [x] Strengthen auto-dispatch tests to assert `startTaskRunnerDO` receives the created chat session ID and task description is persisted to that session.
+- [x] Keep changes scoped to ProjectOrchestrator scheduling, ProjectData service usage, and focused tests.
 - [ ] Run focused scheduler tests, API lint/typecheck/test, and the required `/do` validation/review gates.
 
 ## Acceptance Criteria
 
-- [ ] No orchestrator mailbox enqueue uses a task ID as `targetSessionId`.
-- [ ] Handoff and stall messages are addressed to real chat session IDs in tests and implementation.
-- [ ] Missing target sessions are observable through decision log or structured warning and do not create undeliverable mailbox rows under task IDs.
-- [ ] Scheduler tests fail on the current broken behavior and pass after the fix.
+- [x] No orchestrator mailbox enqueue uses a task ID as `targetSessionId`.
+- [x] Handoff and stall messages are addressed to real chat session IDs in tests and implementation.
+- [x] Missing target sessions are observable through decision log or structured warning and do not create undeliverable mailbox rows under task IDs.
+- [x] Scheduler tests fail on the current broken behavior and pass after the fix.
 - [ ] PR summary includes the original CTO spot-check finding and exact validation commands run.
 
 ## References
