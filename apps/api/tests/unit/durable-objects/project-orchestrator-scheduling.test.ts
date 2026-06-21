@@ -535,6 +535,14 @@ describe('Scheduling Cycle — Handoff Routing', () => {
       call.includes('No active chat session found for dependent task; handoff not enqueued'),
     );
     expect(missingSessionDecision).toBeDefined();
+    const completedTaskRoutedDecision = getDecisionInserts(sql).find((call: unknown[]) =>
+      call.includes('source-task') && call.includes('handoff_routed'),
+    );
+    expect(completedTaskRoutedDecision).toBeUndefined();
+    const retryDecision = getDecisionInserts(sql).find((call: unknown[]) =>
+      call.includes('source-task') && call.includes('Handoff routing deferred: one or more dependent task sessions were unavailable'),
+    );
+    expect(retryDecision).toBeDefined();
   });
 });
 

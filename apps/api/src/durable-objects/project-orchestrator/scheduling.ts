@@ -398,6 +398,7 @@ async function routeHandoffsForTask(
   if (dependentTaskIds.length === 0) return;
 
   const sessionResolutions = await resolveActiveSessionIdsForTaskIds(env, projectId, dependentTaskIds);
+  let routeIncomplete = false;
 
   // Route each handoff to dependent tasks via durable messages
   for (const depTaskId of dependentTaskIds) {
@@ -420,6 +421,7 @@ async function routeHandoffsForTask(
         toTaskId: depTaskId,
         reason: 'missing_target_session',
       });
+      routeIncomplete = true;
       continue;
     }
 
@@ -436,6 +438,7 @@ async function routeHandoffsForTask(
           metadata: { handoffId: handoff.id, fromTaskId: completedTaskId },
         });
       } catch (err) {
+        routeIncomplete = true;
         log.warn('orchestrator.handoff_route_failed', {
           projectId, missionId, fromTaskId: completedTaskId,
           toTaskId: depTaskId, handoffId: handoff.id,
@@ -443,6 +446,16 @@ async function routeHandoffsForTask(
         });
       }
     }
+  }
+
+  if (routeIncomplete) {
+    logDecision(sql, missionId, completedTaskId, 'retry',
+      `Handoff routing deferred: one or more dependent task sessions were unavailable`, now, {
+        handoffCount: handoffs.length,
+        dependentTaskCount: dependentTaskIds.length,
+        reason: 'handoff_route_incomplete',
+      });
+    return;
   }
 
   logDecision(sql, missionId, completedTaskId, 'handoff_routed',
