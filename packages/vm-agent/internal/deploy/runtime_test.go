@@ -118,6 +118,61 @@ func TestEnsureDeploymentNetworkHardeningRunsFirewallAndMetadataBlock(t *testing
 	}
 }
 
+func TestEnsureDeploymentNetworkHardeningContinuesWhenPersistenceInstallUnavailable(t *testing.T) {
+	binDir, logPath := prependFakeBin(t)
+	writeExecutable(t, binDir, "apt-get", `#!/bin/sh
+echo "apt-get $*" >> "$CALL_LOG"
+if [ "$1" = "install" ] && [ "$2" = "-y" ] && [ "$3" = "iptables-persistent" ]; then
+  echo "Package iptables-persistent is not available" >&2
+  exit 100
+fi
+exit 0
+`)
+	writeExecutable(t, binDir, "debconf-set-selections", "#!/bin/sh\necho \"debconf-set-selections\" >> \"$CALL_LOG\"\nexit 0\n")
+	writeExecutable(t, binDir, "systemctl", "#!/bin/sh\necho \"systemctl $*\" >> \"$CALL_LOG\"\nexit 0\n")
+
+	firewallScript := writeExecutable(t, t.TempDir(), "setup-firewall.sh", "#!/bin/sh\necho firewall-script >> \"$CALL_LOG\"\nexit 0\n")
+	originalPath := firewallSetupScriptPath
+	firewallSetupScriptPath = firewallScript
+	t.Cleanup(func() { firewallSetupScriptPath = originalPath })
+
+	if err := ensureDeploymentNetworkHardening(context.Background(), nil); err != nil {
+		t.Fatalf("ensureDeploymentNetworkHardening: %v", err)
+	}
+
+	calls := readCallLog(t, logPath)
+	for _, want := range []string{
+		"apt-get install -y iptables-persistent",
+		"firewall-script",
+		"systemctl daemon-reload",
+		"systemctl enable --now sam-metadata-block.service",
+	} {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("call log missing %q; calls:\n%s", want, calls)
+		}
+	}
+}
+
+func TestEnsureDeploymentNetworkHardeningReturnsFirewallScriptFailure(t *testing.T) {
+	binDir, _ := prependFakeBin(t)
+	writeExecutable(t, binDir, "apt-get", "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, binDir, "debconf-set-selections", "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, binDir, "systemctl", "#!/bin/sh\nexit 0\n")
+
+	firewallScript := writeExecutable(t, t.TempDir(), "setup-firewall.sh", "#!/bin/sh\necho firewall failed >&2\nexit 23\n")
+	originalPath := firewallSetupScriptPath
+	firewallSetupScriptPath = firewallScript
+	t.Cleanup(func() { firewallSetupScriptPath = originalPath })
+
+	err := ensureDeploymentNetworkHardening(context.Background(), nil)
+	if err == nil {
+		t.Fatal("ensureDeploymentNetworkHardening returned nil; want firewall script failure")
+	}
+	if !strings.Contains(err.Error(), "run firewall setup script") {
+		t.Fatalf("ensureDeploymentNetworkHardening error = %q, want firewall script context", err)
+	}
+}
+
 func TestEnsureDeploymentNetworkHardeningFailsWhenFirewallScriptIsMissing(t *testing.T) {
 	originalPath := firewallSetupScriptPath
 	firewallSetupScriptPath = filepath.Join(t.TempDir(), "missing-firewall.sh")

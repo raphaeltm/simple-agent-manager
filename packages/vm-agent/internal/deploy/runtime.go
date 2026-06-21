@@ -103,10 +103,13 @@ func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport
 		return fmt.Errorf("stat firewall setup script: %w", err)
 	}
 
-	if err := runRuntimeShell(ctx, `echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections && `+
-		`echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections && `+
-		`DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent`); err != nil {
-		return fmt.Errorf("install iptables-persistent: %w", err)
+	if err := ensureFirewallPersistence(ctx); err != nil {
+		err = fmt.Errorf("install iptables-persistent: %w", err)
+		slog.Warn("deploy.runtime: firewall persistence package unavailable; continuing with runtime firewall rules", "error", err)
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{
+			"step":  "install_iptables_persistent",
+			"fatal": false,
+		})
 	}
 
 	if err := runRuntimeCommand(ctx, firewallSetupScriptPath); err != nil {
@@ -123,6 +126,12 @@ func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport
 
 	reporter.ReportInfo("deploy.runtime: firewall and metadata API block ready", runtimeReportSource, "", nil)
 	return nil
+}
+
+func ensureFirewallPersistence(ctx context.Context) error {
+	return runRuntimeShell(ctx, `echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections && `+
+		`echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections && `+
+		`DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent`)
 }
 
 func ensureCaddy(ctx context.Context, reporter *errorreport.Reporter) error {
