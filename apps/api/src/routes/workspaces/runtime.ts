@@ -251,7 +251,7 @@ function validateMessageBatch(env: Env, body: MessageBatchBody): string {
   if (body.messages.length === 0) {
     throw errors.badRequest('messages array must not be empty');
   }
-  const maxMessagesPerBatch = parsePositiveInt(env.MAX_MESSAGES_PER_BATCH as string, 100);
+  const maxMessagesPerBatch = parsePositiveInt(env.MAX_MESSAGES_PER_BATCH, 100);
   if (body.messages.length > maxMessagesPerBatch) {
     throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
   }
