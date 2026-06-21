@@ -130,24 +130,17 @@ describe('Settings shell', () => {
     expect(screen.getByTestId('github-app-section')).toBeInTheDocument();
   });
 
-  it('renders connections sub-route', async () => {
-    renderSettings('/settings/connections');
+  it.each([
+    ['/settings/connections', 'connections-overview'],
+    ['/settings/agents', 'agents-section'],
+  ])('renders %s sub-route', async (path, testId) => {
+    renderSettings(path);
 
     await waitFor(() => {
       expect(mocks.listCredentials).toHaveBeenCalled();
     });
 
-    expect(screen.getByTestId('connections-overview')).toBeInTheDocument();
-  });
-
-  it('renders agents sub-route', async () => {
-    renderSettings('/settings/agents');
-
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
-    });
-
-    expect(screen.getByTestId('agents-section')).toBeInTheDocument();
+    expect(screen.getByTestId(testId)).toBeInTheDocument();
   });
 
   it('renders cloud-provider sub-route with scaleway form', async () => {
