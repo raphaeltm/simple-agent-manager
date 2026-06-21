@@ -153,6 +153,18 @@ func assertOutboxCount(t *testing.T, db *sql.DB, want int, context string) {
 	}
 }
 
+func waitForOutboxCount(t *testing.T, db *sql.DB, want int, context string) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+			return false
+		}
+		return count == want
+	})
+	assertOutboxCount(t, db, want, context)
+}
+
 func storedContentAfterOversizedEnqueue(t *testing.T, limit int, messageID string) string {
 	t.Helper()
 	db := openTestDB(t)
@@ -981,19 +993,13 @@ func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 	r.SetToken("test-token")
+	defer r.Shutdown()
 
 	if err := r.Enqueue(Message{MessageID: "m1", Role: "assistant", Content: "first", Timestamp: "2024-01-01T00:00:00Z"}); err != nil {
 		t.Fatalf("enqueue m1: %v", err)
 	}
 	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 1 })
-
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
-		t.Fatalf("count after limit: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected outbox cleared after session limit, got %d", count)
-	}
+	waitForOutboxCount(t, db, 0, "outbox after session limit")
 
 	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:01Z"}); err != nil {
 		t.Fatalf("enqueue m2 after limit: %v", err)
@@ -1002,19 +1008,13 @@ func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("expected no retry or new request after limit, got %d requests", got)
 	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
-		t.Fatalf("count after dropped enqueue: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected dropped post-limit message not to enter outbox, got %d rows", count)
-	}
+	assertOutboxCount(t, db, 0, "outbox after dropped post-limit enqueue")
 
 	r.SetSessionID("sess-2")
 	if err := r.Enqueue(Message{MessageID: "m3", Role: "assistant", Content: "new session", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
 		t.Fatalf("enqueue m3 after session switch: %v", err)
 	}
 	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 2 })
-	r.Shutdown()
 
 	receivedMu.Lock()
 	defer receivedMu.Unlock()
