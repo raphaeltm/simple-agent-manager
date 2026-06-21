@@ -54,6 +54,18 @@ func testConfig(endpoint, workspaceID string) Config {
 	}
 }
 
+func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
+}
+
 func TestNew_ValidConfig(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
@@ -615,6 +627,293 @@ func TestFlush_Size400RetriesSingleMessagesBeforeDelete(t *testing.T) {
 	}
 }
 
+func TestFlush_SizeFallback409DisablesReporter(t *testing.T) {
+	var requests int32
+	var mu sync.Mutex
+	var requestIDs []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				MessageID string `json:"messageId"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		ids := make([]string, 0, len(payload.Messages))
+		for _, msg := range payload.Messages {
+			ids = append(ids, msg.MessageID)
+		}
+		mu.Lock()
+		requestIDs = append(requestIDs, strings.Join(ids, ","))
+		mu.Unlock()
+		atomic.AddInt32(&requests, 1)
+
+		if len(payload.Messages) > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+			return
+		}
+		if payload.Messages[0].MessageID == "m1" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"SESSION_MESSAGE_LIMIT_EXCEEDED","message":"Session message limit reached"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	for i := 0; i < 2; i++ {
+		if err := r.Enqueue(Message{
+			MessageID: fmt.Sprintf("m%d", i),
+			Role:      "assistant",
+			Content:   "content",
+			Timestamp: fmt.Sprintf("2024-01-01T00:00:0%dZ", i),
+		}); err != nil {
+			t.Fatalf("enqueue m%d: %v", i, err)
+		}
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 3 })
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+		t.Fatalf("count after limit: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected outbox cleared after fallback session limit, got %d", count)
+	}
+
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
+		t.Fatalf("enqueue after limit: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	r.Shutdown()
+
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("expected fallback limit to stop future sends, got %d requests", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(requestIDs, "|") != "m0,m1|m0|m1" {
+		t.Fatalf("unexpected request sequence: %v", requestIDs)
+	}
+}
+
+func TestFlush_SizeFallbackPermanentErrorDiscardsBatch(t *testing.T) {
+	var requests int32
+	var mu sync.Mutex
+	var requestIDs []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				MessageID string `json:"messageId"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		ids := make([]string, 0, len(payload.Messages))
+		for _, msg := range payload.Messages {
+			ids = append(ids, msg.MessageID)
+		}
+		mu.Lock()
+		requestIDs = append(requestIDs, strings.Join(ids, ","))
+		mu.Unlock()
+		atomic.AddInt32(&requests, 1)
+
+		if len(payload.Messages) > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+			return
+		}
+		if payload.Messages[0].MessageID == "m1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"UNAUTHORIZED"}`))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	for i := 0; i < 2; i++ {
+		if err := r.Enqueue(Message{
+			MessageID: fmt.Sprintf("m%d", i),
+			Role:      "assistant",
+			Content:   "content",
+			Timestamp: fmt.Sprintf("2024-01-01T00:00:0%dZ", i),
+		}); err != nil {
+			t.Fatalf("enqueue m%d: %v", i, err)
+		}
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 3 })
+	time.Sleep(150 * time.Millisecond)
+	r.Shutdown()
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+		t.Fatalf("count after permanent fallback error: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected fallback permanent error to discard batch, got %d rows", count)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(requestIDs, "|") != "m0,m1|m0|m1" {
+		t.Fatalf("unexpected request sequence: %v", requestIDs)
+	}
+}
+
+func TestShutdown_CancelsSizeFallbackRequest(t *testing.T) {
+	fallbackStarted := make(chan struct{})
+	var fallbackStartedOnce sync.Once
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if len(payload.Messages) > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+			return
+		}
+
+		fallbackStartedOnce.Do(func() { close(fallbackStarted) })
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.HTTPTimeout = 10 * time.Second
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	for i := 0; i < 2; i++ {
+		if err := r.Enqueue(Message{
+			MessageID: fmt.Sprintf("m%d", i),
+			Role:      "assistant",
+			Content:   "content",
+			Timestamp: fmt.Sprintf("2024-01-01T00:00:0%dZ", i),
+		}); err != nil {
+			t.Fatalf("enqueue m%d: %v", i, err)
+		}
+	}
+
+	select {
+	case <-fallbackStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fallback request")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		r.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("shutdown did not cancel fallback request promptly")
+	}
+}
+
+func TestEnqueue_TruncationIncludesMarkerWithinConfiguredLimit(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.MaxMessageContentBytes = 32
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	if err := r.Enqueue(Message{
+		MessageID: "oversized",
+		Role:      "assistant",
+		Content:   strings.Repeat("x", 128),
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	var stored string
+	if err := db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", "oversized").Scan(&stored); err != nil {
+		t.Fatalf("select content: %v", err)
+	}
+	if len(stored) > cfg.MaxMessageContentBytes {
+		t.Fatalf("stored content length = %d, want <= %d", len(stored), cfg.MaxMessageContentBytes)
+	}
+	if !strings.HasSuffix(stored, truncationMarker) {
+		t.Fatalf("stored content should include truncation marker, got %q", stored)
+	}
+}
+
+func TestEnqueue_TruncationHonorsTinyConfiguredLimit(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.MaxMessageContentBytes = 4
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	if err := r.Enqueue(Message{
+		MessageID: "tiny-limit",
+		Role:      "assistant",
+		Content:   strings.Repeat("x", 128),
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	var stored string
+	if err := db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", "tiny-limit").Scan(&stored); err != nil {
+		t.Fatalf("select content: %v", err)
+	}
+	if len(stored) != cfg.MaxMessageContentBytes {
+		t.Fatalf("stored content length = %d, want %d", len(stored), cfg.MaxMessageContentBytes)
+	}
+	if stored != truncationMarker[:cfg.MaxMessageContentBytes] {
+		t.Fatalf("stored content = %q, want truncated marker prefix", stored)
+	}
+}
+
 func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
 	var received []struct {
 		MessageID    string `json:"messageId"`
@@ -689,6 +988,88 @@ func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
 	}
 	if msg.ToolMetadata != "" {
 		t.Fatalf("expected oversized tool metadata omitted, got %q", msg.ToolMetadata)
+	}
+}
+
+func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
+	var requests int32
+	var receivedMu sync.Mutex
+	var receivedIDs []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				MessageID string `json:"messageId"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		receivedMu.Lock()
+		for _, msg := range payload.Messages {
+			receivedIDs = append(receivedIDs, msg.MessageID)
+		}
+		receivedMu.Unlock()
+
+		if atomic.AddInt32(&requests, 1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"SESSION_MESSAGE_LIMIT_EXCEEDED","message":"Session message limit reached"}`))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	if err := r.Enqueue(Message{MessageID: "m1", Role: "assistant", Content: "first", Timestamp: "2024-01-01T00:00:00Z"}); err != nil {
+		t.Fatalf("enqueue m1: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 1 })
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+		t.Fatalf("count after limit: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected outbox cleared after session limit, got %d", count)
+	}
+
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:01Z"}); err != nil {
+		t.Fatalf("enqueue m2 after limit: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("expected no retry or new request after limit, got %d requests", got)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+		t.Fatalf("count after dropped enqueue: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected dropped post-limit message not to enter outbox, got %d rows", count)
+	}
+
+	r.SetSessionID("sess-2")
+	if err := r.Enqueue(Message{MessageID: "m3", Role: "assistant", Content: "new session", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
+		t.Fatalf("enqueue m3 after session switch: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 2 })
+	r.Shutdown()
+
+	receivedMu.Lock()
+	defer receivedMu.Unlock()
+	if strings.Join(receivedIDs, ",") != "m1,m3" {
+		t.Fatalf("expected only m1 and m3 delivered, got %v", receivedIDs)
 	}
 }
 
@@ -1136,6 +1517,52 @@ func TestSetSessionID_NewMessagesUseNewSession(t *testing.T) {
 	}
 }
 
+func TestSetSessionID_ConcurrentEnqueueDoesNotLeaveOldSessionRows(t *testing.T) {
+	for attempt := 0; attempt < 100; attempt++ {
+		db := openTestDB(t)
+		cfg := testConfig("http://localhost", "ws-1")
+		cfg.BatchMaxWait = time.Hour
+		cfg.OutboxMaxSize = 10000
+		r, err := New(db, cfg)
+		if err != nil {
+			t.Fatalf("attempt %d new: %v", attempt, err)
+		}
+
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = r.Enqueue(Message{
+					MessageID: fmt.Sprintf("attempt-%d-msg-%d", attempt, i),
+					Role:      "assistant",
+					Content:   "content",
+					Timestamp: "2024-01-01T00:00:00Z",
+				})
+			}
+		}()
+
+		time.Sleep(100 * time.Microsecond)
+		r.SetSessionID("sess-2")
+		close(stop)
+		<-done
+
+		var stale int
+		if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox WHERE session_id = ?", "sess-1").Scan(&stale); err != nil {
+			t.Fatalf("attempt %d count stale: %v", attempt, err)
+		}
+		r.Shutdown()
+		if stale != 0 {
+			t.Fatalf("attempt %d left %d stale old-session rows", attempt, stale)
+		}
+	}
+}
+
 func TestSetSessionID_NilReporter_DoesNotPanic(t *testing.T) {
 	var r *Reporter
 	r.SetSessionID("anything") // should not panic
@@ -1350,9 +1777,8 @@ func TestEnqueue_TruncatesOversizedContent(t *testing.T) {
 		t.Fatalf("expected content to end with truncation marker, got last 30 chars: %q", content[len(content)-30:])
 	}
 
-	expectedLen := cfg.MaxMessageContentBytes + len(truncationMarker)
-	if len(content) != expectedLen {
-		t.Fatalf("truncated content length = %d, want %d", len(content), expectedLen)
+	if len(content) != cfg.MaxMessageContentBytes {
+		t.Fatalf("truncated content length = %d, want %d", len(content), cfg.MaxMessageContentBytes)
 	}
 }
 

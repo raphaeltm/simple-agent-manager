@@ -14,7 +14,8 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -28,6 +29,7 @@ import {
   AgentCredentialSyncSchema,
   AgentTypeBodySchema,
   BootLogEntrySchema,
+  formatIssues,
   jsonValidator,
   MessageBatchSchema,
 } from '../../schemas';
@@ -102,6 +104,11 @@ function buildPlatformInferenceConfig(input: {
 }
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
+type RuntimeContext = Context<{ Bindings: Env }>;
+type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
+
+const DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024;
+const ACTIVE_MESSAGE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
 
 function waitUntilIfAvailable(
   c: { executionCtx: ExecutionContext },
@@ -115,6 +122,74 @@ function waitUntilIfAvailable(
       throw err;
     }
   }
+}
+
+async function readRequestBodyWithLimit(request: Request, maxBytes: number): Promise<string> {
+  const contentLengthHeader = request.headers.get('content-length');
+  if (contentLengthHeader) {
+    const contentLength = Number.parseInt(contentLengthHeader, 10);
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      throw errors.badRequest('Invalid Content-Length header');
+    }
+    if (contentLength > maxBytes) {
+      throw errors.badRequest(`Payload exceeds ${maxBytes} byte limit`);
+    }
+  }
+
+  if (!request.body) {
+    return '';
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let done = false;
+
+  try {
+    while (!done) {
+      const read = await reader.read();
+      done = read.done;
+      if (done) continue;
+      const { value } = read;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw errors.badRequest(`Payload exceeds ${maxBytes} byte limit`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+async function parseMessageBatchRequest(c: RuntimeContext): Promise<MessageBatchBody> {
+  const maxPayloadBytes = parsePositiveInt(
+    c.env.MAX_MESSAGES_PAYLOAD_BYTES as string,
+    DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES
+  );
+  const rawBody = await readRequestBodyWithLimit(c.req.raw, maxPayloadBytes);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    throw errors.badRequest('Invalid JSON in request body');
+  }
+
+  const result = v.safeParse(MessageBatchSchema, parsed);
+  if (!result.success) {
+    throw errors.badRequest(formatIssues(result.issues));
+  }
+  return result.output;
 }
 
 async function verifyWorkspaceGitHubOwnerAccess(input: {
@@ -1062,18 +1137,11 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
  * Uses workspace callback auth. Accepts 1-100 messages per batch.
  * All messages must target the same sessionId.
  */
-runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c) => {
+runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (256KB default, configurable via MAX_MESSAGES_PAYLOAD_BYTES)
-  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = parsePositiveInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string, 256 * 1024);
-  if (contentLength > maxPayloadBytes) {
-    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
-  }
-
-  const body = c.req.valid('json');
+  const body = await parseMessageBatchRequest(c);
 
   if (body.messages.length === 0) {
     throw errors.badRequest('messages array must not be empty');
@@ -1125,6 +1193,7 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
     .select({
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
     })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
@@ -1136,6 +1205,28 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
   }
   if (!workspace.projectId) {
     throw errors.badRequest('Workspace is not linked to a project');
+  }
+  if (!ACTIVE_MESSAGE_WORKSPACE_STATUSES.has(workspace.status)) {
+    const context = {
+      workspaceId,
+      projectId: workspace.projectId,
+      sessionId,
+      status: workspace.status,
+      messageCount: body.messages.length,
+      action: 'rejected_inactive_workspace',
+    };
+    log.warn('message_persistence.inactive_workspace', context);
+    waitUntilIfAvailable(
+      c,
+      persistError(c.env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Rejecting messages for inactive workspace ${workspaceId}`,
+        context,
+        workspaceId,
+      })
+    );
+    throw errors.badRequest(`Workspace is ${workspace.status}, not active`);
   }
 
   // Validate session ID matches workspace's linked session.

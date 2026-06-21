@@ -2,6 +2,7 @@ package messagereport
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -44,6 +45,11 @@ type Reporter struct {
 	authToken   string
 	workspaceID string // dynamically set after workspace creation
 	sessionID   string // dynamically updated when warm node is reused for new task
+	// messageLimitReached disables persistence for the current chat session
+	// once the control plane reports SESSION_MESSAGE_LIMIT_EXCEEDED. Retrying
+	// cannot succeed until a new session is selected, so the reporter drops
+	// later messages instead of growing an unwinnable outbox.
+	messageLimitReached bool
 
 	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
 	// Lock ordering: flushMu must always be acquired BEFORE mu when both
@@ -153,14 +159,16 @@ func (r *Reporter) SetSessionID(id string) {
 		return
 	}
 
-	// Acquire flushMu FIRST to block any concurrent flush, then read the
-	// old session ID under mu. This closes the window where a flush could
-	// start between reading oldSessionID and clearing the outbox.
+	// Acquire flushMu FIRST to block any concurrent flush, then hold mu through
+	// the outbox clear and session update. Enqueue also holds mu through its
+	// insert, so a concurrent enqueue either lands before the clear and is
+	// removed with the old session, or waits and uses the new session ID.
 	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	oldSessionID := r.sessionID
-	r.mu.Unlock()
 
 	// Clear stale messages from the previous session BEFORE updating the
 	// session ID to prevent a race where Enqueue reads the new sessionID
@@ -175,23 +183,14 @@ func (r *Reporter) SetSessionID(id string) {
 				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
 		}
 
-		// Update session ID while still holding flushMu so that no flush
-		// can observe the new session ID with stale outbox contents.
-		r.mu.Lock()
-		r.sessionID = id
-		r.mu.Unlock()
-
-		r.flushMu.Unlock()
-
 		slog.Info("messagereport: session ID updated",
 			"sessionId", id, "previousSessionId", oldSessionID)
-	} else {
-		r.mu.Lock()
-		r.sessionID = id
-		r.mu.Unlock()
-
-		r.flushMu.Unlock()
 	}
+
+	if oldSessionID != id {
+		r.messageLimitReached = false
+	}
+	r.sessionID = id
 }
 
 // clearOutboxForSession removes messages for a specific session from the
@@ -219,6 +218,17 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return nil
 	}
 
+	if msg.Timestamp == "" {
+		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.messageLimitReached {
+		return nil
+	}
+
 	// Check outbox size using a bounded count instead of COUNT(*) over the
 	// entire table. LIMIT caps the scan at OutboxMaxSize rows.
 	var count int
@@ -234,16 +244,10 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: outbox full (%d/%d)", count, r.cfg.OutboxMaxSize)
 	}
 
-	if msg.Timestamp == "" {
-		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-
 	// Use the dynamically updatable session ID (updated via SetSessionID
 	// when a warm node is reused for a new task).
-	r.mu.Lock()
 	sessionID := r.sessionID
 	workspaceID := r.workspaceID
-	r.mu.Unlock()
 
 	// Principle XIII (Fail-Fast): Reject messages when no session ID is set.
 	// This is a defensive check — by construction, a non-nil Reporter should
@@ -269,7 +273,7 @@ func (r *Reporter) Enqueue(msg Message) error {
 			"maxBytes", maxBytes,
 			"workspaceId", workspaceID,
 		)
-		msg.Content = msg.Content[:maxBytes] + truncationMarker
+		msg.Content = truncateContentToLimit(msg.Content, maxBytes)
 	}
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
@@ -442,8 +446,13 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 	r.mu.Lock()
 	token := r.authToken
 	wsID := r.workspaceID
+	messageLimitReached := r.messageLimitReached
 	r.mu.Unlock()
 
+	if messageLimitReached {
+		r.deleteBatch(batch)
+		return nil
+	}
 	if token == "" {
 		// No token yet — leave messages in outbox for later.
 		return fmt.Errorf("no auth token")
@@ -471,15 +480,20 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 			return nil // success
 		}
 
-		if statusCode == 400 && isPayloadSizeError(responseBody) {
+		if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
 			if err := r.sendSizeFallback(url, token, batch); err != nil {
 				return err
 			}
 			return nil
 		}
 
+		if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
+			r.markMessageLimitReached(batch, responseBody)
+			return nil
+		}
+
 		// Permanent non-size client errors — discard the batch.
-		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
+		if statusCode == http.StatusBadRequest || statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
 			slog.Warn("messagereport: permanent error, discarding batch",
 				"statusCode", statusCode,
 				"count", len(batch),
@@ -530,23 +544,84 @@ func isPayloadSizeError(responseBody string) bool {
 		strings.Contains(body, "byte limit")
 }
 
+func isSessionMessageLimitError(responseBody string) bool {
+	return strings.Contains(responseBody, "SESSION_MESSAGE_LIMIT_EXCEEDED")
+}
+
+type sessionMessageLimitError struct {
+	responseBody string
+}
+
+func (e sessionMessageLimitError) Error() string {
+	return "session message limit reached"
+}
+
+type fallbackPermanentError struct {
+	statusCode   int
+	responseBody string
+}
+
+func (e fallbackPermanentError) Error() string {
+	return fmt.Sprintf("fallback permanent error status=%d body=%s", e.statusCode, e.responseBody)
+}
+
+func (r *Reporter) markMessageLimitReached(batch []outboxRow, responseBody string) {
+	r.mu.Lock()
+	r.messageLimitReached = true
+	wsID := r.workspaceID
+	sessionID := r.sessionID
+	r.mu.Unlock()
+
+	slog.Warn("messagereport: session message limit reached, disabling reporter for session",
+		"count", len(batch),
+		"workspaceId", wsID,
+		"sessionId", sessionID,
+		"responseBody", responseBody,
+	)
+	r.deleteBatch(batch)
+}
+
 func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error {
+	ctx, cancel := r.contextUntilStop()
+	defer cancel()
+
 	for _, row := range batch {
-		if err := r.sendSingleWithSizeFallback(url, token, row); err != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("shutdown during fallback: %w", err)
+		}
+
+		if err := r.sendSingleWithSizeFallback(ctx, url, token, row); err != nil {
+			if limitErr, ok := err.(sessionMessageLimitError); ok {
+				r.markMessageLimitReached(batch, limitErr.responseBody)
+				return nil
+			}
+			if permanentErr, ok := err.(fallbackPermanentError); ok {
+				slog.Warn("messagereport: fallback permanent error, discarding batch",
+					"statusCode", permanentErr.statusCode,
+					"count", len(batch),
+					"messageId", row.messageID,
+					"responseBody", permanentErr.responseBody,
+				)
+				return nil
+			}
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Reporter) sendSingleWithSizeFallback(url, token string, row outboxRow) error {
+func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token string, row outboxRow) error {
 	candidates := r.sizeFallbackCandidates(row)
 	for i, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("shutdown during fallback: %w", err)
+		}
+
 		body, err := buildBatchPayload([]apiMessage{candidate})
 		if err != nil {
 			return fmt.Errorf("marshal fallback payload: %w", err)
 		}
-		statusCode, responseBody, err := r.doPost(url, token, body)
+		statusCode, responseBody, err := r.doPostWithContext(ctx, url, token, body)
 		if err == nil && statusCode >= 200 && statusCode < 300 {
 			if i > 0 {
 				slog.Warn("messagereport: delivered oversized message fallback",
@@ -557,15 +632,30 @@ func (r *Reporter) sendSingleWithSizeFallback(url, token string, row outboxRow) 
 			}
 			return nil
 		}
-		if statusCode == 400 && isPayloadSizeError(responseBody) {
+		if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
 			continue
 		}
-		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
-			return fmt.Errorf("fallback permanent error status=%d body=%s", statusCode, responseBody)
+		if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
+			return sessionMessageLimitError{responseBody: responseBody}
+		}
+		if statusCode == http.StatusBadRequest || statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
 		}
 		return fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, err, responseBody)
 	}
 	return fmt.Errorf("fallback candidates exhausted for message %s", row.messageID)
+}
+
+func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-r.stopC:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }
 
 func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
@@ -582,8 +672,11 @@ func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
 }
 
 func truncateContentToLimit(content string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
 	if maxBytes <= len(truncationMarker) {
-		return truncationMarker
+		return truncationMarker[:maxBytes]
 	}
 	if len(content) <= maxBytes {
 		return content
@@ -593,7 +686,11 @@ func truncateContentToLimit(content string, maxBytes int) string {
 }
 
 func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	return r.doPostWithContext(context.Background(), url, token, body)
+}
+
+func (r *Reporter) doPostWithContext(ctx context.Context, url, token string, body []byte) (int, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, "", err
 	}

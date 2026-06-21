@@ -51,6 +51,7 @@ vi.mock('../../src/db/schema', () => ({
     userId: 'userId',
     projectId: 'projectId',
     chatSessionId: 'chatSessionId',
+    status: 'status',
   },
   tasks: { id: 'id', workspaceId: 'workspaceId' },
   credentials: {},
@@ -104,27 +105,30 @@ vi.mock('../../src/routes/credentials', () => ({
   getDecryptedCredential: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock('../../src/schemas', () => ({
-  AgentTypeBodySchema: {},
-  AgentCredentialSyncSchema: {},
-  BootLogEntrySchema: {},
-  MessageBatchSchema: {},
-  jsonValidator:
-    () =>
-    async (
-      c: {
-        req: {
-          json: () => Promise<unknown>;
-          addValidatedData: (target: string, data: unknown) => void;
-        };
+vi.mock('../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/schemas')>();
+  return {
+    ...actual,
+    AgentTypeBodySchema: {},
+    AgentCredentialSyncSchema: {},
+    BootLogEntrySchema: {},
+    jsonValidator:
+      () =>
+      async (
+        c: {
+          req: {
+            json: () => Promise<unknown>;
+            addValidatedData: (target: string, data: unknown) => void;
+          };
+        },
+        next: () => Promise<void>
+      ) => {
+        const body = await c.req.json();
+        c.req.addValidatedData('json', body);
+        await next();
       },
-      next: () => Promise<void>
-    ) => {
-      const body = await c.req.json();
-      c.req.addValidatedData('json', body);
-      await next();
-    },
-}));
+  };
+});
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
@@ -174,6 +178,7 @@ vi.mock('../../src/lib/route-helpers', () => ({
 }));
 
 import type { Env } from '../../src/env';
+import { verifyWorkspaceCallbackAuth } from '../../src/routes/workspaces/_helpers';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
 import * as projectDataService from '../../src/services/project-data';
 
@@ -215,6 +220,10 @@ function postAgentKey(agentType: string, envOverrides?: Partial<Env>) {
 }
 
 function postMessages(messages: Record<string, unknown>[], envOverrides?: Partial<Env>) {
+  return postMessagesRaw(JSON.stringify({ messages }), envOverrides);
+}
+
+function postMessagesRaw(body: string, envOverrides?: Partial<Env>) {
   return testApp.request(
     '/ws/test-workspace/messages',
     {
@@ -223,7 +232,7 @@ function postMessages(messages: Record<string, unknown>[], envOverrides?: Partia
         'Content-Type': 'application/json',
         Authorization: 'Bearer test-callback-token',
       },
-      body: JSON.stringify({ messages }),
+      body,
     },
     envOverrides ? ({ ...mockEnv, ...envOverrides } as Env) : mockEnv
   );
@@ -258,8 +267,80 @@ beforeEach(() => {
 });
 
 describe('runtime.ts always-proxy', () => {
+  it('authenticates message persistence before reading or validating the JSON body', async () => {
+    const authError = Object.assign(new Error('Unauthorized'), {
+      statusCode: 401,
+      error: 'UNAUTHORIZED',
+    });
+    vi.mocked(verifyWorkspaceCallbackAuth).mockRejectedValueOnce(authError);
+
+    const response = await postMessagesRaw('{not valid json', { MAX_MESSAGES_PAYLOAD_BYTES: '8' });
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(401);
+    expect(body.error).toBe('UNAUTHORIZED');
+    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized message payloads with a bounded body read before persistence', async () => {
+    mockDbLimit.mockImplementation(() => [
+      { projectId: 'proj1', chatSessionId: 'sess1', status: 'running' },
+    ]);
+
+    const response = await postMessagesRaw(
+      JSON.stringify({
+        messages: [
+          {
+            messageId: 'msg1',
+            sessionId: 'sess1',
+            role: 'assistant',
+            content: 'this body is intentionally longer than the configured payload cap',
+            timestamp: '2026-06-18T14:18:22.000Z',
+          },
+        ],
+      }),
+      { MAX_MESSAGES_PAYLOAD_BYTES: '64' }
+    );
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(400);
+    expect(body).toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Payload exceeds 64 byte limit',
+    });
+    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects message persistence for inactive workspaces before ProjectData writes', async () => {
+    mockDbLimit.mockImplementation(() => [
+      { projectId: 'proj1', chatSessionId: 'sess1', status: 'stopped' },
+    ]);
+
+    const response = await postMessages([
+      {
+        messageId: 'msg1',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'one',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+    ]);
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(400);
+    expect(body).toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Workspace is stopped, not active',
+    });
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
   it('returns structured 409 when message batch reaches the session cap', async () => {
-    mockDbLimit.mockImplementation(() => [{ projectId: 'proj1', chatSessionId: 'sess1' }]);
+    mockDbLimit.mockImplementation(() => [
+      { projectId: 'proj1', chatSessionId: 'sess1', status: 'running' },
+    ]);
     vi.mocked(projectDataService.persistMessageBatch).mockResolvedValueOnce({
       persisted: 1,
       duplicates: 0,
