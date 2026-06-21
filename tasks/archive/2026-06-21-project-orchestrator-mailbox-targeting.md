@@ -26,7 +26,7 @@ A CTO spot check found that `ProjectOrchestrator` routes handoff and stall mailb
 - [x] Strengthen auto-dispatch tests to assert `startTaskRunnerDO` receives the created chat session ID and task description is persisted to that session.
 - [x] Replace import-only non-mission guard coverage with a behavioral `complete_task` assertion.
 - [x] Keep changes scoped to ProjectOrchestrator scheduling, ProjectData service usage, and focused tests.
-- [ ] Run focused scheduler tests, API lint/typecheck/test, and the required `/do` validation/review gates.
+- [x] Run focused scheduler tests, API lint/typecheck/test, and the required `/do` validation/review gates.
 
 ## Acceptance Criteria
 
