@@ -1,4 +1,5 @@
-import type { DeploymentManifest } from '@simple-agent-manager/shared';
+import { type DeploymentManifest, extractContainerPort } from '@simple-agent-manager/shared';
+import { parse as parseYaml } from 'yaml';
 
 /** Default loopback port base for app routes published to node-local Caddy. */
 export const DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE = 35_000;
@@ -58,7 +59,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 export function environmentPortOffset(
   environmentId: string,
   portSpan: number,
-  portBase: number,
+  portBase: number
 ): number {
   const bandCount = Math.floor((MAX_TCP_PORT - portBase + 1) / portSpan);
   if (bandCount <= 0) return 0;
@@ -88,27 +89,48 @@ function sanitizeDnsLabelPart(value: string): string {
   return normalized || 'app';
 }
 
-function buildRouteHostname(environmentId: string, service: string, port: number, routeIndex: number, baseDomain: string): string {
+export function buildRouteHostname(
+  environmentId: string,
+  service: string,
+  port: number,
+  routeIndex: number,
+  baseDomain: string
+): string {
   const envPart = sanitizeDnsLabelPart(environmentId);
   const servicePart = sanitizeDnsLabelPart(service).slice(0, MAX_SERVICE_LABEL_LENGTH);
   return `r${routeIndex + 1}-${servicePart}-${port}-${envPart}.apps.${baseDomain.toLowerCase()}`;
 }
 
-export function buildDeploymentRouteTargets(
-  manifest: DeploymentManifest,
-  opts: DeploymentRouteTargetOptions,
+/** A public route to publish, identified only by service name and container port. */
+export interface PublicRouteInput {
+  service: string;
+  port: number;
+}
+
+/**
+ * Assign loopback host ports + grey-cloud hostnames to an ordered list of
+ * public routes. This is the shared derivation used by BOTH the normalized
+ * build-on-node manifest path ({@link buildDeploymentRouteTargets}) and the
+ * compose-publish raw-compose apply path. Keeping a single implementation
+ * guarantees the hostnames/hostPorts produced for DNS upsert, Caddy routing,
+ * and the docker-published loopback bindings all agree.
+ */
+export function assignRouteTargets(
+  publicRoutes: PublicRouteInput[],
+  opts: DeploymentRouteTargetOptions
 ): DeploymentRouteTarget[] {
-  const publicRoutes = manifest.routes.filter((route) => route.mode === 'public');
   const portBase = parsePositiveInt(opts.routePortBase, DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE);
   const portSpan = parsePositiveInt(opts.routePortSpan, DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN);
 
   if (portBase > MAX_TCP_PORT) {
-    throw new Error(`Configured deployment route port base ${portBase} exceeds maximum TCP port ${MAX_TCP_PORT}`);
+    throw new Error(
+      `Configured deployment route port base ${portBase} exceeds maximum TCP port ${MAX_TCP_PORT}`
+    );
   }
 
   if (publicRoutes.length > portSpan) {
     throw new Error(
-      `Manifest defines ${publicRoutes.length} public routes, exceeding configured deployment route port span ${portSpan}`,
+      `Manifest defines ${publicRoutes.length} public routes, exceeding configured deployment route port span ${portSpan}`
     );
   }
 
@@ -121,16 +143,71 @@ export function buildDeploymentRouteTargets(
   const lastAssignedPort = envPortBase + publicRoutes.length - 1;
   if (publicRoutes.length > 0 && lastAssignedPort > MAX_TCP_PORT) {
     throw new Error(
-      `Manifest public routes require ports through ${lastAssignedPort}, exceeding maximum TCP port ${MAX_TCP_PORT}`,
+      `Manifest public routes require ports through ${lastAssignedPort}, exceeding maximum TCP port ${MAX_TCP_PORT}`
     );
   }
 
   return publicRoutes.map((route, index) => ({
-    hostname: buildRouteHostname(opts.environmentId, route.service, route.port, index, opts.baseDomain),
+    hostname: buildRouteHostname(
+      opts.environmentId,
+      route.service,
+      route.port,
+      index,
+      opts.baseDomain
+    ),
     service: route.service,
     containerPort: route.port,
     hostPort: envPortBase + index,
   }));
+}
+
+export function buildDeploymentRouteTargets(
+  manifest: DeploymentManifest,
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteTarget[] {
+  const publicRoutes = manifest.routes
+    .filter((route) => route.mode === 'public')
+    .map((route) => ({ service: route.service, port: route.port }));
+  return assignRouteTargets(publicRoutes, opts);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function buildComposePublishRouteTargets(
+  submission: Record<string, unknown>,
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteTarget[] {
+  const composeYaml = submission.composeYaml;
+  if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
+    return [];
+  }
+
+  let doc: unknown;
+  try {
+    doc = parseYaml(composeYaml);
+  } catch {
+    return [];
+  }
+  if (!isPlainObject(doc) || !isPlainObject(doc.services)) {
+    return [];
+  }
+
+  const publicRoutes: PublicRouteInput[] = [];
+  for (const [serviceName, rawService] of Object.entries(doc.services)) {
+    if (!isPlainObject(rawService) || !Array.isArray(rawService.ports)) {
+      continue;
+    }
+    for (const portSpec of rawService.ports) {
+      const port = extractContainerPort(portSpec);
+      if (port !== null) {
+        publicRoutes.push({ service: serviceName, port });
+      }
+    }
+  }
+
+  return assignRouteTargets(publicRoutes, opts);
 }
 
 /**
@@ -145,22 +222,22 @@ export function buildDeploymentRouteTargets(
  */
 export function collectEnvironmentRouteHostnames(
   manifests: string[],
-  opts: DeploymentRouteTargetOptions,
+  opts: DeploymentRouteTargetOptions
 ): string[] {
   const hostnames = new Set<string>();
   for (const raw of manifests) {
-    let manifest: DeploymentManifest;
+    let manifest: Record<string, unknown>;
     try {
-      manifest = JSON.parse(raw) as DeploymentManifest;
+      manifest = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       continue;
     }
-    if (!manifest || !Array.isArray(manifest.routes)) {
-      continue;
-    }
+
     let targets: DeploymentRouteTarget[];
     try {
-      targets = buildDeploymentRouteTargets(manifest, opts);
+      targets = Array.isArray(manifest.routes)
+        ? buildDeploymentRouteTargets(manifest as unknown as DeploymentManifest, opts)
+        : buildComposePublishRouteTargets(manifest, opts);
     } catch {
       continue;
     }

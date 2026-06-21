@@ -40,6 +40,14 @@ export interface RegistryCredentialAudit {
   mintedAt: string;
 }
 
+export interface RegistryCredentialRateLimitResult {
+  allowed: boolean;
+  maxRequests: number;
+  windowSeconds: number;
+  count: number | null;
+  retryAfterSeconds: number;
+}
+
 /**
  * Build the project-scoped registry namespace prefix.
  *
@@ -71,11 +79,11 @@ export async function mintProjectRegistryCredential(
   userId: string,
   taskId: string,
   environment?: string,
-  options?: { permissions?: Array<'pull' | 'push'> },
+  options?: { permissions?: Array<'pull' | 'push'> }
 ): Promise<RegistryCredentialResult> {
   const expirationMinutes = parsePositiveInteger(
     env.REGISTRY_CREDENTIAL_EXPIRATION_MINUTES,
-    DEFAULT_REGISTRY_CREDENTIAL_EXPIRATION_MINUTES,
+    DEFAULT_REGISTRY_CREDENTIAL_EXPIRATION_MINUTES
   );
 
   const registryHost = (env.REGISTRY_HOST || DEFAULT_CLOUDFLARE_REGISTRY_HOST).trim();
@@ -88,7 +96,7 @@ export async function mintProjectRegistryCredential(
 
   if (!mintConfig) {
     throw new Error(
-      'Registry credential minting is not available: CF_ACCOUNT_ID and CF_API_TOKEN must be configured',
+      'Registry credential minting is not available: CF_ACCOUNT_ID and CF_API_TOKEN must be configured'
     );
   }
 
@@ -130,11 +138,65 @@ export function getRegistryCredentialRateLimit(env: Env): {
   return {
     maxRequests: parsePositiveInteger(
       env.REGISTRY_CREDENTIAL_RATE_LIMIT,
-      DEFAULT_REGISTRY_CREDENTIAL_RATE_LIMIT,
+      DEFAULT_REGISTRY_CREDENTIAL_RATE_LIMIT
     ),
     windowSeconds: parsePositiveInteger(
       env.REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS,
-      DEFAULT_REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS,
+      DEFAULT_REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS
     ),
+  };
+}
+
+/**
+ * Atomically consume one project-scoped registry-credential mint quota slot.
+ *
+ * D1/SQLite serializes this guarded upsert for a fixed project/window key:
+ * callers only get a returned row when the counter was inserted or incremented
+ * below the configured cap. Failed mint attempts still consume quota; callers
+ * invoke this before contacting Cloudflare to bound upstream load during
+ * incidents.
+ */
+export async function consumeRegistryCredentialRateLimit(
+  env: Env,
+  projectId: string,
+  nowMs = Date.now()
+): Promise<RegistryCredentialRateLimitResult> {
+  const rateLimit = getRegistryCredentialRateLimit(env);
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const windowStart = Math.floor(nowSeconds / rateLimit.windowSeconds) * rateLimit.windowSeconds;
+  const retryAfterSeconds = Math.max(1, windowStart + rateLimit.windowSeconds - nowSeconds);
+  const rateKey = `registry-cred-rate:${projectId}:${windowStart}`;
+  const nowIso = new Date(nowMs).toISOString();
+  const expiresAt = new Date((windowStart + rateLimit.windowSeconds + 60) * 1000).toISOString();
+
+  const row = await env.DATABASE.prepare(
+    `INSERT INTO registry_credential_rate_limits
+       (rate_key, project_id, window_start, request_count, expires_at, updated_at)
+     VALUES (?, ?, ?, 1, ?, ?)
+     ON CONFLICT(rate_key) DO UPDATE SET
+       request_count = registry_credential_rate_limits.request_count + 1,
+       expires_at = excluded.expires_at,
+       updated_at = excluded.updated_at
+     WHERE registry_credential_rate_limits.request_count < ?
+     RETURNING request_count`
+  )
+    .bind(rateKey, projectId, windowStart, expiresAt, nowIso, rateLimit.maxRequests)
+    .first<{ request_count: number }>();
+
+  void env.DATABASE.prepare('DELETE FROM registry_credential_rate_limits WHERE expires_at < ?')
+    .bind(nowIso)
+    .run()
+    .catch((err: unknown) => {
+      log.warn('registry_credential_rate_limit_cleanup_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  return {
+    allowed: Boolean(row),
+    maxRequests: rateLimit.maxRequests,
+    windowSeconds: rateLimit.windowSeconds,
+    count: row?.request_count ?? null,
+    retryAfterSeconds,
   };
 }

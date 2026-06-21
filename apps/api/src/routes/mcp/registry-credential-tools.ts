@@ -7,14 +7,14 @@
  * The credential is minted server-side using the platform CF_API_TOKEN.
  * Credential values are NEVER logged or persisted — only audit metadata.
  */
-import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import {
-  getRegistryCredentialRateLimit,
+  consumeRegistryCredentialRateLimit,
   mintProjectRegistryCredential,
 } from '../../services/registry-credentials';
 import {
@@ -33,75 +33,44 @@ const RATE_LIMITED = -32000;
 /**
  * Handle the get_registry_credentials MCP tool call.
  *
- * Rate-limited per project using KV-based fixed-window counter (time-bucketed key).
+ * Rate-limited per project using a D1-backed atomic fixed-window counter.
  */
 export async function handleGetRegistryCredentials(
   requestId: string | number | null,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const { projectId, userId, taskId } = tokenData;
-  const rawEnvironment = typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
+  const rawEnvironment =
+    typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
   const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
 
-  // If an environment name is provided, verify it exists and belongs to this project
-  if (environment) {
-    const db = drizzle(env.DATABASE, { schema });
-    const envRows = await db
-      .select({ id: schema.deploymentEnvironments.id })
-      .from(schema.deploymentEnvironments)
-      .where(
-        and(
-          eq(schema.deploymentEnvironments.projectId, projectId),
-          eq(schema.deploymentEnvironments.name, environment),
-          eq(schema.deploymentEnvironments.status, 'active'),
-        ),
-      )
-      .limit(1);
-
-    if (envRows.length === 0) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `Deployment environment '${environment}' not found or inactive for this project.`,
-      );
-    }
+  if (!environment) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'A deployment environment name is required before registry credentials can be minted.'
+    );
   }
 
-  // Rate limit: per-project credential minting using time-bucketed key (no TTL drift).
-  // NOTE: KV does not support atomic read-modify-write. Under high concurrency within
-  // the same time bucket, parallel requests may read the same count and both pass the
-  // gate. This is acceptable for this use case — the overshoot is bounded by concurrency
-  // and the window is wide (300s default). Matches the pattern in _helpers.ts:checkMcpRateLimit.
-  const rateLimit = getRegistryCredentialRateLimit(env);
-  const now = Math.floor(Date.now() / 1000);
-  const windowStart = Math.floor(now / rateLimit.windowSeconds) * rateLimit.windowSeconds;
-  const rateLimitKey = `registry-cred-rate:${projectId}:${windowStart}`;
-  const currentCount = await env.KV.get(rateLimitKey).then((v) => (v ? parseInt(v, 10) : 0));
-  if (currentCount >= rateLimit.maxRequests) {
+  const db = drizzle(env.DATABASE, { schema });
+  const policyResult = await assertAgentDeploymentAllowed(db, projectId, environment, tokenData);
+  if ('error' in policyResult) {
+    return jsonRpcError(requestId, INVALID_PARAMS, policyResult.error);
+  }
+
+  const rateLimit = await consumeRegistryCredentialRateLimit(env, projectId);
+  if (!rateLimit.allowed) {
     return jsonRpcError(
       requestId,
       RATE_LIMITED,
-      `Registry credential rate limit exceeded (${rateLimit.maxRequests} per ${rateLimit.windowSeconds}s). Try again later.`,
+      `Registry credential rate limit exceeded (${rateLimit.maxRequests} per ${rateLimit.windowSeconds}s). Try again later.`
     );
   }
 
-  // Increment counter BEFORE minting — failed CF API calls still consume quota to prevent
-  // unbounded upstream calls during an incident (increment-first pattern from _helpers.ts)
-  const newCount = currentCount + 1;
-  await env.KV.put(rateLimitKey, String(newCount), {
-    expirationTtl: rateLimit.windowSeconds + 60,
-  });
-
   try {
-    const result = await mintProjectRegistryCredential(
-      env,
-      projectId,
-      userId,
-      taskId,
-      environment,
-    );
+    const result = await mintProjectRegistryCredential(env, projectId, userId, taskId, environment);
 
     const instructions = [
       '1. Run: printf \'%s\' "<password>" | docker login -u <username> --password-stdin <registry>',
@@ -125,7 +94,7 @@ export async function handleGetRegistryCredentials(
               instructions,
             },
             null,
-            2,
+            2
           ),
         },
       ],
@@ -144,7 +113,7 @@ export async function handleGetRegistryCredentials(
     return jsonRpcError(
       requestId,
       INTERNAL_ERROR,
-      'Registry credential minting is temporarily unavailable. Please try again later.',
+      'Registry credential minting is temporarily unavailable. Please try again later.'
     );
   }
 }

@@ -74,6 +74,10 @@ function makeSuggestion(overrides: Partial<SubmoduleSuggestion> = {}): Submodule
   };
 }
 
+async function findAdditionalRepositoryInput(): Promise<HTMLInputElement> {
+  return (await screen.findByLabelText('Additional repository')) as HTMLInputElement;
+}
+
 describe('RepositoryAccessSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -145,9 +149,8 @@ describe('RepositoryAccessSettings', () => {
     });
 
     render(<RepositoryAccessSettings project={makeProject()} />);
-    await waitFor(() => expect(mocks.listProjectRepositories).toHaveBeenCalled());
 
-    const input = screen.getByLabelText('Additional repository') as HTMLInputElement;
+    const input = await findAdditionalRepositoryInput();
     fireEvent.change(input, { target: { value: '  acme/new-lib  ' } });
     // Pressing Enter commits the typed owner/repo as a manual entry.
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -167,9 +170,8 @@ describe('RepositoryAccessSettings', () => {
 
   it('ignores an empty repository submission without calling the API', async () => {
     render(<RepositoryAccessSettings project={makeProject()} />);
-    await waitFor(() => expect(mocks.listProjectRepositories).toHaveBeenCalled());
 
-    const input = screen.getByLabelText('Additional repository') as HTMLInputElement;
+    const input = await findAdditionalRepositoryInput();
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -183,9 +185,8 @@ describe('RepositoryAccessSettings', () => {
     );
 
     render(<RepositoryAccessSettings project={makeProject()} />);
-    await waitFor(() => expect(mocks.listProjectRepositories).toHaveBeenCalled());
 
-    const input = screen.getByLabelText('Additional repository');
+    const input = await findAdditionalRepositoryInput();
     fireEvent.change(input, { target: { value: 'acme/forbidden' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -235,9 +236,8 @@ describe('RepositoryAccessSettings', () => {
     });
 
     render(<RepositoryAccessSettings project={makeProject()} />);
-    await waitFor(() => expect(mocks.listProjectRepositories).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Discover from .gitmodules' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discover from .gitmodules' }));
 
     await waitFor(() => {
       expect(screen.getByText('acme/vendor-lib')).toBeInTheDocument();
@@ -261,9 +261,8 @@ describe('RepositoryAccessSettings', () => {
     mocks.discoverSubmoduleRepos.mockResolvedValue({ suggestions: [] });
 
     render(<RepositoryAccessSettings project={makeProject()} />);
-    await waitFor(() => expect(mocks.listProjectRepositories).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Discover from .gitmodules' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discover from .gitmodules' }));
 
     await waitFor(() => {
       expect(mockToast.success).toHaveBeenCalledWith(

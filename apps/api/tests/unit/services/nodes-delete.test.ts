@@ -75,7 +75,13 @@ describe('node resource deletion services', () => {
   });
 
   it('keeps legacy deleteNodeResources idempotent when the node row is missing', async () => {
-    await expect(deleteNodeResources('missing-node', 'user-1', ENV)).resolves.toBeUndefined();
+    await expect(deleteNodeResources('missing-node', 'user-1', ENV)).resolves.toEqual({
+      nodeFound: false,
+      providerVmDeleted: false,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: false,
+      errors: [],
+    });
   });
 
   it('throws from strict deletion when the node row is missing', async () => {

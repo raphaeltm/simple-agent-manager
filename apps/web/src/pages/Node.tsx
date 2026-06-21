@@ -2,6 +2,7 @@ import '../styles/workspace-chrome.css';
 
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton } from '@simple-agent-manager/ui';
+import { Rocket } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
@@ -42,6 +43,8 @@ export function Node() {
   const [error, setError] = useState<string | null>(null);
 
   const { systemInfo, loading: sysInfoLoading } = useNodeSystemInfo(id, node?.status);
+  const isDeploymentNode = node?.nodeRole === 'deployment';
+  const deploymentEnvironments = node?.deploymentEnvironments ?? [];
 
   const loadNode = useCallback(async () => {
     if (!id) return;
@@ -120,10 +123,20 @@ export function Node() {
   const handleDelete = async () => {
     if (!id || !node) return;
 
-    const confirmed = window.confirm(
-      `Delete node "${node.name}"? This permanently deletes the node and all attached workspaces/sessions.`
-    );
-    if (!confirmed) return;
+    if (isDeploymentNode) {
+      const envSummary = deploymentEnvironments.length > 0
+        ? `${deploymentEnvironments.length} deployment environment${deploymentEnvironments.length === 1 ? '' : 's'}: ${deploymentEnvironments.map((env) => env.name).join(', ')}`
+        : 'deployment environments currently listed on this node';
+      const confirmed = window.confirm(
+        `This is a deployment node ("${node.name}") hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
+      );
+      if (!confirmed) return;
+    } else {
+      const confirmed = window.confirm(
+        `Delete node "${node.name}"? This permanently deletes the node and all attached workspaces/sessions.`
+      );
+      if (!confirmed) return;
+    }
 
     try {
       setDeleting(true);
@@ -213,9 +226,11 @@ export function Node() {
 
       {/* Action buttons */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
-          Create Workspace
-        </Button>
+        {!isDeploymentNode && (
+          <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
+            Create Workspace
+          </Button>
+        )}
         <Button
           variant="secondary"
           onClick={handleStop}
@@ -229,7 +244,7 @@ export function Node() {
           disabled={stopping || deleting || !node}
           style={{ borderColor: 'var(--sam-color-danger)', color: 'var(--sam-color-danger)' }}
         >
-          {deleting ? 'Deleting...' : 'Delete Node'}
+          {deleting ? 'Deleting...' : isDeploymentNode ? 'Delete Node Only' : 'Delete Node'}
         </Button>
       </div>
 
@@ -268,6 +283,26 @@ export function Node() {
         <Alert variant="error">Node not found</Alert>
       ) : (
         <div className="flex flex-col gap-6">
+          {isDeploymentNode && (
+            <div className="glass-surface rounded-md p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-sm bg-accent-tint flex items-center justify-center shrink-0">
+                <Rocket size={18} className="text-accent" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="m-0 text-sm font-semibold text-fg-primary">Deployment node</h2>
+                <p className="m-0 mt-1 text-sm text-fg-muted">
+                  This node runs {deploymentEnvironments.length || 'one or more'} project deployment environment{deploymentEnvironments.length === 1 ? '' : 's'}. Logs and system health are available here; environment policy, DNS cleanup, volume teardown, and release management are on the project Deployments page.
+                </p>
+                <p className="m-0 mt-1 text-sm text-fg-muted">
+                  {deploymentEnvironments.length > 0
+                    ? `Hosted environments: ${deploymentEnvironments.map((env) => env.name).join(', ')}. `
+                    : ''}
+                  Deleting the node directly affects every hosted environment; use <strong>Destroy</strong> on the Deployments page for per-environment teardown.
+                </p>
+              </div>
+            </div>
+          )}
+
           <NodeOverviewSection node={node} systemInfo={systemInfo} catalogs={catalogs} />
 
           {node.status === 'running' && (
@@ -288,13 +323,15 @@ export function Node() {
 
           <LogsSection nodeId={id} nodeStatus={node.status} />
 
-          <NodeWorkspacesSection
-            workspaces={workspaces}
-            onCreateWorkspace={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
-            onStop={handleStopWorkspace}
-            onRestart={handleRestartWorkspace}
-            onDelete={handleDeleteWorkspace}
-          />
+          {!isDeploymentNode && (
+            <NodeWorkspacesSection
+              workspaces={workspaces}
+              onCreateWorkspace={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
+              onStop={handleStopWorkspace}
+              onRestart={handleRestartWorkspace}
+              onDelete={handleDeleteWorkspace}
+            />
+          )}
 
           <NodeEventsSection
             events={events}

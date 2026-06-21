@@ -45,6 +45,9 @@ export const errors = {
   paymentRequired: (message = 'Payment required') =>
     new AppError(402, 'PAYMENT_REQUIRED', message),
 
+  tooManyRequests: (message = 'Too many requests') =>
+    new AppError(429, 'TOO_MANY_REQUESTS', message),
+
   internal: (message = 'Internal server error') =>
     new AppError(500, 'INTERNAL_ERROR', message),
 };

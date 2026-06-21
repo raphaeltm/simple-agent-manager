@@ -1,6 +1,7 @@
 import type {
   CreateNodeRequest,
   Event,
+  NodeContainerListResponse,
   NodeLogFilter,
   NodeLogResponse,
   NodeResponse,
@@ -65,6 +66,10 @@ export async function getNodeLogs(
   return request<NodeLogResponse>(
     `/api/nodes/${nodeId}/logs${qs ? `?${qs}` : ''}`
   );
+}
+
+export async function listNodeContainers(nodeId: string): Promise<NodeContainerListResponse> {
+  return request<NodeContainerListResponse>(`/api/nodes/${nodeId}/containers`);
 }
 
 /** Build the WebSocket URL for real-time log streaming. */

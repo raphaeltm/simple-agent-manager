@@ -153,21 +153,21 @@ describe('renderCompose', () => {
     });
   });
 
-  it('attaches service to sam-internal network', () => {
+  it('attaches service to environment-scoped sam-internal network', () => {
     const doc = parse(renderCompose(makeManifest(), CTX));
-    expect(doc.services.web.networks).toEqual(['sam-internal']);
+    expect(doc.services.web.networks).toEqual(['sam-internal-env-001']);
   });
 
-  it('declares sam-internal network as a non-internal bridge', () => {
+  it('declares environment-scoped sam-internal network as a non-internal bridge', () => {
     // Regression: an `internal: true` network drops Docker's host->container
     // forwarding for published ports, so node-local Caddy reverse-proxying to
     // `127.0.0.1:<hostPort>` returns 502 even when the container is healthy.
     // Public routes require host ingress, which an internal network forbids.
     const doc = parse(renderCompose(makeManifest(), CTX));
-    expect(doc.networks['sam-internal']).toEqual({
+    expect(doc.networks['sam-internal-env-001']).toEqual({
       driver: 'bridge',
     });
-    expect(doc.networks['sam-internal'].internal).toBeUndefined();
+    expect(doc.networks['sam-internal-env-001'].internal).toBeUndefined();
   });
 
   it('renders multiple services with distinct labels', () => {
@@ -191,8 +191,8 @@ describe('renderCompose', () => {
     expect(doc.services.worker.labels['sam.service']).toBe('worker');
     expect(doc.services.worker.environment).toEqual({ QUEUE: 'jobs' });
     // Both share the same network
-    expect(doc.services.web.networks).toEqual(['sam-internal']);
-    expect(doc.services.worker.networks).toEqual(['sam-internal']);
+    expect(doc.services.web.networks).toEqual(['sam-internal-env-001']);
+    expect(doc.services.worker.networks).toEqual(['sam-internal-env-001']);
   });
 
   it('ignores healthCheck field (deferred to future slice)', () => {

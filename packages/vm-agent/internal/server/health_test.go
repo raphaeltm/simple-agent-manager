@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
 )
 
@@ -171,6 +174,193 @@ func TestHeartbeatNoRefreshOnServerError(t *testing.T) {
 
 	if got := s.getCallbackToken(); got != "keep-this-token" {
 		t.Fatalf("expected token unchanged on error, got %q", got)
+	}
+}
+
+type deploymentHeartbeatHarness struct {
+	server     *Server
+	sitesDir   string
+	composeLog string
+}
+
+func newDeploymentHeartbeatHarness(t *testing.T, configureResponse func(*heartbeatResponse)) *deploymentHeartbeatHarness {
+	t.Helper()
+
+	dir := t.TempDir()
+	activeDir := filepath.Join(dir, "active")
+	sitesDir := filepath.Join(activeDir, "sites")
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		t.Fatalf("mkdir sites: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-a.caddy"), []byte("env-a"), 0644); err != nil {
+		t.Fatalf("write env-a snippet: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-b.caddy"), []byte("env-b"), 0644); err != nil {
+		t.Fatalf("write env-b snippet: %v", err)
+	}
+
+	disk, err := deploy.NewDiskState(filepath.Join(dir, "deploy", "env-a"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	state := &deploy.ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node-deploy", Status: deploy.StatusApplied}
+	if err := disk.WriteRelease(state, "services: {}\n", "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COMPOSE_LOG\"\n"), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+	reloadLog := filepath.Join(dir, "reload.log")
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\necho reloaded > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+	t.Setenv("COMPOSE_LOG", composeLog)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		}
+		configureResponse(&resp)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(ts.Close)
+
+	cfg := &config.Config{
+		ControlPlaneURL:   ts.URL,
+		NodeID:            "node-deploy",
+		CallbackToken:     "token",
+		Role:              config.RoleDeployment,
+		DeployBaseDir:     filepath.Join(dir, "deploy"),
+		DeployComposeCmd:  composeScript,
+		HeartbeatInterval: time.Minute,
+	}
+
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces:    make(map[string]*WorkspaceRuntime),
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+		deployEngines: make(map[string]*deploy.Engine),
+	}
+	s.SetDeployEngine(deploy.NewEngine(disk, nil, deploy.EngineConfig{
+		EnvironmentID:      "env-a",
+		NodeID:             cfg.NodeID,
+		ControlPlaneURL:    cfg.ControlPlaneURL,
+		CallbackToken:      cfg.CallbackToken,
+		ComposeCmd:         composeScript,
+		ComposeProjectName: "sam-env-env-a",
+		CaddyfilePath:      filepath.Join(activeDir, "Caddyfile"),
+		CaddyReloadCmd:     reloadScript + " " + reloadLog,
+	}))
+
+	return &deploymentHeartbeatHarness{
+		server:     s,
+		sitesDir:   sitesDir,
+		composeLog: composeLog,
+	}
+}
+
+func TestDeploymentHeartbeatMissingEnvironmentListDoesNotRetireExistingEnvironment(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		resp.DeployPubKey = ""
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-a")
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineExists(t, h.server, "env-a")
+	assertDeployEngineMissing(t, h.server, "env-b")
+	assertNoComposeDown(t, h.composeLog)
+}
+
+func TestDeploymentHeartbeatDiscoversActiveEnvironmentWithoutRetiringOmittedEngine(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		environments := []deploymentEnvironmentResponse{{EnvironmentID: "env-b"}}
+		resp.Deployment.Environments = &environments
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-a")
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineExists(t, h.server, "env-a")
+	assertDeployEngineExists(t, h.server, "env-b")
+	assertNoComposeDown(t, h.composeLog)
+}
+
+func TestDeploymentHeartbeatExplicitRetireEnvironment(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		resp.Deployment.RetireEnvironments = []deploymentEnvironmentResponse{{EnvironmentID: "env-a"}}
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy")); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
+		t.Fatalf("expected env-a snippet removed after retirement, stat err=%v", err)
+	}
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineMissing(t, h.server, "env-a")
+
+	composeArgs, err := os.ReadFile(h.composeLog)
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if !strings.Contains(string(composeArgs), "--project-name\nsam-env-env-a") || !strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected retired env compose down, got:\n%s", composeArgs)
+	}
+}
+
+func assertDeploymentSnippetExists(t *testing.T, sitesDir, environmentID string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(sitesDir, environmentID+".caddy")); err != nil {
+		t.Fatalf("expected %s snippet preserved: %v", environmentID, err)
+	}
+}
+
+func assertDeployEngineExists(t *testing.T, s *Server, environmentID string) {
+	t.Helper()
+	if _, ok := s.deploymentEnginesSnapshot()[environmentID]; !ok {
+		t.Fatalf("expected %s engine present on server", environmentID)
+	}
+}
+
+func assertDeployEngineMissing(t *testing.T, s *Server, environmentID string) {
+	t.Helper()
+	if _, ok := s.deploymentEnginesSnapshot()[environmentID]; ok {
+		t.Fatalf("expected %s engine absent from server", environmentID)
+	}
+}
+
+func assertNoComposeDown(t *testing.T, composeLog string) {
+	t.Helper()
+	composeArgs, err := os.ReadFile(composeLog)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected no compose down call, got:\n%s", composeArgs)
 	}
 }
 

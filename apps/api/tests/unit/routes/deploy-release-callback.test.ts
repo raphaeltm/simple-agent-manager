@@ -13,6 +13,8 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
 });
 const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
+const mockUpdateSet = vi.fn();
+const mockUpdateWhere = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -23,6 +25,12 @@ vi.mock('drizzle-orm/d1', () => ({
           where: () => ({ limit: mockLimit }),
         }),
       }),
+    }),
+    update: () => ({
+      set: (...args: unknown[]) => {
+        mockUpdateSet(...args);
+        return { where: mockUpdateWhere };
+      },
     }),
   }),
 }));
@@ -68,12 +76,20 @@ function manifest() {
     version: 1,
     services: {
       web: {
-        image: { registry: 'docker.io', repository: 'example/web', digest: `sha256:${'a'.repeat(64)}` },
+        image: {
+          registry: 'docker.io',
+          repository: 'example/web',
+          digest: `sha256:${'a'.repeat(64)}`,
+        },
         env: {},
         volumes: [],
       },
       worker: {
-        image: { registry: 'docker.io', repository: 'example/worker', digest: `sha256:${'b'.repeat(64)}` },
+        image: {
+          registry: 'docker.io',
+          repository: 'example/worker',
+          digest: `sha256:${'b'.repeat(64)}`,
+        },
         env: {},
         volumes: [],
       },
@@ -93,7 +109,11 @@ function manifestWithSecret() {
     version: 1,
     services: {
       web: {
-        image: { registry: 'docker.io', repository: 'example/web', digest: `sha256:${'a'.repeat(64)}` },
+        image: {
+          registry: 'docker.io',
+          repository: 'example/web',
+          digest: `sha256:${'a'.repeat(64)}`,
+        },
         env: { API_KEY: { secret: 'API_KEY' }, PLAIN: 'literal-value' },
         volumes: [],
       },
@@ -127,11 +147,16 @@ function stubHappyPathDb() {
 
 /** Stub the four CF DNS API calls (two list, two create) for the happy path. */
 function stubDnsFetch(): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn()
+  const fetchMock = vi
+    .fn()
     .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 }));
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 })
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ result: { id: 'dns-r2' } }), { status: 200 })
+    );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
@@ -141,13 +166,16 @@ function requestDeployRelease() {
   return createTestApp().request(
     '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
     { headers: { Authorization: 'Bearer callback-token' } },
-    env(),
+    env()
   );
 }
 
 describe('deploy release callback route', () => {
   beforeEach(() => {
     mockLimit.mockReset();
+    mockUpdateSet.mockReset();
+    mockUpdateWhere.mockReset();
+    mockUpdateWhere.mockResolvedValue(undefined);
     mockVerifyCallbackToken.mockClear();
     mockSignDeployPayload.mockClear();
     mockMintProjectRegistryCredential.mockReset();
@@ -179,7 +207,11 @@ describe('deploy release callback route', () => {
 
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
-    expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), { expectedScope: 'node' });
+    expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), {
+      expectedScope: 'node',
+    });
+    expect(mockUpdateSet).toHaveBeenCalledWith({ status: 'applying' });
+    expect(mockUpdateWhere).toHaveBeenCalledTimes(1);
 
     // Port base includes per-environment offset to prevent cross-env collisions
     const envOffset = environmentPortOffset('env-1', 10, 36_000);
@@ -213,7 +245,7 @@ describe('deploy release callback route', () => {
         composeYaml: expect.stringContaining(`127.0.0.1:${expectedPort0}:3000`),
         routes: body.routes,
       }),
-      expect.anything(),
+      expect.anything()
     );
     dateNow.mockRestore();
 
@@ -237,6 +269,74 @@ describe('deploy release callback route', () => {
     });
   });
 
+  it('serves distinct payloads for two environments placed on the same node', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const envTwoManifest = {
+      ...manifest(),
+      routes: [{ service: 'web', port: 3000, mode: 'public' }],
+    };
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }])
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-2', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([
+        { id: 'rel-2', manifest: JSON.stringify(envTwoManifest), version: 3 },
+      ]);
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ result: { id: 'dns-a1' } }), { status: 200 })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ result: { id: 'dns-a2' } }), { status: 200 })
+        )
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ result: { id: 'dns-b1' } }), { status: 200 })
+        )
+    );
+
+    const app = createTestApp();
+    const responseOne = await app.request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env()
+    );
+    const responseTwo = await app.request(
+      '/api/nodes/node-deploy-1/deploy-release?seq=3&environmentId=env-2',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env()
+    );
+
+    const bodyOne = await responseOne.json();
+    const bodyTwo = await responseTwo.json();
+    expect(responseOne.status, JSON.stringify(bodyOne)).toBe(200);
+    expect(responseTwo.status, JSON.stringify(bodyTwo)).toBe(200);
+    expect(bodyOne.environmentId).toBe('env-1');
+    expect(bodyTwo.environmentId).toBe('env-2');
+    expect(bodyOne.seq).toBe(7);
+    expect(bodyTwo.seq).toBe(3);
+    expect(bodyOne.routes[0].hostname).toContain('env-1');
+    expect(bodyTwo.routes[0].hostname).toContain('env-2');
+    expect(bodyOne.routes[0].hostPort).not.toBe(bodyTwo.routes[0].hostPort);
+    expect(bodyOne.composeYaml).toContain('sam-internal-env-1');
+    expect(bodyTwo.composeYaml).toContain('sam-internal-env-2');
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'env-1', nodeId: 'node-deploy-1', seq: 7 }),
+      expect.anything()
+    );
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'env-2', nodeId: 'node-deploy-1', seq: 3 }),
+      expect.anything()
+    );
+  });
+
   it('returns conflict before DNS or signing when public routes exist but node IP is not ready', async () => {
     mockLimit
       .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: null }])
@@ -248,12 +348,13 @@ describe('deploy release callback route', () => {
     const response = await createTestApp().request(
       '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
       { headers: { Authorization: 'Bearer callback-token' } },
-      env(),
+      env()
     );
 
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({
-      message: 'Deployment node does not have an IP address yet; retry after provisioning completes',
+      message:
+        'Deployment node does not have an IP address yet; retry after provisioning completes',
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockSignDeployPayload).not.toHaveBeenCalled();
@@ -267,7 +368,7 @@ describe('deploy release callback route', () => {
     const response = await createTestApp().request(
       '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-other-node',
       { headers: { Authorization: 'Bearer callback-token' } },
-      env(),
+      env()
     );
 
     expect(response.status).toBe(404);
@@ -275,12 +376,14 @@ describe('deploy release callback route', () => {
   });
 
   it('rejects legacy or workspace-scoped callback tokens before DNS or signing work', async () => {
-    mockVerifyCallbackToken.mockRejectedValueOnce(new Error("Token scope 'none' does not match expected 'node'"));
+    mockVerifyCallbackToken.mockRejectedValueOnce(
+      new Error("Token scope 'none' does not match expected 'node'")
+    );
 
     const response = await createTestApp().request(
       '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
       { headers: { Authorization: 'Bearer legacy-callback-token' } },
-      env(),
+      env()
     );
 
     expect(response.status).toBe(403);
@@ -309,17 +412,17 @@ describe('deploy release callback route', () => {
     // Verify the mint was called with pull-only permissions and correct project context
     expect(mockMintProjectRegistryCredential).toHaveBeenCalledWith(
       expect.anything(), // env
-      'proj-1',          // projectId
-      'user-1',          // userId
-      '',                // taskId (empty for deploy callback)
-      'env-1',           // environment
-      { permissions: ['pull'] },
+      'proj-1', // projectId
+      'user-1', // userId
+      '', // taskId (empty for deploy callback)
+      'env-1', // environment
+      { permissions: ['pull'] }
     );
   });
 
   it('returns registryCredentials: null when minting fails (public images still work)', async () => {
     mockMintProjectRegistryCredential.mockRejectedValueOnce(
-      new Error('CF_ACCOUNT_ID and CF_API_TOKEN must be configured'),
+      new Error('CF_ACCOUNT_ID and CF_API_TOKEN must be configured')
     );
 
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
@@ -343,15 +446,20 @@ describe('deploy release callback route', () => {
     mockLimit
       .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
       .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
-      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifestWithSecret()), version: 7 }]);
+      .mockResolvedValueOnce([
+        { id: 'rel-1', manifest: JSON.stringify(manifestWithSecret()), version: 7 },
+      ]);
     // The resolver decrypts API_KEY to this plaintext.
     mockLoadResolvedSecrets.mockResolvedValueOnce({ API_KEY: 'super-secret-value' });
     // Single public route → one DNS list + one DNS create.
     vi.stubGlobal(
       'fetch',
-      vi.fn()
+      vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 })),
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 })
+        )
     );
 
     const response = await requestDeployRelease();
@@ -364,7 +472,7 @@ describe('deploy release callback route', () => {
       expect.anything(),
       'env-1',
       ['API_KEY'],
-      'test-encryption-key',
+      'test-encryption-key'
     );
 
     // The decrypted value AND the literal env value land in the rendered Compose,
@@ -373,7 +481,7 @@ describe('deploy release callback route', () => {
     expect(body.composeYaml).toContain('literal-value');
     expect(mockSignDeployPayload).toHaveBeenCalledWith(
       expect.objectContaining({ composeYaml: expect.stringContaining('super-secret-value') }),
-      expect.anything(),
+      expect.anything()
     );
   });
 

@@ -53,6 +53,8 @@ export type {
   Event,
   EventLevel,
   Node,
+  NodeContainerListResponse,
+  NodeContainerLogTarget,
   NodeHealthStatus,
   NodeLifecycleState,
   NodeLifecycleStatus,

@@ -286,11 +286,19 @@ exit 0
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
 	active := string(activeBytes)
-	if !strings.Contains(active, "r1-web-env.apps.example.com") {
-		t.Fatalf("active Caddyfile missing hostname:\n%s", active)
+	if !strings.Contains(active, "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import:\n%s", active)
 	}
-	if !strings.Contains(active, "reverse_proxy 127.0.0.1:35000") {
-		t.Fatalf("active Caddyfile missing upstream:\n%s", active)
+	snippetBytes, err := os.ReadFile(filepath.Join(filepath.Dir(activeCaddyfile), "sites", "env-1.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	snippet := string(snippetBytes)
+	if !strings.Contains(snippet, "r1-web-env.apps.example.com") {
+		t.Fatalf("active Caddy snippet missing hostname:\n%s", snippet)
+	}
+	if !strings.Contains(snippet, "reverse_proxy 127.0.0.1:35000") {
+		t.Fatalf("active Caddy snippet missing upstream:\n%s", snippet)
 	}
 
 	reloadBytes, err := os.ReadFile(reloadLog)
@@ -313,6 +321,75 @@ exit 0
 	}
 	if strings.Contains(composeOutput, "caddy") {
 		t.Fatalf("compose commands must not restart Caddy: %q", composeOutput)
+	}
+}
+
+func TestEngine_ApplyWaitsForRoutedServicesOnly(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+echo "$@" >> "`+composeLog+`"
+case "$*" in
+  *" ps --format json"*)
+    echo '{"Name":"sam-env-env-1-web-1","Service":"web","State":"running","Health":"healthy"}'
+    echo '{"Name":"sam-env-env-1-worker-1","Service":"worker","State":"exited","Health":""}'
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     reloadScript,
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := makeTestPayload("env-1", "node-1", 1, "services:\n  web:\n    image: nginx\n  worker:\n    image: busybox\n    command: echo done\n", priv)
+	payload.Routes = []RouteTarget{{
+		Hostname:      "app.example.com",
+		Service:       "web",
+		ContainerPort: 3000,
+		HostPort:      35000,
+	}}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply should ignore exited non-routed worker, got: %v", err)
+	}
+
+	observed := engine.GetObserved()
+	if observed.Status != StatusApplied {
+		t.Fatalf("expected observed status=applied, got %s", observed.Status)
+	}
+	if observed.AppliedSeq != 1 {
+		t.Fatalf("expected applied seq 1, got %d", observed.AppliedSeq)
 	}
 }
 
@@ -403,6 +480,10 @@ exit 0
 	}
 	if observed.AppliedSeq != 0 {
 		t.Fatalf("failed initial release must remain retryable in heartbeat, observed applied seq %d", observed.AppliedSeq)
+	}
+	snippetPath := filepath.Join(dir, "active", "sites", "env-1.caddy")
+	if _, err := os.Stat(snippetPath); !os.IsNotExist(err) {
+		t.Fatalf("failed initial release must remove active Caddy snippet, stat err=%v", err)
 	}
 }
 
@@ -679,6 +760,9 @@ exit 0
 				if observed.Status != StatusReverted {
 					t.Fatalf("expected observed status=reverted, got %s", observed.Status)
 				}
+				if !strings.Contains(observed.ErrorMessage, "compose up") {
+					t.Fatalf("expected observed revert error to include apply failure, got %q", observed.ErrorMessage)
+				}
 			}
 		})
 	}
@@ -813,6 +897,38 @@ exit 0
 	if loginIdx >= pullIdx {
 		t.Fatalf("docker login (at %d) must precede compose pull (at %d) in log:\n%s",
 			loginIdx, pullIdx, logContent)
+	}
+}
+
+func TestMatchedServiceUsesExplicitServiceOrExactNameOnly(t *testing.T) {
+	required := map[string]bool{"api": true}
+
+	if got, ok := matchedService(ServiceState{Name: "sam-env-worker-api-1", Service: "worker"}, required); ok {
+		t.Fatalf("matchedService fuzzy-matched container name substring as %q", got)
+	}
+
+	if got, ok := matchedService(ServiceState{Name: "sam-env-api-1", Service: "api"}, required); !ok || got != "api" {
+		t.Fatalf("matchedService explicit Service match = %q/%v, want api/true", got, ok)
+	}
+
+	if got, ok := matchedService(ServiceState{Name: "api", Service: ""}, required); !ok || got != "api" {
+		t.Fatalf("matchedService exact Name match = %q/%v, want api/true", got, ok)
+	}
+}
+
+func TestWaitForHealthSkipsContainerPollingWhenNoRoutes(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(dir)
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         filepath.Join(dir, "missing-compose"),
+		HealthTimeout:      time.Second,
+		HealthPollInterval: time.Millisecond,
+	})
+
+	if err := engine.waitForHealth(context.Background(), 1, nil); err != nil {
+		t.Fatalf("waitForHealth with no routes = %v, want nil", err)
 	}
 }
 

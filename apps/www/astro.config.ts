@@ -43,6 +43,7 @@ export default defineConfig({
             { slug: 'docs/guides/chat-features' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/creating-workspaces' },
+            { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },
             { slug: 'docs/guides/local-development' },
           ],

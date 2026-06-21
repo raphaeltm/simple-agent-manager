@@ -1,7 +1,7 @@
 import type { NodeResponse, ProviderCatalog, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
-import { Plus,Server } from 'lucide-react';
+import { Plus,Rocket,Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -65,6 +65,10 @@ export const NodeCard: FC<NodeCardProps> = ({
   const hasMetrics = metrics && (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
   const visibleWorkspaces = workspaces.slice(0, MAX_VISIBLE_WORKSPACES);
   const hiddenCount = workspaces.length - visibleWorkspaces.length;
+  const isDeploymentNode = node.nodeRole === 'deployment';
+  const deploymentEnvironments = node.deploymentEnvironments ?? [];
+  const visibleDeploymentEnvironments = deploymentEnvironments.slice(0, MAX_VISIBLE_WORKSPACES);
+  const hiddenDeploymentCount = deploymentEnvironments.length - visibleDeploymentEnvironments.length;
 
   const handleCardClick = () => {
     navigate(`/nodes/${node.id}`);
@@ -94,8 +98,16 @@ export const NodeCard: FC<NodeCardProps> = ({
       <Card variant="glass" className="flex flex-col gap-3" style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
         {/* Header: icon + name + dropdown */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-sm bg-info-tint flex items-center justify-center shrink-0">
-            <Server size={20} color="var(--sam-color-info-fg)" />
+          <div
+            className={`w-9 h-9 rounded-sm flex items-center justify-center shrink-0 ${
+              isDeploymentNode ? 'bg-accent-tint' : 'bg-info-tint'
+            }`}
+          >
+            {isDeploymentNode ? (
+              <Rocket size={20} className="text-accent" />
+            ) : (
+              <Server size={20} color="var(--sam-color-info-fg)" />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -115,6 +127,11 @@ export const NodeCard: FC<NodeCardProps> = ({
         <div className="flex items-center gap-2">
           <StatusBadge status={node.status} />
           <StatusBadge status={node.healthStatus || 'stale'} />
+          {isDeploymentNode && (
+            <span className="inline-flex items-center rounded-full bg-accent-tint px-2.5 py-0.5 text-xs font-semibold text-accent">
+              Deployment
+            </span>
+          )}
         </div>
 
         {/* VM info */}
@@ -166,10 +183,25 @@ export const NodeCard: FC<NodeCardProps> = ({
         {/* Workspaces section */}
         <div className="border-t border-border-default pt-3 flex flex-col gap-2">
           <span className="sam-type-caption text-fg-muted font-medium">
-            Workspaces ({workspaces.length})
+            {isDeploymentNode
+              ? `Deployment environments (${deploymentEnvironments.length})`
+              : `Workspaces (${workspaces.length})`}
           </span>
 
-          {visibleWorkspaces.length > 0 ? (
+          {isDeploymentNode && visibleDeploymentEnvironments.length > 0 ? (
+            <>
+              {visibleDeploymentEnvironments.map((env) => (
+                <span key={env.id} className="sam-type-caption text-fg-primary pl-3 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {env.name}
+                </span>
+              ))}
+              {hiddenDeploymentCount > 0 && (
+                <span className="sam-type-caption text-fg-muted pl-3">
+                  +{hiddenDeploymentCount} more
+                </span>
+              )}
+            </>
+          ) : visibleWorkspaces.length > 0 ? (
             <>
               {visibleWorkspaces.map((ws) => (
                 <div key={ws.id} onClick={(e) => e.stopPropagation()}>
@@ -184,19 +216,25 @@ export const NodeCard: FC<NodeCardProps> = ({
             </>
           ) : (
             <span className="sam-type-caption text-fg-muted italic">
-              No workspaces
+              {isDeploymentNode ? 'No deployment environments' : 'No workspaces'}
             </span>
           )}
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCreateWorkspace}
-            className="self-start"
-          >
-            <Plus size={14} />
-            Create Workspace
-          </Button>
+          {isDeploymentNode ? (
+            <span className="sam-type-caption text-fg-muted">
+              Managed from the project deployment environment.
+            </span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCreateWorkspace}
+              className="self-start"
+            >
+              <Plus size={14} />
+              Create Workspace
+            </Button>
+          )}
         </div>
 
         {/* Error message */}

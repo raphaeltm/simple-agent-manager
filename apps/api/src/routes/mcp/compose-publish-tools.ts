@@ -1,0 +1,125 @@
+/**
+ * MCP tool handler: build_and_publish
+ *
+ * Builds the project's Docker Compose stack on the agent-node HOST docker daemon
+ * (from the workspace's cloned repo), re-pushes the built service images into the
+ * project-scoped registry namespace using short-lived control-plane credentials,
+ * and records a deployment release — all server-side. The coding agent runs ZERO
+ * docker or registry commands and never receives a credential: this handler
+ * proxies a single request to the vm-agent, which owns the entire build → push →
+ * release flow.
+ *
+ * Gated behind the same phase-D environment-scoped agent-deploy policy as the
+ * registry credential path.
+ */
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../db/schema';
+import type { Env } from '../../env';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
+import {
+  INTERNAL_ERROR,
+  INVALID_PARAMS,
+  jsonRpcError,
+  type JsonRpcResponse,
+  jsonRpcSuccess,
+  type McpTokenData,
+  sanitizeUserInput,
+} from './_helpers';
+import { proxyToVmAgentWithNodeManagement, requireWorkspace } from './workspace-tools';
+
+/**
+ * Host build + registry push + release submission is slow (image build + push).
+ * This bounds the worker→vm-agent proxy wait; the vm-agent applies its own
+ * 20-minute internal cap. Override via BUILD_PUBLISH_TOOL_TIMEOUT_MS.
+ */
+const DEFAULT_BUILD_PUBLISH_TIMEOUT_MS = 21 * 60 * 1000;
+function getBuildPublishTimeout(env: Env): number {
+  return parsePositiveInt(env.BUILD_PUBLISH_TOOL_TIMEOUT_MS, DEFAULT_BUILD_PUBLISH_TIMEOUT_MS);
+}
+
+/**
+ * Handle the build_and_publish MCP tool call.
+ *
+ * No rate limiting here: the downstream credential mint + release ingestion the
+ * vm-agent triggers are themselves rate-limited at their own endpoints.
+ */
+export async function handleBuildAndPublish(
+  requestId: string | number | null,
+  toolArgs: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const workspaceErr = requireWorkspace(requestId, tokenData);
+  if (workspaceErr) return workspaceErr;
+
+  const { projectId } = tokenData;
+  const db = drizzle(env.DATABASE, { schema });
+
+  const rawEnvironment =
+    typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
+  const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
+  if (!environment) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'A deployment environment name is required before build_and_publish can record a release.'
+    );
+  }
+
+  const policyResult = await assertAgentDeploymentAllowed(db, projectId, environment, tokenData);
+  if ('error' in policyResult) {
+    return jsonRpcError(requestId, INVALID_PARAMS, policyResult.error);
+  }
+
+  const reference =
+    typeof toolArgs.reference === 'string' && toolArgs.reference.trim() !== ''
+      ? toolArgs.reference.trim()
+      : undefined;
+
+  // Optional: the agent's current working directory (e.g. a git worktree under
+  // /workspaces). When set, the vm-agent builds the source at this directory
+  // instead of the workspace's primary repo. The vm-agent validates it is a path
+  // under /workspaces and ignores anything that isn't.
+  const workingDir =
+    typeof toolArgs.workingDir === 'string' && toolArgs.workingDir.trim() !== ''
+      ? toolArgs.workingDir.trim()
+      : undefined;
+
+  const proxyBody: Record<string, unknown> = {
+    environment,
+    environmentId: policyResult.environmentId,
+    submittedBy: {
+      userId: tokenData.userId,
+      workspaceId: tokenData.workspaceId,
+      taskId: tokenData.taskId || undefined,
+      agentProfileId: policyResult.taskAgentProfileId || undefined,
+    },
+  };
+  if (reference) proxyBody.reference = reference;
+  if (workingDir) proxyBody.workingDir = workingDir;
+
+  try {
+    const result = await proxyToVmAgentWithNodeManagement(
+      env,
+      tokenData.workspaceId,
+      tokenData.userId,
+      projectId,
+      'build-and-publish',
+      'POST',
+      proxyBody,
+      getBuildPublishTimeout(env)
+    );
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    });
+  } catch (e) {
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Build and publish failed: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+}

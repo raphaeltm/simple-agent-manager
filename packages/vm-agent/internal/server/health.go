@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/deploy"
 )
 
 func nowUTC() time.Time {
@@ -38,6 +41,10 @@ func (s *Server) setCallbackToken(token string) {
 
 	// Update ACP gateway config.
 	s.acpConfig.CallbackToken = token
+
+	for _, engine := range s.deploymentEnginesSnapshot() {
+		engine.SetCallbackToken(token)
+	}
 }
 
 func (s *Server) startNodeHealthReporter() {
@@ -92,6 +99,22 @@ func (s *Server) sendNodeReady() {
 	}
 }
 
+type deploymentEnvironmentResponse struct {
+	EnvironmentID string `json:"environmentId"`
+}
+
+type deploymentPendingReleaseResponse struct {
+	EnvironmentID string `json:"environmentId"`
+	Seq           int64  `json:"seq"`
+}
+
+type deploymentHeartbeatResponse struct {
+	Environments       *[]deploymentEnvironmentResponse   `json:"environments,omitempty"`
+	RetireEnvironments []deploymentEnvironmentResponse    `json:"retireEnvironments,omitempty"`
+	PendingReleases    []deploymentPendingReleaseResponse `json:"pendingReleases,omitempty"`
+	DeployPubKey       string                             `json:"deployPubKey,omitempty"`
+}
+
 // heartbeatResponse is the expected JSON response from the heartbeat endpoint.
 type heartbeatResponse struct {
 	Status          string `json:"status"`
@@ -100,8 +123,9 @@ type heartbeatResponse struct {
 	RefreshedToken  string `json:"refreshedToken,omitempty"`
 
 	// Deployment mode fields
-	PendingReleaseSeq int64  `json:"pendingReleaseSeq,omitempty"`
-	DeployPubKey      string `json:"deployPubKey,omitempty"` // Refreshed signing public key (base64)
+	PendingReleaseSeq int64                       `json:"pendingReleaseSeq,omitempty"`
+	DeployPubKey      string                      `json:"deployPubKey,omitempty"` // Refreshed signing public key (base64)
+	Deployment        deploymentHeartbeatResponse `json:"deployment,omitempty"`
 }
 
 func (s *Server) sendNodeHeartbeat() {
@@ -112,23 +136,28 @@ func (s *Server) sendNodeHeartbeat() {
 		"nodeId":           s.config.NodeID,
 	}
 
-	// In deployment mode, include observed deployment state + disk telemetry
-	if s.deployEngine != nil {
-		observed := s.deployEngine.GetObserved()
-		deployPayload := map[string]interface{}{
-			"environmentId": s.config.EnvironmentID,
-			"appliedSeq":    observed.AppliedSeq,
-			"status":        string(observed.Status),
-			"errorMessage":  observed.ErrorMessage,
-			"services":      observed.Services,
+	// In deployment mode, include observed deployment state + disk telemetry per environment.
+	if s.config.Role == config.RoleDeployment {
+		engines := s.deploymentEnginesSnapshot()
+		environments := make([]map[string]interface{}, 0, len(engines))
+		for environmentID, engine := range engines {
+			observed := engine.GetObserved()
+			deployPayload := map[string]interface{}{
+				"environmentId": environmentID,
+				"appliedSeq":    observed.AppliedSeq,
+				"status":        string(observed.Status),
+				"errorMessage":  observed.ErrorMessage,
+				"services":      observed.Services,
+			}
+			if observed.DeployStatus != nil {
+				deployPayload["deployStatus"] = observed.DeployStatus
+			}
+			if observed.DiskTelemetry != nil {
+				deployPayload["diskTelemetry"] = observed.DiskTelemetry
+			}
+			environments = append(environments, deployPayload)
 		}
-		if observed.DeployStatus != nil {
-			deployPayload["deployStatus"] = observed.DeployStatus
-		}
-		if observed.DiskTelemetry != nil {
-			deployPayload["diskTelemetry"] = observed.DiskTelemetry
-		}
-		payload["deployment"] = deployPayload
+		payload["deployment"] = map[string]interface{}{"environments": environments}
 	}
 
 	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
@@ -189,33 +218,79 @@ func (s *Server) sendNodeHeartbeat() {
 	}
 
 	// Deployment mode: handle pending release signal and key refresh
-	if s.deployEngine != nil {
-		// Refresh signing public key if provided
-		if hbResp.DeployPubKey != "" {
-			if err := s.deployEngine.SetVerifierKey(hbResp.DeployPubKey); err != nil {
-				slog.Error("deploy: failed to refresh signing public key", "error", err)
-			} else {
-				slog.Info("deploy: signing public key refreshed from heartbeat")
+	if s.config.Role == config.RoleDeployment {
+		deployPubKey := hbResp.DeployPubKey
+		if hbResp.Deployment.DeployPubKey != "" {
+			deployPubKey = hbResp.Deployment.DeployPubKey
+		}
+		if hbResp.Deployment.Environments != nil {
+			for _, env := range *hbResp.Deployment.Environments {
+				environmentID := strings.TrimSpace(env.EnvironmentID)
+				if environmentID == "" {
+					continue
+				}
+				s.ensureDeployEngine(environmentID)
 			}
 		}
 
-		// Check for pending release
-		if hbResp.PendingReleaseSeq > 0 {
-			observed := s.deployEngine.GetObserved()
-			if hbResp.PendingReleaseSeq > observed.AppliedSeq {
-				slog.Info("deploy: pending release detected",
-					"pendingSeq", hbResp.PendingReleaseSeq,
-					"appliedSeq", observed.AppliedSeq)
-				// Fetch and apply in background — don't block heartbeat ticker
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-					defer cancel()
-					if err := s.deployEngine.FetchAndApply(ctx, hbResp.PendingReleaseSeq); err != nil {
-						slog.Error("deploy: fetch and apply failed",
-							"seq", hbResp.PendingReleaseSeq, "error", err)
-					}
-				}()
+		retireEnvironmentIDs := make(map[string]bool, len(hbResp.Deployment.RetireEnvironments))
+		for _, env := range hbResp.Deployment.RetireEnvironments {
+			environmentID := strings.TrimSpace(env.EnvironmentID)
+			if environmentID == "" {
+				continue
 			}
+			retireEnvironmentIDs[environmentID] = true
+		}
+		if len(retireEnvironmentIDs) > 0 {
+			s.retireDeployEngines(retireEnvironmentIDs)
+		}
+
+		// Refresh signing public key if provided
+		if deployPubKey != "" {
+			for environmentID, engine := range s.deploymentEnginesSnapshot() {
+				if err := engine.SetVerifierKey(deployPubKey); err != nil {
+					slog.Error("deploy: failed to refresh signing public key", "environmentId", environmentID, "error", err)
+				} else {
+					slog.Info("deploy: signing public key refreshed from heartbeat", "environmentId", environmentID)
+				}
+			}
+		}
+
+		pendingReleases := hbResp.Deployment.PendingReleases
+		if hbResp.PendingReleaseSeq > 0 {
+			if s.config.EnvironmentID != "" {
+				pendingReleases = append(pendingReleases, deploymentPendingReleaseResponse{
+					EnvironmentID: s.config.EnvironmentID,
+					Seq:           hbResp.PendingReleaseSeq,
+				})
+			}
+		}
+
+		for _, pending := range pendingReleases {
+			environmentID := strings.TrimSpace(pending.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			engine := s.ensureDeployEngine(environmentID)
+			if engine == nil {
+				continue
+			}
+			observed := engine.GetObserved()
+			if pending.Seq <= observed.AppliedSeq {
+				continue
+			}
+			slog.Info("deploy: pending release detected",
+				"environmentId", environmentID,
+				"pendingSeq", pending.Seq,
+				"appliedSeq", observed.AppliedSeq)
+			go func(environmentID string, seq int64, engine *deploy.Engine) {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				if err := engine.FetchAndApply(ctx, seq); err != nil {
+					slog.Error("deploy: fetch and apply failed",
+						"environmentId", environmentID, "seq", seq, "error", err)
+				}
+			}(environmentID, pending.Seq, engine)
 		}
 	}
 

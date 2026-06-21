@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +51,7 @@ type EngineConfig struct {
 	ControlPlaneURL    string
 	CallbackToken      string
 	ComposeCmd         string // e.g., "docker compose"
+	ComposeProjectName string
 	CaddyfilePath      string
 	CaddyReloadCmd     string
 	CaddyRestartCmd    string
@@ -67,6 +70,9 @@ type EngineConfig struct {
 func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	if cfg.ComposeCmd == "" {
 		cfg.ComposeCmd = "docker compose"
+	}
+	if cfg.ComposeProjectName == "" {
+		cfg.ComposeProjectName = "sam-env-" + SafeEnvironmentFilePart(cfg.EnvironmentID)
 	}
 	if cfg.CaddyfilePath == "" {
 		cfg.CaddyfilePath = "/etc/caddy/Caddyfile"
@@ -106,6 +112,47 @@ func (e *Engine) SetCallbackToken(token string) {
 	e.tokenMu.Lock()
 	defer e.tokenMu.Unlock()
 	e.callbackToken = token
+}
+
+func (e *Engine) EnvironmentID() string {
+	return e.cfg.EnvironmentID
+}
+
+// Teardown stops the current compose project and removes only this
+// environment's active Caddy snippet from the node-level import directory.
+func (e *Engine) Teardown(ctx context.Context) error {
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
+
+	var errs []string
+	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
+		if err := e.composeDown(ctx, composeFile); err != nil {
+			errs = append(errs, fmt.Sprintf("compose down: %v", err))
+		}
+	} else if !strings.Contains(err.Error(), "no current release") {
+		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
+	}
+
+	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("remove Caddy snippet: %v", err))
+	}
+
+	root := GenerateRootCaddyfile(CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
+		errs = append(errs, fmt.Sprintf("write root Caddyfile: %v", err))
+	} else if err := e.reloadActiveCaddyConfig(ctx); err != nil {
+		errs = append(errs, fmt.Sprintf("reload Caddy: %v", err))
+	}
+
+	e.setObserved(ObservedState{})
+	if len(errs) > 0 {
+		return fmt.Errorf("teardown environment %s: %s", e.cfg.EnvironmentID, strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // getCallbackToken returns the current callback token under a read lock.
@@ -210,10 +257,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	// Write release to disk
-	caddyfile, err := GenerateCaddyfile(payload.Routes, CaddyfileOptions{
-		ACMEEmail: e.cfg.ACMEEmail,
-		ACMECA:    e.cfg.ACMECA,
-	})
+	caddyfile, err := GenerateCaddySnippet(payload.Routes)
 	if err != nil {
 		return fmt.Errorf("generate Caddyfile: %w", err)
 	}
@@ -276,7 +320,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	}
 
 	// Wait for health checks
-	if err := e.waitForHealth(ctx, payload.Seq); err != nil {
+	if err := e.waitForHealth(ctx, payload.Seq, payload.Routes); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("health check: %w", err))
 	}
 
@@ -323,19 +367,36 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 			slog.Warn("deploy.apply: failed to stop containers after failed-initial",
 				"error", err)
 		}
+		if err := e.clearActiveCaddySnippet(ctx); err != nil {
+			slog.Warn("deploy.apply: failed to clear Caddy snippet after failed-initial",
+				"error", err)
+		}
 
-		_ = e.disk.UpdateState(state)
+		var persistenceErrs []error
+		if err := e.disk.UpdateState(state); err != nil {
+			slog.Error("deploy.apply: failed to persist failed-initial state",
+				"seq", state.Seq, "error", err)
+			persistenceErrs = append(persistenceErrs, fmt.Errorf("persist failed-initial state: %w", err))
+		}
 		e.setObserved(ObservedState{
 			AppliedSeq:   0,
 			Status:       StatusFailedInitial,
 			ErrorMessage: applyErr.Error(),
 		})
-		return fmt.Errorf("apply failed (no previous release to revert): %w", applyErr)
+		return errors.Join(
+			fmt.Errorf("apply failed (no previous release to revert): %w", applyErr),
+			errors.Join(persistenceErrs...),
+		)
 	}
 
 	// Revert to previous release
+	var recoveryErrs []error
 	state.Status = StatusFailed
-	_ = e.disk.UpdateState(state)
+	if err := e.disk.UpdateState(state); err != nil {
+		slog.Error("deploy.apply: failed to persist failed release state",
+			"seq", state.Seq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("persist failed release state: %w", err))
+	}
 
 	// Tear down the partially-started new release before bringing the previous
 	// one back up. Otherwise its containers may still hold the host port and the
@@ -356,34 +417,54 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 			Status:       StatusFailed,
 			ErrorMessage: applyErr.Error(),
 		})
-		return fmt.Errorf("apply failed and revert failed: apply=%w, revert=%v", applyErr, err)
+		return errors.Join(
+			fmt.Errorf("apply failed and revert failed: apply=%w, revert=%v", applyErr, err),
+			errors.Join(recoveryErrs...),
+		)
 	}
 
 	if err := e.reloadCaddy(ctx, e.disk.CaddyfilePath(previousSeq)); err != nil {
 		slog.Error("deploy.apply: caddy reload for reverted release failed",
 			"prevSeq", previousSeq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("reload reverted caddy: %w", err))
 	}
 
 	// Restore current pointer to previous
-	_ = e.disk.SetCurrent(previousSeq)
+	if err := e.disk.SetCurrent(previousSeq); err != nil {
+		slog.Error("deploy.apply: failed to restore current pointer after revert",
+			"prevSeq", previousSeq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("restore current pointer after revert: %w", err))
+	}
 
 	// Update previous release state to show it was reverted-to
 	prevState, err := e.disk.ReadState(previousSeq)
 	if err == nil {
 		prevState.Status = StatusApplied
-		_ = e.disk.UpdateState(prevState)
+		if err := e.disk.UpdateState(prevState); err != nil {
+			slog.Error("deploy.apply: failed to persist reverted release state",
+				"prevSeq", previousSeq, "error", err)
+			recoveryErrs = append(recoveryErrs, fmt.Errorf("persist reverted release state: %w", err))
+		}
+	} else {
+		slog.Error("deploy.apply: failed to read previous release state after revert",
+			"prevSeq", previousSeq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("read previous release state after revert: %w", err))
 	}
 
 	services, _ := e.inspectServices(ctx, previousSeq)
 	e.setObserved(ObservedState{
-		AppliedSeq: previousSeq,
-		Status:     StatusReverted,
-		Services:   services,
+		AppliedSeq:   previousSeq,
+		Status:       StatusReverted,
+		ErrorMessage: applyErr.Error(),
+		Services:     services,
 	})
 
 	slog.Info("deploy.apply: reverted to previous release",
 		"failedSeq", state.Seq, "revertedTo", previousSeq)
-	return fmt.Errorf("apply failed, reverted to seq %d: %w", previousSeq, applyErr)
+	return errors.Join(
+		fmt.Errorf("apply failed, reverted to seq %d: %w", previousSeq, applyErr),
+		errors.Join(recoveryErrs...),
+	)
 }
 
 // GetObserved returns the current observed deployment state (thread-safe).
@@ -456,7 +537,7 @@ func (e *Engine) composeDown(ctx context.Context, composeFile string) error {
 
 func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...string) error {
 	parts := strings.Fields(e.cfg.ComposeCmd)
-	cmdArgs := append(parts[1:], "-f", composeFile)
+	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile)
 	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
@@ -473,12 +554,44 @@ func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...str
 func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error {
 	content, err := os.ReadFile(releaseCaddyfile)
 	if err != nil {
-		return fmt.Errorf("read release Caddyfile: %w", err)
+		return fmt.Errorf("read release Caddy snippet: %w", err)
 	}
-	if err := writeFileAtomic(e.cfg.CaddyfilePath, string(content), 0644); err != nil {
-		return fmt.Errorf("write active Caddyfile: %w", err)
+	sitesDir := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites")
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		return fmt.Errorf("create caddy sites dir: %w", err)
+	}
+	root := GenerateRootCaddyfile(CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
+		return fmt.Errorf("write root Caddyfile: %w", err)
+	}
+	snippetPath := filepath.Join(sitesDir, SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	if err := writeFileAtomic(snippetPath, string(content), 0644); err != nil {
+		return fmt.Errorf("write active Caddy snippet: %w", err)
 	}
 
+	return e.reloadActiveCaddyConfig(ctx)
+}
+
+func (e *Engine) clearActiveCaddySnippet(ctx context.Context) error {
+	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
+	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove active Caddy snippet: %w", err)
+	}
+
+	root := GenerateRootCaddyfile(CaddyfileOptions{
+		ACMEEmail: e.cfg.ACMEEmail,
+		ACMECA:    e.cfg.ACMECA,
+	})
+	if err := writeFileAtomic(e.cfg.CaddyfilePath, root, 0644); err != nil {
+		return fmt.Errorf("write root Caddyfile: %w", err)
+	}
+	return e.reloadActiveCaddyConfig(ctx)
+}
+
+func (e *Engine) reloadActiveCaddyConfig(ctx context.Context) error {
 	parts := strings.Fields(e.cfg.CaddyReloadCmd)
 	if len(parts) == 0 {
 		return fmt.Errorf("empty caddy reload command")
@@ -547,7 +660,12 @@ func (e *Engine) waitForReloadCommand(ctx context.Context, command string) error
 	}
 }
 
-func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
+func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTarget) error {
+	requiredServices := routeServiceSet(routes)
+	if len(requiredServices) == 0 {
+		return nil
+	}
+
 	deadline := time.NewTimer(e.cfg.HealthTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(e.cfg.HealthPollInterval)
@@ -566,31 +684,63 @@ func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
 				continue
 			}
 
-			allHealthy := true
-			for _, svc := range services {
-				if svc.Status != "running" {
-					allHealthy = false
-					break
-				}
-				// If health check is configured, it must be healthy
-				if svc.Health != "" && svc.Health != "healthy" && svc.Health != "none" {
-					allHealthy = false
-					break
-				}
-			}
-
-			if allHealthy && len(services) > 0 {
+			if routedServicesHealthy(services, requiredServices) {
 				return nil
 			}
 		}
 	}
 }
 
+func routeServiceSet(routes []RouteTarget) map[string]bool {
+	services := make(map[string]bool)
+	for _, route := range routes {
+		service := strings.TrimSpace(route.Service)
+		if service != "" {
+			services[service] = true
+		}
+	}
+	return services
+}
+
+func routedServicesHealthy(services []ServiceState, requiredServices map[string]bool) bool {
+	healthyByService := make(map[string]bool, len(requiredServices))
+	for _, svc := range services {
+		service, ok := matchedService(svc, requiredServices)
+		if ok && serviceHealthy(svc) {
+			healthyByService[service] = true
+		}
+	}
+	for service := range requiredServices {
+		if !healthyByService[service] {
+			return false
+		}
+	}
+	return true
+}
+
+func matchedService(svc ServiceState, requiredServices map[string]bool) (string, bool) {
+	if requiredServices[svc.Service] {
+		return svc.Service, true
+	}
+	if requiredServices[svc.Name] {
+		return svc.Name, true
+	}
+	return "", false
+}
+
+func serviceHealthy(svc ServiceState) bool {
+	if svc.Status != "running" {
+		return false
+	}
+	// If health check is configured, it must be healthy.
+	return svc.Health == "" || svc.Health == "healthy" || svc.Health == "none"
+}
+
 func (e *Engine) inspectServices(ctx context.Context, seq int64) ([]ServiceState, error) {
 	composeFile := e.disk.ComposeFilePath(seq)
 
 	parts := strings.Fields(e.cfg.ComposeCmd)
-	cmdArgs := append(parts[1:], "-f", composeFile, "ps", "--format", "json")
+	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile, "ps", "--format", "json")
 
 	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
 	var stdout, stderr bytes.Buffer
@@ -608,18 +758,20 @@ func (e *Engine) inspectServices(ctx context.Context, seq int64) ([]ServiceState
 			continue
 		}
 		var container struct {
-			Name   string `json:"Name"`
-			State  string `json:"State"`
-			Health string `json:"Health"`
+			Name    string `json:"Name"`
+			Service string `json:"Service"`
+			State   string `json:"State"`
+			Health  string `json:"Health"`
 		}
 		if err := json.Unmarshal([]byte(line), &container); err != nil {
 			slog.Debug("deploy.inspect: failed to parse container JSON", "line", line, "error", err)
 			continue
 		}
 		services = append(services, ServiceState{
-			Name:   container.Name,
-			Status: container.State,
-			Health: container.Health,
+			Name:    container.Name,
+			Service: container.Service,
+			Status:  container.State,
+			Health:  container.Health,
 		})
 	}
 	return services, nil

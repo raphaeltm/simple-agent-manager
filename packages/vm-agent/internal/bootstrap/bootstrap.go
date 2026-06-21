@@ -436,6 +436,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	} else {
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
+
 	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
 		return recoveryMode, err
 	}

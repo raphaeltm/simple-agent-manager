@@ -6,7 +6,7 @@
  * endpoint MUST be mounted before projectsRoutes to avoid the session auth
  * middleware leak (see .claude/rules/34-vm-agent-callback-auth.md).
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -16,10 +16,20 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
+import {
+  buildComposePublishApplyPayload,
+  DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
+  DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+  DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB,
+} from '../services/compose-publish-apply';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
-import { buildDeploymentRouteTargets } from '../services/deployment-routing';
-import { upsertAppRouteDNSRecord } from '../services/dns';
+import {
+  buildDeploymentRouteTargets,
+  collectEnvironmentRouteHostnames,
+  type DeploymentRouteTarget,
+} from '../services/deployment-routing';
+import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
 import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
@@ -90,16 +100,13 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       nodeId: schema.deploymentEnvironments.nodeId,
     })
     .from(schema.deploymentEnvironments)
-    .innerJoin(
-      schema.projects,
-      eq(schema.deploymentEnvironments.projectId, schema.projects.id),
-    )
+    .innerJoin(schema.projects, eq(schema.deploymentEnvironments.projectId, schema.projects.id))
     .where(
       and(
         eq(schema.deploymentEnvironments.id, environmentId),
         eq(schema.deploymentEnvironments.nodeId, nodeId),
-        eq(schema.projects.userId, node.userId),
-      ),
+        eq(schema.projects.userId, node.userId)
+      )
     )
     .limit(1);
 
@@ -116,8 +123,8 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .where(
       and(
         eq(schema.deploymentReleases.environmentId, environmentId),
-        eq(schema.deploymentReleases.version, seq),
-      ),
+        eq(schema.deploymentReleases.version, seq)
+      )
     )
     .limit(1);
 
@@ -125,42 +132,159 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   if (!release) {
     throw errors.notFound('Deployment release');
   }
-  const manifest = JSON.parse(release.manifest);
 
-  const routes = buildDeploymentRouteTargets(manifest, {
-    environmentId,
-    baseDomain: c.env.BASE_DOMAIN,
-    routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-    routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-  });
+  await db
+    .update(schema.deploymentReleases)
+    .set({ status: 'applying' })
+    .where(eq(schema.deploymentReleases.id, release.id));
 
-  if (routes.length > 0) {
-    const nodeIp = node.ipAddress;
-    if (!nodeIp) {
-      throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
+  // Two release shapes share this apply path, discriminated by `release.source`:
+  //
+  //  - compose-publish: the stored manifest IS the captured publish submission
+  //    ({ reference, composeYaml, services[] }). We transform the raw compose
+  //    in-place (preserving provider:/healthcheck/depends_on, digest-pinning
+  //    build images via pushedRef) rather than round-tripping through the lossy
+  //    normalized manifest. Routes are derived from each service's `ports:`.
+  //
+  //  - build-on-node (default): the stored manifest is the normalized
+  //    DeploymentManifest. Routes come from manifest.routes and the compose is
+  //    re-rendered from the manifest with secret injection.
+  let routes: DeploymentRouteTarget[];
+  let composeYaml: string;
+
+  if (release.source === 'compose-publish') {
+    const submission = JSON.parse(release.manifest);
+    const applied = buildComposePublishApplyPayload(submission, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      releaseId: release.id,
+      defaultMemoryLimitMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB
+      ),
+      defaultLogMaxSize:
+        c.env.DEPLOYMENT_LOG_MAX_SIZE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+      defaultLogMaxFile:
+        c.env.DEPLOYMENT_LOG_MAX_FILE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
+    });
+    routes = applied.routes;
+    composeYaml = applied.composeYaml;
+
+    if (applied.warnings.length > 0) {
+      log.warn('deploy_release.compose_publish_warnings', {
+        nodeId,
+        environmentId,
+        seq,
+        releaseId: release.id,
+        warnings: applied.warnings,
+      });
     }
 
-    await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
+    if (routes.length > 0) {
+      const nodeIp = node.ipAddress;
+      if (!nodeIp) {
+        throw errors.conflict(
+          'Deployment node does not have an IP address yet; retry after provisioning completes'
+        );
+      }
+      await Promise.all(
+        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
+      );
+    }
+  } else {
+    const manifest = JSON.parse(release.manifest);
+
+    routes = buildDeploymentRouteTargets(manifest, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    });
+
+    if (routes.length > 0) {
+      const nodeIp = node.ipAddress;
+      if (!nodeIp) {
+        throw errors.conflict(
+          'Deployment node does not have an IP address yet; retry after provisioning completes'
+        );
+      }
+
+      await Promise.all(
+        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
+      );
+    }
+
+    // Resolve secret references — inject decrypted values for the node
+    const secretNames = collectSecretNames(manifest);
+    const resolvedSecrets =
+      secretNames.length > 0
+        ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
+        : {};
+
+    // Render the Compose YAML from the manifest
+    composeYaml = renderCompose(manifest, {
+      environmentId,
+      releaseId: release.id,
+      routeTargets: routes,
+      resolvedSecrets,
+    });
   }
 
-  // Resolve secret references — inject decrypted values for the node
-  const secretNames = collectSecretNames(manifest);
-  const resolvedSecrets = secretNames.length > 0
-    ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
-    : {};
-
-  // Render the Compose YAML from the manifest
-  const composeYaml = renderCompose(manifest, {
-    environmentId,
-    releaseId: release.id,
-    routeTargets: routes,
-    resolvedSecrets,
-  });
-
-  const expiresAt = Math.floor(Date.now() / 1000) + parsePositiveInt(
-    c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS,
-    DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS,
+  const cleanupStaleRoutes = async () => {
+    const priorReleaseRows = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(
+        and(
+          eq(schema.deploymentReleases.environmentId, environmentId),
+          lt(schema.deploymentReleases.version, seq)
+        )
+      );
+    const previousHostnames = collectEnvironmentRouteHostnames(
+      priorReleaseRows.map((row) => row.manifest),
+      {
+        environmentId,
+        baseDomain: c.env.BASE_DOMAIN,
+        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      }
+    );
+    const currentHostnames = new Set(routes.map((route) => route.hostname));
+    const staleHostnames = previousHostnames.filter((hostname) => !currentHostnames.has(hostname));
+    if (staleHostnames.length === 0) {
+      return;
+    }
+    const deleted = await cleanupAppRouteDNSRecords(staleHostnames, c.env);
+    log.info('deploy_release.stale_route_dns_cleaned', {
+      nodeId,
+      environmentId,
+      releaseId: release.id,
+      requested: staleHostnames.length,
+      deleted,
+    });
+  };
+  let executionCtx: ExecutionContext | null = null;
+  try {
+    executionCtx = c.executionCtx;
+  } catch {
+    executionCtx = null;
+  }
+  executionCtx?.waitUntil(
+    cleanupStaleRoutes().catch((err) => {
+      log.error('deploy_release.stale_route_dns_cleanup_failed', {
+        nodeId,
+        environmentId,
+        releaseId: release.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
   );
+
+  const expiresAt =
+    Math.floor(Date.now() / 1000) +
+    parsePositiveInt(c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS, DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS);
 
   // Sign the payload with the deploy signing key
   const signature = await signDeployPayload(
@@ -172,7 +296,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       composeYaml,
       routes,
     },
-    c.env,
+    c.env
   );
 
   // Mint short-lived pull-only registry credentials for private image pulls.
@@ -186,7 +310,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       node.userId,
       '', // no task context in deploy callback
       environmentId,
-      { permissions: ['pull'] },
+      { permissions: ['pull'] }
     );
     registryCredentials = {
       server: creds.registry,

@@ -142,16 +142,33 @@ export {
   validateCredential,
 } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
-export type { DeploymentSecretEntry, ProjectDeploymentGcpResponse } from './deployment';
+export type {
+  DeleteDeploymentEnvironmentResponse,
+  DeploymentAgentPolicy,
+  DeploymentEnvironment,
+  DeploymentEnvironmentMetricsResponse,
+  DeploymentEnvironmentNodeSummary,
+  DeploymentObservedState,
+  DeploymentReleaseSummary,
+  DeploymentSecretEntry,
+  ProjectDeploymentGcpResponse,
+} from './deployment';
 export {
+  createDeploymentEnvironment,
+  deleteDeploymentEnvironment,
   deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
+  getDeploymentEnvironmentLogs,
+  getDeploymentEnvironmentMetrics,
   getDeployOAuthResult,
   getProjectDeploymentGcp,
+  listDeploymentEnvironmentContainers,
+  listDeploymentEnvironments,
   listDeploymentSecrets,
   listGcpProjectsForDeploy,
   setDeploymentSecret,
   setupProjectDeploymentGcp,
+  updateDeploymentEnvironmentPolicy,
 } from './deployment';
 export type {
   FileEntry,
@@ -234,6 +251,7 @@ export {
   getNodeLogs,
   getNodeLogStreamUrl,
   getNodeSystemInfo,
+  listNodeContainers,
   listNodeEvents,
   listNodes,
   stopNode,

@@ -20,6 +20,7 @@ vi.mock('drizzle-orm/d1');
 const mocks = {
   requireNodeOwnership: vi.fn(),
   stopNodeResources: vi.fn(),
+  deleteNodeResources: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   getUserId: vi.fn(() => 'user-123'),
 };
@@ -37,7 +38,7 @@ vi.mock('../../../src/middleware/node-auth', () => ({
 vi.mock('../../../src/services/nodes', () => ({
   stopNodeResources: (...args: any[]) => mocks.stopNodeResources(...args),
   createNodeRecord: vi.fn(),
-  deleteNodeResources: vi.fn(),
+  deleteNodeResources: (...args: any[]) => mocks.deleteNodeResources(...args),
   provisionNode: vi.fn(),
 }));
 
@@ -111,6 +112,7 @@ function createMockEnv(): Env {
 describe('POST /api/nodes/:id/stop', () => {
   let app: ReturnType<typeof createApp>;
   let env: Env;
+  let mockDeleteWhere: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -125,6 +127,13 @@ describe('POST /api/nodes/:id/stop', () => {
       userId: 'user-123',
     });
     mocks.stopNodeResources.mockResolvedValue(undefined);
+    mocks.deleteNodeResources.mockResolvedValue({
+      nodeFound: true,
+      providerVmDeleted: true,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: true,
+      errors: [],
+    });
 
     // Mock drizzle to return chainable query builders
     const mockUpdateChain: any = {};
@@ -135,10 +144,12 @@ describe('POST /api/nodes/:id/stop', () => {
     mockSelectChain.from = vi.fn(() => mockSelectChain);
     mockSelectChain.where = vi.fn(() => Promise.resolve([]));
 
+    mockDeleteWhere = vi.fn(() => Promise.resolve());
+
     (drizzle as any).mockReturnValue({
       select: vi.fn(() => mockSelectChain),
       update: vi.fn(() => mockUpdateChain),
-      delete: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })),
+      delete: vi.fn(() => ({ where: mockDeleteWhere })),
     });
   });
 
@@ -168,5 +179,79 @@ describe('POST /api/nodes/:id/stop', () => {
 
     const response = await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
     expect(response.status).toBe(404);
+  });
+});
+
+describe('DELETE /api/nodes/:id', () => {
+  let app: ReturnType<typeof createApp>;
+  let env: Env;
+  let mockDeleteWhere: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    app = createApp();
+    env = createMockEnv();
+
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-1',
+      status: 'running',
+      healthStatus: 'healthy',
+      userId: 'user-123',
+      nodeRole: 'workspace',
+    });
+    mocks.deleteNodeResources.mockResolvedValue({
+      nodeFound: true,
+      providerVmDeleted: false,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: false,
+      errors: ['provider cleanup failed'],
+    });
+
+    const mockSelectChain: any = {};
+    mockSelectChain.from = vi.fn(() => mockSelectChain);
+    mockSelectChain.where = vi.fn(() => Promise.resolve([]));
+    mockDeleteWhere = vi.fn(() => Promise.resolve());
+
+    (drizzle as any).mockReturnValue({
+      select: vi.fn(() => mockSelectChain),
+      update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) })),
+      delete: vi.fn(() => ({ where: mockDeleteWhere })),
+    });
+  });
+
+  it('returns conflict and preserves deployment node row when provider cleanup fails', async () => {
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-deploy-1',
+      status: 'running',
+      healthStatus: 'healthy',
+      userId: 'user-123',
+      nodeRole: 'deployment',
+    });
+
+    const response = await app.request(
+      '/api/nodes/node-deploy-1',
+      { method: 'DELETE' },
+      env,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'Deployment node could not be fully deprovisioned: provider cleanup failed',
+    });
+    expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-deploy-1', 'user-123', env);
+    expect(mockDeleteWhere).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing workspace-node deletion behavior when cleanup reports errors', async () => {
+    const response = await app.request(
+      '/api/nodes/node-1',
+      { method: 'DELETE' },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-123', env);
+    expect(mockDeleteWhere).toHaveBeenCalled();
   });
 });

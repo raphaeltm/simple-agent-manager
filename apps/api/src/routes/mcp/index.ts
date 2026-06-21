@@ -25,6 +25,7 @@ import {
   MCP_TOOLS,
   METHOD_NOT_FOUND,
 } from './_helpers';
+import { handleBuildAndPublish } from './compose-publish-tools';
 import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
@@ -296,6 +297,10 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleGetDeploymentCredentials(requestId, tokenData, c.env, rawToken!));
         case 'get_registry_credentials':
           return c.json(await handleGetRegistryCredentials(requestId, toolArgs, tokenData, c.env));
+        case 'build_and_publish':
+          return c.json(
+            await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env),
+          );
         // ─── Workspace tools (unified from workspace-mcp) ──────────────
         case 'get_workspace_info':
           return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
