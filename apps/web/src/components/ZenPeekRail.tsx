@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 
 /**
  * Zen-mode collapsed sidebar.
@@ -31,21 +31,33 @@ export function ZenPeekRail({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const isTop = edge === 'nav';
   const panelWidth = edge === 'nav' ? 220 : 288;
 
   return (
-    <div style={{ gridRow, width: 0 }} aria-hidden={false}>
+    <div style={{ gridRow, width: 0 }}>
       <div
         className={`fixed left-0 z-40 h-1/2 w-3 ${isTop ? 'top-0' : 'bottom-0'}`}
         onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
+        onMouseLeave={(e) => {
+          // Keep the panel open while focus lives inside it (e.g. tabbing
+          // through sidebar links) so the pointer leaving doesn't yank it shut.
+          if (!e.currentTarget.contains(document.activeElement)) setOpen(false);
+        }}
         onFocusCapture={() => setOpen(true)}
         onBlurCapture={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
         }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && open) {
+            setOpen(false);
+            buttonRef.current?.focus();
+          }
+        }}
       >
         <button
+          ref={buttonRef}
           type="button"
           onClick={onExpand}
           aria-label={`${label} (Zen mode). Activate to expand.`}
@@ -53,9 +65,10 @@ export function ZenPeekRail({
           className="group absolute inset-0 flex items-center justify-center bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
         >
           <span
-            className="absolute inset-y-0 left-0 w-3 bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow,rgba(34,197,94,0.45))_0%,transparent_75%)] opacity-70 group-hover:opacity-100 transition-opacity"
+            className="absolute inset-y-0 left-0 w-3 bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow,rgba(34,197,94,0.45))_0%,transparent_75%)] opacity-70 group-hover:opacity-100 transition-opacity motion-reduce:transition-none"
           />
           <span
+            aria-hidden="true"
             className="relative z-10 text-[10px] font-medium uppercase tracking-wider text-accent select-none"
             style={{ writingMode: 'vertical-rl' }}
           >

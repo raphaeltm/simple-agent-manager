@@ -93,6 +93,12 @@ describe('FocusStrip', () => {
     // The critical invariant: the tooltip is a direct child of <body>, not
     // nested inside the FocusStrip's (glass-clipped) DOM subtree.
     expect(tooltip.parentElement).toBe(document.body);
+    // WCAG 1.3.1 / ARIA tooltip pattern: the tooltip must be programmatically
+    // associated with its trigger via id + aria-describedby.
+    expect(tooltip).toHaveAttribute('id', 'focus-strip-tooltip');
+    expect(
+      screen.getByRole('button', { name: /^Implement authentication flow — / }),
+    ).toHaveAttribute('aria-describedby', 'focus-strip-tooltip');
   });
 
   it('also peeks the tooltip on keyboard focus (parented to body)', () => {
