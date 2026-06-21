@@ -33,14 +33,14 @@ import { AppError } from '../../src/middleware/error';
 import { createRateLimitKey, getCurrentWindowStart } from '../../src/middleware/rate-limit';
 import { clientErrorsRoutes } from '../../src/routes/client-errors';
 import { nodeLifecycleRoutes } from '../../src/routes/node-lifecycle';
+import { runObservabilityPurge } from '../../src/scheduled/observability-purge';
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
 import {
   persistError,
   persistErrorBatch,
-  queryErrors,
   type PersistErrorInput,
+  queryErrors,
 } from '../../src/services/observability';
-import { runObservabilityPurge } from '../../src/scheduled/observability-purge';
 
 const PLATFORM_ERRORS_DDL = `CREATE TABLE platform_errors (
   id TEXT PRIMARY KEY,
@@ -377,7 +377,10 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       // Matches the message-hit AND the context-hit, but not the unrelated row.
       expect(errors).toHaveLength(2);
       expect(total).toBe(2);
-      expect(errors.map((e) => e.message).sort()).toEqual(['needle in the message', 'plain message']);
+      expect(errors.map((e) => e.message).sort((a, b) => a.localeCompare(b))).toEqual([
+        'needle in the message',
+        'plain message',
+      ]);
     });
 
     it('queryErrors filters by startTime and endTime (inclusive bounds)', async () => {
@@ -399,7 +402,10 @@ describe('observability error ingestion pipeline (behavioral)', () => {
 
       // A wider window that spans only the first two rows.
       const widened = await queryErrors(obsDb, { startTime: base + 100, endTime: base + 200 });
-      expect(widened.errors.map((e) => e.message).sort()).toEqual(['before-window', 'in-window']);
+      expect(widened.errors.map((e) => e.message).sort((a, b) => a.localeCompare(b))).toEqual([
+        'before-window',
+        'in-window',
+      ]);
       expect(widened.total).toBe(2);
     });
   });
