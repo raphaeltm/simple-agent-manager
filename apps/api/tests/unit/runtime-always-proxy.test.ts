@@ -215,7 +215,7 @@ function postAgentKey(agentType: string, envOverrides?: Partial<Env>) {
       },
       body: JSON.stringify({ agentType }),
     },
-    envOverrides ? ({ ...mockEnv, ...envOverrides } as Env) : mockEnv
+    envOverrides ? { ...mockEnv, ...envOverrides } : mockEnv
   );
 }
 

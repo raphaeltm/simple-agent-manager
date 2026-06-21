@@ -31,7 +31,7 @@ export class SessionMessageLimitExceededError extends Error {
 }
 
 function resolveMaxMessagesPerSession(env: Env): number {
-  const parsed = parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
+  const parsed = Number.parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
 }
 

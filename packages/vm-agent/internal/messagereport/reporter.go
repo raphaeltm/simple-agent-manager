@@ -443,12 +443,7 @@ func marshaledBatchSize(batch []outboxRow) (int, error) {
 
 // sendBatch POSTs the batch to the control plane with exponential backoff.
 func (r *Reporter) sendBatch(batch []outboxRow) error {
-	r.mu.Lock()
-	token := r.authToken
-	wsID := r.workspaceID
-	messageLimitReached := r.messageLimitReached
-	r.mu.Unlock()
-
+	token, wsID, messageLimitReached := r.senderState()
 	if messageLimitReached {
 		r.deleteBatch(batch)
 		return nil
@@ -469,72 +464,93 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 
 	url := strings.TrimRight(r.cfg.Endpoint, "/") +
 		"/api/workspaces/" + wsID + "/messages"
+	return r.sendBatchWithRetry(batch, url, token, wsID, body)
+}
 
+func (r *Reporter) senderState() (token, workspaceID string, messageLimitReached bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.authToken, r.workspaceID, r.messageLimitReached
+}
+
+func (r *Reporter) sendBatchWithRetry(batch []outboxRow, url, token, wsID string, body []byte) error {
 	// Retry with exponential backoff + jitter.
 	delay := r.cfg.RetryInitial
 	start := time.Now()
 
 	for {
 		statusCode, responseBody, err := r.doPost(url, token, body)
-		if err == nil && statusCode >= 200 && statusCode < 300 {
-			return nil // success
+		handled, handleErr := r.handleBatchResponse(batch, url, token, wsID, statusCode, responseBody, err)
+		if handled {
+			return handleErr
 		}
 
-		if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
-			if err := r.sendSizeFallback(url, token, batch); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
-			r.markMessageLimitReached(batch, responseBody)
-			return nil
-		}
-
-		// Permanent non-size client errors — discard the batch.
-		if statusCode == http.StatusBadRequest || statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
-			slog.Warn("messagereport: permanent error, discarding batch",
-				"statusCode", statusCode,
-				"count", len(batch),
-				"workspaceId", wsID,
-				"responseBody", responseBody,
-			)
-			// Delete from outbox so we don't retry forever.
-			r.deleteBatch(batch)
-			return nil
-		}
-
-		// Check elapsed time.
 		if time.Since(start) > r.cfg.RetryMaxElapsed {
 			return fmt.Errorf("retries exhausted after %v (last status=%d, err=%v)",
 				time.Since(start), statusCode, err)
 		}
 
-		// Check if we should stop.
-		select {
-		case <-r.stopC:
-			return fmt.Errorf("shutdown during retry")
-		default:
+		if err := r.waitForRetry(delay, statusCode, err); err != nil {
+			return err
 		}
-
-		// Backoff with jitter.
-		jitter := time.Duration(rand.Int63n(int64(delay) / 2))
-		sleepDur := delay + jitter
-		slog.Info("messagereport: retrying after backoff",
-			"delay", sleepDur, "statusCode", statusCode, "err", err)
-
-		timer := time.NewTimer(sleepDur)
-		select {
-		case <-timer.C:
-		case <-r.stopC:
-			timer.Stop()
-			return fmt.Errorf("shutdown during backoff")
-		}
-
-		// Exponential increase capped at RetryMax.
-		delay = time.Duration(math.Min(float64(delay*2), float64(r.cfg.RetryMax)))
+		delay = r.nextRetryDelay(delay)
 	}
+}
+
+func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID string, statusCode int, responseBody string, postErr error) (bool, error) {
+	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+		return true, nil
+	}
+	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
+		return true, r.sendSizeFallback(url, token, batch)
+	}
+	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
+		r.markMessageLimitReached(batch, responseBody)
+		return true, nil
+	}
+	if isPermanentBatchError(statusCode) {
+		slog.Warn("messagereport: permanent error, discarding batch",
+			"statusCode", statusCode,
+			"count", len(batch),
+			"workspaceId", wsID,
+			"responseBody", responseBody,
+		)
+		r.deleteBatch(batch)
+		return true, nil
+	}
+	return false, nil
+}
+
+func isPermanentBatchError(statusCode int) bool {
+	return statusCode == http.StatusBadRequest ||
+		statusCode == http.StatusUnauthorized ||
+		statusCode == http.StatusForbidden
+}
+
+func (r *Reporter) waitForRetry(delay time.Duration, statusCode int, err error) error {
+	select {
+	case <-r.stopC:
+		return fmt.Errorf("shutdown during retry")
+	default:
+	}
+
+	jitter := time.Duration(rand.Int63n(int64(delay) / 2))
+	sleepDur := delay + jitter
+	slog.Info("messagereport: retrying after backoff",
+		"delay", sleepDur, "statusCode", statusCode, "err", err)
+
+	timer := time.NewTimer(sleepDur)
+	select {
+	case <-timer.C:
+		return nil
+	case <-r.stopC:
+		timer.Stop()
+		return fmt.Errorf("shutdown during backoff")
+	}
+}
+
+func (r *Reporter) nextRetryDelay(delay time.Duration) time.Duration {
+	return time.Duration(math.Min(float64(delay*2), float64(r.cfg.RetryMax)))
 }
 
 func isPayloadSizeError(responseBody string) bool {
@@ -617,33 +633,54 @@ func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token st
 			return fmt.Errorf("shutdown during fallback: %w", err)
 		}
 
-		body, err := buildBatchPayload([]apiMessage{candidate})
+		statusCode, responseBody, postErr, err := r.postFallbackCandidate(ctx, url, token, candidate)
 		if err != nil {
-			return fmt.Errorf("marshal fallback payload: %w", err)
+			return err
 		}
-		statusCode, responseBody, err := r.doPostWithContext(ctx, url, token, body)
-		if err == nil && statusCode >= 200 && statusCode < 300 {
-			if i > 0 {
-				slog.Warn("messagereport: delivered oversized message fallback",
-					"messageId", row.messageID,
-					"role", row.role,
-					"fallbackIndex", i,
-				)
-			}
-			return nil
-		}
-		if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
+		tryNext, resultErr := fallbackCandidateResult(row, i, statusCode, responseBody, postErr)
+		if tryNext {
 			continue
 		}
-		if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
-			return sessionMessageLimitError{responseBody: responseBody}
-		}
-		if statusCode == http.StatusBadRequest || statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
-			return fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
-		}
-		return fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, err, responseBody)
+		return resultErr
 	}
 	return fmt.Errorf("fallback candidates exhausted for message %s", row.messageID)
+}
+
+func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string, candidate apiMessage) (int, string, error, error) {
+	body, err := buildBatchPayload([]apiMessage{candidate})
+	if err != nil {
+		return 0, "", nil, fmt.Errorf("marshal fallback payload: %w", err)
+	}
+	statusCode, responseBody, postErr := r.doPostWithContext(ctx, url, token, body)
+	return statusCode, responseBody, postErr, nil
+}
+
+func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, responseBody string, postErr error) (tryNext bool, err error) {
+	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+		logFallbackSuccess(row, candidateIndex)
+		return false, nil
+	}
+	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
+		return true, nil
+	}
+	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
+		return false, sessionMessageLimitError{responseBody: responseBody}
+	}
+	if isPermanentBatchError(statusCode) {
+		return false, fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
+	}
+	return false, fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, postErr, responseBody)
+}
+
+func logFallbackSuccess(row outboxRow, candidateIndex int) {
+	if candidateIndex == 0 {
+		return
+	}
+	slog.Warn("messagereport: delivered oversized message fallback",
+		"messageId", row.messageID,
+		"role", row.role,
+		"fallbackIndex", candidateIndex,
+	)
 }
 
 func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {

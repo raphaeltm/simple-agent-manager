@@ -66,6 +66,46 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 	t.Fatal("timed out waiting for condition")
 }
 
+func requestMessageIDs(t *testing.T, r *http.Request) []string {
+	t.Helper()
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		Messages []struct {
+			MessageID string `json:"messageId"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	ids := make([]string, 0, len(payload.Messages))
+	for _, msg := range payload.Messages {
+		ids = append(ids, msg.MessageID)
+	}
+	return ids
+}
+
+func recordJoinedIDs(mu *sync.Mutex, requestIDs *[]string, ids []string) {
+	mu.Lock()
+	defer mu.Unlock()
+	*requestIDs = append(*requestIDs, strings.Join(ids, ","))
+}
+
+func writePayloadTooLarge(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+}
+
+func writeSessionLimit(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_, _ = w.Write([]byte(`{"error":"SESSION_MESSAGE_LIMIT_EXCEEDED","message":"Session message limit reached"}`))
+}
+
+func writePersisted(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+}
+
 func TestNew_ValidConfig(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
@@ -633,38 +673,19 @@ func TestFlush_SizeFallback409DisablesReporter(t *testing.T) {
 	var requestIDs []string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Messages []struct {
-				MessageID string `json:"messageId"`
-			} `json:"messages"`
-		}
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("unmarshal request: %v", err)
-		}
-
-		ids := make([]string, 0, len(payload.Messages))
-		for _, msg := range payload.Messages {
-			ids = append(ids, msg.MessageID)
-		}
-		mu.Lock()
-		requestIDs = append(requestIDs, strings.Join(ids, ","))
-		mu.Unlock()
+		ids := requestMessageIDs(t, r)
+		recordJoinedIDs(&mu, &requestIDs, ids)
 		atomic.AddInt32(&requests, 1)
 
-		if len(payload.Messages) > 1 {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+		if len(ids) > 1 {
+			writePayloadTooLarge(w)
 			return
 		}
-		if payload.Messages[0].MessageID == "m1" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"error":"SESSION_MESSAGE_LIMIT_EXCEEDED","message":"Session message limit reached"}`))
+		if ids[0] == "m1" {
+			writeSessionLimit(w)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+		writePersisted(w)
 	}))
 	defer ts.Close()
 
@@ -997,30 +1018,17 @@ func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 	var receivedIDs []string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Messages []struct {
-				MessageID string `json:"messageId"`
-			} `json:"messages"`
-		}
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("unmarshal request: %v", err)
-		}
+		ids := requestMessageIDs(t, r)
 		receivedMu.Lock()
-		for _, msg := range payload.Messages {
-			receivedIDs = append(receivedIDs, msg.MessageID)
-		}
+		receivedIDs = append(receivedIDs, ids...)
 		receivedMu.Unlock()
 
 		if atomic.AddInt32(&requests, 1) == 1 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"error":"SESSION_MESSAGE_LIMIT_EXCEEDED","message":"Session message limit reached"}`))
+			writeSessionLimit(w)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+		writePersisted(w)
 	}))
 	defer ts.Close()
 
