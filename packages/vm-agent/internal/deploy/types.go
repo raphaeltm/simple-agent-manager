@@ -30,9 +30,10 @@ type ReleaseState struct {
 
 // ServiceState reports per-service container state for heartbeat reporting.
 type ServiceState struct {
-	Name   string `json:"name"`
-	Status string `json:"status"` // running, exited, restarting, etc.
-	Health string `json:"health"` // healthy, unhealthy, starting, none
+	Name    string `json:"name"`
+	Service string `json:"service,omitempty"`
+	Status  string `json:"status"` // running, exited, restarting, etc.
+	Health  string `json:"health"` // healthy, unhealthy, starting, none
 }
 
 // ObservedState is sent in the heartbeat to report deployment state.
@@ -43,7 +44,7 @@ type ObservedState struct {
 	Services     []ServiceState `json:"services,omitempty"`
 
 	// Day-2 status model: six independent dimensions
-	DeployStatus *DeploymentStatus  `json:"deployStatus,omitempty"`
+	DeployStatus *DeploymentStatus `json:"deployStatus,omitempty"`
 	// Disk telemetry for root disk and optional data volume
 	DiskTelemetry *NodeDiskTelemetry `json:"diskTelemetry,omitempty"`
 }

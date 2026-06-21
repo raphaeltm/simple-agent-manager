@@ -378,13 +378,20 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         }
 
         const latestRelease = await db
-          .select({ version: schema.deploymentReleases.version })
+          .select({
+            version: schema.deploymentReleases.version,
+            status: schema.deploymentReleases.status,
+          })
           .from(schema.deploymentReleases)
           .where(eq(schema.deploymentReleases.environmentId, envId))
           .orderBy(desc(schema.deploymentReleases.version))
           .limit(1);
 
-        if (latestRelease[0] && latestRelease[0].version > appliedSeq) {
+        if (
+          latestRelease[0] &&
+          latestRelease[0].version > appliedSeq &&
+          (latestRelease[0].status === 'created' || latestRelease[0].status === 'applying')
+        ) {
           pendingReleases.push({ environmentId: envId, seq: latestRelease[0].version });
         }
       }

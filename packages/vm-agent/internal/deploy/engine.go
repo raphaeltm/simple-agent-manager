@@ -319,7 +319,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	}
 
 	// Wait for health checks
-	if err := e.waitForHealth(ctx, payload.Seq); err != nil {
+	if err := e.waitForHealth(ctx, payload.Seq, payload.Routes); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("health check: %w", err))
 	}
 
@@ -423,9 +423,10 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 	services, _ := e.inspectServices(ctx, previousSeq)
 	e.setObserved(ObservedState{
-		AppliedSeq: previousSeq,
-		Status:     StatusReverted,
-		Services:   services,
+		AppliedSeq:   previousSeq,
+		Status:       StatusReverted,
+		ErrorMessage: applyErr.Error(),
+		Services:     services,
 	})
 
 	slog.Info("deploy.apply: reverted to previous release",
@@ -626,11 +627,12 @@ func (e *Engine) waitForReloadCommand(ctx context.Context, command string) error
 	}
 }
 
-func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
+func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTarget) error {
 	deadline := time.NewTimer(e.cfg.HealthTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(e.cfg.HealthPollInterval)
 	defer ticker.Stop()
+	requiredServices := routeServiceSet(routes)
 
 	for {
 		select {
@@ -645,24 +647,87 @@ func (e *Engine) waitForHealth(ctx context.Context, seq int64) error {
 				continue
 			}
 
-			allHealthy := true
-			for _, svc := range services {
-				if svc.Status != "running" {
-					allHealthy = false
-					break
+			if len(requiredServices) > 0 {
+				if routedServicesHealthy(services, requiredServices) {
+					return nil
 				}
-				// If health check is configured, it must be healthy
-				if svc.Health != "" && svc.Health != "healthy" && svc.Health != "none" {
-					allHealthy = false
-					break
-				}
+				continue
 			}
 
-			if allHealthy && len(services) > 0 {
+			if allServicesHealthy(services) {
 				return nil
 			}
 		}
 	}
+}
+
+func routeServiceSet(routes []RouteTarget) map[string]bool {
+	services := make(map[string]bool)
+	for _, route := range routes {
+		service := strings.TrimSpace(route.Service)
+		if service != "" {
+			services[service] = true
+		}
+	}
+	return services
+}
+
+func allServicesHealthy(services []ServiceState) bool {
+	if len(services) == 0 {
+		return false
+	}
+	for _, svc := range services {
+		if !serviceHealthy(svc) {
+			return false
+		}
+	}
+	return true
+}
+
+func routedServicesHealthy(services []ServiceState, requiredServices map[string]bool) bool {
+	healthyByService := make(map[string]bool, len(requiredServices))
+	for _, svc := range services {
+		service, ok := matchedService(svc, requiredServices)
+		if ok && serviceHealthy(svc) {
+			healthyByService[service] = true
+		}
+	}
+	for service := range requiredServices {
+		if !healthyByService[service] {
+			return false
+		}
+	}
+	return true
+}
+
+func matchedService(svc ServiceState, requiredServices map[string]bool) (string, bool) {
+	if requiredServices[svc.Service] {
+		return svc.Service, true
+	}
+	if requiredServices[svc.Name] {
+		return svc.Name, true
+	}
+	for service := range requiredServices {
+		if composeContainerNameMatchesService(svc.Name, service) {
+			return service, true
+		}
+	}
+	return "", false
+}
+
+func composeContainerNameMatchesService(containerName, service string) bool {
+	return strings.Contains(containerName, "-"+service+"-") ||
+		strings.Contains(containerName, "_"+service+"_") ||
+		strings.HasPrefix(containerName, service+"-") ||
+		strings.HasPrefix(containerName, service+"_")
+}
+
+func serviceHealthy(svc ServiceState) bool {
+	if svc.Status != "running" {
+		return false
+	}
+	// If health check is configured, it must be healthy.
+	return svc.Health == "" || svc.Health == "healthy" || svc.Health == "none"
 }
 
 func (e *Engine) inspectServices(ctx context.Context, seq int64) ([]ServiceState, error) {
@@ -687,18 +752,20 @@ func (e *Engine) inspectServices(ctx context.Context, seq int64) ([]ServiceState
 			continue
 		}
 		var container struct {
-			Name   string `json:"Name"`
-			State  string `json:"State"`
-			Health string `json:"Health"`
+			Name    string `json:"Name"`
+			Service string `json:"Service"`
+			State   string `json:"State"`
+			Health  string `json:"Health"`
 		}
 		if err := json.Unmarshal([]byte(line), &container); err != nil {
 			slog.Debug("deploy.inspect: failed to parse container JSON", "line", line, "error", err)
 			continue
 		}
 		services = append(services, ServiceState{
-			Name:   container.Name,
-			Status: container.State,
-			Health: container.Health,
+			Name:    container.Name,
+			Service: container.Service,
+			Status:  container.State,
+			Health:  container.Health,
 		})
 	}
 	return services, nil

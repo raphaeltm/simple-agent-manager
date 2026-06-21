@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type Condition = { op: 'eq'; col: string; val: unknown } | { op: 'and'; conds: Condition[] };
 
 const updates: Array<{ table: unknown; values: Record<string, unknown>; where: unknown }> = [];
-const latestByEnvironment = new Map<string, number>();
+const latestByEnvironment = new Map<string, { version: number; status: string }>();
 let deploymentPlacements: Array<{ envId: string }> = [];
 
 vi.mock('drizzle-orm', () => ({
@@ -125,9 +125,10 @@ function createMockDb() {
           }
           if (table && typeof table === 'object' && 'version' in table) {
             const envId = String(findEq(condition, 'deployment_releases.environmentId') ?? '');
+            const release = latestByEnvironment.get(envId) ?? { version: 0, status: 'created' };
             return {
               orderBy: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue([{ version: latestByEnvironment.get(envId) ?? 0 }]),
+                limit: vi.fn().mockResolvedValue([release]),
               }),
             };
           }
@@ -151,8 +152,8 @@ describe('node lifecycle deployment heartbeat contract', () => {
     updates.length = 0;
     deploymentPlacements = [{ envId: 'env-a' }, { envId: 'env-b' }];
     latestByEnvironment.clear();
-    latestByEnvironment.set('env-a', 5);
-    latestByEnvironment.set('env-b', 8);
+    latestByEnvironment.set('env-a', { version: 5, status: 'created' });
+    latestByEnvironment.set('env-b', { version: 8, status: 'applied' });
   });
 
   it('returns per-environment pending releases and explicit retirement for reported environments not placed on the node', async () => {
@@ -198,5 +199,39 @@ describe('node lifecycle deployment heartbeat contract', () => {
     );
     expect(deploymentUpdates).toHaveLength(2);
     expect(deploymentUpdates.some((update) => JSON.stringify(update.where).includes('env-evil'))).toBe(false);
+  });
+
+  it('does not reissue a failed newer release after the node reports rollback', async () => {
+    latestByEnvironment.set('env-a', { version: 6, status: 'failed' });
+    const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
+    const app = new Hono();
+    app.route('/api/nodes', nodeLifecycleRoutes);
+
+    const res = await app.request('/api/nodes/node-deploy-1/heartbeat', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer node-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        deployment: {
+          environments: [
+            { environmentId: 'env-a', appliedSeq: 5, status: 'reverted' },
+            { environmentId: 'env-b', appliedSeq: 8, status: 'applied' },
+          ],
+        },
+      }),
+    }, {
+      DATABASE: {},
+      DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
+    }, {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.deployment.pendingReleases).toBeUndefined();
+    expect(body.pendingReleaseSeq).toBeUndefined();
   });
 });

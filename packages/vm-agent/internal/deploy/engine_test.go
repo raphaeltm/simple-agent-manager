@@ -324,6 +324,75 @@ exit 0
 	}
 }
 
+func TestEngine_ApplyWaitsForRoutedServicesOnly(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+echo "$@" >> "`+composeLog+`"
+case "$*" in
+  *" ps --format json"*)
+    echo '{"Name":"sam-env-env-1-web-1","Service":"web","State":"running","Health":"healthy"}'
+    echo '{"Name":"sam-env-env-1-worker-1","Service":"worker","State":"exited","Health":""}'
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     reloadScript,
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := makeTestPayload("env-1", "node-1", 1, "services:\n  web:\n    image: nginx\n  worker:\n    image: busybox\n    command: echo done\n", priv)
+	payload.Routes = []RouteTarget{{
+		Hostname:      "app.example.com",
+		Service:       "web",
+		ContainerPort: 3000,
+		HostPort:      35000,
+	}}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply should ignore exited non-routed worker, got: %v", err)
+	}
+
+	observed := engine.GetObserved()
+	if observed.Status != StatusApplied {
+		t.Fatalf("expected observed status=applied, got %s", observed.Status)
+	}
+	if observed.AppliedSeq != 1 {
+		t.Fatalf("expected applied seq 1, got %d", observed.AppliedSeq)
+	}
+}
+
 func TestEngine_ApplyFailsBeforeMarkingAppliedWhenCaddyReloadFails(t *testing.T) {
 	dir := t.TempDir()
 	disk, err := NewDiskState(filepath.Join(dir, "state"))
@@ -690,6 +759,9 @@ exit 0
 				observed := engine.GetObserved()
 				if observed.Status != StatusReverted {
 					t.Fatalf("expected observed status=reverted, got %s", observed.Status)
+				}
+				if !strings.Contains(observed.ErrorMessage, "compose up") {
+					t.Fatalf("expected observed revert error to include apply failure, got %q", observed.ErrorMessage)
 				}
 			}
 		})
