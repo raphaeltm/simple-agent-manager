@@ -123,6 +123,7 @@ export function FocusStrip({
                 onFocus={(e) => openTooltip(session, e.currentTarget)}
                 onBlur={scheduleClose}
                 aria-label={`${label} — ${config.label}`}
+                aria-describedby="focus-strip-tooltip"
                 className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-transparent cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--sam-color-focus-ring)] ${
                   isSelected
                     ? 'border-[var(--sam-color-accent-primary)] bg-[rgba(22,163,74,0.08)]'
@@ -143,6 +144,7 @@ export function FocusStrip({
       {tooltip &&
         createPortal(
           <div
+            id="focus-strip-tooltip"
             data-testid="focus-tooltip"
             role="tooltip"
             onMouseEnter={cancelClose}

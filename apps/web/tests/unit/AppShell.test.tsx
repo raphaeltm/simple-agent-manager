@@ -470,6 +470,18 @@ describe('AppShell (Focus Mode — desktop)', () => {
     input.remove();
     expect(search).toBeInTheDocument();
   });
+
+  it('ignores the F key while a select element is focused', () => {
+    renderAppShell();
+    // A native <select> captures "f" for type-ahead option matching, so the
+    // global Focus Mode cycle must not also fire.
+    const select = document.createElement('select');
+    document.body.appendChild(select);
+    select.focus();
+    fireEvent.keyDown(select, { key: 'f' });
+    expect(gridColumns()).toBe('220px 1fr');
+    select.remove();
+  });
 });
 
 describe('AppShell (Focus Mode — mobile is disabled)', () => {

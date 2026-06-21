@@ -116,7 +116,13 @@ export function AppShell({ children }: AppShellProps) {
       if (e.key.toLowerCase() !== 'f' || e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target?.isContentEditable
+      )
+        return;
       e.preventDefault();
       cycleFocusMode();
     };
@@ -315,6 +321,15 @@ export function AppShell({ children }: AppShellProps) {
       className="grid h-screen overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
       style={{ gridTemplateColumns: `${navWidthForMode(focusMode)}px 1fr`, gridTemplateRows: 'minmax(0, 1fr) auto' }}
     >
+      {/* Announce Focus Mode changes to assistive tech (mode is cycled via the
+          "F" key or the toggle, so screen readers need a live region). */}
+      <div aria-live="polite" className="sr-only">
+        {focusMode === 'default'
+          ? 'Default view'
+          : focusMode === 'focus'
+            ? 'Focus mode: sidebars collapsed'
+            : 'Zen mode: sidebars hidden'}
+      </div>
       {focusMode === 'zen' ? (
         <ZenPeekRail
           edge="nav"
