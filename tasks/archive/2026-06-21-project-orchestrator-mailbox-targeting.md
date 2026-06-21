@@ -34,7 +34,7 @@ A CTO spot check found that `ProjectOrchestrator` routes handoff and stall mailb
 - [x] Handoff and stall messages are addressed to real chat session IDs in tests and implementation.
 - [x] Missing target sessions are observable through decision log or structured warning and do not create undeliverable mailbox rows under task IDs.
 - [x] Scheduler tests fail on the current broken behavior and pass after the fix.
-- [ ] PR summary includes the original CTO spot-check finding and exact validation commands run.
+- [x] PR summary includes the original CTO spot-check finding and exact validation commands run.
 
 ## References
 
