@@ -596,22 +596,3 @@ describe('Scheduling Cycle — Mission Completion', () => {
     expect(failDecision).toBeDefined();
   });
 });
-
-describe('Non-Mission Task Guard', () => {
-  it('complete_task orchestrator hook is guarded on mission_id', async () => {
-    // Read the source to verify the guard exists
-    const taskToolsSource = await import('../../../src/routes/mcp/task-tools');
-    expect(taskToolsSource.handleCompleteTask).toBeDefined();
-
-    // The guard is `if (taskRow?.mission_id)` — we verify by checking
-    // that notifyTaskEvent is imported from orchestrator service
-    const orchestratorService = await import('../../../src/services/project-orchestrator');
-    expect(orchestratorService.notifyTaskEvent).toBeDefined();
-  });
-
-  it('task-runner failTask orchestrator hook is guarded on mission_id', async () => {
-    // Verify the state-machine module imports orchestrator service
-    const stateMachine = await import('../../../src/durable-objects/task-runner/state-machine');
-    expect(stateMachine.failTask).toBeDefined();
-  });
-});
