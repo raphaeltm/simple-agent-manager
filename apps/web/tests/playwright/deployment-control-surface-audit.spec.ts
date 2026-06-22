@@ -367,6 +367,17 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
       const envs = includeFailingEnv ? [MOCK_ENV, MOCK_ENV_PREVIEW, MOCK_ENV_FAILING] : [MOCK_ENV, MOCK_ENV_PREVIEW];
       return respond(route, 200, { environments: envs });
     }
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/secrets`) {
+      return respond(route, 200, {
+        secrets: [
+          { name: 'DATABASE_URL', createdAt: '2026-06-18T08:21:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z' },
+          { name: 'STRIPE_SECRET_KEY', createdAt: '2026-06-18T08:22:00.000Z', updatedAt: '2026-06-18T08:22:00.000Z' },
+        ],
+      });
+    }
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/secrets`) {
+      return respond(route, 200, { secrets: [] });
+    }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/logs`) {
       return respond(route, 200, { ...MOCK_LOGS, source: 'node', nodeId: NODE_ID });
     }
@@ -413,114 +424,214 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
   });
 }
 
+// Summary cards on the list page are <Link> anchors, not <article>.
 function environmentCard(page: Page, name: string) {
-  return page.locator('article').filter({ has: page.getByRole('heading', { name, exact: true }) }).first();
+  return page.getByRole('link').filter({ has: page.getByRole('heading', { name, exact: true }) }).first();
 }
 
-test.describe('Deployment control surface audit', () => {
-  test('project deployments page — healthy environment with attribution, summary, logs', async ({ page }) => {
+// The failing env name is long and truncated; match on a stable substring.
+function failingEnvironmentCard(page: Page) {
+  return page.getByRole('link').filter({ hasText: 'production-us-east' }).first();
+}
+
+function tab(page: Page, name: string) {
+  return page.getByRole('button', { name, exact: true });
+}
+
+test.describe('Deployment control surface audit — list page', () => {
+  test('list page renders compact summary cards with status and release', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
+
     const stagingCard = environmentCard(page, 'staging');
+    await expect(stagingCard).toBeVisible();
 
-    // Operational summary: Serving badge and release version
+    // Compact summary: service-state label + release summary "v7 · applied"
     await expect(stagingCard.getByText('Serving', { exact: true })).toBeVisible();
-    await expect(stagingCard.getByText('Release v7', { exact: true })).toBeVisible();
+    await expect(stagingCard.getByText('v7 · applied')).toBeVisible();
+    // Route count + node name
+    await expect(stagingCard.getByText('2 routes')).toBeVisible();
+    await expect(stagingCard.getByText('deploy-staging-01')).toBeVisible();
 
-    // Release attribution
-    await expect(page.getByText(/submitted by/).first()).toBeVisible();
+    // No Logs/Destroy/Metrics controls leak onto the card itself.
+    await expect(stagingCard.getByRole('button')).toHaveCount(0);
 
-    // Deployment Node section
-    await expect(page.getByText('Deployment Node', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Agent Policy', { exact: true }).first()).toBeVisible();
-
-    // Deployment metrics panel with node and per-container metrics.
-    await expect(stagingCard.getByText('Metrics', { exact: true })).toBeVisible({ timeout: 10000 });
-    await expect(stagingCard.getByText('deploy-audit-web-1')).toBeVisible();
-    await expect(stagingCard.getByText('3.5MiB / 256MiB')).toBeVisible();
-
-    // Route hostnames (including long one)
-    await expect(page.getByText('staging.deploy-audit.sammy.party')).toBeVisible();
-
-    // Destroy button
-    await expect(page.getByRole('button', { name: 'Destroy' }).first()).toBeVisible();
-
-    // Open logs on the staging card
-    await stagingCard.getByRole('button', { name: 'Logs' }).click();
-    await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
-    await stagingCard.locator('#log-source').selectOption('app');
-    await expect(stagingCard.locator('#log-container')).toBeVisible();
-    await expect(stagingCard.locator('#log-container')).toContainText('deploy-audit-web-1');
-    // UTC timestamps in logs
-    await expect(page.getByText('UTC').first()).toBeVisible();
-
-    await screenshot(page, 'deployment-control-surface-healthy');
+    await screenshot(page, 'deployment-list-page');
     await assertNoOverflow(page);
   });
 
-  test('project deployments page — failing environment with blocker, NaN guard, stale node', async ({ page }) => {
+  test('list page surfaces failing environment summary', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-    // Wait for failing env to render
-    const failingCard = page.locator('article').filter({ hasText: 'production-us-east' });
+    const failingCard = failingEnvironmentCard(page);
     await expect(failingCard).toBeVisible();
-
-    // Blocker/needs-attention line
-    await expect(failingCard.getByText(/compose pull failed/)).toBeVisible();
-
-    // Release v3 failed
-    await expect(failingCard.getByText('Release v3', { exact: true })).toBeVisible();
-    await expect(failingCard.getByText('failed').first()).toBeVisible();
-
-    // NaN guard: Root Disk should show '-' not 'NaN%'
-    await expect(failingCard.locator('div').filter({ hasText: /^Root Disk\s*-$/ }).first()).toBeVisible();
-    // Verify no NaN text visible anywhere
-    const nanCount = await failingCard.locator('text=NaN').count();
-    expect(nanCount).toBe(0);
-
-    // Stale node badge
+    await expect(failingCard.getByText('v3 · failed')).toBeVisible();
+    // Stale node health badge on the card (StatusBadge capitalizes the label)
     await expect(failingCard.getByText('Stale', { exact: true })).toBeVisible();
 
-    await screenshot(page, 'deployment-control-surface-failing');
+    await screenshot(page, 'deployment-list-failing');
     await assertNoOverflow(page);
   });
 
-  test('failing environment logs show unavailable reason for stale node', async ({ page }) => {
+  test('clicking a summary card navigates to the environment detail page', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-    const failingCard = page.locator('article').filter({ hasText: 'production-us-east' });
-    await failingCard.getByRole('button', { name: 'Logs' }).click();
+    await environmentCard(page, 'staging').click();
 
-    // Clear unavailable copy
-    await expect(failingCard.getByText(/not reported recently/)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/deployments/${ENV_ID}$`));
+    await expect(page.getByRole('heading', { name: 'staging', level: 1 })).toBeVisible();
+    // Tabbed navigation present
+    await expect(page.getByRole('navigation', { name: 'Environment sections' })).toBeVisible();
+  });
+});
 
-    await screenshot(page, 'deployment-logs-unavailable-stale');
+test.describe('Deployment control surface audit — detail page', () => {
+  test('overview tab shows operational summary, status dimensions and routes', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}`);
+
+    // Header: name, back link, release attribution, destroy
+    await expect(page.getByRole('heading', { name: 'staging', level: 1 })).toBeVisible();
+    // Scope to <main> — the AppShell sidebar (<aside>) also has a "Deployments" link.
+    await expect(page.getByRole('main').getByRole('link', { name: 'Deployments' })).toBeVisible();
+    await expect(page.getByText(/submitted by/).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Destroy Env' })).toBeVisible();
+
+    // Operational summary
+    await expect(page.getByText('Serving', { exact: true })).toBeVisible();
+    await expect(page.getByText('Release v7', { exact: true })).toBeVisible();
+    await expect(page.getByText('applied', { exact: true }).first()).toBeVisible();
+
+    // Public routes (including long one) rendered as external links
+    await expect(page.getByText('staging.deploy-audit.sammy.party')).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-overview');
     await assertNoOverflow(page);
   });
 
-  test('destroy dialog on deployments page shows deployment-specific consequences', async ({ page }) => {
+  test('overview NaN guard renders dash for failing env disk telemetry', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_FAIL_ID}`);
 
-    // Click Destroy on the staging env, which shares its node with preview.
-    const stagingCard = environmentCard(page, 'staging');
-    await stagingCard.getByRole('button', { name: 'Destroy' }).click();
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
-    // Deployment-specific confirmation copy
+    // Blocker line
+    await expect(page.getByText(/compose pull failed/)).toBeVisible();
+
+    // Root Disk shows '-' not 'NaN%'
+    const nanCount = await page.locator('text=NaN').count();
+    expect(nanCount).toBe(0);
+
+    await screenshot(page, 'deployment-detail-overview-failing');
+    await assertNoOverflow(page);
+  });
+
+  test('logs tab auto-loads entries and exposes filter controls', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=logs`);
+
+    await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
+
+    await expect(page.locator('#log-source')).toBeVisible();
+    await expect(page.locator('#log-level')).toBeVisible();
+    await expect(page.getByPlaceholder('Search logs...')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy' })).toBeVisible();
+
+    await page.locator('#log-source').selectOption('app');
+    await expect(page.locator('#log-container')).toBeVisible();
+    await expect(page.locator('#log-container')).toContainText('deploy-audit-web-1');
+
+    await screenshot(page, 'deployment-detail-logs');
+    await assertNoOverflow(page);
+  });
+
+  test('logs tab on failing env shows unavailable reason for stale node', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_FAIL_ID}?tab=logs`);
+
+    await expect(page.getByText(/not reported recently/)).toBeVisible({ timeout: 10000 });
+
+    await screenshot(page, 'deployment-detail-logs-unavailable');
+    await assertNoOverflow(page);
+  });
+
+  test('long log messages do not cause horizontal overflow', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=logs`);
+
+    await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/DEPLOY_COMPOSE_PULL_TIMEOUT/)).toBeVisible();
+
+    await assertNoOverflow(page);
+    await screenshot(page, 'deployment-detail-logs-long-message');
+  });
+
+  test('configuration tab renders secrets management', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=config`);
+
+    await expect(page.getByRole('heading', { name: 'Secrets' })).toBeVisible();
+    await expect(page.locator('#config-secret-name')).toBeVisible();
+    await expect(page.locator('#config-secret-value')).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-config');
+    await assertNoOverflow(page);
+  });
+
+  test('policy tab renders agent policy controls', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=policy`);
+
+    await expect(page.getByText('Agent Policy', { exact: true })).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-policy');
+    await assertNoOverflow(page);
+  });
+
+  test('node & metrics tab renders deployment node info', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=node`);
+
+    await expect(page.getByText('Deployment Node', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'deploy-staging-01' })).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-node');
+    await assertNoOverflow(page);
+  });
+
+  test('destroy dialog shows deployment-specific consequences', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}`);
+
+    await page.getByRole('button', { name: 'Destroy Env' }).click();
+
+    await expect(page.getByText('Destroy deployment environment?')).toBeVisible();
     await expect(page.getByText('Removes all app-route DNS records')).toBeVisible();
     await expect(page.getByText('Detaches and deletes attached deployment volumes')).toBeVisible();
     await expect(page.getByText(/Keeps the shared deployment node running/)).toBeVisible();
     await expect(page.getByText('This cannot be undone.')).toBeVisible();
 
-    await screenshot(page, 'deployment-destroy-dialog');
+    await screenshot(page, 'deployment-detail-destroy-dialog');
     await assertNoOverflow(page);
   });
 
+  test('tabs are keyboard reachable and mark the active tab', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}`);
+
+    await expect(tab(page, 'Overview')).toHaveAttribute('aria-current', 'page');
+    await tab(page, 'Configuration').click();
+    await expect(tab(page, 'Configuration')).toHaveAttribute('aria-current', 'page');
+    await expect(page).toHaveURL(/tab=config/);
+  });
+});
+
+test.describe('Deployment node pages', () => {
   test('nodes page distinguishes deployment nodes from workspace nodes', async ({ page }) => {
     await setupMocks(page);
     await page.goto('/nodes');
@@ -565,44 +676,6 @@ test.describe('Deployment control surface audit', () => {
     await screenshot(page, 'deployment-node-detail-stale');
     await assertNoOverflow(page);
   });
-
-  test('log panel shows source and level filter controls', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
-
-    const stagingCard = environmentCard(page, 'staging');
-    await stagingCard.getByRole('button', { name: 'Logs' }).click();
-
-    // Source filter
-    await expect(page.locator('#log-source')).toBeVisible();
-    // Level filter
-    await expect(page.locator('#log-level')).toBeVisible();
-    // Search input
-    await expect(page.getByPlaceholder('Search logs...')).toBeVisible();
-    await page.locator('#log-source').selectOption('app');
-    await expect(page.locator('#log-container')).toBeVisible();
-    await expect(page.locator('#log-container')).toContainText('deploy-audit-worker-1');
-    // Copy button
-    await expect(page.getByRole('button', { name: 'Copy' })).toBeVisible();
-
-    await screenshot(page, 'deployment-logs-controls');
-    await assertNoOverflow(page);
-  });
-
-  test('long log messages do not cause horizontal overflow', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
-
-    const stagingCard = environmentCard(page, 'staging');
-    await stagingCard.getByRole('button', { name: 'Logs' }).click();
-    // Wait for logs to load from mock API
-    await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
-    // The long unbreakable log message should be visible and not overflow
-    await expect(page.getByText(/DEPLOY_COMPOSE_PULL_TIMEOUT/)).toBeVisible();
-
-    await assertNoOverflow(page);
-    await screenshot(page, 'deployment-logs-long-message');
-  });
 });
 
 // ─── Mobile viewport tests ─────────────────────────────────────────────────
@@ -610,24 +683,34 @@ test.describe('Deployment control surface audit', () => {
 test.describe('Deployment control surface — mobile', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-  test('deployments page with healthy and failing env — mobile', async ({ page }) => {
+  test('deployments list page — mobile', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'staging' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
     await expect(environmentCard(page, 'staging').getByText('Serving', { exact: true })).toBeVisible();
 
-    await screenshot(page, 'deployment-mobile-healthy');
+    await screenshot(page, 'deployment-mobile-list');
     await assertNoOverflow(page);
   });
 
-  test('failing environment on mobile — no overflow', async ({ page }) => {
+  test('environment detail overview — mobile', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}`);
 
-    const failingCard = page.locator('article').filter({ hasText: 'production-us-east' });
-    await expect(failingCard).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'staging', level: 1 })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Environment sections' })).toBeVisible();
+
+    await screenshot(page, 'deployment-mobile-detail-overview');
+    await assertNoOverflow(page);
+  });
+
+  test('failing environment detail — mobile, no overflow', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_FAIL_ID}`);
+
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-failing');
     await assertNoOverflow(page);
@@ -635,9 +718,9 @@ test.describe('Deployment control surface — mobile', () => {
 
   test('destroy dialog on mobile — no overflow', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}`);
 
-    await page.getByRole('button', { name: 'Destroy' }).first().click();
+    await page.getByRole('button', { name: 'Destroy Env' }).click();
     await expect(page.getByText('Destroy deployment environment?')).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-destroy-dialog');
@@ -656,10 +739,8 @@ test.describe('Deployment control surface — mobile', () => {
 
   test('logs panel with controls on mobile — no overflow', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=logs`);
 
-    const stagingCard = environmentCard(page, 'staging');
-    await stagingCard.getByRole('button', { name: 'Logs' }).click();
     await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
 
     await screenshot(page, 'deployment-mobile-logs');
