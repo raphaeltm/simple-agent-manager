@@ -150,8 +150,8 @@ func TestEngine_SetVerifierKeyInitializesMissingVerifier(t *testing.T) {
 	}
 
 	err = engine.Apply(context.Background(), payload)
-	if err == nil || !strings.Contains(err.Error(), "compose pull") {
-		t.Fatalf("expected signed payload to proceed to compose pull, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "compose config") {
+		t.Fatalf("expected signed payload to proceed to compose config preflight, got: %v", err)
 	}
 }
 
@@ -927,7 +927,7 @@ func TestWaitForHealthSkipsContainerPollingWhenNoRoutes(t *testing.T) {
 		HealthPollInterval: time.Millisecond,
 	})
 
-	if err := engine.waitForHealth(context.Background(), 1, nil); err != nil {
+	if err := engine.waitForHealth(context.Background(), 1, nil, nil); err != nil {
 		t.Fatalf("waitForHealth with no routes = %v, want nil", err)
 	}
 }

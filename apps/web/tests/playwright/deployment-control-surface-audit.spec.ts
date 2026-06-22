@@ -289,6 +289,24 @@ const MOCK_CONTAINERS = {
   ],
 };
 
+const MOCK_RUNTIME_CONFIG = {
+  environmentId: ENV_ID,
+  updatedAt: '2026-06-18T10:10:00.000Z',
+  envVars: [
+    {
+      key: 'PUBLIC_APP_DOMAIN',
+      value: 'staging.deploy-audit-with-a-very-long-hostname-that-must-wrap-without-overflow.sammy.party',
+      isSecret: false,
+      updatedAt: '2026-06-18T10:01:00.000Z',
+    },
+    {
+      key: 'DATABASE_URL',
+      isSecret: true,
+      updatedAt: '2026-06-18T10:02:00.000Z',
+    },
+  ],
+};
+
 const MOCK_SYSTEM_INFO = {
   cpu: { numCpu: 4, model: 'AMD EPYC', loadAvg1: 0.42, loadAvg5: 0.38, loadAvg15: 0.31 },
   memory: { totalBytes: 8_000_000_000, usedBytes: 3_600_000_000, availableBytes: 4_400_000_000, usedPercent: 45 },
@@ -367,16 +385,11 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
       const envs = includeFailingEnv ? [MOCK_ENV, MOCK_ENV_PREVIEW, MOCK_ENV_FAILING] : [MOCK_ENV, MOCK_ENV_PREVIEW];
       return respond(route, 200, { environments: envs });
     }
-    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/secrets`) {
-      return respond(route, 200, {
-        secrets: [
-          { name: 'DATABASE_URL', createdAt: '2026-06-18T08:21:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z' },
-          { name: 'STRIPE_SECRET_KEY', createdAt: '2026-06-18T08:22:00.000Z', updatedAt: '2026-06-18T08:22:00.000Z' },
-        ],
-      });
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/runtime-config` && method === 'GET') {
+      return respond(route, 200, MOCK_RUNTIME_CONFIG);
     }
-    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/secrets`) {
-      return respond(route, 200, { secrets: [] });
+    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/runtime-config` && method === 'GET') {
+      return respond(route, 200, { environmentId: ENV_FAIL_ID, updatedAt: null, envVars: [] });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/logs`) {
       return respond(route, 200, { ...MOCK_LOGS, source: 'node', nodeId: NODE_ID });
@@ -744,6 +757,19 @@ test.describe('Deployment control surface — mobile', () => {
     await expect(page.getByText('Pulled release image')).toBeVisible({ timeout: 10000 });
 
     await screenshot(page, 'deployment-mobile-logs');
+    await assertNoOverflow(page);
+  });
+
+  test('configuration panel on mobile — no overflow', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments`);
+
+    const stagingCard = environmentCard(page, 'staging');
+    await stagingCard.getByRole('button', { name: 'Config' }).click();
+    await expect(stagingCard.getByText('PUBLIC_APP_DOMAIN')).toBeVisible();
+    await expect(stagingCard.getByText('Hidden after save')).toBeVisible();
+
+    await screenshot(page, 'deployment-mobile-config-panel');
     await assertNoOverflow(page);
   });
 });

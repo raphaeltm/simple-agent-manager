@@ -8,7 +8,7 @@
  */
 import { and, eq, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -22,8 +22,9 @@ import {
   DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
   DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB,
 } from '../services/compose-publish-apply';
-import { collectSecretNames, renderCompose } from '../services/compose-renderer';
+import { collectSecretNames, renderComposeForApply } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
+import { loadDeploymentInterpolationEnv } from '../services/deployment-environment-config';
 import {
   buildDeploymentRouteTargets,
   collectEnvironmentRouteHostnames,
@@ -37,17 +38,7 @@ import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 const DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS = 3_600;
 
-/**
- * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
- *
- * Returns a signed apply payload for the requested release sequence.
- * The node calls this when the heartbeat response includes a
- * pendingReleaseSeq greater than the node's current applied seq.
- */
-deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
-  const nodeId = c.req.param('id');
-
-  // Verify callback JWT auth (same pattern as heartbeat/ready)
+async function verifyNodeCallback(c: Context<{ Bindings: Env }>, nodeId: string) {
   const token = extractBearerToken(c.req.header('Authorization'));
   let payload;
   try {
@@ -63,6 +54,67 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');
   }
+}
+
+deployReleaseCallbackRoute.get('/:id/deployment-env', async (c) => {
+  const nodeId = c.req.param('id');
+  await verifyNodeCallback(c, nodeId);
+  const environmentId = c.req.query('environmentId');
+  if (!environmentId) {
+    throw errors.badRequest('Missing required query parameter: environmentId');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  const nodeRows = await db
+    .select({ userId: schema.nodes.userId })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+  const node = nodeRows.at(0);
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  const envRows = await db
+    .select({
+      id: schema.deploymentEnvironments.id,
+      configUpdatedAt: schema.deploymentEnvironments.configUpdatedAt,
+    })
+    .from(schema.deploymentEnvironments)
+    .innerJoin(schema.projects, eq(schema.deploymentEnvironments.projectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.deploymentEnvironments.nodeId, nodeId),
+        eq(schema.projects.userId, node.userId)
+      )
+    )
+    .limit(1);
+  const environment = envRows.at(0);
+  if (!environment) {
+    throw errors.notFound('Deployment environment');
+  }
+
+  const config = await loadDeploymentInterpolationEnv(db, environmentId, getEncryptionKey(c.env));
+  return c.json({
+    environmentId,
+    interpolationEnv: config.values,
+    configUpdatedAt: environment.configUpdatedAt ?? null,
+  });
+});
+
+/**
+ * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
+ *
+ * Returns a signed apply payload for the requested release sequence.
+ * The node calls this when the heartbeat response includes a
+ * pendingReleaseSeq greater than the node's current applied seq.
+ */
+deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
+  const nodeId = c.req.param('id');
+
+  // Verify callback JWT auth (same pattern as heartbeat/ready)
+  await verifyNodeCallback(c, nodeId);
 
   // Parse query parameters
   const seqStr = c.req.query('seq');
@@ -151,6 +203,12 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   //    re-rendered from the manifest with secret injection.
   let routes: DeploymentRouteTarget[];
   let composeYaml: string;
+  let interpolationEnv: Record<string, string> = {};
+  const environmentConfig = await loadDeploymentInterpolationEnv(
+    db,
+    environmentId,
+    getEncryptionKey(c.env)
+  );
 
   if (release.source === 'compose-publish') {
     const submission = JSON.parse(release.manifest);
@@ -171,6 +229,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     });
     routes = applied.routes;
     composeYaml = applied.composeYaml;
+    interpolationEnv = environmentConfig.values;
 
     if (applied.warnings.length > 0) {
       log.warn('deploy_release.compose_publish_warnings', {
@@ -223,13 +282,17 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
         ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
         : {};
 
-    // Render the Compose YAML from the manifest
-    composeYaml = renderCompose(manifest, {
+    // Render the Compose YAML from the manifest. Secret values are supplied as
+    // transient interpolation env, not materialized into the compose file.
+    const rendered = renderComposeForApply(manifest, {
       environmentId,
       releaseId: release.id,
       routeTargets: routes,
       resolvedSecrets,
+      baseInterpolationEnv: environmentConfig.values,
     });
+    composeYaml = rendered.composeYaml;
+    interpolationEnv = rendered.interpolationEnv;
   }
 
   const cleanupStaleRoutes = async () => {
@@ -295,6 +358,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       expiresAt,
       composeYaml,
       routes,
+      interpolationEnv,
     },
     c.env
   );
@@ -332,6 +396,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     releaseId: release.id,
     routeCount: routes.length,
+    interpolationEnvKeyCount: Object.keys(interpolationEnv).length,
     hasRegistryCredentials: registryCredentials !== null,
   });
 
@@ -341,6 +406,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     expiresAt,
     composeYaml,
+    interpolationEnv,
     routes,
     signature,
     registryCredentials,

@@ -146,18 +146,23 @@ export type {
   DeleteDeploymentEnvironmentResponse,
   DeploymentAgentPolicy,
   DeploymentEnvironment,
+  DeploymentEnvironmentConfigResponse,
+  DeploymentEnvironmentConfigVar,
   DeploymentEnvironmentMetricsResponse,
   DeploymentEnvironmentNodeSummary,
   DeploymentObservedState,
   DeploymentReleaseSummary,
   DeploymentSecretEntry,
   ProjectDeploymentGcpResponse,
+  UpsertDeploymentEnvironmentConfigVarRequest,
 } from './deployment';
 export {
   createDeploymentEnvironment,
   deleteDeploymentEnvironment,
+  deleteDeploymentEnvironmentConfigVar,
   deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
+  getDeploymentEnvironmentConfig,
   getDeploymentEnvironmentLogs,
   getDeploymentEnvironmentMetrics,
   getDeployOAuthResult,
@@ -169,6 +174,7 @@ export {
   setDeploymentSecret,
   setupProjectDeploymentGcp,
   updateDeploymentEnvironmentPolicy,
+  upsertDeploymentEnvironmentConfigVar,
 } from './deployment';
 export type {
   FileEntry,

@@ -52,6 +52,13 @@ export interface ComposeRenderContext {
   };
 }
 
+export interface ComposeApplyRenderResult {
+  composeYaml: string;
+  interpolationEnv: Record<string, string>;
+  missingSecretRefs: string[];
+  referencedInterpolationKeys: string[];
+}
+
 const DEFAULT_MEMORY_LIMIT_MB = 256;
 
 // =============================================================================
@@ -125,6 +132,8 @@ interface ServiceBuildContext {
   routeTargets: NonNullable<ComposeRenderContext['routeTargets']>;
   logMaxSize: string;
   logMaxFile: string;
+  secretInterpolationNames?: Record<string, string>;
+  interpolationEnv?: Record<string, string>;
 }
 
 function buildService(
@@ -147,6 +156,17 @@ function buildService(
   if (Object.keys(svc.env).length > 0) {
     const env: Record<string, string> = {};
     for (const [key, val] of Object.entries(svc.env)) {
+      if (isSecretRef(val) && buildCtx.secretInterpolationNames && buildCtx.interpolationEnv) {
+        const interpolationKey = buildCtx.secretInterpolationNames[val.secret];
+        const resolved = buildCtx.resolvedSecrets[val.secret];
+        if (!interpolationKey || resolved === undefined) {
+          missingSecrets.add(val.secret);
+          continue;
+        }
+        env[key] = `\${${interpolationKey}}`;
+        buildCtx.interpolationEnv[interpolationKey] = resolved;
+        continue;
+      }
       const resolved = resolveEnvValue(val, buildCtx.resolvedSecrets, missingSecrets);
       if (resolved !== undefined) {
         env[key] = resolved;
@@ -202,6 +222,15 @@ function buildService(
 }
 
 export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderContext): string {
+  return renderComposeInternal(manifest, ctx).composeYaml;
+}
+
+function renderComposeInternal(
+  manifest: DeploymentManifest,
+  ctx: ComposeRenderContext,
+  secretInterpolationNames?: Record<string, string>,
+  interpolationEnv?: Record<string, string>,
+): ComposeApplyRenderResult {
   const networkName = `sam-internal-${ctx.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const buildCtx: ServiceBuildContext = {
     volumeRoot: ctx.volumeRoot ?? resolveVolumeMountRoot(ctx.environmentId),
@@ -213,6 +242,8 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
     routeTargets: ctx.routeTargets ?? [],
     logMaxSize: ctx.logRotation?.maxSize ?? '10m',
     logMaxFile: ctx.logRotation?.maxFile ?? '3',
+    secretInterpolationNames,
+    interpolationEnv,
   };
 
   const doc: Record<string, unknown> = {};
@@ -256,5 +287,49 @@ export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderCo
   // Docker Compose requires volume declarations if services reference them as named.
   // Since we use bind mounts (host path), we don't declare top-level named volumes.
 
-  return stringify(doc, { lineWidth: 0 });
+  const composeYaml = stringify(doc, { lineWidth: 0 });
+  return {
+    composeYaml,
+    interpolationEnv: interpolationEnv ?? {},
+    missingSecretRefs: Array.from(missingSecrets).sort((a, b) => a.localeCompare(b)),
+    referencedInterpolationKeys: collectInterpolationKeys(composeYaml),
+  };
+}
+
+export function renderComposeForApply(
+  manifest: DeploymentManifest,
+  ctx: ComposeRenderContext & { baseInterpolationEnv?: Record<string, string> },
+): ComposeApplyRenderResult {
+  const secretNames = collectSecretNames(manifest);
+  const secretInterpolationNames = buildLegacySecretInterpolationNames(secretNames);
+  const interpolationEnv = { ...(ctx.baseInterpolationEnv ?? {}) };
+  return renderComposeInternal(manifest, ctx, secretInterpolationNames, interpolationEnv);
+}
+
+function buildLegacySecretInterpolationNames(secretNames: string[]): Record<string, string> {
+  const used = new Set<string>();
+  const result: Record<string, string> = {};
+  for (const secretName of secretNames) {
+    const base = `SAM_SECRET_${secretName.replace(/[^A-Za-z0-9_]/g, '_').toUpperCase()}`;
+    let candidate = /^[A-Za-z_]/.test(base) ? base : `SAM_SECRET_${base}`;
+    let suffix = 2;
+    while (used.has(candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    used.add(candidate);
+    result[secretName] = candidate;
+  }
+  return result;
+}
+
+const INTERPOLATION_PATTERN = /(?<!\$)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::[-?][^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g;
+
+function collectInterpolationKeys(value: string): string[] {
+  const keys = new Set<string>();
+  for (const match of value.matchAll(INTERPOLATION_PATTERN)) {
+    const key = match[1] ?? match[2];
+    if (key) keys.add(key);
+  }
+  return Array.from(keys).sort((a, b) => a.localeCompare(b));
 }

@@ -18,6 +18,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
+import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -72,6 +73,7 @@ export async function handleBuildAndPublish(
   if ('error' in policyResult) {
     return jsonRpcError(requestId, INVALID_PARAMS, policyResult.error);
   }
+  const buildEnv = await loadDeploymentBuildInterpolationEnv(db, policyResult.environmentId);
 
   const reference =
     typeof toolArgs.reference === 'string' && toolArgs.reference.trim() !== ''
@@ -96,6 +98,8 @@ export async function handleBuildAndPublish(
       taskId: tokenData.taskId || undefined,
       agentProfileId: policyResult.taskAgentProfileId || undefined,
     },
+    buildInterpolationEnv: buildEnv.values,
+    secretInterpolationKeys: buildEnv.secretKeys,
   };
   if (reference) proxyBody.reference = reference;
   if (workingDir) proxyBody.workingDir = workingDir;

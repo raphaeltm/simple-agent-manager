@@ -13,6 +13,7 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
 });
 const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
+const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
 
@@ -20,7 +21,7 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
       from: () => ({
-        where: () => ({ limit: mockLimit }),
+        where: () => ({ limit: mockLimit, orderBy: mockOrderBy }),
         innerJoin: () => ({
           where: () => ({ limit: mockLimit }),
         }),
@@ -181,6 +182,8 @@ describe('deploy release callback route', () => {
     mockMintProjectRegistryCredential.mockReset();
     mockLoadResolvedSecrets.mockReset();
     mockLoadResolvedSecrets.mockResolvedValue({});
+    mockOrderBy.mockReset();
+    mockOrderBy.mockResolvedValue([]);
     mockSignDeployPayload.mockResolvedValue('signed-payload');
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
@@ -475,12 +478,17 @@ describe('deploy release callback route', () => {
       'test-encryption-key'
     );
 
-    // The decrypted value AND the literal env value land in the rendered Compose,
-    // and the signed payload carries the same resolved YAML.
-    expect(body.composeYaml).toContain('super-secret-value');
+    // The decrypted value is supplied as transient interpolation env, not
+    // materialized into the rendered Compose YAML.
+    expect(body.composeYaml).toContain('${SAM_SECRET_API_KEY}');
+    expect(body.composeYaml).not.toContain('super-secret-value');
     expect(body.composeYaml).toContain('literal-value');
+    expect(body.interpolationEnv).toMatchObject({ SAM_SECRET_API_KEY: 'super-secret-value' });
     expect(mockSignDeployPayload).toHaveBeenCalledWith(
-      expect.objectContaining({ composeYaml: expect.stringContaining('super-secret-value') }),
+      expect.objectContaining({
+        composeYaml: expect.stringContaining('${SAM_SECRET_API_KEY}'),
+        interpolationEnv: expect.objectContaining({ SAM_SECRET_API_KEY: 'super-secret-value' }),
+      }),
       expect.anything()
     );
   });

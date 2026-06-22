@@ -122,16 +122,44 @@ function buildPushedRefMap(submission: ComposePublishSubmission): Map<string, st
 }
 
 /** Normalize a compose `ports:` entry list into container ports (transform exception). */
-function collectServiceContainerPorts(ports: unknown): number[] {
+function collectServiceContainerPorts(serviceName: string, ports: unknown): number[] {
   if (!Array.isArray(ports)) return [];
   const result: number[] = [];
-  for (const spec of ports) {
+  for (const [index, spec] of ports.entries()) {
+    rejectInterpolatedContainerPort(serviceName, index, spec);
     const port = extractContainerPort(spec);
     if (port !== null) {
       result.push(port);
     }
   }
   return result;
+}
+
+function hasComposeInterpolation(value: string): boolean {
+  return /\$\{?[A-Za-z_][A-Za-z0-9_]*/.test(value);
+}
+
+function rejectInterpolatedContainerPort(serviceName: string, index: number, spec: unknown): void {
+  if (typeof spec === 'string') {
+    const cleaned = spec.split('/')[0]!;
+    const parts = cleaned.split(':');
+    const containerPart = parts[parts.length - 1]?.trim() ?? '';
+    if (hasComposeInterpolation(containerPart)) {
+      throw new Error(
+        `Compose-publish port validation failed: services.${serviceName}.ports[${index}] uses an interpolated container port (${containerPart}). SAM can rewrite interpolated host ports, but container ports must be literal numbers so routes can be assigned.`
+      );
+    }
+    return;
+  }
+
+  if (isPlainObject(spec)) {
+    const target = spec.target;
+    if (typeof target === 'string' && hasComposeInterpolation(target)) {
+      throw new Error(
+        `Compose-publish port validation failed: services.${serviceName}.ports[${index}].target uses an interpolated container port (${target}). SAM can rewrite interpolated published ports, but target/container ports must be literal numbers so routes can be assigned.`
+      );
+    }
+  }
 }
 
 function formatComposeParseErrors(errors: ComposeParseError[]): string {
@@ -360,7 +388,7 @@ export function buildComposePublishApplyPayload(
     }
 
     // Collect public routes from ports: (transform exception — NOT stripped).
-    const containerPorts = collectServiceContainerPorts(service.ports);
+    const containerPorts = collectServiceContainerPorts(name, service.ports);
     for (const port of containerPorts) {
       publicRoutes.push({ service: name, port });
       routeServiceByIndex.push({ service: name, containerPort: port });
