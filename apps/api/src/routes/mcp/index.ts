@@ -26,6 +26,12 @@ import {
   METHOD_NOT_FOUND,
 } from './_helpers';
 import { handleBuildAndPublish } from './compose-publish-tools';
+import {
+  handleListDeploymentEnvironmentConfig,
+  handleListDeploymentEnvironments,
+  handleReadDeploymentLogs,
+  handleSetDeploymentEnvironmentConfig,
+} from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
   handleCreateIdea,
@@ -292,6 +298,22 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
         case 'build_and_publish':
           return c.json(
             await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'list_deployment_environments':
+          return c.json(
+            await handleListDeploymentEnvironments(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'read_deployment_logs':
+          return c.json(
+            await handleReadDeploymentLogs(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'list_deployment_environment_config':
+          return c.json(
+            await handleListDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'set_deployment_environment_config':
+          return c.json(
+            await handleSetDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env),
           );
         // ─── Workspace tools (unified from workspace-mcp) ──────────────
         case 'get_workspace_info':
