@@ -60,45 +60,45 @@ Source idea: `01KVQANNQPBF4PVJR060VYKNG5` ("App deployments: per-environment Com
   - [x] Fetch current env for restart reconcile and teardown without caching decrypted values on disk.
   - [x] Add label-based cleanup fallback for teardown when env fetch or placeholder resolution fails.
   - [x] Update disk-state comments and tests to prove placeholders are persisted instead of decrypted values.
-- [ ] Update compose-publish/build path:
+- [x] Update compose-publish/build path:
   - [x] Load only non-secret build env and secret key names in the API before proxying to the workspace VM.
   - [x] Add VM build request/options for build env and secret keys.
   - [x] Separate resolved build inventory from placeholder-preserving deploy template capture.
-  - [ ] Capture stderr on successful compose commands and detect missing-variable warnings robustly.
-  - [ ] Reject secret references in build/image/publish-control fields; preserve placeholders in stored release manifests.
+  - [x] Capture stderr on successful compose commands and detect missing-variable warnings robustly.
+  - [x] Reject secret references in build/image/publish-control fields; preserve placeholders in stored release manifests.
 - [ ] Update compose-publish apply transform:
-  - [ ] Preserve interpolation placeholders in deploy-time service fields.
+  - [x] Preserve interpolation placeholders in deploy-time service fields.
   - [ ] Reject interpolated container ports with actionable diagnostics while allowing host ports SAM rewrites.
-  - [ ] Attach current interpolation env in compose-publish deploy callback branch.
+  - [x] Attach current interpolation env in compose-publish deploy callback branch.
 - [ ] Add deployment UI:
   - [x] Add a compact Configuration summary row/panel to `DeploymentEnvironmentCard`.
   - [x] Implement reusable env-var editor behavior with loading, empty, error, save/update/delete, duplicate-key, long-value, and secret replace/delete states.
   - [x] Add API client functions and exports; stop using the legacy secret-only UI.
-  - [ ] Verify mobile/desktop overflow, focus, ARIA, and long data states with Playwright.
+  - [x] Verify mobile/desktop overflow, focus, ARIA, and long data states with Playwright.
 - [x] Update public deployment docs:
   - [x] Explain per-environment Variables vs Secrets and Compose interpolation examples.
   - [x] Document deploy-only secret behavior, non-secret build variable behavior, missing-variable validation, and compatibility status of old secret refs.
 
 ## Acceptance Criteria
 
-- [ ] Users can add deployment-environment Variables and Secrets from the Deployments page.
-- [ ] Compose files using `${DATABASE_URL}` and non-secret `${PUBLIC_APP_DOMAIN}` style placeholders deploy with SAM-supplied values.
-- [ ] Secret values do not appear in D1 release manifests, preview responses, signed Compose YAML, node `docker-compose.yml`, node metadata JSON, logs/errors/heartbeat observed errors, or build/publish requests.
-- [ ] Deployment-node Docker Compose commands receive interpolation env through process env and SAM values override host env.
-- [ ] Build/publish receives only non-secret variables; secret variable names may be sent only as names for validation.
-- [ ] Secret placeholders in build/image/publish-control fields are rejected before build/apply.
-- [ ] Missing variables are preserved through SAM capture/render stages and fail at apply preflight or Compose required-expression validation with redacted output.
-- [ ] Apply payload signature verification fails if interpolation env key/value content is modified.
-- [ ] Reconcile and teardown after node restart work by fetching current config, with best-effort label cleanup fallback for unresolved placeholders.
-- [ ] Old `deployment_secrets` and explicit secret refs remain compatible during transition but are no longer the primary UI/product path.
+- [x] Users can add deployment-environment Variables and Secrets from the Deployments page.
+- [x] Compose files using `${DATABASE_URL}` and non-secret `${PUBLIC_APP_DOMAIN}` style placeholders deploy with SAM-supplied values.
+- [x] Secret values do not appear in D1 release manifests, preview responses, signed Compose YAML, node `docker-compose.yml`, node metadata JSON, logs/errors/heartbeat observed errors, or build/publish requests.
+- [x] Deployment-node Docker Compose commands receive interpolation env through process env and SAM values override host env.
+- [x] Build/publish receives only non-secret variables; secret variable names may be sent only as names for validation.
+- [x] Secret placeholders in build/image/publish-control fields are rejected before build/apply.
+- [x] Missing variables are preserved through SAM capture/render stages and fail at apply preflight or Compose required-expression validation with redacted output.
+- [x] Apply payload signature verification fails if interpolation env key/value content is modified.
+- [x] Reconcile and teardown after node restart work by fetching current config, with best-effort label cleanup fallback for unresolved placeholders.
+- [x] Old `deployment_secrets` and explicit secret refs remain compatible during transition but are no longer the primary UI/product path.
 
 ## Test Plan
 
 - [ ] API route tests for CRUD, encryption/masking, validation, limits, rate limiting, and ownership.
-- [ ] Callback/apply tests proving placeholder YAML, attached interpolation env, no decrypted secrets in Compose YAML, and signature changes when env changes.
-- [ ] Renderer tests for legacy explicit secret refs, generated internal variable names, missing refs, and preview parity.
-- [ ] Go tests for signing hash parity, tamper rejection, env propagation to compose commands, redaction, disk placeholder persistence, reconcile/teardown fetch, and cleanup fallback.
+- [x] Callback/apply tests proving placeholder YAML, attached interpolation env, no decrypted secrets in Compose YAML, and signature changes when env changes.
+- [x] Renderer tests for legacy explicit secret refs, generated internal variable names, missing refs, and preview parity.
+- [x] Go tests for signing hash parity, tamper rejection, env propagation to compose commands, redaction, disk placeholder persistence, reconcile/teardown fetch, and cleanup fallback.
 - [ ] Compose-publish tests for non-secret build env, no secret env to build commands, placeholder-preserving capture, missing-variable warning detection, secret-in-build rejection, and route-port diagnostics.
-- [ ] UI component and Playwright tests for configuration summary/panel, many rows, long keys/values, validation errors, masked secrets, loading/error states, keyboard/focus behavior, and 320/375px no-overflow.
-- [ ] Public docs build.
+- [x] UI component and Playwright tests for configuration summary/panel, many rows, long keys/values, validation errors, masked secrets, loading/error states, keyboard/focus behavior, and 320/375px no-overflow.
+- [x] Public docs build.
 - [ ] Full local quality suite, specialist review, staging deploy, real VM-agent refresh/provisioning verification, PR CI, merge, and production deploy monitoring per `/do`.

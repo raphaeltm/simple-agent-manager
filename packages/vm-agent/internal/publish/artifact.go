@@ -29,8 +29,8 @@ type BuiltService struct {
 type BuildArtifact struct {
 	// Reference is the release tag the publish targets (e.g. "latest").
 	Reference string
-	// ComposeYAML is the resolved compose configuration bytes recorded with the
-	// release.
+	// ComposeYAML is the placeholder-preserving compose configuration bytes
+	// recorded with the release.
 	ComposeYAML []byte
 	// Services are the per-service images built on the host.
 	Services []BuiltService
