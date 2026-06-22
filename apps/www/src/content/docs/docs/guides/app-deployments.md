@@ -5,14 +5,13 @@ description: Author and submit SAM app deployment releases with Docker Compose.
 
 SAM app deployments are agent-first. A user creates a deployment environment and enables agent deployment for that environment. An agent then targets that named environment when it publishes a release.
 
-There are two publish paths:
+Agents publish with a single tool:
 
-- `build_and_publish(environment)` builds the workspace's Docker Compose stack on the SAM VM, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never receive registry credentials.
-- `get_registry_credentials(environment)` returns short-lived credentials for advanced direct pushes. Use it only when an agent needs to push images itself.
+- `build_and_publish(environment)` builds the workspace's Docker Compose stack on the SAM VM, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
 
-Both tools require the named deployment environment to be active, agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy.
+This tool requires the named deployment environment to be active, agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy.
 
-The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives public routes from either `x-sam-routes` or compose service `ports:` depending on the publish path.
+The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives public routes from either `x-sam-routes` or compose service `ports:`.
 
 ```yaml
 services:
