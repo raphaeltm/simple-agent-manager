@@ -44,7 +44,7 @@ Required tools:
 - [x] Add or update MCP tests covering success paths, unauthorized access, missing resources, secret masking, var writes, secret writes, and log reads.
 - [x] Run focused tests and quality checks.
 - [x] Run specialist review before archiving the task.
-- [ ] Open a stacked PR based on PR #1381.
+- [x] Open a stacked PR based on PR #1381.
 
 ## Acceptance Criteria
 
@@ -54,7 +54,7 @@ Required tools:
 - [x] Agents can set variables and secrets for authorized environments using existing config validation and encrypted storage paths.
 - [x] Unauthorized project/environment access returns MCP errors without leaking whether inaccessible resources exist beyond existing API behavior.
 - [x] No MCP tool returns decrypted secret values, raw encrypted payloads, or sensitive values in error details.
-- [ ] The PR is stacked on #1381 and does not modify the parent branch.
+- [x] The PR is stacked on #1381 and does not modify the parent branch.
 
 ## Test Plan
 
@@ -81,3 +81,9 @@ Required tools:
 - `pnpm lint`
 - `pnpm typecheck`
 - `pnpm --filter @simple-agent-manager/api test:workers -- --run deployment-mcp-tools` was attempted while developing the first Worker-pool test version, but the Worker harness crashed with repeated `workerd` segmentation faults before assertions. That unstable test file was replaced by focused Node-side MCP handler coverage.
+
+## Pull Request
+
+- PR #1382: https://github.com/raphaeltm/simple-agent-manager/pull/1382
+- Base branch: `sam/use-sam-mcp-tools-01kvr3` (parent PR #1381)
+- Head branch: `sam/use-sam-mcp-tools-01kvrr`
