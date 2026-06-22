@@ -33,37 +33,37 @@ Source idea: `01KVQANNQPBF4PVJR060VYKNG5` ("App deployments: per-environment Com
 
 ## Implementation Checklist
 
-- [ ] Add schema and shared contract:
-  - [ ] Add migration `0075_deployment_environment_config_vars.sql` with `config_updated_at` and `deployment_environment_config_vars`.
-  - [ ] Update Drizzle schema and shared deployment config response/request types.
-  - [ ] Add configurable per-env count, per-value byte, and aggregate env-size limits.
-- [ ] Add deployment environment config API:
-  - [ ] Implement service helpers for masked responses, encrypted storage, deploy interpolation env, build-only interpolation env, and timestamp updates.
-  - [ ] Add session-auth routes for `GET /runtime-config`, `POST /runtime/env-vars`, and `DELETE /runtime/env-vars/:envKey`.
-  - [ ] Validate env keys with `[A-Za-z_][A-Za-z0-9_]*`, mask secrets, reject empty secret writes, enforce create-only count limits, rate-limit writes, and enforce project/environment ownership.
-- [ ] Add callback-auth node config fetch:
-  - [ ] Add callback-JWT-only endpoint for deployment nodes to fetch current interpolation env by environment.
-  - [ ] Mount before session-auth routes and test through the combined app route stack.
-- [ ] Sign and transport interpolation env:
-  - [ ] Add `interpolationEnv` to TS and Go apply payloads.
-  - [ ] Add deterministic sorted-entry env hash to TS and Go signing contracts.
-  - [ ] Add cross-language fixture tests for empty, single, reordered, and multiline values.
-- [ ] Update normalized renderer/apply path:
-  - [ ] Refactor renderer to emit placeholder YAML plus interpolation env instead of plaintext secret YAML.
-  - [ ] Preserve legacy explicit secret refs using deterministic internal env names when necessary.
-  - [ ] Attach current deployment environment config to normalized apply payloads.
-  - [ ] Update release preview to show placeholders, not fake `***` runtime YAML.
-- [ ] Update VM agent deploy engine:
-  - [ ] Pass interpolation env to `config`, `pull`, `up`, `down`, and service inspection commands.
-  - [ ] Add compose config preflight with missing-variable warning detection.
-  - [ ] Redact all interpolation env values from compose stderr/errors, persisted release state, and observed heartbeat errors.
-  - [ ] Fetch current env for restart reconcile and teardown without caching decrypted values on disk.
-  - [ ] Add label-based cleanup fallback for teardown when env fetch or placeholder resolution fails.
-  - [ ] Update disk-state comments and tests to prove placeholders are persisted instead of decrypted values.
+- [x] Add schema and shared contract:
+  - [x] Add migration `0075_deployment_environment_config_vars.sql` with `config_updated_at` and `deployment_environment_config_vars`.
+  - [x] Update Drizzle schema and shared deployment config response/request types.
+  - [x] Add configurable per-env count, per-value byte, and aggregate env-size limits.
+- [x] Add deployment environment config API:
+  - [x] Implement service helpers for masked responses, encrypted storage, deploy interpolation env, build-only interpolation env, and timestamp updates.
+  - [x] Add session-auth routes for `GET /runtime-config`, `POST /runtime/env-vars`, and `DELETE /runtime/env-vars/:envKey`.
+  - [x] Validate env keys with `[A-Za-z_][A-Za-z0-9_]*`, mask secrets, reject empty secret writes, enforce create-only count limits, rate-limit writes, and enforce project/environment ownership.
+- [x] Add callback-auth node config fetch:
+  - [x] Add callback-JWT-only endpoint for deployment nodes to fetch current interpolation env by environment.
+  - [x] Mount before session-auth routes and test through the combined app route stack.
+- [x] Sign and transport interpolation env:
+  - [x] Add `interpolationEnv` to TS and Go apply payloads.
+  - [x] Add deterministic sorted-entry env hash to TS and Go signing contracts.
+  - [x] Add cross-language fixture tests for empty, single, reordered, and multiline values.
+- [x] Update normalized renderer/apply path:
+  - [x] Refactor renderer to emit placeholder YAML plus interpolation env instead of plaintext secret YAML.
+  - [x] Preserve legacy explicit secret refs using deterministic internal env names when necessary.
+  - [x] Attach current deployment environment config to normalized apply payloads.
+  - [x] Update release preview to show placeholders, not fake `***` runtime YAML.
+- [x] Update VM agent deploy engine:
+  - [x] Pass interpolation env to `config`, `pull`, `up`, `down`, and service inspection commands.
+  - [x] Add compose config preflight with missing-variable warning detection.
+  - [x] Redact all interpolation env values from compose stderr/errors, persisted release state, and observed heartbeat errors.
+  - [x] Fetch current env for restart reconcile and teardown without caching decrypted values on disk.
+  - [x] Add label-based cleanup fallback for teardown when env fetch or placeholder resolution fails.
+  - [x] Update disk-state comments and tests to prove placeholders are persisted instead of decrypted values.
 - [ ] Update compose-publish/build path:
-  - [ ] Load only non-secret build env and secret key names in the API before proxying to the workspace VM.
-  - [ ] Add VM build request/options for build env and secret keys.
-  - [ ] Separate resolved build inventory from placeholder-preserving deploy template capture.
+  - [x] Load only non-secret build env and secret key names in the API before proxying to the workspace VM.
+  - [x] Add VM build request/options for build env and secret keys.
+  - [x] Separate resolved build inventory from placeholder-preserving deploy template capture.
   - [ ] Capture stderr on successful compose commands and detect missing-variable warnings robustly.
   - [ ] Reject secret references in build/image/publish-control fields; preserve placeholders in stored release manifests.
 - [ ] Update compose-publish apply transform:
@@ -71,13 +71,13 @@ Source idea: `01KVQANNQPBF4PVJR060VYKNG5` ("App deployments: per-environment Com
   - [ ] Reject interpolated container ports with actionable diagnostics while allowing host ports SAM rewrites.
   - [ ] Attach current interpolation env in compose-publish deploy callback branch.
 - [ ] Add deployment UI:
-  - [ ] Add a compact Configuration summary row/panel to `DeploymentEnvironmentCard`.
-  - [ ] Implement reusable env-var editor behavior with loading, empty, error, save/update/delete, duplicate-key, long-value, and secret replace/delete states.
-  - [ ] Add API client functions and exports; stop using the legacy secret-only UI.
+  - [x] Add a compact Configuration summary row/panel to `DeploymentEnvironmentCard`.
+  - [x] Implement reusable env-var editor behavior with loading, empty, error, save/update/delete, duplicate-key, long-value, and secret replace/delete states.
+  - [x] Add API client functions and exports; stop using the legacy secret-only UI.
   - [ ] Verify mobile/desktop overflow, focus, ARIA, and long data states with Playwright.
-- [ ] Update public deployment docs:
-  - [ ] Explain per-environment Variables vs Secrets and Compose interpolation examples.
-  - [ ] Document deploy-only secret behavior, non-secret build variable behavior, missing-variable validation, and compatibility status of old secret refs.
+- [x] Update public deployment docs:
+  - [x] Explain per-environment Variables vs Secrets and Compose interpolation examples.
+  - [x] Document deploy-only secret behavior, non-secret build variable behavior, missing-variable validation, and compatibility status of old secret refs.
 
 ## Acceptance Criteria
 

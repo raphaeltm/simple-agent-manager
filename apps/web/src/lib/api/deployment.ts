@@ -79,6 +79,28 @@ export interface DeploymentEnvironment {
   node: DeploymentEnvironmentNodeSummary | null;
 }
 
+export interface DeploymentEnvironmentConfigVar {
+  key: string;
+  value: string | null;
+  isSecret: boolean;
+  hasValue: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeploymentEnvironmentConfigResponse {
+  envVars: DeploymentEnvironmentConfigVar[];
+  updatedAt: string | null;
+  variableCount: number;
+  secretCount: number;
+}
+
+export interface UpsertDeploymentEnvironmentConfigVarRequest {
+  key: string;
+  value: string;
+  isSecret?: boolean;
+}
+
 export interface DeleteDeploymentEnvironmentResponse {
   id: string;
   deleted: boolean;
@@ -178,6 +200,37 @@ export async function getDeploymentEnvironmentMetrics(
 ): Promise<DeploymentEnvironmentMetricsResponse> {
   return request<DeploymentEnvironmentMetricsResponse>(
     `/api/projects/${projectId}/environments/${envId}/metrics`
+  );
+}
+
+export async function getDeploymentEnvironmentConfig(
+  projectId: string,
+  envId: string
+): Promise<DeploymentEnvironmentConfigResponse> {
+  return request<DeploymentEnvironmentConfigResponse>(
+    `/api/projects/${projectId}/environments/${envId}/runtime-config`
+  );
+}
+
+export async function upsertDeploymentEnvironmentConfigVar(
+  projectId: string,
+  envId: string,
+  data: UpsertDeploymentEnvironmentConfigVarRequest
+): Promise<DeploymentEnvironmentConfigResponse> {
+  return request<DeploymentEnvironmentConfigResponse>(
+    `/api/projects/${projectId}/environments/${envId}/runtime/env-vars`,
+    { method: 'POST', body: JSON.stringify(data) }
+  );
+}
+
+export async function deleteDeploymentEnvironmentConfigVar(
+  projectId: string,
+  envId: string,
+  envKey: string
+): Promise<DeploymentEnvironmentConfigResponse> {
+  return request<DeploymentEnvironmentConfigResponse>(
+    `/api/projects/${projectId}/environments/${envId}/runtime/env-vars/${encodeURIComponent(envKey)}`,
+    { method: 'DELETE' }
   );
 }
 

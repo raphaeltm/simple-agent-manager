@@ -238,6 +238,9 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES`      | `8192`   | Max bytes per env var value |
 | `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES`   | `131072` | Max bytes per file content  |
 | `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | `256`    | Max file path length        |
+| `MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT` | `100`    | Max deployment config vars per environment |
+| `MAX_DEPLOYMENT_ENV_VALUE_BYTES`           | `65536`  | Max bytes per deployment config value |
+| `MAX_DEPLOYMENT_ENV_TOTAL_BYTES`           | `262144` | Max aggregate deployment config env size |
 
 ## External API Timeouts
 

@@ -19,9 +19,9 @@ services:
   web:
     image: registry.example.com/my-project/web:v1.2.3
     environment:
-      NODE_ENV: production
-      DATABASE_URL:
-        x-sam-secret: database-url
+      NODE_ENV: ${NODE_ENV:-production}
+      PUBLIC_APP_DOMAIN: ${PUBLIC_APP_DOMAIN}
+      DATABASE_URL: ${DATABASE_URL}
     volumes:
       - app-data:/var/lib/app
     healthcheck:
@@ -48,6 +48,13 @@ Content-Type: text/yaml
 
 SAM accepts `application/yaml`, `text/yaml`, `application/x-yaml`, and `text/x-yaml`. Raw manifest JSON is still accepted for older callers, but Compose YAML is the authoring format.
 
-Use `x-sam-secret` for environment secrets. The release stores the secret name only; values are injected server-side when SAM renders the signed apply payload.
+Configure values on each deployment environment from the Deployments page:
+
+- **Variables** are visible after save. SAM supplies them to `build_and_publish` and to deployment-node Compose apply commands, so they can be used for image tags, build args, domains, and runtime environment values.
+- **Secrets** are hidden after save. SAM supplies them only to deployment-node Compose apply commands as process environment for Compose interpolation. Secrets are not sent to build nodes and should not be used in build args, image tags, route fields, or other build/publish-control fields.
+
+Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It does not override literal Compose values like `NODE_ENV: production`.
+
+`x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
 For compose-publish releases, SAM preserves safe named volumes declared in the Compose file. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are rejected.

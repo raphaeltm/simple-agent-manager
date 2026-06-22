@@ -125,9 +125,18 @@ func (e *Engine) Teardown(ctx context.Context) error {
 	defer e.applyMu.Unlock()
 
 	var errs []string
+	interpolationEnv, envErr := e.fetchCurrentInterpolationEnv(ctx)
+	if envErr != nil {
+		slog.Warn("deploy.teardown: failed to fetch current interpolation env; falling back to label cleanup if compose down fails", "error", envErr)
+	}
 	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
-		if err := e.composeDown(ctx, composeFile, nil); err != nil {
+		if err := e.composeDown(ctx, composeFile, interpolationEnv); err != nil {
 			errs = append(errs, fmt.Sprintf("compose down: %v", err))
+			if envErr != nil {
+				if fallbackErr := e.cleanupComposeProjectByLabel(ctx); fallbackErr != nil {
+					errs = append(errs, fmt.Sprintf("compose label cleanup: %v", fallbackErr))
+				}
+			}
 		}
 	} else if !strings.Contains(err.Error(), "no current release") {
 		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
@@ -197,7 +206,18 @@ func (e *Engine) ReconcileOnStart(ctx context.Context) error {
 		"seq", state.Seq, "status", state.Status)
 
 	// Check container state without modifying anything
-	services, err := e.inspectServices(ctx, state.Seq, nil)
+	interpolationEnv, envErr := e.fetchCurrentInterpolationEnv(ctx)
+	if envErr != nil {
+		slog.Warn("deploy.reconcile: failed to fetch current interpolation env; skipping service details",
+			"seq", state.Seq, "error", envErr)
+		e.setObserved(ObservedState{
+			AppliedSeq: state.Seq,
+			Status:     state.Status,
+		})
+		return nil
+	}
+
+	services, err := e.inspectServices(ctx, state.Seq, interpolationEnv)
 	if err != nil {
 		slog.Warn("deploy.reconcile: failed to inspect services",
 			"seq", state.Seq, "error", err)
@@ -527,6 +547,40 @@ func (e *Engine) fetchRelease(ctx context.Context, seq int64) (*ApplyPayload, er
 	return &payload, nil
 }
 
+func (e *Engine) fetchCurrentInterpolationEnv(ctx context.Context) (map[string]string, error) {
+	if strings.TrimSpace(e.cfg.ControlPlaneURL) == "" || strings.TrimSpace(e.getCallbackToken()) == "" {
+		return nil, nil
+	}
+	url := fmt.Sprintf("%s/api/nodes/%s/deployment-env?environmentId=%s",
+		strings.TrimRight(e.cfg.ControlPlaneURL, "/"),
+		e.cfg.NodeID,
+		e.cfg.EnvironmentID,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+e.getCallbackToken())
+
+	resp, err := e.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var payload DeploymentEnvResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode deployment env: %w", err)
+	}
+	return payload.InterpolationEnv, nil
+}
+
 // Docker Compose helpers
 
 func (e *Engine) composeConfigPreflight(ctx context.Context, composeFile string, interpolationEnv map[string]string) error {
@@ -543,6 +597,22 @@ func (e *Engine) composeUp(ctx context.Context, composeFile string, interpolatio
 
 func (e *Engine) composeDown(ctx context.Context, composeFile string, interpolationEnv map[string]string) error {
 	return e.runCompose(ctx, composeFile, interpolationEnv, "down")
+}
+
+func (e *Engine) cleanupComposeProjectByLabel(ctx context.Context) error {
+	containers, err := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+e.cfg.ComposeProjectName).Output()
+	if err != nil {
+		return fmt.Errorf("list compose project containers: %w", err)
+	}
+	ids := strings.Fields(string(containers))
+	if len(ids) > 0 {
+		args := append([]string{"rm", "-f"}, ids...)
+		if err := exec.CommandContext(ctx, "docker", args...).Run(); err != nil {
+			return fmt.Errorf("remove compose project containers: %w", err)
+		}
+	}
+	_ = exec.CommandContext(ctx, "docker", "network", "rm", e.cfg.ComposeProjectName+"_default").Run()
+	return nil
 }
 
 func (e *Engine) runCompose(ctx context.Context, composeFile string, interpolationEnv map[string]string, args ...string) error {

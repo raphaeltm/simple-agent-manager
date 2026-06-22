@@ -1,10 +1,11 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, StatusBadge } from '@simple-agent-manager/ui';
-import { AlertTriangle, ExternalLink, ScrollText, Server, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, KeyRound, ScrollText, Server, ShieldCheck, Trash2 } from 'lucide-react';
 import { Link } from 'react-router';
 
 import type { DeploymentEnvironment } from '../../lib/api';
 import { formatDateTimeCompact, safePercent } from './deployment-card-format';
+import { DeploymentEnvironmentConfigPanel } from './DeploymentEnvironmentConfigPanel';
 import { type DeploymentLogState, LogsPanel } from './DeploymentLogsPanel';
 import { DeploymentMetricsPanel, type DeploymentMetricsState } from './DeploymentMetricsPanel';
 
@@ -253,12 +254,15 @@ function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
 // ─── Main Card ─────────────────────────────────────────────────────────────
 
 interface DeploymentEnvironmentCardProps {
+  projectId: string;
   env: DeploymentEnvironment;
   profiles: AgentProfile[];
   policySaving: string | null;
   logState: DeploymentLogState | undefined;
   metricsState: DeploymentMetricsState | undefined;
   logsOpen: boolean;
+  configOpen: boolean;
+  onConfigToggle: (env: DeploymentEnvironment) => void;
   onPolicyEnabledChange: (env: DeploymentEnvironment, enabled: boolean) => void;
   onProfileToggle: (env: DeploymentEnvironment, profileId: string) => void;
   onRefreshLogs: (
@@ -269,12 +273,15 @@ interface DeploymentEnvironmentCardProps {
 }
 
 export function DeploymentEnvironmentCard({
+  projectId,
   env,
   profiles,
   policySaving,
   logState,
   metricsState,
   logsOpen,
+  configOpen,
+  onConfigToggle,
   onPolicyEnabledChange,
   onProfileToggle,
   onRefreshLogs,
@@ -300,6 +307,16 @@ export function DeploymentEnvironmentCard({
           <Button size="sm" variant="secondary" onClick={() => onRefreshLogs(env)}>
             <ScrollText size={14} />
             {logsOpen ? 'Refresh Logs' : 'Logs'}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => onConfigToggle(env)}
+            aria-expanded={configOpen}
+            aria-controls={`deployment-config-${env.id}`}
+          >
+            <KeyRound size={14} />
+            Config
           </Button>
           <Button size="sm" variant="danger" onClick={() => onDelete(env)}>
             <Trash2 size={14} />
@@ -421,6 +438,12 @@ export function DeploymentEnvironmentCard({
           </section>
         </aside>
       </div>
+
+      <DeploymentEnvironmentConfigPanel
+        projectId={projectId}
+        environmentId={env.id}
+        open={configOpen}
+      />
 
       {logsOpen && (
         <LogsPanel

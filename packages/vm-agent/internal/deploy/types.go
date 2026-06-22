@@ -65,6 +65,12 @@ type ApplyPayload struct {
 	RegistryCredentials *RegistryCredentials `json:"registryCredentials,omitempty"`
 }
 
+type DeploymentEnvResponse struct {
+	EnvironmentID    string            `json:"environmentId"`
+	InterpolationEnv map[string]string `json:"interpolationEnv,omitempty"`
+	ConfigUpdatedAt  string            `json:"configUpdatedAt,omitempty"`
+}
+
 // RouteTarget maps a public hostname to the loopback port published by Compose.
 type RouteTarget struct {
 	Hostname      string `json:"hostname"`

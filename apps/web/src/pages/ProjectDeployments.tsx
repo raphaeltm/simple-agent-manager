@@ -57,6 +57,7 @@ export function ProjectDeployments() {
   const [creating, setCreating] = useState(false);
   const [policySaving, setPolicySaving] = useState<string | null>(null);
   const [logsOpenEnvId, setLogsOpenEnvId] = useState<string | null>(null);
+  const [configOpenEnvId, setConfigOpenEnvId] = useState<string | null>(null);
   const [logsByEnv, setLogsByEnv] = useState<Record<string, DeploymentLogState>>({});
   const [metricsByEnv, setMetricsByEnv] = useState<Record<string, DeploymentMetricsState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeploymentEnvironment | null>(null);
@@ -393,12 +394,17 @@ export function ProjectDeployments() {
           {sortedEnvironments.map((env) => (
             <DeploymentEnvironmentCard
               key={env.id}
+              projectId={projectId}
               env={env}
               profiles={profiles}
               policySaving={policySaving}
               logState={logsByEnv[env.id]}
               metricsState={metricsByEnv[env.id]}
               logsOpen={logsOpenEnvId === env.id}
+              configOpen={configOpenEnvId === env.id}
+              onConfigToggle={(target) =>
+                setConfigOpenEnvId((current) => (current === target.id ? null : target.id))
+              }
               onPolicyEnabledChange={(target, enabled) =>
                 void handlePolicyEnabledChange(target, enabled)
               }
