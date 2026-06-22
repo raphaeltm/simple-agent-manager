@@ -19,16 +19,16 @@ As a result, callers that construct or mutate an `UnresolvedManifest` directly c
 
 ## Implementation Checklist
 
-- [ ] Update `packages/shared/src/compose-parser/resolve.ts` to use canonical `validateManifest()` for the final resolved object.
-- [ ] Preserve the existing `ComposeResolveResult` error shape and path/message formatting.
-- [ ] Add focused resolver regression tests for route references to missing services.
-- [ ] Add focused resolver regression tests for service volumes referencing missing top-level volumes.
-- [ ] Add focused resolver regression tests for preFlight hooks referencing missing services.
-- [ ] Update stale round-trip test naming/comment language to describe canonical deployment-manifest validation, including semantic cross-reference validation.
-- [ ] Add the required bug-fix post-mortem/process-fix record for this validation-boundary bug.
-- [ ] Run `pnpm --filter @simple-agent-manager/shared test -- deployment-manifest compose-parser compose-round-trip`.
-- [ ] Run `pnpm --filter @simple-agent-manager/shared lint`.
-- [ ] Run `pnpm --filter @simple-agent-manager/shared typecheck`.
+- [x] Update `packages/shared/src/compose-parser/resolve.ts` to use canonical `validateManifest()` for the final resolved object.
+- [x] Preserve the existing `ComposeResolveResult` error shape and path/message formatting.
+- [x] Add focused resolver regression tests for route references to missing services.
+- [x] Add focused resolver regression tests for service volumes referencing missing top-level volumes.
+- [x] Add focused resolver regression tests for preFlight hooks referencing missing services.
+- [x] Update stale round-trip test naming/comment language to describe canonical deployment-manifest validation, including semantic cross-reference validation.
+- [x] Add the required bug-fix post-mortem/process-fix record for this validation-boundary bug.
+- [x] Run `pnpm --filter @simple-agent-manager/shared test -- deployment-manifest compose-parser compose-round-trip`.
+- [x] Run `pnpm --filter @simple-agent-manager/shared lint`.
+- [x] Run `pnpm --filter @simple-agent-manager/shared typecheck`.
 
 ## Acceptance Criteria
 

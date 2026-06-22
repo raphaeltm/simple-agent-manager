@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ImageResolver } from '../../src/compose-parser';
+import type { ImageResolver, UnresolvedManifest } from '../../src/compose-parser';
 import { DENIED_SERVICE_FIELDS, DENIED_TOP_LEVEL_FIELDS, isDigestReference, parseCompose, resolveManifest } from '../../src/compose-parser';
 
 // =============================================================================
@@ -59,6 +59,26 @@ x-sam-routes:
 const FAKE_DIGEST = 'sha256:' + 'a'.repeat(64);
 
 const mockResolver: ImageResolver = vi.fn().mockResolvedValue(FAKE_DIGEST);
+
+function unresolvedManifest(overrides: Partial<UnresolvedManifest> = {}): UnresolvedManifest {
+  return {
+    version: 1,
+    services: {
+      web: {
+        image: {
+          registry: 'ghcr.io',
+          repository: 'org/app',
+          reference: 'v1.0',
+        },
+        env: {},
+        volumes: [],
+      },
+    },
+    volumes: {},
+    routes: [{ service: 'web', port: 80, mode: 'public' }],
+    ...overrides,
+  };
+}
 
 // =============================================================================
 // Acceptance: typical web-app compose.yaml
@@ -1091,6 +1111,71 @@ x-sam-routes:
 
     expect(resolved.manifest.services['web']!.image.digest).toBe('sha256:' + 'a'.repeat(64));
     expect(resolved.manifest.services['worker']!.image.digest).toBe('sha256:' + 'b'.repeat(64));
+  });
+
+  it('rejects a resolved manifest with a route targeting a missing service', async () => {
+    const resolved = await resolveManifest(
+      unresolvedManifest({
+        routes: [{ service: 'api', port: 80, mode: 'public' }],
+      }),
+      mockResolver,
+    );
+
+    expect(resolved.success).toBe(false);
+    if (resolved.success) return;
+    expect(resolved.errors).toContainEqual({
+      path: 'routes[0].service',
+      message: 'Route references service "api" which is not declared in "services". Declared services: web',
+    });
+  });
+
+  it('rejects a resolved manifest with a service volume missing from top-level volumes', async () => {
+    const resolved = await resolveManifest(
+      unresolvedManifest({
+        services: {
+          web: {
+            image: {
+              registry: 'ghcr.io',
+              repository: 'org/app',
+              reference: 'v1.0',
+            },
+            env: {},
+            volumes: [{ name: 'data', mountPath: '/data' }],
+          },
+        },
+        volumes: {},
+      }),
+      mockResolver,
+    );
+
+    expect(resolved.success).toBe(false);
+    if (resolved.success) return;
+    expect(resolved.errors).toContainEqual({
+      path: 'services.web.volumes[0].name',
+      message: 'Volume "data" is not declared in "volumes". Declared volumes: (none)',
+    });
+  });
+
+  it('rejects a resolved manifest with a preFlight hook targeting a missing service', async () => {
+    const resolved = await resolveManifest(
+      unresolvedManifest({
+        hooks: {
+          preFlight: {
+            service: 'worker',
+            command: ['npm', 'run', 'migrate'],
+            timeoutSeconds: 120,
+          },
+        },
+      }),
+      mockResolver,
+    );
+
+    expect(resolved.success).toBe(false);
+    if (resolved.success) return;
+    expect(resolved.errors).toContainEqual({
+      path: 'hooks.preFlight.service',
+      message: 'Hook references service "worker" which is not declared in "services". Declared services: web',
+    });
   });
 });
 
