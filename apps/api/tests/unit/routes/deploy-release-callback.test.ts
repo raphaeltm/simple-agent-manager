@@ -13,6 +13,7 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
 });
 const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
+const mockLoadDeploymentInterpolationEnv = vi.fn().mockResolvedValue({ values: {} });
 const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
@@ -55,6 +56,16 @@ vi.mock('../../../src/services/registry-credentials', () => ({
 vi.mock('../../../src/routes/deployment-releases', () => ({
   getEncryptionKey: () => 'test-encryption-key',
   loadResolvedSecrets: (...args: unknown[]) => mockLoadResolvedSecrets(...args),
+}));
+
+// The /deployment-env callback decrypts the environment's full interpolation
+// env (plaintext variables + decrypted secret values) via this service. Mock it
+// so the route is exercised without a real encrypted D1 row; the tests assert
+// the route forwards the decrypted values to the requesting node and never logs
+// them.
+vi.mock('../../../src/services/deployment-environment-config', () => ({
+  loadDeploymentInterpolationEnv: (...args: unknown[]) =>
+    mockLoadDeploymentInterpolationEnv(...args),
 }));
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
@@ -182,6 +193,8 @@ describe('deploy release callback route', () => {
     mockMintProjectRegistryCredential.mockReset();
     mockLoadResolvedSecrets.mockReset();
     mockLoadResolvedSecrets.mockResolvedValue({});
+    mockLoadDeploymentInterpolationEnv.mockReset();
+    mockLoadDeploymentInterpolationEnv.mockResolvedValue({ values: {} });
     mockOrderBy.mockReset();
     mockOrderBy.mockResolvedValue([]);
     mockSignDeployPayload.mockResolvedValue('signed-payload');
@@ -516,6 +529,193 @@ describe('deploy release callback route', () => {
 
     console.log = origConsoleLog;
     console.info = origConsoleInfo;
+  });
+});
+
+/**
+ * GET /api/nodes/:id/deployment-env — the highest-sensitivity deploy callback.
+ *
+ * It decrypts an environment's FULL interpolation env (plaintext variables AND
+ * decrypted secret values) and returns it to the requesting deployment node so
+ * the VM agent can interpolate `${SAM_SECRET_*}` placeholders at compose-apply
+ * time. The boundary contract these tests pin:
+ *   - only a node-scoped callback token whose `workspace` matches the node id
+ *     may reach the decrypt path (scope/identity gates),
+ *   - the environment lookup is joined on BOTH nodeId AND the node's owning
+ *     userId, so a token for one node cannot read another node's (or another
+ *     user's) environment config (IDOR),
+ *   - decrypted secret values are forwarded to the node but never logged.
+ */
+describe('deployment-env callback route', () => {
+  function requestDeploymentEnv(
+    path = '/api/nodes/node-deploy-1/deployment-env?environmentId=env-1'
+  ) {
+    return createTestApp().request(
+      path,
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env()
+    );
+  }
+
+  beforeEach(() => {
+    mockLimit.mockReset();
+    mockVerifyCallbackToken.mockClear();
+    mockVerifyCallbackToken.mockResolvedValue({
+      workspace: 'node-deploy-1',
+      type: 'callback',
+      scope: 'node',
+    });
+    mockLoadDeploymentInterpolationEnv.mockReset();
+    mockLoadDeploymentInterpolationEnv.mockResolvedValue({ values: {} });
+    vi.unstubAllGlobals();
+  });
+
+  it('returns the decrypted interpolation env and configUpdatedAt to the owning node', async () => {
+    mockLimit
+      // node lookup → node belongs to user-1
+      .mockResolvedValueOnce([{ userId: 'user-1' }])
+      // env lookup (joined on nodeId + owner userId) → found
+      .mockResolvedValueOnce([{ id: 'env-1', configUpdatedAt: '2026-06-22T10:00:00.000Z' }]);
+    mockLoadDeploymentInterpolationEnv.mockResolvedValueOnce({
+      values: {
+        PUBLIC_APP_DOMAIN: 'app.example.com',
+        SAM_SECRET_API_KEY: 'super-secret-value',
+      },
+    });
+
+    const response = await requestDeploymentEnv();
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body).toEqual({
+      environmentId: 'env-1',
+      interpolationEnv: {
+        PUBLIC_APP_DOMAIN: 'app.example.com',
+        SAM_SECRET_API_KEY: 'super-secret-value',
+      },
+      configUpdatedAt: '2026-06-22T10:00:00.000Z',
+    });
+    // Decryption ran with the environment id and the server encryption key.
+    expect(mockLoadDeploymentInterpolationEnv).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      'test-encryption-key'
+    );
+  });
+
+  it('returns configUpdatedAt: null when the environment has never been configured', async () => {
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1' }])
+      .mockResolvedValueOnce([{ id: 'env-1', configUpdatedAt: null }]);
+    mockLoadDeploymentInterpolationEnv.mockResolvedValueOnce({ values: {} });
+
+    const response = await requestDeploymentEnv();
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.configUpdatedAt).toBeNull();
+    expect(body.interpolationEnv).toEqual({});
+  });
+
+  it('rejects with 400 when environmentId is missing', async () => {
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deployment-env',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env()
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      message: 'Missing required query parameter: environmentId',
+    });
+    // Identity verified, but no DB read or decrypt happens without an env id.
+    expect(mockLimit).not.toHaveBeenCalled();
+    expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
+  });
+
+  it('rejects with 404 when the node does not exist', async () => {
+    mockLimit.mockResolvedValueOnce([]);
+
+    const response = await requestDeploymentEnv();
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ message: 'Node not found' });
+    expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 (not the config) when the environment belongs to a different node or user (IDOR)', async () => {
+    mockLimit
+      // node exists and is owned by user-1
+      .mockResolvedValueOnce([{ userId: 'user-1' }])
+      // env lookup joined on nodeId + owner userId returns nothing → cross-node
+      // or cross-user request
+      .mockResolvedValueOnce([]);
+
+    const response = await requestDeploymentEnv(
+      '/api/nodes/node-deploy-1/deployment-env?environmentId=env-other'
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ message: 'Deployment environment not found' });
+    // Critically: the decrypt path is never reached for an unauthorized env.
+    expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-node-scoped callback token with 403 before any DB read', async () => {
+    mockVerifyCallbackToken.mockRejectedValueOnce(
+      new Error("Token scope 'none' does not match expected 'node'")
+    );
+
+    const response = await requestDeploymentEnv();
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ message: 'Insufficient token scope' });
+    expect(mockLimit).not.toHaveBeenCalled();
+    expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
+  });
+
+  it('rejects with 401 when a node token is presented for a different node', async () => {
+    // Valid node-scoped token, but minted for a different node.
+    mockVerifyCallbackToken.mockResolvedValueOnce({
+      workspace: 'node-other',
+      type: 'callback',
+      scope: 'node',
+    });
+
+    const response = await requestDeploymentEnv();
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({
+      message: 'Callback token does not match node',
+    });
+    expect(mockLimit).not.toHaveBeenCalled();
+    expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
+  });
+
+  it('never writes decrypted secret values to the log', async () => {
+    const logEntries: Array<Record<string, unknown>> = [];
+    const origLog = console.log;
+    const origInfo = console.info;
+    const origError = console.error;
+    console.log = (...args: unknown[]) => logEntries.push({ args });
+    console.info = (...args: unknown[]) => logEntries.push({ args });
+    console.error = (...args: unknown[]) => logEntries.push({ args });
+
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1' }])
+      .mockResolvedValueOnce([{ id: 'env-1', configUpdatedAt: '2026-06-22T10:00:00.000Z' }]);
+    mockLoadDeploymentInterpolationEnv.mockResolvedValueOnce({
+      values: { SAM_SECRET_API_KEY: 'super-secret-value' },
+    });
+
+    const response = await requestDeploymentEnv();
+    expect(response.status).toBe(200);
+
+    console.log = origLog;
+    console.info = origInfo;
+    console.error = origError;
+
+    expect(JSON.stringify(logEntries)).not.toContain('super-secret-value');
   });
 });
 
