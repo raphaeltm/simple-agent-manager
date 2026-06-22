@@ -66,9 +66,9 @@ Source idea: `01KVQANNQPBF4PVJR060VYKNG5` ("App deployments: per-environment Com
   - [x] Separate resolved build inventory from placeholder-preserving deploy template capture.
   - [x] Capture stderr on successful compose commands and detect missing-variable warnings robustly.
   - [x] Reject secret references in build/image/publish-control fields; preserve placeholders in stored release manifests.
-- [ ] Update compose-publish apply transform:
+- [x] Update compose-publish apply transform:
   - [x] Preserve interpolation placeholders in deploy-time service fields.
-  - [ ] Reject interpolated container ports with actionable diagnostics while allowing host ports SAM rewrites.
+  - [x] Reject interpolated container ports with actionable diagnostics while allowing host ports SAM rewrites.
   - [x] Attach current interpolation env in compose-publish deploy callback branch.
 - [ ] Add deployment UI:
   - [x] Add a compact Configuration summary row/panel to `DeploymentEnvironmentCard`.
@@ -98,7 +98,7 @@ Source idea: `01KVQANNQPBF4PVJR060VYKNG5` ("App deployments: per-environment Com
 - [x] Callback/apply tests proving placeholder YAML, attached interpolation env, no decrypted secrets in Compose YAML, and signature changes when env changes.
 - [x] Renderer tests for legacy explicit secret refs, generated internal variable names, missing refs, and preview parity.
 - [x] Go tests for signing hash parity, tamper rejection, env propagation to compose commands, redaction, disk placeholder persistence, reconcile/teardown fetch, and cleanup fallback.
-- [ ] Compose-publish tests for non-secret build env, no secret env to build commands, placeholder-preserving capture, missing-variable warning detection, secret-in-build rejection, and route-port diagnostics.
+- [x] Compose-publish tests for non-secret build env, no secret env to build commands, placeholder-preserving capture, missing-variable warning detection, secret-in-build rejection, and route-port diagnostics.
 - [x] UI component and Playwright tests for configuration summary/panel, many rows, long keys/values, validation errors, masked secrets, loading/error states, keyboard/focus behavior, and 320/375px no-overflow.
 - [x] Public docs build.
 - [ ] Full local quality suite, specialist review, staging deploy, real VM-agent refresh/provisioning verification, PR CI, merge, and production deploy monitoring per `/do`.
