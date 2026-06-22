@@ -33,33 +33,51 @@ Required tools:
 
 ## Implementation Checklist
 
-- [ ] Inspect current parent branch MCP registration and schema/handler patterns.
-- [ ] Inspect deployment environment routes/services for access checks, config CRUD, and logs.
-- [ ] Design tool names/descriptions/input schemas with narrow project/environment scoping.
-- [ ] Implement `list_deployment_environments` for accessible environments.
-- [ ] Implement `read_deployment_logs` for accessible environments/deployments with existing log filters.
-- [ ] Implement `list_deployment_environment_config` with plaintext variable values and masked secret metadata only.
-- [ ] Implement `set_deployment_environment_config` for variables and secrets, preserving existing validation/encryption/rate-limit behavior.
-- [ ] Ensure every handler verifies project/session/agent access and never exposes decrypted secret values.
-- [ ] Add or update MCP tests covering success paths, unauthorized access, missing resources, secret masking, var writes, secret writes, and log reads.
-- [ ] Run focused tests and quality checks.
-- [ ] Run specialist review before archiving the task.
+- [x] Inspect current parent branch MCP registration and schema/handler patterns.
+- [x] Inspect deployment environment routes/services for access checks, config CRUD, and logs.
+- [x] Design tool names/descriptions/input schemas with narrow project/environment scoping.
+- [x] Implement `list_deployment_environments` for accessible environments.
+- [x] Implement `read_deployment_logs` for accessible environments/deployments with existing log filters.
+- [x] Implement `list_deployment_environment_config` with plaintext variable values and masked secret metadata only.
+- [x] Implement `set_deployment_environment_config` for variables and secrets, preserving existing validation/encryption/rate-limit behavior.
+- [x] Ensure every handler verifies project/session/agent access and never exposes decrypted secret values.
+- [x] Add or update MCP tests covering success paths, unauthorized access, missing resources, secret masking, var writes, secret writes, and log reads.
+- [x] Run focused tests and quality checks.
+- [x] Run specialist review before archiving the task.
 - [ ] Open a stacked PR based on PR #1381.
 
 ## Acceptance Criteria
 
-- [ ] Agents can list deployment environments they are authorized to access.
-- [ ] Agents can read logs only for deployment environments/deployments they are authorized to access.
-- [ ] Agents can list environment config for authorized environments, including non-secret values and secret keys/metadata without decrypted values.
-- [ ] Agents can set variables and secrets for authorized environments using existing config validation and encrypted storage paths.
-- [ ] Unauthorized project/environment access returns MCP errors without leaking whether inaccessible resources exist beyond existing API behavior.
-- [ ] No MCP tool returns decrypted secret values, raw encrypted payloads, or sensitive values in error details.
+- [x] Agents can list deployment environments they are authorized to access.
+- [x] Agents can read logs only for deployment environments/deployments they are authorized to access.
+- [x] Agents can list environment config for authorized environments, including non-secret values and secret keys/metadata without decrypted values.
+- [x] Agents can set variables and secrets for authorized environments using existing config validation and encrypted storage paths.
+- [x] Unauthorized project/environment access returns MCP errors without leaking whether inaccessible resources exist beyond existing API behavior.
+- [x] No MCP tool returns decrypted secret values, raw encrypted payloads, or sensitive values in error details.
 - [ ] The PR is stacked on #1381 and does not modify the parent branch.
 
 ## Test Plan
 
-- [ ] MCP unit/worker tests for each new tool.
-- [ ] Realistic D1-backed or route-stack tests for environment access and config rows where existing patterns support it.
-- [ ] Regression tests for secret masking and secret write behavior.
-- [ ] Focused `mcp.test.ts` or equivalent MCP test suite.
-- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` or documented focused equivalents if the full suite is blocked by pre-existing failures.
+- [x] MCP unit/worker tests for each new tool.
+- [x] Realistic D1-backed or route-stack tests for environment access and config rows where existing patterns support it.
+- [x] Regression tests for secret masking and secret write behavior.
+- [x] Focused `mcp.test.ts` or equivalent MCP test suite.
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` or documented focused equivalents if the full suite is blocked by pre-existing failures.
+
+## Review Notes
+
+- Security review: new handlers call `assertAgentDeploymentAllowed` before config/log access, scope environment rows to `tokenData.projectId`, proxy logs only through owned running nodes, encrypt secret writes through `upsertDeploymentEnvironmentConfigVar`, and return masked config responses from `buildDeploymentEnvironmentConfigResponse`.
+- Cloudflare/D1 review: no migrations or binding changes are needed; new D1 access uses existing Drizzle tables and existing deployment config storage.
+- Test review: `apps/api/tests/unit/mcp-deployment-tools.test.ts` exercises handlers through real deployment-control/config code with a realistic D1 boundary mock, plus node-agent HTTP boundary assertions.
+- Constitution review: new deployment log limits use env-overridable defaults via `MCP_DEPLOYMENT_LOG_DEFAULT_LIMIT` and `MCP_DEPLOYMENT_LOG_MAX_LIMIT`.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/api test -- --run mcp-deployment-tools mcp-build-and-publish mcp`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm --filter @simple-agent-manager/api test` (339 files, 5,583 tests)
+- `pnpm --filter @simple-agent-manager/api build`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm --filter @simple-agent-manager/api test:workers -- --run deployment-mcp-tools` was attempted while developing the first Worker-pool test version, but the Worker harness crashed with repeated `workerd` segmentation faults before assertions. That unstable test file was replaced by focused Node-side MCP handler coverage.

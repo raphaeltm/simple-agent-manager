@@ -228,7 +228,7 @@ export async function reconcileDeploymentReleaseStatuses(
   }
 }
 
-async function getTaskAgentProfileId(
+export async function getTaskAgentProfileId(
   db: ReturnType<typeof drizzle<typeof schema>>,
   taskId: string
 ): Promise<string | null> {
@@ -239,6 +239,20 @@ async function getTaskAgentProfileId(
     .where(eq(schema.tasks.id, taskId))
     .limit(1);
   return rows[0]?.agentProfileHint ?? null;
+}
+
+export function isDeploymentPolicyAllowedForProfile(
+  policy: DeploymentAgentPolicy,
+  taskAgentProfileId: string | null | undefined
+): boolean {
+  if (!policy.agentDeployEnabled) {
+    return false;
+  }
+  const normalizedProfileId = taskAgentProfileId?.trim() || null;
+  return (
+    policy.allowedDeployProfileIds.length === 0 ||
+    (normalizedProfileId !== null && policy.allowedDeployProfileIds.includes(normalizedProfileId))
+  );
 }
 
 export async function assertAgentDeploymentAllowed(
@@ -308,18 +322,16 @@ export async function assertAgentDeploymentAllowedForProfile(
 
   const normalizedProfileId = taskAgentProfileId?.trim() || null;
 
-  if (policy.allowedDeployProfileIds.length > 0) {
-    if (!normalizedProfileId || !policy.allowedDeployProfileIds.includes(normalizedProfileId)) {
-      log.warn('deployment_agent_policy.denied_profile', {
-        projectId,
-        environmentName,
-        taskId: context.taskId ?? null,
-        taskProfileId: normalizedProfileId,
-      });
-      return {
-        error: `This agent profile is not allowed to deploy to environment '${environmentName}'.`,
-      };
-    }
+  if (!isDeploymentPolicyAllowedForProfile(policy, normalizedProfileId)) {
+    log.warn('deployment_agent_policy.denied_profile', {
+      projectId,
+      environmentName,
+      taskId: context.taskId ?? null,
+      taskProfileId: normalizedProfileId,
+    });
+    return {
+      error: `This agent profile is not allowed to deploy to environment '${environmentName}'.`,
+    };
   }
 
   return { environmentId: row.id, policy, taskAgentProfileId: normalizedProfileId };

@@ -336,6 +336,8 @@ export interface Env {
   MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
+  MCP_DEPLOYMENT_LOG_DEFAULT_LIMIT?: string; // Default deployment log rows for read_deployment_logs (default: 200)
+  MCP_DEPLOYMENT_LOG_MAX_LIMIT?: string; // Max deployment log rows for read_deployment_logs (default: 1000)
   // Configurable content limits
   MAX_TASK_MESSAGE_LENGTH?: string;
   MAX_ACTIVITY_MESSAGE_LENGTH?: string;
