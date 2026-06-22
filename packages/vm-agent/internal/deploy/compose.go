@@ -29,19 +29,28 @@ func (e *Engine) composeDown(ctx context.Context, composeFile string, interpolat
 }
 
 func (e *Engine) cleanupComposeProjectByLabel(ctx context.Context) error {
-	containers, err := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+e.cfg.ComposeProjectName).Output()
+	dockerCmd := e.composeBinary()
+	containers, err := exec.CommandContext(ctx, dockerCmd, "ps", "-aq", "--filter", "label=com.docker.compose.project="+e.cfg.ComposeProjectName).Output()
 	if err != nil {
 		return fmt.Errorf("list compose project containers: %w", err)
 	}
 	ids := strings.Fields(string(containers))
 	if len(ids) > 0 {
 		args := append([]string{"rm", "-f"}, ids...)
-		if err := exec.CommandContext(ctx, "docker", args...).Run(); err != nil {
+		if err := exec.CommandContext(ctx, dockerCmd, args...).Run(); err != nil {
 			return fmt.Errorf("remove compose project containers: %w", err)
 		}
 	}
-	_ = exec.CommandContext(ctx, "docker", "network", "rm", e.cfg.ComposeProjectName+"_default").Run()
+	_ = exec.CommandContext(ctx, dockerCmd, "network", "rm", e.cfg.ComposeProjectName+"_default").Run()
 	return nil
+}
+
+func (e *Engine) composeBinary() string {
+	parts := strings.Fields(e.cfg.ComposeCmd)
+	if len(parts) == 0 {
+		return "docker"
+	}
+	return parts[0]
 }
 
 func (e *Engine) runCompose(ctx context.Context, composeFile string, interpolationEnv map[string]string, args ...string) error {
