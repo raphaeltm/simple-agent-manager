@@ -46,6 +46,7 @@ import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectSkills } from './pages/ProjectSkills';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
+import { RepositoryRebindPrototype } from './pages/repository-rebind-prototype';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
@@ -96,6 +97,7 @@ export default function App() {
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
+                <Route path="/prototype/repository-rebind" element={<RepositoryRebindPrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />

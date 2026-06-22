@@ -6,6 +6,7 @@ import {
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -22,13 +23,14 @@ import {
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
-import {
-  deleteProject,
-  updateProject,
-} from '../lib/api';
+import { deleteProject, updateProject } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
-export function ProjectSettings() {
+interface ProjectSettingsProps {
+  repositoryIdentitySection?: ReactNode;
+}
+
+export function ProjectSettings({ repositoryIdentitySection }: ProjectSettingsProps = {}) {
   const toast = useToast();
   const navigate = useNavigate();
   const { projectId, project, reload } = useProjectContext();
@@ -280,6 +282,7 @@ export function ProjectSettings() {
       </section>
 
       {/* Repository Access — additional same-installation repos for workspace tokens */}
+      {repositoryIdentitySection}
       {project && <RepositoryAccessSettings project={project} />}
 
       {/* Workspace Idle Timeout */}
