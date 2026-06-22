@@ -1168,3 +1168,111 @@ func TestSignPayload_Roundtrip(t *testing.T) {
 		t.Errorf("verification failed: %v", err)
 	}
 }
+
+// TestEngine_ApplyFailureRedactsSecretsInReportedStatus is the security crux of
+// the Compose interpolation feature: when an apply fails on a node whose compose
+// command emits a secret interpolation value to stderr, that secret must NEVER
+// appear in the error message persisted to disk state OR reported to the control
+// plane via ObservedState.ErrorMessage. The control plane surfaces this status
+// to the user, so a leak here would expose decrypted secrets in the UI.
+//
+// This is a vertical-slice test: it drives the real Engine.Apply through the real
+// composeUp -> runCompose -> newEnvRedactor path with a compose command that
+// leaks a secret, and asserts on the durable + reported failure status.
+func TestEngine_ApplyFailureRedactsSecretsInReportedStatus(t *testing.T) {
+	const secret = "supersecretvalue123" // len >= 6 so the redactor collects it
+
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	// config and pull succeed; `up` fails and prints the secret to stderr,
+	// exactly as a real `docker compose up` would when interpolation injects a
+	// secret into an image reference or build arg that then fails to pull.
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *"up -d"*)
+    echo "compose up failed: cannot pull image registry/app with token `+secret+`" >&2
+    exit 7
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     "/bin/true",
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := &ApplyPayload{
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Seq:              1,
+		ExpiresAt:        time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:      "services:\n  web:\n    image: nginx\n",
+		InterpolationEnv: map[string]string{"SAM_SECRET_TOKEN": secret},
+		Routes: []RouteTarget{{
+			Hostname:      "r1-web-env.apps.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
+		}},
+	}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	err = engine.Apply(context.Background(), payload)
+	if err == nil {
+		t.Fatal("expected apply to fail when compose up fails")
+	}
+	// The error returned to the caller must also be scrubbed.
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("returned error leaked the secret: %v", err)
+	}
+
+	// Durable failure state must not contain the secret.
+	state, err := disk.ReadState(1)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if state.Status != StatusFailedInitial {
+		t.Fatalf("expected failed-initial state, got %s", state.Status)
+	}
+	if strings.Contains(state.ErrorMessage, secret) {
+		t.Fatalf("persisted state.ErrorMessage leaked the secret: %q", state.ErrorMessage)
+	}
+	if !strings.Contains(state.ErrorMessage, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] marker in persisted error, got %q", state.ErrorMessage)
+	}
+
+	// Status reported to the control plane via heartbeat must not contain the secret.
+	observed := engine.GetObserved()
+	if observed.Status != StatusFailedInitial {
+		t.Fatalf("expected observed failed-initial status, got %s", observed.Status)
+	}
+	if strings.Contains(observed.ErrorMessage, secret) {
+		t.Fatalf("reported ObservedState.ErrorMessage leaked the secret: %q", observed.ErrorMessage)
+	}
+	if !strings.Contains(observed.ErrorMessage, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] marker in reported error, got %q", observed.ErrorMessage)
+	}
+}
