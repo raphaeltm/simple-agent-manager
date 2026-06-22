@@ -21,7 +21,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { encrypt } from '../../src/services/encryption';
+import { ulid } from '../../src/lib/ulid';
 import {
   buildDeploymentEnvironmentConfigResponse,
   deleteDeploymentEnvironmentConfigVar,
@@ -29,7 +29,6 @@ import {
   loadDeploymentInterpolationEnv,
   upsertDeploymentEnvironmentConfigVar,
 } from '../../src/services/deployment-environment-config';
-import { ulid } from '../../src/lib/ulid';
 
 const PREFIX = `decfg-${Date.now()}`;
 const USER_ID = `${PREFIX}-user`;
