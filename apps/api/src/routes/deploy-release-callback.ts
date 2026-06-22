@@ -22,8 +22,9 @@ import {
   DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
   DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB,
 } from '../services/compose-publish-apply';
-import { collectSecretNames, renderCompose } from '../services/compose-renderer';
+import { collectSecretNames, renderComposeForApply } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
+import { loadDeploymentInterpolationEnv } from '../services/deployment-environment-config';
 import {
   buildDeploymentRouteTargets,
   collectEnvironmentRouteHostnames,
@@ -151,6 +152,12 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   //    re-rendered from the manifest with secret injection.
   let routes: DeploymentRouteTarget[];
   let composeYaml: string;
+  let interpolationEnv: Record<string, string> = {};
+  const environmentConfig = await loadDeploymentInterpolationEnv(
+    db,
+    environmentId,
+    getEncryptionKey(c.env)
+  );
 
   if (release.source === 'compose-publish') {
     const submission = JSON.parse(release.manifest);
@@ -171,6 +178,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     });
     routes = applied.routes;
     composeYaml = applied.composeYaml;
+    interpolationEnv = environmentConfig.values;
 
     if (applied.warnings.length > 0) {
       log.warn('deploy_release.compose_publish_warnings', {
@@ -223,13 +231,17 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
         ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
         : {};
 
-    // Render the Compose YAML from the manifest
-    composeYaml = renderCompose(manifest, {
+    // Render the Compose YAML from the manifest. Secret values are supplied as
+    // transient interpolation env, not materialized into the compose file.
+    const rendered = renderComposeForApply(manifest, {
       environmentId,
       releaseId: release.id,
       routeTargets: routes,
       resolvedSecrets,
+      baseInterpolationEnv: environmentConfig.values,
     });
+    composeYaml = rendered.composeYaml;
+    interpolationEnv = rendered.interpolationEnv;
   }
 
   const cleanupStaleRoutes = async () => {
@@ -295,6 +307,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       expiresAt,
       composeYaml,
       routes,
+      interpolationEnv,
     },
     c.env
   );
@@ -332,6 +345,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     releaseId: release.id,
     routeCount: routes.length,
+    interpolationEnvKeyCount: Object.keys(interpolationEnv).length,
     hasRegistryCredentials: registryCredentials !== null,
   });
 
@@ -341,6 +355,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     expiresAt,
     composeYaml,
+    interpolationEnv,
     routes,
     signature,
     registryCredentials,

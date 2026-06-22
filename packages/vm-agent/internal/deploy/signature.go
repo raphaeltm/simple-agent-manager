@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -106,17 +107,33 @@ func buildSignableBytes(payload *ApplyPayload) []byte {
 	}
 	routesBytes, _ := json.Marshal(routes)
 	routesHash := sha256.Sum256(routesBytes)
+	interpolationEnvHash := hashInterpolationEnv(payload.InterpolationEnv)
 	signable := SignablePayload{
-		EnvironmentID: payload.EnvironmentID,
-		NodeID:        payload.NodeID,
-		Seq:           payload.Seq,
-		ExpiresAt:     payload.ExpiresAt,
-		ComposeHash:   hex.EncodeToString(composeHash[:]),
-		RoutesHash:    hex.EncodeToString(routesHash[:]),
+		EnvironmentID:        payload.EnvironmentID,
+		NodeID:               payload.NodeID,
+		Seq:                  payload.Seq,
+		ExpiresAt:            payload.ExpiresAt,
+		ComposeHash:          hex.EncodeToString(composeHash[:]),
+		RoutesHash:           hex.EncodeToString(routesHash[:]),
+		InterpolationEnvHash: interpolationEnvHash,
 	}
 	// JSON marshal with sorted keys (Go's encoding/json sorts by struct field order)
 	b, _ := json.Marshal(signable)
 	return b
+}
+
+func hashInterpolationEnv(env map[string]string) string {
+	type entry [2]string
+	entries := make([]entry, 0, len(env))
+	for key, value := range env {
+		entries = append(entries, entry{key, value})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i][0] < entries[j][0]
+	})
+	bytes, _ := json.Marshal(entries)
+	hash := sha256.Sum256(bytes)
+	return hex.EncodeToString(hash[:])
 }
 
 // SignPayload signs an apply payload with an Ed25519 private key.

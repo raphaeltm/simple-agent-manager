@@ -1854,6 +1854,7 @@ export const deploymentEnvironments = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
     secretsUpdatedAt: text('secrets_updated_at'),
+    configUpdatedAt: text('config_updated_at'),
     /** Latest deployment state observed from the authenticated deployment node. */
     observedAppliedSeq: integer('observed_applied_seq'),
     observedStatus: text('observed_status'),
@@ -1920,6 +1921,48 @@ export const deploymentSecrets = sqliteTable(
 
 export type DeploymentSecretRow = typeof deploymentSecrets.$inferSelect;
 export type NewDeploymentSecretRow = typeof deploymentSecrets.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT ENVIRONMENT CONFIG VARS
+// =============================================================================
+
+/** Per-deployment-environment Compose interpolation variables.
+ *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
+export const deploymentEnvironmentConfigVars = sqliteTable(
+  'deployment_environment_config_vars',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    envKey: text('env_key').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext value. */
+    storedValue: text('stored_value').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (value stored in plaintext). */
+    valueIv: text('value_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envKeyUnique: uniqueIndex('idx_deployment_environment_config_vars_env_key').on(
+      table.environmentId,
+      table.envKey,
+    ),
+    environmentIdIdx: index('idx_deployment_environment_config_vars_environment_id').on(
+      table.environmentId,
+    ),
+  }),
+);
+
+export type DeploymentEnvironmentConfigVarRow =
+  typeof deploymentEnvironmentConfigVars.$inferSelect;
+export type NewDeploymentEnvironmentConfigVarRow =
+  typeof deploymentEnvironmentConfigVars.$inferInsert;
 
 // =============================================================================
 // DEPLOYMENT RELEASES
