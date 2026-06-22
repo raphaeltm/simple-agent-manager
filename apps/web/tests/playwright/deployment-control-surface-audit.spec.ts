@@ -584,13 +584,20 @@ test.describe('Deployment control surface audit — detail page', () => {
     await screenshot(page, 'deployment-detail-logs-long-message');
   });
 
-  test('configuration tab renders secrets management', async ({ page }) => {
+  test('configuration tab renders variables and secrets', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=config`);
 
-    await expect(page.getByRole('heading', { name: 'Secrets' })).toBeVisible();
-    await expect(page.locator('#config-secret-name')).toBeVisible();
-    await expect(page.locator('#config-secret-value')).toBeVisible();
+    const panel = page.locator(`#deployment-config-${ENV_ID}`);
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText('Configuration')).toBeVisible();
+
+    // Plaintext Variable shows its value; secret value stays hidden.
+    await expect(panel.getByText('PUBLIC_APP_DOMAIN')).toBeVisible();
+    await expect(panel.locator('span').filter({ hasText: /^Variable$/ })).toBeVisible();
+    await expect(panel.getByText('DATABASE_URL')).toBeVisible();
+    await expect(panel.locator('span').filter({ hasText: /^Secret$/ })).toBeVisible();
+    await expect(panel.getByText('Hidden after save')).toBeVisible();
 
     await screenshot(page, 'deployment-detail-config');
     await assertNoOverflow(page);
@@ -762,12 +769,11 @@ test.describe('Deployment control surface — mobile', () => {
 
   test('configuration panel on mobile — no overflow', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/deployments`);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=config`);
 
-    const stagingCard = environmentCard(page, 'staging');
-    await stagingCard.getByRole('button', { name: 'Config' }).click();
-    await expect(stagingCard.getByText('PUBLIC_APP_DOMAIN')).toBeVisible();
-    await expect(stagingCard.getByText('Hidden after save')).toBeVisible();
+    const panel = page.locator(`#deployment-config-${ENV_ID}`);
+    await expect(panel.getByText('PUBLIC_APP_DOMAIN')).toBeVisible();
+    await expect(panel.getByText('Hidden after save')).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-config-panel');
     await assertNoOverflow(page);

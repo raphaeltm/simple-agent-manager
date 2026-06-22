@@ -157,6 +157,7 @@ export function ProjectDeployments() {
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
+          {sortedEnvironments.map((env) => (
             <DeploymentEnvironmentSummaryCard key={env.id} env={env} />
           ))}
         </div>

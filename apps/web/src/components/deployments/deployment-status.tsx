@@ -1,3 +1,4 @@
+import type { AgentProfile } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 import { AlertTriangle } from 'lucide-react';
 

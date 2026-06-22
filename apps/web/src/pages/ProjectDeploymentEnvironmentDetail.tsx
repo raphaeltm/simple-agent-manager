@@ -20,7 +20,7 @@ import {
   ReleaseAttribution,
   StatusDimensions,
 } from '../components/deployments/deployment-status';
-import { DeploymentConfigPanel } from '../components/deployments/DeploymentConfigPanel';
+import { DeploymentEnvironmentConfigPanel } from '../components/deployments/DeploymentEnvironmentConfigPanel';
 import {
   type DeploymentLogState,
   LogsPanel,
@@ -386,9 +386,7 @@ export function ProjectDeploymentEnvironmentDetail() {
       )}
 
       {activeTab === 'config' && (
-        <section>
-          <DeploymentConfigPanel projectId={projectId} environmentId={env.id} />
-        </section>
+        <DeploymentEnvironmentConfigPanel projectId={projectId} environmentId={env.id} open />
       )}
 
       {activeTab === 'policy' && (
