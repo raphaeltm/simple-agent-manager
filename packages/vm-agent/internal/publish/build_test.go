@@ -1,7 +1,10 @@
 package publish
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,6 +53,48 @@ func TestValidateNoSecretRefsInBuildFieldsAllowsDeployOnlyReference(t *testing.T
 
 	if err := validateNoSecretRefsInBuildFields(cfg, []string{"DATABASE_URL"}); err != nil {
 		t.Fatalf("non-secret build/image references should be allowed: %v", err)
+	}
+}
+
+func TestBuildComposeCommandEnvAddsSecretPlaceholders(t *testing.T) {
+	buildEnv := map[string]string{
+		"PUBLIC_TAG":   "v1",
+		"DATABASE_URL": "should-not-leak",
+	}
+
+	env := buildComposeCommandEnv(buildEnv, []string{"DATABASE_URL", "API_TOKEN", "DATABASE_URL", " "})
+
+	if env["PUBLIC_TAG"] != "v1" {
+		t.Fatalf("PUBLIC_TAG = %q, want v1", env["PUBLIC_TAG"])
+	}
+	if env["DATABASE_URL"] != secretInterpolationPlaceholder {
+		t.Fatalf("DATABASE_URL = %q, want placeholder", env["DATABASE_URL"])
+	}
+	if env["API_TOKEN"] != secretInterpolationPlaceholder {
+		t.Fatalf("API_TOKEN = %q, want placeholder", env["API_TOKEN"])
+	}
+	if buildEnv["DATABASE_URL"] != "should-not-leak" {
+		t.Fatalf("buildComposeCommandEnv mutated buildEnv: %#v", buildEnv)
+	}
+}
+
+func TestRunComposeAllowsConfiguredSecretRuntimeReference(t *testing.T) {
+	dir := t.TempDir()
+	compose := filepath.Join(dir, "fake-compose")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ -z \"${SAM_RUNTIME_SECRET_FOR_TEST+x}\" ]; then",
+		"  echo 'time=\"2026-06-22T00:00:00Z\" level=warning msg=\"The \"SAM_RUNTIME_SECRET_FOR_TEST\" variable is not set. Defaulting to a blank string.\"' >&2",
+		"fi",
+		"printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"}}}}'",
+	}, "\n")
+	if err := os.WriteFile(compose, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake compose: %v", err)
+	}
+
+	env := buildComposeCommandEnv(nil, []string{"SAM_RUNTIME_SECRET_FOR_TEST"})
+	if _, err := runCompose(context.Background(), compose, dir, env, "config", "--format", "json"); err != nil {
+		t.Fatalf("runCompose should allow configured secret runtime interpolation: %v", err)
 	}
 }
 

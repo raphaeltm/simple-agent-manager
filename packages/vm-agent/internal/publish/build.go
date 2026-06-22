@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+const secretInterpolationPlaceholder = "__SAM_CONFIGURED_SECRET_PLACEHOLDER__"
+
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
 	// WorkspaceDir is the host path of the cloned repo (the compose project
@@ -86,7 +88,19 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		"composeCmd", composeCmd,
 		"reference", opts.Reference)
 
-	cfg, err := loadComposeConfig(ctx, composeCmd, opts.WorkspaceDir, opts.BuildEnv)
+	templateCfg, err := loadComposeTemplateConfig(ctx, composeCmd, opts.WorkspaceDir)
+	if err != nil {
+		log.Error("compose template validation failed",
+			"composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir, "error", err)
+		return nil, err
+	}
+	if err := validateNoSecretRefsInBuildFields(templateCfg, opts.SecretKeys); err != nil {
+		log.Error("compose template uses deployment secrets in build-time fields", "error", err)
+		return nil, err
+	}
+
+	composeEnv := buildComposeCommandEnv(opts.BuildEnv, opts.SecretKeys)
+	cfg, err := loadComposeConfig(ctx, composeCmd, opts.WorkspaceDir, composeEnv)
 	if err != nil {
 		// `docker compose config --format json` is the validation gate. If it
 		// fails the error wraps the compose CLI stderr (invalid schema,
@@ -98,17 +112,6 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 	}
 	log.Debug("compose config validated",
 		"project", cfg.Name, "serviceCount", len(cfg.Services))
-
-	templateCfg, err := loadComposeTemplateConfig(ctx, composeCmd, opts.WorkspaceDir)
-	if err != nil {
-		log.Error("compose template validation failed",
-			"composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir, "error", err)
-		return nil, err
-	}
-	if err := validateNoSecretRefsInBuildFields(templateCfg, opts.SecretKeys); err != nil {
-		log.Error("compose template uses deployment secrets in build-time fields", "error", err)
-		return nil, err
-	}
 
 	// Only services with a `build` section produce images we re-push. Services
 	// without build (e.g. postgres:15) are pulled by the deployment node.
@@ -181,7 +184,7 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		"skippedCount", len(skipped))
 
 	log.Debug("running compose build", "composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir)
-	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, opts.BuildEnv, "build"); err != nil {
+	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, composeEnv, "build"); err != nil {
 		log.Error("compose build command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose build: %w", err)
 	}
@@ -255,6 +258,25 @@ func loadComposeTemplateConfig(ctx context.Context, composeCmd, dir string) (*co
 		return nil, fmt.Errorf("build: parse compose template json: %w", err)
 	}
 	return &cfg, nil
+}
+
+func buildComposeCommandEnv(buildEnv map[string]string, secretKeys []string) map[string]string {
+	keys := normalizedSecretKeys(secretKeys)
+	if len(buildEnv) == 0 && len(keys) == 0 {
+		return nil
+	}
+	env := make(map[string]string, len(buildEnv)+len(keys))
+	for key, value := range buildEnv {
+		env[key] = value
+	}
+	// Compose validates the whole file during build commands, including
+	// runtime-only environment fields. Secret values are never available here,
+	// so configured secret keys get non-sensitive placeholders after the
+	// template has rejected their use in image/build fields.
+	for _, key := range keys {
+		env[key] = secretInterpolationPlaceholder
+	}
+	return env
 }
 
 func validateNoSecretRefsInBuildFields(cfg *composeConfig, secretKeys []string) error {
