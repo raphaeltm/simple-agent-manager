@@ -1,4 +1,5 @@
-import { useEffect, useRef,useState } from 'react';
+import { X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface ChatSettingsData {
   model: string | null;
@@ -32,7 +33,11 @@ export function ChatSettingsPanel({
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState(settings?.permissionMode ?? 'default');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const headingId = 'chat-settings-heading';
+  const modelInputId = 'chat-settings-model';
 
   // Sync state when settings load
   useEffect(() => {
@@ -41,6 +46,15 @@ export function ChatSettingsPanel({
       setPermissionMode(settings.permissionMode ?? 'default');
     }
   }, [settings]);
+
+  // Focus management: capture previous focus, focus panel on mount, restore on close
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus();
+    };
+  }, []);
 
   // Close on Escape
   useEffect(() => {
@@ -57,6 +71,7 @@ export function ChatSettingsPanel({
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       await onSave({
         model: model.trim() || null,
@@ -64,7 +79,7 @@ export function ChatSettingsPanel({
       });
       onClose();
     } catch {
-      // Stay open on error so user can retry
+      setSaveError('Failed to save settings. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -86,6 +101,7 @@ export function ChatSettingsPanel({
       {/* Settings panel — fixed bottom sheet */}
       <div
         ref={panelRef}
+        tabIndex={-1}
         style={{
           position: 'fixed',
           bottom: 0,
@@ -101,9 +117,11 @@ export function ChatSettingsPanel({
           maxHeight: '80vh',
           overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
+          outline: 'none',
         }}
         role="dialog"
-        aria-label="Agent settings"
+        aria-modal="true"
+        aria-labelledby={headingId}
       >
         {/* Drag handle indicator */}
         <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
@@ -118,13 +136,17 @@ export function ChatSettingsPanel({
 
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="flex items-center justify-between">
-            <span style={{
-              fontSize: '1rem',
-              fontWeight: 600,
-              color: 'var(--sam-color-fg-primary, #e5e5e5)',
-            }}>
+            <h2
+              id={headingId}
+              style={{
+                fontSize: '1rem',
+                fontWeight: 600,
+                color: 'var(--sam-color-fg-primary, #e5e5e5)',
+                margin: 0,
+              }}
+            >
               Agent Settings
-            </span>
+            </h2>
             <button
               type="button"
               onClick={onClose}
@@ -136,12 +158,13 @@ export function ChatSettingsPanel({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
               }}
               aria-label="Close settings"
             >
-              <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M1 1l12 12M13 1L1 13" />
-              </svg>
+              <X size={18} />
             </button>
           </div>
 
@@ -157,8 +180,8 @@ export function ChatSettingsPanel({
           ) : (
             <>
               {/* Permission Mode */}
-              <div>
-                <label style={{
+              <fieldset style={{ border: 'none', margin: 0, padding: 0 }} role="radiogroup">
+                <legend style={{
                   display: 'block',
                   fontSize: '0.75rem',
                   color: 'var(--sam-color-fg-muted, #888)',
@@ -168,12 +191,14 @@ export function ChatSettingsPanel({
                   fontWeight: 500,
                 }}>
                   Permission Mode
-                </label>
+                </legend>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {permissionModes.map((mode) => (
                     <button
                       key={mode.value}
                       type="button"
+                      role="radio"
+                      aria-checked={permissionMode === mode.value}
                       onClick={() => setPermissionMode(mode.value)}
                       style={{
                         padding: '8px 14px',
@@ -206,22 +231,26 @@ export function ChatSettingsPanel({
                     Agent will auto-approve all actions without prompts.
                   </p>
                 )}
-              </div>
+              </fieldset>
 
               {/* Model */}
               <div>
-                <label style={{
-                  display: 'block',
-                  fontSize: '0.75rem',
-                  color: 'var(--sam-color-fg-muted, #888)',
-                  marginBottom: 8,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  fontWeight: 500,
-                }}>
+                <label
+                  htmlFor={modelInputId}
+                  style={{
+                    display: 'block',
+                    fontSize: '0.75rem',
+                    color: 'var(--sam-color-fg-muted, #888)',
+                    marginBottom: 8,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    fontWeight: 500,
+                  }}
+                >
                   Model
                 </label>
                 <input
+                  id={modelInputId}
                   type="text"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
@@ -238,6 +267,20 @@ export function ChatSettingsPanel({
                   }}
                 />
               </div>
+
+              {/* Error message */}
+              {saveError && (
+                <p
+                  role="alert"
+                  style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--sam-color-error, #ef4444)',
+                    margin: 0,
+                  }}
+                >
+                  {saveError}
+                </p>
+              )}
 
               {/* Save button */}
               <button
