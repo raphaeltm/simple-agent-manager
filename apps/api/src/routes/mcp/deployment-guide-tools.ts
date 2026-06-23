@@ -53,7 +53,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`set_deployment_environment_config(environment, key, value, isSecret?)\` | Create or update a Variable or Secret for an environment. |
 | \`build_and_publish(environment, reference?, workingDir?)\` | Build the workspace Compose stack server-side, push images with SAM-owned credentials, and record a release. This is the deploy action. |
 | \`read_deployment_logs(environment, source?, level?, container?, since?, until?, search?, cursor?, limit?)\` | Read deployment-node logs for an environment to verify the release and debug failures. |
-| \`check_dns_status()\` | Check DNS propagation and TLS validity for the workspace URL (useful when verifying public routing). |
+| \`check_dns_status()\` | Check DNS propagation and TLS validity for **this workspace's own** \`ws-*\` URL. It verifies the workspace is reachable at the Cloudflare edge — it does NOT check a deployed app's public route. |
 
 ---
 
@@ -104,7 +104,7 @@ Constraints for compose-publish releases:
 
 - Safe named volumes are preserved. **Host bind mounts, Docker socket mounts, \`tmpfs\`, external volumes, and custom volume drivers are rejected.**
 - Docker Model Runner \`provider:\` services are preserved.
-- Prefer normal \`\${VAR}\` placeholders backed by per-environment Variables and Secrets over older explicit secret references.
+- Prefer normal \`\${VAR}\` placeholders backed by per-environment Variables and Secrets over older explicit secret references. The legacy \`x-sam-secret\` syntax is still supported for compatibility, but new deployments should use \`\${VAR}\` placeholders.
 
 ### Step 4 — Build and publish (the deploy action)
 
@@ -122,8 +122,8 @@ This tool requires the named environment to be active, agent deployment to be en
 
 After publishing:
 
-- Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Use the \`source\`, \`level\`, \`container\`, \`since\`, \`search\`, and \`limit\` filters to narrow down failures. Read the logs before guessing at fixes.
-- If the app exposes a public route, call \`check_dns_status()\` to confirm DNS propagation and TLS are valid.
+- Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Use the \`source\`, \`level\`, \`container\`, \`since\`, \`until\`, \`search\`, \`cursor\`, and \`limit\` filters to narrow down failures. Read the logs before guessing at fixes.
+- Call \`check_dns_status()\` to confirm **this workspace's** \`ws-*\` URL is reachable with valid TLS at the edge. Note this checks the workspace itself, not the deployed app's public route — use \`read_deployment_logs\` to confirm the deployed containers are serving.
 
 ---
 

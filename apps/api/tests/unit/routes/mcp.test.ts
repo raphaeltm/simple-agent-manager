@@ -327,8 +327,13 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('replace_library_file');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
-      // Deployment discovery tool
+      // Deployment discovery tool — verify it advertises a zero-argument schema
       expect(toolNames).toContain('get_deployment_guide');
+      const deploymentGuideTool = body.result.tools.find(
+        (t: { name: string }) => t.name === 'get_deployment_guide',
+      );
+      expect(deploymentGuideTool.inputSchema.properties).toEqual({});
+      expect(deploymentGuideTool.inputSchema.required).toBeUndefined();
       // Trigger tools
       expect(toolNames).toContain('create_trigger');
       // Agent profile tools
@@ -493,11 +498,15 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
+      expect(body.jsonrpc).toBe('2.0');
+      expect(body.id).toBeDefined();
       expect(body.error).toBeUndefined();
       expect(body.result).toBeDefined();
       expect(body.result.content).toHaveLength(1);
       expect(body.result.content[0].type).toBe('text');
       const text = body.result.content[0].text;
+      // Preamble from handleGetDeploymentGuide (not part of the guide constant).
+      expect(text).toContain('Follow the guide below to deploy, launch, publish, ship, or release an app with SAM.');
       expect(text).toContain('SAM App Deployment Guide');
       expect(text).toContain('Agent-First Deployment Model');
       expect(text).toContain('build_and_publish');
