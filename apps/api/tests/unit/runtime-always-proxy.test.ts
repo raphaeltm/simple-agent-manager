@@ -46,7 +46,13 @@ vi.mock('drizzle-orm', async (importOriginal) => {
 });
 
 vi.mock('../../src/db/schema', () => ({
-  workspaces: { id: 'id', userId: 'userId', projectId: 'projectId' },
+  workspaces: {
+    id: 'id',
+    userId: 'userId',
+    projectId: 'projectId',
+    chatSessionId: 'chatSessionId',
+    status: 'status',
+  },
   tasks: { id: 'id', workspaceId: 'workspaceId' },
   credentials: {},
   agentSettings: {},
@@ -84,6 +90,12 @@ vi.mock('../../src/middleware/error', () => ({
       err.error = 'BAD_REQUEST';
       return err;
     },
+    conflict: (msg: string) => {
+      const err = new Error(msg) as Error & { statusCode: number; error: string };
+      err.statusCode = 409;
+      err.error = 'CONFLICT';
+      return err;
+    },
   },
 }));
 
@@ -93,27 +105,30 @@ vi.mock('../../src/routes/credentials', () => ({
   getDecryptedCredential: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock('../../src/schemas', () => ({
-  AgentTypeBodySchema: {},
-  AgentCredentialSyncSchema: {},
-  BootLogEntrySchema: {},
-  MessageBatchSchema: {},
-  jsonValidator:
-    () =>
-    async (
-      c: {
-        req: {
-          json: () => Promise<unknown>;
-          addValidatedData: (target: string, data: unknown) => void;
-        };
+vi.mock('../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/schemas')>();
+  return {
+    ...actual,
+    AgentTypeBodySchema: {},
+    AgentCredentialSyncSchema: {},
+    BootLogEntrySchema: {},
+    jsonValidator:
+      () =>
+      async (
+        c: {
+          req: {
+            json: () => Promise<unknown>;
+            addValidatedData: (target: string, data: unknown) => void;
+          };
+        },
+        next: () => Promise<void>
+      ) => {
+        const body = await c.req.json();
+        c.req.addValidatedData('json', body);
+        await next();
       },
-      next: () => Promise<void>
-    ) => {
-      const body = await c.req.json();
-      c.req.addValidatedData('json', body);
-      await next();
-    },
-}));
+  };
+});
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
@@ -163,7 +178,9 @@ vi.mock('../../src/lib/route-helpers', () => ({
 }));
 
 import type { Env } from '../../src/env';
+import { verifyWorkspaceCallbackAuth } from '../../src/routes/workspaces/_helpers';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
+import * as projectDataService from '../../src/services/project-data';
 
 // Wrap subrouter in parent app for correct env binding
 const testApp = new Hono<{ Bindings: Env }>();
@@ -198,6 +215,25 @@ function postAgentKey(agentType: string, envOverrides?: Partial<Env>) {
       },
       body: JSON.stringify({ agentType }),
     },
+    envOverrides ? { ...mockEnv, ...envOverrides } : mockEnv
+  );
+}
+
+function postMessages(messages: Record<string, unknown>[], envOverrides?: Partial<Env>) {
+  return postMessagesRaw(JSON.stringify({ messages }), envOverrides);
+}
+
+function postMessagesRaw(body: string, envOverrides?: Partial<Env>) {
+  return testApp.request(
+    '/ws/test-workspace/messages',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-callback-token',
+      },
+      body,
+    },
     envOverrides ? ({ ...mockEnv, ...envOverrides } as Env) : mockEnv
   );
 }
@@ -231,6 +267,121 @@ beforeEach(() => {
 });
 
 describe('runtime.ts always-proxy', () => {
+  it('authenticates message persistence before reading or validating the JSON body', async () => {
+    const authError = Object.assign(new Error('Unauthorized'), {
+      statusCode: 401,
+      error: 'UNAUTHORIZED',
+    });
+    vi.mocked(verifyWorkspaceCallbackAuth).mockRejectedValueOnce(authError);
+
+    const response = await postMessagesRaw('{not valid json', { MAX_MESSAGES_PAYLOAD_BYTES: '8' });
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(401);
+    expect(body.error).toBe('UNAUTHORIZED');
+    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized message payloads with a bounded body read before persistence', async () => {
+    mockDbLimit.mockImplementation(() => [
+      { projectId: 'proj1', chatSessionId: 'sess1', status: 'running' },
+    ]);
+
+    const response = await postMessagesRaw(
+      JSON.stringify({
+        messages: [
+          {
+            messageId: 'msg1',
+            sessionId: 'sess1',
+            role: 'assistant',
+            content: 'this body is intentionally longer than the configured payload cap',
+            timestamp: '2026-06-18T14:18:22.000Z',
+          },
+        ],
+      }),
+      { MAX_MESSAGES_PAYLOAD_BYTES: '64' }
+    );
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(400);
+    expect(body).toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Payload exceeds 64 byte limit',
+    });
+    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects message persistence for inactive workspaces before ProjectData writes', async () => {
+    mockDbLimit.mockImplementation(() => [
+      { projectId: 'proj1', chatSessionId: 'sess1', status: 'stopped' },
+    ]);
+
+    const response = await postMessages([
+      {
+        messageId: 'msg1',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'one',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+    ]);
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(400);
+    expect(body).toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Workspace is stopped, not active',
+    });
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('returns structured 409 when message batch reaches the session cap', async () => {
+    mockDbLimit.mockImplementation(() => [
+      { projectId: 'proj1', chatSessionId: 'sess1', status: 'running' },
+    ]);
+    vi.mocked(projectDataService.persistMessageBatch).mockResolvedValueOnce({
+      persisted: 1,
+      duplicates: 0,
+      limitReached: true,
+      maxMessages: 100000,
+      remainingCapacity: 0,
+    });
+
+    const response = await postMessages([
+      {
+        messageId: 'msg1',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'one',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+      {
+        messageId: 'msg2',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'two',
+        timestamp: '2026-06-18T14:18:23.000Z',
+      },
+    ]);
+
+    const body = (await response.json()) as {
+      error: string;
+      message?: string;
+      persisted: number;
+      maxMessages: number;
+      remainingCapacity: number;
+    };
+    expect(response.status, body.message).toBe(409);
+    expect(body).toMatchObject({
+      error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+      persisted: 1,
+      maxMessages: 100000,
+      remainingCapacity: 0,
+    });
+  });
+
   it('preserves passthrough inferenceConfig outputs for Claude/Codex agents', async () => {
     const outputs: Record<string, unknown> = {};
 
@@ -248,14 +399,15 @@ describe('runtime.ts always-proxy', () => {
         credential: `sk-${agentType}`,
         credentialKind: 'api-key',
         credentialSource: 'user',
-        baseUrl: agentType === 'claude-code'
-          ? 'https://anthropic-alt.example/anthropic'
-          : 'https://custom-openai.example/v1',
+        baseUrl:
+          agentType === 'claude-code'
+            ? 'https://anthropic-alt.example/anthropic'
+            : 'https://custom-openai.example/v1',
         providerDialect: agentType === 'claude-code' ? 'anthropic' : 'openai-compatible',
       });
 
       const response = await postAgentKey(agentType);
-      const json = await response.json() as { inferenceConfig?: unknown };
+      const json = (await response.json()) as { inferenceConfig?: unknown };
       expect(response.status).toBe(200);
       outputs[agentType] = json.inferenceConfig;
     }
@@ -297,7 +449,7 @@ describe('runtime.ts always-proxy', () => {
       }
 
       const response = await postAgentKey(agentType);
-      const json = await response.json() as { inferenceConfig?: unknown };
+      const json = (await response.json()) as { inferenceConfig?: unknown };
       expect(response.status).toBe(200);
       outputs[agentType] = json.inferenceConfig;
     }
@@ -474,7 +626,12 @@ describe('runtime.ts always-proxy', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as {
       apiKey: string;
-      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string; upstreamBaseURL?: string };
+      inferenceConfig: {
+        provider: string;
+        baseURL: string;
+        apiKeySource: string;
+        upstreamBaseURL?: string;
+      };
     };
     expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.inferenceConfig.provider).toBe('openai-passthrough');
@@ -515,7 +672,7 @@ describe('runtime.ts always-proxy', () => {
     });
 
     const res = await postAgentKey('claude-code');
-    const json = await res.json() as { message?: string; apiKey?: string };
+    const json = (await res.json()) as { message?: string; apiKey?: string };
 
     expect(res.status).toBe(404);
     expect(json.message).toBe('Agent credential');

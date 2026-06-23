@@ -14,7 +14,8 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -28,6 +29,7 @@ import {
   AgentCredentialSyncSchema,
   AgentTypeBodySchema,
   BootLogEntrySchema,
+  formatIssues,
   jsonValidator,
   MessageBatchSchema,
 } from '../../schemas';
@@ -102,6 +104,414 @@ function buildPlatformInferenceConfig(input: {
 }
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
+type RuntimeContext = Context<{ Bindings: Env }>;
+type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
+
+const DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024;
+const DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES = 102400;
+const ACTIVE_MESSAGE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
+const VALID_MESSAGE_ROLES = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
+
+type MessageWorkspace = {
+  projectId: string | null;
+  chatSessionId: string | null;
+  status: string;
+};
+
+type MessageBatchPersistenceRouteResult = {
+  persisted: number;
+  duplicates: number;
+  limitReached?: boolean;
+  maxMessages?: number;
+  remainingCapacity?: number;
+};
+
+type MessageRouteContext = {
+  workspaceId: string;
+  projectId: string;
+  sessionId: string;
+  messageCount: number;
+};
+
+function waitUntilIfAvailable(
+  c: { executionCtx: ExecutionContext },
+  promise: Promise<unknown> | void
+): void {
+  if (!promise) return;
+  try {
+    c.executionCtx.waitUntil(promise);
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.includes('no ExecutionContext')) {
+      throw err;
+    }
+  }
+}
+
+async function readRequestBodyWithLimit(request: Request, maxBytes: number): Promise<string> {
+  const contentLengthHeader = request.headers.get('content-length');
+  if (contentLengthHeader) {
+    const contentLength = Number.parseInt(contentLengthHeader, 10);
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      throw errors.badRequest('Invalid Content-Length header');
+    }
+    if (contentLength > maxBytes) {
+      throw errors.badRequest(`Payload exceeds ${maxBytes} byte limit`);
+    }
+  }
+
+  if (!request.body) {
+    return '';
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let done = false;
+
+  try {
+    while (!done) {
+      const read = await reader.read();
+      done = read.done;
+      if (done) continue;
+      const { value } = read;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw errors.badRequest(`Payload exceeds ${maxBytes} byte limit`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+async function parseMessageBatchRequest(c: RuntimeContext): Promise<MessageBatchBody> {
+  const maxPayloadBytes = parsePositiveInt(
+    c.env.MAX_MESSAGES_PAYLOAD_BYTES as string,
+    DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES
+  );
+  const rawBody = await readRequestBodyWithLimit(c.req.raw, maxPayloadBytes);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    throw errors.badRequest('Invalid JSON in request body');
+  }
+
+  const result = v.safeParse(MessageBatchSchema, parsed);
+  if (!result.success) {
+    throw errors.badRequest(formatIssues(result.issues));
+  }
+  return result.output;
+}
+
+function resolveMaxMessageBytes(env: Env): number {
+  return env.MESSAGE_SIZE_THRESHOLD
+    ? Number.parseInt(env.MESSAGE_SIZE_THRESHOLD, 10)
+    : DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES;
+}
+
+function validateMessageEntry(
+  msg: MessageBatchBody['messages'][number],
+  maxMessageBytes: number
+): void {
+  if (!msg.messageId) {
+    throw errors.badRequest('Each message must have a messageId string');
+  }
+  if (!msg.sessionId) {
+    throw errors.badRequest('Each message must have a sessionId string');
+  }
+  if (!msg.role || !VALID_MESSAGE_ROLES.has(msg.role)) {
+    throw errors.badRequest(
+      `Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`
+    );
+  }
+  if (!msg.content) {
+    throw errors.badRequest('Each message must have non-empty content');
+  }
+  if (msg.content.length > maxMessageBytes) {
+    throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
+  }
+  if (!msg.timestamp) {
+    throw errors.badRequest('Each message must have a timestamp string');
+  }
+}
+
+function validateMessageBatch(env: Env, body: MessageBatchBody): string {
+  if (body.messages.length === 0) {
+    throw errors.badRequest('messages array must not be empty');
+  }
+  const maxMessagesPerBatch = parsePositiveInt(env.MAX_MESSAGES_PER_BATCH, 100);
+  if (body.messages.length > maxMessagesPerBatch) {
+    throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
+  }
+
+  const firstMessage = body.messages[0];
+  if (!firstMessage) {
+    throw errors.badRequest('messages array must not be empty');
+  }
+  const maxMessageBytes = resolveMaxMessageBytes(env);
+  const sessionId = firstMessage.sessionId;
+  for (const msg of body.messages) {
+    validateMessageEntry(msg, maxMessageBytes);
+    if (msg.sessionId !== sessionId) {
+      throw errors.badRequest('All messages in a batch must target the same sessionId');
+    }
+  }
+  return sessionId;
+}
+
+async function loadMessageWorkspace(
+  env: Env,
+  workspaceId: string
+): Promise<MessageWorkspace | null> {
+  const db = drizzle(env.DATABASE, { schema });
+  const workspaceRows = await db
+    .select({
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
+    })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+  return workspaceRows[0] ?? null;
+}
+
+function rejectInactiveMessageWorkspace(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  status: string
+): never {
+  const logContext = {
+    ...context,
+    status,
+    action: 'rejected_inactive_workspace',
+  };
+  log.warn('message_persistence.inactive_workspace', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'warn',
+      message: `Rejecting messages for inactive workspace ${context.workspaceId}`,
+      context: logContext,
+      workspaceId: context.workspaceId,
+    })
+  );
+  throw errors.badRequest(`Workspace is ${status}, not active`);
+}
+
+function rejectMessageSessionMismatch(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  expectedSessionId: string
+): never {
+  const logContext = {
+    ...context,
+    expectedSessionId,
+    receivedSessionId: context.sessionId,
+    action: 'rejected_batch',
+  };
+  log.error('message_routing.session_mismatch', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'error',
+      message: `Message routing mismatch: workspace ${context.workspaceId} linked to session ${expectedSessionId}, but messages target ${context.sessionId}`,
+      context: logContext,
+      workspaceId: context.workspaceId,
+    })
+  );
+  throw errors.badRequest(
+    `Session mismatch: workspace is linked to session ${expectedSessionId}, ` +
+      `but messages target session ${context.sessionId}`
+  );
+}
+
+function rejectWorkspaceWithoutChatSession(c: RuntimeContext, context: MessageRouteContext): never {
+  const logContext = {
+    ...context,
+    providedSessionId: context.sessionId,
+    action: 'rejected_no_session_link',
+  };
+  log.warn('message_routing.no_chat_session_linked', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'warn',
+      message: `Rejecting messages for workspace ${context.workspaceId}: no chatSessionId linked yet`,
+      context: logContext,
+      workspaceId: context.workspaceId,
+    })
+  );
+  throw errors.conflict(
+    'Workspace has no linked chat session yet — messages cannot be routed safely'
+  );
+}
+
+function assertMessageWorkspaceAcceptsBatch(
+  c: RuntimeContext,
+  workspace: MessageWorkspace | null,
+  workspaceId: string,
+  sessionId: string,
+  messageCount: number
+): asserts workspace is MessageWorkspace & { projectId: string; chatSessionId: string } {
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+  if (!workspace.projectId) {
+    throw errors.badRequest('Workspace is not linked to a project');
+  }
+
+  const context: MessageRouteContext = {
+    workspaceId,
+    projectId: workspace.projectId,
+    sessionId,
+    messageCount,
+  };
+  if (!ACTIVE_MESSAGE_WORKSPACE_STATUSES.has(workspace.status)) {
+    rejectInactiveMessageWorkspace(c, context, workspace.status);
+  }
+  if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
+    rejectMessageSessionMismatch(c, context, workspace.chatSessionId);
+  }
+  if (!workspace.chatSessionId) {
+    rejectWorkspaceWithoutChatSession(c, context);
+  }
+}
+
+function toProjectDataMessages(body: MessageBatchBody) {
+  return body.messages.map((m) => ({
+    messageId: m.messageId,
+    role: m.role,
+    content: m.content,
+    toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
+    timestamp: m.timestamp,
+    sequence: m.sequence,
+  }));
+}
+
+function sessionLimitReachedResponse(c: RuntimeContext, context: MessageRouteContext): Response {
+  log.error('message_persistence.session_message_limit_exceeded', {
+    ...context,
+    action: 'rejected_session_message_limit',
+  });
+  waitUntilIfAvailable(
+    c,
+    persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'error',
+      message: `Session ${context.sessionId} has reached the message limit`,
+      context: { ...context, action: 'rejected_session_message_limit' },
+      workspaceId: context.workspaceId,
+    })
+  );
+  return c.json(
+    {
+      error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+      message: 'Session message limit reached; no additional messages can be persisted',
+    },
+    409
+  );
+}
+
+function handleMessagePersistenceError(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  err: unknown
+): Response {
+  const message = err instanceof Error ? err.message : 'Failed to persist messages';
+  if (message.includes('SESSION_MESSAGE_LIMIT_EXCEEDED') || message.includes('message limit')) {
+    return sessionLimitReachedResponse(c, context);
+  }
+  if (message.includes('not found') || message.includes('is stopped')) {
+    log.error('message_persistence.rejected_by_do', {
+      ...context,
+      error: message,
+      action: 'rejected_permanent',
+    });
+    throw errors.badRequest(message);
+  }
+  log.error('message_persistence.do_error_transient', {
+    ...context,
+    error: message,
+    action: 'rejected_transient',
+  });
+  return c.json(
+    { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
+    503
+  );
+}
+
+function partialSessionLimitResponse(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  result: MessageBatchPersistenceRouteResult
+): Response {
+  const logContext = {
+    ...context,
+    persisted: result.persisted,
+    duplicates: result.duplicates,
+    maxMessages: result.maxMessages,
+    remainingCapacity: result.remainingCapacity,
+    action: 'partial_persist_session_message_limit',
+  };
+  log.error('message_persistence.session_message_limit_reached', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'error',
+      message: `Session ${context.sessionId} reached the message limit while persisting a batch`,
+      context: logContext,
+      workspaceId: context.workspaceId,
+    })
+  );
+  return c.json(
+    {
+      error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+      message: 'Session message limit reached; only part of the batch was persisted',
+      persisted: result.persisted,
+      duplicates: result.duplicates,
+      maxMessages: result.maxMessages,
+      remainingCapacity: result.remainingCapacity,
+    },
+    409
+  );
+}
+
+function bridgePersistedAgentActivity(
+  c: RuntimeContext,
+  projectId: string,
+  result: MessageBatchPersistenceRouteResult,
+  body: MessageBatchBody
+): void {
+  if (result.persisted === 0) return;
+  c.executionCtx.waitUntil(
+    bridgeAgentActivity(
+      c.env,
+      projectId,
+      body.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
+      }))
+    )
+  );
+}
 
 async function verifyWorkspaceGitHubOwnerAccess(input: {
   env: Env;
@@ -1048,201 +1458,46 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
  * Uses workspace callback auth. Accepts 1-100 messages per batch.
  * All messages must target the same sessionId.
  */
-runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c) => {
+runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (256KB default, configurable via MAX_MESSAGES_PAYLOAD_BYTES)
-  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = parsePositiveInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string, 256 * 1024);
-  if (contentLength > maxPayloadBytes) {
-    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
-  }
-
-  const body = c.req.valid('json');
-
-  if (body.messages.length === 0) {
-    throw errors.badRequest('messages array must not be empty');
-  }
-  const maxMessagesPerBatch = parsePositiveInt(c.env.MAX_MESSAGES_PER_BATCH as string, 100);
-  if (body.messages.length > maxMessagesPerBatch) {
-    throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
-  }
-
-  const validRoles = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
-  const maxMessageBytes = c.env.MESSAGE_SIZE_THRESHOLD
-    ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10)
-    : 102400; // 100KB default
-
-  // Validate each message and extract sessionId
-  let sessionId: string | null = null;
-  for (const msg of body.messages) {
-    if (!msg.messageId || typeof msg.messageId !== 'string') {
-      throw errors.badRequest('Each message must have a messageId string');
-    }
-    if (!msg.sessionId || typeof msg.sessionId !== 'string') {
-      throw errors.badRequest('Each message must have a sessionId string');
-    }
-    if (!msg.role || !validRoles.has(msg.role)) {
-      throw errors.badRequest(
-        `Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`
-      );
-    }
-    if (!msg.content || typeof msg.content !== 'string') {
-      throw errors.badRequest('Each message must have non-empty content');
-    }
-    if (msg.content.length > maxMessageBytes) {
-      throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
-    }
-    if (!msg.timestamp || typeof msg.timestamp !== 'string') {
-      throw errors.badRequest('Each message must have a timestamp string');
-    }
-
-    if (sessionId === null) {
-      sessionId = msg.sessionId;
-    } else if (msg.sessionId !== sessionId) {
-      throw errors.badRequest('All messages in a batch must target the same sessionId');
-    }
-  }
+  const body = await parseMessageBatchRequest(c);
+  const sessionId = validateMessageBatch(c.env, body);
 
   // Resolve workspace to project and validate session linkage (Principle XIII: Fail-Fast)
-  const db = drizzle(c.env.DATABASE, { schema });
-  const workspaceRows = await db
-    .select({
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-    })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-  if (!workspace.projectId) {
-    throw errors.badRequest('Workspace is not linked to a project');
-  }
-
-  // Validate session ID matches workspace's linked session.
-  // If the workspace has a chatSessionId, messages MUST target that session.
-  // Messages targeting a different session are rejected to prevent misrouting.
-  if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
-    const context = {
-      workspaceId,
-      projectId: workspace.projectId,
-      expectedSessionId: workspace.chatSessionId,
-      receivedSessionId: sessionId,
-      messageCount: body.messages.length,
-      action: 'rejected_batch',
-    };
-    log.error('message_routing.session_mismatch', context);
-    c.executionCtx.waitUntil(
-      persistError(c.env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Message routing mismatch: workspace ${workspaceId} linked to session ${workspace.chatSessionId}, but messages target ${sessionId}`,
-        context,
-        workspaceId,
-      })
-    );
-    throw errors.badRequest(
-      `Session mismatch: workspace is linked to session ${workspace.chatSessionId}, ` +
-        `but messages target session ${sessionId}`
-    );
-  }
-
-  // Reject messages when workspace has no linked chatSessionId.
-  // This prevents misrouting during the session linking window where
-  // chatSessionId is NULL between workspace creation and ensureSessionLinked().
-  if (!workspace.chatSessionId) {
-    const context = {
-      workspaceId,
-      projectId: workspace.projectId,
-      providedSessionId: sessionId,
-      messageCount: body.messages.length,
-      action: 'rejected_no_session_link',
-    };
-    log.warn('message_routing.no_chat_session_linked', context);
-    c.executionCtx.waitUntil(
-      persistError(c.env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Rejecting messages for workspace ${workspaceId}: no chatSessionId linked yet`,
-        context,
-        workspaceId,
-      })
-    );
-    // Use 409 Conflict (not 400) so the VM agent's outbox retries the batch.
-    // This is a transient condition: chatSessionId will be set once ensureSessionLinked() completes.
-    throw errors.conflict(
-      'Workspace has no linked chat session yet — messages cannot be routed safely'
-    );
-  }
+  const workspace = await loadMessageWorkspace(c.env, workspaceId);
+  assertMessageWorkspaceAcceptsBatch(c, workspace, workspaceId, sessionId, body.messages.length);
 
   // Delegate to ProjectData DO with structured error handling.
   // On failure, return appropriate status codes so the VM agent outbox
   // can distinguish transient (retry) from permanent (discard) errors.
-  let result: { persisted: number; duplicates: number };
+  const context: MessageRouteContext = {
+    workspaceId,
+    projectId: workspace.projectId,
+    sessionId,
+    messageCount: body.messages.length,
+  };
+  let result: MessageBatchPersistenceRouteResult;
   try {
     result = await projectDataService.persistMessageBatch(
       c.env,
       workspace.projectId,
-      sessionId!,
-      body.messages.map((m) => ({
-        messageId: m.messageId,
-        role: m.role,
-        content: m.content,
-        toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
-        timestamp: m.timestamp,
-        sequence: m.sequence,
-      }))
+      sessionId,
+      toProjectDataMessages(body)
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to persist messages';
+    return handleMessagePersistenceError(c, context, err);
+  }
 
-    // Session-not-found and stopped-session errors are permanent — do not retry
-    if (message.includes('not found') || message.includes('is stopped')) {
-      log.error('message_persistence.rejected_by_do', {
-        workspaceId,
-        projectId: workspace.projectId,
-        sessionId,
-        error: message,
-        action: 'rejected_permanent',
-      });
-      throw errors.badRequest(message);
-    }
-
-    // All other DO errors are transient — return 503 so the outbox retries
-    log.error('message_persistence.do_error_transient', {
-      workspaceId,
-      projectId: workspace.projectId,
-      sessionId,
-      error: message,
-      action: 'rejected_transient',
-    });
-    return c.json(
-      { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
-      503
-    );
+  if (result.limitReached) {
+    return partialSessionLimitResponse(c, context, result);
   }
 
   // Fire-and-forget: pipe agent activity to the trial SSE feed (if this
   // workspace belongs to a trial project). Non-trial projects short-circuit
   // with a single KV lookup inside the bridge.
-  if (workspace.projectId && result.persisted > 0) {
-    c.executionCtx.waitUntil(
-      bridgeAgentActivity(
-        c.env,
-        workspace.projectId,
-        body.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-          toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
-        }))
-      )
-    );
-  }
+  bridgePersistedAgentActivity(c, workspace.projectId, result, body);
 
   return c.json({
     persisted: result.persisted,

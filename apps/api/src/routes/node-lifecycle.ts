@@ -17,6 +17,10 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { jsonValidator, NodeErrorBatchSchema, NodeHeartbeatSchema } from '../schemas';
+import {
+  buildObservedDeploymentUpdate,
+  reconcileDeploymentReleaseStatuses,
+} from '../services/deployment-control';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
@@ -30,6 +34,31 @@ import { persistErrorBatch, type PersistErrorInput } from '../services/observabi
 import * as projectDataService from '../services/project-data';
 
 const nodeLifecycleRoutes = new Hono<{ Bindings: Env }>();
+const NODE_DNS_ERROR_MESSAGE_MAX_LENGTH = 500;
+const NODE_BACKEND_DNS_ERROR_PREFIX = 'Backend DNS record creation failed:';
+
+function truncateNodeLifecycleError(value: string): string {
+  return value.length > NODE_DNS_ERROR_MESSAGE_MAX_LENGTH
+    ? `${value.slice(0, NODE_DNS_ERROR_MESSAGE_MAX_LENGTH - 3)}...`
+    : value;
+}
+
+function isBackendDnsError(errorMessage: string | null | undefined): boolean {
+  return !!errorMessage && errorMessage.startsWith(NODE_BACKEND_DNS_ERROR_PREFIX);
+}
+
+function isValidIPv4Address(value: string | null | undefined): value is string {
+  if (!value) return false;
+
+  const octets = value.split('.');
+  if (octets.length !== 4) return false;
+
+  return octets.every((octet) => {
+    if (!/^\d+$/.test(octet)) return false;
+    const numeric = Number(octet);
+    return numeric >= 0 && numeric <= 255;
+  });
+}
 
 /**
  * POST /:id/token — Issue a node-scoped management token for direct VM Agent access.
@@ -138,11 +167,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   const body = c.req.valid('json');
 
   // Read the node first to check if IP backfill is needed
-  const rows = await db
-    .select()
-    .from(schema.nodes)
-    .where(eq(schema.nodes.id, nodeId))
-    .limit(1);
+  const rows = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
 
   const node = rows[0];
   if (!node) {
@@ -168,10 +193,13 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     updatePayload.errorMessage = sql`NULL`;
   }
 
+  const heartbeatIp = c.req.header('CF-Connecting-IP');
+
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
+  let effectiveNodeIp = node.ipAddress;
+
   if (!node.ipAddress) {
-    const heartbeatIp = c.req.header('CF-Connecting-IP');
     if (heartbeatIp) {
       log.info('heartbeat.ip_backfilled', {
         nodeId,
@@ -179,6 +207,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         action: 'ip_backfilled',
       });
       updatePayload.ipAddress = heartbeatIp;
+      effectiveNodeIp = heartbeatIp;
 
       // Always clear the "Awaiting IP allocation" error when IP is backfilled.
       // Use explicit SQL null to ensure Drizzle/D1 generates SET errorMessage = NULL
@@ -189,25 +218,52 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       if (node.status === 'creating' || node.status === 'error') {
         updatePayload.status = 'running';
       }
-
-      // Update DNS record if we have one, or create a new one
-      try {
-        if (node.backendDnsRecordId) {
-          await updateDNSRecord(node.backendDnsRecordId, heartbeatIp, c.env);
-        } else {
-          const dnsRecordId = await createNodeBackendDNSRecord(nodeId, heartbeatIp, c.env);
-          updatePayload.backendDnsRecordId = dnsRecordId;
-        }
-      } catch (dnsErr) {
-        log.error('heartbeat.dns_update_failed_during_ip_backfill', { nodeId, error: String(dnsErr) });
-      }
     }
   }
 
-  await db
-    .update(schema.nodes)
-    .set(updatePayload)
-    .where(eq(schema.nodes.id, nodeId));
+  if (effectiveNodeIp) {
+    const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null;
+    const dnsIp = heartbeatIpv4 || effectiveNodeIp;
+    try {
+      if (node.backendDnsRecordId) {
+        if (heartbeatIpv4 && heartbeatIpv4 !== node.ipAddress) {
+          await updateDNSRecord(node.backendDnsRecordId, heartbeatIpv4, c.env);
+          log.info('heartbeat.backend_dns_updated', {
+            nodeId,
+            ipAddress: heartbeatIpv4,
+            previousIpAddress: node.ipAddress,
+          });
+        }
+      } else {
+        const dnsRecordId = await createNodeBackendDNSRecord(nodeId, dnsIp, c.env);
+        updatePayload.backendDnsRecordId = dnsRecordId;
+        if (isBackendDnsError(node.errorMessage)) {
+          updatePayload.errorMessage = sql`NULL`;
+          if (node.status === 'error') {
+            updatePayload.status = 'running';
+          }
+        }
+        log.info('heartbeat.backend_dns_backfilled', {
+          nodeId,
+          ipAddress: dnsIp,
+          source: heartbeatIpv4 ? 'heartbeat' : 'stored',
+        });
+      }
+    } catch (dnsErr) {
+      const message = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+      updatePayload.errorMessage = truncateNodeLifecycleError(
+        `${NODE_BACKEND_DNS_ERROR_PREFIX} ${message}`
+      );
+      log.error('heartbeat.backend_dns_backfill_failed', {
+        nodeId,
+        ipAddress: dnsIp,
+        hasExistingDnsRecord: !!node.backendDnsRecordId,
+        error: String(dnsErr),
+      });
+    }
+  }
+
+  await db.update(schema.nodes).set(updatePayload).where(eq(schema.nodes.id, nodeId));
 
   // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the
   // VM agent via POST /api/projects/:id/node-acp-heartbeat. Retained as safety net.
@@ -219,14 +275,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           .select({ id: schema.workspaces.id, projectId: schema.workspaces.projectId })
           .from(schema.workspaces)
           .where(
-            and(
-              eq(schema.workspaces.nodeId, nodeId),
-              eq(schema.workspaces.status, 'running'),
-            )
+            and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.status, 'running'))
           );
 
-        const projectIds = [...new Set(workspaces.map((w) => w.projectId).filter(Boolean))] as string[];
-        log.debug('heartbeat.acp_sweep', { nodeId, workspaces: workspaces.length, projects: projectIds.length });
+        const projectIds = [
+          ...new Set(workspaces.map((w) => w.projectId).filter(Boolean)),
+        ] as string[];
+        log.debug('heartbeat.acp_sweep', {
+          nodeId,
+          workspaces: workspaces.length,
+          projects: projectIds.length,
+        });
 
         await Promise.all(
           projectIds.map(async (projectId) => {
@@ -237,9 +296,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
                   setTimeout(() => reject(new Error('acp_sweep_timeout')), acpSweepTimeoutMs)
                 ),
               ]);
-              log.debug('heartbeat.acp_sweep_updated', { nodeId, projectId, updatedSessions: updated });
+              log.debug('heartbeat.acp_sweep_updated', {
+                nodeId,
+                projectId,
+                updatedSessions: updated,
+              });
             } catch (err) {
-              log.warn('heartbeat.acp_session_update_failed', { nodeId, projectId, error: String(err) });
+              log.warn('heartbeat.acp_session_update_failed', {
+                nodeId,
+                projectId,
+                error: String(err),
+              });
             }
           })
         );
@@ -259,32 +326,87 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
   }
 
-  // Deployment mode: include pending release seq and deploy pub key for deployment nodes.
-  // SECURITY: Look up the environment from the authenticated node's placement record —
-  // never trust the environmentId from the request body (IDOR risk).
+  // Deployment mode: include pending release seqs and deploy pub key for deployment nodes.
+  // SECURITY: Look up environments from the authenticated node's placement records —
+  // never trust environment IDs from the request body for authorization (IDOR risk).
   if (node.nodeRole === 'deployment' && body.deployment) {
-    const appliedSeq = body.deployment.appliedSeq ?? 0;
-
-    // Resolve environment from the node's placement record (node_id is indexed)
     try {
-      const envRow = await db
+      const envRows = await db
         .select({ envId: schema.deploymentEnvironments.id })
         .from(schema.deploymentEnvironments)
-        .where(eq(schema.deploymentEnvironments.nodeId, nodeId))
-        .limit(1);
+        .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
+      const placedEnvIds = new Set(envRows.map((row) => row.envId));
+      const bodyStates = Array.isArray(body.deployment.environments)
+        ? body.deployment.environments
+        : [];
+      const reportedEnvIds = Array.from(
+        new Set(
+          bodyStates
+            .map((state) => state.environmentId.trim())
+            .filter((environmentId) => environmentId.length > 0)
+        )
+      );
+      const retireEnvironments = reportedEnvIds
+        .filter((environmentId) => !placedEnvIds.has(environmentId))
+        .map((environmentId) => ({ environmentId }));
 
-      const envId = envRow[0]?.envId;
+      response.deployment = {
+        environments: envRows.map((row) => ({ environmentId: row.envId })),
+        ...(retireEnvironments.length > 0 ? { retireEnvironments } : {}),
+      };
 
-      if (envId) {
+      const stateByEnv = new Map(bodyStates.map((state) => [state.environmentId, state]));
+
+      const pendingReleases: Array<{ environmentId: string; seq: number }> = [];
+
+      for (const envRow of envRows) {
+        const envId = envRow.envId;
+        const bodyState = stateByEnv.get(envId);
+        const deploymentState = bodyState ?? null;
+        const appliedSeq = deploymentState?.appliedSeq ?? 0;
+
+        if (deploymentState) {
+          await db
+            .update(schema.deploymentEnvironments)
+            .set(buildObservedDeploymentUpdate(deploymentState, now))
+            .where(
+              and(
+                eq(schema.deploymentEnvironments.id, envId),
+                eq(schema.deploymentEnvironments.nodeId, nodeId)
+              )
+            );
+
+          await reconcileDeploymentReleaseStatuses(db, envId, deploymentState);
+        }
+
         const latestRelease = await db
-          .select({ version: schema.deploymentReleases.version })
+          .select({
+            version: schema.deploymentReleases.version,
+            status: schema.deploymentReleases.status,
+          })
           .from(schema.deploymentReleases)
           .where(eq(schema.deploymentReleases.environmentId, envId))
           .orderBy(desc(schema.deploymentReleases.version))
           .limit(1);
 
-        if (latestRelease[0] && latestRelease[0].version > appliedSeq) {
-          response.pendingReleaseSeq = latestRelease[0].version;
+        const latest = latestRelease[0];
+        const nodeAlreadyApplying = deploymentState?.status === 'applying';
+        if (
+          latest &&
+          latest.version > appliedSeq &&
+          (latest.status === 'created' || (latest.status === 'applying' && !nodeAlreadyApplying))
+        ) {
+          pendingReleases.push({ environmentId: envId, seq: latest.version });
+        }
+      }
+
+      if (pendingReleases.length > 0) {
+        response.deployment = {
+          ...(response.deployment as Record<string, unknown>),
+          pendingReleases,
+        };
+        if (pendingReleases.length === 1) {
+          response.pendingReleaseSeq = pendingReleases[0]?.seq;
         }
       }
     } catch (err) {
@@ -297,6 +419,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     // Include deploy signing public key for key refresh
     if (c.env.DEPLOY_SIGNING_PUBLIC_KEY) {
       response.deployPubKey = c.env.DEPLOY_SIGNING_PUBLIC_KEY;
+      response.deployment = {
+        ...(typeof response.deployment === 'object' && response.deployment !== null
+          ? (response.deployment as Record<string, unknown>)
+          : {}),
+        deployPubKey: c.env.DEPLOY_SIGNING_PUBLIC_KEY,
+      };
     }
   }
 
@@ -323,9 +451,7 @@ function isVMAgentReportLevel(value: unknown): value is VMAgentReportLevel {
 }
 
 function normalizeVMAgentReportLevel(value: unknown): VMAgentReportLevel {
-  return isVMAgentReportLevel(value)
-    ? value
-    : 'error';
+  return isVMAgentReportLevel(value) ? value : 'error';
 }
 
 function truncateString(value: string, maxLength: number): string {
@@ -398,7 +524,8 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
       level,
       message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
       source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),
-      stack: typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
+      stack:
+        typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
       workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
       timestamp: typeof e.timestamp === 'string' ? e.timestamp : null,
       context: maybeJsonRecord(e.context),
@@ -414,15 +541,28 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
       context: maybeJsonRecord(e.context),
       nodeId,
       workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
-      timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() || Date.now() : Date.now(),
+      timestamp:
+        typeof e.timestamp === 'string'
+          ? new Date(e.timestamp).getTime() || Date.now()
+          : Date.now(),
     });
   }
 
   // Persist to observability D1 (fire-and-forget, fail-silent)
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
-    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
-      .catch((e) => { log.error('observability.persist_error_batch_failed', { count: persistInputs.length, error: String(e) }); });
-    try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
+    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env).catch(
+      (e) => {
+        log.error('observability.persist_error_batch_failed', {
+          count: persistInputs.length,
+          error: String(e),
+        });
+      }
+    );
+    try {
+      c.executionCtx.waitUntil(promise);
+    } catch {
+      /* no exec ctx (e.g. tests) */
+    }
   }
 
   return c.body(null, 204);
@@ -430,7 +570,10 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
 
 // --- Internal helpers ---
 
-async function verifyNodeCallbackAuth(c: import('hono').Context<{ Bindings: Env }>, nodeId: string): Promise<void> {
+async function verifyNodeCallbackAuth(
+  c: import('hono').Context<{ Bindings: Env }>,
+  nodeId: string
+): Promise<void> {
   const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 

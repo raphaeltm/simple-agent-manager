@@ -56,6 +56,8 @@ vi.mock('../../../src/hooks/useNodeLogs', () => ({
     hasMore: false,
     streaming: false,
     paused: false,
+    containers: [],
+    containersLoading: false,
     filter: { source: 'all', level: 'info', container: '', search: '' },
     setSource: vi.fn(),
     setLevel: vi.fn(),

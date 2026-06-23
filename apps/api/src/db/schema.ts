@@ -1841,7 +1841,7 @@ export const deploymentEnvironments = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     status: text('status').notNull().default('active'),
-    /** Node hosting this environment (one environment per node for MVP). */
+    /** Deployment node hosting this environment; many environments may share one node. */
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
     /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
     provider: text('provider'),
@@ -1854,6 +1854,25 @@ export const deploymentEnvironments = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
     secretsUpdatedAt: text('secrets_updated_at'),
+    configUpdatedAt: text('config_updated_at'),
+    /** Latest deployment state observed from the authenticated deployment node. */
+    observedAppliedSeq: integer('observed_applied_seq'),
+    observedStatus: text('observed_status'),
+    observedErrorMessage: text('observed_error_message'),
+    observedServicesJson: text('observed_services_json'),
+    observedDeployStatusJson: text('observed_deploy_status_json'),
+    observedDiskTelemetryJson: text('observed_disk_telemetry_json'),
+    observedAt: text('observed_at'),
+    /** User-controlled gate for agent-facing app-deployment tools. */
+    agentDeployEnabled: integer('agent_deploy_enabled', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    agentDeployEnabledBy: text('agent_deploy_enabled_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    agentDeployEnabledAt: text('agent_deploy_enabled_at'),
+    agentDeployDisabledAt: text('agent_deploy_disabled_at'),
+    allowedDeployProfileIdsJson: text('allowed_deploy_profile_ids_json'),
   },
   (table) => ({
     projectNameUnique: uniqueIndex('idx_deployment_environments_project_name').on(
@@ -1862,6 +1881,8 @@ export const deploymentEnvironments = sqliteTable(
     ),
     projectIdIdx: index('idx_deployment_environments_project_id').on(table.projectId),
     nodeIdIdx: index('idx_deployment_environments_node_id').on(table.nodeId),
+    observedStatusIdx: index('idx_deployment_environments_observed_status').on(table.observedStatus),
+    agentDeployEnabledIdx: index('idx_deployment_environments_agent_deploy_enabled').on(table.agentDeployEnabled),
   }),
 );
 
@@ -1902,6 +1923,48 @@ export type DeploymentSecretRow = typeof deploymentSecrets.$inferSelect;
 export type NewDeploymentSecretRow = typeof deploymentSecrets.$inferInsert;
 
 // =============================================================================
+// DEPLOYMENT ENVIRONMENT CONFIG VARS
+// =============================================================================
+
+/** Per-deployment-environment Compose interpolation variables.
+ *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
+export const deploymentEnvironmentConfigVars = sqliteTable(
+  'deployment_environment_config_vars',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    envKey: text('env_key').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext value. */
+    storedValue: text('stored_value').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (value stored in plaintext). */
+    valueIv: text('value_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envKeyUnique: uniqueIndex('idx_deployment_environment_config_vars_env_key').on(
+      table.environmentId,
+      table.envKey,
+    ),
+    environmentIdIdx: index('idx_deployment_environment_config_vars_environment_id').on(
+      table.environmentId,
+    ),
+  }),
+);
+
+export type DeploymentEnvironmentConfigVarRow =
+  typeof deploymentEnvironmentConfigVars.$inferSelect;
+export type NewDeploymentEnvironmentConfigVarRow =
+  typeof deploymentEnvironmentConfigVars.$inferInsert;
+
+// =============================================================================
 // DEPLOYMENT RELEASES
 // =============================================================================
 
@@ -1915,6 +1978,11 @@ export const deploymentReleases = sqliteTable(
     manifest: text('manifest').notNull(),
     version: integer('version').notNull(),
     status: text('status').notNull().default('created'),
+    // Discriminator for how the release was produced (migration 0073).
+    // NULL / 'build-on-node' = manifest is a DeploymentManifest.
+    // 'compose-publish' = manifest is a captured `docker compose publish`
+    //   ReleaseSubmission (compose YAML + image-digests + pushed service refs).
+    source: text('source'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -1928,6 +1996,7 @@ export const deploymentReleases = sqliteTable(
       table.environmentId,
       table.version,
     ),
+    sourceIdx: index('idx_deployment_releases_source').on(table.source),
   }),
 );
 

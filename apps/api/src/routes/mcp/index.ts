@@ -25,7 +25,13 @@ import {
   MCP_TOOLS,
   METHOD_NOT_FOUND,
 } from './_helpers';
-import { handleGetDeploymentCredentials } from './deployment-tools';
+import { handleBuildAndPublish } from './compose-publish-tools';
+import {
+  handleListDeploymentEnvironmentConfig,
+  handleListDeploymentEnvironments,
+  handleReadDeploymentLogs,
+  handleSetDeploymentEnvironmentConfig,
+} from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
   handleCreateIdea,
@@ -99,7 +105,6 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
-import { handleGetRegistryCredentials } from './registry-credential-tools';
 import {
   handleGetSessionMessages,
   handleListSessions,
@@ -130,8 +135,6 @@ import {
 } from './workspace-tools';
 import {
   handleCheckDnsStatus,
-  handleGetCiStatus,
-  handleGetDeploymentStatus,
   handleGetPeerAgentOutput,
   handleGetTaskDependencies,
   handleListProjectAgents,
@@ -147,8 +150,8 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
-  // Authenticate — returns parsed token data and raw token
-  const [tokenData, rawToken] = await authenticateMcpRequest(
+  // Authenticate — returns parsed token data
+  const [tokenData] = await authenticateMcpRequest(
     c.req.header('Authorization'),
     c.env.KV,
     c.env,
@@ -292,10 +295,26 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleListIdeas(requestId, toolArgs, tokenData, c.env));
         case 'search_ideas':
           return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
-        case 'get_deployment_credentials':
-          return c.json(await handleGetDeploymentCredentials(requestId, tokenData, c.env, rawToken!));
-        case 'get_registry_credentials':
-          return c.json(await handleGetRegistryCredentials(requestId, toolArgs, tokenData, c.env));
+        case 'build_and_publish':
+          return c.json(
+            await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'list_deployment_environments':
+          return c.json(
+            await handleListDeploymentEnvironments(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'read_deployment_logs':
+          return c.json(
+            await handleReadDeploymentLogs(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'list_deployment_environment_config':
+          return c.json(
+            await handleListDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env),
+          );
+        case 'set_deployment_environment_config':
+          return c.json(
+            await handleSetDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env),
+          );
         // ─── Workspace tools (unified from workspace-mcp) ──────────────
         case 'get_workspace_info':
           return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
@@ -313,10 +332,6 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleGetPeerAgentOutput(requestId, toolArgs, tokenData, c.env));
         case 'get_task_dependencies':
           return c.json(await handleGetTaskDependencies(requestId, tokenData, c.env));
-        case 'get_ci_status':
-          return c.json(await handleGetCiStatus(requestId, tokenData, c.env));
-        case 'get_deployment_status':
-          return c.json(await handleGetDeploymentStatus(requestId, tokenData, c.env));
         case 'get_workspace_diff_summary':
           return c.json(await handleGetWorkspaceDiffSummary(requestId, tokenData, c.env));
         case 'report_environment_issue':

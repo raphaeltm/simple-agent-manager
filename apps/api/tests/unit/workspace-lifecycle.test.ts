@@ -292,9 +292,11 @@ describe('/provisioning-failed route — inline DO notification (TDF-5)', () => 
   const failedHandlerStart = routeSource.indexOf(
     "lifecycleRoutes.post('/:id/provisioning-failed'"
   );
-  const failedHandlerEnd = routeSource.indexOf(
-    "runtimeRoutes.post('/:id/agent-key'"
-  );
+  // End at the close of lifecycle.ts (the provisioning-failed handler is the
+  // last route in that file). Using a runtime.ts route as the boundary would
+  // wrongly pull unrelated runtime.ts code (e.g. waitUntil helpers) into the
+  // slice and break this structural assertion.
+  const failedHandlerEnd = routeSource.indexOf('export { lifecycleRoutes }');
   const failedHandler = routeSource.slice(failedHandlerStart, failedHandlerEnd);
 
   it('calls advanceTaskRunnerWorkspaceReady with error status inline', () => {

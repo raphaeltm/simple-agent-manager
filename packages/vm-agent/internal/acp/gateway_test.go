@@ -1481,3 +1481,35 @@ func TestBuildOpencodeConfig_OpenCodeZenUsesBuiltInModelPrefixes(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildOpencodeConfig_OpenCodeGoDefaultsToGLM52(t *testing.T) {
+	t.Parallel()
+
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "opencode-go",
+	}, nil)
+
+	if got := config["model"]; got != DefaultOpencodeGoModel {
+		t.Fatalf("model = %v, want %q", got, DefaultOpencodeGoModel)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for OpenCode Go built-in provider: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_OpenCodeGoPreservesExplicitModel(t *testing.T) {
+	t.Parallel()
+
+	const model = "opencode-go/kimi-k2.7-code"
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "opencode-go",
+		Model:            model,
+	}, nil)
+
+	if got := config["model"]; got != model {
+		t.Fatalf("model = %v, want %q", got, model)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for OpenCode Go built-in provider: %#v", config["provider"])
+	}
+}

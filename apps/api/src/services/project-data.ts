@@ -166,7 +166,13 @@ export async function persistMessageBatch(
     timestamp: string;
     sequence?: number;
   }>
-): Promise<{ persisted: number; duplicates: number }> {
+): Promise<{
+  persisted: number;
+  duplicates: number;
+  limitReached?: boolean;
+  maxMessages?: number;
+  remainingCapacity?: number;
+}> {
   const stub = await getStub(env, projectId);
   return stub.persistMessageBatch(
     sessionId,

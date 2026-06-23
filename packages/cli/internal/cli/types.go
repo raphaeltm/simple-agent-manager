@@ -107,6 +107,23 @@ type PortTokenResponse struct {
 	Port  int    `json:"port"`
 }
 
+type LocalForwardSessionRequest struct {
+	RemotePort     int    `json:"remotePort"`
+	Mode           string `json:"mode"`
+	LocalAuthority string `json:"localAuthority"`
+}
+
+type LocalForwardSessionResponse struct {
+	Token          string `json:"token"`
+	ExpiresAt      string `json:"expiresAt"`
+	WorkspaceID    string `json:"workspaceId"`
+	NodeID         string `json:"nodeId"`
+	RemotePort     int    `json:"remotePort"`
+	Mode           string `json:"mode"`
+	LocalAuthority string `json:"localAuthority"`
+	ForwardPath    string `json:"forwardPath"`
+}
+
 type TaskSubmitOptions struct {
 	Agent          string
 	AgentProfile   string

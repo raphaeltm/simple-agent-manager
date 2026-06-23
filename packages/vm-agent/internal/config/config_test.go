@@ -188,6 +188,35 @@ func TestBootstrapTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestDeployRuntimeTimeoutDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ID", "node-123")
+	t.Setenv("NODE_ROLE", RoleDeployment)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.DeployRuntimeTimeout != 15*time.Minute {
+		t.Fatalf("DeployRuntimeTimeout=%v, want %v", cfg.DeployRuntimeTimeout, 15*time.Minute)
+	}
+}
+
+func TestDeployRuntimeTimeoutOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ID", "node-123")
+	t.Setenv("NODE_ROLE", RoleDeployment)
+	t.Setenv("DEPLOY_RUNTIME_TIMEOUT", "7m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.DeployRuntimeTimeout != 7*time.Minute {
+		t.Fatalf("DeployRuntimeTimeout=%v, want %v", cfg.DeployRuntimeTimeout, 7*time.Minute)
+	}
+}
+
 func TestPTYOrphanGracePeriodDefaultDisabled(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")

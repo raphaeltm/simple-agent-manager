@@ -65,6 +65,8 @@ Manifest addition (extends doc 06 sketch):
 }
 ```
 
+For API submissions, agents author this manifest through Compose YAML using SAM extensions. The equivalent Compose hook field is `x-sam-pre-flight`, while routes use top-level `x-sam-routes` and secret references use environment values shaped as `{ x-sam-secret: "<secret-name>" }`. The release API stores the validated, digest-pinned manifest JSON after parsing and resolving the Compose file.
+
 Semantics:
 
 - Runs as a one-shot container (same image, env, network, and volumes as the named service) **after** images are pulled and the previous release's containers are stopped, **before** new containers start. Sequence: pull → stop old → hook → start new → health check.

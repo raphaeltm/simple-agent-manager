@@ -6,9 +6,9 @@
  * endpoint MUST be mounted before projectsRoutes to avoid the session auth
  * middleware leak (see .claude/rules/34-vm-agent-callback-auth.md).
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -16,10 +16,21 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
-import { collectSecretNames, renderCompose } from '../services/compose-renderer';
+import {
+  buildComposePublishApplyPayload,
+  DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
+  DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+  DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB,
+} from '../services/compose-publish-apply';
+import { collectSecretNames, renderComposeForApply } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
-import { buildDeploymentRouteTargets } from '../services/deployment-routing';
-import { upsertAppRouteDNSRecord } from '../services/dns';
+import { loadDeploymentInterpolationEnv } from '../services/deployment-environment-config';
+import {
+  buildDeploymentRouteTargets,
+  collectEnvironmentRouteHostnames,
+  type DeploymentRouteTarget,
+} from '../services/deployment-routing';
+import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
 import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
@@ -27,17 +38,7 @@ import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
 const deployReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 const DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS = 3_600;
 
-/**
- * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
- *
- * Returns a signed apply payload for the requested release sequence.
- * The node calls this when the heartbeat response includes a
- * pendingReleaseSeq greater than the node's current applied seq.
- */
-deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
-  const nodeId = c.req.param('id');
-
-  // Verify callback JWT auth (same pattern as heartbeat/ready)
+async function verifyNodeCallback(c: Context<{ Bindings: Env }>, nodeId: string) {
   const token = extractBearerToken(c.req.header('Authorization'));
   let payload;
   try {
@@ -53,6 +54,67 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');
   }
+}
+
+deployReleaseCallbackRoute.get('/:id/deployment-env', async (c) => {
+  const nodeId = c.req.param('id');
+  await verifyNodeCallback(c, nodeId);
+  const environmentId = c.req.query('environmentId');
+  if (!environmentId) {
+    throw errors.badRequest('Missing required query parameter: environmentId');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  const nodeRows = await db
+    .select({ userId: schema.nodes.userId })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+  const node = nodeRows.at(0);
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  const envRows = await db
+    .select({
+      id: schema.deploymentEnvironments.id,
+      configUpdatedAt: schema.deploymentEnvironments.configUpdatedAt,
+    })
+    .from(schema.deploymentEnvironments)
+    .innerJoin(schema.projects, eq(schema.deploymentEnvironments.projectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.deploymentEnvironments.nodeId, nodeId),
+        eq(schema.projects.userId, node.userId)
+      )
+    )
+    .limit(1);
+  const environment = envRows.at(0);
+  if (!environment) {
+    throw errors.notFound('Deployment environment');
+  }
+
+  const config = await loadDeploymentInterpolationEnv(db, environmentId, getEncryptionKey(c.env));
+  return c.json({
+    environmentId,
+    interpolationEnv: config.values,
+    configUpdatedAt: environment.configUpdatedAt ?? null,
+  });
+});
+
+/**
+ * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
+ *
+ * Returns a signed apply payload for the requested release sequence.
+ * The node calls this when the heartbeat response includes a
+ * pendingReleaseSeq greater than the node's current applied seq.
+ */
+deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
+  const nodeId = c.req.param('id');
+
+  // Verify callback JWT auth (same pattern as heartbeat/ready)
+  await verifyNodeCallback(c, nodeId);
 
   // Parse query parameters
   const seqStr = c.req.query('seq');
@@ -90,16 +152,13 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       nodeId: schema.deploymentEnvironments.nodeId,
     })
     .from(schema.deploymentEnvironments)
-    .innerJoin(
-      schema.projects,
-      eq(schema.deploymentEnvironments.projectId, schema.projects.id),
-    )
+    .innerJoin(schema.projects, eq(schema.deploymentEnvironments.projectId, schema.projects.id))
     .where(
       and(
         eq(schema.deploymentEnvironments.id, environmentId),
         eq(schema.deploymentEnvironments.nodeId, nodeId),
-        eq(schema.projects.userId, node.userId),
-      ),
+        eq(schema.projects.userId, node.userId)
+      )
     )
     .limit(1);
 
@@ -116,8 +175,8 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .where(
       and(
         eq(schema.deploymentReleases.environmentId, environmentId),
-        eq(schema.deploymentReleases.version, seq),
-      ),
+        eq(schema.deploymentReleases.version, seq)
+      )
     )
     .limit(1);
 
@@ -125,42 +184,170 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   if (!release) {
     throw errors.notFound('Deployment release');
   }
-  const manifest = JSON.parse(release.manifest);
 
-  const routes = buildDeploymentRouteTargets(manifest, {
+  await db
+    .update(schema.deploymentReleases)
+    .set({ status: 'applying' })
+    .where(eq(schema.deploymentReleases.id, release.id));
+
+  // Two release shapes share this apply path, discriminated by `release.source`:
+  //
+  //  - compose-publish: the stored manifest IS the captured publish submission
+  //    ({ reference, composeYaml, services[] }). We transform the raw compose
+  //    in-place (preserving provider:/healthcheck/depends_on, digest-pinning
+  //    build images via pushedRef) rather than round-tripping through the lossy
+  //    normalized manifest. Routes are derived from each service's `ports:`.
+  //
+  //  - build-on-node (default): the stored manifest is the normalized
+  //    DeploymentManifest. Routes come from manifest.routes and the compose is
+  //    re-rendered from the manifest with secret injection.
+  let routes: DeploymentRouteTarget[];
+  let composeYaml: string;
+  let interpolationEnv: Record<string, string> = {};
+  const environmentConfig = await loadDeploymentInterpolationEnv(
+    db,
     environmentId,
-    baseDomain: c.env.BASE_DOMAIN,
-    routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-    routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-  });
+    getEncryptionKey(c.env)
+  );
 
-  if (routes.length > 0) {
-    const nodeIp = node.ipAddress;
-    if (!nodeIp) {
-      throw errors.conflict('Deployment node does not have an IP address yet; retry after provisioning completes');
+  if (release.source === 'compose-publish') {
+    const submission = JSON.parse(release.manifest);
+    const applied = buildComposePublishApplyPayload(submission, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      releaseId: release.id,
+      defaultMemoryLimitMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB
+      ),
+      defaultLogMaxSize:
+        c.env.DEPLOYMENT_LOG_MAX_SIZE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+      defaultLogMaxFile:
+        c.env.DEPLOYMENT_LOG_MAX_FILE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
+    });
+    routes = applied.routes;
+    composeYaml = applied.composeYaml;
+    interpolationEnv = environmentConfig.values;
+
+    if (applied.warnings.length > 0) {
+      log.warn('deploy_release.compose_publish_warnings', {
+        nodeId,
+        environmentId,
+        seq,
+        releaseId: release.id,
+        warnings: applied.warnings,
+      });
     }
 
-    await Promise.all(routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env)));
+    if (routes.length > 0) {
+      const nodeIp = node.ipAddress;
+      if (!nodeIp) {
+        throw errors.conflict(
+          'Deployment node does not have an IP address yet; retry after provisioning completes'
+        );
+      }
+      await Promise.all(
+        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
+      );
+    }
+  } else {
+    const manifest = JSON.parse(release.manifest);
+
+    routes = buildDeploymentRouteTargets(manifest, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    });
+
+    if (routes.length > 0) {
+      const nodeIp = node.ipAddress;
+      if (!nodeIp) {
+        throw errors.conflict(
+          'Deployment node does not have an IP address yet; retry after provisioning completes'
+        );
+      }
+
+      await Promise.all(
+        routes.map((route) => upsertAppRouteDNSRecord(route.hostname, nodeIp, c.env))
+      );
+    }
+
+    // Resolve secret references — inject decrypted values for the node
+    const secretNames = collectSecretNames(manifest);
+    const resolvedSecrets =
+      secretNames.length > 0
+        ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
+        : {};
+
+    // Render the Compose YAML from the manifest. Secret values are supplied as
+    // transient interpolation env, not materialized into the compose file.
+    const rendered = renderComposeForApply(manifest, {
+      environmentId,
+      releaseId: release.id,
+      routeTargets: routes,
+      resolvedSecrets,
+      baseInterpolationEnv: environmentConfig.values,
+    });
+    composeYaml = rendered.composeYaml;
+    interpolationEnv = rendered.interpolationEnv;
   }
 
-  // Resolve secret references — inject decrypted values for the node
-  const secretNames = collectSecretNames(manifest);
-  const resolvedSecrets = secretNames.length > 0
-    ? await loadResolvedSecrets(db, environmentId, secretNames, getEncryptionKey(c.env))
-    : {};
-
-  // Render the Compose YAML from the manifest
-  const composeYaml = renderCompose(manifest, {
-    environmentId,
-    releaseId: release.id,
-    routeTargets: routes,
-    resolvedSecrets,
-  });
-
-  const expiresAt = Math.floor(Date.now() / 1000) + parsePositiveInt(
-    c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS,
-    DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS,
+  const cleanupStaleRoutes = async () => {
+    const priorReleaseRows = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(
+        and(
+          eq(schema.deploymentReleases.environmentId, environmentId),
+          lt(schema.deploymentReleases.version, seq)
+        )
+      );
+    const previousHostnames = collectEnvironmentRouteHostnames(
+      priorReleaseRows.map((row) => row.manifest),
+      {
+        environmentId,
+        baseDomain: c.env.BASE_DOMAIN,
+        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      }
+    );
+    const currentHostnames = new Set(routes.map((route) => route.hostname));
+    const staleHostnames = previousHostnames.filter((hostname) => !currentHostnames.has(hostname));
+    if (staleHostnames.length === 0) {
+      return;
+    }
+    const deleted = await cleanupAppRouteDNSRecords(staleHostnames, c.env);
+    log.info('deploy_release.stale_route_dns_cleaned', {
+      nodeId,
+      environmentId,
+      releaseId: release.id,
+      requested: staleHostnames.length,
+      deleted,
+    });
+  };
+  let executionCtx: ExecutionContext | null = null;
+  try {
+    executionCtx = c.executionCtx;
+  } catch {
+    executionCtx = null;
+  }
+  executionCtx?.waitUntil(
+    cleanupStaleRoutes().catch((err) => {
+      log.error('deploy_release.stale_route_dns_cleanup_failed', {
+        nodeId,
+        environmentId,
+        releaseId: release.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
   );
+
+  const expiresAt =
+    Math.floor(Date.now() / 1000) +
+    parsePositiveInt(c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS, DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS);
 
   // Sign the payload with the deploy signing key
   const signature = await signDeployPayload(
@@ -171,8 +358,9 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       expiresAt,
       composeYaml,
       routes,
+      interpolationEnv,
     },
-    c.env,
+    c.env
   );
 
   // Mint short-lived pull-only registry credentials for private image pulls.
@@ -186,7 +374,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       node.userId,
       '', // no task context in deploy callback
       environmentId,
-      { permissions: ['pull'] },
+      { permissions: ['pull'] }
     );
     registryCredentials = {
       server: creds.registry,
@@ -208,6 +396,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     releaseId: release.id,
     routeCount: routes.length,
+    interpolationEnvKeyCount: Object.keys(interpolationEnv).length,
     hasRegistryCredentials: registryCredentials !== null,
   });
 
@@ -217,6 +406,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     expiresAt,
     composeYaml,
+    interpolationEnv,
     routes,
     signature,
     registryCredentials,

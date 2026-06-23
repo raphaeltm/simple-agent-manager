@@ -38,15 +38,15 @@ func parseGeneratedCaddyfile(input string) []parsedCaddyRoute {
 	return routes
 }
 
-func TestGenerateCaddyfile_RoundTripsMultiRouteConfig(t *testing.T) {
+func TestGenerateCaddySnippet_RoundTripsMultiRouteConfig(t *testing.T) {
 	routes := []RouteTarget{
 		{Hostname: "r2-api-env123.apps.example.com", Service: "api", ContainerPort: 8080, HostPort: 35001},
 		{Hostname: "r1-web-env123.apps.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
 	}
 
-	caddyfile, err := GenerateCaddyfile(routes, CaddyfileOptions{})
+	caddyfile, err := GenerateCaddySnippet(routes)
 	if err != nil {
-		t.Fatalf("GenerateCaddyfile: %v", err)
+		t.Fatalf("GenerateCaddySnippet: %v", err)
 	}
 	parsed := parseGeneratedCaddyfile(caddyfile)
 
@@ -84,32 +84,23 @@ func TestGenerateCaddyfile_RoundTripsMultiRouteConfig(t *testing.T) {
 	}
 }
 
-func TestGenerateCaddyfile_EmitsGlobalOptionsForACME(t *testing.T) {
-	routes := []RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}}
-
-	withOpts, err := GenerateCaddyfile(routes, CaddyfileOptions{
+func TestGenerateRootCaddyfile_EmitsGlobalOptionsForACME(t *testing.T) {
+	withOpts := GenerateRootCaddyfile(CaddyfileOptions{
 		ACMEEmail: "ops@example.com",
 		ACMECA:    "https://acme-staging-v02.api.letsencrypt.org/directory",
 	})
-	if err != nil {
-		t.Fatalf("GenerateCaddyfile: %v", err)
-	}
 	if !strings.Contains(withOpts, "\temail ops@example.com\n") {
 		t.Fatalf("expected email directive in global block, got:\n%s", withOpts)
 	}
 	if !strings.Contains(withOpts, "\tacme_ca https://acme-staging-v02.api.letsencrypt.org/directory\n") {
 		t.Fatalf("expected acme_ca directive in global block, got:\n%s", withOpts)
 	}
-	// Global options block must precede the first site block.
-	if optsIdx, siteIdx := strings.Index(withOpts, "email ops@example.com"), strings.Index(withOpts, "app.apps.example.com {"); optsIdx == -1 || siteIdx == -1 || optsIdx > siteIdx {
-		t.Fatalf("global options block must precede site blocks, got:\n%s", withOpts)
+	if optsIdx, importIdx := strings.Index(withOpts, "email ops@example.com"), strings.Index(withOpts, "import sites/*"); optsIdx == -1 || importIdx == -1 || optsIdx > importIdx {
+		t.Fatalf("global options block must precede sites import, got:\n%s", withOpts)
 	}
 
 	// No options -> no global block (Caddy defaults apply, no leading "{").
-	noOpts, err := GenerateCaddyfile(routes, CaddyfileOptions{})
-	if err != nil {
-		t.Fatalf("GenerateCaddyfile (no opts): %v", err)
-	}
+	noOpts := GenerateRootCaddyfile(CaddyfileOptions{})
 	body := strings.TrimPrefix(noOpts, "# Managed by SAM deployment agent.\n")
 	if strings.HasPrefix(strings.TrimSpace(body), "{") {
 		t.Fatalf("expected no global options block when ACME options are empty, got:\n%s", noOpts)
@@ -123,9 +114,9 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("NewDiskState: %v", err)
 	}
 	state := &ReleaseState{Seq: 1, EnvironmentID: "env", NodeID: "node", Status: StatusApplying}
-	caddyfile, err := GenerateCaddyfile([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}}, CaddyfileOptions{})
+	caddyfile, err := GenerateCaddySnippet([]RouteTarget{{Hostname: "app.apps.example.com", ContainerPort: 3000, HostPort: 35000}})
 	if err != nil {
-		t.Fatalf("GenerateCaddyfile: %v", err)
+		t.Fatalf("GenerateCaddySnippet: %v", err)
 	}
 	if err := disk.WriteRelease(state, "compose", caddyfile); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
@@ -137,6 +128,7 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 		t.Fatalf("write reload script: %v", err)
 	}
 	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:  "env",
 		CaddyfilePath:  filepath.Join(dir, "active", "Caddyfile"),
 		CaddyReloadCmd: reloadScript + " " + reloadLog,
 	})
@@ -148,8 +140,15 @@ func TestReloadCaddy_AtomicallyWritesActiveConfigAndInvokesReload(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
-	if string(active) != caddyfile {
-		t.Fatalf("active Caddyfile mismatch: %q", string(active))
+	if !strings.Contains(string(active), "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import: %q", string(active))
+	}
+	snippet, err := os.ReadFile(filepath.Join(filepath.Dir(engine.cfg.CaddyfilePath), "sites", "env.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	if string(snippet) != caddyfile {
+		t.Fatalf("active Caddy snippet mismatch: %q", string(snippet))
 	}
 	logBytes, err := os.ReadFile(reloadLog)
 	if err != nil {
@@ -211,6 +210,7 @@ exit 1
 	}
 
 	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:   "env",
 		CaddyfilePath:   filepath.Join(dir, "active", "Caddyfile"),
 		CaddyReloadCmd:  reloadScript,
 		CaddyRestartCmd: restartScript + " " + restartLog,
@@ -223,8 +223,15 @@ exit 1
 	if err != nil {
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
-	if string(active) != caddyfile {
-		t.Fatalf("active Caddyfile mismatch: %q", string(active))
+	if !strings.Contains(string(active), "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import: %q", string(active))
+	}
+	snippet, err := os.ReadFile(filepath.Join(filepath.Dir(engine.cfg.CaddyfilePath), "sites", "env.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	if string(snippet) != caddyfile {
+		t.Fatalf("active Caddy snippet mismatch: %q", string(snippet))
 	}
 	logBytes, err := os.ReadFile(restartLog)
 	if err != nil {
@@ -272,7 +279,74 @@ func TestReloadCaddy_WaitsForReloadCommandToExist(t *testing.T) {
 	}
 }
 
-func TestGenerateCaddyfile_RejectsUnsafeRouteTargets(t *testing.T) {
+func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	state := &ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node", Status: StatusApplied}
+	if err := disk.WriteRelease(state, "services: {}\n", "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	activeDir := filepath.Join(dir, "active")
+	sitesDir := filepath.Join(activeDir, "sites")
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		t.Fatalf("mkdir sites: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-a.caddy"), []byte("env-a"), 0644); err != nil {
+		t.Fatalf("write env-a snippet: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-b.caddy"), []byte("env-b"), 0644); err != nil {
+		t.Fatalf("write env-b snippet: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COMPOSE_LOG\"\n"), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+	reloadLog := filepath.Join(dir, "reload.log")
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\necho reloaded > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+	t.Setenv("COMPOSE_LOG", composeLog)
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:      "env-a",
+		ComposeCmd:         composeScript,
+		ComposeProjectName: "sam-env-env-a",
+		CaddyfilePath:      filepath.Join(activeDir, "Caddyfile"),
+		CaddyReloadCmd:     reloadScript + " " + reloadLog,
+	})
+
+	if err := engine.Teardown(t.Context()); err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
+		t.Fatalf("expected env-a snippet removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sitesDir, "env-b.caddy")); err != nil {
+		t.Fatalf("expected env-b snippet preserved: %v", err)
+	}
+	composeArgs, err := os.ReadFile(composeLog)
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if !strings.Contains(string(composeArgs), "--project-name\nsam-env-env-a") || !strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected compose down with project name, got:\n%s", composeArgs)
+	}
+	if _, err := os.ReadFile(reloadLog); err != nil {
+		t.Fatalf("reload command did not run: %v", err)
+	}
+}
+
+func TestGenerateCaddySnippet_RejectsUnsafeRouteTargets(t *testing.T) {
 	tests := []struct {
 		name  string
 		route RouteTarget
@@ -308,7 +382,7 @@ func TestGenerateCaddyfile_RejectsUnsafeRouteTargets(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := GenerateCaddyfile([]RouteTarget{tc.route}, CaddyfileOptions{}); err == nil {
+			if _, err := GenerateCaddySnippet([]RouteTarget{tc.route}); err == nil {
 				t.Fatal("expected invalid route target to be rejected")
 			}
 		})

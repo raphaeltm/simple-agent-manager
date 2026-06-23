@@ -111,6 +111,17 @@ func (c APIClient) GetPortToken(ctx context.Context, workspaceID string, port in
 	return response, err
 }
 
+func (c APIClient) CreateLocalForwardSession(ctx context.Context, workspaceID string, req LocalForwardSessionRequest) (LocalForwardSessionResponse, error) {
+	var response LocalForwardSessionResponse
+	path := fmt.Sprintf("%s%s/forwards", apiWorkspacesPath, url.PathEscape(workspaceID))
+	err := c.request(ctx, http.MethodPost, path, map[string]any{
+		"remotePort":     req.RemotePort,
+		"mode":           req.Mode,
+		"localAuthority": req.LocalAuthority,
+	}, &response)
+	return response, err
+}
+
 func (c APIClient) SendPrompt(ctx context.Context, projectID string, sessionID string, content string) (map[string]any, error) {
 	var response map[string]any
 	err := c.request(ctx, http.MethodPost, projectAPIPath(projectID, "sessions", sessionID, "prompt"), map[string]any{"content": content}, &response)

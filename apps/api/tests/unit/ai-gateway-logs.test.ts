@@ -211,6 +211,71 @@ describe('resolveGatewayPagination', () => {
 // ---------------------------------------------------------------------------
 
 describe('iterateGatewayLogs', () => {
+  it('accepts Cloudflare responses with omitted errors, no total_pages, and non-string metadata', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '3',
+    } as never;
+    const entries = [
+      makeEntry({ id: 'log-1', metadata: { userId: 'user-1', messageCount: 3 } as never }),
+      makeEntry({ id: 'log-2', metadata: { userId: 'user-2', hasTools: false } as never }),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      result: entries,
+      result_info: { page: 1, per_page: 3, count: 2, total_count: 2 },
+      success: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(
+      env,
+      'gateway-1',
+      '2026-05-01T00:00:00.000Z',
+      (entry) => visited.push(entry),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2']);
+    expect(visited[0]?.metadata).toEqual({ userId: 'user-1', messageCount: '3' });
+    expect(visited[1]?.metadata).toEqual({ userId: 'user-2', hasTools: 'false' });
+  });
+
+  it('derives total_pages from total_count when Cloudflare omits it', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '2',
+    } as never;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(input.toString());
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const entries = page === 1
+        ? [makeEntry({ id: 'log-1' }), makeEntry({ id: 'log-2' })]
+        : [makeEntry({ id: 'log-3' })];
+
+      return Promise.resolve(new Response(JSON.stringify({
+        result: entries,
+        result_info: { page, per_page: 2, count: entries.length, total_count: 3 },
+        success: true,
+        errors: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(
+      env,
+      'gateway-1',
+      '2026-05-01T00:00:00.000Z',
+      (entry) => visited.push(entry),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2', 'log-3']);
+  });
+
   it('warns when pagination reaches maxPages while more pages exist', async () => {
     const env = {
       CF_ACCOUNT_ID: 'account-1',

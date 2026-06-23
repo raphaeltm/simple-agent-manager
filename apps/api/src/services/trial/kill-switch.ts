@@ -29,6 +29,17 @@ export function __resetKillSwitchCacheForTest(): void {
   cache = null;
 }
 
+export function resolveTrialsEnabledKvKey(env: Env): string {
+  return env.TRIALS_ENABLED_KV_KEY ?? DEFAULT_TRIALS_ENABLED_KV_KEY;
+}
+
+export function resolveTrialKillSwitchCacheMs(env: Env): number {
+  const configured = Number(env.TRIAL_KILL_SWITCH_CACHE_MS ?? DEFAULT_KILL_SWITCH_CACHE_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_KILL_SWITCH_CACHE_MS;
+}
+
 /**
  * Returns `true` when trials are enabled. Default is **disabled** — an
  * operator must explicitly set the KV flag to `"true"` to turn trials on.
@@ -39,8 +50,8 @@ export async function isTrialsEnabled(
 ): Promise<boolean> {
   if (cache && now < cache.expiresAt) return cache.enabled;
 
-  const key = env.TRIALS_ENABLED_KV_KEY ?? DEFAULT_TRIALS_ENABLED_KV_KEY;
-  const ttl = Number(env.TRIAL_KILL_SWITCH_CACHE_MS ?? DEFAULT_KILL_SWITCH_CACHE_MS);
+  const key = resolveTrialsEnabledKvKey(env);
+  const ttl = resolveTrialKillSwitchCacheMs(env);
 
   let enabled = false;
   try {
@@ -58,4 +69,22 @@ export async function isTrialsEnabled(
 
   cache = { enabled, expiresAt: now + ttl };
   return enabled;
+}
+
+export async function setTrialsEnabled(
+  env: Env,
+  enabled: boolean,
+  now: number = Date.now()
+): Promise<{ enabled: boolean; kvKey: string; cacheTtlMs: number }> {
+  const key = resolveTrialsEnabledKvKey(env);
+  const ttl = resolveTrialKillSwitchCacheMs(env);
+
+  await env.KV.put(key, enabled ? 'true' : 'false');
+  cache = { enabled, expiresAt: now + ttl };
+
+  return {
+    enabled,
+    kvKey: key,
+    cacheTtlMs: ttl,
+  };
 }

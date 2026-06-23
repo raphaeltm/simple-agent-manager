@@ -59,8 +59,9 @@ vi.mock('@simple-agent-manager/cloud-init', () => ({
   validateCloudInitSize: () => true,
 }));
 
+const createNodeBackendDNSRecord = vi.fn();
 vi.mock('../../../src/services/dns', () => ({
-  createNodeBackendDNSRecord: vi.fn().mockResolvedValue('dns-record-id'),
+  createNodeBackendDNSRecord: (...args: unknown[]) => createNodeBackendDNSRecord(...args),
   deleteDNSRecord: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -102,6 +103,70 @@ beforeEach(() => {
   createProviderForUser.mockResolvedValue({
     provider: { createVM },
     credentialSource: 'user',
+  });
+  createVM.mockResolvedValue({ id: 'provider-vm-1', ip: '203.0.113.10' });
+  createNodeBackendDNSRecord.mockResolvedValue('dns-record-id');
+});
+
+describe('provisionNode backend DNS records', () => {
+  it('creates and stores a backend DNS record for deployment nodes with a VM IP', async () => {
+    await provisionNode(
+      'node-1',
+      ENV,
+      undefined,
+      undefined,
+      { environmentId: 'env-1' },
+    );
+
+    expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', '203.0.113.10', ENV);
+    expect(ops).toContainEqual(expect.objectContaining({
+      kind: 'update',
+      set: expect.objectContaining({
+        providerInstanceId: 'provider-vm-1',
+        ipAddress: '203.0.113.10',
+        backendDnsRecordId: 'dns-record-id',
+        status: 'running',
+      }),
+    }));
+  });
+
+  it('keeps existing workspace-node backend DNS behavior intact', async () => {
+    await provisionNode('node-1', ENV);
+
+    expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', '203.0.113.10', ENV);
+    expect(ops).toContainEqual(expect.objectContaining({
+      kind: 'update',
+      set: expect.objectContaining({
+        backendDnsRecordId: 'dns-record-id',
+        status: 'running',
+      }),
+    }));
+  });
+
+  it('records explicit node state when backend DNS creation fails', async () => {
+    createNodeBackendDNSRecord.mockRejectedValue(new Error('Cloudflare DNS unavailable'));
+
+    await expect(
+      provisionNode(
+        'node-1',
+        ENV,
+        undefined,
+        undefined,
+        { environmentId: 'env-1' },
+      )
+    ).resolves.toBeUndefined();
+
+    expect(ops).toContainEqual(expect.objectContaining({
+      kind: 'update',
+      set: expect.objectContaining({
+        providerInstanceId: 'provider-vm-1',
+        ipAddress: '203.0.113.10',
+        backendDnsRecordId: null,
+        status: 'error',
+        healthStatus: 'unhealthy',
+        errorMessage: expect.stringContaining('Backend DNS record creation failed'),
+      }),
+    }));
   });
 });
 

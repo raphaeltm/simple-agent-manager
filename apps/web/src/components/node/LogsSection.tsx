@@ -22,6 +22,8 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
     hasMore,
     streaming,
     paused,
+    containers,
+    containersLoading,
     filter,
     setSource,
     setLevel,
@@ -82,6 +84,8 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               level={filter.level}
               search={filter.search}
               container={filter.container}
+              containers={containers}
+              containersLoading={containersLoading}
               onSourceChange={setSource}
               onLevelChange={setLevel}
               onSearchChange={setSearch}

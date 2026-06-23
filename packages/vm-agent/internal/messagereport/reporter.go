@@ -2,6 +2,7 @@ package messagereport
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -20,6 +21,8 @@ import (
 
 // truncationMarker is appended to content that was truncated.
 const truncationMarker = "\n\n[truncated]"
+
+const omittedMessageMarker = "[message omitted: exceeded message transport limit]"
 
 // Message is the unit of work enqueued into the outbox.
 type Message struct {
@@ -42,6 +45,11 @@ type Reporter struct {
 	authToken   string
 	workspaceID string // dynamically set after workspace creation
 	sessionID   string // dynamically updated when warm node is reused for new task
+	// messageLimitReached disables persistence for the current chat session
+	// once the control plane reports SESSION_MESSAGE_LIMIT_EXCEEDED. Retrying
+	// cannot succeed until a new session is selected, so the reporter drops
+	// later messages instead of growing an unwinnable outbox.
+	messageLimitReached bool
 
 	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
 	// Lock ordering: flushMu must always be acquired BEFORE mu when both
@@ -151,14 +159,16 @@ func (r *Reporter) SetSessionID(id string) {
 		return
 	}
 
-	// Acquire flushMu FIRST to block any concurrent flush, then read the
-	// old session ID under mu. This closes the window where a flush could
-	// start between reading oldSessionID and clearing the outbox.
+	// Acquire flushMu FIRST to block any concurrent flush, then hold mu through
+	// the outbox clear and session update. Enqueue also holds mu through its
+	// insert, so a concurrent enqueue either lands before the clear and is
+	// removed with the old session, or waits and uses the new session ID.
 	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	oldSessionID := r.sessionID
-	r.mu.Unlock()
 
 	// Clear stale messages from the previous session BEFORE updating the
 	// session ID to prevent a race where Enqueue reads the new sessionID
@@ -173,23 +183,14 @@ func (r *Reporter) SetSessionID(id string) {
 				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
 		}
 
-		// Update session ID while still holding flushMu so that no flush
-		// can observe the new session ID with stale outbox contents.
-		r.mu.Lock()
-		r.sessionID = id
-		r.mu.Unlock()
-
-		r.flushMu.Unlock()
-
 		slog.Info("messagereport: session ID updated",
 			"sessionId", id, "previousSessionId", oldSessionID)
-	} else {
-		r.mu.Lock()
-		r.sessionID = id
-		r.mu.Unlock()
-
-		r.flushMu.Unlock()
 	}
+
+	if oldSessionID != id {
+		r.messageLimitReached = false
+	}
+	r.sessionID = id
 }
 
 // clearOutboxForSession removes messages for a specific session from the
@@ -217,6 +218,17 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return nil
 	}
 
+	if msg.Timestamp == "" {
+		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.messageLimitReached {
+		return nil
+	}
+
 	// Check outbox size using a bounded count instead of COUNT(*) over the
 	// entire table. LIMIT caps the scan at OutboxMaxSize rows.
 	var count int
@@ -232,16 +244,10 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: outbox full (%d/%d)", count, r.cfg.OutboxMaxSize)
 	}
 
-	if msg.Timestamp == "" {
-		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-
 	// Use the dynamically updatable session ID (updated via SetSessionID
 	// when a warm node is reused for a new task).
-	r.mu.Lock()
 	sessionID := r.sessionID
 	workspaceID := r.workspaceID
-	r.mu.Unlock()
 
 	// Principle XIII (Fail-Fast): Reject messages when no session ID is set.
 	// This is a defensive check — by construction, a non-nil Reporter should
@@ -257,10 +263,8 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
 
-	// Truncate oversized content to prevent permanent message loss. The
-	// Cloudflare Worker enforces a ~262 KB request body limit; messages
-	// exceeding that cause a 400 which sendBatch() treats as permanent,
-	// deleting the batch from the outbox.
+	// Truncate oversized content to match the API's individual-message limit.
+	// sendBatch still has a size fallback for JSON overhead and tool metadata.
 	maxBytes := r.cfg.MaxMessageContentBytes
 	if len(msg.Content) > maxBytes {
 		slog.Warn("messagereport: truncating oversized message content",
@@ -269,7 +273,7 @@ func (r *Reporter) Enqueue(msg Message) error {
 			"maxBytes", maxBytes,
 			"workspaceId", workspaceID,
 		)
-		msg.Content = msg.Content[:maxBytes] + truncationMarker
+		msg.Content = truncateContentToLimit(msg.Content, maxBytes)
 	}
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
@@ -372,33 +376,78 @@ func (r *Reporter) readBatch() ([]outboxRow, error) {
 	defer rows.Close()
 
 	var batch []outboxRow
-	var totalBytes int
 	for rows.Next() {
 		var row outboxRow
 		if err := rows.Scan(&row.id, &row.messageID, &row.sessionID, &row.role, &row.content, &row.toolMetadata, &row.createdAt); err != nil {
 			return nil, err
 		}
-		rowBytes := len(row.content)
-		if row.toolMetadata.Valid {
-			rowBytes += len(row.toolMetadata.String)
+		candidate := append(append([]outboxRow(nil), batch...), row)
+		payloadBytes, err := marshaledBatchSize(candidate)
+		if err != nil {
+			return nil, err
 		}
-		// Respect byte limit (but always include at least one message).
-		if len(batch) > 0 && totalBytes+rowBytes > r.cfg.BatchMaxBytes {
+		// Respect marshaled payload limit, but always include at least one
+		// message so an oversized row can progress to fallback handling.
+		if len(batch) > 0 && payloadBytes > r.cfg.BatchMaxBytes {
 			break
 		}
 		batch = append(batch, row)
-		totalBytes += rowBytes
 	}
 	return batch, rows.Err()
 }
 
+type apiMessage struct {
+	MessageID    string `json:"messageId"`
+	SessionID    string `json:"sessionId"`
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	ToolMetadata string `json:"toolMetadata,omitempty"`
+	Timestamp    string `json:"timestamp"`
+	Sequence     int64  `json:"sequence"`
+}
+
+func rowToAPIMessage(row outboxRow) apiMessage {
+	m := apiMessage{
+		MessageID: row.messageID,
+		SessionID: row.sessionID,
+		Role:      row.role,
+		Content:   row.content,
+		Timestamp: row.createdAt,
+		Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
+	}
+	if row.toolMetadata.Valid {
+		m.ToolMetadata = row.toolMetadata.String
+	}
+	return m
+}
+
+func buildBatchPayload(messages []apiMessage) ([]byte, error) {
+	return json.Marshal(map[string]interface{}{"messages": messages})
+}
+
+func buildBatchBody(batch []outboxRow) ([]byte, error) {
+	messages := make([]apiMessage, 0, len(batch))
+	for _, row := range batch {
+		messages = append(messages, rowToAPIMessage(row))
+	}
+	return buildBatchPayload(messages)
+}
+
+func marshaledBatchSize(batch []outboxRow) (int, error) {
+	body, err := buildBatchBody(batch)
+	if err != nil {
+		return 0, err
+	}
+	return len(body), nil
+}
+
 // sendBatch POSTs the batch to the control plane with exponential backoff.
 func (r *Reporter) sendBatch(batch []outboxRow) error {
-	r.mu.Lock()
-	token := r.authToken
-	wsID := r.workspaceID
-	r.mu.Unlock()
-
+	token, wsID, messageLimitReached := r.senderState()
+	if messageLimitReached {
+		r.deleteBatch(batch)
+		return nil
+	}
 	if token == "" {
 		// No token yet — leave messages in outbox for later.
 		return fmt.Errorf("no auth token")
@@ -408,101 +457,277 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 		return fmt.Errorf("no workspace ID")
 	}
 
-	// Build the request body matching the API contract.
-	type apiMessage struct {
-		MessageID    string `json:"messageId"`
-		SessionID    string `json:"sessionId"`
-		Role         string `json:"role"`
-		Content      string `json:"content"`
-		ToolMetadata string `json:"toolMetadata,omitempty"`
-		Timestamp    string `json:"timestamp"`
-		Sequence     int64  `json:"sequence"`
-	}
-	messages := make([]apiMessage, 0, len(batch))
-	for _, row := range batch {
-		m := apiMessage{
-			MessageID: row.messageID,
-			SessionID: row.sessionID,
-			Role:      row.role,
-			Content:   row.content,
-			Timestamp: row.createdAt,
-			Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
-		}
-		if row.toolMetadata.Valid {
-			m.ToolMetadata = row.toolMetadata.String
-		}
-		messages = append(messages, m)
-	}
-
-	payload := map[string]interface{}{
-		"messages": messages,
-	}
-
-	body, err := json.Marshal(payload)
+	body, err := buildBatchBody(batch)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
 	url := strings.TrimRight(r.cfg.Endpoint, "/") +
 		"/api/workspaces/" + wsID + "/messages"
+	return r.sendBatchWithRetry(batch, url, token, wsID, body)
+}
 
+func (r *Reporter) senderState() (token, workspaceID string, messageLimitReached bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.authToken, r.workspaceID, r.messageLimitReached
+}
+
+func (r *Reporter) sendBatchWithRetry(batch []outboxRow, url, token, wsID string, body []byte) error {
 	// Retry with exponential backoff + jitter.
 	delay := r.cfg.RetryInitial
 	start := time.Now()
 
 	for {
 		statusCode, responseBody, err := r.doPost(url, token, body)
-		if err == nil && statusCode >= 200 && statusCode < 300 {
-			return nil // success
+		handled, handleErr := r.handleBatchResponse(batch, url, token, wsID, statusCode, responseBody, err)
+		if handled {
+			return handleErr
 		}
 
-		// Permanent client errors — discard the batch.
-		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
-			slog.Warn("messagereport: permanent error, discarding batch",
-				"statusCode", statusCode,
-				"count", len(batch),
-				"workspaceId", wsID,
-				"responseBody", responseBody,
-			)
-			// Delete from outbox so we don't retry forever.
-			r.deleteBatch(batch)
-			return nil
-		}
-
-		// Check elapsed time.
 		if time.Since(start) > r.cfg.RetryMaxElapsed {
 			return fmt.Errorf("retries exhausted after %v (last status=%d, err=%v)",
 				time.Since(start), statusCode, err)
 		}
 
-		// Check if we should stop.
-		select {
-		case <-r.stopC:
-			return fmt.Errorf("shutdown during retry")
-		default:
+		if err := r.waitForRetry(delay, statusCode, err); err != nil {
+			return err
 		}
-
-		// Backoff with jitter.
-		jitter := time.Duration(rand.Int63n(int64(delay) / 2))
-		sleepDur := delay + jitter
-		slog.Info("messagereport: retrying after backoff",
-			"delay", sleepDur, "statusCode", statusCode, "err", err)
-
-		timer := time.NewTimer(sleepDur)
-		select {
-		case <-timer.C:
-		case <-r.stopC:
-			timer.Stop()
-			return fmt.Errorf("shutdown during backoff")
-		}
-
-		// Exponential increase capped at RetryMax.
-		delay = time.Duration(math.Min(float64(delay*2), float64(r.cfg.RetryMax)))
+		delay = r.nextRetryDelay(delay)
 	}
 }
 
+func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID string, statusCode int, responseBody string, postErr error) (bool, error) {
+	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+		return true, nil
+	}
+	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
+		return true, r.sendSizeFallback(url, token, batch)
+	}
+	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
+		r.markMessageLimitReached(batch, responseBody)
+		return true, nil
+	}
+	if isPermanentBatchError(statusCode) {
+		slog.Warn("messagereport: permanent error, discarding batch",
+			"statusCode", statusCode,
+			"count", len(batch),
+			"workspaceId", wsID,
+			"responseBody", responseBody,
+		)
+		r.deleteBatch(batch)
+		return true, nil
+	}
+	return false, nil
+}
+
+func isPermanentBatchError(statusCode int) bool {
+	return statusCode == http.StatusBadRequest ||
+		statusCode == http.StatusUnauthorized ||
+		statusCode == http.StatusForbidden
+}
+
+func (r *Reporter) waitForRetry(delay time.Duration, statusCode int, err error) error {
+	select {
+	case <-r.stopC:
+		return fmt.Errorf("shutdown during retry")
+	default:
+	}
+
+	jitter := time.Duration(rand.Int63n(int64(delay) / 2))
+	sleepDur := delay + jitter
+	slog.Info("messagereport: retrying after backoff",
+		"delay", sleepDur, "statusCode", statusCode, "err", err)
+
+	timer := time.NewTimer(sleepDur)
+	select {
+	case <-timer.C:
+		return nil
+	case <-r.stopC:
+		timer.Stop()
+		return fmt.Errorf("shutdown during backoff")
+	}
+}
+
+func (r *Reporter) nextRetryDelay(delay time.Duration) time.Duration {
+	return time.Duration(math.Min(float64(delay*2), float64(r.cfg.RetryMax)))
+}
+
+func isPayloadSizeError(responseBody string) bool {
+	body := strings.ToLower(responseBody)
+	return strings.Contains(body, "payload exceeds") ||
+		strings.Contains(body, "individual message content exceeds") ||
+		strings.Contains(body, "byte limit")
+}
+
+func isSessionMessageLimitError(responseBody string) bool {
+	return strings.Contains(responseBody, "SESSION_MESSAGE_LIMIT_EXCEEDED")
+}
+
+type sessionMessageLimitError struct {
+	responseBody string
+}
+
+func (e sessionMessageLimitError) Error() string {
+	return "session message limit reached"
+}
+
+type fallbackPermanentError struct {
+	statusCode   int
+	responseBody string
+}
+
+func (e fallbackPermanentError) Error() string {
+	return fmt.Sprintf("fallback permanent error status=%d body=%s", e.statusCode, e.responseBody)
+}
+
+func (r *Reporter) markMessageLimitReached(batch []outboxRow, responseBody string) {
+	r.mu.Lock()
+	r.messageLimitReached = true
+	wsID := r.workspaceID
+	sessionID := r.sessionID
+	r.mu.Unlock()
+
+	slog.Warn("messagereport: session message limit reached, disabling reporter for session",
+		"count", len(batch),
+		"workspaceId", wsID,
+		"sessionId", sessionID,
+		"responseBody", responseBody,
+	)
+	r.deleteBatch(batch)
+}
+
+func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error {
+	ctx, cancel := r.contextUntilStop()
+	defer cancel()
+
+	for _, row := range batch {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("shutdown during fallback: %w", err)
+		}
+
+		if err := r.sendSingleWithSizeFallback(ctx, url, token, row); err != nil {
+			if limitErr, ok := err.(sessionMessageLimitError); ok {
+				r.markMessageLimitReached(batch, limitErr.responseBody)
+				return nil
+			}
+			if permanentErr, ok := err.(fallbackPermanentError); ok {
+				slog.Warn("messagereport: fallback permanent error, discarding batch",
+					"statusCode", permanentErr.statusCode,
+					"count", len(batch),
+					"messageId", row.messageID,
+					"responseBody", permanentErr.responseBody,
+				)
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token string, row outboxRow) error {
+	candidates := r.sizeFallbackCandidates(row)
+	for i, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("shutdown during fallback: %w", err)
+		}
+
+		statusCode, responseBody, postErr, err := r.postFallbackCandidate(ctx, url, token, candidate)
+		if err != nil {
+			return err
+		}
+		tryNext, resultErr := fallbackCandidateResult(row, i, statusCode, responseBody, postErr)
+		if tryNext {
+			continue
+		}
+		return resultErr
+	}
+	return fmt.Errorf("fallback candidates exhausted for message %s", row.messageID)
+}
+
+func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string, candidate apiMessage) (int, string, error, error) {
+	body, err := buildBatchPayload([]apiMessage{candidate})
+	if err != nil {
+		return 0, "", nil, fmt.Errorf("marshal fallback payload: %w", err)
+	}
+	statusCode, responseBody, postErr := r.doPostWithContext(ctx, url, token, body)
+	return statusCode, responseBody, postErr, nil
+}
+
+func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, responseBody string, postErr error) (tryNext bool, err error) {
+	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+		logFallbackSuccess(row, candidateIndex)
+		return false, nil
+	}
+	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
+		return true, nil
+	}
+	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
+		return false, sessionMessageLimitError{responseBody: responseBody}
+	}
+	if isPermanentBatchError(statusCode) {
+		return false, fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
+	}
+	return false, fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, postErr, responseBody)
+}
+
+func logFallbackSuccess(row outboxRow, candidateIndex int) {
+	if candidateIndex == 0 {
+		return
+	}
+	slog.Warn("messagereport: delivered oversized message fallback",
+		"messageId", row.messageID,
+		"role", row.role,
+		"fallbackIndex", candidateIndex,
+	)
+}
+
+func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-r.stopC:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
+}
+
+func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
+	trimmed := rowToAPIMessage(row)
+	trimmed.Content = truncateContentToLimit(trimmed.Content, r.cfg.MaxMessageContentBytes)
+
+	withoutMetadata := trimmed
+	withoutMetadata.ToolMetadata = ""
+
+	omitted := withoutMetadata
+	omitted.Content = omittedMessageMarker
+
+	return []apiMessage{trimmed, withoutMetadata, omitted}
+}
+
+func truncateContentToLimit(content string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if maxBytes <= len(truncationMarker) {
+		return truncationMarker[:maxBytes]
+	}
+	if len(content) <= maxBytes {
+		return content
+	}
+	keep := maxBytes - len(truncationMarker)
+	return content[:keep] + truncationMarker
+}
+
 func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	return r.doPostWithContext(context.Background(), url, token, body)
+}
+
+func (r *Reporter) doPostWithContext(ctx context.Context, url, token string, body []byte) (int, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, "", err
 	}

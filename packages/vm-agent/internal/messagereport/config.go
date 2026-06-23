@@ -20,8 +20,7 @@ type Config struct {
 	// BatchMaxSize is the maximum number of messages per HTTP POST.
 	BatchMaxSize int
 
-	// BatchMaxBytes is the approximate max payload size per batch (bytes).
-	// Messages are measured by their JSON-serialized content length.
+	// BatchMaxBytes is the maximum marshaled JSON payload size per batch.
 	BatchMaxBytes int
 
 	// MaxMessageContentBytes is the maximum message content size before
@@ -67,8 +66,8 @@ func DefaultConfig() Config {
 	return Config{
 		BatchMaxWait:           2 * time.Second,
 		BatchMaxSize:           50,
-		BatchMaxBytes:          65536,      // 64 KB
-		MaxMessageContentBytes: 200 * 1024, // 200 KB
+		BatchMaxBytes:          256 * 1024, // API MAX_MESSAGES_PAYLOAD_BYTES default
+		MaxMessageContentBytes: 100 * 1024, // API MESSAGE_SIZE_THRESHOLD default
 		OutboxMaxSize:          10000,
 		RetryInitial:           1 * time.Second,
 		RetryMax:               30 * time.Second,

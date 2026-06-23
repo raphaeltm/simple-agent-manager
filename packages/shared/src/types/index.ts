@@ -53,6 +53,8 @@ export type {
   Event,
   EventLevel,
   Node,
+  NodeContainerListResponse,
+  NodeContainerLogTarget,
   NodeHealthStatus,
   NodeLifecycleState,
   NodeLifecycleStatus,
@@ -108,6 +110,13 @@ export type {
   UpsertProjectRuntimeFileRequest,
 } from './project';
 export { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from './project';
+
+// Deployment
+export type {
+  DeploymentEnvironmentConfigResponse,
+  DeploymentEnvironmentConfigVarResponse,
+  UpsertDeploymentEnvironmentConfigVarRequest,
+} from './deployment';
 
 // Task
 export type {
@@ -266,6 +275,7 @@ export {
   AGENT_EFFORT_LEVELS,
   DEFAULT_AGENT_EFFORT,
   DEFAULT_GITHUB_CLI_POLICY,
+  DEFAULT_OPENCODE_GO_MODEL,
   DEFAULT_OPENCODE_PROVIDER,
   DEFAULT_OPENCODE_ZEN_MODEL,
   getSupportedEffortsForAgent,

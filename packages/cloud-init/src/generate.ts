@@ -27,6 +27,15 @@ const SAFE_TOKEN_RE = /^[a-zA-Z0-9_.\-/+=]+$/;
 /** Boolean strings accepted by the VM agent config loader. */
 const BOOLEAN_RE = /^(true|false)$/;
 
+/** Simple email syntax for ACME account contact, excluding whitespace/control chars. */
+const SAFE_EMAIL_RE = /^[a-zA-Z0-9.!#$%&*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+/** Deployment compose command: executable plus optional space-separated args, no shell metacharacters. */
+const SAFE_DEPLOY_COMPOSE_CMD_RE = /^[a-zA-Z0-9_./:-]+(?: [a-zA-Z0-9_./:-]+)*$/;
+
+/** Go duration syntax accepted for deployment health timeout (e.g. 5m, 1m30s). */
+const GO_DURATION_RE = /^(?:[0-9]+(?:ns|us|ms|s|m|h))+$/;
+
 /**
  * PEM envelope: must start with -----BEGIN <label>----- and end with -----END <label>-----.
  * BEGIN and END labels must match (enforced via backreference).
@@ -48,39 +57,53 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     errors.push(`nodeId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.nodeId)})`);
   }
   if (!variables.hostname || !SAFE_HOSTNAME_RE.test(variables.hostname)) {
-    errors.push(`hostname: must match ${SAFE_HOSTNAME_RE} (got ${JSON.stringify(variables.hostname)})`);
+    errors.push(
+      `hostname: must match ${SAFE_HOSTNAME_RE} (got ${JSON.stringify(variables.hostname)})`
+    );
   }
   if (!variables.controlPlaneUrl || !SAFE_URL_RE.test(variables.controlPlaneUrl)) {
-    errors.push(`controlPlaneUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.controlPlaneUrl)})`);
+    errors.push(
+      `controlPlaneUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.controlPlaneUrl)})`
+    );
   }
   if (!variables.jwksUrl || !SAFE_URL_RE.test(variables.jwksUrl)) {
     errors.push(`jwksUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.jwksUrl)})`);
   }
   if (!variables.callbackToken || !SAFE_TOKEN_RE.test(variables.callbackToken)) {
-    errors.push(`callbackToken: must contain only safe token characters (got ${JSON.stringify(variables.callbackToken)})`);
+    errors.push(
+      `callbackToken: must contain only safe token characters (got ${JSON.stringify(variables.callbackToken)})`
+    );
   }
 
   // Optional fields — only validated when present and non-empty
   if (variables.vmAgentPort !== undefined && variables.vmAgentPort !== '') {
     const port = Number(variables.vmAgentPort);
     if (!NUMERIC_RE.test(variables.vmAgentPort) || port < 1 || port > 65535) {
-      errors.push(`vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`);
+      errors.push(
+        `vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`
+      );
     }
   }
   if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
     const timeout = Number(variables.cfIpFetchTimeout);
     if (!NUMERIC_RE.test(variables.cfIpFetchTimeout) || timeout < 1) {
-      errors.push(`cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`);
+      errors.push(
+        `cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`
+      );
     }
   }
   if (variables.projectId !== undefined && variables.projectId !== '') {
     if (!SAFE_ID_RE.test(variables.projectId)) {
-      errors.push(`projectId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.projectId)})`);
+      errors.push(
+        `projectId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.projectId)})`
+      );
     }
   }
   if (variables.chatSessionId !== undefined && variables.chatSessionId !== '') {
     if (!SAFE_ID_RE.test(variables.chatSessionId)) {
-      errors.push(`chatSessionId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.chatSessionId)})`);
+      errors.push(
+        `chatSessionId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.chatSessionId)})`
+      );
     }
   }
   if (variables.taskId !== undefined && variables.taskId !== '') {
@@ -90,74 +113,133 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
   }
   if (variables.taskMode !== undefined && variables.taskMode !== '') {
     if (variables.taskMode !== 'task' && variables.taskMode !== 'conversation') {
-      errors.push(`taskMode: must be 'task' or 'conversation' (got ${JSON.stringify(variables.taskMode)})`);
+      errors.push(
+        `taskMode: must be 'task' or 'conversation' (got ${JSON.stringify(variables.taskMode)})`
+      );
     }
   }
   if (variables.provider !== undefined && variables.provider !== '') {
     if (!VALID_CLOUD_PROVIDERS.includes(variables.provider as CloudProvider)) {
-      errors.push(`provider: must be one of ${VALID_CLOUD_PROVIDERS.join(', ')} (got ${JSON.stringify(variables.provider)})`);
+      errors.push(
+        `provider: must be one of ${VALID_CLOUD_PROVIDERS.join(', ')} (got ${JSON.stringify(variables.provider)})`
+      );
     }
   }
   if (variables.logJournalMaxUse !== undefined && variables.logJournalMaxUse !== '') {
     if (!JOURNALD_SIZE_RE.test(variables.logJournalMaxUse)) {
-      errors.push(`logJournalMaxUse: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalMaxUse)})`);
+      errors.push(
+        `logJournalMaxUse: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalMaxUse)})`
+      );
     }
   }
   if (variables.logJournalKeepFree !== undefined && variables.logJournalKeepFree !== '') {
     if (!JOURNALD_SIZE_RE.test(variables.logJournalKeepFree)) {
-      errors.push(`logJournalKeepFree: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalKeepFree)})`);
+      errors.push(
+        `logJournalKeepFree: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalKeepFree)})`
+      );
     }
   }
   if (variables.logJournalMaxRetention !== undefined && variables.logJournalMaxRetention !== '') {
     if (!JOURNALD_TIME_RE.test(variables.logJournalMaxRetention)) {
-      errors.push(`logJournalMaxRetention: must match ${JOURNALD_TIME_RE} (got ${JSON.stringify(variables.logJournalMaxRetention)})`);
+      errors.push(
+        `logJournalMaxRetention: must match ${JOURNALD_TIME_RE} (got ${JSON.stringify(variables.logJournalMaxRetention)})`
+      );
     }
   }
   if (variables.dockerDnsServers !== undefined && variables.dockerDnsServers !== '') {
     if (!isValidDockerDnsServers(variables.dockerDnsServers)) {
-      errors.push(`dockerDnsServers: must be a JSON fragment containing valid quoted IPv4 addresses (got ${JSON.stringify(variables.dockerDnsServers)})`);
+      errors.push(
+        `dockerDnsServers: must be a JSON fragment containing valid quoted IPv4 addresses (got ${JSON.stringify(variables.dockerDnsServers)})`
+      );
     }
   }
-  if (variables.devcontainerCacheEnabled !== undefined && variables.devcontainerCacheEnabled !== '') {
+  if (
+    variables.devcontainerCacheEnabled !== undefined &&
+    variables.devcontainerCacheEnabled !== ''
+  ) {
     if (!BOOLEAN_RE.test(variables.devcontainerCacheEnabled)) {
-      errors.push(`devcontainerCacheEnabled: must be "true" or "false" (got ${JSON.stringify(variables.devcontainerCacheEnabled)})`);
+      errors.push(
+        `devcontainerCacheEnabled: must be "true" or "false" (got ${JSON.stringify(variables.devcontainerCacheEnabled)})`
+      );
     }
   }
   if (variables.originCaCert !== undefined && variables.originCaCert !== '') {
     if (!PEM_ENVELOPE_RE.test(variables.originCaCert)) {
-      errors.push('originCaCert: must be a valid PEM-encoded certificate (-----BEGIN ... ----- / -----END ... -----)');
+      errors.push(
+        'originCaCert: must be a valid PEM-encoded certificate (-----BEGIN ... ----- / -----END ... -----)'
+      );
     }
   }
   if (variables.originCaKey !== undefined && variables.originCaKey !== '') {
     if (!PEM_ENVELOPE_RE.test(variables.originCaKey)) {
-      errors.push('originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)');
+      errors.push(
+        'originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)'
+      );
     }
   }
   if (variables.swapSizeMb !== undefined && variables.swapSizeMb !== '') {
     const size = Number(variables.swapSizeMb);
     if (!NUMERIC_RE.test(variables.swapSizeMb) || size < 0 || size > 65536) {
-      errors.push(`swapSizeMb: must be numeric 0-65536 (got ${JSON.stringify(variables.swapSizeMb)})`);
+      errors.push(
+        `swapSizeMb: must be numeric 0-65536 (got ${JSON.stringify(variables.swapSizeMb)})`
+      );
     }
   }
   if (variables.swapSwappiness !== undefined && variables.swapSwappiness !== '') {
     const val = Number(variables.swapSwappiness);
     if (!NUMERIC_RE.test(variables.swapSwappiness) || val < 0 || val > 100) {
-      errors.push(`swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`);
+      errors.push(
+        `swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`
+      );
     }
   }
   if (variables.role !== undefined && variables.role !== '') {
     if (variables.role !== 'workspace' && variables.role !== 'deployment') {
-      errors.push(`role: must be 'workspace' or 'deployment' (got ${JSON.stringify(variables.role)})`);
+      errors.push(
+        `role: must be 'workspace' or 'deployment' (got ${JSON.stringify(variables.role)})`
+      );
     }
   }
   if (variables.environmentId !== undefined && variables.environmentId !== '') {
     if (!SAFE_ID_RE.test(variables.environmentId)) {
-      errors.push(`environmentId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.environmentId)})`);
+      errors.push(
+        `environmentId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.environmentId)})`
+      );
     }
   }
   if (variables.deploySigningPubKey !== undefined && variables.deploySigningPubKey !== '') {
     if (!SAFE_TOKEN_RE.test(variables.deploySigningPubKey)) {
-      errors.push(`deploySigningPubKey: must contain only safe token characters (got ${JSON.stringify(variables.deploySigningPubKey)})`);
+      errors.push(
+        `deploySigningPubKey: must contain only safe token characters (got ${JSON.stringify(variables.deploySigningPubKey)})`
+      );
+    }
+  }
+  if (variables.deployAcmeEmail !== undefined && variables.deployAcmeEmail !== '') {
+    if (!SAFE_EMAIL_RE.test(variables.deployAcmeEmail)) {
+      errors.push(
+        `deployAcmeEmail: must be a valid email address (got ${JSON.stringify(variables.deployAcmeEmail)})`
+      );
+    }
+  }
+  if (variables.deployAcmeCa !== undefined && variables.deployAcmeCa !== '') {
+    if (!SAFE_URL_RE.test(variables.deployAcmeCa)) {
+      errors.push(
+        `deployAcmeCa: must be a valid HTTPS URL (got ${JSON.stringify(variables.deployAcmeCa)})`
+      );
+    }
+  }
+  if (variables.deployComposeCmd !== undefined && variables.deployComposeCmd !== '') {
+    if (!SAFE_DEPLOY_COMPOSE_CMD_RE.test(variables.deployComposeCmd)) {
+      errors.push(
+        `deployComposeCmd: must be a command plus optional arguments without shell metacharacters (got ${JSON.stringify(variables.deployComposeCmd)})`
+      );
+    }
+  }
+  if (variables.deployHealthTimeout !== undefined && variables.deployHealthTimeout !== '') {
+    if (!GO_DURATION_RE.test(variables.deployHealthTimeout)) {
+      errors.push(
+        `deployHealthTimeout: must be a Go duration using ns/us/ms/s/m/h units (got ${JSON.stringify(variables.deployHealthTimeout)})`
+      );
     }
   }
 
@@ -217,6 +299,14 @@ export interface CloudInitVariables {
   environmentId?: string;
   /** Base64-encoded Ed25519 deploy signing public key for release verification. */
   deploySigningPubKey?: string;
+  /** Contact email for ACME/Let's Encrypt account on deployment nodes. */
+  deployAcmeEmail?: string;
+  /** Optional ACME CA directory URL override for deployment nodes. */
+  deployAcmeCa?: string;
+  /** Docker Compose command override for deployment nodes. */
+  deployComposeCmd?: string;
+  /** Max time for deployment health checks, as Go duration string. */
+  deployHealthTimeout?: string;
 }
 
 /**
@@ -232,7 +322,7 @@ export interface GenerateCloudInitOptions {
  */
 export function generateCloudInit(
   variables: CloudInitVariables,
-  options?: GenerateCloudInitOptions,
+  options?: GenerateCloudInitOptions
 ): string {
   validateCloudInitVariables(variables);
 
@@ -266,6 +356,10 @@ export function generateCloudInit(
     '{{ role }}': variables.role ?? '',
     '{{ environment_id }}': variables.environmentId ?? '',
     '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',
+    '{{ deploy_acme_email }}': variables.deployAcmeEmail ?? '',
+    '{{ deploy_acme_ca }}': variables.deployAcmeCa ?? '',
+    '{{ deploy_compose_cmd }}': variables.deployComposeCmd ?? '',
+    '{{ deploy_health_timeout }}': variables.deployHealthTimeout ?? '',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.
@@ -279,7 +373,7 @@ export function generateCloudInit(
     if (!validateCloudInitSize(config)) {
       const sizeBytes = new TextEncoder().encode(config).length;
       throw new Error(
-        `Cloud-init config exceeds ${HETZNER_USER_DATA_MAX_BYTES / 1024}KB Hetzner user-data limit (${sizeBytes} bytes)`,
+        `Cloud-init config exceeds ${HETZNER_USER_DATA_MAX_BYTES / 1024}KB Hetzner user-data limit (${sizeBytes} bytes)`
       );
     }
   }
@@ -321,11 +415,14 @@ function isValidIpv4Address(value: unknown): boolean {
   if (typeof value !== 'string') return false;
 
   const octets = value.split('.');
-  return octets.length === 4 && octets.every((octet) => {
-    if (!/^\d{1,3}$/.test(octet)) return false;
-    const numeric = Number(octet);
-    return numeric >= 0 && numeric <= 255;
-  });
+  return (
+    octets.length === 4 &&
+    octets.every((octet) => {
+      if (!/^\d{1,3}$/.test(octet)) return false;
+      const numeric = Number(octet);
+      return numeric >= 0 && numeric <= 255;
+    })
+  );
 }
 
 function escapeRegExp(str: string): string {

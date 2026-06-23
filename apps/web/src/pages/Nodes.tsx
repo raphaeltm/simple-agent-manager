@@ -98,6 +98,17 @@ export function Nodes() {
   };
 
   const handleDeleteNode = async (id: string) => {
+    const targetNode = nodes.find((n) => n.id === id);
+    if (targetNode?.nodeRole === 'deployment') {
+      const envs = targetNode.deploymentEnvironments ?? [];
+      const envSummary = envs.length > 0
+        ? `${envs.length} deployment environment${envs.length === 1 ? '' : 's'}: ${envs.map((env) => env.name).join(', ')}`
+        : 'deployment environments currently listed on this node';
+      const confirmed = window.confirm(
+        `"${targetNode.name}" is a deployment node hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
+      );
+      if (!confirmed) return;
+    }
     try {
       await deleteNode(id);
       void loadData();
@@ -132,7 +143,7 @@ export function Nodes() {
       <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <p className="sam-type-secondary m-0 text-fg-muted">
-            Nodes host one or more workspaces.
+            Nodes host workspaces or project deployment environments.
           </p>
           {isRefreshing && <Spinner size="sm" />}
         </div>

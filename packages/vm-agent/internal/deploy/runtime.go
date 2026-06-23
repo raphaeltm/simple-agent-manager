@@ -4,12 +4,21 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 
+	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/dockersetup"
 	"github.com/workspace/vm-agent/internal/errorreport"
 )
 
 const runtimeReportSource = "deploy.runtime"
+
+var firewallSetupScriptPath = "/etc/sam/firewall/setup-firewall.sh"
+
+const metadataBlockServiceName = "sam-metadata-block.service"
+
+var prepareCaddyPathsFunc = prepareCaddyPaths
 
 // EnsureRuntime installs and starts the host-level dependencies required for
 // deployment apply. It is intentionally small and separate from workspace
@@ -25,10 +34,32 @@ func EnsureRuntime(ctx context.Context, reporter *errorreport.Reporter) error {
 		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_docker"})
 		return err
 	}
+	if err := ensureDeploymentNetworkHardening(ctx, reporter); err != nil {
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_network_hardening"})
+		return err
+	}
 	if err := ensureCaddy(ctx, reporter); err != nil {
 		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_caddy"})
 		return err
 	}
+
+	// Docker Model Runner support: the Hetzner docker-ce base image ships a
+	// Compose plugin older than v2.35, which rejects compose `provider:`
+	// services with "Additional property provider is not allowed". Deployment
+	// nodes that apply Model Runner compose files therefore need the same
+	// compose upgrade + `docker model` runner install that workspace
+	// provisioning performs. Both steps are idempotent and non-fatal: a deploy
+	// without `provider:` services must still proceed if either step fails, so
+	// we log-and-continue rather than aborting EnsureRuntime.
+	if err := dockersetup.EnsureModernCompose(ctx); err != nil {
+		slog.Warn("deploy.runtime: compose upgrade failed; provider services may not validate", "error", err)
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_modern_compose", "fatal": false})
+	}
+	if err := dockersetup.EnsureDockerModelRunner(ctx); err != nil {
+		slog.Warn("deploy.runtime: model runner install failed; provider services may not run", "error", err)
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{"step": "ensure_docker_model_runner", "fatal": false})
+	}
+
 	reporter.ReportInfo("deploy.runtime: host dependencies ready", runtimeReportSource, "", nil)
 	return nil
 }
@@ -37,8 +68,12 @@ func ensureDocker(ctx context.Context, reporter *errorreport.Reporter) error {
 	if _, err := exec.LookPath("docker"); err == nil {
 		slog.Info("deploy.runtime: docker already installed")
 		reporter.ReportInfo("deploy.runtime: docker already installed; ensuring service is running", runtimeReportSource, "", nil)
-		_ = runRuntimeCommand(ctx, "systemctl", "enable", "docker")
-		_ = runRuntimeCommand(ctx, "systemctl", "start", "docker")
+		if err := runRuntimeCommand(ctx, "systemctl", "enable", "docker"); err != nil {
+			return fmt.Errorf("enable docker: %w", err)
+		}
+		if err := runRuntimeCommand(ctx, "systemctl", "start", "docker"); err != nil {
+			return fmt.Errorf("start docker: %w", err)
+		}
 		return nil
 	}
 
@@ -58,6 +93,47 @@ func ensureDocker(ctx context.Context, reporter *errorreport.Reporter) error {
 	return nil
 }
 
+func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport.Reporter) error {
+	reporter.ReportInfo("deploy.runtime: ensuring firewall and metadata API block", runtimeReportSource, "", nil)
+
+	if _, err := os.Stat(firewallSetupScriptPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("firewall setup script missing: %s", firewallSetupScriptPath)
+		}
+		return fmt.Errorf("stat firewall setup script: %w", err)
+	}
+
+	if err := ensureFirewallPersistence(ctx); err != nil {
+		err = fmt.Errorf("install iptables-persistent: %w", err)
+		slog.Warn("deploy.runtime: firewall persistence package unavailable; continuing with runtime firewall rules", "error", err)
+		reporter.ReportError(err, runtimeReportSource, "", map[string]interface{}{
+			"step":  "install_iptables_persistent",
+			"fatal": false,
+		})
+	}
+
+	if err := runRuntimeCommand(ctx, firewallSetupScriptPath); err != nil {
+		return fmt.Errorf("run firewall setup script: %w", err)
+	}
+	config.CloseIdleControlPlaneConnections()
+
+	if err := runRuntimeCommand(ctx, "systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("reload systemd for metadata block: %w", err)
+	}
+	if err := runRuntimeCommand(ctx, "systemctl", "enable", "--now", metadataBlockServiceName); err != nil {
+		return fmt.Errorf("enable metadata block service: %w", err)
+	}
+
+	reporter.ReportInfo("deploy.runtime: firewall and metadata API block ready", runtimeReportSource, "", nil)
+	return nil
+}
+
+func ensureFirewallPersistence(ctx context.Context) error {
+	return runRuntimeShell(ctx, `echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections && `+
+		`echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections && `+
+		`DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent`)
+}
+
 func ensureCaddy(ctx context.Context, reporter *errorreport.Reporter) error {
 	// A usable Caddy runtime needs three things: the binary, the `caddy` system
 	// user (file ownership + the systemd unit's User= directive resolve to it),
@@ -73,11 +149,15 @@ func ensureCaddy(ctx context.Context, reporter *errorreport.Reporter) error {
 	if caddyRuntimeReady(ctx) {
 		slog.Info("deploy.runtime: caddy already installed")
 		reporter.ReportInfo("deploy.runtime: caddy already installed; preparing paths and starting service", runtimeReportSource, "", nil)
-		if err := prepareCaddyPaths(ctx); err != nil {
+		if err := prepareCaddyPathsFunc(ctx); err != nil {
 			return err
 		}
-		_ = runRuntimeCommand(ctx, "systemctl", "enable", "caddy")
-		_ = runRuntimeCommand(ctx, "systemctl", "reload-or-restart", "caddy")
+		if err := runRuntimeCommand(ctx, "systemctl", "enable", "caddy"); err != nil {
+			return fmt.Errorf("enable caddy: %w", err)
+		}
+		if err := runRuntimeCommand(ctx, "systemctl", "reload-or-restart", "caddy"); err != nil {
+			return fmt.Errorf("reload-or-restart caddy: %w", err)
+		}
 		return nil
 	}
 
@@ -96,7 +176,7 @@ apt-get update -qq
 # conffile, so the postinst hits a conffile conflict and, under noninteractive
 # apt, exits 100 (telemetry caught: "Configuration file '/etc/caddy/Caddyfile'
 # ... exit status 100"). Force-keep the on-disk version: the deploy engine
-# overwrites this file via GenerateCaddyfile on apply anyway, so the bootstrap
+# overwrites this file during release apply anyway, so the bootstrap
 # contents are disposable — all that matters is the install completing.
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" caddy

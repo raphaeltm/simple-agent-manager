@@ -43,6 +43,7 @@ import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-b
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
+import { adminTrialsRoutes } from './routes/admin-trials';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentProfileRoutes } from './routes/agent-profiles';
@@ -65,6 +66,7 @@ import { ccRoutes } from './routes/composable-credentials';
 import { credentialsRoutes } from './routes/credentials';
 import { dashboardRoutes } from './routes/dashboard';
 import { deployReleaseCallbackRoute } from './routes/deploy-release-callback';
+import { deploymentEnvironmentConfigRoutes } from './routes/deployment-environment-config';
 import { deploymentEnvironmentRoutes } from './routes/deployment-environments';
 import { deploymentReleaseRoutes } from './routes/deployment-releases';
 import { deploymentSecretRoutes } from './routes/deployment-secrets';
@@ -89,7 +91,9 @@ import { projectAgentRoutes } from './routes/project-agent';
 import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes } from './routes/project-deployment';
 import { projectsRoutes } from './routes/projects';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
+import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
+import { registryPushCredentialsCallbackRoute } from './routes/projects/registry-push-credentials-callback';
 import { providersRoutes } from './routes/providers';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { samRoutes } from './routes/sam';
@@ -573,6 +577,8 @@ app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
 app.route('/api/projects', agentActivityCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', taskCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', registryPushCredentialsCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', composePublishReleaseCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
@@ -592,6 +598,7 @@ app.route('/api/projects/:projectId/policies', policyRoutes);
 app.route('/api/projects/:projectId/agent', projectAgentRoutes);
 app.route('/api/projects', projectDeploymentRoutes);
 app.route('/api/projects', deploymentEnvironmentRoutes);
+app.route('/api/projects', deploymentEnvironmentConfigRoutes);
 app.route('/api/projects', deploymentReleaseRoutes);
 app.route('/api/projects', deploymentSecretRoutes);
 app.route('/api/projects', deploymentVolumeRoutes);
@@ -602,6 +609,7 @@ app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/analytics/ai-usage', adminAiUsageRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
+app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);
@@ -810,6 +818,10 @@ export default {
       triggerExecCleanupErrors: triggerCleanup.errors,
       computeUsageOrphansClosed: computeUsageClosed,
       trialExpired: trialExpire.expired,
+      trialProjectsLinked: trialExpire.projectsLinked,
+      trialWorkspacesDeleted: trialExpire.workspacesDeleted,
+      trialNodesDeleted: trialExpire.nodesDeleted,
+      trialCleanupErrors: trialExpire.cleanupErrors,
     });
   },
 };

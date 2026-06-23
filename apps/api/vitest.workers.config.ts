@@ -9,8 +9,8 @@
  *
  * Run: pnpm test:workers
  */
-import { defineConfig } from 'vitest/config';
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [
@@ -70,7 +70,7 @@ export default defineConfig({
           MAX_AGENT_SESSIONS_PER_WORKSPACE: '10',
           MAX_PROJECTS_PER_USER: '50',
           MAX_SESSIONS_PER_PROJECT: '1000',
-          MAX_MESSAGES_PER_SESSION: '10000',
+          MAX_MESSAGES_PER_SESSION: '100000',
           MESSAGE_SIZE_THRESHOLD: '102400',
           ACTIVITY_RETENTION_DAYS: '90',
           SESSION_IDLE_TIMEOUT_MINUTES: '60',

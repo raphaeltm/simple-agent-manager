@@ -14,6 +14,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
 import type { Env } from '../../src/env';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';
@@ -21,6 +22,17 @@ import * as svc from '../../src/services/project-data';
 // Cast the test env to the service's Env type.
 // The miniflare env provides the same bindings (PROJECT_DATA, etc.)
 const testEnv = env as unknown as Env;
+
+async function withMessageCap<T>(cap: string, fn: () => Promise<T>): Promise<T> {
+  const mutableEnv = testEnv as Env & { MAX_MESSAGES_PER_SESSION?: string };
+  const previous = mutableEnv.MAX_MESSAGES_PER_SESSION;
+  mutableEnv.MAX_MESSAGES_PER_SESSION = cap;
+  try {
+    return await fn();
+  } finally {
+    mutableEnv.MAX_MESSAGES_PER_SESSION = previous;
+  }
+}
 
 // =========================================================================
 // 1. Session Lifecycle
@@ -228,7 +240,8 @@ describe('project-data service: message persistence', () => {
       },
     ]);
 
-    expect(result).toEqual({ persisted: 0, duplicates: 1 });
+    expect(result.persisted).toBe(0);
+    expect(result.duplicates).toBe(1);
 
     const { messages } = await svc.getMessages(testEnv, pid, sessionId);
     expect(messages).toHaveLength(1);
@@ -259,6 +272,48 @@ describe('project-data service: message persistence', () => {
     // Original content preserved
     const original = messages.find((m) => m.id === sharedId);
     expect(original!.content).toBe('Original');
+  });
+
+  it('uses 100000 as the default session message cap', () => {
+    expect(DEFAULT_MAX_MESSAGES_PER_SESSION).toBe(100000);
+  });
+
+  it('persists up to remaining capacity and reports cap exhaustion', async () => {
+    await withMessageCap('2', async () => {
+      const pid = 'svc-batch-cap-partial';
+      const sessionId = await svc.createSession(testEnv, pid, null, null);
+
+      const result = await svc.persistMessageBatch(testEnv, pid, sessionId, [
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'one', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'two', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'three', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(2);
+      expect(result.duplicates).toBe(0);
+      expect(result.limitReached).toBe(true);
+      expect(result.maxMessages).toBe(2);
+      expect(result.remainingCapacity).toBe(0);
+
+      const session = await svc.getSession(testEnv, pid, sessionId);
+      expect(session!.messageCount).toBe(2);
+    });
+  });
+
+  it('throws SESSION_MESSAGE_LIMIT_EXCEEDED when capacity is already exhausted', async () => {
+    await withMessageCap('1', async () => {
+      const pid = 'svc-batch-cap-full';
+      const sessionId = await svc.createSession(testEnv, pid, null, null);
+      await svc.persistMessageBatch(testEnv, pid, sessionId, [
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'one', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      await expect(
+        svc.persistMessageBatch(testEnv, pid, sessionId, [
+          { messageId: crypto.randomUUID(), role: 'assistant', content: 'two', toolMetadata: null, timestamp: new Date().toISOString() },
+        ])
+      ).rejects.toThrow(/message limit/i);
+    });
   });
 
   it('persistMessageBatch preserves sequence ordering', async () => {

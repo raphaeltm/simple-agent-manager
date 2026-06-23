@@ -21,6 +21,7 @@ interface SignablePayload {
   expiresAt: number;
   composeYaml: string;
   routes?: unknown;
+  interpolationEnv?: Record<string, string>;
 }
 
 const ED25519_PKCS8_SEED_PREFIX = Uint8Array.from([
@@ -50,6 +51,8 @@ async function buildSignableBytes(p: SignablePayload): Promise<Uint8Array> {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
+  const interpolationEnvHash = await hashInterpolationEnv(p.interpolationEnv);
+
   const canonical = JSON.stringify({
     environmentId: p.environmentId,
     nodeId: p.nodeId,
@@ -57,9 +60,19 @@ async function buildSignableBytes(p: SignablePayload): Promise<Uint8Array> {
     expiresAt: p.expiresAt,
     composeHash,
     routesHash,
+    interpolationEnvHash,
   });
 
   return new TextEncoder().encode(canonical);
+}
+
+export async function hashInterpolationEnv(env: Record<string, string> | undefined): Promise<string> {
+  const entries = Object.entries(env ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const bytes = new TextEncoder().encode(JSON.stringify(entries));
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /**

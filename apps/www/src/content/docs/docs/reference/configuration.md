@@ -13,25 +13,25 @@ This reference covers the most important configuration variables. For the comple
 
 These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generates security keys on first deploy.
 
-| Secret                     | Description                                                                                   |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`           | AES-256-GCM key for credential encryption (auto-generated)                                    |
-| `JWT_PRIVATE_KEY`          | RSA-2048 private key for signing tokens (auto-generated)                                      |
-| `JWT_PUBLIC_KEY`           | RSA-2048 public key for token verification (auto-generated)                                   |
+| Secret                       | Description                                                                                   |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`             | AES-256-GCM key for credential encryption (auto-generated)                                    |
+| `JWT_PRIVATE_KEY`            | RSA-2048 private key for signing tokens (auto-generated)                                      |
+| `JWT_PUBLIC_KEY`             | RSA-2048 public key for token verification (auto-generated)                                   |
 | `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 private key for signing deployment apply payloads                                     |
 | `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 public key delivered to deployment nodes for apply payload verification               |
-| `CF_API_TOKEN`             | Cloudflare API token for infrastructure, DNS, observability, AI Gateway, and admin log access |
-| `CF_ZONE_ID`               | Cloudflare zone ID for DNS record management                                                  |
-| `CF_ACCOUNT_ID`            | Cloudflare account ID                                                                         |
-| `GITHUB_CLIENT_ID`         | GitHub App client ID for OAuth                                                                |
-| `GITHUB_CLIENT_SECRET`     | GitHub App client secret for OAuth                                                            |
-| `GITHUB_APP_ID`            | GitHub App ID for installation tokens                                                         |
-| `GITHUB_APP_PRIVATE_KEY`   | GitHub App private key (PEM or base64)                                                        |
-| `GITHUB_APP_SLUG`          | GitHub App URL slug                                                                           |
-| `GITHUB_WEBHOOK_SECRET`    | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`            |
-| `ORIGIN_CA_CERT`           | Cloudflare Origin CA certificate for VM-agent TLS (auto-generated)                            |
-| `ORIGIN_CA_KEY`            | Cloudflare Origin CA private key for VM-agent TLS (auto-generated)                            |
-| `TRIAL_CLAIM_TOKEN_SECRET` | Trial onboarding HMAC secret (auto-generated)                                                 |
+| `CF_API_TOKEN`               | Cloudflare API token for infrastructure, DNS, observability, AI Gateway, and admin log access |
+| `CF_ZONE_ID`                 | Cloudflare zone ID for DNS record management                                                  |
+| `CF_ACCOUNT_ID`              | Cloudflare account ID                                                                         |
+| `GITHUB_CLIENT_ID`           | GitHub App client ID for OAuth                                                                |
+| `GITHUB_CLIENT_SECRET`       | GitHub App client secret for OAuth                                                            |
+| `GITHUB_APP_ID`              | GitHub App ID for installation tokens                                                         |
+| `GITHUB_APP_PRIVATE_KEY`     | GitHub App private key (PEM or base64)                                                        |
+| `GITHUB_APP_SLUG`            | GitHub App URL slug                                                                           |
+| `GITHUB_WEBHOOK_SECRET`      | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`            |
+| `ORIGIN_CA_CERT`             | Cloudflare Origin CA certificate for VM-agent TLS (auto-generated)                            |
+| `ORIGIN_CA_KEY`              | Cloudflare Origin CA private key for VM-agent TLS (auto-generated)                            |
+| `TRIAL_CLAIM_TOKEN_SECRET`   | Trial onboarding HMAC secret (auto-generated)                                                 |
 
 ## Worker Variables
 
@@ -60,11 +60,11 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Feature Flags
 
-| Variable                          | Default   | Description                                                                                                                                |
-| --------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `REQUIRE_APPROVAL`                | _(unset)_ | Require admin approval for new users. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
-| `TRIAL_ANONYMOUS_USER_ID`         | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id. |
-| `CAPACITY_SIZE_FALLBACK_ENABLED`  | `true`    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
+| Variable                         | Default                   | Description                                                                                                                                                                                                                      |
+| -------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQUIRE_APPROVAL`               | _(unset)_                 | Require admin approval for new users. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access).                               |
+| `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                     |
+| `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
 
 ## AI Idea Title Generation
 
@@ -112,29 +112,29 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## ACP Protocol (VM Agent)
 
-| Variable                      | Default | Description                        |
-| ----------------------------- | ------- | ---------------------------------- |
-| `ACP_MESSAGE_BUFFER_SIZE`     | `5000`  | Buffer size for ACP messages       |
-| `ACP_STDERR_BUFFER_BYTES`     | `4096`  | Agent stderr bytes retained for crash reports |
-| `ACP_PING_INTERVAL`           | `30s`   | WebSocket keepalive ping interval  |
-| `ACP_PONG_TIMEOUT`            | `10s`   | Pong response timeout              |
-| `ACP_TASK_PROMPT_TIMEOUT`     | `6h`    | Task execution prompt timeout      |
-| `ACP_PROMPT_RETRY_MAX_RETRIES` | `2`     | Max transient provider prompt retries after the initial attempt |
-| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
-| `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m`    | Max exponential backoff for transient provider prompt retries |
-| `ACP_IDLE_SUSPEND_TIMEOUT`    | `30m`   | Idle session auto-suspend timeout  |
-| `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s`    | Notification serialization timeout |
+| Variable                           | Default | Description                                                      |
+| ---------------------------------- | ------- | ---------------------------------------------------------------- |
+| `ACP_MESSAGE_BUFFER_SIZE`          | `5000`  | Buffer size for ACP messages                                     |
+| `ACP_STDERR_BUFFER_BYTES`          | `4096`  | Agent stderr bytes retained for crash reports                    |
+| `ACP_PING_INTERVAL`                | `30s`   | WebSocket keepalive ping interval                                |
+| `ACP_PONG_TIMEOUT`                 | `10s`   | Pong response timeout                                            |
+| `ACP_TASK_PROMPT_TIMEOUT`          | `6h`    | Task execution prompt timeout                                    |
+| `ACP_PROMPT_RETRY_MAX_RETRIES`     | `2`     | Max transient provider prompt retries after the initial attempt  |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s`   | Initial backoff before retrying transient provider prompt errors |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF`     | `2m`    | Max exponential backoff for transient provider prompt retries    |
+| `ACP_IDLE_SUSPEND_TIMEOUT`         | `30m`   | Idle session auto-suspend timeout                                |
+| `ACP_NOTIF_SERIALIZE_TIMEOUT`      | `5s`    | Notification serialization timeout                               |
 
 ## MCP (Agent Tools)
 
-| Variable                              | Default           | Description                                                         |
-| ------------------------------------- | ----------------- | ------------------------------------------------------------------- |
-| `MCP_TOKEN_TTL_SECONDS`               | `28800` (8 hours) | Sliding inactivity timeout for agent MCP access                     |
-| `MCP_RATE_LIMIT`                      | `120`             | Max MCP requests per window                                         |
-| `MCP_RATE_LIMIT_WINDOW_SECONDS`       | `60`              | Rate limit window                                                   |
-| `MCP_DISPATCH_MAX_DEPTH`              | `3`               | Max recursion depth for dispatch_task                               |
-| `MCP_DISPATCH_MAX_PER_TASK`           | `5`               | Max dispatched tasks per parent task                                |
-| `MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT` | `10`              | Max active dispatched tasks per project                             |
+| Variable                              | Default           | Description                                     |
+| ------------------------------------- | ----------------- | ----------------------------------------------- |
+| `MCP_TOKEN_TTL_SECONDS`               | `28800` (8 hours) | Sliding inactivity timeout for agent MCP access |
+| `MCP_RATE_LIMIT`                      | `120`             | Max MCP requests per window                     |
+| `MCP_RATE_LIMIT_WINDOW_SECONDS`       | `60`              | Rate limit window                               |
+| `MCP_DISPATCH_MAX_DEPTH`              | `3`               | Max recursion depth for dispatch_task           |
+| `MCP_DISPATCH_MAX_PER_TASK`           | `5`               | Max dispatched tasks per parent task            |
+| `MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT` | `10`              | Max active dispatched tasks per project         |
 
 ## Voice & Text-to-Speech
 
@@ -153,13 +153,13 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Context Summarization (Forking)
 
-| Variable                          | Default                     | Description                                  |
-| --------------------------------- | --------------------------- | -------------------------------------------- |
+| Variable                          | Default                         | Description                                  |
+| --------------------------------- | ------------------------------- | -------------------------------------------- |
 | `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for conversation context summarization |
-| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                      | Max summary length in characters             |
-| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                     | Summarization timeout                        |
-| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                        | Max messages to include in summary           |
-| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                         | Skip AI for conversations this short         |
+| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                          | Max summary length in characters             |
+| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                         | Summarization timeout                        |
+| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                            | Max messages to include in summary           |
+| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                             | Skip AI for conversations this short         |
 
 ## Idea Execution Timeouts
 
@@ -183,11 +183,22 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## App Deployment Routing
 
-| Variable                       | Default | Description                                           |
-| ------------------------------ | ------- | ----------------------------------------------------- |
-| `DEPLOY_PAYLOAD_EXPIRY_SECONDS` | `3600`  | Signed deployment apply payload lifetime              |
-| `DEPLOYMENT_ROUTE_PORT_BASE`   | `35000` | First node-local loopback port reserved for app routes |
-| `DEPLOYMENT_ROUTE_PORT_SPAN`   | `1000`  | Number of loopback ports reserved per deployment node |
+| Variable                               | Default          | Description                                                           |
+| -------------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `DEPLOY_PAYLOAD_EXPIRY_SECONDS`        | `3600`           | Signed deployment apply payload lifetime                              |
+| `DEPLOYMENT_ROUTE_PORT_BASE`           | `35000`          | First node-local loopback port reserved for app routes                |
+| `DEPLOYMENT_ROUTE_PORT_SPAN`           | `100`            | Number of loopback ports reserved per deployment environment          |
+| `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE` | `5`              | Maximum deployment environments to place on one deployment node       |
+| `DEPLOYMENT_DEFAULT_VM_SIZE`           | `small`          | Default VM size for deployment nodes                                  |
+| `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`      | `medium`         | VM size for deployment nodes that need Docker Model Runner            |
+| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`   | `256`            | Default per-service memory limit for compose-publish releases         |
+| `DEPLOYMENT_LOG_MAX_SIZE`              | `10m`            | Default json-file log max-size for compose-publish releases           |
+| `DEPLOYMENT_LOG_MAX_FILE`              | `3`              | Default json-file log max-file for compose-publish releases           |
+| `BUILD_PUBLISH_TOOL_TIMEOUT_MS`        | `1260000`        | Worker-to-VM proxy timeout for `build_and_publish`                    |
+| `DEPLOY_ACME_EMAIL`                    | _(unset)_        | Optional ACME contact email emitted into deployment-node Caddy config |
+| `DEPLOY_ACME_CA`                       | _(unset)_        | Optional ACME CA directory override, useful for Let's Encrypt staging |
+| `DEPLOY_COMPOSE_CMD`                   | `docker compose` | Docker Compose command used by the deployment engine                  |
+| `DEPLOY_HEALTH_TIMEOUT`                | `5m`             | Deployment health-check timeout used by the VM agent                  |
 
 ## Platform Limits
 
@@ -204,7 +215,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | Variable                       | Default  | Description                        |
 | ------------------------------ | -------- | ---------------------------------- |
 | `MAX_SESSIONS_PER_PROJECT`     | `10000`  | Max chat sessions per project      |
-| `MAX_MESSAGES_PER_SESSION`     | `10000`  | Max messages per chat session      |
+| `MAX_MESSAGES_PER_SESSION`     | `100000` | Max messages per chat session      |
 | `MESSAGE_SIZE_THRESHOLD`       | `102400` | Max message size in bytes          |
 | `ACTIVITY_RETENTION_DAYS`      | `90`     | Days to retain activity events     |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | `60`     | Idle session timeout               |
@@ -212,9 +223,9 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Durable Object Retry
 
-| Variable                 | Default | Description                                                               |
-| ------------------------ | ------- | ------------------------------------------------------------------------- |
-| `DO_RETRY_MAX_ATTEMPTS`  | `8`     | Max attempts for transient Durable Object RPC reset/overload errors       |
+| Variable                 | Default | Description                                                                |
+| ------------------------ | ------- | -------------------------------------------------------------------------- |
+| `DO_RETRY_MAX_ATTEMPTS`  | `8`     | Max attempts for transient Durable Object RPC reset/overload errors        |
 | `DO_RETRY_BASE_DELAY_MS` | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures |
 | `DO_RETRY_MAX_DELAY_MS`  | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures      |
 
@@ -227,6 +238,9 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES`      | `8192`   | Max bytes per env var value |
 | `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES`   | `131072` | Max bytes per file content  |
 | `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | `256`    | Max file path length        |
+| `MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT` | `100`    | Max deployment config vars per environment |
+| `MAX_DEPLOYMENT_ENV_VALUE_BYTES`           | `65536`  | Max bytes per deployment config value |
+| `MAX_DEPLOYMENT_ENV_TOTAL_BYTES`           | `262144` | Max aggregate deployment config env size |
 
 ## External API Timeouts
 

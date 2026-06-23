@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { signDeployPayload } from '../../../src/services/deploy-signing';
+import { hashInterpolationEnv, signDeployPayload } from '../../../src/services/deploy-signing';
 
 const TEST_SEED_B64 = 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=';
 const TEST_PUBLIC_KEY_B64 = 'ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=';
@@ -29,6 +29,7 @@ async function signableBytes(payload: {
   expiresAt: number;
   composeYaml: string;
   routes?: unknown;
+  interpolationEnv?: Record<string, string>;
 }): Promise<Uint8Array> {
   const canonical = JSON.stringify({
     environmentId: payload.environmentId,
@@ -37,11 +38,30 @@ async function signableBytes(payload: {
     expiresAt: payload.expiresAt,
     composeHash: await sha256Hex(payload.composeYaml),
     routesHash: await sha256Hex(JSON.stringify(payload.routes ?? [])),
+    interpolationEnvHash: await hashInterpolationEnv(payload.interpolationEnv),
   });
   return new TextEncoder().encode(canonical);
 }
 
 describe('signDeployPayload', () => {
+  it('hashes interpolation env as sorted key-value entries', async () => {
+    await expect(hashInterpolationEnv({ B: 'two', A: 'one' })).resolves.toBe(
+      await hashInterpolationEnv({ A: 'one', B: 'two' })
+    );
+    await expect(hashInterpolationEnv({
+      DATABASE_URL: 'postgres://user:pass@host/db',
+      MULTILINE_SECRET: 'line one\nline two',
+    })).resolves.toBe(
+      await sha256Hex(JSON.stringify([
+        ['DATABASE_URL', 'postgres://user:pass@host/db'],
+        ['MULTILINE_SECRET', 'line one\nline two'],
+      ]))
+    );
+    await expect(hashInterpolationEnv(undefined)).resolves.toBe(
+      await sha256Hex(JSON.stringify([]))
+    );
+  });
+
   it('signs payloads with a seed key that verifies with the public key', async () => {
     const payload = {
       environmentId: 'env-1',
@@ -57,6 +77,9 @@ describe('signDeployPayload', () => {
           hostPort: 35000,
         },
       ],
+      interpolationEnv: {
+        DATABASE_URL: 'postgres://example',
+      },
     };
 
     const signature = await signDeployPayload(payload, {
@@ -92,6 +115,7 @@ describe('signDeployPayload', () => {
       expiresAt: 1_800_000_000,
       composeYaml: 'services: {}\n',
       routes: [],
+      interpolationEnv: {},
     }, {
       DEPLOY_SIGNING_PRIVATE_KEY: goPrivateKey,
     })).resolves.toEqual(expect.any(String));

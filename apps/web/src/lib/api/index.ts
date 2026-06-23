@@ -1,6 +1,7 @@
 export type {
   AdminErrorsFilter,
   AdminLogQueryParams,
+  AdminTrialsConfigResponse,
   AIProxyConfigResponse,
   BillingMode,
   CostByModel,
@@ -40,6 +41,7 @@ export {
   fetchAdminErrorTrends,
   fetchAdminHealth,
   fetchAdminNodeUsage,
+  fetchAdminTrialsConfig,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,
   fetchAdminUserQuota,
@@ -61,6 +63,7 @@ export {
   removeAdminUserQuota,
   resetAIProxyConfig,
   updateAdminDefaultQuota,
+  updateAdminTrialsConfig,
   updateAdminUserQuota,
   updateAIProxyBillingMode,
   updateAIProxyConfig,
@@ -139,16 +142,39 @@ export {
   validateCredential,
 } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
-export type { DeploymentSecretEntry, ProjectDeploymentGcpResponse } from './deployment';
+export type {
+  DeleteDeploymentEnvironmentResponse,
+  DeploymentAgentPolicy,
+  DeploymentEnvironment,
+  DeploymentEnvironmentConfigResponse,
+  DeploymentEnvironmentConfigVar,
+  DeploymentEnvironmentMetricsResponse,
+  DeploymentEnvironmentNodeSummary,
+  DeploymentObservedState,
+  DeploymentReleaseSummary,
+  DeploymentSecretEntry,
+  ProjectDeploymentGcpResponse,
+  UpsertDeploymentEnvironmentConfigVarRequest,
+} from './deployment';
 export {
+  createDeploymentEnvironment,
+  deleteDeploymentEnvironment,
+  deleteDeploymentEnvironmentConfigVar,
   deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
+  getDeploymentEnvironmentConfig,
+  getDeploymentEnvironmentLogs,
+  getDeploymentEnvironmentMetrics,
   getDeployOAuthResult,
   getProjectDeploymentGcp,
+  listDeploymentEnvironmentContainers,
+  listDeploymentEnvironments,
   listDeploymentSecrets,
   listGcpProjectsForDeploy,
   setDeploymentSecret,
   setupProjectDeploymentGcp,
+  updateDeploymentEnvironmentPolicy,
+  upsertDeploymentEnvironmentConfigVar,
 } from './deployment';
 export type {
   FileEntry,
@@ -231,6 +257,7 @@ export {
   getNodeLogs,
   getNodeLogStreamUrl,
   getNodeSystemInfo,
+  listNodeContainers,
   listNodeEvents,
   listNodes,
   stopNode,

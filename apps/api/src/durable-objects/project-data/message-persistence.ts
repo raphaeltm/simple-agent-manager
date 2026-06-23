@@ -23,6 +23,14 @@ export type MessagePersistenceHooks = {
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
 };
 
+export type MessageBatchPersistenceResult = {
+  persisted: number;
+  duplicates: number;
+  limitReached: boolean;
+  maxMessages: number;
+  remainingCapacity: number;
+};
+
 export async function persistMessageWithSideEffects(
   sql: SqlStorage,
   env: Env,
@@ -31,9 +39,17 @@ export async function persistMessageWithSideEffects(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string,
+  messageId?: string
 ): Promise<string> {
-  const result = messages.persistMessage(sql, env, sessionId, role, content, toolMetadata, messageId);
+  const result = messages.persistMessage(
+    sql,
+    env,
+    sessionId,
+    role,
+    content,
+    toolMetadata,
+    messageId
+  );
   if (!result.inserted) return result.id;
 
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
@@ -63,7 +79,7 @@ export async function persistMessageWithSideEffects(
       createdAt: result.now,
       sequence: result.sequence,
     },
-    sessionId,
+    sessionId
   );
   return result.id;
 }
@@ -73,11 +89,17 @@ export async function persistMessageBatchWithSideEffects(
   env: Env,
   hooks: MessagePersistenceHooks,
   sessionId: string,
-  batchMessages: BatchMessageInput[],
-): Promise<{ persisted: number; duplicates: number }> {
+  batchMessages: BatchMessageInput[]
+): Promise<MessageBatchPersistenceResult> {
   const result = messages.persistMessageBatch(sql, env, sessionId, batchMessages);
   if (result.persisted === 0) {
-    return { persisted: result.persisted, duplicates: result.duplicates };
+    return {
+      persisted: result.persisted,
+      duplicates: result.duplicates,
+      limitReached: result.limitReached,
+      maxMessages: result.maxMessages,
+      remainingCapacity: result.remainingCapacity,
+    };
   }
 
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
@@ -100,16 +122,22 @@ export async function persistMessageBatchWithSideEffects(
   hooks.broadcastEvent(
     'messages.batch',
     { sessionId, messages: result.persistedMessages, count: result.persisted },
-    sessionId,
+    sessionId
   );
-  return { persisted: result.persisted, duplicates: result.duplicates };
+  return {
+    persisted: result.persisted,
+    duplicates: result.duplicates,
+    limitReached: result.limitReached,
+    maxMessages: result.maxMessages,
+    remainingCapacity: result.remainingCapacity,
+  };
 }
 
 async function resolveAttentionForRoles(
   sql: SqlStorage,
   hooks: MessagePersistenceHooks,
   sessionId: string,
-  persistedMessages: Array<{ id: string; role: string }>,
+  persistedMessages: Array<{ id: string; role: string }>
 ): Promise<void> {
   const firstUserMsg = persistedMessages.find((m) => m.role === 'user');
   const firstAssistantMsg = persistedMessages.find((m) => m.role === 'assistant');
@@ -117,7 +145,13 @@ async function resolveAttentionForRoles(
   let reason: string | null = null;
 
   if (firstUserMsg) {
-    resolved = attention.resolveAttentionMarkers(sql, sessionId, firstUserMsg.id, 'human', 'human_message');
+    resolved = attention.resolveAttentionMarkers(
+      sql,
+      sessionId,
+      firstUserMsg.id,
+      'human',
+      'human_message'
+    );
     reason = 'human_message';
   } else if (firstAssistantMsg) {
     resolved = attention.resolveAttentionMarkersByKind(
@@ -126,7 +160,7 @@ async function resolveAttentionForRoles(
       'reconciliation_checkin',
       firstAssistantMsg.id,
       'agent',
-      'agent_message',
+      'agent_message'
     );
     reason = 'agent_message';
   }

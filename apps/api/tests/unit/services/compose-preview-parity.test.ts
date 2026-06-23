@@ -457,7 +457,7 @@ describe('compose structural integrity with routes + secrets', () => {
       'sam.releaseId': RELEASE_ID,
       'sam.service': 'web',
     });
-    expect(web.networks).toContain('sam-internal');
+    expect(web.networks).toContain('sam-internal-env-parity-test');
     expect(web.deploy.resources.limits.memory).toBe('256M');
 
     // Ports are present when routeTargets are provided

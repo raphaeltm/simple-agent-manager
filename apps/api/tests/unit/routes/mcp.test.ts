@@ -309,8 +309,6 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_idea');
       expect(toolNames).toContain('list_ideas');
       expect(toolNames).toContain('search_ideas');
-      // Deployment tools
-      expect(toolNames).toContain('get_deployment_credentials');
       // Workspace tools (unified from workspace-mcp)
       expect(toolNames).toContain('get_workspace_info');
       expect(toolNames).toContain('get_credential_status');
@@ -320,8 +318,6 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_project_agents');
       expect(toolNames).toContain('get_peer_agent_output');
       expect(toolNames).toContain('get_task_dependencies');
-      expect(toolNames).toContain('get_ci_status');
-      expect(toolNames).toContain('get_deployment_status');
       expect(toolNames).toContain('get_workspace_diff_summary');
       expect(toolNames).toContain('report_environment_issue');
       // Project file library tools
@@ -355,7 +351,13 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('resume_mission');
       expect(toolNames).toContain('cancel_mission');
       expect(toolNames).toContain('override_task_state');
-      expect(body.result.tools).toHaveLength(90);
+      // Compose build + publish (agent-first deployment) tool
+      expect(toolNames).toContain('build_and_publish');
+      expect(toolNames).toContain('list_deployment_environments');
+      expect(toolNames).toContain('read_deployment_logs');
+      expect(toolNames).toContain('list_deployment_environment_config');
+      expect(toolNames).toContain('set_deployment_environment_config');
+      expect(body.result.tools).toHaveLength(91);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

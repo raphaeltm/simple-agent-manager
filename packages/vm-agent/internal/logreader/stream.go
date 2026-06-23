@@ -77,6 +77,10 @@ func (r *Reader) sendCatchUp(ctx context.Context, filter LogFilter, send SendFun
 
 // followLogs starts a journalctl --follow process and streams entries.
 func (r *Reader) followLogs(ctx context.Context, filter LogFilter, send SendFunc) error {
+	if filter.Source == "docker" {
+		return r.followDockerLogs(ctx, filter, send)
+	}
+
 	for {
 		err := r.runFollowProcess(ctx, filter, send)
 		if ctx.Err() != nil {
@@ -103,6 +107,130 @@ func (r *Reader) followLogs(ctx context.Context, filter LogFilter, send SendFunc
 			// Retry journalctl after a bounded pause.
 		}
 	}
+}
+
+func (r *Reader) followDockerLogs(ctx context.Context, filter LogFilter, send SendFunc) error {
+	var containers []string
+	if filter.Container != "" {
+		containers = []string{filter.Container}
+	} else {
+		list, err := r.ListContainers(ctx)
+		if err != nil {
+			return err
+		}
+		for _, container := range list {
+			containers = append(containers, container.Name)
+		}
+	}
+	if len(containers) == 0 {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	entryCh := make(chan LogEntry, StreamBufferSize)
+	errCh := make(chan error, len(containers))
+	for _, container := range containers {
+		container := container
+		go func() {
+			for {
+				err := r.runDockerFollowProcess(ctx, filter, container, func(entry LogEntry) error {
+					select {
+					case entryCh <- entry:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				})
+				if ctx.Err() != nil {
+					errCh <- ctx.Err()
+					return
+				}
+				if err != nil {
+					slog.Warn("docker logs --follow exited, restarting", "container", container, "error", err)
+				}
+				select {
+				case <-ctx.Done():
+					errCh <- ctx.Err()
+					return
+				case <-time.After(2 * time.Second):
+				}
+			}
+		}()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case entry := <-entryCh:
+			if err := send(entry); err != nil {
+				return err
+			}
+		case err := <-errCh:
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("docker logs --follow exited", "error", err)
+			}
+		}
+	}
+}
+
+func (r *Reader) runDockerFollowProcess(ctx context.Context, filter LogFilter, container string, send SendFunc) error {
+	args := []string{"logs", "--follow", "--timestamps", "--tail", "0"}
+	if filter.Since != "" {
+		args = append(args, "--since", normalizeTimeArg(filter.Since))
+	}
+	args = append(args, container)
+
+	cmd := r.exec(ctx, "docker", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start docker logs: %w", err)
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				slog.Warn("docker logs follow stderr", "container", container, "stderr", line)
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		entries := parseDockerLogsOutput(scanner.Text(), container)
+		for _, entry := range entries {
+			if filter.Level != "" && filter.Level != "debug" {
+				minOrd := levelOrder[strings.ToLower(filter.Level)]
+				if levelOrder[entry.Level] < minOrd {
+					continue
+				}
+			}
+			if filter.Search != "" && !strings.Contains(strings.ToLower(entry.Message), strings.ToLower(filter.Search)) {
+				continue
+			}
+			if err := send(entry); err != nil {
+				return err
+			}
+		}
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	return cmd.Wait()
 }
 
 // runFollowProcess runs a single journalctl --follow subprocess.

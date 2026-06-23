@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/dockersetup"
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
 
@@ -128,6 +129,7 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		Steps: []Step{
 			{Name: "packages", Status: "pending"},
 			{Name: "docker", Status: "pending"},
+			{Name: "docker-model-runner", Status: "pending"},
 			{Name: "firewall", Status: "pending"},
 			{Name: "tls-permissions", Status: "pending"},
 			{Name: "nodejs-install", Status: "pending"},
@@ -198,6 +200,38 @@ func Run(ctx context.Context, cfg Config, es *eventstore.Store) (*Status, error)
 		}
 	} else {
 		status.setStep("docker", "skipped")
+	}
+
+	// Step 2b: Ensure a modern Docker Compose plugin. The Hetzner docker-ce base
+	// image (and the docker.io apt fallback) ship a compose plugin older than
+	// v2.35, which rejects Docker Model Runner `provider:` services during
+	// `docker compose config` — breaking host-side build-and-publish for Model
+	// Runner compose files. Upgrade is non-fatal: a too-old plugin only affects
+	// the newer compose schema, so ordinary deploys still work if this fails.
+	if !cfg.SkipDocker {
+		if err := runStep("compose-plugin", func(ctx context.Context) error {
+			return dockersetup.EnsureModernCompose(ctx)
+		}); err != nil {
+			slog.Warn("Docker Compose plugin upgrade failed, continuing", "error", err)
+		}
+	} else {
+		status.setStep("compose-plugin", "skipped")
+	}
+
+	// Step 2c: Docker Model Runner. Deployment compose files may declare
+	// `provider: {type: model}` services (Docker Model Runner). The runner is a
+	// host-managed daemon + CLI plugin (`docker model`) that serves model
+	// inference and is wired into dependent services via auto-injected
+	// {SERVICE}_URL/{SERVICE}_MODEL env vars. Install is non-fatal: app nodes
+	// without model services still deploy normally if this fails.
+	if !cfg.SkipDocker {
+		if err := runStep("docker-model-runner", func(ctx context.Context) error {
+			return dockersetup.EnsureDockerModelRunner(ctx)
+		}); err != nil {
+			slog.Warn("Docker Model Runner install failed, continuing", "error", err)
+		}
+	} else {
+		status.setStep("docker-model-runner", "skipped")
 	}
 
 	// Step 3: Firewall (needed for Cloudflare-only access to vm-agent port)

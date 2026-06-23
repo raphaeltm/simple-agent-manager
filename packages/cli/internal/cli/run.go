@@ -521,7 +521,8 @@ Usage:
   sam activity                                  List recent activity
   sam nodes                                     List infrastructure nodes
 
-  sam workspace <id> forward [--port <port>]    Forward workspace ports
+  sam workspace <id> forward [--port <port>] [--local-port <port>] [--local-host localhost|127.0.0.1]
+                                                Forward workspace ports
   sam workspace <id> ports                      List workspace ports
 
 Global flags:
