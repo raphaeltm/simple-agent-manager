@@ -42,7 +42,7 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 ## Workflow Gates
 
 - [x] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
-- [ ] Complete staging deployment and VM-agent infrastructure verification because this touches `packages/vm-agent`: provision a real staging workspace, confirm heartbeat, verify workspace/agent session access, and clean it up.
+- [x] Complete staging deployment and VM-agent infrastructure verification because this touches `packages/vm-agent`: provision a real staging workspace, confirm heartbeat, verify workspace/agent session access, and clean it up.
 - [ ] Open a PR from `sam/task-failed-code-32603messageinternal-01kvtf`, wait for CI, merge only when green, then monitor production deploy.
 
 ## Validation Notes
@@ -59,3 +59,8 @@ SAM already retries some transient ACP prompt provider failures, but this observ
   - `$test-engineer`: ADDRESSED; added explicit exponential backoff/cap coverage and callback-composition coverage.
   - `$constitution-validator`: PASS; retry limits/delays are configurable through `RetryConfig` and no hardcoded URLs or deployment identifiers were introduced.
 - Post-review Go validation passed: `/tmp/go/bin/go test ./...` in `packages/harness`, `/tmp/go/bin/go test ./internal/acp` in `packages/vm-agent`, and `/tmp/go/bin/go test -race ./llm ./agent` in `packages/harness`.
+- Staging deploy run 28038528215 succeeded for branch `sam/task-failed-code-32603messageinternal-01kvtf` at commit c35b42aa; smoke tests passed.
+- Cloudflare staging evidence: R2 objects `agents/vm-agent-linux-amd64` and `agents/vm-agent-linux-arm64` were updated at 2026-06-23T15:59:31.244Z and 2026-06-23T15:59:33.940Z.
+- VM-agent staging verification passed with fresh workspace `01KVTKQ0ADXKXF8GA1XVX80DT3` on node `01KVTKPZWD33MSS3AAPYBJY6X6` (`167.233.197.58`): workspace created at 2026-06-23T16:06:16.456Z, agent ready at 2026-06-23T16:10:26.838Z, heartbeat at 2026-06-23T16:10:48.881Z, workspace dispatched at 2026-06-23T16:10:27.509Z, workspace running at 2026-06-23T16:10:56.808Z.
+- Workspace access verification passed: terminal token minted for `https://ws-01KVTKQ0ADXKXF8GA1XVX80DT3.sammy.party`, agent session `01KVTKZQ7F14QRXKTWZ66J3HQJ` created with `agentType=openai-codex`, and Playwright loaded the staging app workspace URL showing the workspace as Running with chat and terminal.
+- Cleanup verification passed: `DELETE /api/workspaces/01KVTKQ0ADXKXF8GA1XVX80DT3` and `DELETE /api/nodes/01KVTKPZWD33MSS3AAPYBJY6X6` returned 200; D1 showed no remaining rows for either ID.
