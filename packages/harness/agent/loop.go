@@ -16,6 +16,8 @@ type Config struct {
 	SystemPrompt string
 	// MaxTurns is the maximum number of think-act-observe cycles. 0 means 10.
 	MaxTurns int
+	// LLMRetry controls transient LLM provider retry behavior.
+	LLMRetry llm.RetryConfig
 }
 
 // Result is the outcome of an agent run.
@@ -57,16 +59,32 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			"tool_count":    len(toolDefs),
 		})
 
-		resp, err := provider.SendMessage(ctx, messages, toolDefs)
+		retryConfig := cfg.LLMRetry
+		onRetry := retryConfig.OnRetry
+		retryConfig.OnRetry = func(event llm.RetryEvent) {
+			log.Append(transcript.EventInfo, turn, map[string]any{
+				"event":          "llm_retry",
+				"failed_attempt": event.FailedAttempt,
+				"retry_attempt":  event.RetryAttempt,
+				"total_attempts": event.TotalAttempts,
+				"max_retries":    event.MaxRetries,
+				"delay":          event.Delay.String(),
+				"error":          event.Error,
+			})
+			if onRetry != nil {
+				onRetry(event)
+			}
+		}
+		resp, err := llm.NewRetryingProvider(provider, retryConfig).SendMessage(ctx, messages, toolDefs)
 		if err != nil {
 			log.Append(transcript.EventError, turn, map[string]any{"error": err.Error()})
 			return &Result{TurnsUsed: turn, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
 		}
 
 		log.Append(transcript.EventLLMResponse, turn, map[string]any{
-			"content":       resp.Content,
+			"content":         resp.Content,
 			"tool_call_count": len(resp.ToolCalls),
-			"stop_reason":   resp.StopReason,
+			"stop_reason":     resp.StopReason,
 		})
 
 		// If no tool calls, the model is done.

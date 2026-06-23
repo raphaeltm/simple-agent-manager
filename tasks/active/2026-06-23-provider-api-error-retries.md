@@ -22,12 +22,12 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 
 ## Checklist
 
-- [ ] Add focused ACP tests proving the observed `500 api_error` shape is retryable.
-- [ ] Extend transient provider classification to include provider-originated `500 api_error`, `502`, and `504` gateway-style failures while keeping generic local/internal errors non-retryable.
-- [ ] Preserve cancellation, deadline, crash recovery, timeout, and non-retryable internal error behavior.
-- [ ] Add a reusable retrying `llm.Provider` wrapper in `packages/harness` with bounded exponential backoff, injectable sleeper, and transcript-visible retry events.
-- [ ] Add Go tests for harness retry success, retry exhaustion, non-retryable behavior, and cancellation/deadline behavior.
-- [ ] Run focused Go tests for `packages/vm-agent/internal/acp` and `packages/harness`.
+- [x] Add focused ACP tests proving the observed `500 api_error` shape is retryable.
+- [x] Extend transient provider classification to include provider-originated `500 api_error`, `502`, and `504` gateway-style failures while keeping generic local/internal errors non-retryable.
+- [x] Preserve cancellation, deadline, crash recovery, timeout, and non-retryable internal error behavior.
+- [x] Add a reusable retrying `llm.Provider` wrapper in `packages/harness` with bounded exponential backoff, injectable sleeper, and transcript-visible retry events.
+- [x] Add Go tests for harness retry success, retry exhaustion, non-retryable behavior, and cancellation/deadline behavior.
+- [x] Run focused Go tests for `packages/vm-agent/internal/acp` and `packages/harness`.
 - [ ] Run broader quality checks as practical before PR.
 - [ ] Move this task to `tasks/archive/` after validation.
 
