@@ -29,6 +29,21 @@ func TestIsTransientProviderPromptError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "observed claude api error 500",
+			err:  errors.New(`Internal error: API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"},"request_id":"req_011CcLMjaKVmvLwnVCBsLoLn"}`),
+			want: true,
+		},
+		{
+			name: "bad gateway 502",
+			err:  errors.New(`provider returned HTTP 502 Bad Gateway`),
+			want: true,
+		},
+		{
+			name: "gateway timeout 504",
+			err:  errors.New(`API Error: 504 gateway timeout`),
+			want: true,
+		},
+		{
 			name: "rate limit 429",
 			err:  errors.New(`provider returned HTTP 429 Too Many Requests`),
 			want: true,
@@ -56,6 +71,11 @@ func TestIsTransientProviderPromptError(t *testing.T) {
 		{
 			name: "non-retryable internal error",
 			err:  errors.New(`Internal error: invalid tool call payload`),
+			want: false,
+		},
+		{
+			name: "plain internal server error without provider status",
+			err:  errors.New(`Internal server error`),
 			want: false,
 		},
 	}

@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/tools"
@@ -154,6 +157,65 @@ func TestRun_Cancellation(t *testing.T) {
 	}
 }
 
+func TestRun_RetriesTransientProviderErrorAndLogsTranscriptEvent(t *testing.T) {
+	t.Parallel()
+
+	provider := newAgentScriptedProvider(
+		agentScriptedProviderStep{err: errors.New(`Internal error: API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`)},
+		agentScriptedProviderStep{resp: &llm.Response{Content: "recovered"}},
+	)
+	registry := tools.NewRegistry()
+	log := transcript.NewLog()
+	var callbackEvents []llm.RetryEvent
+
+	result, err := Run(context.Background(), provider, registry, log, Config{
+		MaxTurns: 5,
+		LLMRetry: llm.RetryConfig{
+			MaxRetries:   2,
+			InitialDelay: time.Millisecond,
+			MaxDelay:     time.Millisecond,
+			Sleeper: func(ctx context.Context, _ time.Duration) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					return nil
+				}
+			},
+			OnRetry: func(event llm.RetryEvent) {
+				callbackEvents = append(callbackEvents, event)
+			},
+		},
+	}, "recover")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StopReason != "complete" {
+		t.Errorf("stop_reason = %s, want complete", result.StopReason)
+	}
+	if got := provider.CallCount(); got != 2 {
+		t.Fatalf("provider call count = %d, want 2", got)
+	}
+	if len(callbackEvents) != 1 {
+		t.Fatalf("configured retry callback events = %d, want 1", len(callbackEvents))
+	}
+
+	var sawRetry bool
+	for _, event := range log.Events() {
+		data, ok := event.Data.(map[string]any)
+		if event.Type == transcript.EventInfo && ok && data["event"] == "llm_retry" {
+			sawRetry = true
+			if data["retry_attempt"] != 2 {
+				t.Fatalf("retry_attempt = %#v, want 2", data["retry_attempt"])
+			}
+		}
+	}
+	if !sawRetry {
+		t.Fatal("transcript did not include llm_retry info event")
+	}
+}
+
 func TestRun_ScriptedEditWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "app.py"), []byte("print('hello')"), 0o644)
@@ -229,4 +291,38 @@ func (e *echoTool) Schema() map[string]any {
 }
 func (e *echoTool) Execute(_ context.Context, params map[string]any) (string, error) {
 	return "echoed", nil
+}
+
+type agentScriptedProviderStep struct {
+	resp *llm.Response
+	err  error
+}
+
+type agentScriptedProvider struct {
+	mu    sync.Mutex
+	steps []agentScriptedProviderStep
+	calls int
+}
+
+func newAgentScriptedProvider(steps ...agentScriptedProviderStep) *agentScriptedProvider {
+	return &agentScriptedProvider{steps: steps}
+}
+
+func (p *agentScriptedProvider) SendMessage(_ context.Context, _ []llm.Message, _ []llm.ToolDefinition) (*llm.Response, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	index := p.calls
+	p.calls++
+	if index >= len(p.steps) {
+		return nil, errors.New("agent scripted provider exhausted")
+	}
+	step := p.steps[index]
+	return step.resp, step.err
+}
+
+func (p *agentScriptedProvider) CallCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
 }
