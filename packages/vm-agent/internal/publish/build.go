@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 )
+
+const secretInterpolationPlaceholder = "__SAM_CONFIGURED_SECRET_PLACEHOLDER__"
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
@@ -22,6 +25,13 @@ type BuildOptions struct {
 	// empty it is auto-detected (v2 "docker compose" preferred, v1
 	// "docker-compose" fallback).
 	ComposeCmd string
+	// BuildEnv is non-secret deployment config supplied to Docker Compose for
+	// interpolation during build inventory and build commands.
+	BuildEnv map[string]string
+	// SecretKeys are deployment config keys that are secret. Values are not
+	// available on build nodes; phase-one validation rejects obvious build-field
+	// references before running compose.
+	SecretKeys []string
 	Logger     *slog.Logger
 }
 
@@ -34,6 +44,11 @@ type composeConfig struct {
 type composeConfigService struct {
 	Image string          `json:"image"`
 	Build json.RawMessage `json:"build"`
+}
+
+type commandResult struct {
+	Stdout []byte
+	Stderr string
 }
 
 // imageInspect is the subset of `docker image inspect` we read.
@@ -73,7 +88,19 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		"composeCmd", composeCmd,
 		"reference", opts.Reference)
 
-	cfg, err := loadComposeConfig(ctx, composeCmd, opts.WorkspaceDir)
+	templateCfg, err := loadComposeTemplateConfig(ctx, composeCmd, opts.WorkspaceDir)
+	if err != nil {
+		log.Error("compose template validation failed",
+			"composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir, "error", err)
+		return nil, err
+	}
+	if err := validateNoSecretRefsInBuildFields(templateCfg, opts.SecretKeys); err != nil {
+		log.Error("compose template uses deployment secrets in build-time fields", "error", err)
+		return nil, err
+	}
+
+	composeEnv := buildComposeCommandEnv(opts.BuildEnv, opts.SecretKeys)
+	cfg, err := loadComposeConfig(ctx, composeCmd, opts.WorkspaceDir, composeEnv)
 	if err != nil {
 		// `docker compose config --format json` is the validation gate. If it
 		// fails the error wraps the compose CLI stderr (invalid schema,
@@ -157,14 +184,14 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		"skippedCount", len(skipped))
 
 	log.Debug("running compose build", "composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir)
-	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, "build"); err != nil {
+	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, composeEnv, "build"); err != nil {
 		log.Error("compose build command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose build: %w", err)
 	}
 	log.Info("host compose build complete", "serviceCount", len(targets))
 
 	log.Debug("capturing resolved compose config", "composeCmd", composeCmd)
-	composeYAML, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, "config")
+	composeYAML, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, nil, "config", "--no-interpolate")
 	if err != nil {
 		log.Error("compose config command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose config: %w", err)
@@ -200,17 +227,17 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 // detectComposeCmd prefers compose v2 ("docker compose") and falls back to v1
 // ("docker-compose").
 func detectComposeCmd(ctx context.Context, dir string) (string, error) {
-	if _, err := runCommand(ctx, dir, "docker", "compose", "version"); err == nil {
+	if _, err := runCommand(ctx, dir, nil, "docker", "compose", "version"); err == nil {
 		return "docker compose", nil
 	}
-	if _, err := runCommand(ctx, dir, "docker-compose", "version"); err == nil {
+	if _, err := runCommand(ctx, dir, nil, "docker-compose", "version"); err == nil {
 		return "docker-compose", nil
 	}
 	return "", fmt.Errorf("build: no docker compose (v2) or docker-compose (v1) available")
 }
 
-func loadComposeConfig(ctx context.Context, composeCmd, dir string) (*composeConfig, error) {
-	out, err := runCompose(ctx, composeCmd, dir, "config", "--format", "json")
+func loadComposeConfig(ctx context.Context, composeCmd, dir string, env map[string]string) (*composeConfig, error) {
+	out, err := runCompose(ctx, composeCmd, dir, env, "config", "--format", "json")
 	if err != nil {
 		return nil, fmt.Errorf("build: docker compose config --format json: %w", err)
 	}
@@ -221,13 +248,122 @@ func loadComposeConfig(ctx context.Context, composeCmd, dir string) (*composeCon
 	return &cfg, nil
 }
 
+func loadComposeTemplateConfig(ctx context.Context, composeCmd, dir string) (*composeConfig, error) {
+	out, err := runCompose(ctx, composeCmd, dir, nil, "config", "--no-interpolate", "--format", "json")
+	if err != nil {
+		return nil, fmt.Errorf("build: docker compose config --no-interpolate --format json: %w", err)
+	}
+	var cfg composeConfig
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		return nil, fmt.Errorf("build: parse compose template json: %w", err)
+	}
+	return &cfg, nil
+}
+
+func buildComposeCommandEnv(buildEnv map[string]string, secretKeys []string) map[string]string {
+	keys := normalizedSecretKeys(secretKeys)
+	if len(buildEnv) == 0 && len(keys) == 0 {
+		return nil
+	}
+	env := make(map[string]string, len(buildEnv)+len(keys))
+	for key, value := range buildEnv {
+		env[key] = value
+	}
+	// Compose validates the whole file during build commands, including
+	// runtime-only environment fields. Secret values are never available here,
+	// so configured secret keys get non-sensitive placeholders after the
+	// template has rejected their use in image/build fields.
+	for _, key := range keys {
+		env[key] = secretInterpolationPlaceholder
+	}
+	return env
+}
+
+func validateNoSecretRefsInBuildFields(cfg *composeConfig, secretKeys []string) error {
+	keys := normalizedSecretKeys(secretKeys)
+	if len(keys) == 0 || cfg == nil {
+		return nil
+	}
+	serviceNames := make([]string, 0, len(cfg.Services))
+	for name := range cfg.Services {
+		serviceNames = append(serviceNames, name)
+	}
+	sort.Strings(serviceNames)
+	for _, serviceName := range serviceNames {
+		svc := cfg.Services[serviceName]
+		for _, key := range keys {
+			if containsEnvReference(svc.Image, key) {
+				return fmt.Errorf("build: service %s image references secret interpolation key %s; deployment secrets cannot be used in build/image fields", serviceName, key)
+			}
+			if containsEnvReference(string(svc.Build), key) {
+				return fmt.Errorf("build: service %s build section references secret interpolation key %s; deployment secrets cannot be used in build fields", serviceName, key)
+			}
+		}
+	}
+	return nil
+}
+
+func normalizedSecretKeys(secretKeys []string) []string {
+	seen := make(map[string]bool, len(secretKeys))
+	keys := make([]string, 0, len(secretKeys))
+	for _, key := range secretKeys {
+		key = strings.TrimSpace(key)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func containsEnvReference(value, key string) bool {
+	if value == "" || key == "" {
+		return false
+	}
+	for offset := 0; ; {
+		idx := strings.Index(value[offset:], "${"+key)
+		if idx < 0 {
+			break
+		}
+		end := offset + idx + 2 + len(key)
+		if end < len(value) && isComposeBracedReferenceSuffix(value[end]) {
+			return true
+		}
+		offset = end
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] != '$' || i+1 >= len(value) || value[i+1] == '{' {
+			continue
+		}
+		start := i + 1
+		end := start
+		for end < len(value) && isEnvIdent(value[end]) {
+			end++
+		}
+		if value[start:end] == key {
+			return true
+		}
+	}
+	return false
+}
+
+func isComposeBracedReferenceSuffix(ch byte) bool {
+	return ch == '}' || ch == ':' || ch == '-' || ch == '?' || ch == '+'
+}
+
+func isEnvIdent(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
+}
+
 func inspectImage(ctx context.Context, image string) (*imageInspect, error) {
-	out, err := runCommand(ctx, "", "docker", "image", "inspect", image)
+	result, err := runCommand(ctx, "", nil, "docker", "image", "inspect", image)
 	if err != nil {
 		return nil, err
 	}
 	var inspected []imageInspect
-	if err := json.Unmarshal(out, &inspected); err != nil {
+	if err := json.Unmarshal(result.Stdout, &inspected); err != nil {
 		return nil, fmt.Errorf("parse image inspect json: %w", err)
 	}
 	if len(inspected) == 0 {
@@ -238,19 +374,30 @@ func inspectImage(ctx context.Context, image string) (*imageInspect, error) {
 
 // runCompose runs the configured compose CLI (which may be multi-word, e.g.
 // "docker compose") with args in dir, returning stdout.
-func runCompose(ctx context.Context, composeCmd, dir string, args ...string) ([]byte, error) {
+func runCompose(ctx context.Context, composeCmd, dir string, env map[string]string, args ...string) ([]byte, error) {
 	parts := strings.Fields(composeCmd)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty compose command")
 	}
 	cmdArgs := append(parts[1:], args...)
-	return runCommand(ctx, dir, parts[0], cmdArgs...)
+	result, err := runCommand(ctx, dir, env, parts[0], cmdArgs...)
+	if err != nil {
+		return nil, err
+	}
+	if missing := missingVariableWarnings(result.Stderr); len(missing) > 0 {
+		return nil, fmt.Errorf("%s %s: compose reported missing interpolation variables: %s",
+			parts[0], strings.Join(cmdArgs, " "), strings.Join(missing, "; "))
+	}
+	return result.Stdout, nil
 }
 
-func runCommand(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+func runCommand(ctx context.Context, dir string, env map[string]string, name string, args ...string) (*commandResult, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = mergeEnvForCommand(env)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -259,5 +406,45 @@ func runCommand(ctx context.Context, dir, name string, args ...string) ([]byte, 
 		return nil, fmt.Errorf("%s %s: %w (stderr: %s)",
 			name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return stdout.Bytes(), nil
+	return &commandResult{Stdout: stdout.Bytes(), Stderr: stderr.String()}, nil
+}
+
+func missingVariableWarnings(stderr string) []string {
+	lines := strings.Split(stderr, "\n")
+	warnings := make([]string, 0)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Contains(lower, "variable is not set") ||
+			strings.Contains(lower, "is not set. defaulting to a blank string") {
+			warnings = append(warnings, trimmed)
+		}
+	}
+	return warnings
+}
+
+func mergeEnvForCommand(overrides map[string]string) []string {
+	env := make([]string, 0, len(overrides)+len(overrides))
+	seen := make(map[string]bool, len(overrides))
+	for _, item := range os.Environ() {
+		key, _, ok := strings.Cut(item, "=")
+		if ok {
+			if value, exists := overrides[key]; exists {
+				env = append(env, fmt.Sprintf("%s=%s", key, value))
+				seen[key] = true
+				continue
+			}
+			seen[key] = true
+		}
+		env = append(env, item)
+	}
+	for key, value := range overrides {
+		if !seen[key] {
+			env = append(env, fmt.Sprintf("%s=%s", key, value))
+		}
+	}
+	return env
 }

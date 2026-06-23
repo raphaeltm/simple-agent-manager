@@ -125,9 +125,18 @@ func (e *Engine) Teardown(ctx context.Context) error {
 	defer e.applyMu.Unlock()
 
 	var errs []string
+	interpolationEnv, envErr := e.fetchCurrentInterpolationEnv(ctx)
+	if envErr != nil {
+		slog.Warn("deploy.teardown: failed to fetch current interpolation env; falling back to label cleanup if compose down fails", "error", envErr)
+	}
 	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
-		if err := e.composeDown(ctx, composeFile); err != nil {
+		if err := e.composeDown(ctx, composeFile, interpolationEnv); err != nil {
 			errs = append(errs, fmt.Sprintf("compose down: %v", err))
+			if envErr != nil {
+				if fallbackErr := e.cleanupComposeProjectByLabel(ctx); fallbackErr != nil {
+					errs = append(errs, fmt.Sprintf("compose label cleanup: %v", fallbackErr))
+				}
+			}
 		}
 	} else if !strings.Contains(err.Error(), "no current release") {
 		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
@@ -197,7 +206,18 @@ func (e *Engine) ReconcileOnStart(ctx context.Context) error {
 		"seq", state.Seq, "status", state.Status)
 
 	// Check container state without modifying anything
-	services, err := e.inspectServices(ctx, state.Seq)
+	interpolationEnv, envErr := e.fetchCurrentInterpolationEnv(ctx)
+	if envErr != nil {
+		slog.Warn("deploy.reconcile: failed to fetch current interpolation env; skipping service details",
+			"seq", state.Seq, "error", envErr)
+		e.setObserved(ObservedState{
+			AppliedSeq: state.Seq,
+			Status:     state.Status,
+		})
+		return nil
+	}
+
+	services, err := e.inspectServices(ctx, state.Seq, interpolationEnv)
 	if err != nil {
 		slog.Warn("deploy.reconcile: failed to inspect services",
 			"seq", state.Seq, "error", err)
@@ -240,6 +260,8 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 
 	slog.Info("deploy.apply: starting",
 		"seq", payload.Seq, "prevSeq", currentSeq)
+	applyEnv := payload.InterpolationEnv
+	redactor := newEnvRedactor(applyEnv)
 
 	// Mark as applying
 	now := time.Now().UTC()
@@ -273,7 +295,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		prevComposeFile := e.disk.ComposeFilePath(currentSeq)
 		slog.Info("deploy.apply: tearing down previous release to free ports",
 			"prevSeq", currentSeq)
-		if err := e.composeDown(ctx, prevComposeFile); err != nil {
+		if err := e.composeDown(ctx, prevComposeFile, applyEnv); err != nil {
 			slog.Warn("deploy.apply: failed to tear down previous release",
 				"prevSeq", currentSeq, "error", err)
 			// Continue anyway — the port may still be free if the previous
@@ -294,7 +316,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 			payload.RegistryCredentials.Username,
 			payload.RegistryCredentials.Password,
 		); err != nil {
-			return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("docker login: %w", err))
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("docker login: %w", err)), applyEnv)
 		}
 	}
 
@@ -306,39 +328,43 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		mountChecker = RealMountChecker{}
 	}
 	if err := verifyVolumeMounts(payload.ComposeYAML, mountChecker); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, err)
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(err), applyEnv)
 	}
 
 	// Execute docker compose
 	composeFile := e.disk.ComposeFilePath(payload.Seq)
-	if err := e.composePull(ctx, composeFile); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("compose pull: %w", err))
+	if err := e.composeConfigPreflight(ctx, composeFile, applyEnv); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose config: %w", err)), applyEnv)
 	}
 
-	if err := e.composeUp(ctx, composeFile); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("compose up: %w", err))
+	if err := e.composePull(ctx, composeFile, applyEnv); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose pull: %w", err)), applyEnv)
+	}
+
+	if err := e.composeUp(ctx, composeFile, applyEnv); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose up: %w", err)), applyEnv)
 	}
 
 	// Wait for health checks
-	if err := e.waitForHealth(ctx, payload.Seq, payload.Routes); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("health check: %w", err))
+	if err := e.waitForHealth(ctx, payload.Seq, payload.Routes, applyEnv); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("health check: %w", err)), applyEnv)
 	}
 
 	if err := e.reloadCaddy(ctx, e.disk.CaddyfilePath(payload.Seq)); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("caddy reload: %w", err))
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("caddy reload: %w", err)), applyEnv)
 	}
 
 	newState.Status = StatusApplied
 	if err := e.disk.UpdateState(newState); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("update applied metadata: %w", err))
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("update applied metadata: %w", err)), applyEnv)
 	}
 
 	// Success: update current pointer only after metadata is durably applied.
 	if err := e.disk.SetCurrent(payload.Seq); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("set current pointer: %w", err))
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("set current pointer: %w", err)), applyEnv)
 	}
 
-	services, _ := e.inspectServices(ctx, payload.Seq)
+	services, _ := e.inspectServices(ctx, payload.Seq, applyEnv)
 	e.setObserved(ObservedState{
 		AppliedSeq: payload.Seq,
 		Status:     StatusApplied,
@@ -350,7 +376,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 }
 
 // handleApplyFailure reverts to the previous release or marks as failed-initial.
-func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, previousSeq int64, applyErr error) error {
+func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, previousSeq int64, applyErr error, applyEnv map[string]string) error {
 	slog.Error("deploy.apply: failed, reverting",
 		"seq", state.Seq, "prevSeq", previousSeq, "error", applyErr)
 
@@ -363,7 +389,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 		// Stop any containers that may have started
 		composeFile := e.disk.ComposeFilePath(state.Seq)
-		if err := e.composeDown(ctx, composeFile); err != nil {
+		if err := e.composeDown(ctx, composeFile, applyEnv); err != nil {
 			slog.Warn("deploy.apply: failed to stop containers after failed-initial",
 				"error", err)
 		}
@@ -403,13 +429,13 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 	// revert composeUp fails with "port already in use" — the exact rebind
 	// conflict T1 prevents on the happy path. Best-effort: log and continue.
 	newComposeFile := e.disk.ComposeFilePath(state.Seq)
-	if err := e.composeDown(ctx, newComposeFile); err != nil {
+	if err := e.composeDown(ctx, newComposeFile, applyEnv); err != nil {
 		slog.Warn("deploy.apply: failed to stop new release before revert",
 			"seq", state.Seq, "error", err)
 	}
 
 	prevComposeFile := e.disk.ComposeFilePath(previousSeq)
-	if err := e.composeUp(ctx, prevComposeFile); err != nil {
+	if err := e.composeUp(ctx, prevComposeFile, applyEnv); err != nil {
 		slog.Error("deploy.apply: revert also failed",
 			"prevSeq", previousSeq, "error", err)
 		e.setObserved(ObservedState{
@@ -451,7 +477,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 		recoveryErrs = append(recoveryErrs, fmt.Errorf("read previous release state after revert: %w", err))
 	}
 
-	services, _ := e.inspectServices(ctx, previousSeq)
+	services, _ := e.inspectServices(ctx, previousSeq, applyEnv)
 	e.setObserved(ObservedState{
 		AppliedSeq:   previousSeq,
 		Status:       StatusReverted,
@@ -521,34 +547,38 @@ func (e *Engine) fetchRelease(ctx context.Context, seq int64) (*ApplyPayload, er
 	return &payload, nil
 }
 
-// Docker Compose helpers
-
-func (e *Engine) composePull(ctx context.Context, composeFile string) error {
-	return e.runCompose(ctx, composeFile, "pull")
-}
-
-func (e *Engine) composeUp(ctx context.Context, composeFile string) error {
-	return e.runCompose(ctx, composeFile, "up", "-d", "--remove-orphans")
-}
-
-func (e *Engine) composeDown(ctx context.Context, composeFile string) error {
-	return e.runCompose(ctx, composeFile, "down")
-}
-
-func (e *Engine) runCompose(ctx context.Context, composeFile string, args ...string) error {
-	parts := strings.Fields(e.cfg.ComposeCmd)
-	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile)
-	cmdArgs = append(cmdArgs, args...)
-
-	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %w (stderr: %s)",
-			e.cfg.ComposeCmd, strings.Join(args, " "), err, stderr.String())
+func (e *Engine) fetchCurrentInterpolationEnv(ctx context.Context) (map[string]string, error) {
+	if strings.TrimSpace(e.cfg.ControlPlaneURL) == "" || strings.TrimSpace(e.getCallbackToken()) == "" {
+		return nil, nil
 	}
-	return nil
+	url := fmt.Sprintf("%s/api/nodes/%s/deployment-env?environmentId=%s",
+		strings.TrimRight(e.cfg.ControlPlaneURL, "/"),
+		e.cfg.NodeID,
+		e.cfg.EnvironmentID,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+e.getCallbackToken())
+
+	resp, err := e.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var payload DeploymentEnvResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode deployment env: %w", err)
+	}
+	return payload.InterpolationEnv, nil
 }
 
 func (e *Engine) reloadCaddy(ctx context.Context, releaseCaddyfile string) error {
@@ -658,121 +688,4 @@ func (e *Engine) waitForReloadCommand(ctx context.Context, command string) error
 			}
 		}
 	}
-}
-
-func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTarget) error {
-	requiredServices := routeServiceSet(routes)
-	if len(requiredServices) == 0 {
-		return nil
-	}
-
-	deadline := time.NewTimer(e.cfg.HealthTimeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(e.cfg.HealthPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			return fmt.Errorf("health check timed out after %s", e.cfg.HealthTimeout)
-		case <-ticker.C:
-			services, err := e.inspectServices(ctx, seq)
-			if err != nil {
-				slog.Debug("deploy.health: inspect failed", "error", err)
-				continue
-			}
-
-			if routedServicesHealthy(services, requiredServices) {
-				return nil
-			}
-		}
-	}
-}
-
-func routeServiceSet(routes []RouteTarget) map[string]bool {
-	services := make(map[string]bool)
-	for _, route := range routes {
-		service := strings.TrimSpace(route.Service)
-		if service != "" {
-			services[service] = true
-		}
-	}
-	return services
-}
-
-func routedServicesHealthy(services []ServiceState, requiredServices map[string]bool) bool {
-	healthyByService := make(map[string]bool, len(requiredServices))
-	for _, svc := range services {
-		service, ok := matchedService(svc, requiredServices)
-		if ok && serviceHealthy(svc) {
-			healthyByService[service] = true
-		}
-	}
-	for service := range requiredServices {
-		if !healthyByService[service] {
-			return false
-		}
-	}
-	return true
-}
-
-func matchedService(svc ServiceState, requiredServices map[string]bool) (string, bool) {
-	if requiredServices[svc.Service] {
-		return svc.Service, true
-	}
-	if requiredServices[svc.Name] {
-		return svc.Name, true
-	}
-	return "", false
-}
-
-func serviceHealthy(svc ServiceState) bool {
-	if svc.Status != "running" {
-		return false
-	}
-	// If health check is configured, it must be healthy.
-	return svc.Health == "" || svc.Health == "healthy" || svc.Health == "none"
-}
-
-func (e *Engine) inspectServices(ctx context.Context, seq int64) ([]ServiceState, error) {
-	composeFile := e.disk.ComposeFilePath(seq)
-
-	parts := strings.Fields(e.cfg.ComposeCmd)
-	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile, "ps", "--format", "json")
-
-	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("compose ps: %w (stderr: %s)", err, stderr.String())
-	}
-
-	// docker compose ps --format json outputs one JSON object per line
-	var services []ServiceState
-	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var container struct {
-			Name    string `json:"Name"`
-			Service string `json:"Service"`
-			State   string `json:"State"`
-			Health  string `json:"Health"`
-		}
-		if err := json.Unmarshal([]byte(line), &container); err != nil {
-			slog.Debug("deploy.inspect: failed to parse container JSON", "line", line, "error", err)
-			continue
-		}
-		services = append(services, ServiceState{
-			Name:    container.Name,
-			Service: container.Service,
-			Status:  container.State,
-			Health:  container.Health,
-		})
-	}
-	return services, nil
 }

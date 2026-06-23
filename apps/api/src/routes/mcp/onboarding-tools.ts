@@ -88,8 +88,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 - \`get_task_dependencies\` — Upstream/downstream task dependency graph. Know where your work fits in the bigger picture.
 
 **CI/CD:**
-- \`get_ci_status\` — GitHub Actions workflow status for your branch. Check this after pushing.
-- \`get_deployment_status\` — Staging and production deployment state.
+- Use the GitHub CLI (\`gh run list\`, \`gh run view\`) to check GitHub Actions workflow and deployment status after pushing.
 
 **Observability:**
 - \`get_workspace_diff_summary\` — Everything you've changed since workspace creation. Useful for self-review before completing.
@@ -110,14 +109,14 @@ These are patterns that work well across different types of tasks:
 **During work:**
 - \`update_task_status\` after each significant milestone
 - \`list_project_agents\` before touching heavily-shared files
-- \`get_ci_status\` after pushing to verify CI passes
+- \`gh run list\` after pushing to verify CI passes
 - \`create_idea\` when you notice something worth tracking but out of scope
 - \`request_human_input\` when genuinely blocked — don't guess at ambiguous requirements
 - Commit and push frequently — treat every push as a checkpoint
 
 **Wrapping up:**
 - \`get_workspace_diff_summary\` to review everything you've done
-- \`get_ci_status\` to confirm CI is green
+- \`gh run list\` to confirm CI is green
 - Push all changes to the output branch
 - \`complete_task\` with a clear summary of what was accomplished
 
@@ -147,9 +146,9 @@ Thoroughly analyze this repository:
 
 Think about how SAM's capabilities map to this specific project's workflows. Consider:
 
-- **Does this project have a CI pipeline?** If so, agents should check \`get_ci_status\` after pushing and know what checks to expect.
+- **Does this project have a CI pipeline?** If so, agents should check CI status (e.g. \`gh run list\`) after pushing and know what checks to expect.
 - **Is this a monorepo?** If so, agents should know build order, which packages to test after changes, and how to scope their work.
-- **Does it have a deployment process?** Agents should know about \`get_deployment_status\` and any staging/production verification steps.
+- **Does it have a deployment process?** Agents should know how to check deployment status (e.g. \`gh run list\`) and any staging/production verification steps.
 - **Are there dev servers to run?** Agents should know to \`expose_port\` when running preview servers so humans can see their work.
 - **Are there shared files that multiple agents might touch?** Identify hotspots where \`list_project_agents\` is especially important for conflict avoidance.
 - **What kind of tasks are typical?** Bug fixes, features, refactors, docs? Tailor the push/commit frequency guidance to the project's rhythm.
@@ -163,7 +162,7 @@ Guidelines for what to write:
 
 1. **Lead with detection.** Tell agents to check for \`SAM_WORKSPACE_ID\` and explain that SAM-specific behavior should activate only when present.
 
-2. **Integrate with existing workflows.** If the project's instructions say "run tests before committing," augment that with "and after pushing, check \`get_ci_status\` to verify CI agrees." Don't create a separate "SAM section" that feels bolted on — weave it in.
+2. **Integrate with existing workflows.** If the project's instructions say "run tests before committing," augment that with "and after pushing, check CI (e.g. \`gh run list\`) to verify CI agrees." Don't create a separate "SAM section" that feels bolted on — weave it in.
 
 3. **Be specific to this project.** Don't just say "push frequently." Say "after updating schema files in \`src/db/\`, push immediately — these are high-conflict files. Check \`list_project_agents\` before modifying them." Tailor the guidance to what you learned about the project.
 

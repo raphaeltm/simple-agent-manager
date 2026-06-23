@@ -37,6 +37,7 @@ import { ProjectChat } from './pages/project-chat';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
+import { ProjectDeploymentEnvironmentDetail } from './pages/ProjectDeploymentEnvironmentDetail';
 import { ProjectDeployments } from './pages/ProjectDeployments';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
@@ -115,6 +116,10 @@ export default function App() {
                     <Route path="library" element={<ProjectLibrary />} />
                     <Route path="ideas" element={<IdeasPage />} />
                     <Route path="deployments" element={<ProjectDeployments />} />
+                    <Route
+                      path="deployments/:envId"
+                      element={<ProjectDeploymentEnvironmentDetail />}
+                    />
                     <Route path="agent-context" element={<AgentContextPage />} />
                     <Route path="knowledge" element={<Navigate to="../agent-context" replace />} />
                     <Route path="ideas/:taskId" element={<IdeaDetailPage />} />

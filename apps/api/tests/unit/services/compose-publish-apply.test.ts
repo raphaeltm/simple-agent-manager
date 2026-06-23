@@ -130,6 +130,59 @@ describe('buildComposePublishApplyPayload', () => {
     expect(doc.services.worker.ports).toBeUndefined();
   });
 
+  it('allows interpolated host ports because SAM rewrites host bindings', () => {
+    const composeWithInterpolatedHostPort = `services:
+  app:
+    image: example/app:1
+    ports:
+      - "\${PUBLIC_HOST_PORT:-8000}:8000"
+`;
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({ composeYaml: composeWithInterpolatedHostPort, services: [] }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(result.routes).toHaveLength(1);
+    expect(result.routes[0]!.containerPort).toBe(8000);
+    expect(doc.services.app.ports).toEqual([
+      `127.0.0.1:${result.routes[0]!.hostPort}:8000`,
+    ]);
+  });
+
+  it('rejects interpolated short-syntax container ports with an actionable diagnostic', () => {
+    const composeWithInterpolatedContainerPort = `services:
+  app:
+    image: example/app:1
+    ports:
+      - "8000:\${APP_PORT}"
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithInterpolatedContainerPort, services: [] }),
+        OPTS
+      )
+    ).toThrow(/container ports must be literal numbers/i);
+  });
+
+  it('rejects interpolated long-syntax target ports with an actionable diagnostic', () => {
+    const composeWithInterpolatedTarget = `services:
+  app:
+    image: example/app:1
+    ports:
+      - target: \${APP_PORT}
+        published: "\${PUBLIC_HOST_PORT:-8000}"
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithInterpolatedTarget, services: [] }),
+        OPTS
+      )
+    ).toThrow(/target\/container ports must be literal numbers/i);
+  });
+
   it('strips denied service fields and reports them as warnings (not errors)', () => {
     const composeWithDenied = `services:
   app:

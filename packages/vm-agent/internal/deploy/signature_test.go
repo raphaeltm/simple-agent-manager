@@ -98,6 +98,54 @@ func TestVerifier_RejectsRouteMutationAfterSigning(t *testing.T) {
 	}
 }
 
+func TestVerifier_RejectsInterpolationEnvMutationAfterSigning(t *testing.T) {
+	pub, priv := generateTestKeys(t)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	v, err := NewVerifier(pubB64)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "compose yaml",
+		InterpolationEnv: map[string]string{
+			"DATABASE_URL": "postgres://user:pass@host/db",
+		},
+	}
+	sig, _ := SignPayload(payload, priv)
+	payload.Signature = sig
+	payload.InterpolationEnv["DATABASE_URL"] = "postgres://attacker/db"
+
+	err = v.Verify(payload, "env-1", "node-1", 0)
+	if err == nil {
+		t.Error("expected signature verification to fail after interpolation env mutation")
+	}
+}
+
+func TestHashInterpolationEnvCanonicalizesSortedEntries(t *testing.T) {
+	first := hashInterpolationEnv(map[string]string{
+		"B": "two",
+		"A": "one",
+	})
+	second := hashInterpolationEnv(map[string]string{
+		"A": "one",
+		"B": "two",
+	})
+	if first != second {
+		t.Fatalf("expected insertion order independent hash, got %s and %s", first, second)
+	}
+
+	empty := hashInterpolationEnv(nil)
+	if empty != "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945" {
+		t.Fatalf("unexpected empty env hash: %s", empty)
+	}
+}
+
 func TestVerifier_WrongEnvironment(t *testing.T) {
 	pub, priv := generateTestKeys(t)
 	pubB64 := base64.StdEncoding.EncodeToString(pub)

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockAssertAgentDeploymentAllowed = vi.fn();
 const mockProxyToVmAgentWithNodeManagement = vi.fn();
+const mockLoadDeploymentBuildInterpolationEnv = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({ mocked: true })),
@@ -9,6 +10,11 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('../../src/services/deployment-control', () => ({
   assertAgentDeploymentAllowed: (...args: unknown[]) => mockAssertAgentDeploymentAllowed(...args),
+}));
+
+vi.mock('../../src/services/deployment-environment-config', () => ({
+  loadDeploymentBuildInterpolationEnv: (...args: unknown[]) =>
+    mockLoadDeploymentBuildInterpolationEnv(...args),
 }));
 
 vi.mock('../../src/routes/mcp/workspace-tools', async () => {
@@ -42,6 +48,13 @@ function env() {
 describe('handleBuildAndPublish', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLoadDeploymentBuildInterpolationEnv.mockResolvedValue({
+      values: {},
+      plainKeys: [],
+      secretKeys: [],
+      configUpdatedAt: null,
+      totalBytes: 0,
+    });
   });
 
   it('rejects when there is no active workspace', async () => {
@@ -107,6 +120,10 @@ describe('handleBuildAndPublish', () => {
     );
 
     expect(result.error).toBeUndefined();
+    expect(mockLoadDeploymentBuildInterpolationEnv).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1'
+    );
     expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
@@ -117,6 +134,8 @@ describe('handleBuildAndPublish', () => {
       {
         environment: 'staging',
         environmentId: 'env-1',
+        buildInterpolationEnv: {},
+        secretInterpolationKeys: [],
         submittedBy: {
           userId: 'user-1',
           workspaceId: 'ws-1',
@@ -131,6 +150,42 @@ describe('handleBuildAndPublish', () => {
     const payload = JSON.parse(text);
     expect(payload.releaseId).toBe('rel-1');
     expect(payload.status).toBe('created');
+  });
+
+  it('forwards non-secret build interpolation env and secret key names to the vm-agent', async () => {
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: {},
+      taskAgentProfileId: null,
+    });
+    mockLoadDeploymentBuildInterpolationEnv.mockResolvedValue({
+      values: { PUBLIC_APP_DOMAIN: 'staging.example.com' },
+      plainKeys: ['PUBLIC_APP_DOMAIN'],
+      secretKeys: ['DATABASE_URL'],
+      configUpdatedAt: null,
+      totalBytes: 43,
+    });
+    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
+      releaseId: 'rel-env',
+      version: 8,
+      status: 'created',
+    });
+
+    await handleBuildAndPublish('req-1', { environment: 'staging' }, tokenData(), env());
+
+    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
+      expect.anything(),
+      'ws-1',
+      'user-1',
+      'proj-1',
+      'build-and-publish',
+      'POST',
+      expect.objectContaining({
+        buildInterpolationEnv: { PUBLIC_APP_DOMAIN: 'staging.example.com' },
+        secretInterpolationKeys: ['DATABASE_URL'],
+      }),
+      expect.any(Number)
+    );
   });
 
   it('forwards a trimmed reference argument to the vm-agent', async () => {

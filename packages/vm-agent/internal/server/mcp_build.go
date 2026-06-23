@@ -38,6 +38,12 @@ type McpBuildAndPublishRequest struct {
 	// workspace's primary repo dir. Optional; ignored if it is not a valid path
 	// under /workspaces or the resolved host path does not exist.
 	WorkingDir string `json:"workingDir,omitempty"`
+	// BuildInterpolationEnv contains non-secret deployment config values only.
+	// Secrets are intentionally omitted from workspace/build nodes.
+	BuildInterpolationEnv map[string]string `json:"buildInterpolationEnv,omitempty"`
+	// SecretInterpolationKeys contains secret names for validation only; values
+	// are never sent to build nodes.
+	SecretInterpolationKeys []string `json:"secretInterpolationKeys,omitempty"`
 	// SubmittedBy carries agent/task/workspace attribution for release history.
 	SubmittedBy *publish.ReleaseSubmittedBy `json:"submittedBy,omitempty"`
 }
@@ -141,6 +147,8 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 	artifact, err := publish.Build(ctx, publish.BuildOptions{
 		WorkspaceDir: buildDir,
 		Reference:    reference,
+		BuildEnv:     req.BuildInterpolationEnv,
+		SecretKeys:   req.SecretInterpolationKeys,
 		Logger:       log,
 	})
 	if err != nil {

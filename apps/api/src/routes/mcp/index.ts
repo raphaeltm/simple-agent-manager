@@ -26,7 +26,6 @@ import {
   METHOD_NOT_FOUND,
 } from './_helpers';
 import { handleBuildAndPublish } from './compose-publish-tools';
-import { handleGetDeploymentCredentials } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
   handleCreateIdea,
@@ -100,7 +99,6 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
-import { handleGetRegistryCredentials } from './registry-credential-tools';
 import {
   handleGetSessionMessages,
   handleListSessions,
@@ -131,8 +129,6 @@ import {
 } from './workspace-tools';
 import {
   handleCheckDnsStatus,
-  handleGetCiStatus,
-  handleGetDeploymentStatus,
   handleGetPeerAgentOutput,
   handleGetTaskDependencies,
   handleListProjectAgents,
@@ -148,8 +144,8 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
-  // Authenticate — returns parsed token data and raw token
-  const [tokenData, rawToken] = await authenticateMcpRequest(
+  // Authenticate — returns parsed token data
+  const [tokenData] = await authenticateMcpRequest(
     c.req.header('Authorization'),
     c.env.KV,
     c.env,
@@ -293,10 +289,6 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleListIdeas(requestId, toolArgs, tokenData, c.env));
         case 'search_ideas':
           return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
-        case 'get_deployment_credentials':
-          return c.json(await handleGetDeploymentCredentials(requestId, tokenData, c.env, rawToken!));
-        case 'get_registry_credentials':
-          return c.json(await handleGetRegistryCredentials(requestId, toolArgs, tokenData, c.env));
         case 'build_and_publish':
           return c.json(
             await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env),
@@ -318,10 +310,6 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(await handleGetPeerAgentOutput(requestId, toolArgs, tokenData, c.env));
         case 'get_task_dependencies':
           return c.json(await handleGetTaskDependencies(requestId, tokenData, c.env));
-        case 'get_ci_status':
-          return c.json(await handleGetCiStatus(requestId, tokenData, c.env));
-        case 'get_deployment_status':
-          return c.json(await handleGetDeploymentStatus(requestId, tokenData, c.env));
         case 'get_workspace_diff_summary':
           return c.json(await handleGetWorkspaceDiffSummary(requestId, tokenData, c.env));
         case 'report_environment_issue':

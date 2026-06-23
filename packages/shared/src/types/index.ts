@@ -111,6 +111,13 @@ export type {
 } from './project';
 export { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from './project';
 
+// Deployment
+export type {
+  DeploymentEnvironmentConfigResponse,
+  DeploymentEnvironmentConfigVarResponse,
+  UpsertDeploymentEnvironmentConfigVarRequest,
+} from './deployment';
+
 // Task
 export type {
   CreateTaskDependencyRequest,

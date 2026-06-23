@@ -219,36 +219,9 @@ export const SESSION_IDEA_TOOLS = [
     },
   },
   {
-    name: 'get_deployment_credentials',
-    description:
-      'Get GCP deployment credentials for the current project. Returns a GCP external_account credential config JSON that can be written to a file and used with GOOGLE_APPLICATION_CREDENTIALS. GCP client libraries will auto-refresh tokens via SAM.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'get_registry_credentials',
-    description:
-      'Get short-lived container registry credentials for pushing images to the Cloudflare managed registry for a user-enabled deployment environment. Returns registry host, username, password, project-scoped namespace prefix, and expiry. Use these to `docker login` and push images directly to registry.cloudflare.com. All images MUST be pushed under the returned namespace prefix.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        environment: {
-          type: 'string',
-          description:
-            'Deployment environment name (e.g. "staging", "production"). The environment must exist, be active, and have agent deployment enabled by a user.',
-        },
-      },
-      required: ['environment'],
-      additionalProperties: false,
-    },
-  },
-  {
     name: 'build_and_publish',
     description:
-      "Build your project's Docker Compose stack and publish it to SAM as a deployment release for a specific deployment environment. Use this INSTEAD of get_registry_credentials when the project has a compose file. SAM builds your compose services on the host Docker daemon, re-pushes the built service images into your project-scoped registry namespace, and records a deployment release — entirely server-side. You run ZERO docker or registry commands and never receive a credential. Ensure all buildable services define a `build:` section and the stack builds cleanly first. Requires agent deployment to be enabled on the named deployment environment and this agent profile to be allowed by that environment policy.",
+      "Build your project's Docker Compose stack and publish it to SAM as a deployment release for a specific deployment environment. This is the publish path for compose-based projects. SAM builds your compose services on the host Docker daemon, re-pushes the built service images into your project-scoped registry namespace, and records a deployment release — entirely server-side. You run ZERO docker or registry commands and never receive a credential. Ensure all buildable services define a `build:` section and the stack builds cleanly first. Requires agent deployment to be enabled on the named deployment environment and this agent profile to be allowed by that environment policy.",
     inputSchema: {
       type: 'object' as const,
       properties: {

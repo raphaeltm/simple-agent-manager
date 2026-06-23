@@ -8,15 +8,11 @@
  */
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { readResponseJson } from '../../lib/runtime-validation';
-import { getCredentialEncryptionKey } from '../../lib/secrets';
-import { decrypt } from '../../services/encryption';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -31,34 +27,11 @@ import { requireWorkspace } from './workspace-tools';
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
-/** Timeout for GitHub API calls. Override via WORKSPACE_TOOL_GITHUB_TIMEOUT_MS. */
-const DEFAULT_GITHUB_API_TIMEOUT_MS = 10_000;
 /** Timeout for DNS check calls. Override via WORKSPACE_TOOL_DNS_TIMEOUT_MS. */
 const DEFAULT_DNS_CHECK_TIMEOUT_MS = 10_000;
-/** Max CI runs to return. Override via WORKSPACE_TOOL_CI_RUNS_LIMIT. */
-const DEFAULT_CI_RUNS_LIMIT = 10;
-/** Max deployment runs to return. Override via WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT. */
-const DEFAULT_DEPLOY_RUNS_LIMIT = 5;
 /** Max size (bytes) for diagnostic data in report_environment_issue. Override via WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES. */
 const DEFAULT_DIAGNOSTIC_MAX_BYTES = 4096;
 
-const githubWorkflowRunSchema = v.object({
-  id: v.number(),
-  name: v.optional(v.string()),
-  status: v.string(),
-  conclusion: v.nullable(v.string()),
-  html_url: v.string(),
-  created_at: v.string(),
-  head_branch: v.optional(v.string()),
-});
-
-const githubWorkflowRunsSchema = v.object({
-  workflow_runs: v.optional(v.array(githubWorkflowRunSchema)),
-});
-
-function getGitHubApiTimeout(env: Env): number {
-  return parsePositiveInt(env.WORKSPACE_TOOL_GITHUB_TIMEOUT_MS, DEFAULT_GITHUB_API_TIMEOUT_MS);
-}
 function getDnsCheckTimeout(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_TOOL_DNS_TIMEOUT_MS, DEFAULT_DNS_CHECK_TIMEOUT_MS);
 }
@@ -314,155 +287,6 @@ export async function handleReportEnvironmentIssue(
   }
 }
 
-export async function handleGetCiStatus(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<JsonRpcResponse> {
-  if (!tokenData.taskId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'This tool requires a task-scoped MCP token');
-  }
-
-  try {
-    const db = drizzle(env.DATABASE, { schema });
-
-    // Get the task's branch
-    const [task] = await db
-      .select({ outputBranch: schema.tasks.outputBranch })
-      .from(schema.tasks)
-      .where(eq(schema.tasks.id, tokenData.taskId))
-      .limit(1);
-
-    // Get the project's repository
-    const [project] = await db
-      .select({ repository: schema.projects.repository })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, tokenData.projectId))
-      .limit(1);
-
-    if (!project?.repository) {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ status: 'no_repository', note: 'No repository configured for this project' }) }],
-      });
-    }
-    if (!validateRepository(project.repository)) {
-      return jsonRpcError(requestId, INTERNAL_ERROR, 'Invalid repository format');
-    }
-
-    const branch = task?.outputBranch;
-    if (!branch) {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ status: 'no_branch', note: 'No output branch for current task' }) }],
-      });
-    }
-
-    // Get GitHub token from user's stored credentials
-    const ghToken = await getUserGitHubToken(db, tokenData.userId, env);
-    if (!ghToken) {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ status: 'no_credentials', note: 'No GitHub token available. CI status requires GitHub credentials.' }) }],
-      });
-    }
-
-    const runsLimit = parsePositiveInt(env.WORKSPACE_TOOL_CI_RUNS_LIMIT, DEFAULT_CI_RUNS_LIMIT);
-    const ghTimeoutMs = getGitHubApiTimeout(env);
-    const apiUrl = `https://api.github.com/repos/${project.repository}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=${runsLimit}`;
-
-    const res = await fetch(apiUrl, {
-      headers: {
-        Authorization: `Bearer ${ghToken}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'SAM-MCP/1.0',
-      },
-      signal: AbortSignal.timeout(ghTimeoutMs),
-    });
-
-    if (!res.ok) {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ status: 'api_error', note: `GitHub API returned ${res.status}` }) }],
-      });
-    }
-
-    const data = await readResponseJson(res, githubWorkflowRunsSchema, 'github.workspace_tool.workflow_runs');
-    const runs = (data.workflow_runs ?? []).map((r) => ({
-      id: r.id,
-      name: r.name ?? '',
-      status: r.status,
-      conclusion: r.conclusion,
-      url: r.html_url,
-      createdAt: r.created_at,
-    }));
-
-    // Determine overall status
-    let overallStatus = 'no_runs';
-    if (runs.length > 0) {
-      const hasRunning = runs.some((r) => r.status === 'in_progress' || r.status === 'queued');
-      const hasFailed = runs.some((r) => r.conclusion === 'failure');
-      if (hasRunning) overallStatus = 'running';
-      else if (hasFailed) overallStatus = 'failed';
-      else overallStatus = 'passed';
-    }
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({ branch, overallStatus, runs }, null, 2) }],
-    });
-  } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get CI status: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
-export async function handleGetDeploymentStatus(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<JsonRpcResponse> {
-  try {
-    const db = drizzle(env.DATABASE, { schema });
-
-    // Get the project's repository
-    const [project] = await db
-      .select({ repository: schema.projects.repository })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, tokenData.projectId))
-      .limit(1);
-
-    if (!project?.repository) {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ status: 'no_repository' }) }],
-      });
-    }
-
-    const ghToken = await getUserGitHubToken(db, tokenData.userId, env);
-    if (!ghToken) {
-      return jsonRpcSuccess(requestId, {
-        content: [{ type: 'text', text: JSON.stringify({ status: 'no_credentials', note: 'No GitHub token available.' }) }],
-      });
-    }
-
-    const runsLimit = parsePositiveInt(env.WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT, DEFAULT_DEPLOY_RUNS_LIMIT);
-    const ghTimeoutMs = getGitHubApiTimeout(env);
-
-    // Fetch staging and production deployment workflows
-    const [stagingRes, prodRes] = await Promise.all([
-      fetchWorkflowRuns(ghToken, project.repository, 'deploy-staging.yml', runsLimit, ghTimeoutMs),
-      fetchWorkflowRuns(ghToken, project.repository, 'deploy.yml', runsLimit, ghTimeoutMs),
-    ]);
-
-    return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          staging: stagingRes,
-          production: prodRes,
-        }, null, 2),
-      }],
-    });
-  } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get deployment status: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
 // ─── Category C: Handled in Worker (no VM agent needed) ─────────────────────
 
 export async function handleCheckDnsStatus(
@@ -519,95 +343,3 @@ export async function handleCheckDnsStatus(
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/** Validate that a repository string matches the expected owner/repo format. */
-const REPO_FORMAT_RE = /^[\w.-]+\/[\w.-]+$/;
-function validateRepository(repo: string): boolean {
-  return REPO_FORMAT_RE.test(repo);
-}
-
-/**
- * Get the user's GitHub token from encrypted credentials.
- * Returns null if not available.
- */
-async function getUserGitHubToken(
-  db: ReturnType<typeof drizzle>,
-  userId: string,
-  env: Env,
-): Promise<string | null> {
-  try {
-    const [cred] = await db
-      .select({
-        encryptedToken: schema.credentials.encryptedToken,
-        iv: schema.credentials.iv,
-      })
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.provider, 'github'),
-        ),
-      )
-      .limit(1);
-
-    if (!cred) return null;
-
-    const encryptionKey = getCredentialEncryptionKey(env);
-    return await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-  } catch (e) {
-    log.warn('workspace_tools.github_token_decrypt_failed', { userId, error: String(e) });
-    return null;
-  }
-}
-
-/**
- * Fetch recent workflow runs from GitHub API.
- */
-async function fetchWorkflowRuns(
-  ghToken: string,
-  repository: string,
-  workflowFile: string,
-  limit: number,
-  timeoutMs: number,
-): Promise<{ lastDeploy: unknown; isDeploying: boolean; recentRuns: unknown[] } | { error: string }> {
-  try {
-    const apiUrl = `https://api.github.com/repos/${repository}/actions/workflows/${workflowFile}/runs?per_page=${limit}`;
-    const res = await fetch(apiUrl, {
-      headers: {
-        Authorization: `Bearer ${ghToken}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'SAM-MCP/1.0',
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (!res.ok) {
-      return { error: `GitHub API returned ${res.status}` };
-    }
-
-    const data = await readResponseJson(res, githubWorkflowRunsSchema, 'github.workspace_tool.deploy_runs');
-    const runs = data.workflow_runs ?? [];
-
-    const lastDeploy = runs[0]
-      ? { status: runs[0].status, conclusion: runs[0].conclusion, branch: runs[0].head_branch ?? '', url: runs[0].html_url, createdAt: runs[0].created_at }
-      : null;
-
-    const isDeploying = runs.some((r) => r.status === 'in_progress' || r.status === 'queued');
-
-    return {
-      lastDeploy,
-      isDeploying,
-      recentRuns: runs.slice(0, 3).map((r) => ({
-        status: r.status,
-        conclusion: r.conclusion,
-        branch: r.head_branch,
-        url: r.html_url,
-        createdAt: r.created_at,
-      })),
-    };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
-  }
-}

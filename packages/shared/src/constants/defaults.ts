@@ -84,6 +84,15 @@ export const DEFAULT_MAX_PROJECT_RUNTIME_FILES_PER_PROJECT = 50;
 /** Default max runtime env var value size in bytes. Override via MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES env var. */
 export const DEFAULT_MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES = 8 * 1024;
 
+/** Default max deployment environment config vars per environment. Override via MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT env var. */
+export const DEFAULT_MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT = 100;
+
+/** Default max deployment environment config value size in bytes. Override via MAX_DEPLOYMENT_ENV_VALUE_BYTES env var. */
+export const DEFAULT_MAX_DEPLOYMENT_ENV_VALUE_BYTES = 64 * 1024;
+
+/** Default aggregate deployment environment config size in bytes. Override via MAX_DEPLOYMENT_ENV_TOTAL_BYTES env var. */
+export const DEFAULT_MAX_DEPLOYMENT_ENV_TOTAL_BYTES = 256 * 1024;
+
 /** Default max runtime file content size in bytes. Override via MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES env var. */
 export const DEFAULT_MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES = 128 * 1024;
 

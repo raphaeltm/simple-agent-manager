@@ -51,17 +51,24 @@ type ObservedState struct {
 
 // ApplyPayload is the signed payload received from the control plane.
 type ApplyPayload struct {
-	EnvironmentID string        `json:"environmentId"`
-	NodeID        string        `json:"nodeId"`
-	Seq           int64         `json:"seq"`
-	ExpiresAt     int64         `json:"expiresAt"` // Unix timestamp
-	ComposeYAML   string        `json:"composeYaml"`
-	Routes        []RouteTarget `json:"routes,omitempty"`
-	Signature     string        `json:"signature"` // Base64-encoded Ed25519 signature
+	EnvironmentID    string            `json:"environmentId"`
+	NodeID           string            `json:"nodeId"`
+	Seq              int64             `json:"seq"`
+	ExpiresAt        int64             `json:"expiresAt"` // Unix timestamp
+	ComposeYAML      string            `json:"composeYaml"`
+	InterpolationEnv map[string]string `json:"interpolationEnv,omitempty"`
+	Routes           []RouteTarget     `json:"routes,omitempty"`
+	Signature        string            `json:"signature"` // Base64-encoded Ed25519 signature
 
 	// Registry credentials for private image pulls. When present, the
 	// deploy engine calls docker login --password-stdin before composePull.
 	RegistryCredentials *RegistryCredentials `json:"registryCredentials,omitempty"`
+}
+
+type DeploymentEnvResponse struct {
+	EnvironmentID    string            `json:"environmentId"`
+	InterpolationEnv map[string]string `json:"interpolationEnv,omitempty"`
+	ConfigUpdatedAt  string            `json:"configUpdatedAt,omitempty"`
 }
 
 // RouteTarget maps a public hostname to the loopback port published by Compose.
@@ -81,12 +88,13 @@ type RegistryCredentials struct {
 }
 
 // SignablePayload is the canonical byte representation that gets signed.
-// The signature covers: environmentId + nodeId + seq + expiresAt + sha256(composeYaml) + sha256(routes).
+// The signature covers: environmentId + nodeId + seq + expiresAt + sha256(composeYaml) + sha256(routes) + sha256(interpolationEnv).
 type SignablePayload struct {
-	EnvironmentID string `json:"environmentId"`
-	NodeID        string `json:"nodeId"`
-	Seq           int64  `json:"seq"`
-	ExpiresAt     int64  `json:"expiresAt"`
-	ComposeHash   string `json:"composeHash"` // hex-encoded SHA-256 of ComposeYAML
-	RoutesHash    string `json:"routesHash"`  // hex-encoded SHA-256 of canonical routes JSON
+	EnvironmentID        string `json:"environmentId"`
+	NodeID               string `json:"nodeId"`
+	Seq                  int64  `json:"seq"`
+	ExpiresAt            int64  `json:"expiresAt"`
+	ComposeHash          string `json:"composeHash"` // hex-encoded SHA-256 of ComposeYAML
+	RoutesHash           string `json:"routesHash"`  // hex-encoded SHA-256 of canonical routes JSON
+	InterpolationEnvHash string `json:"interpolationEnvHash"`
 }
