@@ -40,7 +40,9 @@ Review the last two weeks of SAM work, agent/human interactions, knowledge, idea
 - [x] Repo guidance points to existing detailed rules where possible instead of duplicating large sections.
 - [x] Guidance explicitly distinguishes local subagent critique from SAM-dispatched visible subtasks.
 - [x] Failed dispatch retry guidance includes `outputBranch` and requested profile/skill/taskMode evidence.
-- [ ] Draft PR describes evidence, durable MCP updates, validation, and no-staging/no-merge handling.
+- [x] Draft PR describes evidence, durable MCP updates, validation, and no-staging/no-merge handling.
+
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1386
 
 ## Validation
 
