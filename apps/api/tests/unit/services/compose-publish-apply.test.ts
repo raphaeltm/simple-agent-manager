@@ -94,6 +94,57 @@ describe('buildComposePublishApplyPayload', () => {
     expect(doc.services.worker.image).toBe('sam-registry.local:5050/proj/worker@sha256:bbb');
   });
 
+  it('replaces artifact-backed build services with local refs and pull_policy never', () => {
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({
+        services: [
+          {
+            serviceName: 'app',
+            sourceRef: 'crewai-app',
+            localImageRef: 'crewai-app',
+            r2Key: 'compose-image-artifacts/proj/env/ws/upload/app.tar',
+            sizeBytes: 123,
+            archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveType: 'docker-save',
+            mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          },
+          {
+            serviceName: 'worker',
+            sourceRef: 'crewai-worker',
+            localImageRef: 'crewai-worker',
+            r2Key: 'compose-image-artifacts/proj/env/ws/upload/worker.tar',
+            sizeBytes: 456,
+            archiveSha256: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            archiveType: 'docker-save',
+            mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          },
+        ],
+      }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(doc.services.app.build).toBeUndefined();
+    expect(doc.services.app.image).toBe(`sam-${ENVIRONMENT_ID}-app:${RELEASE_ID}`);
+    expect(doc.services.app.pull_policy).toBe('never');
+    expect(doc.services.worker.image).toBe(`sam-${ENVIRONMENT_ID}-worker:${RELEASE_ID}`);
+    expect(doc.services.worker.pull_policy).toBe('never');
+    expect(doc.services.postgres.image).toBe('pgvector/pgvector:pg16');
+    expect(doc.services.postgres.pull_policy).toBeUndefined();
+    expect(result.artifacts).toEqual([
+      expect.objectContaining({
+        serviceName: 'app',
+        sourceRef: 'crewai-app',
+        localImageRef: `sam-${ENVIRONMENT_ID}-app:${RELEASE_ID}`,
+        r2Key: 'compose-image-artifacts/proj/env/ws/upload/app.tar',
+      }),
+      expect.objectContaining({
+        serviceName: 'worker',
+        localImageRef: `sam-${ENVIRONMENT_ID}-worker:${RELEASE_ID}`,
+      }),
+    ]);
+  });
+
   it('warns when a build service has no pushed image and no fallback image', () => {
     const submission = makeSubmission({
       services: [

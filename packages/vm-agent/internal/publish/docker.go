@@ -13,13 +13,22 @@ import (
 )
 
 // HostDocker drives the host docker daemon via the docker CLI. It is the
-// production Docker implementation the orchestrator uses to re-tag and re-push
-// the captured built images. The same daemon ran `docker compose publish`, so
-// the built images are already present content-addressed by digest.
+// production Docker implementation the orchestrator uses to export captured
+// built images. The same daemon ran `docker compose build`, so the built images
+// are already present by their resolved compose `image:` reference.
 type HostDocker struct{}
 
 // NewHostDocker returns a Docker backed by the host docker CLI.
 func NewHostDocker() *HostDocker { return &HostDocker{} }
+
+// Save exports a source image to a docker-save archive path.
+func (d *HostDocker) Save(ctx context.Context, source, archivePath string) error {
+	cmd := exec.CommandContext(ctx, container.DockerCLIPath(), "save", "-o", archivePath, source)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker save %s: %w: %s", source, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
 
 // Login authenticates the host daemon to the registry. It reuses
 // cache.DockerLogin, which feeds the password via stdin and redacts it on error.

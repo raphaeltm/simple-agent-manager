@@ -53,6 +53,10 @@ import {
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import {
+  buildLocalImageRef,
+  type ComposeImageArtifactDescriptor,
+} from './compose-image-artifacts';
+import {
   assignRouteTargets,
   type DeploymentRouteTarget,
   type DeploymentRouteTargetOptions,
@@ -71,8 +75,16 @@ export interface ComposePublishSubmission {
   composeYaml: string;
   services?: Array<{
     serviceName?: unknown;
+    sourceRef?: unknown;
+    localImageRef?: unknown;
     pushedRef?: unknown;
     digest?: unknown;
+    r2Key?: unknown;
+    sizeBytes?: unknown;
+    archiveSha256?: unknown;
+    archiveType?: unknown;
+    mediaType?: unknown;
+    platform?: unknown;
   }>;
 }
 
@@ -100,6 +112,7 @@ export interface ComposePublishApplyResult {
   warnings: ComposePublishWarning[];
   /** True when at least one service declares a `provider:` (Model Runner). */
   hasModelProvider: boolean;
+  artifacts: ComposeImageArtifactDescriptor[];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -116,6 +129,39 @@ function buildPushedRefMap(submission: ComposePublishSubmission): Map<string, st
       svc.pushedRef.trim() !== ''
     ) {
       map.set(svc.serviceName, svc.pushedRef);
+    }
+  }
+  return map;
+}
+
+function buildArtifactMap(submission: ComposePublishSubmission): Map<string, ComposeImageArtifactDescriptor> {
+  const map = new Map<string, ComposeImageArtifactDescriptor>();
+  for (const svc of submission.services ?? []) {
+    if (
+      typeof svc.serviceName === 'string' &&
+      typeof svc.sourceRef === 'string' &&
+      typeof svc.r2Key === 'string' &&
+      typeof svc.sizeBytes === 'number' &&
+      typeof svc.archiveSha256 === 'string' &&
+      typeof svc.archiveType === 'string' &&
+      typeof svc.mediaType === 'string'
+    ) {
+      map.set(svc.serviceName, {
+        serviceName: svc.serviceName,
+        sourceRef: svc.sourceRef,
+        localImageRef:
+          typeof svc.localImageRef === 'string' && svc.localImageRef.trim() !== ''
+            ? svc.localImageRef
+            : svc.sourceRef,
+        r2Key: svc.r2Key,
+        sizeBytes: svc.sizeBytes,
+        archiveSha256: svc.archiveSha256,
+        archiveType: svc.archiveType,
+        mediaType: svc.mediaType,
+        ...(typeof svc.platform === 'object' && svc.platform !== null
+          ? { platform: svc.platform as ComposeImageArtifactDescriptor['platform'] }
+          : {}),
+      });
     }
   }
   return map;
@@ -332,6 +378,7 @@ export function buildComposePublishApplyPayload(
   const sanitizedVolumes = validateSafeNamedVolumes(doc, rawServices);
 
   const pushedRefByService = buildPushedRefMap(submission);
+  const artifactByService = buildArtifactMap(submission);
   const networkName = `sam-internal-${opts.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
   const publicRoutes: PublicRouteInput[] = [];
@@ -340,6 +387,7 @@ export function buildComposePublishApplyPayload(
   const routeServiceByIndex: Array<{ service: string; containerPort: number }> = [];
 
   let hasModelProvider = false;
+  const artifacts: ComposeImageArtifactDescriptor[] = [];
   const outServices: Record<string, unknown> = {};
 
   for (const [name, rawService] of Object.entries(rawServices)) {
@@ -363,20 +411,29 @@ export function buildComposePublishApplyPayload(
     }
 
     const service: Record<string, unknown> = { ...rawService };
+    const artifact = artifactByService.get(name);
 
-    // Replace build: with the digest-pinned pushed image.
+    // Replace build: with the artifact-backed local image ref when available,
+    // otherwise fall back to legacy digest-pinned pushed images.
     if ('build' in service) {
       delete service.build;
-      const pushedRef = pushedRefByService.get(name);
-      if (pushedRef) {
-        service.image = pushedRef;
-      } else if (typeof service.image !== 'string' || service.image.trim() === '') {
-        warnings.push({
-          service: name,
-          field: 'build',
-          message:
-            'Service used "build" but no pushed image was found for it; the deployment will fail to pull an image for this service.',
-        });
+      if (artifact) {
+        const localImageRef = buildLocalImageRef(opts.environmentId, opts.releaseId, name);
+        service.image = localImageRef;
+        service.pull_policy = 'never';
+        artifacts.push({ ...artifact, localImageRef });
+      } else {
+        const pushedRef = pushedRefByService.get(name);
+        if (pushedRef) {
+          service.image = pushedRef;
+        } else if (typeof service.image !== 'string' || service.image.trim() === '') {
+          warnings.push({
+            service: name,
+            field: 'build',
+            message:
+              'Service used "build" but no pushed image or artifact was found for it; the deployment will fail to resolve an image for this service.',
+          });
+        }
       }
     } else {
       // No build — prefer the pushed digest-pinned ref when the publisher
@@ -472,5 +529,5 @@ export function buildComposePublishApplyPayload(
 
   const composeYaml = stringifyYaml(outDoc, { lineWidth: 0 });
 
-  return { composeYaml, routes, warnings, hasModelProvider };
+  return { composeYaml, routes, warnings, hasModelProvider, artifacts };
 }

@@ -20,20 +20,32 @@ This task must stop at an open PR. Staging deployment and staging mutation are e
 
 ## Implementation Checklist
 
-- [ ] Add API types and services for compose image artifacts: server-derived keys, upload init/complete metadata validation, download access generation, and release descriptors.
-- [ ] Extend compose-publish release recording to persist service artifact descriptors alongside legacy pushed refs.
-- [ ] Update MCP/control-plane publish contract so VM agent uploads per-service Docker archives to R2 using server-scoped URLs/keys and submits size/hash/archive metadata.
-- [ ] Update VM agent publish flow to build, capture compose YAML, export one archive per build-backed service, hash it, enforce the MVP size cap, upload directly to R2, and avoid registry login/tag/push for the R2 path.
-- [ ] Update compose-publish apply transform so artifact-backed services use local SAM image refs with pull policy `never`, while provider services pass through and image-only public services keep unauthenticated pulls.
-- [ ] Remove deployment-node `registryCredentials` from the new R2-backed compose-publish apply path while preserving compatibility where legacy releases still require it.
-- [ ] Extend TS deploy signing and Go verifier with an artifacts hash; include artifact keys, hashes, sizes, refs, archive type, and platform in the signed surface.
-- [ ] Update deployment VM agent to download scoped R2 artifacts, verify byte size and SHA-256, load/tag local images before compose up, and skip/limit compose pull for artifact-backed services.
-- [ ] Add focused API unit/route tests for artifact upload init/complete/finalize scoping and release recording.
-- [ ] Add compose transform tests for local refs, `pull_policy: never`, multi-service build artifacts, provider services, image-only public services, volumes, ports, labels, and networks.
-- [ ] Add TS/Go deploy signing contract fixture coverage for `artifactsHash`.
-- [ ] Add VM-agent Go tests for no registry login on R2 payloads, artifact tamper rejection, hash mismatch failure, load failure, pull skipping/limiting, and local tagging before compose up.
-- [ ] Update docs or PR notes with MVP limitations: external image-only policy and multipart status.
-- [ ] Run local quality checks and specialist reviews; do not use staging.
+- [x] Add API types and services for compose image artifacts: server-derived keys, upload init/complete metadata validation, download access generation, and release descriptors.
+- [x] Extend compose-publish release recording to persist service artifact descriptors alongside legacy pushed refs.
+- [x] Update MCP/control-plane publish contract so VM agent uploads per-service Docker archives to R2 using server-scoped URLs/keys and submits size/hash/archive metadata.
+- [x] Update VM agent publish flow to build, capture compose YAML, export one archive per build-backed service, hash it, enforce the MVP size cap, upload directly to R2, and avoid registry login/tag/push for the R2 path.
+- [x] Update compose-publish apply transform so artifact-backed services use local SAM image refs with pull policy `never`, while provider services pass through and image-only public services keep unauthenticated pulls.
+- [x] Remove deployment-node `registryCredentials` from the new R2-backed compose-publish apply path while preserving compatibility where legacy releases still require it.
+- [x] Extend TS deploy signing and Go verifier with an artifacts hash; include artifact keys, hashes, sizes, refs, archive type, and platform in the signed surface.
+- [x] Update deployment VM agent to download scoped R2 artifacts, verify byte size and SHA-256, load/tag local images before compose up, and skip/limit compose pull for artifact-backed services.
+- [x] Add focused API unit/route tests for artifact upload init/complete/finalize scoping and release recording.
+- [x] Add compose transform tests for local refs, `pull_policy: never`, multi-service build artifacts, provider services, image-only public services, volumes, ports, labels, and networks.
+- [x] Add TS/Go deploy signing contract fixture coverage for `artifactsHash`.
+- [x] Add VM-agent Go tests for no registry login on R2 payloads, artifact tamper rejection, hash mismatch failure, load failure, pull skipping/limiting, and local tagging before compose up.
+- [x] Update docs or PR notes with MVP limitations: external image-only policy and multipart status.
+- [x] Run local quality checks and specialist reviews; do not use staging.
+
+## Validation
+
+- `pnpm lint` passed with existing repository warnings.
+- `pnpm typecheck` passed.
+- `go test ./...` passed in `packages/vm-agent`.
+- Focused API tests passed for compose image artifacts, compose-publish apply, deploy signing, compose-publish release callback, and deploy release callback.
+- Focused Go tests passed for `./internal/publish` and `./internal/deploy`.
+- `pnpm test` ran the full suite; API passed 340 files / 5610 tests. The full command failed on one unrelated web timing test in `tests/unit/components/agents-section.test.tsx`, and the exact focused rerun passed 8/8 tests.
+- `pnpm build` passed.
+- Specialist reviews completed locally: Cloudflare/R2, security, Go, test engineering, constitution compliance, and task-completion validation.
+- Staging validation was intentionally skipped by explicit human instruction; no staging deploys or staging mutations were performed.
 
 ## Acceptance Criteria
 

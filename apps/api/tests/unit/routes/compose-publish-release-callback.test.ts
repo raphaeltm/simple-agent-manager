@@ -130,7 +130,7 @@ async function buildApp() {
   return app;
 }
 
-function request(app: Hono, projectId: string, body: unknown) {
+function request(app: Hono, projectId: string, body: unknown, env: Record<string, unknown> = {}) {
   return app.request(
     `/api/projects/${projectId}/compose-publish-release`,
     {
@@ -138,7 +138,7 @@ function request(app: Hono, projectId: string, body: unknown) {
       headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    { DATABASE: {} }
+    { DATABASE: {}, ...env }
   );
 }
 
@@ -209,6 +209,72 @@ describe('compose-publish-release callback (vertical slice)', () => {
         agentProfileId: 'profile-1',
       },
     });
+  });
+
+  it('validates and records artifact-backed service descriptors', async () => {
+    const headCalls: string[] = [];
+    const r2 = {
+      head: vi.fn(async (key: string) => {
+        headCalls.push(key);
+        return { size: 42 };
+      }),
+    };
+    const artifactSubmission = {
+      ...validSubmission,
+      services: [
+        {
+          serviceName: 'web',
+          sourceRef: 'workspace-web',
+          localImageRef: 'workspace-web',
+          r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+          sizeBytes: 42,
+          archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          archiveType: 'docker-save',
+          mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+        },
+      ],
+    };
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', artifactSubmission, { R2: r2 });
+
+    expect(res.status).toBe(200);
+    expect(headCalls).toEqual([
+      'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+    ]);
+    const manifest = JSON.parse(inserted[0].manifest as string);
+    expect(manifest.services[0]).toMatchObject({
+      serviceName: 'web',
+      r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+      archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+  });
+
+  it('rejects artifact descriptors outside the workspace-scoped key prefix', async () => {
+    const app = await buildApp();
+    const res = await request(
+      app,
+      'proj-1',
+      {
+        ...validSubmission,
+        services: [
+          {
+            serviceName: 'web',
+            sourceRef: 'workspace-web',
+            localImageRef: 'workspace-web',
+            r2Key: 'compose-image-artifacts/proj-1/env-1/other-ws/upload-1/web.docker-save.tar',
+            sizeBytes: 42,
+            archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveType: 'docker-save',
+            mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          },
+        ],
+      },
+      { R2: { head: vi.fn() } }
+    );
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
   });
 
   it('starts at version 1 when the environment has no prior releases', async () => {

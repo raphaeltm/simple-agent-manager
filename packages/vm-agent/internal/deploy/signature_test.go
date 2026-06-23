@@ -127,6 +127,44 @@ func TestVerifier_RejectsInterpolationEnvMutationAfterSigning(t *testing.T) {
 	}
 }
 
+func TestVerifier_RejectsArtifactMutationAfterSigning(t *testing.T) {
+	pub, priv := generateTestKeys(t)
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	v, err := NewVerifier(pubB64)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "compose yaml",
+		Artifacts: []ImageArtifact{{
+			ServiceName:       "web",
+			SourceRef:         "workspace-web",
+			LocalImageRef:     "sam-env-1-web:release",
+			R2Key:             "compose-image-artifacts/proj/env/ws/upload/web.tar",
+			SizeBytes:         12,
+			ArchiveSHA256:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			ArchiveType:       "docker-save",
+			MediaType:         "application/vnd.docker.image.rootfs.diff.tar",
+			DownloadURL:       "https://example.test/web.tar",
+			DownloadExpiresIn: 900,
+		}},
+	}
+	sig, _ := SignPayload(payload, priv)
+	payload.Signature = sig
+	payload.Artifacts[0].R2Key = "compose-image-artifacts/proj/env/ws/upload/other.tar"
+
+	err = v.Verify(payload, "env-1", "node-1", 0)
+	if err == nil {
+		t.Error("expected signature verification to fail after artifact mutation")
+	}
+}
+
 func TestHashInterpolationEnvCanonicalizesSortedEntries(t *testing.T) {
 	first := hashInterpolationEnv(map[string]string{
 		"B": "two",

@@ -17,6 +17,10 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
 import {
+  type ComposeImageArtifactDownload,
+  createComposeImageArtifactDownloads,
+} from '../services/compose-image-artifacts';
+import {
   buildComposePublishApplyPayload,
   DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
   DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
@@ -204,6 +208,8 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   let routes: DeploymentRouteTarget[];
   let composeYaml: string;
   let interpolationEnv: Record<string, string> = {};
+  let artifacts: ComposeImageArtifactDownload[] = [];
+  let isR2ComposePublishRelease = false;
   const environmentConfig = await loadDeploymentInterpolationEnv(
     db,
     environmentId,
@@ -230,6 +236,10 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     routes = applied.routes;
     composeYaml = applied.composeYaml;
     interpolationEnv = environmentConfig.values;
+    if (applied.artifacts.length > 0) {
+      artifacts = await createComposeImageArtifactDownloads(c.env, applied.artifacts);
+      isR2ComposePublishRelease = true;
+    }
 
     if (applied.warnings.length > 0) {
       log.warn('deploy_release.compose_publish_warnings', {
@@ -359,35 +369,41 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       composeYaml,
       routes,
       interpolationEnv,
+      artifacts,
     },
     c.env
   );
 
-  // Mint short-lived pull-only registry credentials for private image pulls.
+  // Mint short-lived pull-only registry credentials for legacy private image
+  // pulls. R2-backed compose-publish releases deliberately do not receive
+  // registry credentials; build-backed images are loaded locally from signed R2
+  // artifacts and image-only services are limited to unauthenticated pulls.
   // Best-effort: if minting fails (e.g., CF_ACCOUNT_ID not configured),
   // the payload is still served without credentials (public images still work).
   let registryCredentials: { server: string; username: string; password: string } | null = null;
-  try {
-    const creds = await mintProjectRegistryCredential(
-      c.env,
-      deployEnv.projectId,
-      node.userId,
-      '', // no task context in deploy callback
-      environmentId,
-      { permissions: ['pull'] }
-    );
-    registryCredentials = {
-      server: creds.registry,
-      username: creds.username,
-      password: creds.password,
-    };
-  } catch (err) {
-    log.warn('deploy_release.registry_credentials_skipped', {
-      nodeId,
-      environmentId,
-      seq,
-      reason: err instanceof Error ? err.message : 'Unknown error',
-    });
+  if (!isR2ComposePublishRelease) {
+    try {
+      const creds = await mintProjectRegistryCredential(
+        c.env,
+        deployEnv.projectId,
+        node.userId,
+        '', // no task context in deploy callback
+        environmentId,
+        { permissions: ['pull'] }
+      );
+      registryCredentials = {
+        server: creds.registry,
+        username: creds.username,
+        password: creds.password,
+      };
+    } catch (err) {
+      log.warn('deploy_release.registry_credentials_skipped', {
+        nodeId,
+        environmentId,
+        seq,
+        reason: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
   }
 
   log.info('deploy_release.served', {
@@ -396,6 +412,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     seq,
     releaseId: release.id,
     routeCount: routes.length,
+    artifactCount: artifacts.length,
     interpolationEnvKeyCount: Object.keys(interpolationEnv).length,
     hasRegistryCredentials: registryCredentials !== null,
   });
@@ -408,6 +425,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     composeYaml,
     interpolationEnv,
     routes,
+    artifacts,
     signature,
     registryCredentials,
   });

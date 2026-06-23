@@ -146,6 +146,10 @@ function env(): Env {
     DEPLOYMENT_ROUTE_PORT_BASE: '36000',
     DEPLOYMENT_ROUTE_PORT_SPAN: '10',
     DEPLOY_SIGNING_PRIVATE_KEY: 'test-private-key',
+    CF_ACCOUNT_ID: 'account-1',
+    R2_ACCESS_KEY_ID: 'r2-key',
+    R2_SECRET_ACCESS_KEY: 'r2-secret',
+    R2_BUCKET_NAME: 'sam-artifacts',
   } as Env;
 }
 
@@ -454,6 +458,66 @@ describe('deploy release callback route', () => {
     expect(body.registryCredentials).toBeNull();
     expect(body.signature).toBe('signed-payload');
     expect(body.composeYaml).toBeDefined();
+  });
+
+  it('serves artifact-backed compose-publish releases without registry credentials', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const composePublishManifest = {
+      environment: 'staging',
+      environmentId: 'env-1',
+      reference: 'latest',
+      composeYaml: `services:
+  web:
+    build: .
+`,
+      services: [
+        {
+          serviceName: 'web',
+          sourceRef: 'workspace-web',
+          localImageRef: 'workspace-web',
+          r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+          sizeBytes: 42,
+          archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          archiveType: 'docker-save',
+          mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+        },
+      ],
+    };
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+      .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'rel-1',
+          manifest: JSON.stringify(composePublishManifest),
+          version: 7,
+          source: 'compose-publish',
+        },
+      ]);
+
+    const response = await requestDeployRelease();
+    const body = await response.json();
+
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.registryCredentials).toBeNull();
+    expect(mockMintProjectRegistryCredential).not.toHaveBeenCalled();
+    expect(body.composeYaml).toContain('image: sam-env-1-web:rel-1');
+    expect(body.composeYaml).toContain('pull_policy: never');
+    expect(body.artifacts).toHaveLength(1);
+    expect(body.artifacts[0]).toMatchObject({
+      serviceName: 'web',
+      sourceRef: 'workspace-web',
+      localImageRef: 'sam-env-1-web:rel-1',
+      r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+      sizeBytes: 42,
+    });
+    expect(body.artifacts[0].downloadUrl).toContain('compose-image-artifacts');
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifacts: [expect.objectContaining({ serviceName: 'web' })],
+      }),
+      expect.anything()
+    );
   });
 
   it('resolves manifest secret references into the signed Compose env block (T5)', async () => {

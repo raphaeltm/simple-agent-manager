@@ -58,6 +58,7 @@ type ApplyPayload struct {
 	ComposeYAML      string            `json:"composeYaml"`
 	InterpolationEnv map[string]string `json:"interpolationEnv,omitempty"`
 	Routes           []RouteTarget     `json:"routes,omitempty"`
+	Artifacts        []ImageArtifact   `json:"artifacts,omitempty"`
 	Signature        string            `json:"signature"` // Base64-encoded Ed25519 signature
 
 	// Registry credentials for private image pulls. When present, the
@@ -79,6 +80,29 @@ type RouteTarget struct {
 	HostPort      int    `json:"hostPort"`
 }
 
+// ImageArtifact describes a signed R2-backed docker-save archive to load before
+// running Compose. DownloadURL is short-lived; the key, hash, size, and target
+// local ref are covered by the deploy payload signature.
+type ImageArtifact struct {
+	ServiceName       string    `json:"serviceName"`
+	SourceRef         string    `json:"sourceRef"`
+	LocalImageRef     string    `json:"localImageRef"`
+	R2Key             string    `json:"r2Key"`
+	SizeBytes         int64     `json:"sizeBytes"`
+	ArchiveSHA256     string    `json:"archiveSha256"`
+	ArchiveType       string    `json:"archiveType"`
+	MediaType         string    `json:"mediaType"`
+	Platform          *Platform `json:"platform,omitempty"`
+	DownloadURL       string    `json:"downloadUrl"`
+	DownloadExpiresIn int64     `json:"downloadExpiresIn"`
+}
+
+type Platform struct {
+	Architecture string `json:"architecture,omitempty"`
+	OS           string `json:"os,omitempty"`
+	Variant      string `json:"variant,omitempty"`
+}
+
 // RegistryCredentials holds credentials for pulling private container images.
 // Populated by the deploy-release callback when CF registry minting is available.
 type RegistryCredentials struct {
@@ -88,7 +112,7 @@ type RegistryCredentials struct {
 }
 
 // SignablePayload is the canonical byte representation that gets signed.
-// The signature covers: environmentId + nodeId + seq + expiresAt + sha256(composeYaml) + sha256(routes) + sha256(interpolationEnv).
+// The signature covers: environmentId + nodeId + seq + expiresAt + sha256(composeYaml) + sha256(routes) + sha256(interpolationEnv) + sha256(artifacts).
 type SignablePayload struct {
 	EnvironmentID        string `json:"environmentId"`
 	NodeID               string `json:"nodeId"`
@@ -97,4 +121,5 @@ type SignablePayload struct {
 	ComposeHash          string `json:"composeHash"` // hex-encoded SHA-256 of ComposeYAML
 	RoutesHash           string `json:"routesHash"`  // hex-encoded SHA-256 of canonical routes JSON
 	InterpolationEnvHash string `json:"interpolationEnvHash"`
+	ArtifactsHash        string `json:"artifactsHash"`
 }

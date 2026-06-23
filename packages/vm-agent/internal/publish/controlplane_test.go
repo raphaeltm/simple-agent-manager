@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func TestHTTPControlPlaneMintPushCredentialsSendsPolicyContext(t *testing.T) {
+func TestHTTPControlPlaneInitArtifactUploadsSendsScopedRequest(t *testing.T) {
 	var gotPath string
 	var gotAuth string
 	var gotContentType string
-	var gotBody PushCredentialsRequest
+	var gotBody ArtifactUploadRequest
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -23,11 +23,18 @@ func TestHTTPControlPlaneMintPushCredentialsSendsPolicyContext(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"registry": "registry.cloudflare.com",
-			"username": "u",
-			"password": "p",
-			"namespace": "acct/sam-proj1",
-			"expiresAt": "2026-06-21T00:00:00Z"
+			"uploadId": "upload-1",
+			"maxBytes": 1024,
+			"uploads": [{
+				"serviceName": "web",
+				"sourceRef": "workspace-web",
+				"localImageRef": "workspace-web",
+				"r2Key": "compose-image-artifacts/proj1/env-1/ws/upload-1/web.tar",
+				"uploadUrl": "https://r2.example/upload",
+				"maxBytes": 1024,
+				"archiveType": "docker-save",
+				"mediaType": "application/vnd.docker.image.rootfs.diff.tar"
+			}]
 		}`))
 	}))
 	defer srv.Close()
@@ -38,15 +45,17 @@ func TestHTTPControlPlaneMintPushCredentialsSendsPolicyContext(t *testing.T) {
 		Client:  srv.Client(),
 	})
 
-	creds, err := cp.MintPushCredentials(context.Background(), "proj1", PushCredentialsRequest{
+	result, err := cp.InitArtifactUploads(context.Background(), "proj1", ArtifactUploadRequest{
 		Environment:    "staging",
+		EnvironmentID:  "env-1",
 		AgentProfileID: "profile-1",
+		Services:       []ArtifactServiceInput{{ServiceName: "web", SourceRef: "workspace-web"}},
 	})
 	if err != nil {
-		t.Fatalf("MintPushCredentials: %v", err)
+		t.Fatalf("InitArtifactUploads: %v", err)
 	}
 
-	if gotPath != "/api/projects/proj1/registry-push-credentials" {
+	if gotPath != "/api/projects/proj1/compose-image-artifacts/init" {
 		t.Fatalf("path = %q", gotPath)
 	}
 	if gotAuth != "Bearer callback-token" {
@@ -55,11 +64,59 @@ func TestHTTPControlPlaneMintPushCredentialsSendsPolicyContext(t *testing.T) {
 	if gotContentType != "application/json" {
 		t.Fatalf("content-type = %q", gotContentType)
 	}
-	if gotBody.Environment != "staging" || gotBody.AgentProfileID != "profile-1" {
-		t.Fatalf("body = %+v, want staging/profile-1", gotBody)
+	if gotBody.Environment != "staging" || gotBody.EnvironmentID != "env-1" || gotBody.AgentProfileID != "profile-1" {
+		t.Fatalf("body = %+v, want staging/env-1/profile-1", gotBody)
 	}
-	if creds.Registry != "registry.cloudflare.com" || creds.Namespace != "acct/sam-proj1" {
-		t.Fatalf("credentials = %+v", creds)
+	if len(gotBody.Services) != 1 || gotBody.Services[0].SourceRef != "workspace-web" {
+		t.Fatalf("body services = %+v", gotBody.Services)
+	}
+	if result.UploadID != "upload-1" || len(result.Uploads) != 1 || result.Uploads[0].R2Key == "" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestHTTPControlPlaneCompleteArtifactUploadsSendsDescriptors(t *testing.T) {
+	var gotPath string
+	var gotBody ArtifactCompleteRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cp := NewHTTPControlPlane(HTTPControlPlaneOptions{
+		BaseURL: srv.URL,
+		Token:   "callback-token",
+		Client:  srv.Client(),
+	})
+
+	err := cp.CompleteArtifactUploads(context.Background(), "proj1", ArtifactCompleteRequest{
+		Environment:    "staging",
+		EnvironmentID:  "env-1",
+		AgentProfileID: "profile-1",
+		Artifacts: []ServiceRelease{{
+			ServiceName:   "web",
+			SourceRef:     "workspace-web",
+			R2Key:         "compose-image-artifacts/proj1/env-1/ws/upload-1/web.tar",
+			SizeBytes:     12,
+			ArchiveSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			ArchiveType:   "docker-save",
+			MediaType:     "application/vnd.docker.image.rootfs.diff.tar",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteArtifactUploads: %v", err)
+	}
+	if gotPath != "/api/projects/proj1/compose-image-artifacts/complete" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if len(gotBody.Artifacts) != 1 || gotBody.Artifacts[0].ServiceName != "web" {
+		t.Fatalf("body = %+v", gotBody)
 	}
 }
 

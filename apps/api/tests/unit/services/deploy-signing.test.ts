@@ -29,6 +29,7 @@ async function signableBytes(payload: {
   expiresAt: number;
   composeYaml: string;
   routes?: unknown;
+  artifacts?: unknown;
   interpolationEnv?: Record<string, string>;
 }): Promise<Uint8Array> {
   const canonical = JSON.stringify({
@@ -39,6 +40,7 @@ async function signableBytes(payload: {
     composeHash: await sha256Hex(payload.composeYaml),
     routesHash: await sha256Hex(JSON.stringify(payload.routes ?? [])),
     interpolationEnvHash: await hashInterpolationEnv(payload.interpolationEnv),
+    artifactsHash: await sha256Hex(JSON.stringify(payload.artifacts ?? [])),
   });
   return new TextEncoder().encode(canonical);
 }
@@ -119,6 +121,58 @@ describe('signDeployPayload', () => {
     }, {
       DEPLOY_SIGNING_PRIVATE_KEY: goPrivateKey,
     })).resolves.toEqual(expect.any(String));
+  });
+
+  it('includes artifact descriptors in the signed payload', async () => {
+    const payload = {
+      environmentId: 'env-1',
+      nodeId: 'node-1',
+      seq: 8,
+      expiresAt: 1_800_000_000,
+      composeYaml: 'services:\n  web:\n    image: sam-env-web:rel\n',
+      routes: [],
+      artifacts: [
+        {
+          serviceName: 'web',
+          sourceRef: 'workspace-web',
+          localImageRef: 'sam-env-web:rel',
+          r2Key: 'compose-image-artifacts/proj/env/ws/upload/web.tar',
+          sizeBytes: 12,
+          archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          archiveType: 'docker-save',
+          mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          downloadUrl: 'https://r2.example/web.tar',
+          downloadExpiresIn: 900,
+        },
+      ],
+      interpolationEnv: {},
+    };
+    const signature = await signDeployPayload(payload, {
+      DEPLOY_SIGNING_PRIVATE_KEY: TEST_SEED_B64,
+    });
+    const publicKey = await crypto.subtle.importKey(
+      'raw',
+      fromBase64(TEST_PUBLIC_KEY_B64),
+      { name: 'Ed25519' },
+      false,
+      ['verify'],
+    );
+    const mutated = {
+      ...payload,
+      artifacts: [
+        {
+          ...payload.artifacts[0],
+          r2Key: 'compose-image-artifacts/proj/env/ws/upload/other.tar',
+        },
+      ],
+    };
+
+    await expect(crypto.subtle.verify(
+      'Ed25519',
+      publicKey,
+      fromBase64(signature),
+      await signableBytes(mutated),
+    )).resolves.toBe(false);
   });
 
   it('matches the shared API-to-vm-agent route payload contract fixture', async () => {

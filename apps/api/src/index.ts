@@ -91,6 +91,7 @@ import { projectAgentRoutes } from './routes/project-agent';
 import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes } from './routes/project-deployment';
 import { projectsRoutes } from './routes/projects';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
+import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { registryPushCredentialsCallbackRoute } from './routes/projects/registry-push-credentials-callback';
@@ -578,6 +579,7 @@ app.route('/api/projects', nodeAcpHeartbeatRoute);
 app.route('/api/projects', agentActivityCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', taskCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', registryPushCredentialsCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', composeImageArtifactsCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);

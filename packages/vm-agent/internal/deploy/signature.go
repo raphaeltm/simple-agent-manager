@@ -99,6 +99,8 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 // control plane, and the registry/image they authenticate to is already pinned
 // by the signed ComposeHash. Tampering with the credentials in transit can only
 // cause the pull to fail, not change which image is deployed.
+// Image artifacts ARE covered by the signature because they are out-of-band
+// object references that decide which local image gets loaded before Compose.
 func buildSignableBytes(payload *ApplyPayload) []byte {
 	composeHash := sha256.Sum256([]byte(payload.ComposeYAML))
 	routes := payload.Routes
@@ -107,6 +109,12 @@ func buildSignableBytes(payload *ApplyPayload) []byte {
 	}
 	routesBytes, _ := json.Marshal(routes)
 	routesHash := sha256.Sum256(routesBytes)
+	artifacts := payload.Artifacts
+	if artifacts == nil {
+		artifacts = []ImageArtifact{}
+	}
+	artifactsBytes, _ := json.Marshal(artifacts)
+	artifactsHash := sha256.Sum256(artifactsBytes)
 	interpolationEnvHash := hashInterpolationEnv(payload.InterpolationEnv)
 	signable := SignablePayload{
 		EnvironmentID:        payload.EnvironmentID,
@@ -116,6 +124,7 @@ func buildSignableBytes(payload *ApplyPayload) []byte {
 		ComposeHash:          hex.EncodeToString(composeHash[:]),
 		RoutesHash:           hex.EncodeToString(routesHash[:]),
 		InterpolationEnvHash: interpolationEnvHash,
+		ArtifactsHash:        hex.EncodeToString(artifactsHash[:]),
 	}
 	// JSON marshal with sorted keys (Go's encoding/json sorts by struct field order)
 	b, _ := json.Marshal(signable)

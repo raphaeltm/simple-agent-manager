@@ -15,7 +15,9 @@ import (
 // and authenticated with the workspace's callback JWT.
 const (
 	// routeMintPushCredentials mints short-lived scoped registry push creds.
-	routeMintPushCredentials = "/registry-push-credentials"
+	routeMintPushCredentials           = "/registry-push-credentials"
+	routeComposeImageArtifactsInit     = "/compose-image-artifacts/init"
+	routeComposeImageArtifactsComplete = "/compose-image-artifacts/complete"
 	// routeComposePublishRelease records a release from a captured compose publish.
 	routeComposePublishRelease = "/compose-publish-release"
 )
@@ -58,17 +60,28 @@ func NewHTTPControlPlane(opts HTTPControlPlaneOptions) *HTTPControlPlane {
 	}
 }
 
-// MintPushCredentials requests short-lived scoped registry push credentials for
-// the project. The returned credential values are never logged.
-func (c *HTTPControlPlane) MintPushCredentials(ctx context.Context, projectID string, req PushCredentialsRequest) (*PushCredentials, error) {
-	var creds PushCredentials
-	if err := c.do(ctx, projectID, routeMintPushCredentials, req, &creds); err != nil {
+func (c *HTTPControlPlane) InitArtifactUploads(ctx context.Context, projectID string, req ArtifactUploadRequest) (*ArtifactUploadInitResponse, error) {
+	var result ArtifactUploadInitResponse
+	if err := c.do(ctx, projectID, routeComposeImageArtifactsInit, req, &result); err != nil {
 		return nil, err
 	}
-	if creds.Registry == "" || creds.Namespace == "" {
-		return nil, fmt.Errorf("mint push credentials: control plane returned incomplete credentials")
+	if len(result.Uploads) == 0 {
+		return nil, fmt.Errorf("init artifact uploads: control plane returned no uploads")
 	}
-	return &creds, nil
+	return &result, nil
+}
+
+func (c *HTTPControlPlane) CompleteArtifactUploads(ctx context.Context, projectID string, req ArtifactCompleteRequest) error {
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.do(ctx, projectID, routeComposeImageArtifactsComplete, req, &result); err != nil {
+		return err
+	}
+	if !result.OK {
+		return fmt.Errorf("complete artifact uploads: control plane did not confirm completion")
+	}
+	return nil
 }
 
 // SubmitRelease records a release from the captured compose publish.

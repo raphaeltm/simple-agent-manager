@@ -333,12 +333,20 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 
 	// Execute docker compose
 	composeFile := e.disk.ComposeFilePath(payload.Seq)
+	if err := e.loadImageArtifacts(ctx, payload.Artifacts); err != nil {
+		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("load image artifacts: %w", err)), applyEnv)
+	}
 	if err := e.composeConfigPreflight(ctx, composeFile, applyEnv); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose config: %w", err)), applyEnv)
 	}
 
-	if err := e.composePull(ctx, composeFile, applyEnv); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose pull: %w", err)), applyEnv)
+	if len(payload.Artifacts) == 0 {
+		if err := e.composePull(ctx, composeFile, applyEnv); err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose pull: %w", err)), applyEnv)
+		}
+	} else {
+		slog.Info("deploy.apply: skipping compose pull for artifact-backed release",
+			"seq", payload.Seq, "artifactCount", len(payload.Artifacts))
 	}
 
 	if err := e.composeUp(ctx, composeFile, applyEnv); err != nil {

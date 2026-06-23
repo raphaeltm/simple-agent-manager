@@ -1,20 +1,26 @@
 // Package publish turns a host-side `docker compose build` artifact into a real
 // release. The vm-agent builds the workspace's compose services on the host
-// docker daemon, then the orchestrator mints short-lived push credentials from
-// the control plane, re-tags the built service images into the project-scoped
-// registry namespace ({accountId}/sam-{projectId}), pushes them, and submits the
-// captured compose topology + image digests as a release.
+// docker daemon, then the orchestrator asks the control plane for server-derived
+// R2 artifact upload slots, exports each built image with docker save, uploads
+// the archives directly to R2, and submits the captured compose topology plus
+// artifact descriptors as a release.
 //
-// The agent never receives the account-wide registry credential: the orchestrator
-// runs inside the SAM-controlled vm-agent, mints scoped creds with its callback
-// token, and re-pushes via the host docker daemon. Every hop emits structured
-// logs so the staging flow can be iterated to a clean publish.
+// The build node does not receive broad registry credentials in this R2-first
+// path. Every artifact key is chosen by the control plane, and every release
+// descriptor records byte size and sha256 metadata for deployment-time
+// verification.
 package publish
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -40,11 +46,55 @@ type ServiceRelease struct {
 	ServiceName         string    `json:"serviceName"`
 	RegistryServiceName string    `json:"registryServiceName,omitempty"`
 	SourceRef           string    `json:"sourceRef"`
-	PushedRef           string    `json:"pushedRef"`
-	Digest              string    `json:"digest"`
+	LocalImageRef       string    `json:"localImageRef,omitempty"`
+	PushedRef           string    `json:"pushedRef,omitempty"`
+	Digest              string    `json:"digest,omitempty"`
+	R2Key               string    `json:"r2Key,omitempty"`
+	SizeBytes           int64     `json:"sizeBytes,omitempty"`
+	ArchiveSHA256       string    `json:"archiveSha256,omitempty"`
+	ArchiveType         string    `json:"archiveType,omitempty"`
 	MediaType           string    `json:"mediaType,omitempty"`
-	Size                int64     `json:"size,omitempty"`
 	Platform            *Platform `json:"platform,omitempty"`
+}
+
+type ArtifactUploadRequest struct {
+	Environment    string                 `json:"environment"`
+	EnvironmentID  string                 `json:"environmentId"`
+	AgentProfileID string                 `json:"agentProfileId"`
+	Services       []ArtifactServiceInput `json:"services"`
+}
+
+type ArtifactServiceInput struct {
+	ServiceName   string    `json:"serviceName"`
+	SourceRef     string    `json:"sourceRef"`
+	LocalImageRef string    `json:"localImageRef,omitempty"`
+	Platform      *Platform `json:"platform,omitempty"`
+}
+
+type ArtifactUploadInitResponse struct {
+	UploadID string           `json:"uploadId"`
+	MaxBytes int64            `json:"maxBytes"`
+	Uploads  []ArtifactUpload `json:"uploads"`
+}
+
+type ArtifactUpload struct {
+	ServiceName   string    `json:"serviceName"`
+	SourceRef     string    `json:"sourceRef"`
+	LocalImageRef string    `json:"localImageRef"`
+	R2Key         string    `json:"r2Key"`
+	UploadURL     string    `json:"uploadUrl"`
+	ExpiresIn     int64     `json:"expiresIn"`
+	MaxBytes      int64     `json:"maxBytes"`
+	ArchiveType   string    `json:"archiveType"`
+	MediaType     string    `json:"mediaType"`
+	Platform      *Platform `json:"platform,omitempty"`
+}
+
+type ArtifactCompleteRequest struct {
+	Environment    string           `json:"environment"`
+	EnvironmentID  string           `json:"environmentId"`
+	AgentProfileID string           `json:"agentProfileId"`
+	Artifacts      []ServiceRelease `json:"artifacts"`
 }
 
 // ReleaseSubmittedBy records the SAM context that initiated a compose-publish
@@ -76,21 +126,21 @@ type ReleaseResult struct {
 
 // ControlPlane mints push credentials and submits the captured release.
 type ControlPlane interface {
-	MintPushCredentials(ctx context.Context, projectID string, req PushCredentialsRequest) (*PushCredentials, error)
+	InitArtifactUploads(ctx context.Context, projectID string, req ArtifactUploadRequest) (*ArtifactUploadInitResponse, error)
+	CompleteArtifactUploads(ctx context.Context, projectID string, req ArtifactCompleteRequest) error
 	SubmitRelease(ctx context.Context, projectID string, req *ReleaseSubmission) (*ReleaseResult, error)
 }
 
-// Docker logs into a registry and re-tags + pushes images via the host daemon.
+// Docker exports images via the host daemon.
 type Docker interface {
-	Login(ctx context.Context, registry, username, password string) error
-	Tag(ctx context.Context, source, target string) error
-	Push(ctx context.Context, ref string) (digest string, err error)
+	Save(ctx context.Context, source, archivePath string) error
 }
 
 // Options configures a new Orchestrator.
 type Options struct {
 	ControlPlane ControlPlane
 	Docker       Docker
+	HTTPClient   *http.Client
 	Logger       *slog.Logger
 }
 
@@ -98,6 +148,7 @@ type Options struct {
 type Orchestrator struct {
 	controlPlane ControlPlane
 	docker       Docker
+	httpClient   *http.Client
 	log          *slog.Logger
 }
 
@@ -107,15 +158,19 @@ func New(opts Options) *Orchestrator {
 	if log == nil {
 		log = slog.Default()
 	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
 	return &Orchestrator{
 		controlPlane: opts.ControlPlane,
 		docker:       opts.Docker,
+		httpClient:   client,
 		log:          log.With("component", "publish-orchestrator"),
 	}
 }
 
-// Publish re-pushes the host-built images into the project namespace and records
-// a release.
+// Publish uploads host-built images as scoped R2 artifacts and records a release.
 func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, environmentID string, art *BuildArtifact, submittedBy *ReleaseSubmittedBy) (*ReleaseResult, error) {
 	if art == nil {
 		return nil, fmt.Errorf("publish: nil build artifact")
@@ -145,30 +200,34 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		"serviceCount", len(art.Services),
 		"composeYamlBytes", len(art.ComposeYAML))
 
-	creds, err := o.controlPlane.MintPushCredentials(ctx, projectID, PushCredentialsRequest{
-		Environment:    strings.TrimSpace(environment),
+	uploadInit, err := o.controlPlane.InitArtifactUploads(ctx, projectID, ArtifactUploadRequest{
+		Environment:    environment,
+		EnvironmentID:  environmentID,
 		AgentProfileID: agentProfileID,
+		Services:       artifactServiceInputs(art.Services),
 	})
 	if err != nil {
-		o.log.Error("mint push credentials failed", "projectId", projectID, "error", err)
-		return nil, fmt.Errorf("publish: mint push credentials: %w", err)
+		o.log.Error("init artifact uploads failed", "projectId", projectID, "error", err)
+		return nil, fmt.Errorf("publish: init artifact uploads: %w", err)
 	}
-	o.log.Info("push credentials minted",
+	o.log.Info("artifact uploads initialized",
 		"projectId", projectID,
-		"registry", creds.Registry,
-		"namespace", creds.Namespace,
-		"expiresAt", creds.ExpiresAt)
+		"uploadId", uploadInit.UploadID,
+		"serviceCount", len(uploadInit.Uploads),
+		"maxBytes", uploadInit.MaxBytes)
 
-	if err := o.docker.Login(ctx, creds.Registry, creds.Username, creds.Password); err != nil {
-		o.log.Error("registry login failed", "registry", creds.Registry, "error", err)
-		return nil, fmt.Errorf("publish: docker login %s: %w", creds.Registry, err)
-	}
-	o.log.Info("registry login succeeded", "registry", creds.Registry)
-
-	services, err := o.repushServices(ctx, art, creds)
+	services, err := o.exportAndUploadServices(ctx, art, uploadInit)
 	if err != nil {
-		o.log.Error("re-push services failed", "projectId", projectID, "error", err)
+		o.log.Error("upload services failed", "projectId", projectID, "error", err)
 		return nil, err
+	}
+	if err := o.controlPlane.CompleteArtifactUploads(ctx, projectID, ArtifactCompleteRequest{
+		Environment:    environment,
+		EnvironmentID:  environmentID,
+		AgentProfileID: agentProfileID,
+		Artifacts:      services,
+	}); err != nil {
+		return nil, fmt.Errorf("publish: complete artifact uploads: %w", err)
 	}
 
 	submission := &ReleaseSubmission{
@@ -199,10 +258,29 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 	return result, nil
 }
 
-// repushServices re-tags each host-built service image into the project
-// namespace and pushes it. The source images are present in the host daemon by
-// their resolved compose `image:` reference.
-func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, creds *PushCredentials) ([]ServiceRelease, error) {
+func artifactServiceInputs(services []BuiltService) []ArtifactServiceInput {
+	inputs := make([]ArtifactServiceInput, 0, len(services))
+	for _, svc := range services {
+		inputs = append(inputs, ArtifactServiceInput{
+			ServiceName: svc.ServiceName,
+			SourceRef:   svc.LocalRef,
+			Platform:    svc.Platform,
+		})
+	}
+	return inputs
+}
+
+func (o *Orchestrator) exportAndUploadServices(ctx context.Context, art *BuildArtifact, init *ArtifactUploadInitResponse) ([]ServiceRelease, error) {
+	uploadsByService := make(map[string]ArtifactUpload, len(init.Uploads))
+	for _, upload := range init.Uploads {
+		uploadsByService[upload.ServiceName] = upload
+	}
+	dir, err := os.MkdirTemp("", "sam-publish-artifacts-*")
+	if err != nil {
+		return nil, fmt.Errorf("publish: create temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
 	releases := make([]ServiceRelease, 0, len(art.Services))
 	for i := range art.Services {
 		svc := art.Services[i]
@@ -211,63 +289,102 @@ func (o *Orchestrator) repushServices(ctx context.Context, art *BuildArtifact, c
 		if originalServiceName == "" {
 			originalServiceName = registryServiceName
 		}
-		source := svc.LocalRef
-		target := targetRef(creds, registryServiceName, art.Reference)
-
-		o.log.Info("re-pushing service image",
-			"service", originalServiceName,
-			"registryService", registryServiceName,
-			"source", source,
-			"target", target,
-			"builtDigest", svc.Digest,
-			"mediaType", svc.MediaType,
-			"size", svc.Size)
-
-		if err := o.docker.Tag(ctx, source, target); err != nil {
-			o.log.Error("docker tag failed",
-				"service", originalServiceName, "registryService", registryServiceName, "source", source, "target", target, "error", err)
-			return nil, fmt.Errorf("publish: tag %s -> %s: %w", source, target, err)
+		upload, ok := uploadsByService[originalServiceName]
+		if !ok {
+			return nil, fmt.Errorf("publish: missing artifact upload descriptor for service %s", originalServiceName)
 		}
+		archivePath := filepath.Join(dir, registryServiceName+".tar")
 
-		pushedDigest, err := o.docker.Push(ctx, target)
+		o.log.Info("exporting service image",
+			"service", originalServiceName,
+			"source", svc.LocalRef,
+			"archivePath", archivePath)
+
+		if err := o.docker.Save(ctx, svc.LocalRef, archivePath); err != nil {
+			return nil, fmt.Errorf("publish: save %s: %w", svc.LocalRef, err)
+		}
+		sizeBytes, archiveSHA, err := fileSizeAndSHA256(archivePath)
 		if err != nil {
-			o.log.Error("docker push failed",
-				"service", originalServiceName, "registryService", registryServiceName, "target", target, "error", err)
-			return nil, fmt.Errorf("publish: push %s: %w", target, err)
+			return nil, fmt.Errorf("publish: hash %s: %w", archivePath, err)
 		}
-
-		// The re-tag preserves content, so the pushed digest should equal the
-		// built digest. Warn (don't fail) on divergence so staging surfaces it.
-		if pushedDigest != "" && svc.Digest != "" && pushedDigest != svc.Digest {
-			o.log.Warn("pushed digest differs from built digest",
-				"service", originalServiceName,
-				"registryService", registryServiceName,
-				"builtDigest", svc.Digest,
-				"pushedDigest", pushedDigest)
+		maxBytes := upload.MaxBytes
+		if maxBytes <= 0 {
+			maxBytes = init.MaxBytes
 		}
-		digest := pushedDigest
-		if digest == "" {
-			digest = svc.Digest
+		if maxBytes > 0 && sizeBytes > maxBytes {
+			return nil, fmt.Errorf("publish: artifact %s size %d exceeds maximum %d bytes", originalServiceName, sizeBytes, maxBytes)
 		}
-
-		o.log.Info("service image pushed",
+		if err := o.uploadArchive(ctx, upload.UploadURL, upload.MediaType, archivePath, sizeBytes); err != nil {
+			return nil, err
+		}
+		o.log.Info("service image artifact uploaded",
 			"service", originalServiceName,
-			"registryService", registryServiceName,
-			"target", target,
-			"digest", digest)
+			"r2Key", upload.R2Key,
+			"sizeBytes", sizeBytes,
+			"archiveSha256", archiveSHA)
 
 		releases = append(releases, ServiceRelease{
 			ServiceName:         originalServiceName,
 			RegistryServiceName: registryServiceName,
-			SourceRef:           source,
-			PushedRef:           pinnedRef(target, digest),
-			Digest:              digest,
-			MediaType:           svc.MediaType,
-			Size:                svc.Size,
-			Platform:            svc.Platform,
+			SourceRef:           svc.LocalRef,
+			LocalImageRef:       upload.LocalImageRef,
+			R2Key:               upload.R2Key,
+			SizeBytes:           sizeBytes,
+			ArchiveSHA256:       archiveSHA,
+			ArchiveType:         upload.ArchiveType,
+			MediaType:           upload.MediaType,
+			Platform:            upload.Platform,
 		})
 	}
 	return releases, nil
+}
+
+func fileSizeAndSHA256(path string) (int64, string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, "", err
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	size, err := io.Copy(hasher, file)
+	if err != nil {
+		return 0, "", err
+	}
+	return size, "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func (o *Orchestrator) uploadArchive(ctx context.Context, uploadURL, mediaType, archivePath string, size int64) error {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("publish: open archive: %w", err)
+	}
+	defer file.Close()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, file)
+	if err != nil {
+		return fmt.Errorf("publish: create upload request: %w", err)
+	}
+	req.ContentLength = size
+	if mediaType != "" {
+		req.Header.Set("Content-Type", mediaType)
+	}
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("publish: upload archive: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body := readLimited(resp.Body)
+		return fmt.Errorf("publish: upload archive returned %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+func readLimited(body io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(body, 4096))
+	if err != nil {
+		return "failed to read response body: " + err.Error()
+	}
+	return string(data)
 }
 
 // targetRef is the project-namespace reference for a re-pushed service image.

@@ -7,6 +7,11 @@ import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
+import {
+  getComposeImageArtifactMaxBytes,
+  validateCompletedComposeImageArtifacts,
+  validateComposeImageArtifactDescriptor,
+} from '../../services/compose-image-artifacts';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
@@ -47,8 +52,15 @@ const composePublishReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 interface ServiceReleaseInput {
   serviceName?: unknown;
   sourceRef?: unknown;
+  localImageRef?: unknown;
   pushedRef?: unknown;
   digest?: unknown;
+  r2Key?: unknown;
+  sizeBytes?: unknown;
+  archiveSha256?: unknown;
+  archiveType?: unknown;
+  mediaType?: unknown;
+  platform?: unknown;
 }
 
 interface SubmittedByInput {
@@ -166,6 +178,23 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const services: ServiceReleaseInput[] = Array.isArray(servicesRaw) ? servicesRaw : [];
   if (services.length === 0) {
     throw errors.badRequest('Release submission must include at least one service');
+  }
+  const maxArtifactBytes = getComposeImageArtifactMaxBytes(c.env);
+  const artifactServices = services.filter((svc) => cleanOptionalString(svc.r2Key));
+  if (artifactServices.length > 0) {
+    try {
+      const artifacts = artifactServices.map((svc) =>
+        validateComposeImageArtifactDescriptor(svc, {
+          projectId,
+          workspaceId,
+          environmentId,
+          maxBytes: maxArtifactBytes,
+        })
+      );
+      await validateCompletedComposeImageArtifacts(c.env, artifacts);
+    } catch (err) {
+      throw errors.badRequest(err instanceof Error ? err.message : String(err));
+    }
   }
 
   const manifestSubmission: Record<string, unknown> = {

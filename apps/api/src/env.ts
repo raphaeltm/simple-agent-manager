@@ -113,6 +113,9 @@ export interface Env {
   DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB?: string; // Default per-service memory limit for compose-publish applies (default: 256)
   DEPLOYMENT_LOG_MAX_SIZE?: string; // Default json-file log max-size for compose-publish applies (default: 10m)
   DEPLOYMENT_LOG_MAX_FILE?: string; // Default json-file log max-file for compose-publish applies (default: 3)
+  COMPOSE_IMAGE_ARTIFACT_MAX_BYTES?: string; // Max single docker-save archive size for R2 compose-publish MVP
+  COMPOSE_IMAGE_ARTIFACT_UPLOAD_URL_TTL_SECONDS?: string; // Presigned upload URL TTL for compose image artifacts
+  COMPOSE_IMAGE_ARTIFACT_DOWNLOAD_URL_TTL_SECONDS?: string; // Presigned download URL TTL for compose image artifacts
   DEPLOY_ACME_EMAIL?: string; // Contact email for deployment-node ACME certificates
   DEPLOY_ACME_CA?: string; // ACME CA directory override for deployment nodes
   DEPLOY_COMPOSE_CMD?: string; // Docker Compose command override on deployment nodes

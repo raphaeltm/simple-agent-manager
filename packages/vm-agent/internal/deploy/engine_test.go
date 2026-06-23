@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +38,150 @@ func TestEngine_ReconcileOnStart_NoState(t *testing.T) {
 	if observed.AppliedSeq != 0 {
 		t.Errorf("expected appliedSeq=0, got %d", observed.AppliedSeq)
 	}
+}
+
+func TestEngine_ApplyLoadsArtifactsAndSkipsComposePull(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	archive := []byte("docker archive bytes")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	cmdLog := filepath.Join(dir, "cmd.log")
+	cmdScript := filepath.Join(dir, "docker.sh")
+	if err := os.WriteFile(cmdScript, []byte(`#!/bin/sh
+echo "$@" >> "`+cmdLog+`"
+case "$*" in
+  *" ps --format json"*) echo '{"Name":"web","Service":"web","State":"running","Health":"healthy"}' ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write command script: %v", err)
+	}
+
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         cmdScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     reloadScript + " {config}",
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "services:\n  web:\n    image: sam-env-1-web:release\n    pull_policy: never\n",
+		Routes: []RouteTarget{{
+			Hostname:      "r1-web-env.apps.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
+		}},
+		Artifacts: []ImageArtifact{{
+			ServiceName:       "web",
+			SourceRef:         "workspace-web",
+			LocalImageRef:     "sam-env-1-web:release",
+			R2Key:             "compose-image-artifacts/proj/env/ws/upload/web.tar",
+			SizeBytes:         int64(len(archive)),
+			ArchiveSHA256:     shaForBytes(archive),
+			ArchiveType:       "docker-save",
+			MediaType:         "application/vnd.docker.image.rootfs.diff.tar",
+			DownloadURL:       server.URL,
+			DownloadExpiresIn: 900,
+		}},
+	}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(cmdLog)
+	if err != nil {
+		t.Fatalf("read command log: %v", err)
+	}
+	log := string(logBytes)
+	for _, expected := range []string{"load -i", "tag workspace-web sam-env-1-web:release", "config -q", "up -d --remove-orphans"} {
+		if !strings.Contains(log, expected) {
+			t.Fatalf("command log missing %q: %s", expected, log)
+		}
+	}
+	if strings.Contains(log, " pull") {
+		t.Fatalf("compose pull should be skipped for artifact-backed payload: %s", log)
+	}
+}
+
+func TestEngine_ApplyRejectsArtifactHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(filepath.Join(dir, "state"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("actual archive"))
+	}))
+	defer server.Close()
+	cmdScript := filepath.Join(dir, "docker.sh")
+	if err := os.WriteFile(cmdScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write command script: %v", err)
+	}
+	pub, priv := generateTestKeys(t)
+	verifier, _ := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		ComposeCmd:    cmdScript,
+	})
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "services:\n  web:\n    image: sam-env-1-web:release\n",
+		Artifacts: []ImageArtifact{{
+			ServiceName:       "web",
+			SourceRef:         "workspace-web",
+			LocalImageRef:     "sam-env-1-web:release",
+			R2Key:             "compose-image-artifacts/proj/env/ws/upload/web.tar",
+			SizeBytes:         int64(len("actual archive")),
+			ArchiveSHA256:     shaForBytes([]byte("different archive")),
+			ArchiveType:       "docker-save",
+			MediaType:         "application/vnd.docker.image.rootfs.diff.tar",
+			DownloadURL:       server.URL,
+			DownloadExpiresIn: 900,
+		}},
+	}
+	payload.Signature, _ = SignPayload(payload, priv)
+	err := engine.Apply(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("expected hash mismatch failure, got: %v", err)
+	}
+}
+
+func shaForBytes(value []byte) string {
+	sum := sha256.Sum256(value)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func TestEngine_ReconcileOnStart_WithState(t *testing.T) {

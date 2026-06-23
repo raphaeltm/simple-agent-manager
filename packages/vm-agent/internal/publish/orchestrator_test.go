@@ -3,31 +3,42 @@ package publish
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
 
-// fakeControlPlane records mint/submit calls and returns canned responses.
+// fakeControlPlane records artifact/submit calls and returns canned responses.
 type fakeControlPlane struct {
-	creds         *PushCredentials
-	mintErr       error
-	mintCalls     int
-	mintProject   string
-	mintRequest   PushCredentialsRequest
+	initResp      *ArtifactUploadInitResponse
+	initErr       error
+	initCalls     int
+	initProject   string
+	initRequest   ArtifactUploadRequest
+	completeErr   error
+	completed     *ArtifactCompleteRequest
 	submitErr     error
 	submitted     *ReleaseSubmission
 	submittedProj string
 	result        *ReleaseResult
 }
 
-func (f *fakeControlPlane) MintPushCredentials(_ context.Context, projectID string, req PushCredentialsRequest) (*PushCredentials, error) {
-	f.mintCalls++
-	f.mintProject = projectID
-	f.mintRequest = req
-	if f.mintErr != nil {
-		return nil, f.mintErr
+func (f *fakeControlPlane) InitArtifactUploads(_ context.Context, projectID string, req ArtifactUploadRequest) (*ArtifactUploadInitResponse, error) {
+	f.initCalls++
+	f.initProject = projectID
+	f.initRequest = req
+	if f.initErr != nil {
+		return nil, f.initErr
 	}
-	return f.creds, nil
+	return f.initResp, nil
+}
+
+func (f *fakeControlPlane) CompleteArtifactUploads(_ context.Context, _ string, req ArtifactCompleteRequest) error {
+	f.completed = &req
+	return f.completeErr
 }
 
 func (f *fakeControlPlane) SubmitRelease(_ context.Context, projectID string, req *ReleaseSubmission) (*ReleaseResult, error) {
@@ -39,36 +50,64 @@ func (f *fakeControlPlane) SubmitRelease(_ context.Context, projectID string, re
 	return f.result, nil
 }
 
-// fakeDocker records login/tag/push calls and maps push targets to digests.
+// fakeDocker records saves and writes deterministic archive content.
 type fakeDocker struct {
-	loginCalls  int
-	tags        [][2]string // [source, target]
-	pushed      []string
-	pushDigests map[string]string
-	loginErr    error
-	tagErr      error
-	pushErr     error
+	saves   [][2]string
+	saveErr error
 }
 
-func (d *fakeDocker) Login(_ context.Context, _, _, _ string) error {
-	d.loginCalls++
-	return d.loginErr
-}
-
-func (d *fakeDocker) Tag(_ context.Context, source, target string) error {
-	if d.tagErr != nil {
-		return d.tagErr
+func (d *fakeDocker) Save(_ context.Context, source, archivePath string) error {
+	if d.saveErr != nil {
+		return d.saveErr
 	}
-	d.tags = append(d.tags, [2]string{source, target})
-	return nil
+	d.saves = append(d.saves, [2]string{source, archivePath})
+	return os.WriteFile(archivePath, []byte("archive:"+source), 0644)
 }
 
-func (d *fakeDocker) Push(_ context.Context, ref string) (string, error) {
-	if d.pushErr != nil {
-		return "", d.pushErr
+func artifactUploadServer(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	uploads := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("method = %s, want PUT", r.Method)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read upload: %v", err)
+		}
+		uploads = append(uploads, string(body))
+		w.WriteHeader(http.StatusOK)
+	}))
+	return server, &uploads
+}
+
+func sampleUploadInit(uploadURL string) *ArtifactUploadInitResponse {
+	return &ArtifactUploadInitResponse{
+		UploadID: "upload-1",
+		MaxBytes: 1024 * 1024,
+		Uploads: []ArtifactUpload{
+			{
+				ServiceName:   "api",
+				SourceRef:     "myrepo-api",
+				LocalImageRef: "myrepo-api",
+				R2Key:         "compose-image-artifacts/proj1/env-1/ws/upload-1/api.tar",
+				UploadURL:     uploadURL,
+				MaxBytes:      1024 * 1024,
+				ArchiveType:   "docker-save",
+				MediaType:     "application/vnd.docker.image.rootfs.diff.tar",
+			},
+			{
+				ServiceName:   "worker",
+				SourceRef:     "myrepo-worker",
+				LocalImageRef: "myrepo-worker",
+				R2Key:         "compose-image-artifacts/proj1/env-1/ws/upload-1/worker.tar",
+				UploadURL:     uploadURL,
+				MaxBytes:      1024 * 1024,
+				ArchiveType:   "docker-save",
+				MediaType:     "application/vnd.docker.image.rootfs.diff.tar",
+			},
+		},
 	}
-	d.pushed = append(d.pushed, ref)
-	return d.pushDigests[ref], nil
 }
 
 // sampleArtifact builds a two-service host-built artifact.
@@ -84,21 +123,13 @@ func sampleArtifact() *BuildArtifact {
 }
 
 func TestPublishHappyPath(t *testing.T) {
-	creds := &PushCredentials{
-		Registry:  "registry.cloudflare.com",
-		Username:  "v1",
-		Password:  "secret",
-		Namespace: "acct123/sam-proj1",
-		ExpiresAt: "2026-06-19T00:00:00Z",
-	}
+	server, uploads := artifactUploadServer(t)
+	defer server.Close()
 	art := sampleArtifact()
-	docker := &fakeDocker{pushDigests: map[string]string{
-		"registry.cloudflare.com/acct123/sam-proj1-api:latest":    "sha256:aaa",
-		"registry.cloudflare.com/acct123/sam-proj1-worker:latest": "sha256:bbb",
-	}}
+	docker := &fakeDocker{}
 	control := &fakeControlPlane{
-		creds:  creds,
-		result: &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
+		initResp: sampleUploadInit(server.URL),
+		result:   &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
 	}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
@@ -112,32 +143,23 @@ func TestPublishHappyPath(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 
-	if control.mintCalls != 1 {
-		t.Errorf("mint calls = %d, want 1", control.mintCalls)
+	if control.initCalls != 1 {
+		t.Errorf("init calls = %d, want 1", control.initCalls)
 	}
-	if control.mintProject != "proj1" {
-		t.Errorf("mint project = %q, want proj1", control.mintProject)
+	if control.initProject != "proj1" {
+		t.Errorf("init project = %q, want proj1", control.initProject)
 	}
-	if control.mintRequest.Environment != "staging" || control.mintRequest.AgentProfileID != "profile-1" {
-		t.Errorf("mint request = %+v, want staging/profile-1", control.mintRequest)
+	if control.initRequest.Environment != "staging" || control.initRequest.EnvironmentID != "env-1" || control.initRequest.AgentProfileID != "profile-1" {
+		t.Errorf("init request = %+v, want staging/env-1/profile-1", control.initRequest)
 	}
-	if docker.loginCalls != 1 {
-		t.Errorf("login calls = %d, want 1", docker.loginCalls)
+	if len(docker.saves) != 2 {
+		t.Fatalf("save count = %d, want 2", len(docker.saves))
 	}
-
-	// Both built images were re-tagged from their host-daemon LocalRef into the
-	// project namespace, then pushed.
-	wantTags := map[string]string{
-		"myrepo-api":    "registry.cloudflare.com/acct123/sam-proj1-api:latest",
-		"myrepo-worker": "registry.cloudflare.com/acct123/sam-proj1-worker:latest",
+	if len(*uploads) != 2 {
+		t.Fatalf("upload count = %d, want 2", len(*uploads))
 	}
-	if len(docker.tags) != 2 {
-		t.Fatalf("tag count = %d, want 2", len(docker.tags))
-	}
-	for _, pair := range docker.tags {
-		if want := wantTags[pair[0]]; want != pair[1] {
-			t.Errorf("tag %s -> %s, want -> %s", pair[0], pair[1], want)
-		}
+	if (*uploads)[0] != "archive:myrepo-api" || (*uploads)[1] != "archive:myrepo-worker" {
+		t.Fatalf("unexpected uploaded archives: %#v", *uploads)
 	}
 
 	// The release submission carries the resolved compose + per-service refs.
@@ -164,35 +186,37 @@ func TestPublishHappyPath(t *testing.T) {
 		t.Fatalf("services = %d, want 2", len(sub.Services))
 	}
 	api := sub.Services[0]
-	if api.ServiceName != "api" || api.Digest != "sha256:aaa" {
+	if api.ServiceName != "api" || api.ArchiveType != "docker-save" {
 		t.Errorf("unexpected api service: %+v", api)
 	}
 	if api.SourceRef != "myrepo-api" {
 		t.Errorf("api sourceRef = %q", api.SourceRef)
 	}
-	if api.PushedRef != "registry.cloudflare.com/acct123/sam-proj1-api@sha256:aaa" {
-		t.Errorf("api pushedRef = %q", api.PushedRef)
+	if api.PushedRef != "" {
+		t.Errorf("api pushedRef should be empty for R2 path, got %q", api.PushedRef)
+	}
+	if api.R2Key == "" || api.SizeBytes <= 0 || !strings.HasPrefix(api.ArchiveSHA256, "sha256:") {
+		t.Errorf("api artifact descriptor incomplete: %+v", api)
+	}
+	if control.completed == nil || len(control.completed.Artifacts) != 2 {
+		t.Fatalf("expected completed artifacts, got %#v", control.completed)
 	}
 }
 
 func TestPublishSanitizesServiceNameInTarget(t *testing.T) {
-	creds := &PushCredentials{
-		Registry:  "registry.cloudflare.com",
-		Username:  "v1",
-		Password:  "secret",
-		Namespace: "acct123/sam-proj1",
-	}
+	server, _ := artifactUploadServer(t)
+	defer server.Close()
 	art := &BuildArtifact{
 		Reference: "latest",
 		Services: []BuiltService{
 			{ServiceName: "API Server", LocalRef: "stack-api", Digest: "sha256:aaa"},
 		},
 	}
-	docker := &fakeDocker{pushDigests: map[string]string{
-		"registry.cloudflare.com/acct123/sam-proj1-api-server:latest": "sha256:aaa",
-	}}
+	docker := &fakeDocker{}
 	control := &fakeControlPlane{
-		creds:  creds,
+		initResp: &ArtifactUploadInitResponse{UploadID: "upload-1", MaxBytes: 1024, Uploads: []ArtifactUpload{{
+			ServiceName: "API Server", SourceRef: "stack-api", LocalImageRef: "stack-api", R2Key: "key", UploadURL: server.URL, MaxBytes: 1024, ArchiveType: "docker-save", MediaType: "application/vnd.docker.image.rootfs.diff.tar",
+		}}},
 		result: &ReleaseResult{ReleaseID: "rel1", Version: 1, Status: "created"},
 	}
 
@@ -202,15 +226,15 @@ func TestPublishSanitizesServiceNameInTarget(t *testing.T) {
 	if _, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", art, submittedBy); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if len(docker.tags) != 1 {
-		t.Fatalf("tag count = %d, want 1", len(docker.tags))
+	if len(docker.saves) != 1 {
+		t.Fatalf("save count = %d, want 1", len(docker.saves))
 	}
-	got := docker.tags[0]
+	got := docker.saves[0]
 	if got[0] != "stack-api" {
 		t.Fatalf("source ref = %q", got[0])
 	}
-	if got[1] != "registry.cloudflare.com/acct123/sam-proj1-api-server:latest" {
-		t.Fatalf("target ref = %q", got[1])
+	if !strings.HasSuffix(got[1], "api-server.tar") {
+		t.Fatalf("archive path = %q", got[1])
 	}
 	if control.submitted == nil || len(control.submitted.Services) != 1 {
 		t.Fatal("expected one submitted service")
@@ -237,24 +261,25 @@ func TestPublishEmptyProjectID(t *testing.T) {
 	}
 }
 
-func TestPublishMintFailureStops(t *testing.T) {
-	docker := &fakeDocker{pushDigests: map[string]string{}}
-	control := &fakeControlPlane{mintErr: errors.New("rate limited")}
+func TestPublishArtifactInitFailureStops(t *testing.T) {
+	docker := &fakeDocker{}
+	control := &fakeControlPlane{initErr: errors.New("rate limited")}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
 	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), &ReleaseSubmittedBy{AgentProfileID: "profile-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if docker.loginCalls != 0 || len(docker.pushed) != 0 {
-		t.Errorf("docker should not be touched after mint failure")
+	if len(docker.saves) != 0 {
+		t.Errorf("docker should not be touched after init failure")
 	}
 }
 
-func TestPublishPushFailureStops(t *testing.T) {
-	creds := &PushCredentials{Registry: "r", Namespace: "n", Username: "u", Password: "p"}
-	docker := &fakeDocker{pushDigests: map[string]string{}, pushErr: errors.New("push denied")}
-	control := &fakeControlPlane{creds: creds, result: &ReleaseResult{}}
+func TestPublishSaveFailureStops(t *testing.T) {
+	server, _ := artifactUploadServer(t)
+	defer server.Close()
+	docker := &fakeDocker{saveErr: errors.New("save failed")}
+	control := &fakeControlPlane{initResp: sampleUploadInit(server.URL), result: &ReleaseResult{}}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
 	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), &ReleaseSubmittedBy{AgentProfileID: "profile-1"})
@@ -267,8 +292,8 @@ func TestPublishPushFailureStops(t *testing.T) {
 }
 
 func TestPublishRequiresAgentProfileID(t *testing.T) {
-	docker := &fakeDocker{pushDigests: map[string]string{}}
-	control := &fakeControlPlane{creds: &PushCredentials{}}
+	docker := &fakeDocker{}
+	control := &fakeControlPlane{}
 
 	orch := New(Options{ControlPlane: control, Docker: docker})
 	_, err := orch.Publish(context.Background(), "proj1", "staging", "env-1", sampleArtifact(), nil)
@@ -278,7 +303,7 @@ func TestPublishRequiresAgentProfileID(t *testing.T) {
 	if !strings.Contains(err.Error(), "agentProfileID") {
 		t.Fatalf("error = %q, want agentProfileID context", err)
 	}
-	if control.mintCalls != 0 || docker.loginCalls != 0 {
+	if control.initCalls != 0 || len(docker.saves) != 0 {
 		t.Fatalf("publish touched external dependencies before profile validation")
 	}
 }
