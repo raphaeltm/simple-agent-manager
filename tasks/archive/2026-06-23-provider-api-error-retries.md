@@ -29,7 +29,7 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 - [x] Add Go tests for harness retry success, retry exhaustion, non-retryable behavior, and cancellation/deadline behavior.
 - [x] Run focused Go tests for `packages/vm-agent/internal/acp` and `packages/harness`.
 - [x] Run broader quality checks as practical before PR.
-- [ ] Move this task to `tasks/archive/` after validation.
+- [x] Move this task to `tasks/archive/` after validation.
 
 ## Acceptance Criteria
 
@@ -51,3 +51,5 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 - `/tmp/go/bin/go test ./internal/acp` passed in `packages/vm-agent`.
 - `/tmp/go/bin/go test ./...` in `packages/vm-agent` was attempted; unrelated PTY/server tests that require Docker failed because this workspace does not have a `docker` executable on PATH.
 - `pnpm typecheck && pnpm lint` passed after implementation; lint still reports existing warnings only.
+- `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed before archive.
+- `$task-completion-validator` pre-archive validation passed: research findings, checked checklist items, and acceptance criteria all map to implemented diff and tests; UI/backend and multi-resource checks are N/A.
