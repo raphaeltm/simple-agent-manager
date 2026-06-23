@@ -16,6 +16,24 @@ const (
 	DefaultRetryMaxDelay = 2 * time.Minute
 )
 
+var transientProviderStatusCodes = []string{"529", "500", "502", "429", "503", "504"}
+
+var transientProviderTextSignals = []string{
+	"overloaded_error",
+	"overloaded",
+	"rate_limit_error",
+	"rate limit",
+	"rate-limit",
+	"too many requests",
+	"service unavailable",
+	"bad gateway",
+	"gateway timeout",
+	"temporarily unavailable",
+	"temporarily_unavailable",
+	"temporary unavailable",
+	"temporary_unavailable",
+}
+
 // RetryConfig controls retry behavior for transient LLM provider errors.
 type RetryConfig struct {
 	// MaxRetries bounds retries after the initial attempt. Zero uses the default; negative disables retries.
@@ -157,55 +175,30 @@ func IsTransientProviderError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	signals := []string{
-		"api error: 529",
-		"http 529",
-		"status 529",
-		"status_code\":529",
-		"statuscode\":529",
-		"overloaded_error",
-		"overloaded",
-		"api error: 500",
-		"http 500",
-		"status 500",
-		"status_code\":500",
-		"statuscode\":500",
-		"api error: 502",
-		"http 502",
-		"status 502",
-		"status_code\":502",
-		"statuscode\":502",
-		"rate_limit_error",
-		"rate limit",
-		"rate-limit",
-		"too many requests",
-		"api error: 429",
-		"http 429",
-		"status 429",
-		"status_code\":429",
-		"statuscode\":429",
-		"api error: 503",
-		"http 503",
-		"status 503",
-		"status_code\":503",
-		"statuscode\":503",
-		"api error: 504",
-		"http 504",
-		"status 504",
-		"status_code\":504",
-		"statuscode\":504",
-		"service unavailable",
-		"bad gateway",
-		"gateway timeout",
-		"temporarily unavailable",
-		"temporarily_unavailable",
-		"temporary unavailable",
-		"temporary_unavailable",
+	if hasTransientProviderStatus(msg) {
+		return true
 	}
-	for _, signal := range signals {
+	for _, signal := range transientProviderTextSignals {
 		if strings.Contains(msg, signal) {
 			return true
 		}
 	}
 	return false
+}
+
+func hasTransientProviderStatus(msg string) bool {
+	for _, code := range transientProviderStatusCodes {
+		if containsAnyStatusPattern(msg, code) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyStatusPattern(msg, code string) bool {
+	return strings.Contains(msg, "api error: "+code) ||
+		strings.Contains(msg, "http "+code) ||
+		strings.Contains(msg, "status "+code) ||
+		strings.Contains(msg, "status_code\":"+code) ||
+		strings.Contains(msg, "statuscode\":"+code)
 }

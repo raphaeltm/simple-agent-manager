@@ -17,15 +17,11 @@ func TestRetryingProviderRetriesTransientErrorThenSucceeds(t *testing.T) {
 		scriptedProviderStep{resp: &Response{Content: "done"}},
 	)
 	var events []RetryEvent
-	retrying := NewRetryingProvider(provider, RetryConfig{
-		MaxRetries:   2,
-		InitialDelay: time.Millisecond,
-		MaxDelay:     time.Millisecond,
-		Sleeper:      immediateRetrySleeper,
-		OnRetry: func(event RetryEvent) {
-			events = append(events, event)
-		},
-	})
+	config := testRetryConfig(2)
+	config.OnRetry = func(event RetryEvent) {
+		events = append(events, event)
+	}
+	retrying := NewRetryingProvider(provider, config)
 
 	resp, err := retrying.SendMessage(context.Background(), []Message{{Role: RoleUser, Content: "work"}}, nil)
 	if err != nil {
@@ -53,12 +49,7 @@ func TestRetryingProviderExhaustsTransientRetries(t *testing.T) {
 		scriptedProviderStep{err: errors.New(`API Error: 502 bad gateway`)},
 		scriptedProviderStep{err: errors.New(`API Error: 502 bad gateway`)},
 	)
-	retrying := NewRetryingProvider(provider, RetryConfig{
-		MaxRetries:   2,
-		InitialDelay: time.Millisecond,
-		MaxDelay:     time.Millisecond,
-		Sleeper:      immediateRetrySleeper,
-	})
+	retrying := NewRetryingProvider(provider, testRetryConfig(2))
 
 	_, err := retrying.SendMessage(context.Background(), nil, nil)
 	if err == nil {
@@ -82,15 +73,14 @@ func TestRetryingProviderUsesExponentialBackoffWithCap(t *testing.T) {
 		scriptedProviderStep{resp: &Response{Content: "done"}},
 	)
 	var delays []time.Duration
-	retrying := NewRetryingProvider(provider, RetryConfig{
-		MaxRetries:   3,
-		InitialDelay: 10 * time.Millisecond,
-		MaxDelay:     25 * time.Millisecond,
-		Sleeper: func(ctx context.Context, delay time.Duration) error {
-			delays = append(delays, delay)
-			return immediateRetrySleeper(ctx, delay)
-		},
-	})
+	config := testRetryConfig(3)
+	config.InitialDelay = 10 * time.Millisecond
+	config.MaxDelay = 25 * time.Millisecond
+	config.Sleeper = func(ctx context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return immediateRetrySleeper(ctx, delay)
+	}
+	retrying := NewRetryingProvider(provider, config)
 
 	resp, err := retrying.SendMessage(context.Background(), nil, nil)
 	if err != nil {
@@ -117,12 +107,7 @@ func TestRetryingProviderDoesNotRetryNonRetryableError(t *testing.T) {
 		scriptedProviderStep{err: errors.New(`Internal error: invalid tool call payload`)},
 		scriptedProviderStep{resp: &Response{Content: "unexpected"}},
 	)
-	retrying := NewRetryingProvider(provider, RetryConfig{
-		MaxRetries:   2,
-		InitialDelay: time.Millisecond,
-		MaxDelay:     time.Millisecond,
-		Sleeper:      immediateRetrySleeper,
-	})
+	retrying := NewRetryingProvider(provider, testRetryConfig(2))
 
 	_, err := retrying.SendMessage(context.Background(), nil, nil)
 	if err == nil {
@@ -140,12 +125,7 @@ func TestRetryingProviderNegativeMaxRetriesDisablesRetries(t *testing.T) {
 		scriptedProviderStep{err: errors.New(`API Error: 503 service unavailable`)},
 		scriptedProviderStep{resp: &Response{Content: "unexpected"}},
 	)
-	retrying := NewRetryingProvider(provider, RetryConfig{
-		MaxRetries:   -1,
-		InitialDelay: time.Millisecond,
-		MaxDelay:     time.Millisecond,
-		Sleeper:      immediateRetrySleeper,
-	})
+	retrying := NewRetryingProvider(provider, testRetryConfig(-1))
 
 	_, err := retrying.SendMessage(context.Background(), nil, nil)
 	if err == nil {
@@ -164,16 +144,14 @@ func TestRetryingProviderStopsWhenContextCancelsDuringBackoff(t *testing.T) {
 		scriptedProviderStep{resp: &Response{Content: "unexpected"}},
 	)
 	ctx, cancel := context.WithCancel(context.Background())
-	retrying := NewRetryingProvider(provider, RetryConfig{
-		MaxRetries:   2,
-		InitialDelay: time.Millisecond,
-		MaxDelay:     time.Millisecond,
-		Sleeper: func(ctx context.Context, _ time.Duration) error {
-			cancel()
-			<-ctx.Done()
-			return ctx.Err()
-		},
-	})
+	defer cancel()
+	config := testRetryConfig(2)
+	config.Sleeper = func(ctx context.Context, _ time.Duration) error {
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	retrying := NewRetryingProvider(provider, config)
 
 	_, err := retrying.SendMessage(ctx, nil, nil)
 	if !errors.Is(err, context.Canceled) {
@@ -181,6 +159,15 @@ func TestRetryingProviderStopsWhenContextCancelsDuringBackoff(t *testing.T) {
 	}
 	if got := provider.CallCount(); got != 1 {
 		t.Fatalf("call count = %d, want 1", got)
+	}
+}
+
+func testRetryConfig(maxRetries int) RetryConfig {
+	return RetryConfig{
+		MaxRetries:   maxRetries,
+		InitialDelay: time.Millisecond,
+		MaxDelay:     time.Millisecond,
+		Sleeper:      immediateRetrySleeper,
 	}
 }
 

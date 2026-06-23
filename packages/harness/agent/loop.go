@@ -59,23 +59,7 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			"tool_count":    len(toolDefs),
 		})
 
-		retryConfig := cfg.LLMRetry
-		onRetry := retryConfig.OnRetry
-		retryConfig.OnRetry = func(event llm.RetryEvent) {
-			log.Append(transcript.EventInfo, turn, map[string]any{
-				"event":          "llm_retry",
-				"failed_attempt": event.FailedAttempt,
-				"retry_attempt":  event.RetryAttempt,
-				"total_attempts": event.TotalAttempts,
-				"max_retries":    event.MaxRetries,
-				"delay":          event.Delay.String(),
-				"error":          event.Error,
-			})
-			if onRetry != nil {
-				onRetry(event)
-			}
-		}
-		resp, err := llm.NewRetryingProvider(provider, retryConfig).SendMessage(ctx, messages, toolDefs)
+		resp, err := retryingProviderForTurn(provider, log, cfg.LLMRetry, turn).SendMessage(ctx, messages, toolDefs)
 		if err != nil {
 			log.Append(transcript.EventError, turn, map[string]any{"error": err.Error()})
 			return &Result{TurnsUsed: turn, StopReason: "error"}, fmt.Errorf("turn %d: LLM error: %w", turn, err)
@@ -133,6 +117,29 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		TurnsUsed:  maxTurns,
 		StopReason: "max_turns",
 	}, nil
+}
+
+func retryingProviderForTurn(provider llm.Provider, log *transcript.Log, cfg llm.RetryConfig, turn int) llm.Provider {
+	onRetry := cfg.OnRetry
+	cfg.OnRetry = func(event llm.RetryEvent) {
+		appendRetryEvent(log, turn, event)
+		if onRetry != nil {
+			onRetry(event)
+		}
+	}
+	return llm.NewRetryingProvider(provider, cfg)
+}
+
+func appendRetryEvent(log *transcript.Log, turn int, event llm.RetryEvent) {
+	log.Append(transcript.EventInfo, turn, map[string]any{
+		"event":          "llm_retry",
+		"failed_attempt": event.FailedAttempt,
+		"retry_attempt":  event.RetryAttempt,
+		"total_attempts": event.TotalAttempts,
+		"max_retries":    event.MaxRetries,
+		"delay":          event.Delay.String(),
+		"error":          event.Error,
+	})
 }
 
 func truncate(s string, maxLen int) string {
