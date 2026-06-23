@@ -72,6 +72,44 @@ func TestRetryingProviderExhaustsTransientRetries(t *testing.T) {
 	}
 }
 
+func TestRetryingProviderUsesExponentialBackoffWithCap(t *testing.T) {
+	t.Parallel()
+
+	provider := newScriptedProvider(
+		scriptedProviderStep{err: errors.New(`API Error: 503 service unavailable`)},
+		scriptedProviderStep{err: errors.New(`API Error: 503 service unavailable`)},
+		scriptedProviderStep{err: errors.New(`API Error: 503 service unavailable`)},
+		scriptedProviderStep{resp: &Response{Content: "done"}},
+	)
+	var delays []time.Duration
+	retrying := NewRetryingProvider(provider, RetryConfig{
+		MaxRetries:   3,
+		InitialDelay: 10 * time.Millisecond,
+		MaxDelay:     25 * time.Millisecond,
+		Sleeper: func(ctx context.Context, delay time.Duration) error {
+			delays = append(delays, delay)
+			return immediateRetrySleeper(ctx, delay)
+		},
+	})
+
+	resp, err := retrying.SendMessage(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v, want nil", err)
+	}
+	if resp == nil || resp.Content != "done" {
+		t.Fatalf("response = %#v, want content done", resp)
+	}
+	want := []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 25 * time.Millisecond}
+	if len(delays) != len(want) {
+		t.Fatalf("delays = %v, want %v", delays, want)
+	}
+	for i := range want {
+		if delays[i] != want[i] {
+			t.Fatalf("delays = %v, want %v", delays, want)
+		}
+	}
+}
+
 func TestRetryingProviderDoesNotRetryNonRetryableError(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +127,29 @@ func TestRetryingProviderDoesNotRetryNonRetryableError(t *testing.T) {
 	_, err := retrying.SendMessage(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatal("SendMessage() error = nil, want non-retryable error")
+	}
+	if got := provider.CallCount(); got != 1 {
+		t.Fatalf("call count = %d, want 1", got)
+	}
+}
+
+func TestRetryingProviderNegativeMaxRetriesDisablesRetries(t *testing.T) {
+	t.Parallel()
+
+	provider := newScriptedProvider(
+		scriptedProviderStep{err: errors.New(`API Error: 503 service unavailable`)},
+		scriptedProviderStep{resp: &Response{Content: "unexpected"}},
+	)
+	retrying := NewRetryingProvider(provider, RetryConfig{
+		MaxRetries:   -1,
+		InitialDelay: time.Millisecond,
+		MaxDelay:     time.Millisecond,
+		Sleeper:      immediateRetrySleeper,
+	})
+
+	_, err := retrying.SendMessage(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("SendMessage() error = nil, want initial transient error")
 	}
 	if got := provider.CallCount(); got != 1 {
 		t.Fatalf("call count = %d, want 1", got)

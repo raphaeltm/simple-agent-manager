@@ -41,7 +41,7 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 
 ## Workflow Gates
 
-- [ ] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
+- [x] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
 - [ ] Complete staging deployment and VM-agent infrastructure verification because this touches `packages/vm-agent`: provision a real staging workspace, confirm heartbeat, verify workspace/agent session access, and clean it up.
 - [ ] Open a PR from `sam/task-failed-code-32603messageinternal-01kvtf`, wait for CI, merge only when green, then monitor production deploy.
 
@@ -53,3 +53,9 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 - `pnpm typecheck && pnpm lint` passed after implementation; lint still reports existing warnings only.
 - `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed before archive.
 - `$task-completion-validator` pre-archive validation passed: research findings, checked checklist items, and acceptance criteria all map to implemented diff and tests; UI/backend and multi-resource checks are N/A.
+- Phase 5 review results:
+  - `$task-completion-validator`: PASS after post-review test additions; no planned-vs-actual gaps.
+  - `$go-specialist`: PASS; no concurrency, resource, or error-handling findings in touched Go code.
+  - `$test-engineer`: ADDRESSED; added explicit exponential backoff/cap coverage and callback-composition coverage.
+  - `$constitution-validator`: PASS; retry limits/delays are configurable through `RetryConfig` and no hardcoded URLs or deployment identifiers were introduced.
+- Post-review Go validation passed: `/tmp/go/bin/go test ./...` in `packages/harness`, `/tmp/go/bin/go test ./internal/acp` in `packages/vm-agent`, and `/tmp/go/bin/go test -race ./llm ./agent` in `packages/harness`.

@@ -166,6 +166,7 @@ func TestRun_RetriesTransientProviderErrorAndLogsTranscriptEvent(t *testing.T) {
 	)
 	registry := tools.NewRegistry()
 	log := transcript.NewLog()
+	var callbackEvents []llm.RetryEvent
 
 	result, err := Run(context.Background(), provider, registry, log, Config{
 		MaxTurns: 5,
@@ -181,6 +182,9 @@ func TestRun_RetriesTransientProviderErrorAndLogsTranscriptEvent(t *testing.T) {
 					return nil
 				}
 			},
+			OnRetry: func(event llm.RetryEvent) {
+				callbackEvents = append(callbackEvents, event)
+			},
 		},
 	}, "recover")
 
@@ -192,6 +196,9 @@ func TestRun_RetriesTransientProviderErrorAndLogsTranscriptEvent(t *testing.T) {
 	}
 	if got := provider.CallCount(); got != 2 {
 		t.Fatalf("provider call count = %d, want 2", got)
+	}
+	if len(callbackEvents) != 1 {
+		t.Fatalf("configured retry callback events = %d, want 1", len(callbackEvents))
 	}
 
 	var sawRetry bool
