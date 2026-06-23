@@ -327,6 +327,8 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('replace_library_file');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
+      // Deployment discovery tool
+      expect(toolNames).toContain('get_deployment_guide');
       // Trigger tools
       expect(toolNames).toContain('create_trigger');
       // Agent profile tools
@@ -357,7 +359,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('read_deployment_logs');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(91);
+      expect(body.result.tools).toHaveLength(92);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -467,6 +469,48 @@ describe('MCP Routes', () => {
     it('should not require any arguments', async () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'get_repo_setup_guide',
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+    });
+  });
+
+  // ─── get_deployment_guide ───────────────────────────────────────────
+
+  describe('get_deployment_guide', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should return the SAM deployment guide markdown', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_deployment_guide',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+      expect(body.result.content).toHaveLength(1);
+      expect(body.result.content[0].type).toBe('text');
+      const text = body.result.content[0].text;
+      expect(text).toContain('SAM App Deployment Guide');
+      expect(text).toContain('Agent-First Deployment Model');
+      expect(text).toContain('build_and_publish');
+      expect(text).toContain('list_deployment_environments');
+      expect(text).toContain('Variables');
+      expect(text).toContain('Secrets');
+      expect(text).toContain('read_deployment_logs');
+      expect(text).toContain('check_dns_status');
+    });
+
+    it('should not require any arguments', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_deployment_guide',
       }));
 
       expect(res.status).toBe(200);

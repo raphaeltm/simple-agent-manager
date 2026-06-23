@@ -65,23 +65,23 @@ deployment tool. The tool MUST be discoverable via `tools/list` and callable via
 
 ## Implementation Checklist
 
-- [ ] Create `apps/api/src/routes/mcp/deployment-guide-tools.ts` with a
+- [x] Create `apps/api/src/routes/mcp/deployment-guide-tools.ts` with a
       `SAM_DEPLOYMENT_GUIDE` markdown constant and
       `handleGetDeploymentGuide(requestId): JsonRpcResponse` (copy the
       `get_repo_setup_guide` shape; import `jsonRpcSuccess`/`JsonRpcResponse` from
       `./_helpers`).
-- [ ] Guide content covers: when to use it (deploy/launch/publish/ship/release);
+- [x] Guide content covers: when to use it (deploy/launch/publish/ship/release);
       SAM agent-first / never-CI model; the full tool-by-tool flow in order
       (list environments → set config → build_and_publish → read logs → check DNS);
       Variables vs Secrets semantics; Compose authoring pointer; common pitfalls.
-- [ ] Add `get_deployment_guide` definition to `DEPLOYMENT_TOOLS` in
+- [x] Add `get_deployment_guide` definition to `DEPLOYMENT_TOOLS` in
       `tool-definitions-deployment-tools.ts` (empty input schema, no args).
-- [ ] Add `import { handleGetDeploymentGuide } from './deployment-guide-tools';`
+- [x] Add `import { handleGetDeploymentGuide } from './deployment-guide-tools';`
       and `case 'get_deployment_guide':` (synchronous) to `index.ts`.
-- [ ] Add unit tests in `mcp.test.ts`: discoverability (`tools/list` includes
+- [x] Add unit tests in `mcp.test.ts`: discoverability (`tools/list` includes
       `get_deployment_guide`) and behavior (`tools/call` returns text content with
       expected sections/tool names).
-- [ ] Update `apps/www/src/content/docs/docs/guides/app-deployments.md` to mention
+- [x] Update `apps/www/src/content/docs/docs/guides/app-deployments.md` to mention
       the discovery tool if appropriate (keep docs synced).
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 
