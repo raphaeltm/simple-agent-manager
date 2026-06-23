@@ -83,19 +83,22 @@ deployment tool. The tool MUST be discoverable via `tools/list` and callable via
       expected sections/tool names).
 - [x] Update `apps/www/src/content/docs/docs/guides/app-deployments.md` to mention
       the discovery tool if appropriate (keep docs synced).
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 
 ## Acceptance Criteria
 
-- [ ] `get_deployment_guide` appears in `tools/list` output (discoverable).
-- [ ] Calling `get_deployment_guide` returns a single text content block with the
+- [x] `get_deployment_guide` appears in `tools/list` output (discoverable) —
+      asserted in `mcp.test.ts` discoverability test.
+- [x] Calling `get_deployment_guide` returns a single text content block with the
       deployment briefing, mentioning `build_and_publish`,
-      `list_deployment_environments`, and Variables/Secrets.
-- [ ] Tool requires no arguments and never errors on a valid MCP token.
+      `list_deployment_environments`, and Variables/Secrets — asserted in
+      `mcp.test.ts` behavior test.
+- [x] Tool requires no arguments and never errors on a valid MCP token —
+      asserted in `mcp.test.ts` (no-arguments call test).
 - [ ] Verified on staging: tool is discoverable in `tools/list` AND returns the
       guide via `tools/call` (per user's explicit "discoverable and works in
-      staging before merging" requirement).
-- [ ] Guide content is consistent with `app-deployments.md` and the agent-first /
+      staging before merging" requirement). — Phase 6.
+- [x] Guide content is consistent with `app-deployments.md` and the agent-first /
       never-CI deployment model.
 
 ## References
