@@ -81,9 +81,17 @@ Command-line interface for SAM:
 
 - Auth, task submission, chat prompts, task status, and runner doctor commands.
 
+## Complete: App Deployments
+
+Agent-first deployment environments:
+
+- Deployment environments with user-managed agent deployment policy gates.
+- Docker Compose release submission with SAM extensions and server-side image publishing.
+- Deployment logs, status, environment config, secrets, and safe named volume management.
+
 ## Planned: More Providers
 
-- DigitalOcean, Vultr, AWS, and expanded CLI coverage.
+- DigitalOcean, Vultr, AWS, and expanded provider coverage.
 
 ## Planned: Teams & Collaboration
 
