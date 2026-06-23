@@ -28,7 +28,7 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 - [x] Add a reusable retrying `llm.Provider` wrapper in `packages/harness` with bounded exponential backoff, injectable sleeper, and transcript-visible retry events.
 - [x] Add Go tests for harness retry success, retry exhaustion, non-retryable behavior, and cancellation/deadline behavior.
 - [x] Run focused Go tests for `packages/vm-agent/internal/acp` and `packages/harness`.
-- [ ] Run broader quality checks as practical before PR.
+- [x] Run broader quality checks as practical before PR.
 - [ ] Move this task to `tasks/archive/` after validation.
 
 ## Acceptance Criteria
@@ -44,3 +44,10 @@ SAM already retries some transient ACP prompt provider failures, but this observ
 - [ ] Run `$go-specialist`, `$test-engineer`, `$constitution-validator`, and `$task-completion-validator` review before PR.
 - [ ] Complete staging deployment and VM-agent infrastructure verification because this touches `packages/vm-agent`: provision a real staging workspace, confirm heartbeat, verify workspace/agent session access, and clean it up.
 - [ ] Open a PR from `sam/task-failed-code-32603messageinternal-01kvtf`, wait for CI, merge only when green, then monitor production deploy.
+
+## Validation Notes
+
+- `/tmp/go/bin/go test ./...` passed in `packages/harness`.
+- `/tmp/go/bin/go test ./internal/acp` passed in `packages/vm-agent`.
+- `/tmp/go/bin/go test ./...` in `packages/vm-agent` was attempted; unrelated PTY/server tests that require Docker failed because this workspace does not have a `docker` executable on PATH.
+- `pnpm typecheck && pnpm lint` passed after implementation; lint still reports existing warnings only.
