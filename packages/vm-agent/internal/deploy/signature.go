@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -73,7 +74,10 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 		return fmt.Errorf("decode signature: %w", err)
 	}
 
-	canonical := buildSignableBytes(payload)
+	canonical, err := buildSignableBytes(payload)
+	if err != nil {
+		return fmt.Errorf("build signable payload: %w", err)
+	}
 
 	// Take read lock to safely access current/previous keys during rotation
 	v.mu.RLock()
@@ -101,21 +105,30 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 // cause the pull to fail, not change which image is deployed.
 // Image artifacts ARE covered by the signature because they are out-of-band
 // object references that decide which local image gets loaded before Compose.
-func buildSignableBytes(payload *ApplyPayload) []byte {
+func buildSignableBytes(payload *ApplyPayload) ([]byte, error) {
 	composeHash := sha256.Sum256([]byte(payload.ComposeYAML))
 	routes := payload.Routes
 	if routes == nil {
 		routes = []RouteTarget{}
 	}
-	routesBytes, _ := json.Marshal(routes)
+	routesBytes, err := marshalCanonicalJSON(routes)
+	if err != nil {
+		return nil, fmt.Errorf("marshal routes: %w", err)
+	}
 	routesHash := sha256.Sum256(routesBytes)
 	artifacts := payload.Artifacts
 	if artifacts == nil {
 		artifacts = []ImageArtifact{}
 	}
-	artifactsBytes, _ := json.Marshal(artifacts)
+	artifactsBytes, err := marshalCanonicalJSON(artifacts)
+	if err != nil {
+		return nil, fmt.Errorf("marshal artifacts: %w", err)
+	}
 	artifactsHash := sha256.Sum256(artifactsBytes)
-	interpolationEnvHash := hashInterpolationEnv(payload.InterpolationEnv)
+	interpolationEnvHash, err := hashInterpolationEnv(payload.InterpolationEnv)
+	if err != nil {
+		return nil, fmt.Errorf("hash interpolation env: %w", err)
+	}
 	signable := SignablePayload{
 		EnvironmentID:        payload.EnvironmentID,
 		NodeID:               payload.NodeID,
@@ -126,12 +139,14 @@ func buildSignableBytes(payload *ApplyPayload) []byte {
 		InterpolationEnvHash: interpolationEnvHash,
 		ArtifactsHash:        hex.EncodeToString(artifactsHash[:]),
 	}
-	// JSON marshal with sorted keys (Go's encoding/json sorts by struct field order)
-	b, _ := json.Marshal(signable)
-	return b
+	signableBytes, err := marshalCanonicalJSON(signable)
+	if err != nil {
+		return nil, fmt.Errorf("marshal signable payload: %w", err)
+	}
+	return signableBytes, nil
 }
 
-func hashInterpolationEnv(env map[string]string) string {
+func hashInterpolationEnv(env map[string]string) (string, error) {
 	type entry [2]string
 	entries := make([]entry, 0, len(env))
 	for key, value := range env {
@@ -140,15 +155,31 @@ func hashInterpolationEnv(env map[string]string) string {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i][0] < entries[j][0]
 	})
-	bytes, _ := json.Marshal(entries)
-	hash := sha256.Sum256(bytes)
-	return hex.EncodeToString(hash[:])
+	payload, err := marshalCanonicalJSON(entries)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(payload)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func marshalCanonicalJSON(value any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // SignPayload signs an apply payload with an Ed25519 private key.
 // This is used by the control plane (API) to sign payloads before sending to nodes.
 func SignPayload(payload *ApplyPayload, privKey ed25519.PrivateKey) (string, error) {
-	canonical := buildSignableBytes(payload)
+	canonical, err := buildSignableBytes(payload)
+	if err != nil {
+		return "", err
+	}
 	sig := ed25519.Sign(privKey, canonical)
 	return base64.StdEncoding.EncodeToString(sig), nil
 }

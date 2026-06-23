@@ -165,20 +165,73 @@ func TestVerifier_RejectsArtifactMutationAfterSigning(t *testing.T) {
 	}
 }
 
+func TestBuildSignableBytesMatchesJavaScriptJSONContractForEscapedStrings(t *testing.T) {
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     1800000000,
+		ComposeYAML:   "compose yaml",
+		InterpolationEnv: map[string]string{
+			"DATABASE_URL": "postgres://user:pass@host/db?sslmode=require&connect_timeout=5",
+		},
+		Artifacts: []ImageArtifact{{
+			ServiceName:       "api",
+			SourceRef:         "deploy-test-api",
+			LocalImageRef:     "sam-env-api:rel",
+			R2Key:             "compose-image-artifacts/proj/env/ws/upload/api.tar",
+			SizeBytes:         204690944,
+			ArchiveSHA256:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			ArchiveType:       "docker-save",
+			MediaType:         "application/vnd.docker.image.rootfs.diff.tar",
+			DownloadURL:       "https://example.r2.cloudflarestorage.com/bucket/key?X-Amz-Date=20260623T100000Z&X-Amz-Expires=900&X-Amz-Signature=abc",
+			DownloadExpiresIn: 900,
+		}},
+	}
+
+	var signable SignablePayload
+	signableBytes, err := buildSignableBytes(payload)
+	if err != nil {
+		t.Fatalf("build signable bytes: %v", err)
+	}
+	if err := json.Unmarshal(signableBytes, &signable); err != nil {
+		t.Fatalf("decode signable bytes: %v", err)
+	}
+
+	// These hashes are generated from the TypeScript control plane's
+	// JSON.stringify contract. Go's default json.Marshal escapes &, <, and >,
+	// which changes these hashes and makes signed R2 apply payloads unverifiable.
+	if signable.ArtifactsHash != "ee2ad42b44ddd98f2733d012aaec70371cf274838dcf0fe0388b261fde9dc026" {
+		t.Fatalf("unexpected artifacts hash: %s", signable.ArtifactsHash)
+	}
+	if signable.InterpolationEnvHash != "80ee540b85bb3f4525ec03e7a28ed8bfbfbf0f26f07a595dccca77f94ed1ba52" {
+		t.Fatalf("unexpected interpolation env hash: %s", signable.InterpolationEnvHash)
+	}
+}
+
 func TestHashInterpolationEnvCanonicalizesSortedEntries(t *testing.T) {
-	first := hashInterpolationEnv(map[string]string{
+	first, err := hashInterpolationEnv(map[string]string{
 		"B": "two",
 		"A": "one",
 	})
-	second := hashInterpolationEnv(map[string]string{
+	if err != nil {
+		t.Fatalf("hash first env: %v", err)
+	}
+	second, err := hashInterpolationEnv(map[string]string{
 		"A": "one",
 		"B": "two",
 	})
+	if err != nil {
+		t.Fatalf("hash second env: %v", err)
+	}
 	if first != second {
 		t.Fatalf("expected insertion order independent hash, got %s and %s", first, second)
 	}
 
-	empty := hashInterpolationEnv(nil)
+	empty, err := hashInterpolationEnv(nil)
+	if err != nil {
+		t.Fatalf("hash empty env: %v", err)
+	}
 	if empty != "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945" {
 		t.Fatalf("unexpected empty env hash: %s", empty)
 	}
