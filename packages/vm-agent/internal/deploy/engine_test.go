@@ -150,8 +150,8 @@ func TestEngine_SetVerifierKeyInitializesMissingVerifier(t *testing.T) {
 	}
 
 	err = engine.Apply(context.Background(), payload)
-	if err == nil || !strings.Contains(err.Error(), "compose pull") {
-		t.Fatalf("expected signed payload to proceed to compose pull, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "compose config") {
+		t.Fatalf("expected signed payload to proceed to compose config preflight, got: %v", err)
 	}
 }
 
@@ -286,11 +286,19 @@ exit 0
 		t.Fatalf("read active Caddyfile: %v", err)
 	}
 	active := string(activeBytes)
-	if !strings.Contains(active, "r1-web-env.apps.example.com") {
-		t.Fatalf("active Caddyfile missing hostname:\n%s", active)
+	if !strings.Contains(active, "import sites/*") {
+		t.Fatalf("active Caddyfile missing sites import:\n%s", active)
 	}
-	if !strings.Contains(active, "reverse_proxy 127.0.0.1:35000") {
-		t.Fatalf("active Caddyfile missing upstream:\n%s", active)
+	snippetBytes, err := os.ReadFile(filepath.Join(filepath.Dir(activeCaddyfile), "sites", "env-1.caddy"))
+	if err != nil {
+		t.Fatalf("read active Caddy snippet: %v", err)
+	}
+	snippet := string(snippetBytes)
+	if !strings.Contains(snippet, "r1-web-env.apps.example.com") {
+		t.Fatalf("active Caddy snippet missing hostname:\n%s", snippet)
+	}
+	if !strings.Contains(snippet, "reverse_proxy 127.0.0.1:35000") {
+		t.Fatalf("active Caddy snippet missing upstream:\n%s", snippet)
 	}
 
 	reloadBytes, err := os.ReadFile(reloadLog)
@@ -313,6 +321,75 @@ exit 0
 	}
 	if strings.Contains(composeOutput, "caddy") {
 		t.Fatalf("compose commands must not restart Caddy: %q", composeOutput)
+	}
+}
+
+func TestEngine_ApplyWaitsForRoutedServicesOnly(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+echo "$@" >> "`+composeLog+`"
+case "$*" in
+  *" ps --format json"*)
+    echo '{"Name":"sam-env-env-1-web-1","Service":"web","State":"running","Health":"healthy"}'
+    echo '{"Name":"sam-env-env-1-worker-1","Service":"worker","State":"exited","Health":""}'
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     reloadScript,
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := makeTestPayload("env-1", "node-1", 1, "services:\n  web:\n    image: nginx\n  worker:\n    image: busybox\n    command: echo done\n", priv)
+	payload.Routes = []RouteTarget{{
+		Hostname:      "app.example.com",
+		Service:       "web",
+		ContainerPort: 3000,
+		HostPort:      35000,
+	}}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply should ignore exited non-routed worker, got: %v", err)
+	}
+
+	observed := engine.GetObserved()
+	if observed.Status != StatusApplied {
+		t.Fatalf("expected observed status=applied, got %s", observed.Status)
+	}
+	if observed.AppliedSeq != 1 {
+		t.Fatalf("expected applied seq 1, got %d", observed.AppliedSeq)
 	}
 }
 
@@ -403,6 +480,10 @@ exit 0
 	}
 	if observed.AppliedSeq != 0 {
 		t.Fatalf("failed initial release must remain retryable in heartbeat, observed applied seq %d", observed.AppliedSeq)
+	}
+	snippetPath := filepath.Join(dir, "active", "sites", "env-1.caddy")
+	if _, err := os.Stat(snippetPath); !os.IsNotExist(err) {
+		t.Fatalf("failed initial release must remove active Caddy snippet, stat err=%v", err)
 	}
 }
 
@@ -679,6 +760,9 @@ exit 0
 				if observed.Status != StatusReverted {
 					t.Fatalf("expected observed status=reverted, got %s", observed.Status)
 				}
+				if !strings.Contains(observed.ErrorMessage, "compose up") {
+					t.Fatalf("expected observed revert error to include apply failure, got %q", observed.ErrorMessage)
+				}
 			}
 		})
 	}
@@ -813,6 +897,38 @@ exit 0
 	if loginIdx >= pullIdx {
 		t.Fatalf("docker login (at %d) must precede compose pull (at %d) in log:\n%s",
 			loginIdx, pullIdx, logContent)
+	}
+}
+
+func TestMatchedServiceUsesExplicitServiceOrExactNameOnly(t *testing.T) {
+	required := map[string]bool{"api": true}
+
+	if got, ok := matchedService(ServiceState{Name: "sam-env-worker-api-1", Service: "worker"}, required); ok {
+		t.Fatalf("matchedService fuzzy-matched container name substring as %q", got)
+	}
+
+	if got, ok := matchedService(ServiceState{Name: "sam-env-api-1", Service: "api"}, required); !ok || got != "api" {
+		t.Fatalf("matchedService explicit Service match = %q/%v, want api/true", got, ok)
+	}
+
+	if got, ok := matchedService(ServiceState{Name: "api", Service: ""}, required); !ok || got != "api" {
+		t.Fatalf("matchedService exact Name match = %q/%v, want api/true", got, ok)
+	}
+}
+
+func TestWaitForHealthSkipsContainerPollingWhenNoRoutes(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(dir)
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         filepath.Join(dir, "missing-compose"),
+		HealthTimeout:      time.Second,
+		HealthPollInterval: time.Millisecond,
+	})
+
+	if err := engine.waitForHealth(context.Background(), 1, nil, nil); err != nil {
+		t.Fatalf("waitForHealth with no routes = %v, want nil", err)
 	}
 }
 
@@ -1050,5 +1166,113 @@ func TestSignPayload_Roundtrip(t *testing.T) {
 
 	if err := v.Verify(payload, "env-1", "node-1", 41); err != nil {
 		t.Errorf("verification failed: %v", err)
+	}
+}
+
+// TestEngine_ApplyFailureRedactsSecretsInReportedStatus is the security crux of
+// the Compose interpolation feature: when an apply fails on a node whose compose
+// command emits a secret interpolation value to stderr, that secret must NEVER
+// appear in the error message persisted to disk state OR reported to the control
+// plane via ObservedState.ErrorMessage. The control plane surfaces this status
+// to the user, so a leak here would expose decrypted secrets in the UI.
+//
+// This is a vertical-slice test: it drives the real Engine.Apply through the real
+// composeUp -> runCompose -> newEnvRedactor path with a compose command that
+// leaks a secret, and asserts on the durable + reported failure status.
+func TestEngine_ApplyFailureRedactsSecretsInReportedStatus(t *testing.T) {
+	const secret = "supersecretvalue123" // len >= 6 so the redactor collects it
+
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	// config and pull succeed; `up` fails and prints the secret to stderr,
+	// exactly as a real `docker compose up` would when interpolation injects a
+	// secret into an image reference or build arg that then fails to pull.
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *"up -d"*)
+    echo "compose up failed: cannot pull image registry/app with token `+secret+`" >&2
+    exit 7
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     "/bin/true",
+		HealthTimeout:      1 * time.Second,
+		HealthPollInterval: 10 * time.Millisecond,
+	})
+
+	payload := &ApplyPayload{
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Seq:              1,
+		ExpiresAt:        time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:      "services:\n  web:\n    image: nginx\n",
+		InterpolationEnv: map[string]string{"SAM_SECRET_TOKEN": secret},
+		Routes: []RouteTarget{{
+			Hostname:      "r1-web-env.apps.example.com",
+			Service:       "web",
+			ContainerPort: 3000,
+			HostPort:      35000,
+		}},
+	}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	err = engine.Apply(context.Background(), payload)
+	if err == nil {
+		t.Fatal("expected apply to fail when compose up fails")
+	}
+	// The error returned to the caller must also be scrubbed.
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("returned error leaked the secret: %v", err)
+	}
+
+	// Durable failure state must not contain the secret.
+	state, err := disk.ReadState(1)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if state.Status != StatusFailedInitial {
+		t.Fatalf("expected failed-initial state, got %s", state.Status)
+	}
+	if strings.Contains(state.ErrorMessage, secret) {
+		t.Fatalf("persisted state.ErrorMessage leaked the secret: %q", state.ErrorMessage)
+	}
+	if !strings.Contains(state.ErrorMessage, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] marker in persisted error, got %q", state.ErrorMessage)
+	}
+
+	// Status reported to the control plane via heartbeat must not contain the secret.
+	observed := engine.GetObserved()
+	if observed.Status != StatusFailedInitial {
+		t.Fatalf("expected observed failed-initial status, got %s", observed.Status)
+	}
+	if strings.Contains(observed.ErrorMessage, secret) {
+		t.Fatalf("reported ObservedState.ErrorMessage leaked the secret: %q", observed.ErrorMessage)
+	}
+	if !strings.Contains(observed.ErrorMessage, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] marker in reported error, got %q", observed.ErrorMessage)
 	}
 }

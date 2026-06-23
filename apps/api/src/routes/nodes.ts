@@ -1,5 +1,10 @@
 import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, getLocationsForProvider,isValidLocationForProvider } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  getLocationsForProvider,
+  isValidLocationForProvider,
+} from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -18,6 +23,7 @@ import { getRuntimeLimits } from '../services/limits';
 import {
   getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
+  listNodeContainersFromNode,
   listNodeEventsOnNode,
   nodeAgentRawRequest,
   stopWorkspaceOnNode,
@@ -73,7 +79,12 @@ function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {
   return 'unhealthy';
 }
 
-function toNodeResponse(node: schema.Node): NodeResponse {
+type DeploymentEnvironmentNodeSummary = NonNullable<NodeResponse['deploymentEnvironments']>[number];
+
+function toNodeResponse(
+  node: schema.Node,
+  deploymentEnvironments: DeploymentEnvironmentNodeSummary[] = [],
+): NodeResponse {
   let lastMetrics: NodeResponse['lastMetrics'] = null;
   if (node.lastMetrics) {
     try {
@@ -96,10 +107,40 @@ function toNodeResponse(node: schema.Node): NodeResponse {
     lastHeartbeatAt: node.lastHeartbeatAt,
     heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
     lastMetrics,
+    deploymentEnvironments,
     errorMessage: node.errorMessage,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,
   };
+}
+
+async function loadDeploymentEnvironmentSummaries(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  nodeIds: string[],
+): Promise<Map<string, DeploymentEnvironmentNodeSummary[]>> {
+  if (nodeIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      id: schema.deploymentEnvironments.id,
+      projectId: schema.deploymentEnvironments.projectId,
+      name: schema.deploymentEnvironments.name,
+      nodeId: schema.deploymentEnvironments.nodeId,
+    })
+    .from(schema.deploymentEnvironments)
+    .where(inArray(schema.deploymentEnvironments.nodeId, nodeIds));
+
+  const byNode = new Map<string, DeploymentEnvironmentNodeSummary[]>();
+  for (const row of rows) {
+    if (!row.nodeId) continue;
+    const existing = byNode.get(row.nodeId) ?? [];
+    existing.push({ id: row.id, projectId: row.projectId, name: row.name });
+    byNode.set(row.nodeId, existing);
+  }
+  for (const environments of byNode.values()) {
+    environments.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return byNode;
 }
 
 async function refreshNodeHealth(
@@ -137,7 +178,11 @@ nodesRoutes.get('/', async (c) => {
     .orderBy(desc(schema.nodes.createdAt));
 
   const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node)));
-  return c.json(hydrated.map(toNodeResponse));
+  const deploymentSummaries = await loadDeploymentEnvironmentSummaries(
+    db,
+    hydrated.filter((node) => (node.nodeRole ?? 'workspace') === 'deployment').map((node) => node.id),
+  );
+  return c.json(hydrated.map((node) => toNodeResponse(node, deploymentSummaries.get(node.id) ?? [])));
 });
 
 nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
@@ -224,7 +269,8 @@ nodesRoutes.get('/:id', async (c) => {
   }
 
   const refreshed = await refreshNodeHealth(db, node);
-  return c.json(toNodeResponse(refreshed));
+  const deploymentSummaries = await loadDeploymentEnvironmentSummaries(db, [refreshed.id]);
+  return c.json(toNodeResponse(refreshed, deploymentSummaries.get(refreshed.id) ?? []));
 });
 
 nodesRoutes.post('/:id/stop', async (c) => {
@@ -287,7 +333,12 @@ nodesRoutes.delete('/:id', async (c) => {
     throw errors.notFound('Node');
   }
 
-  await deleteNodeResources(nodeId, userId, c.env);
+  const cleanup = await deleteNodeResources(nodeId, userId, c.env);
+  if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
+    throw errors.conflict(
+      `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
+    );
+  }
 
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
@@ -443,6 +494,34 @@ nodesRoutes.get('/:id/logs', async (c) => {
   } catch {
     // Node agent may be unreachable — return empty rather than 500
     return c.json({ entries: [], nextCursor: null, hasMore: false });
+  }
+});
+
+/**
+ * GET /:id/containers — Proxy Docker container list from the VM Agent.
+ * Used by log filters to offer per-container selection.
+ */
+nodesRoutes.get('/:id/containers', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  if (node.status !== 'running') {
+    return c.json({ containers: [], nodeId, unavailableReason: 'node_not_running' });
+  }
+
+  try {
+    const result = await listNodeContainersFromNode(nodeId, c.env, userId);
+    return c.json({
+      ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
+      nodeId,
+    });
+  } catch {
+    return c.json({ containers: [], nodeId, unavailableReason: 'node_agent_unreachable' }, 503);
   }
 });
 

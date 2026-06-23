@@ -236,48 +236,7 @@ func (r *Reader) readJournalLogs(ctx context.Context, filter LogFilter, limit in
 	return entries, lastCursor, nil
 }
 
-// readDockerLogs reads Docker container logs from journald.
-func (r *Reader) readDockerLogs(ctx context.Context, filter LogFilter, limit int) ([]LogEntry, *string, error) {
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-
-	args := []string{
-		"--output=json",
-		"--no-pager",
-		"-n", strconv.Itoa(limit),
-		"--reverse",
-		// Filter to Docker container entries
-		"_TRANSPORT=journal",
-	}
-
-	if filter.Container != "" {
-		args = append(args, fmt.Sprintf("CONTAINER_NAME=%s", filter.Container))
-	} else {
-		// Match any entry that has CONTAINER_NAME set (Docker journald driver)
-		args = append(args, "CONTAINER_NAME")
-	}
-
-	if filter.Since != "" {
-		args = append(args, "--since", normalizeTimeArg(filter.Since))
-	}
-	if filter.Until != "" {
-		args = append(args, "--until", normalizeTimeArg(filter.Until))
-	}
-	if filter.Cursor != "" {
-		args = append(args, "--after-cursor", filter.Cursor)
-	}
-
-	cmd := r.exec(ctx, "journalctl", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		// Docker logs via journald may not be available if Docker isn't using journald driver
-		return nil, nil, nil
-	}
-
-	entries, lastCursor := parseJournalJSON(string(out), "docker")
-	return entries, lastCursor, nil
-}
-
+// ListContainers returns running Docker containers visible to docker logs.
 // cloudInitTimestamp matches timestamps like "2026-02-23 15:30:00,123"
 var cloudInitTimestamp = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},?\d*)`)
 

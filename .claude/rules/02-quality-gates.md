@@ -107,6 +107,8 @@ Before finalizing tests, ask:
 - Is there a cross-component boundary that unit tests can't cover? If so, add an integration test.
 - Would a developer introducing the original regression have seen a red CI from these tests? If not, the tests aren't defensive enough.
 
+For exported helpers that return canonical domain types, include at least one direct malformed-domain test when the codebase separates structural validation from semantic validation. A resolver, converter, or parser success result must prove the canonical validation helper ran, not just the lower-level schema parser.
+
 ## Post-Mortem and Process Fix Requirements (Mandatory for Bug Fixes)
 
 Every PR that fixes a bug MUST include a post-mortem and process improvement. Bug fixes without process fixes only fix the symptom — the class of bug will recur.

@@ -79,6 +79,11 @@ export interface NodeResponse {
   lastHeartbeatAt: string | null;
   heartbeatStaleAfterSeconds?: number;
   lastMetrics?: NodeMetrics | null;
+  deploymentEnvironments?: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+  }>;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -338,6 +343,20 @@ export interface NodeLogResponse {
   entries: NodeLogEntry[];
   nextCursor?: string | null;
   hasMore: boolean;
+}
+
+export interface NodeContainerLogTarget {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+}
+
+export interface NodeContainerListResponse {
+  containers: NodeContainerLogTarget[];
+  nodeId?: string | null;
+  unavailableReason?: string;
 }
 
 // =============================================================================

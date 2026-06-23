@@ -11,12 +11,20 @@ function manifest() {
     version: 1 as const,
     services: {
       web: {
-        image: { registry: 'docker.io', repository: 'example/web', digest: `sha256:${'a'.repeat(64)}` },
+        image: {
+          registry: 'docker.io',
+          repository: 'example/web',
+          digest: `sha256:${'a'.repeat(64)}`,
+        },
         env: {},
         volumes: [],
       },
       api: {
-        image: { registry: 'docker.io', repository: 'example/api', digest: `sha256:${'b'.repeat(64)}` },
+        image: {
+          registry: 'docker.io',
+          repository: 'example/api',
+          digest: `sha256:${'b'.repeat(64)}`,
+        },
         env: {},
         volumes: [],
       },
@@ -177,21 +185,25 @@ describe('buildDeploymentRouteTargets', () => {
   });
 
   it('fails before assigning ports outside the configured per-environment span', () => {
-    expect(() => buildDeploymentRouteTargets(manifest(), {
-      environmentId: 'env-1',
-      baseDomain: 'example.com',
-      routePortBase: '35000',
-      routePortSpan: '1',
-    })).toThrow('exceeding configured deployment route port span 1');
+    expect(() =>
+      buildDeploymentRouteTargets(manifest(), {
+        environmentId: 'env-1',
+        baseDomain: 'example.com',
+        routePortBase: '35000',
+        routePortSpan: '1',
+      })
+    ).toThrow('exceeding configured deployment route port span 1');
   });
 
   it('fails before assigning loopback ports outside the TCP range', () => {
-    expect(() => buildDeploymentRouteTargets(manifest(), {
-      environmentId: 'env-1',
-      baseDomain: 'example.com',
-      routePortBase: '65535',
-      routePortSpan: '20',
-    })).toThrow('exceeding maximum TCP port 65535');
+    expect(() =>
+      buildDeploymentRouteTargets(manifest(), {
+        environmentId: 'env-1',
+        baseDomain: 'example.com',
+        routePortBase: '65535',
+        routePortSpan: '20',
+      })
+    ).toThrow('exceeding maximum TCP port 65535');
   });
 });
 
@@ -213,7 +225,7 @@ describe('collectEnvironmentRouteHostnames', () => {
   it('dedupes hostnames across multiple releases of the same environment', () => {
     const hostnames = collectEnvironmentRouteHostnames(
       [JSON.stringify(manifest()), JSON.stringify(manifest())],
-      opts,
+      opts
     );
     expect(hostnames).toEqual([
       'r1-web-3000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
@@ -224,11 +236,43 @@ describe('collectEnvironmentRouteHostnames', () => {
   it('skips malformed manifests instead of aborting teardown', () => {
     const hostnames = collectEnvironmentRouteHostnames(
       ['not-json', JSON.stringify(manifest())],
-      opts,
+      opts
     );
     expect(hostnames).toEqual([
       'r1-web-3000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
       'r2-api-8081-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+  });
+
+  it('reconstructs compose-publish hostnames from captured compose service ports', () => {
+    const composePublishSubmission = {
+      reference: 'v1',
+      composeYaml: `services:
+  web:
+    image: example/web
+    ports:
+      - "8000:8000"
+  api:
+    image: example/api
+    ports:
+      - target: 8080
+        published: 18080
+        protocol: tcp
+`,
+      services: [
+        { serviceName: 'web', pushedRef: 'registry.example/web@sha256:aaa' },
+        { serviceName: 'api', pushedRef: 'registry.example/api@sha256:bbb' },
+      ],
+    };
+
+    const hostnames = collectEnvironmentRouteHostnames(
+      [JSON.stringify(composePublishSubmission)],
+      opts
+    );
+
+    expect(hostnames).toEqual([
+      'r1-web-8000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+      'r2-api-8080-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
     ]);
   });
 

@@ -24,7 +24,6 @@ describe('INITIAL_FORM', () => {
       apiKey: '',
       selectedAgent: null,
       hetznerToken: '',
-      selectedRepoUrl: '',
       selectedRepoName: '',
     });
   });

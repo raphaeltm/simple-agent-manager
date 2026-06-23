@@ -75,6 +75,23 @@ async function syncTrialRecord(
   state: TrialOrchestratorState,
   patch: { projectId?: string; workspaceId?: string | null }
 ): Promise<void> {
+  if (patch.projectId) {
+    try {
+      await rc.env.DATABASE.prepare(
+        `UPDATE trials
+         SET project_id = ?
+         WHERE id = ?
+           AND project_id IS NULL`
+      ).bind(patch.projectId, state.trialId).run();
+    } catch (err) {
+      log.warn('trial_orchestrator.trial_d1_project_sync_failed', {
+        trialId: state.trialId,
+        projectId: patch.projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   try {
     const record = await readTrial(rc.env, state.trialId);
     if (!record) return;

@@ -3,16 +3,16 @@
  *
  * Takes an UnresolvedManifest (with tag-based image references) and
  * an injectable ImageResolver to produce a fully resolved DeploymentManifest
- * validated against the Zod schema.
+ * validated through the canonical deployment-manifest contract.
  */
 
-import { DeploymentManifestSchema } from '../deployment-manifest/schema';
+import { validateManifest } from '../deployment-manifest/validate';
 import { isDigestReference } from './parse';
 import type { ComposeParseError, ComposeResolveResult, ImageResolver, UnresolvedManifest } from './types';
 
 /**
  * Resolve all image references in an UnresolvedManifest from tags to digests,
- * then validate the result against the DeploymentManifest schema.
+ * then validate the result against the canonical DeploymentManifest contract.
  */
 export async function resolveManifest(
   unresolved: UnresolvedManifest,
@@ -79,17 +79,11 @@ export async function resolveManifest(
     ...(unresolved.hooks ? { hooks: unresolved.hooks } : {}),
   };
 
-  // Validate against the Zod schema
-  const result = DeploymentManifestSchema.safeParse(resolved);
+  // Validate shape and semantic cross-references through the canonical path.
+  const result = validateManifest(resolved);
   if (!result.success) {
-    return {
-      success: false,
-      errors: result.error.issues.map((issue) => ({
-        path: issue.path.join('.'),
-        message: issue.message,
-      })),
-    };
+    return { success: false, errors: result.errors };
   }
 
-  return { success: true, manifest: result.data };
+  return { success: true, manifest: result.manifest };
 }

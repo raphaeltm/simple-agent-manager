@@ -250,11 +250,12 @@ describe('workspace messages — configurable MAX_MESSAGES_PER_BATCH', () => {
   );
 
   it('reads batch limit from MAX_MESSAGES_PER_BATCH env var', () => {
-    expect(runtimeSource).toContain('c.env.MAX_MESSAGES_PER_BATCH');
+    expect(runtimeSource).toContain('env.MAX_MESSAGES_PER_BATCH');
+    expect(runtimeSource).toContain('validateMessageBatch(c.env, body)');
   });
 
   it('falls back to 100 when env var is absent', () => {
-    expect(runtimeSource).toContain("parsePositiveInt(c.env.MAX_MESSAGES_PER_BATCH as string, 100)");
+    expect(runtimeSource).toContain('parsePositiveInt(env.MAX_MESSAGES_PER_BATCH, 100)');
   });
 
   it('uses maxMessagesPerBatch variable in the comparison (not hardcoded 100)', () => {
@@ -281,7 +282,8 @@ describe('workspace messages — configurable MAX_MESSAGES_PAYLOAD_BYTES', () =>
   });
 
   it('defaults to 256*1024 (256 KB) when env var is absent', () => {
-    expect(runtimeSource).toContain('parsePositiveInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string, 256 * 1024)');
+    expect(runtimeSource).toContain('DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024');
+    expect(runtimeSource).toContain('parsePositiveInt(\n    c.env.MAX_MESSAGES_PAYLOAD_BYTES as string,\n    DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES\n  )');
   });
 
   it('uses configurable maxPayloadBytes in the comparison', () => {

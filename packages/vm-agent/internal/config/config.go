@@ -245,13 +245,14 @@ type Config struct {
 	DiagDiskFullThreshold      float64 // Disk % above which build is "disk full" (env: DIAG_DISK_FULL_THRESHOLD, default: 90)
 
 	// Deployment mode settings (only used when Role == "deployment")
-	EnvironmentID       string        // Deployment environment ID (env: ENVIRONMENT_ID)
-	DeployBaseDir       string        // Base directory for deployment state (env: DEPLOY_BASE_DIR, default: /var/lib/sam-deploy)
-	DeploySigningPubKey string        // Ed25519 public key for payload verification, base64-encoded (env: DEPLOY_SIGNING_PUB_KEY)
-	DeployHealthTimeout time.Duration // Max time to wait for container health checks (env: DEPLOY_HEALTH_TIMEOUT, default: 5m)
-	DeployComposeCmd    string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
-	DeployACMEEmail     string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
-	DeployACMECA        string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
+	EnvironmentID        string        // Deployment environment ID (env: ENVIRONMENT_ID)
+	DeployBaseDir        string        // Base directory for deployment state (env: DEPLOY_BASE_DIR, default: /var/lib/sam-deploy)
+	DeploySigningPubKey  string        // Ed25519 public key for payload verification, base64-encoded (env: DEPLOY_SIGNING_PUB_KEY)
+	DeployRuntimeTimeout time.Duration // Max time for deployment-node host dependency setup (env: DEPLOY_RUNTIME_TIMEOUT, default: 15m)
+	DeployHealthTimeout  time.Duration // Max time to wait for container health checks (env: DEPLOY_HEALTH_TIMEOUT, default: 5m)
+	DeployComposeCmd     string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
+	DeployACMEEmail      string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
+	DeployACMECA         string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
 }
 
 // Load reads configuration from environment variables.
@@ -464,13 +465,14 @@ func Load() (*Config, error) {
 		DiagDiskFullThreshold:      getEnvFloat("DIAG_DISK_FULL_THRESHOLD", 90),
 
 		// Deployment mode settings
-		EnvironmentID:       getEnv("ENVIRONMENT_ID", ""),
-		DeployBaseDir:       getEnv("DEPLOY_BASE_DIR", "/var/lib/sam-deploy"),
-		DeploySigningPubKey: getEnv("DEPLOY_SIGNING_PUB_KEY", ""),
-		DeployHealthTimeout: getEnvDuration("DEPLOY_HEALTH_TIMEOUT", 5*time.Minute),
-		DeployComposeCmd:    getEnv("DEPLOY_COMPOSE_CMD", "docker compose"),
-		DeployACMEEmail:     getEnv("DEPLOY_ACME_EMAIL", ""),
-		DeployACMECA:        getEnv("DEPLOY_ACME_CA", ""),
+		EnvironmentID:        getEnv("ENVIRONMENT_ID", ""),
+		DeployBaseDir:        getEnv("DEPLOY_BASE_DIR", "/var/lib/sam-deploy"),
+		DeploySigningPubKey:  getEnv("DEPLOY_SIGNING_PUB_KEY", ""),
+		DeployRuntimeTimeout: getEnvDuration("DEPLOY_RUNTIME_TIMEOUT", 15*time.Minute),
+		DeployHealthTimeout:  getEnvDuration("DEPLOY_HEALTH_TIMEOUT", 5*time.Minute),
+		DeployComposeCmd:     getEnv("DEPLOY_COMPOSE_CMD", "docker compose"),
+		DeployACMEEmail:      getEnv("DEPLOY_ACME_EMAIL", ""),
+		DeployACMECA:         getEnv("DEPLOY_ACME_CA", ""),
 	}
 
 	// Derive TLS enabled state from cert/key paths
@@ -520,13 +522,6 @@ func Load() (*Config, error) {
 		// valid
 	default:
 		return nil, fmt.Errorf("NODE_ROLE must be %q or %q, got %q", RoleWorkspace, RoleDeployment, cfg.Role)
-	}
-
-	// Deployment mode requires EnvironmentID
-	if cfg.Role == RoleDeployment {
-		if cfg.EnvironmentID == "" {
-			return nil, fmt.Errorf("ENVIRONMENT_ID is required when NODE_ROLE=%q", RoleDeployment)
-		}
 	}
 
 	// Validate TaskMode enum (workspace mode only)

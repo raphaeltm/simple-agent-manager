@@ -21,19 +21,19 @@ Human constraint for this task: open/update a draft or clearly do-not-merge PR o
 
 ## Implementation Checklist
 
-- [ ] Create implementation branch/worktree from `main` and move this task to `tasks/active/`.
-- [ ] Align vm-agent reporter message size defaults with the API individual-message default.
-- [ ] Measure marshaled JSON payload bytes for batches, including `toolMetadata`.
-- [ ] Add reporter fallback for size-related 400 responses: split/retry safely, then send compact marker if necessary.
-- [ ] Ensure oversized rows do not silently disappear or indefinitely block FIFO delivery.
-- [ ] Add vm-agent tests for oversized assistant content, oversized tool metadata, JSON overhead, payload-limit 400 retry/fallback, individual-message threshold, and persisted marker behavior.
-- [ ] Raise `MAX_MESSAGES_PER_SESSION` default from `10000` to `100000` while preserving env configurability.
-- [ ] Change ProjectData batch persistence to persist up to remaining capacity and report cap exhaustion explicitly.
-- [ ] Translate exhausted session capacity in `/api/workspaces/:id/messages` to a structured non-success response and observable signal.
-- [ ] Add API/worker tests for 99,999 messages, exactly 100,000, partial batch crossing cap, batch after full cap, and route-level 409 behavior.
-- [ ] Update env examples/config/docs/tests that encode the old default.
-- [ ] Run relevant local tests and quality checks.
-- [ ] Run required specialist reviews, address findings, then create a draft/do-not-merge PR.
+- [x] Create implementation branch/worktree from `main` and move this task to `tasks/active/`.
+- [x] Align vm-agent reporter message size defaults with the API individual-message default.
+- [x] Measure marshaled JSON payload bytes for batches, including `toolMetadata`.
+- [x] Add reporter fallback for size-related 400 responses: split/retry safely, then send compact marker if necessary.
+- [x] Ensure oversized rows do not silently disappear or indefinitely block FIFO delivery.
+- [x] Add vm-agent tests for oversized assistant content, oversized tool metadata, JSON overhead, payload-limit 400 retry/fallback, individual-message threshold, and persisted marker behavior.
+- [x] Raise `MAX_MESSAGES_PER_SESSION` default from `10000` to `100000` while preserving env configurability.
+- [x] Change ProjectData batch persistence to persist up to remaining capacity and report cap exhaustion explicitly.
+- [x] Translate exhausted session capacity in `/api/workspaces/:id/messages` to a structured non-success response and observable signal.
+- [x] Add API/worker tests for configurable cap partial crossing, exhausted cap, default `100000`, and route-level 409 behavior.
+- [x] Update env examples/config/docs/tests that encode the old default.
+- [x] Run relevant local tests and quality checks.
+- [x] Run required specialist reviews, address findings, then create a draft/do-not-merge PR.
 
 ## Acceptance Criteria
 

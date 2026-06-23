@@ -163,7 +163,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
   /* ─── Project creation ─── */
 
   const handleCreateProject = useCallback(async () => {
-    if (!form.selectedRepoUrl || !form.selectedRepoName) {
+    if (!form.selectedRepoName) {
       setError('Please select a repository');
       return;
     }
@@ -178,7 +178,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
     try {
       const project = await createProject({
         name: form.selectedRepoName.split('/').pop() || form.selectedRepoName,
-        repository: form.selectedRepoUrl,
+        repository: form.selectedRepoName,
         installationId: selectedRepo.installationId,
         githubRepoId: selectedRepo.id,
         defaultBranch: selectedRepo.defaultBranch,
@@ -192,7 +192,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
     } finally {
       if (!abortRef.current.signal.aborted) setLoading(false);
     }
-  }, [form.selectedRepoUrl, form.selectedRepoName, repos, onDismiss, navigate]);
+  }, [form.selectedRepoName, repos, onDismiss, navigate]);
 
   /* ─── Repository loading ─── */
 
@@ -237,15 +237,15 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
             {step.title}
           </h3>
         </div>
-        <p className="text-sm text-fg-muted mb-4 ml-9">{step.description}</p>
+        <p className="text-sm text-fg-muted mb-4 sm:ml-9">{step.description}</p>
 
         {error && (
-          <div className="ml-9 mb-4">
+          <div className="mb-4 sm:ml-9">
             <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
           </div>
         )}
 
-        <div className="ml-9">
+        <div className="sm:ml-9">
           <StepForm
             stepId={step.id}
             tags={tags}
@@ -339,7 +339,7 @@ function StepDetails({
   onToggle: () => void;
 }) {
   return (
-    <div className="ml-9 mt-4">
+    <div className="mt-4 sm:ml-9">
       <button
         type="button"
         onClick={onToggle}

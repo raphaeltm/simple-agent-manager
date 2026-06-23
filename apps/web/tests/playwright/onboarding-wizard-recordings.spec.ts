@@ -85,7 +85,7 @@ const MOCK_PROJECT = {
   id: 'proj-new-1',
   name: 'web-app',
   description: null,
-  repository: 'https://github.com/acme-corp/web-app.git',
+  repository: 'acme-corp/web-app',
   defaultBranch: 'main',
   repoProvider: 'github',
   installationId: 'inst-1',

@@ -1,5 +1,8 @@
 import {
   DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE,
+  DEFAULT_MAX_DEPLOYMENT_ENV_TOTAL_BYTES,
+  DEFAULT_MAX_DEPLOYMENT_ENV_VALUE_BYTES,
+  DEFAULT_MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT,
   DEFAULT_MAX_NODES_PER_USER,
   DEFAULT_MAX_PROJECT_GITHUB_REPOS_PER_PROJECT,
   DEFAULT_MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES,
@@ -31,6 +34,9 @@ export interface RuntimeLimits {
   maxProjectRuntimeEnvValueBytes: number;
   maxProjectRuntimeFileContentBytes: number;
   maxProjectRuntimeFilePathLength: number;
+  maxDeploymentEnvVarsPerEnvironment: number;
+  maxDeploymentEnvValueBytes: number;
+  maxDeploymentEnvTotalBytes: number;
   maxProjectGithubReposPerProject: number;
   taskCallbackTimeoutMs: number;
   taskCallbackRetryMaxAttempts: number;
@@ -59,6 +65,9 @@ export function getRuntimeLimits(env: {
   MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES?: string;
   MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES?: string;
   MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH?: string;
+  MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT?: string;
+  MAX_DEPLOYMENT_ENV_VALUE_BYTES?: string;
+  MAX_DEPLOYMENT_ENV_TOTAL_BYTES?: string;
   MAX_PROJECT_GITHUB_REPOS_PER_PROJECT?: string;
   TASK_CALLBACK_TIMEOUT_MS?: string;
   TASK_CALLBACK_RETRY_MAX_ATTEMPTS?: string;
@@ -106,6 +115,18 @@ export function getRuntimeLimits(env: {
     maxProjectRuntimeFilePathLength: parsePositiveInt(
       env.MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH,
       DEFAULT_MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH
+    ),
+    maxDeploymentEnvVarsPerEnvironment: parsePositiveInt(
+      env.MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT,
+      DEFAULT_MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT
+    ),
+    maxDeploymentEnvValueBytes: parsePositiveInt(
+      env.MAX_DEPLOYMENT_ENV_VALUE_BYTES,
+      DEFAULT_MAX_DEPLOYMENT_ENV_VALUE_BYTES
+    ),
+    maxDeploymentEnvTotalBytes: parsePositiveInt(
+      env.MAX_DEPLOYMENT_ENV_TOTAL_BYTES,
+      DEFAULT_MAX_DEPLOYMENT_ENV_TOTAL_BYTES
     ),
     maxProjectGithubReposPerProject: parsePositiveInt(
       env.MAX_PROJECT_GITHUB_REPOS_PER_PROJECT,

@@ -31,6 +31,7 @@ export type OpenCodeProvider =
   | 'platform'
   | 'scaleway'
   | 'opencode-zen'
+  | 'opencode-go'
   | 'opencode-managed'
   | 'google-vertex'
   | 'openai-compatible'
@@ -40,6 +41,7 @@ export type OpenCodeProvider =
 export const DEFAULT_OPENCODE_PROVIDER = 'opencode-zen' as const;
 export const OPENCODE_MANAGED_PROVIDER_ALIAS = 'opencode-managed' as const;
 export const DEFAULT_OPENCODE_ZEN_MODEL = 'opencode/claude-sonnet-4-6' as const;
+export const DEFAULT_OPENCODE_GO_MODEL = 'opencode-go/glm-5.2' as const;
 
 /** Metadata for an OpenCode provider option */
 export interface OpenCodeProviderMeta {
@@ -78,16 +80,24 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
     modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
     requiresBaseUrl: false,
     requiresApiKey: true,
-    keyLabel: 'OpenCode Zen API Key',
-    keyHelpText: 'Create an OpenCode API key for Zen at opencode.ai/auth',
+    keyLabel: 'OpenCode API Key',
+    keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
+  },
+  'opencode-go': {
+    label: 'OpenCode Go',
+    modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_GO_MODEL}`,
+    requiresBaseUrl: false,
+    requiresApiKey: true,
+    keyLabel: 'OpenCode API Key',
+    keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
   },
   'opencode-managed': {
     label: 'OpenCode Zen',
     modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
     requiresBaseUrl: false,
     requiresApiKey: true,
-    keyLabel: 'OpenCode Zen API Key',
-    keyHelpText: 'Create an OpenCode API key for Zen at opencode.ai/auth',
+    keyLabel: 'OpenCode API Key',
+    keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
   },
   'google-vertex': {
     label: 'Google Vertex',
@@ -126,6 +136,7 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
 /** Ordered list of OpenCode provider values for dropdown rendering */
 export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
   'opencode-zen',
+  'opencode-go',
   'platform',
   'scaleway',
   'google-vertex',

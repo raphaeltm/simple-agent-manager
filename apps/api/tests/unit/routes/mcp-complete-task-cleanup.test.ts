@@ -32,8 +32,9 @@ vi.mock('../../../src/services/trigger-execution-sync', () => ({
 }));
 
 // Mock orchestrator + scheduler
+const notifyTaskEventSpy = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/project-orchestrator', () => ({
-  notifyTaskEvent: vi.fn().mockResolvedValue(undefined),
+  notifyTaskEvent: (...args: unknown[]) => notifyTaskEventSpy(...args),
 }));
 vi.mock('../../../src/services/scheduler-state-sync', () => ({
   recomputeMissionSchedulerStates: vi.fn().mockResolvedValue(undefined),
@@ -147,6 +148,9 @@ describe('complete_task cleanup behavior', () => {
 
     // Verify workspace cleanup was triggered
     expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+
+    // Non-mission tasks must not wake ProjectOrchestrator.
+    expect(notifyTaskEventSpy).not.toHaveBeenCalled();
   });
 
   it('conversation-mode complete_task does NOT trigger session stop or cleanup', async () => {

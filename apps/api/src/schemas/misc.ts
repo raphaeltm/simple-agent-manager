@@ -93,6 +93,17 @@ const DeploymentStateSchema = v.object({
   status: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
   services: v.optional(v.unknown()),
+  deployStatus: v.optional(v.unknown()),
+  diskTelemetry: v.optional(v.unknown()),
+  environments: v.optional(v.array(v.object({
+    environmentId: v.string(),
+    appliedSeq: v.optional(v.number()),
+    status: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    services: v.optional(v.unknown()),
+    deployStatus: v.optional(v.unknown()),
+    diskTelemetry: v.optional(v.unknown()),
+  }))),
 });
 
 export const NodeHeartbeatSchema = v.object({

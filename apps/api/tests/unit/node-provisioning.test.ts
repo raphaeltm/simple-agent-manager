@@ -460,7 +460,18 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function provisionNode'),
       nodesSource.indexOf('async function stopNodeResources')
     );
-    expect(section).toContain('createProviderForUser(db, node.userId, getCredentialEncryptionKey(env), env, targetProvider)');
+    expect(section).toMatch(
+      /createProviderForUser\(\s*db,\s*node\.userId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider\s*\)/
+    );
+  });
+
+  it('provisionNode persists the resolved provider identity for later cleanup', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    expect(section).toContain('cloudProvider: providerResult.providerName');
+    expect(section).toContain('credentialSource: providerResult.credentialSource');
   });
 
   it('provisionNode persists error to observability database on failure', () => {
@@ -498,7 +509,9 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResources')
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider)');
+    expect(section).toMatch(
+      /createProviderForUser\(\s*db,\s*userId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider\s*\)/
+    );
   });
 
   it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
@@ -506,7 +519,18 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResources')
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider)');
+    expect(section).toMatch(
+      /createProviderForUser\(\s*db,\s*userId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider\s*\)/
+    );
+  });
+
+  it('deleteNodeResourcesStrict verifies legacy unknown-provider nodes before deleting', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function deleteNodeResourcesStrict')
+    );
+    expect(section).toContain('providerResult.provider.getVM(node.providerInstanceId)');
+    expect(section).toContain('throw new Error');
+    expect(section).toContain('await providerResult.provider.deleteVM(node.providerInstanceId)');
   });
 });
 

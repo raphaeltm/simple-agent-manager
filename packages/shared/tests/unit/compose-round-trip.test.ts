@@ -197,7 +197,7 @@ x-sam-routes:
     expect(api.image.digest).toBe('sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4');
   });
 
-  it('resolved manifest validates against DeploymentManifestSchema (Zod)', async () => {
+  it('resolved manifest passes canonical deployment-manifest validation', async () => {
     const parseResult = parseCompose(REALISTIC_COMPOSE);
     expect(parseResult.success).toBe(true);
     if (!parseResult.success) throw new Error('Parse failed');
@@ -205,8 +205,8 @@ x-sam-routes:
     const mockResolver: ImageResolver = vi.fn().mockResolvedValue(FIXED_DIGEST);
     const resolveResult = await resolveManifest(parseResult.manifest, mockResolver);
 
-    // resolveManifest internally validates against DeploymentManifestSchema
-    // so a success here proves Zod validation passed
+    // resolveManifest internally validates through validateManifest(), so a
+    // success here proves shape and semantic cross-reference validation passed.
     expect(resolveResult.success).toBe(true);
   });
 

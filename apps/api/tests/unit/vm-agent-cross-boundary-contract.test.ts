@@ -619,6 +619,33 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(parsedBody.projectId).toBeUndefined();
       expect(parsedBody.taskId).toBeUndefined();
     });
+
+    it('preserves OpenCode Go provider and GLM 5.2 model overrides', async () => {
+      vi.resetModules();
+      const capture = setupNodeAgentMocks();
+      const { startAgentSessionOnNode } = await import('../../src/services/node-agent');
+
+      await startAgentSessionOnNode(
+        'node-abc',
+        'ws-test',
+        'sess-xyz',
+        'opencode',
+        'Use GLM 5.2',
+        {} as any,
+        'user-123',
+        undefined,
+        {
+          model: 'opencode-go/glm-5.2',
+          opencodeProvider: 'opencode-go',
+        },
+      );
+
+      const parsedBody = JSON.parse(capture.body!);
+      expect(parsedBody.agentType).toBe('opencode');
+      expect(parsedBody.model).toBe('opencode-go/glm-5.2');
+      expect(parsedBody.opencodeProvider).toBe('opencode-go');
+      expect(parsedBody.opencodeBaseUrl).toBeUndefined();
+    });
   });
 });
 

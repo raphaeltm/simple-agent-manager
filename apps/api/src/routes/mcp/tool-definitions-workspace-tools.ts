@@ -101,26 +101,6 @@ export const WORKSPACE_TOOLS = [
     },
   },
   {
-    name: 'get_ci_status',
-    description:
-      'Get GitHub Actions workflow status for the current branch. Returns overall status and individual workflow run details.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'get_deployment_status',
-    description:
-      'Get staging and production deployment state: last deploy status, whether a deploy is currently running, and recent deployment runs.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-      additionalProperties: false,
-    },
-  },
-  {
     name: 'get_workspace_diff_summary',
     description:
       'Get all changes since workspace creation: files changed, new, deleted, commit count, diff stats, and untracked files.',

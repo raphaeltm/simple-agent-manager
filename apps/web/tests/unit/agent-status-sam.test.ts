@@ -86,4 +86,15 @@ describe('getAgentConnectionSummary', () => {
     expect(result.status).toBe('connected');
     expect(result.label).toBe('Using Scaleway Cloud Key');
   });
+
+  it('does not treat OpenCode Go as a Scaleway fallback', () => {
+    const result = getAgentConnectionSummary(
+      makeAgent({ id: 'opencode', fallbackCredentialSource: 'scaleway-cloud' }),
+      [],
+      'opencode-go',
+      'user',
+    );
+    expect(result.status).toBe('disconnected');
+    expect(result.label).toBe('Not Configured');
+  });
 });

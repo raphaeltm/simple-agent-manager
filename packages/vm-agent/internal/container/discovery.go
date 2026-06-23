@@ -25,7 +25,11 @@ var (
 	inspectContainerBridgeIP     = dockerInspectContainerBridgeIP
 )
 
-func dockerCLIPath() string {
+// DockerCLIPath resolves an absolute path to the docker CLI. It prefers the
+// SAM_DOCKER_CLI_PATH override, then a PATH lookup (only if it resolves to an
+// absolute path), and finally falls back to the conventional install location.
+// Returning an absolute path keeps callers off a bare-name PATH search.
+func DockerCLIPath() string {
 	path := os.Getenv("SAM_DOCKER_CLI_PATH")
 	if filepath.IsAbs(path) {
 		return path
@@ -185,7 +189,7 @@ func sortCandidates(candidates []containerCandidate) {
 
 func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containerCandidate, error) {
 	filter := fmt.Sprintf("label=%s=%s", labelKey, labelValue)
-	cmd := exec.Command(dockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
+	cmd := exec.Command(DockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -217,13 +221,13 @@ func dockerIsContainerRunning(containerID string) bool {
 	if strings.TrimSpace(containerID) == "" {
 		return false
 	}
-	cmd := exec.Command(dockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
+	cmd := exec.Command(DockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
 	output, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(output)) == "true"
 }
 
 func dockerInspectContainerBridgeIP(containerID string) (string, error) {
-	cmd := exec.Command(dockerCLIPath(), "inspect", "-f",
+	cmd := exec.Command(DockerCLIPath(), "inspect", "-f",
 		"{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerID)
 	output, err := cmd.Output()
 	if err != nil {

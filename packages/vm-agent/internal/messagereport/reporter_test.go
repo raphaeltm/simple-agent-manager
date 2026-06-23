@@ -54,6 +54,155 @@ func testConfig(endpoint, workspaceID string) Config {
 	}
 }
 
+func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
+}
+
+func requestMessageIDs(t *testing.T, r *http.Request) []string {
+	t.Helper()
+	messages := requestMessages[struct {
+		MessageID string `json:"messageId"`
+	}](t, r)
+	ids := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		ids = append(ids, msg.MessageID)
+	}
+	return ids
+}
+
+func requestMessages[T any](t *testing.T, r *http.Request) []T {
+	t.Helper()
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		Messages []T `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	return payload.Messages
+}
+
+func recordJoinedIDs(mu *sync.Mutex, requestIDs *[]string, ids []string) {
+	mu.Lock()
+	defer mu.Unlock()
+	*requestIDs = append(*requestIDs, strings.Join(ids, ","))
+}
+
+func writePayloadTooLarge(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+}
+
+func writeSessionLimit(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_, _ = w.Write([]byte(`{"error":"SESSION_MESSAGE_LIMIT_EXCEEDED","message":"Session message limit reached"}`))
+}
+
+func writePersisted(w http.ResponseWriter) {
+	writePersistedCount(w, 1)
+}
+
+func writePersistedCount(w http.ResponseWriter, count int) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"persisted": count, "duplicates": 0})
+}
+
+func newTokenReporter(t *testing.T, endpoint, workspaceID string) (*sql.DB, *Reporter) {
+	t.Helper()
+	db := openTestDB(t)
+	cfg := testConfig(endpoint, workspaceID)
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+	return db, r
+}
+
+func enqueueAssistantPair(t *testing.T, r *Reporter) {
+	t.Helper()
+	for i := 0; i < 2; i++ {
+		if err := r.Enqueue(Message{
+			MessageID: fmt.Sprintf("m%d", i),
+			Role:      "assistant",
+			Content:   "content",
+			Timestamp: fmt.Sprintf("2024-01-01T00:00:0%dZ", i),
+		}); err != nil {
+			t.Fatalf("enqueue m%d: %v", i, err)
+		}
+	}
+}
+
+func assertOutboxCount(t *testing.T, db *sql.DB, want int, context string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+		t.Fatalf("count %s: %v", context, err)
+	}
+	if count != want {
+		t.Fatalf("%s: got %d rows, want %d", context, count, want)
+	}
+}
+
+func waitForOutboxCount(t *testing.T, db *sql.DB, want int, context string) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count); err != nil {
+			return false
+		}
+		return count == want
+	})
+	assertOutboxCount(t, db, want, context)
+}
+
+func storedContentAfterOversizedEnqueue(t *testing.T, limit int, messageID string) string {
+	t.Helper()
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.MaxMessageContentBytes = limit
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	if err := r.Enqueue(Message{
+		MessageID: messageID,
+		Role:      "assistant",
+		Content:   strings.Repeat("x", 128),
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	var stored string
+	if err := db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", messageID).Scan(&stored); err != nil {
+		t.Fatalf("select content: %v", err)
+	}
+	return stored
+}
+
+func recordingBatchSizeHandler(t *testing.T, mu *sync.Mutex, batchSizes *[]int) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		messages := requestMessages[json.RawMessage](t, r)
+		mu.Lock()
+		*batchSizes = append(*batchSizes, len(messages))
+		mu.Unlock()
+		writePersistedCount(w, len(messages))
+	}
+}
+
 func TestNew_ValidConfig(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
@@ -170,18 +319,13 @@ func TestFlush_SuccessfulPOST(t *testing.T) {
 	var mu sync.Mutex
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Messages []json.RawMessage `json:"messages"`
-		}
-		json.Unmarshal(body, &payload)
+		messages := requestMessages[json.RawMessage](t, r)
 
 		mu.Lock()
-		received = append(received, payload.Messages...)
+		received = append(received, messages...)
 		mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": len(payload.Messages), "duplicates": 0})
+		writePersistedCount(w, len(messages))
 	}))
 	defer ts.Close()
 
@@ -360,8 +504,7 @@ func TestSetToken_UpdatesAuth(t *testing.T) {
 	authHeaders := make(chan string, 10)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeaders <- r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+		writePersisted(w)
 	}))
 	defer ts.Close()
 
@@ -405,18 +548,7 @@ func TestBatchMaxSize_RespectedInFlush(t *testing.T) {
 	var batchSizes []int
 	var mu sync.Mutex
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Messages []json.RawMessage `json:"messages"`
-		}
-		json.Unmarshal(body, &payload)
-		mu.Lock()
-		batchSizes = append(batchSizes, len(payload.Messages))
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": len(payload.Messages), "duplicates": 0})
-	}))
+	ts := httptest.NewServer(recordingBatchSizeHandler(t, &mu, &batchSizes))
 	defer ts.Close()
 
 	db := openTestDB(t)
@@ -461,18 +593,7 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	var batchSizes []int
 	var mu sync.Mutex
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload struct {
-			Messages []json.RawMessage `json:"messages"`
-		}
-		json.Unmarshal(body, &payload)
-		mu.Lock()
-		batchSizes = append(batchSizes, len(payload.Messages))
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": len(payload.Messages), "duplicates": 0})
-	}))
+	ts := httptest.NewServer(recordingBatchSizeHandler(t, &mu, &batchSizes))
 	defer ts.Close()
 
 	db := openTestDB(t)
@@ -485,7 +606,9 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	}
 	r.SetToken("test-token")
 
-	// Each message content is ~30 bytes, so BatchMaxBytes=50 should yield ~1-2 per batch.
+	// BatchMaxBytes is measured against the full JSON request body. With a
+	// 50-byte limit even one message exceeds the budget, so each row should
+	// be sent alone and the next row must not be added to that oversized batch.
 	for i := 0; i < 5; i++ {
 		_ = r.Enqueue(Message{
 			MessageID: fmt.Sprintf("m%d", i),
@@ -502,18 +625,401 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Each batch should have at most 2 messages (first is always included,
-	// second may fit if content of first + second <= 50).
 	totalSent := 0
 	for _, size := range batchSizes {
+		if size != 1 {
+			t.Fatalf("expected JSON-budgeted single-message batch, got batch size %d in %v", size, batchSizes)
+		}
 		totalSent += size
 	}
 	if totalSent != 5 {
 		t.Fatalf("expected 5 total messages sent, got %d", totalSent)
 	}
-	// There should be multiple batches (at least 3 for 5 messages with ~30 bytes each and 50 byte limit).
-	if len(batchSizes) < 2 {
-		t.Fatalf("expected multiple batches due to byte limit, got %d", len(batchSizes))
+	if len(batchSizes) != 5 {
+		t.Fatalf("expected 5 single-message batches due to JSON byte limit, got %d", len(batchSizes))
+	}
+}
+
+func TestReadBatch_IncludesToolMetadataInJSONByteBudget(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.BatchMaxSize = 10
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	rows := []outboxRow{
+		{id: 1, messageID: "m1", sessionID: "s1", role: "tool", content: "a", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:00Z"},
+		{id: 2, messageID: "m2", sessionID: "s1", role: "tool", content: "b", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:01Z"},
+	}
+	size, err := marshaledBatchSize(rows[:1])
+	if err != nil {
+		t.Fatalf("marshal size: %v", err)
+	}
+	cfg.BatchMaxBytes = size + 1
+	r.cfg.BatchMaxBytes = cfg.BatchMaxBytes
+
+	for _, row := range rows {
+		_, err := db.Exec(
+			`INSERT INTO message_outbox (message_id, session_id, role, content, tool_metadata, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			row.messageID, row.sessionID, row.role, row.content, row.toolMetadata.String, row.createdAt,
+		)
+		if err != nil {
+			t.Fatalf("insert row: %v", err)
+		}
+	}
+
+	batch, err := r.readBatch()
+	if err != nil {
+		t.Fatalf("readBatch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected tool metadata to count toward JSON byte budget, got %d rows", len(batch))
+	}
+}
+
+func TestFlush_Size400RetriesSingleMessagesBeforeDelete(t *testing.T) {
+	var requestSizes []int
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		mu.Lock()
+		requestSizes = append(requestSizes, len(payload.Messages))
+		mu.Unlock()
+		if len(payload.Messages) > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Payload exceeds 262144 byte limit"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.BatchMaxBytes = 1024 * 1024
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	for i := 0; i < 2; i++ {
+		if err := r.Enqueue(Message{MessageID: fmt.Sprintf("m%d", i), Role: "assistant", Content: "content", Timestamp: fmt.Sprintf("2024-01-01T00:00:0%dZ", i)}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requestSizes) < 3 || requestSizes[0] != 2 || requestSizes[1] != 1 || requestSizes[2] != 1 {
+		t.Fatalf("expected batch retry as singles after payload 400, got request sizes %v", requestSizes)
+	}
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected outbox empty after fallback success, got %d", count)
+	}
+}
+
+func TestFlush_SizeFallback409DisablesReporter(t *testing.T) {
+	var requests int32
+	var mu sync.Mutex
+	var requestIDs []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ids := requestMessageIDs(t, r)
+		recordJoinedIDs(&mu, &requestIDs, ids)
+		atomic.AddInt32(&requests, 1)
+
+		if len(ids) > 1 {
+			writePayloadTooLarge(w)
+			return
+		}
+		if ids[0] == "m1" {
+			writeSessionLimit(w)
+			return
+		}
+		writePersisted(w)
+	}))
+	defer ts.Close()
+
+	db, r := newTokenReporter(t, ts.URL, "ws-1")
+
+	enqueueAssistantPair(t, r)
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 3 })
+
+	assertOutboxCount(t, db, 0, "outbox after fallback session limit")
+
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
+		t.Fatalf("enqueue after limit: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	r.Shutdown()
+
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("expected fallback limit to stop future sends, got %d requests", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(requestIDs, "|") != "m0,m1|m0|m1" {
+		t.Fatalf("unexpected request sequence: %v", requestIDs)
+	}
+}
+
+func TestFlush_SizeFallbackPermanentErrorDiscardsBatch(t *testing.T) {
+	var requests int32
+	var mu sync.Mutex
+	var requestIDs []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ids := requestMessageIDs(t, r)
+		recordJoinedIDs(&mu, &requestIDs, ids)
+		atomic.AddInt32(&requests, 1)
+
+		if len(ids) > 1 {
+			writePayloadTooLarge(w)
+			return
+		}
+		if ids[0] == "m1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"UNAUTHORIZED"}`))
+			return
+		}
+
+		writePersisted(w)
+	}))
+	defer ts.Close()
+
+	db, r := newTokenReporter(t, ts.URL, "ws-1")
+
+	enqueueAssistantPair(t, r)
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 3 })
+	time.Sleep(150 * time.Millisecond)
+	r.Shutdown()
+
+	assertOutboxCount(t, db, 0, "outbox after fallback permanent error")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(requestIDs, "|") != "m0,m1|m0|m1" {
+		t.Fatalf("unexpected request sequence: %v", requestIDs)
+	}
+}
+
+func TestShutdown_CancelsSizeFallbackRequest(t *testing.T) {
+	fallbackStarted := make(chan struct{})
+	var fallbackStartedOnce sync.Once
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		messages := requestMessages[json.RawMessage](t, r)
+		if len(messages) > 1 {
+			writePayloadTooLarge(w)
+			return
+		}
+
+		fallbackStartedOnce.Do(func() { close(fallbackStarted) })
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.HTTPTimeout = 10 * time.Second
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	enqueueAssistantPair(t, r)
+
+	select {
+	case <-fallbackStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fallback request")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		r.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("shutdown did not cancel fallback request promptly")
+	}
+}
+
+func TestEnqueue_TruncationIncludesMarkerWithinConfiguredLimit(t *testing.T) {
+	const maxMessageBytes = 32
+	stored := storedContentAfterOversizedEnqueue(t, maxMessageBytes, "oversized")
+	if len(stored) > maxMessageBytes {
+		t.Fatalf("stored content length = %d, want <= %d", len(stored), maxMessageBytes)
+	}
+	if !strings.HasSuffix(stored, truncationMarker) {
+		t.Fatalf("stored content should include truncation marker, got %q", stored)
+	}
+}
+
+func TestEnqueue_TruncationHonorsTinyConfiguredLimit(t *testing.T) {
+	const maxMessageBytes = 4
+	stored := storedContentAfterOversizedEnqueue(t, maxMessageBytes, "tiny-limit")
+	if len(stored) != maxMessageBytes {
+		t.Fatalf("stored content length = %d, want %d", len(stored), maxMessageBytes)
+	}
+	if stored != truncationMarker[:maxMessageBytes] {
+		t.Fatalf("stored content = %q, want truncated marker prefix", stored)
+	}
+}
+
+func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
+	var received []struct {
+		MessageID    string `json:"messageId"`
+		Role         string `json:"role"`
+		Content      string `json:"content"`
+		ToolMetadata string `json:"toolMetadata"`
+		Timestamp    string `json:"timestamp"`
+	}
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				MessageID    string `json:"messageId"`
+				Role         string `json:"role"`
+				Content      string `json:"content"`
+				ToolMetadata string `json:"toolMetadata"`
+				Timestamp    string `json:"timestamp"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		msg := payload.Messages[0]
+		if msg.Content != omittedMessageMarker {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Individual message content exceeds 102400 byte limit"}`))
+			return
+		}
+		mu.Lock()
+		received = append(received, payload.Messages...)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.MaxMessageContentBytes = 1024
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	if err := r.Enqueue(Message{
+		MessageID:    "oversized-tool",
+		Role:         "assistant",
+		Content:      strings.Repeat("x", 10),
+		ToolMetadata: strings.Repeat("m", 2048),
+		Timestamp:    "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected one omitted marker delivery, got %d", len(received))
+	}
+	msg := received[0]
+	if msg.MessageID != "oversized-tool" || msg.Role != "assistant" || msg.Timestamp != "2024-01-01T00:00:00Z" {
+		t.Fatalf("marker did not preserve identity fields: %+v", msg)
+	}
+	if msg.Content != omittedMessageMarker {
+		t.Fatalf("content = %q, want omitted marker", msg.Content)
+	}
+	if msg.ToolMetadata != "" {
+		t.Fatalf("expected oversized tool metadata omitted, got %q", msg.ToolMetadata)
+	}
+}
+
+func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
+	var requests int32
+	var receivedMu sync.Mutex
+	var receivedIDs []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ids := requestMessageIDs(t, r)
+		receivedMu.Lock()
+		receivedIDs = append(receivedIDs, ids...)
+		receivedMu.Unlock()
+
+		if atomic.AddInt32(&requests, 1) == 1 {
+			writeSessionLimit(w)
+			return
+		}
+
+		writePersisted(w)
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+	defer r.Shutdown()
+
+	if err := r.Enqueue(Message{MessageID: "m1", Role: "assistant", Content: "first", Timestamp: "2024-01-01T00:00:00Z"}); err != nil {
+		t.Fatalf("enqueue m1: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 1 })
+	waitForOutboxCount(t, db, 0, "outbox after session limit")
+
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:01Z"}); err != nil {
+		t.Fatalf("enqueue m2 after limit: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("expected no retry or new request after limit, got %d requests", got)
+	}
+	assertOutboxCount(t, db, 0, "outbox after dropped post-limit enqueue")
+
+	r.SetSessionID("sess-2")
+	if err := r.Enqueue(Message{MessageID: "m3", Role: "assistant", Content: "new session", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
+		t.Fatalf("enqueue m3 after session switch: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 2 })
+
+	receivedMu.Lock()
+	defer receivedMu.Unlock()
+	if strings.Join(receivedIDs, ",") != "m1,m3" {
+		t.Fatalf("expected only m1 and m3 delivered, got %v", receivedIDs)
 	}
 }
 
@@ -961,6 +1467,52 @@ func TestSetSessionID_NewMessagesUseNewSession(t *testing.T) {
 	}
 }
 
+func TestSetSessionID_ConcurrentEnqueueDoesNotLeaveOldSessionRows(t *testing.T) {
+	for attempt := 0; attempt < 100; attempt++ {
+		db := openTestDB(t)
+		cfg := testConfig("http://localhost", "ws-1")
+		cfg.BatchMaxWait = time.Hour
+		cfg.OutboxMaxSize = 10000
+		r, err := New(db, cfg)
+		if err != nil {
+			t.Fatalf("attempt %d new: %v", attempt, err)
+		}
+
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = r.Enqueue(Message{
+					MessageID: fmt.Sprintf("attempt-%d-msg-%d", attempt, i),
+					Role:      "assistant",
+					Content:   "content",
+					Timestamp: "2024-01-01T00:00:00Z",
+				})
+			}
+		}()
+
+		time.Sleep(100 * time.Microsecond)
+		r.SetSessionID("sess-2")
+		close(stop)
+		<-done
+
+		var stale int
+		if err := db.QueryRow("SELECT COUNT(*) FROM message_outbox WHERE session_id = ?", "sess-1").Scan(&stale); err != nil {
+			t.Fatalf("attempt %d count stale: %v", attempt, err)
+		}
+		r.Shutdown()
+		if stale != 0 {
+			t.Fatalf("attempt %d left %d stale old-session rows", attempt, stale)
+		}
+	}
+}
+
 func TestSetSessionID_NilReporter_DoesNotPanic(t *testing.T) {
 	var r *Reporter
 	r.SetSessionID("anything") // should not panic
@@ -1175,9 +1727,8 @@ func TestEnqueue_TruncatesOversizedContent(t *testing.T) {
 		t.Fatalf("expected content to end with truncation marker, got last 30 chars: %q", content[len(content)-30:])
 	}
 
-	expectedLen := cfg.MaxMessageContentBytes + len(truncationMarker)
-	if len(content) != expectedLen {
-		t.Fatalf("truncated content length = %d, want %d", len(content), expectedLen)
+	if len(content) != cfg.MaxMessageContentBytes {
+		t.Fatalf("truncated content length = %d, want %d", len(content), cfg.MaxMessageContentBytes)
 	}
 }
 

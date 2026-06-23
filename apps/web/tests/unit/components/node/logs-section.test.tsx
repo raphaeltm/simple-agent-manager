@@ -48,6 +48,8 @@ function defaultHook(overrides: Partial<ReturnType<typeof mockUseNodeLogs>> = {}
     hasMore: false,
     streaming: false,
     paused: false,
+    containers: [],
+    containersLoading: false,
     filter: { source: 'all', level: 'info', search: '', container: '' },
     setSource: vi.fn(),
     setLevel: vi.fn(),

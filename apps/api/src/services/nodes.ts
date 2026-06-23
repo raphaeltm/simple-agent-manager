@@ -15,6 +15,8 @@ import { signNodeCallbackToken } from './jwt';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
 
+const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
+
 export interface CreateNodeInput {
   userId: string;
   name: string;
@@ -57,7 +59,7 @@ export interface ProvisionedNode {
  */
 export function resolveHetznerBaseImageOverride(
   targetProvider: CredentialProvider | undefined,
-  envValue: string | undefined,
+  envValue: string | undefined
 ): string | undefined {
   if (targetProvider !== 'hetzner') return undefined;
   const trimmed = envValue?.trim();
@@ -136,15 +138,11 @@ export async function provisionNode(
   env: Env,
   taskContext?: ProvisionTaskContext,
   options?: ProvisionNodeOptions,
-  deploymentContext?: DeploymentProvisionContext,
+  deploymentContext?: DeploymentProvisionContext
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
 
-  const nodes = await db
-    .select()
-    .from(schema.nodes)
-    .where(eq(schema.nodes.id, nodeId))
-    .limit(1);
+  const nodes = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
 
   const node = nodes[0];
   if (!node) {
@@ -152,24 +150,35 @@ export async function provisionNode(
   }
 
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+  let attemptedProvider = targetProvider;
 
   try {
-    const providerResult = await createProviderForUser(db, node.userId, getCredentialEncryptionKey(env), env, targetProvider);
+    const providerResult = await createProviderForUser(
+      db,
+      node.userId,
+      getCredentialEncryptionKey(env),
+      env,
+      targetProvider
+    );
     if (!providerResult) {
       throw new Error(
         targetProvider
           ? `Cloud provider "${targetProvider}" not connected`
-          : 'Cloud provider account not connected',
+          : 'Cloud provider account not connected'
       );
     }
+    attemptedProvider = providerResult.providerName;
 
-    // Track credential source on the node record
-    if (providerResult.credentialSource === 'platform') {
-      await db
-        .update(schema.nodes)
-        .set({ credentialSource: 'platform' })
-        .where(eq(schema.nodes.id, node.id));
-    }
+    // Persist the resolved provider identity before external provisioning so
+    // cleanup never has to guess which third-party API owns the VM.
+    await db
+      .update(schema.nodes)
+      .set({
+        cloudProvider: providerResult.providerName,
+        credentialSource: providerResult.credentialSource,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.nodes.id, node.id));
 
     const callbackToken = await signNodeCallbackToken(node.id, env);
 
@@ -181,7 +190,7 @@ export async function provisionNode(
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
       callbackToken,
-      provider: targetProvider,
+      provider: providerResult.providerName,
       logJournalMaxUse: env.LOG_JOURNAL_MAX_USE,
       logJournalKeepFree: env.LOG_JOURNAL_KEEP_FREE,
       logJournalMaxRetention: env.LOG_JOURNAL_MAX_RETENTION,
@@ -199,6 +208,10 @@ export async function provisionNode(
       role: isDeploymentNode ? 'deployment' : undefined,
       environmentId: deploymentContext?.environmentId,
       deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined,
+      deployAcmeEmail: isDeploymentNode ? env.DEPLOY_ACME_EMAIL : undefined,
+      deployAcmeCa: isDeploymentNode ? env.DEPLOY_ACME_CA : undefined,
+      deployComposeCmd: isDeploymentNode ? env.DEPLOY_COMPOSE_CMD : undefined,
+      deployHealthTimeout: isDeploymentNode ? env.DEPLOY_HEALTH_TIMEOUT : undefined,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -208,8 +221,8 @@ export async function provisionNode(
     const provider = providerResult.provider;
 
     const baseImageOverride = resolveHetznerBaseImageOverride(
-      targetProvider,
-      env.HETZNER_BASE_IMAGE,
+      providerResult.providerName,
+      env.HETZNER_BASE_IMAGE
     );
 
     const vm = await provider.createVM({
@@ -236,6 +249,8 @@ export async function provisionNode(
       await db
         .update(schema.nodes)
         .set({
+          cloudProvider: providerResult.providerName,
+          credentialSource: providerResult.credentialSource,
           providerInstanceId: vm.id,
           status: 'creating',
           errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
@@ -245,34 +260,43 @@ export async function provisionNode(
       return;
     }
 
-    // Deployment nodes use pull-based release channel — no DNS record needed.
-    // Workspace nodes need a backend DNS record for CF-proxied traffic.
     let backendDnsRecordId: string | null = null;
-    if (!isDeploymentNode) {
-      try {
-        backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
-      } catch (dnsErr) {
-        log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
-      }
+    let dnsErrorMessage: string | null = null;
+    try {
+      backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
+    } catch (dnsErr) {
+      log.error('node_provisioning.dns_record_failed', {
+        nodeId: node.id,
+        ...serializeError(dnsErr),
+      });
+      dnsErrorMessage = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
     }
 
     await db
       .update(schema.nodes)
       .set({
+        cloudProvider: providerResult.providerName,
+        credentialSource: providerResult.credentialSource,
         providerInstanceId: vm.id,
         ipAddress: vm.ip,
         backendDnsRecordId,
-        status: 'running',
-        healthStatus: 'stale',
+        status: dnsErrorMessage ? 'error' : 'running',
+        healthStatus: dnsErrorMessage ? 'unhealthy' : 'stale',
+        errorMessage: dnsErrorMessage
+          ? truncateNodeErrorMessage(`Backend DNS record creation failed: ${dnsErrorMessage}`)
+          : null,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
   } catch (err) {
     // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage
-    const errorMessage = err instanceof GcpApiError
-      ? sanitizeGcpError(err, 'node-provisioning')
-      : (err instanceof Error ? err.message : String(err));
-    const providerName = targetProvider ?? 'unknown';
+    const errorMessage =
+      err instanceof GcpApiError
+        ? sanitizeGcpError(err, 'node-provisioning')
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    const providerName = attemptedProvider ?? 'unknown';
     const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
 
     log.error('node_provisioning.failed', {
@@ -315,7 +339,7 @@ export async function provisionNode(
       if (isCapacityFailure) {
         await db.delete(schema.nodes).where(eq(schema.nodes.id, node.id));
       } else {
-        const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
+        const truncatedError = truncateNodeErrorMessage(errorMessage);
         await db
           .update(schema.nodes)
           .set({
@@ -330,7 +354,7 @@ export async function provisionNode(
     }
 
     // Legacy mode: store the actual error message (truncated) in the node record.
-    const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
+    const truncatedError = truncateNodeErrorMessage(errorMessage);
     await db
       .update(schema.nodes)
       .set({
@@ -350,12 +374,7 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   const rows = await db
     .select()
     .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    )
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
     .limit(1);
 
   const node = rows[0];
@@ -366,7 +385,13 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
+    const providerResult = await createProviderForUser(
+      db,
+      userId,
+      getCredentialEncryptionKey(env),
+      env,
+      targetProvider
+    );
     if (providerResult) {
       try {
         await providerResult.provider.deleteVM(node.providerInstanceId);
@@ -392,12 +417,7 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       status: 'deleted',
       updatedAt: now,
     })
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   await db
     .update(schema.nodes)
@@ -406,15 +426,105 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       healthStatus: 'stale',
       updatedAt: now,
     })
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    );
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
 }
 
-export async function deleteNodeResources(nodeId: string, userId: string, env: Env): Promise<void> {
+export interface DeleteNodeResourcesResult {
+  nodeFound: boolean;
+  providerVmDeleted: boolean;
+  providerVmDeleteSkippedReason: string | null;
+  backendDnsDeleted: boolean;
+  errors: string[];
+}
+
+export async function deleteNodeResources(
+  nodeId: string,
+  userId: string,
+  env: Env
+): Promise<DeleteNodeResourcesResult> {
+  const db = drizzle(env.DATABASE, { schema });
+  const result: DeleteNodeResourcesResult = {
+    nodeFound: false,
+    providerVmDeleted: false,
+    providerVmDeleteSkippedReason: null,
+    backendDnsDeleted: false,
+    errors: [],
+  };
+
+  const rows = await db
+    .select()
+    .from(schema.nodes)
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
+    .limit(1);
+
+  const node = rows[0];
+  if (!node) {
+    return result;
+  }
+  result.nodeFound = true;
+
+  if (node.providerInstanceId) {
+    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+    const providerResult2 = await createProviderForUser(
+      db,
+      userId,
+      getCredentialEncryptionKey(env),
+      env,
+      targetProvider
+    );
+    if (providerResult2) {
+      try {
+        await providerResult2.provider.deleteVM(node.providerInstanceId);
+        result.providerVmDeleted = true;
+      } catch (err) {
+        result.errors.push(err instanceof Error ? err.message : String(err));
+        log.error('node_delete.delete_vm_failed', { nodeId, ...serializeError(err) });
+      }
+    } else {
+      result.providerVmDeleteSkippedReason = 'cloud provider credential unavailable';
+      result.errors.push('Cloud provider credential unavailable; provider VM may still exist.');
+      log.error('node_cleanup.credential_missing_vm_orphaned', {
+        nodeId,
+        userId,
+        providerInstanceId: node.providerInstanceId,
+        cloudProvider: node.cloudProvider,
+      });
+    }
+  }
+
+  if (node.backendDnsRecordId) {
+    try {
+      await deleteDNSRecord(node.backendDnsRecordId, env);
+      result.backendDnsDeleted = true;
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
+      log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
+    }
+  }
+
+  // Cascade workspace status: mark all workspaces on this node as deleted
+  const now = new Date().toISOString();
+  await db
+    .update(schema.workspaces)
+    .set({ status: 'deleted', updatedAt: now })
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+
+  return result;
+}
+
+function truncateNodeErrorMessage(message: string): string {
+  return message.length > NODE_ERROR_MESSAGE_MAX_LENGTH
+    ? message.slice(0, NODE_ERROR_MESSAGE_MAX_LENGTH) + '...'
+    : message;
+}
+
+/**
+ * Strict node teardown for cleanup paths where hiding a failed cloud delete is
+ * worse than surfacing a stale D1 row. Unlike deleteNodeResources(), this does
+ * not cascade workspace status; callers must update workspace rows only after
+ * external resources have actually been removed.
+ */
+export async function deleteNodeResourcesStrict(nodeId: string, userId: string, env: Env): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
 
   const rows = await db
@@ -430,43 +540,62 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
 
   const node = rows[0];
   if (!node) {
-    return;
+    throw new Error(`Node ${nodeId} not found for strict deletion`);
   }
 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult2 = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
-    if (providerResult2) {
-      try {
-        await providerResult2.provider.deleteVM(node.providerInstanceId);
-      } catch (err) {
-        log.error('node_delete.delete_vm_failed', { nodeId, ...serializeError(err) });
-      }
-    } else {
-      log.error('node_cleanup.credential_missing_vm_orphaned', {
-        nodeId,
-        userId,
-        providerInstanceId: node.providerInstanceId,
-        cloudProvider: node.cloudProvider,
-      });
+    const providerResult = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
+    if (!providerResult) {
+      throw new Error(
+        `Cloud provider credentials missing for strict node deletion: node=${nodeId} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
+      );
     }
+
+    if (!targetProvider) {
+      const vm = await providerResult.provider.getVM(node.providerInstanceId);
+      if (!vm) {
+        throw new Error(
+          `Cannot strictly delete node ${nodeId}: provider ${providerResult.providerName} does not contain VM ${node.providerInstanceId}`
+        );
+      }
+    }
+
+    await db
+      .update(schema.nodes)
+      .set({
+        cloudProvider: providerResult.providerName,
+        credentialSource: providerResult.credentialSource,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.nodes.id, node.id));
+
+    await providerResult.provider.deleteVM(node.providerInstanceId);
   }
 
   if (node.backendDnsRecordId) {
     try {
       await deleteDNSRecord(node.backendDnsRecordId, env);
     } catch (err) {
-      log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
+      log.error('node_delete.strict_dns_cleanup_failed', { nodeId, ...serializeError(err) });
+      try {
+        await persistError(env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: `Strict node DNS cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            component: 'node-deletion',
+            recoveryType: 'strict_node_dns_cleanup_failure',
+            nodeId,
+            backendDnsRecordId: node.backendDnsRecordId,
+          },
+          nodeId,
+          userId,
+        });
+      } catch (obsErr) {
+        log.error('node_delete.strict_dns_observability_failed', { nodeId, ...serializeError(obsErr) });
+      }
     }
   }
-
-  // Cascade workspace status: mark all workspaces on this node as deleted
-  const now = new Date().toISOString();
-  await db
-    .update(schema.workspaces)
-    .set({ status: 'deleted', updatedAt: now })
-    .where(and(
-      eq(schema.workspaces.nodeId, nodeId),
-      eq(schema.workspaces.userId, userId)
-    ));
 }

@@ -51,11 +51,11 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 |----------|-------|
 | **Provider** | OpenCode (SST) |
 | **Default Inference Provider** | OpenCode Zen |
-| **Advanced Inference Providers** | SAM Platform (Workers AI), Scaleway, Google Vertex, OpenAI-compatible, Anthropic, custom |
-| **API Key** | `OPENCODE_API_KEY` for the default Zen path |
+| **Advanced Inference Providers** | OpenCode Go, SAM Platform (Workers AI), Scaleway, Google Vertex, OpenAI-compatible, Anthropic, custom |
+| **API Key** | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go |
 | **Get a Key** | [OpenCode auth](https://opencode.ai/auth) |
 
-OpenCode defaults to OpenCode Zen. Advanced configurations can use SAM Platform inference without a user API key, or a user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
+OpenCode defaults to OpenCode Zen. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/glm-5.2`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
 
 ### Amp
 

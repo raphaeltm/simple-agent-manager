@@ -20,6 +20,7 @@ import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
 import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
 import { AdminStream } from './pages/AdminStream';
+import { AdminTrials } from './pages/AdminTrials';
 import { AdminUsers } from './pages/AdminUsers';
 import { AgentContextPage } from './pages/AgentContextPage';
 import { Chats } from './pages/Chats';
@@ -36,6 +37,8 @@ import { ProjectChat } from './pages/project-chat';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
+import { ProjectDeploymentEnvironmentDetail } from './pages/ProjectDeploymentEnvironmentDetail';
+import { ProjectDeployments } from './pages/ProjectDeployments';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
 import { ProjectProfiles } from './pages/ProjectProfiles';
@@ -46,6 +49,7 @@ import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
 import { Settings } from './pages/Settings';
+import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
@@ -111,6 +115,11 @@ export default function App() {
                     <Route path="agent" element={<ProjectAgentChat />} />
                     <Route path="library" element={<ProjectLibrary />} />
                     <Route path="ideas" element={<IdeasPage />} />
+                    <Route path="deployments" element={<ProjectDeployments />} />
+                    <Route
+                      path="deployments/:envId"
+                      element={<ProjectDeploymentEnvironmentDetail />}
+                    />
                     <Route path="agent-context" element={<AgentContextPage />} />
                     <Route path="knowledge" element={<Navigate to="../agent-context" replace />} />
                     <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
@@ -134,7 +143,7 @@ export default function App() {
                     <Route path="cloud-provider" element={<SettingsCloudProvider />} />
                     <Route path="github" element={<SettingsGitHub />} />
                     <Route path="connections" element={<SettingsConnections />} />
-                    <Route path="agents" element={<Navigate to="../connections" replace />} />
+                    <Route path="agents" element={<SettingsAgents />} />
                     <Route path="agent-keys" element={<Navigate to="../connections" replace />} />
                     <Route path="agent-config" element={<Navigate to="../connections" replace />} />
                     <Route path="notifications" element={<SettingsNotifications />} />
@@ -152,6 +161,7 @@ export default function App() {
                     <Route path="users" element={<AdminUsers />} />
                     <Route path="credentials" element={<AdminPlatformCredentials />} />
                     <Route path="ai-proxy" element={<AdminAIProxy />} />
+                    <Route path="trials" element={<AdminTrials />} />
                     <Route path="costs" element={<AdminCosts />} />
                     <Route path="usage" element={<AdminComputeUsage />} />
                     <Route path="quotas" element={<AdminComputeQuotas />} />
