@@ -90,22 +90,22 @@ Verification must confirm all of:
 
 - The task/session actually started and is not failed, stuck queued, or missing
 - The created task title/summary matches the intended work, not a generic or hallucinated title
-- The receiving session is using the requested agent/profile/skill, especially `/do` for implementation work
-- The task description still contains the critical constraints you intended to pass along, such as "do not merge", "draft PR", required branch, or required profile
+- The receiving session is using the requested agent/profile/skill and task mode when those are observable, especially `/do` for implementation work
+- The task description still contains the critical constraints you intended to pass along, such as "do not merge", "draft PR", required branch, output branch, required skill, or required profile
 
-If the session failed immediately, never started, launched under the wrong profile, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile or report the dispatch failure with exact status evidence.
+If the session failed immediately, never started, launched under the wrong profile/skill/mode, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile/skill/mode or report the dispatch failure with exact status evidence.
 
-If the requested specialist/profile is not available or cannot be observed from the dispatch result, do not assume it worked. Use the cheapest available status/details check, record what is missing, and either re-dispatch with an explicit supported profile or ask for clarification. A generic task running under the platform default is not a substitute for a requested reviewer, specialist, or constrained profile.
+If the requested specialist/profile/skill/mode is not available or cannot be observed from the dispatch result, do not assume it worked. Use the cheapest available status/details check, record what is missing, and either re-dispatch with an explicit supported profile/skill/mode or ask for clarification. A generic task running under the platform default is not a substitute for a requested reviewer, specialist, or constrained profile.
 
-When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile and respected the original constraints. If the result was produced by the wrong profile, ignored `draft PR`/`do not merge`, dropped the requested branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
+When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile/skill/mode and respected the original constraints. If the result was produced by the wrong profile or skill, ignored `draft PR`/`do not merge`, dropped the requested output branch or branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
 
 ### Before Retrying a Failed Dispatch
 
 Before retrying or redispatching the same work after a SAM task fails, diagnose the failed start:
 
-- Call `get_task_details` for the failed task and read any output summary, branch, PR URL, and status evidence.
+- Call `get_task_details` for the failed task and read any output summary, output branch, branch, PR URL, profile/skill/mode evidence, and status evidence.
 - If there is a session, read enough messages to distinguish no-workspace/startup failure, transient provider error, human-cancel recovery, wrong profile, or real task failure.
-- Call `list_tasks`/`list_project_agents` to check for active duplicates with the same prompt, title, branch, or PR.
+- Call `list_tasks`/`list_project_agents` to check for active duplicates with the same prompt, title, output branch, branch, PR, profile, or skill.
 - If an active duplicate exists, inspect or coordinate with it instead of creating another copy.
 - If the failure was a transient provider or platform startup issue, adjust the retry only after confirming the current platform behavior has not already fixed it.
 

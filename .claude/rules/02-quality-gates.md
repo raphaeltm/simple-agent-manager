@@ -142,6 +142,8 @@ The PR description must include a "Post-Mortem" section summarizing the root cau
 
 Before merging ANY pull request, dispatch a team of skeptical subagents to review the PR. Each reviewer should be adversarial — their job is to find problems, not confirm the code works.
 
+For current-PR or current-workspace critique, reviewers may be local subagents. If the user explicitly requests local subagents, do not dispatch SAM tasks for that critique. Give each local reviewer the original issue/request, relevant production or staging evidence, explicit user constraints, and the current diff or concrete proposal so their findings are grounded in the same problem the human reported.
+
 ### Review Team Composition
 
 Dispatch reviewers **in parallel** covering each language and discipline touched by the PR:

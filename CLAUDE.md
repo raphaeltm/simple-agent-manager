@@ -218,7 +218,7 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 
 **Read-only investigations**: PR status, PR history, task status, and diagnostic questions are read-only by default. Use SAM MCP, GitHub, logs, and local evidence in the current session. Do not create task files, branches, commits, or PRs unless the user asks for code/config changes or durable artifacts.
 
-**Failed task retries**: Before retrying or redispatching a failed SAM task, inspect the failed task/session and check for active duplicate work with the same prompt, branch, or title. Do not blindly resubmit the same prompt after no-workspace/startup failures or transient provider failures.
+**Failed task retries**: Before retrying or redispatching a failed SAM task, inspect the failed task/session and check for active duplicate work with the same prompt, output branch, branch, or title. Do not blindly resubmit the same prompt after no-workspace/startup failures or transient provider failures. See `.claude/rules/09-task-tracking.md` for profile, skill, and task-mode validation details.
 
 **Agent profile defaults**: When changing profile setup or onboarding, fresh installs should not seed multiple provider-specific built-in profiles. Prefer a setup wizard, templates, or at most one conversational default so users learn profiles intentionally instead of inheriting clutter.
 
