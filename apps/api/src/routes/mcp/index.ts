@@ -26,6 +26,7 @@ import {
   METHOD_NOT_FOUND,
 } from './_helpers';
 import { handleBuildAndPublish } from './compose-publish-tools';
+import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
   handleListDeploymentEnvironmentConfig,
   handleListDeploymentEnvironments,
@@ -73,7 +74,6 @@ import {
   handlePublishHandoff,
   handlePublishMissionState,
 } from './mission-tools';
-import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
