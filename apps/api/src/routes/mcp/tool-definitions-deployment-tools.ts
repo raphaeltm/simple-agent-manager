@@ -104,4 +104,18 @@ export const DEPLOYMENT_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'get_deployment_guide',
+    description:
+      'Get a comprehensive guide for deploying an app with SAM. ' +
+      'Call this whenever a user asks to deploy, launch, publish, ship, or release an app. ' +
+      'Returns a briefing covering SAM\'s agent-first / never-through-CI deployment model, the ' +
+      'full tool-by-tool flow in order (list environments, set Variables/Secrets, build_and_publish, ' +
+      'read logs, check DNS), Variables vs Secrets semantics, Compose authoring, and common pitfalls.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ] as const;

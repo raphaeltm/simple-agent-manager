@@ -26,6 +26,7 @@ import {
   METHOD_NOT_FOUND,
 } from './_helpers';
 import { handleBuildAndPublish } from './compose-publish-tools';
+import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
   handleListDeploymentEnvironmentConfig,
   handleListDeploymentEnvironments,
@@ -315,6 +316,9 @@ mcpRoutes.post('/', async (c) => { // NOSONAR - legacy MCP dispatcher switch is 
           return c.json(
             await handleSetDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env),
           );
+        case 'get_deployment_guide':
+          // Synchronous — no async I/O needed for static content
+          return c.json(handleGetDeploymentGuide(requestId));
         // ─── Workspace tools (unified from workspace-mcp) ──────────────
         case 'get_workspace_info':
           return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
