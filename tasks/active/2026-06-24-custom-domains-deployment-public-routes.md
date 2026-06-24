@@ -106,7 +106,7 @@ applied to every deployment node, not just tested ones.
 ### Signed payload injection
 
 - [x] In `deploy-release-callback.ts`, after the release-shape branch, load verified custom domains for the env and append a `DeploymentRouteTarget` for each (hostname = custom hostname; service/containerPort = parent route; hostPort = parent route's hostPort matched by service+containerPort). Skip if no matching parent route in current `routes`. Do NOT call `upsertAppRouteDNSRecord` for them.
-- [x] Vertical-slice test (Rule 35): attach→verify→apply. Mock DoH (realistic CNAME + non-matching), mock the signed-payload boundary; assert the custom hostname rides in `routes` with the parent's `hostPort` and is covered by `routesHash`.
+- [x] Vertical-slice test (Rule 35): attach→verify→apply in `apps/api/tests/unit/routes/deployment-custom-domains-vertical.test.ts`. Mock DoH (realistic CNAME), mock the signed-payload boundary, and assert the custom hostname rides in `routes` with the parent's `hostPort` while user DNS is not upserted.
 
 ### Cross-boundary + Go
 
@@ -120,12 +120,14 @@ applied to every deployment node, not just tested ones.
 
 ## Acceptance criteria
 
-- [ ] A user can attach a custom subdomain to an existing public route; private/nonexistent routes are rejected.
-- [ ] Verification resolves the hostname via Cloudflare DoH and only marks `verified` when it points at our route target (CNAME) or node IP (A). Non-matching → `failed` with the exact CNAME target surfaced.
-- [ ] On verified, the custom hostname rides as an additional `RouteTarget` (same `hostPort` as its parent public route) in the next signed `ApplyPayload`, covered by `routesHash`.
+- [x] A user can attach a custom subdomain to an existing public route; private/nonexistent routes are rejected.
+- [x] Verification resolves the hostname via Cloudflare DoH and only marks `verified` when it points at our route target (CNAME) or node IP (A). Non-matching → `failed` with the exact CNAME target surfaced.
+- [x] On verified, the custom hostname rides as an additional `RouteTarget` (same `hostPort` as its parent public route) in the next signed `ApplyPayload`, covered by `routesHash`.
 - [ ] Node Caddy provisions TLS + reverse-proxies the custom hostname (verified on staging serving valid HTTPS).
-- [ ] Deleting a custom domain drops its site block on next apply.
-- [ ] SAM never creates the user's DNS record (no `upsertAppRouteDNSRecord` for custom hostnames).
+- [x] Deleting a custom domain drops its site block on next apply.
+- [x] SAM never creates the user's DNS record (no `upsertAppRouteDNSRecord` for custom hostnames).
+
+Staging note: the live TLS/reverse-proxy criterion intentionally remains open until Phase 6 staging verification produces evidence from a real deployment node and custom hostname. Do not archive this task before that evidence is recorded.
 
 ## Out of scope (v2 — note in spec)
 
