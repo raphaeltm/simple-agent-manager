@@ -104,6 +104,8 @@ export interface Env {
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
   PROVISIONING_TIMEOUT_MS?: string;
   DNS_TTL_SECONDS?: string;
+  DOH_RESOLVER_URL?: string; // Cloudflare DoH resolver base for custom-domain verification (default: https://cloudflare-dns.com/dns-query)
+  DOH_TIMEOUT_MS?: string; // Timeout for DoH custom-domain lookups in ms (default: 10000)
   DEPLOY_PAYLOAD_EXPIRY_SECONDS?: string;
   DEPLOYMENT_ROUTE_PORT_BASE?: string;
   DEPLOYMENT_ROUTE_PORT_SPAN?: string;

@@ -175,7 +175,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function buildComposePublishRouteTargets(
+export function buildComposePublishRouteTargets(
   submission: Record<string, unknown>,
   opts: DeploymentRouteTargetOptions
 ): DeploymentRouteTarget[] {
@@ -211,9 +211,42 @@ function buildComposePublishRouteTargets(
 }
 
 /**
+ * Derive the public route targets for a SINGLE stored release manifest.
+ *
+ * A release manifest is persisted as a JSON string and may be either a
+ * normalized build-on-node manifest (has a `routes` array) or a raw
+ * compose-publish submission (has a `composeYaml` string). This reapplies the
+ * exact same derivation the apply path uses so callers — teardown, the
+ * environment summary, and custom-domain attach/verify — all agree on the
+ * hostnames and loopback hostPorts for an environment's current public routes.
+ *
+ * Returns an empty array for malformed manifests or manifests whose route set
+ * exceeds configured bounds, rather than throwing.
+ */
+export function buildReleaseRouteTargets(
+  manifestJson: string,
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteTarget[] {
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(manifestJson) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  try {
+    return Array.isArray(manifest.routes)
+      ? buildDeploymentRouteTargets(manifest as unknown as DeploymentManifest, opts)
+      : buildComposePublishRouteTargets(manifest, opts);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Collect the unique set of app-route hostnames an environment's releases have
  * provisioned, by reapplying the same derivation the apply path uses
- * ({@link buildDeploymentRouteTargets}). Used by teardown paths to deprovision
+ * ({@link buildReleaseRouteTargets}). Used by teardown paths to deprovision
  * the matching grey-cloud DNS records.
  *
  * Manifests are stored as JSON strings on each release; malformed manifests and
@@ -226,22 +259,7 @@ export function collectEnvironmentRouteHostnames(
 ): string[] {
   const hostnames = new Set<string>();
   for (const raw of manifests) {
-    let manifest: Record<string, unknown>;
-    try {
-      manifest = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-
-    let targets: DeploymentRouteTarget[];
-    try {
-      targets = Array.isArray(manifest.routes)
-        ? buildDeploymentRouteTargets(manifest as unknown as DeploymentManifest, opts)
-        : buildComposePublishRouteTargets(manifest, opts);
-    } catch {
-      continue;
-    }
-    for (const target of targets) {
+    for (const target of buildReleaseRouteTargets(raw, opts)) {
       hostnames.add(target.hostname);
     }
   }

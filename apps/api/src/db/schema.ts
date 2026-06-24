@@ -2042,6 +2042,51 @@ export type DeploymentVolumeRow = typeof deploymentVolumes.$inferSelect;
 export type NewDeploymentVolumeRow = typeof deploymentVolumes.$inferInsert;
 
 // =============================================================================
+// DEPLOYMENT CUSTOM DOMAINS (migration 0076)
+// =============================================================================
+// A user-owned subdomain attached to an existing public route of an
+// environment. SAM verifies the hostname resolves to the route target via
+// Cloudflare DoH, then emits an additional Caddy site block (same hostPort as
+// the parent public route) in the signed ApplyPayload. SAM does NOT create the
+// user's DNS record.
+
+export const deploymentCustomDomains = sqliteTable(
+  'deployment_custom_domains',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    /** Service name of the parent public route this domain attaches to. */
+    service: text('service').notNull(),
+    /** Container port of the parent public route. */
+    port: integer('port').notNull(),
+    /** Zero-based route index of the parent public route within the manifest. */
+    routeIndex: integer('route_index').notNull(),
+    /** The user's custom hostname (e.g. app.theircompany.com). */
+    hostname: text('hostname').notNull(),
+    /** 'pending' | 'verified' | 'failed'. */
+    verificationStatus: text('verification_status').notNull().default('pending'),
+    /** Human-readable reason the last verification attempt failed. */
+    verificationError: text('verification_error'),
+    verifiedAt: text('verified_at'),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    hostnameUnique: uniqueIndex('idx_deployment_custom_domains_hostname').on(table.hostname),
+    environmentIdIdx: index('idx_deployment_custom_domains_environment_id').on(
+      table.environmentId,
+    ),
+  }),
+);
+
+export type DeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferSelect;
+export type NewDeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferInsert;
+
+// =============================================================================
 // Composable Credentials — three-primitive model (migration 0071)
 // =============================================================================
 

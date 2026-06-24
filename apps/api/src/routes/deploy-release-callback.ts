@@ -28,6 +28,7 @@ import {
 } from '../services/compose-publish-apply';
 import { collectSecretNames, renderComposeForApply } from '../services/compose-renderer';
 import { signDeployPayload } from '../services/deploy-signing';
+import { buildVerifiedCustomRouteTargets } from '../services/deployment-custom-domains';
 import { loadDeploymentInterpolationEnv } from '../services/deployment-environment-config';
 import {
   buildDeploymentRouteTargets,
@@ -303,6 +304,17 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     });
     composeYaml = rendered.composeYaml;
     interpolationEnv = rendered.interpolationEnv;
+  }
+
+  // Append VERIFIED custom domains as additional signed RouteTargets, reusing
+  // each parent public route's loopback hostPort so node-local Caddy renders a
+  // site block (ACME HTTP-01 + reverse_proxy) for the user's hostname. These
+  // ride inside the signed payload's `routes` (covered by routesHash) but are
+  // EXCLUDED from the grey-cloud DNS upsert above — the user owns the custom
+  // hostname's DNS record (they point a CNAME at the SAM route target).
+  const customTargets = await buildVerifiedCustomRouteTargets(db, environmentId, routes);
+  if (customTargets.length > 0) {
+    routes = [...routes, ...customTargets];
   }
 
   const cleanupStaleRoutes = async () => {
