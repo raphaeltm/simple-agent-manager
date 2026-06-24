@@ -143,6 +143,9 @@ browser console errors. A broader staging pass also loaded dashboard, project
 chat, the deployment environment, and settings routes with content present, no
 404s, and no browser console errors.
 
+PR evidence validation: `scripts/quality/check-preflight-evidence.ts` passed
+locally against the updated PR body before the final CI refresh push.
+
 ## Out of scope (v2 — note in spec)
 
 - Apex / root domains; node-IP / apex ALIAS handling.
