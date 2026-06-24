@@ -90,6 +90,55 @@ function rowToConsumer(row: { consumerKind: string; consumerTarget: string }): C
     : { kind: 'compute', provider: row.consumerTarget };
 }
 
+function buildCloudProviderHints(configurations: CCConfiguration[]): Map<string, string> {
+  const providersByCredential = new Map<string, Set<string>>();
+
+  for (const configuration of configurations) {
+    if (configuration.consumer.kind !== 'compute' || !configuration.credentialId) continue;
+
+    const providers = providersByCredential.get(configuration.credentialId) ?? new Set<string>();
+    providers.add(configuration.consumer.provider);
+    providersByCredential.set(configuration.credentialId, providers);
+  }
+
+  const hints = new Map<string, string>();
+  for (const [credentialId, providers] of providersByCredential) {
+    if (providers.size === 1) {
+      const [provider] = providers;
+      if (provider) hints.set(credentialId, provider);
+    }
+  }
+
+  return hints;
+}
+
+/**
+ * Raw migrated Hetzner credentials carry no embedded provider in the encrypted
+ * token body. The provider identity lives on the compute configuration produced
+ * by legacy backfill, so recover it there when it is unambiguous.
+ */
+export function hydrateMissingCloudProviderSecretProviders(
+  credentials: CCCredential[],
+  configurations: CCConfiguration[],
+): CCCredential[] {
+  const providerHints = buildCloudProviderHints(configurations);
+
+  return credentials.map((credential) => {
+    const secret = credential.secret;
+    if (secret.kind !== 'cloud-provider' || secret.provider) {
+      return credential;
+    }
+
+    const provider = providerHints.get(credential.id);
+    if (!provider) return credential;
+
+    return {
+      ...credential,
+      secret: { ...secret, provider },
+    };
+  });
+}
+
 /**
  * Build a CompositionSnapshot for a user, optionally scoped to a project.
  * Decrypts all credential secrets.
@@ -140,7 +189,7 @@ export async function buildSnapshot(
       }
     }),
   );
-  const credentials: CCCredential[] = credentialResults.filter(
+  const parsedCredentials: CCCredential[] = credentialResults.filter(
     (c): c is CCCredential => c !== null,
   );
 
@@ -154,6 +203,11 @@ export async function buildSnapshot(
     settings: row.settingsJson ? safeParseJson(row.settingsJson, row.id) : {},
     isActive: row.isActive,
   }));
+
+  const credentials = hydrateMissingCloudProviderSecretProviders(
+    parsedCredentials,
+    configurations,
+  );
 
   // Map attachments
   const attachments: CCAttachment[] = attachRows.map((row) => ({
