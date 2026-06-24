@@ -22,8 +22,9 @@ custom hostname via the same ACME HTTP-01 path.
    existing SAM-owned route hostname. No apex A-record / ALIAS handling.
 2. **No wildcards** — single concrete hostnames only.
 3. **Ownership proof = "domain points at us is sufficient"** — no TXT challenge.
-   Verify the user's hostname CNAME/A-resolves (via Cloudflare DoH at 1.1.1.1) to
-   our route target (or node IP) before activating. No separate TXT record.
+   Verify the user's hostname CNAME/A-resolves (via a configurable DNS-over-HTTPS
+   resolver, defaulting to Cloudflare DoH) to our route target (or node IP) before
+   activating. No separate TXT record.
 4. **Caddy strategy = simple / static** — emit a static per-domain site block
    inside the signed `ApplyPayload` (custom hostname must be covered by
    `routesHash`). No on-demand TLS / no `ask` authorization endpoint in v1.
@@ -72,9 +73,9 @@ applied to every deployment node, not just tested ones.
 ### DNS / verification — `apps/api/src/services/dns.ts`
 
 - `upsertAppRouteDNSRecord` / `deleteAppRouteDNSRecord` / `cleanupAppRouteDNSRecords`
-  manage SAM-owned grey-cloud records. **No** Cloudflare DoH resolver exists — must
-  write one (Worker `fetch` to `https://cloudflare-dns.com/dns-query` with
-  `accept: application/dns-json`) for hostname verification.
+  manage SAM-owned grey-cloud records. The branch adds a DNS-over-HTTPS verifier
+  with configurable `DOH_RESOLVER_URL` and `DOH_TIMEOUT_MS` defaults for hostname
+  verification.
 
 ### VM agent — `packages/vm-agent/internal/deploy/`
 
@@ -95,7 +96,7 @@ applied to every deployment node, not just tested ones.
 
 ### DoH verification helper
 
-- [x] New `apps/api/src/services/deployment-domain-verify.ts` (or add to dns.ts): `resolveHostnameTarget(hostname): Promise<{ cname?: string; a?: string[] }>` via Cloudflare DoH. `verifyCustomDomainTarget(hostname, expectedCnameTarget, expectedNodeIp)` → boolean (matches CNAME to route hostname OR A to node IP).
+- [x] New `apps/api/src/services/deployment-domain-verify.ts`: `resolveHostnameTarget(hostname, env)` via configurable DoH. `verifyCustomDomainTarget(hostname, expectedCnameTarget, expectedNodeIp, env)` → boolean (matches CNAME to route hostname OR A to node IP).
 - [x] Unit tests: matching CNAME answer → verified; non-matching answer → failed; A-record-to-node-ip → verified.
 
 ### API CRUD
