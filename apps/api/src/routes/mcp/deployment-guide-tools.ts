@@ -79,7 +79,7 @@ In your Compose file, reference these as normal interpolation placeholders, for 
 
 ### Step 3 — Author the Compose stack
 
-Write a standard Docker Compose YAML file in the workspace. SAM supports multi-service stacks and derives public routes from either \`x-sam-routes\` or each service's \`ports:\`.
+Write a standard Docker Compose YAML file in the workspace. SAM supports multi-service stacks and derives public routes from each service's \`ports:\` by default. Use \`x-sam-routes\` only when you need an explicit override, such as exposing a service port without \`ports:\` or marking a matching \`ports:\` entry as \`private\`.
 
 \`\`\`yaml
 services:
@@ -93,11 +93,13 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    ports:
+      - "3000"
 
 x-sam-routes:
   - service: web
     port: 3000
-    mode: public
+    mode: private
 \`\`\`
 
 Constraints for compose-publish releases:
@@ -142,7 +144,7 @@ After publishing:
 
 1. \`list_deployment_environments()\` → pick the target.
 2. \`list_deployment_environment_config(environment)\` → review; \`set_deployment_environment_config(...)\` for anything missing (Secrets via \`isSecret: true\`).
-3. Author the Compose stack with \`\${VAR}\` placeholders and \`x-sam-routes\`.
+3. Author the Compose stack with \`\${VAR}\` placeholders and \`ports:\` for public app routes; add \`x-sam-routes\` only for explicit overrides.
 4. \`build_and_publish(environment)\` → SAM builds, pushes, and records the release.
 5. \`read_deployment_logs(environment)\` and \`check_dns_status()\` → verify it is actually running.`;
 

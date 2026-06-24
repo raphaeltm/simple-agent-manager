@@ -29,20 +29,21 @@ Desired product behavior:
 
 ## Implementation checklist
 
-- [ ] Add a shared helper inside `compose-publish-apply.ts` that parses top-level `x-sam-routes` from the captured compose document and returns explicit route definitions with structured validation errors.
-- [ ] Update compose-publish public route collection so explicit `x-sam-routes` entries take precedence over `ports:` hints for the same `service` + `port`.
-- [ ] Ensure `mode: private` suppresses public exposure for the same `service` + `port` even when the service has `ports:`.
-- [ ] Ensure `x-sam-routes` `mode: public` can publish a route even if the service has no `ports:` entry by injecting the loopback binding into the rendered Compose output.
-- [ ] Preserve current `ports:` happy-path behavior, including route order, loopback rewrite, artifact/provider handling, and deterministic hostname/hostPort assignment.
-- [ ] Add focused regression tests in `apps/api/tests/unit/services/compose-publish-apply.test.ts`:
-  - [ ] `ports:` alone still creates a public route and loopback binding.
-  - [ ] `x-sam-routes` public without `ports:` creates a route and loopback binding.
-  - [ ] `x-sam-routes` private plus matching `ports:` suppresses the public route and removes the service `ports:` entry.
-  - [ ] explicit public route plus matching `ports:` does not duplicate.
-  - [ ] invalid route mode/service/port fails with an actionable compose-publish error.
-- [ ] Add/update route-target reconstruction tests in `apps/api/tests/unit/services/deployment-routing.test.ts` so stale DNS/custom-domain consumers also honor stored compose-publish `x-sam-routes`.
-- [ ] Clarify docs/tool guide wording: use `ports:` for normal public routes; use `x-sam-routes` for explicit public routes without `ports:` or to mark a matching port private.
-- [ ] Run focused tests, typecheck/lint, full quality suite, specialist review, staging verification, PR, CI, merge, and production deploy monitoring per `/do`.
+- [x] Add a shared helper in `deployment-routing.ts` that parses top-level `x-sam-routes` from the captured compose document and returns explicit route definitions with structured validation errors for both apply-time and reconstruction-time callers.
+- [x] Update compose-publish public route collection so explicit `x-sam-routes` entries take precedence over `ports:` hints for the same `service` + `port`.
+- [x] Ensure `mode: private` suppresses public exposure for the same `service` + `port` even when the service has `ports:`.
+- [x] Ensure `x-sam-routes` `mode: public` can publish a route even if the service has no `ports:` entry by injecting the loopback binding into the rendered Compose output.
+- [x] Preserve current `ports:` happy-path behavior, including route order, loopback rewrite, artifact/provider handling, and deterministic hostname/hostPort assignment.
+- [x] Add focused regression tests in `apps/api/tests/unit/services/compose-publish-apply.test.ts`:
+  - [x] `ports:` alone still creates a public route and loopback binding.
+  - [x] `x-sam-routes` public without `ports:` creates a route and loopback binding.
+  - [x] `x-sam-routes` private plus matching `ports:` suppresses the public route and removes the service `ports:` entry.
+  - [x] explicit public route plus matching `ports:` does not duplicate.
+  - [x] invalid route mode/service/port fails with an actionable compose-publish error.
+- [x] Add/update route-target reconstruction tests in `apps/api/tests/unit/services/deployment-routing.test.ts` so stale DNS/custom-domain consumers also honor stored compose-publish `x-sam-routes`.
+- [x] Clarify docs/tool guide wording: use `ports:` for normal public routes; use `x-sam-routes` for explicit public routes without `ports:` or to mark a matching port private.
+- [x] Run focused tests and API typecheck/lint.
+- [ ] Run full quality suite, specialist review, staging verification, PR, CI, merge, and production deploy monitoring per `/do`.
 
 ## Acceptance criteria
 

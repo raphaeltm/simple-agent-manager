@@ -107,6 +107,163 @@ export interface PublicRouteInput {
   port: number;
 }
 
+type ComposePublishRouteMode = 'public' | 'private';
+
+interface ComposePublishRouteInput extends PublicRouteInput {
+  mode: ComposePublishRouteMode;
+}
+
+interface ComposePublishPublicRouteOptions {
+  portExtractor?: (serviceName: string, ports: unknown) => number[];
+}
+
+function routeKey(service: string, port: number): string {
+  return `${service}\u0000${port}`;
+}
+
+function extractComposePorts(_serviceName: string, ports: unknown): number[] {
+  if (!Array.isArray(ports)) {
+    return [];
+  }
+  const result: number[] = [];
+  for (const portSpec of ports) {
+    const port = extractContainerPort(portSpec);
+    if (port !== null) {
+      result.push(port);
+    }
+  }
+  return result;
+}
+
+function formatRouteErrors(errors: Array<{ path: string; message: string }>): string {
+  return errors.map((err) => `${err.path}: ${err.message}`).join('; ');
+}
+
+function parseComposePublishExplicitRoutes(
+  xSamRoutes: unknown,
+  services: Record<string, unknown>
+): ComposePublishRouteInput[] {
+  if (xSamRoutes === undefined || xSamRoutes === null) {
+    return [];
+  }
+
+  const errors: Array<{ path: string; message: string }> = [];
+  const routes: ComposePublishRouteInput[] = [];
+
+  if (!Array.isArray(xSamRoutes)) {
+    throw new Error(
+      'Compose-publish route validation failed: x-sam-routes: "x-sam-routes" must be an array of route definitions.'
+    );
+  }
+
+  for (const [index, route] of xSamRoutes.entries()) {
+    if (!isPlainObject(route)) {
+      errors.push({
+        path: `x-sam-routes[${index}]`,
+        message: 'Each route must be an object with service, port, and mode fields.',
+      });
+      continue;
+    }
+
+    const service = route.service;
+    const port = route.port;
+    const mode = route.mode ?? 'public';
+
+    if (typeof service !== 'string' || service.trim() === '') {
+      errors.push({
+        path: `x-sam-routes[${index}].service`,
+        message: 'Route must specify a "service" name.',
+      });
+      continue;
+    }
+
+    if (!Number.isInteger(port) || typeof port !== 'number' || port < 1 || port > MAX_TCP_PORT) {
+      errors.push({
+        path: `x-sam-routes[${index}].port`,
+        message: `Route must specify a valid "port" (1-${MAX_TCP_PORT}).`,
+      });
+      continue;
+    }
+
+    if (mode !== 'public' && mode !== 'private') {
+      errors.push({
+        path: `x-sam-routes[${index}].mode`,
+        message: `Route mode must be "public" or "private", got "${String(mode)}".`,
+      });
+      continue;
+    }
+
+    if (!(service in services)) {
+      errors.push({
+        path: `x-sam-routes[${index}].service`,
+        message: `Route references service "${service}" which is not defined in "services". Defined services: ${Object.keys(services).join(', ')}`,
+      });
+      continue;
+    }
+
+    const serviceConfig = services[service];
+    if (!isPlainObject(serviceConfig)) {
+      errors.push({
+        path: `x-sam-routes[${index}].service`,
+        message: `Route references service "${service}" which is not a service mapping and cannot be exposed.`,
+      });
+      continue;
+    }
+
+    if ('provider' in serviceConfig) {
+      errors.push({
+        path: `x-sam-routes[${index}].service`,
+        message: `Route references provider service "${service}", but provider services cannot be exposed as SAM app routes.`,
+      });
+      continue;
+    }
+
+    routes.push({ service, port, mode });
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Compose-publish route validation failed: ${formatRouteErrors(errors)}`);
+  }
+
+  return routes;
+}
+
+/**
+ * Derive compose-publish public route inputs from explicit `x-sam-routes` plus
+ * `ports:` hints. This mirrors the normalized Compose parser's precedence:
+ * explicit service+port routes win, including `mode: private` suppressing a
+ * matching public `ports:` hint.
+ */
+export function collectComposePublishPublicRoutes(
+  doc: Record<string, unknown>,
+  opts: ComposePublishPublicRouteOptions = {}
+): PublicRouteInput[] {
+  if (!isPlainObject(doc.services)) {
+    return [];
+  }
+
+  const portExtractor = opts.portExtractor ?? extractComposePorts;
+  const explicitRoutes = parseComposePublishExplicitRoutes(doc['x-sam-routes'], doc.services);
+  const explicitRouteKeys = new Set(explicitRoutes.map((route) => routeKey(route.service, route.port)));
+  const publicRoutes = explicitRoutes
+    .filter((route) => route.mode === 'public')
+    .map((route) => ({ service: route.service, port: route.port }));
+
+  for (const [serviceName, rawService] of Object.entries(doc.services)) {
+    if (!isPlainObject(rawService) || 'provider' in rawService) {
+      continue;
+    }
+
+    for (const port of portExtractor(serviceName, rawService.ports)) {
+      if (!explicitRouteKeys.has(routeKey(serviceName, port))) {
+        publicRoutes.push({ service: serviceName, port });
+      }
+    }
+  }
+
+  return publicRoutes;
+}
+
 /**
  * Assign loopback host ports + grey-cloud hostnames to an ordered list of
  * public routes. This is the shared derivation used by BOTH the normalized
@@ -194,20 +351,7 @@ export function buildComposePublishRouteTargets(
     return [];
   }
 
-  const publicRoutes: PublicRouteInput[] = [];
-  for (const [serviceName, rawService] of Object.entries(doc.services)) {
-    if (!isPlainObject(rawService) || !Array.isArray(rawService.ports)) {
-      continue;
-    }
-    for (const portSpec of rawService.ports) {
-      const port = extractContainerPort(portSpec);
-      if (port !== null) {
-        publicRoutes.push({ service: serviceName, port });
-      }
-    }
-  }
-
-  return assignRouteTargets(publicRoutes, opts);
+  return assignRouteTargets(collectComposePublishPublicRoutes(doc), opts);
 }
 
 /**

@@ -21,10 +21,13 @@
  *    re-labelled).
  *  - `build:` is replaced with the digest-pinned `image:` that the publish
  *    orchestrator already pushed to the project registry (`pushedRef`).
- *  - `ports:` is TRANSFORMED (not stripped): each published container port
- *    becomes a public route (hostname + loopback hostPort) and the service's
- *    ports are rewritten to `127.0.0.1:<hostPort>:<containerPort>` so node-local
- *    Caddy can reverse-proxy to it.
+ *  - `x-sam-routes` is the explicit route override layer. `ports:` still
+ *    creates public routes by default, but an explicit `mode: private`
+ *    suppresses a matching `ports:` route.
+ *  - Public routes are TRANSFORMED into loopback host bindings: each routed
+ *    container port gets a hostname + loopback hostPort and the service's ports
+ *    are rewritten to `127.0.0.1:<hostPort>:<containerPort>` so node-local Caddy
+ *    can reverse-proxy to it.
  *  - Every other denied field (DENIED_SERVICE_FIELDS) is stripped with a
  *    warning. `logging`/`labels` are denied because SAM re-injects its own.
  *  - SAM injects: the per-environment bridge network, sam.* labels,
@@ -58,9 +61,9 @@ import {
 } from './compose-image-artifacts';
 import {
   assignRouteTargets,
+  collectComposePublishPublicRoutes,
   type DeploymentRouteTarget,
   type DeploymentRouteTargetOptions,
-  type PublicRouteInput,
 } from './deployment-routing';
 
 export const DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB = 256;
@@ -381,10 +384,9 @@ export function buildComposePublishApplyPayload(
   const artifactByService = buildArtifactMap(submission);
   const networkName = `sam-internal-${opts.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
-  const publicRoutes: PublicRouteInput[] = [];
-  // Track which service each route maps to, in route order, so we can rewrite
-  // the service's ports to loopback bindings after host ports are assigned.
-  const routeServiceByIndex: Array<{ service: string; containerPort: number }> = [];
+  const publicRoutes = collectComposePublishPublicRoutes(doc, {
+    portExtractor: collectServiceContainerPorts,
+  });
 
   let hasModelProvider = false;
   const artifacts: ComposeImageArtifactDescriptor[] = [];
@@ -444,14 +446,9 @@ export function buildComposePublishApplyPayload(
       }
     }
 
-    // Collect public routes from ports: (transform exception — NOT stripped).
-    const containerPorts = collectServiceContainerPorts(name, service.ports);
-    for (const port of containerPorts) {
-      publicRoutes.push({ service: name, port });
-      routeServiceByIndex.push({ service: name, containerPort: port });
-    }
-    // Remove ports for now; rewritten to loopback bindings after host-port
-    // assignment below. A service with no resolvable ports keeps none.
+    // Remove ports for now; public routes are rewritten to loopback bindings
+    // after host-port assignment below. Explicit `mode: private` routes leave
+    // the matching service port unpublished.
     delete service.ports;
 
     // Strip every other denied service field (WARN, never error).
@@ -487,14 +484,11 @@ export function buildComposePublishApplyPayload(
   // Rewrite each routed service's ports to loopback bindings now that host
   // ports are assigned. routes preserves publicRoutes order.
   const loopbackPortsByService = new Map<string, string[]>();
-  routes.forEach((route, index) => {
-    const mapped = routeServiceByIndex[index];
-    // Defensive: assignRouteTargets preserves order, so mapped.service === route.service.
-    const serviceName = mapped?.service ?? route.service;
-    const list = loopbackPortsByService.get(serviceName) ?? [];
+  for (const route of routes) {
+    const list = loopbackPortsByService.get(route.service) ?? [];
     list.push(`127.0.0.1:${route.hostPort}:${route.containerPort}`);
-    loopbackPortsByService.set(serviceName, list);
-  });
+    loopbackPortsByService.set(route.service, list);
+  }
   for (const [serviceName, loopbackPorts] of loopbackPortsByService) {
     const service = outServices[serviceName];
     if (isPlainObject(service)) {

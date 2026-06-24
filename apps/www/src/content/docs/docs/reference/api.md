@@ -136,7 +136,7 @@ Create a task record.
 ### `POST /api/projects/:projectId/environments/:envId/releases`
 Create a deployment release for an environment.
 
-Preferred body: Docker Compose YAML with `Content-Type: text/yaml`, `application/yaml`, `text/x-yaml`, or `application/x-yaml`. Compose submissions may use `x-sam-routes` for routes and `x-sam-secret` environment values for secret references.
+Preferred body: Docker Compose YAML with `Content-Type: text/yaml`, `application/yaml`, `text/x-yaml`, or `application/x-yaml`. Compose submissions derive public routes from service `ports:` by default and may use `x-sam-routes` for explicit route overrides. They may also use `x-sam-secret` environment values for legacy secret references.
 
 Raw manifest JSON is still accepted for backward compatibility when another content type is used.
 
