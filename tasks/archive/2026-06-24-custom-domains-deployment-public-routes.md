@@ -135,6 +135,14 @@ deployment node `01KVT1KVGZ8S9NZHKHKAV0QFP6`. Custom hostname
 and served HTTPS 200 with `ssl_verify_result=0`, `remote_ip=138.199.146.229`,
 `server: nginx/1.31.2`, and `via: 1.1 Caddy`.
 
+Browser staging verification: Playwright token-login against
+`https://api.sammy.party/api/auth/token-login` then navigation to
+`https://app.sammy.party/projects/01KVRJCC7Y3NSDQYCPWDRPVJVH/deployments/01KVWBXQZ3QZV8EKW7WFHTGTDM`
+loaded the deployment view with expected environment/deployments content and no
+browser console errors. A broader staging pass also loaded dashboard, project
+chat, the deployment environment, and settings routes with content present, no
+404s, and no browser console errors.
+
 ## Out of scope (v2 — note in spec)
 
 - Apex / root domains; node-IP / apex ALIAS handling.
