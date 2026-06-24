@@ -478,6 +478,7 @@ const USER_F = `${TEST_PREFIX}-user-f`;
 const USER_G = `${TEST_PREFIX}-user-g`;
 const USER_H = `${TEST_PREFIX}-user-h`;
 const USER_I = `${TEST_PREFIX}-user-i`;
+const USER_J = `${TEST_PREFIX}-user-j`;
 const PROJECT_E = `${TEST_PREFIX}-proj-e`;
 
 async function seedPlatformCredential(opts: {
@@ -520,7 +521,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
 
   beforeAll(async () => {
     // Seed fresh users so earlier tests are unaffected
-    for (const uid of [USER_C, USER_D, USER_E, USER_F, USER_G, USER_H, USER_I]) {
+    for (const uid of [USER_C, USER_D, USER_E, USER_F, USER_G, USER_H, USER_I, USER_J]) {
       await env.DATABASE.prepare(
         `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
          VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
@@ -653,6 +654,47 @@ describe('enabled platform default does not short-circuit user backfill', () => 
         USER_I,
       )
       .run();
+
+    const { ciphertext: mismatchedCloudCiphertext, iv: mismatchedCloudIv } = await encrypt(
+      JSON.stringify({ provider: 'scaleway', token: 'scaleway-secret-for-hetzner-consumer' }),
+      ENCRYPTION_KEY,
+    );
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_credentials
+       (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 'cloud-provider', ?, ?, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(
+        `${TEST_PREFIX}-cc-mismatch-cloud`,
+        USER_J,
+        'Scaleway secret attached to Hetzner',
+        mismatchedCloudCiphertext,
+        mismatchedCloudIv,
+      )
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_configurations
+       (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, 'compute', 'hetzner', ?, '{}', 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(
+        `${TEST_PREFIX}-cc-mismatch-cfg`,
+        USER_J,
+        'Hetzner compute with mismatched secret',
+        `${TEST_PREFIX}-cc-mismatch-cloud`,
+      )
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO cc_attachments
+       (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
+       VALUES (?, ?, 'compute', 'hetzner', ?, NULL, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(
+        `${TEST_PREFIX}-cc-mismatch-att`,
+        `${TEST_PREFIX}-cc-mismatch-cfg`,
+        USER_J,
+      )
+      .run();
   });
 
   it('user has no cc_* data before resolution (legacy-only)', async () => {
@@ -772,5 +814,13 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     expect(result).not.toBeNull();
     expect(result!.providerName).toBe('hetzner');
     expect(result!.credentialSource).toBe('platform');
+  });
+
+  it('compute path: mismatched CC cloud-provider secret is rejected before provider creation', async () => {
+    const { createProviderForUser } = await import('../../src/services/provider-credentials');
+
+    await expect(
+      createProviderForUser(db, USER_J, ENCRYPTION_KEY, env as never, 'hetzner'),
+    ).rejects.toThrow('compute provider mismatch: requested hetzner, credential is scaleway');
   });
 });

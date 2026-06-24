@@ -138,6 +138,11 @@ export const computeAssembler: Assembler<ProviderConfig> = {
     if (secret.kind !== 'cloud-provider') {
       throw new Error(`compute consumer requires a cloud-provider credential, got ${secret.kind}`);
     }
+    if (secret.provider !== resolved.consumer.provider) {
+      throw new Error(
+        `compute provider mismatch: requested ${resolved.consumer.provider}, credential is ${secret.provider}`
+      );
+    }
     return {
       provider: secret.provider,
       token: secret.token,

@@ -17,6 +17,23 @@ The class of bug is **silent acceptance at credential trust boundaries.** Every 
 
 ## Required Behavioral Tests
 
+### 0. Provider / Dialect Identity Consistency
+
+When a resolved consumer and the decrypted credential secret both name a
+downstream provider, dialect, audience, or equivalent identity, tests MUST assert
+that disagreement is rejected before the secret leaves the credential boundary.
+
+Examples:
+
+- A `compute:hetzner` consumer resolving a `cloud-provider` secret with
+  `provider: "scaleway"` MUST throw before provider client construction.
+- An agent/provider-dialect configuration that resolves to an incompatible
+  secret dialect MUST throw before env vars, proxy config, or auth files are
+  assembled.
+
+The error should include both identities so the bad row is diagnosable without
+logging the secret value.
+
 ### 1. Fallback Branch Coverage
 
 For any function that returns a stored credential based on a scoping tuple, there MUST be a behavioral test for EACH of these branches:
@@ -70,6 +87,7 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
 Before merging any PR that touches credential resolution, rotation, or comparison:
 
 - [ ] Every fallback branch has a behavioral test (active-scoped, inactive-scoped, no-scoped, no-row-at-all)
+- [ ] Provider/dialect identity mismatches are rejected before a credential is assembled or a downstream client is constructed
 - [ ] Stale/mismatch responses are asserted to OMIT the rotating credential
 - [ ] Rotation validation defaults to a conservative allowlist (not disabled)
 - [ ] Rotation validation BLOCKS on failure, not warns

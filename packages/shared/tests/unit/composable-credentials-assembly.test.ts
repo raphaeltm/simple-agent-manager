@@ -1,8 +1,9 @@
 /**
- * EXPERIMENT (E5) — assembly-slice coverage for opencode custom config.
+ * Assembly contract coverage for opencode custom config.
  *
- * The E2 tests prove the agent assembler produces the right opencode config for
- * ONE hardcoded z.ai case. That is not enough to claim parity: the only piece of
+ * The resolver/assembler contract tests prove the agent assembler produces the
+ * right opencode config for ONE hardcoded z.ai case. That is not enough to claim
+ * parity: the only piece of
  * shared logic between the TS assembler and the Go function that can silently
  * DRIFT is the model-alias sanitization (slashes/spaces/dots → dashes) and the
  * surrounding `custom` provider shape. A single happy-path string can't catch a
@@ -59,6 +60,14 @@ function expectedProxyOpencodeConfig(model: string, baseURL: string): Record<str
 let seq = 0;
 const id = (p: string) => `${p}-${++seq}`;
 
+function expectResolved(
+  resolved: ResolvedEnvironment | null,
+  message = 'expected opencode credential resolution to produce a result',
+): ResolvedEnvironment {
+  expect(resolved, message).not.toBeNull();
+  return resolved as ResolvedEnvironment;
+}
+
 function assembleOpencode(model: string, baseUrl: string): Record<string, unknown> | undefined {
   seq = 0;
   const userId = 'user-1';
@@ -94,14 +103,14 @@ function assembleOpencode(model: string, baseUrl: string): Record<string, unknow
     platform: {},
   };
   const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'opencode' }, { userId });
-  return agentAssembler.assemble(resolved!).opencodeConfig;
+  return agentAssembler.assemble(expectResolved(resolved)).opencodeConfig;
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('E5 — opencode proxy custom-provider assembly across model names', () => {
+describe('opencode proxy custom-provider assembly across model names', () => {
   // Adversarial model names — each exercises a different sanitization path.
   const MODELS = [
     'glm-4.6', // dot

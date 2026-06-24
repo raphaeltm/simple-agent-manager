@@ -1,5 +1,5 @@
 /**
- * E6 — wiring parity: CC resolver output → legacy getDecryptedAgentKey shape.
+ * Composable credential wiring parity.
  *
  * Tests the mapping from ResolvedEnvironment (CC model) to the legacy return
  * shape { credential, credentialKind, credentialSource }. This is the exact
@@ -80,6 +80,22 @@ function mapSourceToLegacy(source: string): LegacyCredentialSource {
 let seq = 0;
 const id = (prefix: string) => `${prefix}-${++seq}`;
 
+function expectResolved(
+  resolved: ResolvedEnvironment | null,
+  message = 'expected composable credential resolution to produce a result',
+): ResolvedEnvironment {
+  expect(resolved, message).not.toBeNull();
+  return resolved as ResolvedEnvironment;
+}
+
+function expectLegacy(
+  legacy: ReturnType<typeof mapResolvedToLegacy>,
+  message = 'expected resolved environment to map to a legacy credential',
+): NonNullable<ReturnType<typeof mapResolvedToLegacy>> {
+  expect(legacy, message).not.toBeNull();
+  return legacy as NonNullable<ReturnType<typeof mapResolvedToLegacy>>;
+}
+
 function makeSnapshot(opts: {
   userId: string;
   credentials: Credential[];
@@ -119,7 +135,7 @@ function makeSnapshot(opts: {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () => {
+describe('mapResolvedToLegacy: CC resolver output to legacy shape', () => {
   beforeEach(() => { seq = 0; });
 
   it('api-key credential maps to { credential: apiKey, credentialKind: "api-key" }', () => {
@@ -136,7 +152,7 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
     const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'claude-code' }, { userId });
 
     expect(resolved).not.toBeNull();
-    const legacy = mapResolvedToLegacy(resolved!);
+    const legacy = mapResolvedToLegacy(expectResolved(resolved));
     expect(legacy).toEqual({
       credential: 'sk-ant-123',
       credentialKind: 'api-key',
@@ -157,7 +173,7 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
     const snap = makeSnapshot({ userId, credentials: [cred], agentType: 'claude-code' });
     const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'claude-code' }, { userId });
 
-    const legacy = mapResolvedToLegacy(resolved!);
+    const legacy = mapResolvedToLegacy(expectResolved(resolved));
     expect(legacy).toEqual({
       credential: 'gho_abc123',
       credentialKind: 'oauth-token',
@@ -178,7 +194,7 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
     const snap = makeSnapshot({ userId, credentials: [cred], agentType: 'codex' });
     const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'codex' }, { userId });
 
-    const legacy = mapResolvedToLegacy(resolved!);
+    const legacy = mapResolvedToLegacy(expectResolved(resolved));
     expect(legacy).toEqual({
       credential: '{"token":"abc"}',
       credentialKind: 'oauth-token',
@@ -199,7 +215,7 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
     const snap = makeSnapshot({ userId, credentials: [cred], agentType: 'opencode' });
     const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'opencode' }, { userId });
 
-    const legacy = mapResolvedToLegacy(resolved!);
+    const legacy = mapResolvedToLegacy(expectResolved(resolved));
     expect(legacy).toEqual({
       credential: 'sk-oai-xyz',
       credentialKind: 'api-key',
@@ -217,29 +233,52 @@ describe('E6 — mapResolvedToLegacy: CC resolver output → legacy shape', () =
       secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'hetzner-tok' },
       isActive: true,
     };
-    // Attach as compute consumer but resolve as agent — shouldn't match
-    // (resolver won't match consumer kind mismatch, so this just tests null path)
-    const resolved: ResolvedEnvironment = {
-      credential: cred,
-      source: 'user-attachment',
-      configuration: null as never,
+    const cfg = {
+      id: id('cfg'),
+      ownerId: userId,
+      name: 'compute config',
+      consumer: { kind: 'compute' as const, provider: 'hetzner' },
+      credentialId: cred.id,
+      settings: {},
+      isActive: true,
     };
-    const legacy = mapResolvedToLegacy(resolved);
+    const snap: CompositionSnapshot = {
+      credentials: [cred],
+      configurations: [cfg],
+      attachments: [
+        {
+          id: id('att'),
+          configurationId: cfg.id,
+          consumer: { kind: 'compute', provider: 'hetzner' },
+          target: { scope: 'user', userId },
+          isActive: true,
+        },
+      ],
+      platform: {},
+    };
+    const resolved = resolveEnvironment(snap, { kind: 'compute', provider: 'hetzner' }, { userId });
+    const legacy = mapResolvedToLegacy(expectResolved(resolved));
     expect(legacy).toBeNull();
   });
 
   it('platform-proxy source returns null (no raw credential)', () => {
-    const resolved: ResolvedEnvironment = {
-      credential: null as never,
-      source: 'platform-proxy',
-      configuration: null as never,
+    const snap: CompositionSnapshot = {
+      credentials: [],
+      configurations: [],
+      attachments: [],
+      platform: { 'agent:claude-code': { mode: 'proxy' } },
     };
-    const legacy = mapResolvedToLegacy(resolved);
+    const resolved = resolveEnvironment(
+      snap,
+      { kind: 'agent', agentType: 'claude-code' },
+      { userId: 'user-1' },
+    );
+    const legacy = mapResolvedToLegacy(expectResolved(resolved));
     expect(legacy).toBeNull();
   });
 });
 
-describe('E6 — mapSourceToLegacy: ResolutionSource → CredentialSource', () => {
+describe('mapSourceToLegacy: ResolutionSource to CredentialSource', () => {
   const cases: Array<[string, LegacyCredentialSource]> = [
     ['project-attachment', 'project'],
     ['user-attachment', 'user'],
@@ -254,7 +293,7 @@ describe('E6 — mapSourceToLegacy: ResolutionSource → CredentialSource', () =
   }
 });
 
-describe('E6 — project-scoped resolution maps to credentialSource "project"', () => {
+describe('project-scoped resolution maps to credentialSource "project"', () => {
   it('project-attached credential → credentialSource "project"', () => {
     seq = 0;
     const userId = 'user-1';
@@ -274,14 +313,14 @@ describe('E6 — project-scoped resolution maps to credentialSource "project"', 
       { userId, projectId },
     );
 
-    expect(resolved).not.toBeNull();
-    expect(resolved!.source).toBe('project-attachment');
-    const legacy = mapResolvedToLegacy(resolved!);
-    expect(legacy!.credentialSource).toBe('project');
+    const concrete = expectResolved(resolved);
+    expect(concrete.source).toBe('project-attachment');
+    const legacy = expectLegacy(mapResolvedToLegacy(concrete));
+    expect(legacy.credentialSource).toBe('project');
   });
 });
 
-describe('E6 — Rule 28: inactive project-scoped attachment halts CC resolution', () => {
+describe('Rule 28: inactive project-scoped attachment halts CC resolution', () => {
   it('inactive project attachment returns null (does NOT fall through to user-scoped)', () => {
     seq = 0;
     const userId = 'user-1';
@@ -380,15 +419,14 @@ describe('E6 — Rule 28: inactive project-scoped attachment halts CC resolution
       { userId, projectId },
     );
 
-    expect(resolved).not.toBeNull();
-    expect(resolved!.source).toBe('project-attachment');
-    const legacy = mapResolvedToLegacy(resolved!);
-    expect(legacy).not.toBeNull();
-    expect(legacy!.credential).toBe('sk-proj-active');
+    const concrete = expectResolved(resolved);
+    expect(concrete.source).toBe('project-attachment');
+    const legacy = expectLegacy(mapResolvedToLegacy(concrete));
+    expect(legacy.credential).toBe('sk-proj-active');
   });
 });
 
-describe('E6 — compute assembler output compatible with buildProviderConfig', () => {
+describe('compute assembler output compatible with buildProviderConfig', () => {
   it('hetzner compute credential produces token string for buildProviderConfig', () => {
     seq = 0;
     const userId = 'user-1';
@@ -428,11 +466,8 @@ describe('E6 — compute assembler output compatible with buildProviderConfig', 
       { kind: 'compute', provider: 'hetzner' },
       { userId },
     );
-    expect(resolved).not.toBeNull();
-
-    const assembled = computeAssembler.assemble(resolved!);
-    expect(assembled).not.toBeNull();
-    expect(assembled!.token).toBe('hetzner-api-tok-123');
-    expect(assembled!.isPlatform).toBe(false);
+    const assembled = computeAssembler.assemble(expectResolved(resolved));
+    expect(assembled.token).toBe('hetzner-api-tok-123');
+    expect(assembled.isPlatform).toBe(false);
   });
 });
