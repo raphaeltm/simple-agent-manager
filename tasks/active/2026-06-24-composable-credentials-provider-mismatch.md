@@ -42,6 +42,7 @@ Validation notes:
 - `pnpm --filter @simple-agent-manager/shared lint` passed with pre-existing warnings outside the touched composable-credentials files.
 - `pnpm --filter @simple-agent-manager/api typecheck` passed.
 - `pnpm --filter @simple-agent-manager/api lint` passed with pre-existing warnings.
+- `pnpm --filter @simple-agent-manager/api test -- composable-credentials-resolver` passed, including a normal-runner API resolver-service regression for provider mismatch rejection.
 - `pnpm --filter @simple-agent-manager/api test -- composable-credentials-wiring` is not the right API command because the default API test script excludes worker tests.
 - `pnpm --filter @simple-agent-manager/api test:workers -- composable-credentials-wiring` could not complete locally because `workerd` repeatedly segfaulted during runtime startup before Vitest reported assertions; the run was terminated after confirming repeated signal 11 startup crashes.
 - `pnpm lint` passed with pre-existing warnings.
