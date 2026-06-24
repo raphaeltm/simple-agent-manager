@@ -179,7 +179,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     const labels = options.map((o) => o.textContent);
     expect(labels.some((l) => l?.includes('Go to Chat'))).toBe(true);
     expect(labels.some((l) => l?.includes('Go to Ideas'))).toBe(true);
-    expect(labels.some((l) => l?.includes('Go to Activity'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Go to Deployments'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Go to Activity'))).toBe(false);
     expect(labels.some((l) => l?.includes('Go to Settings'))).toBe(true);
   });
 
@@ -216,7 +217,9 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     const contextOptions = options.filter((o) => o.textContent?.includes('Go to Ideas'));
     expect(contextOptions.length).toBeGreaterThanOrEqual(1);
 
-    // "Go to Activity" should be filtered out since "ideas" doesn't match
+    // Unrelated project destinations should be filtered out since "ideas" doesn't match
+    const deploymentsOptions = options.filter((o) => o.textContent?.includes('Go to Deployments'));
+    expect(deploymentsOptions).toHaveLength(0);
     const activityOptions = options.filter((o) => o.textContent?.includes('Go to Activity'));
     expect(activityOptions).toHaveLength(0);
   });

@@ -1,5 +1,4 @@
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   Bell,
@@ -59,7 +58,6 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
   { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
   { label: 'Skills', path: 'skills', icon: <Zap size={18} /> },
-  { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 

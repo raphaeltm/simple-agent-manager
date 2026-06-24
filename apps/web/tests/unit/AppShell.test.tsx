@@ -145,7 +145,8 @@ describe('AppShell (project context)', () => {
     expect(projectNav.getAttribute('aria-hidden')).not.toBe('true');
     expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByText('Ideas')).toBeInTheDocument();
-    expect(screen.getByText('Activity')).toBeInTheDocument();
+    expect(screen.getByText('Deployments')).toBeInTheDocument();
+    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
 
   it('shows Back to Projects toggle button when inside a project', () => {
@@ -265,7 +266,8 @@ describe('AppShell (mobile)', () => {
     expect(drawer).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Activity' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deployments' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activity' })).not.toBeInTheDocument();
   });
 
   it('renders icons alongside labels in mobile drawer nav items', () => {

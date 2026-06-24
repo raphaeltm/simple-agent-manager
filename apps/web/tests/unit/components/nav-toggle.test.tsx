@@ -70,7 +70,8 @@ describe('NavSidebar — desktop toggle', () => {
     renderSidebar({ pathname: '/projects/proj-1/chat' });
     expect(screen.getByText('Chat')).toBeTruthy();
     expect(screen.getByText('Ideas')).toBeTruthy();
-    expect(screen.getByText('Activity')).toBeTruthy();
+    expect(screen.getByText('Deployments')).toBeTruthy();
+    expect(screen.queryByText('Activity')).toBeNull();
   });
 
   it('shows global nav items when showGlobalNav is true', () => {

@@ -149,7 +149,8 @@ describe('useCommandPaletteContext', () => {
     const labels = result.current.contextActions.map((a) => a.label);
     expect(labels).toContain('My Project: Go to Chat');
     expect(labels).toContain('My Project: Go to Ideas');
-    expect(labels).toContain('My Project: Go to Activity');
+    expect(labels).toContain('My Project: Go to Deployments');
+    expect(labels).not.toContain('My Project: Go to Activity');
     expect(labels).toContain('My Project: Go to Settings');
   });
 
@@ -169,6 +170,7 @@ describe('useCommandPaletteContext', () => {
 
     const labels = result.current.contextActions.map((a) => a.label);
     expect(labels).toContain('My Project: Go to Library');
+    expect(labels).toContain('My Project: Go to Deployments');
     expect(labels).toContain('My Project: Go to Agent Context');
     expect(labels).toContain('My Project: Go to Notifications');
     expect(labels).toContain('My Project: Go to Triggers');
@@ -178,6 +180,7 @@ describe('useCommandPaletteContext', () => {
 
   it.each([
     ['ctx-project-library', '/projects/p1/library'],
+    ['ctx-project-deployments', '/projects/p1/deployments'],
     ['ctx-project-agent-context', '/projects/p1/agent-context'],
     ['ctx-project-notifications', '/projects/p1/notifications'],
     ['ctx-project-triggers', '/projects/p1/triggers'],

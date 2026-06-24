@@ -1,5 +1,4 @@
 import {
-  Activity,
   Bell,
   Brain,
   Clock,
@@ -9,6 +8,7 @@ import {
   MessageSquare,
   Monitor,
   Plus,
+  Rocket,
   Settings,
   UserCog,
   Zap,
@@ -69,7 +69,7 @@ interface ProjectActionItem {
 const PROJECT_NAV_ITEMS: ProjectActionItem[] = [
   { id: 'ctx-project-chat', label: 'Go to Chat', icon: <MessageSquare size={14} />, path: 'chat' },
   { id: 'ctx-project-ideas', label: 'Go to Ideas', icon: <Lightbulb size={14} />, path: 'ideas' },
-  { id: 'ctx-project-activity', label: 'Go to Activity', icon: <Activity size={14} />, path: 'activity' },
+  { id: 'ctx-project-deployments', label: 'Go to Deployments', icon: <Rocket size={14} />, path: 'deployments' },
   { id: 'ctx-project-settings', label: 'Go to Settings', icon: <Settings size={14} />, path: 'settings' },
   { id: 'ctx-project-library', label: 'Go to Library', icon: <FolderOpen size={14} />, path: 'library' },
   { id: 'ctx-project-agent-context', label: 'Go to Agent Context', icon: <Brain size={14} />, path: 'agent-context' },
