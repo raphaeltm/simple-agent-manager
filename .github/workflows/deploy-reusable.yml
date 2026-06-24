@@ -93,10 +93,9 @@ jobs:
             echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."
           fi
           if [ "$HAS_DEPLOY_SIGNING_PRIVATE_KEY" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.DEPLOY_SIGNING_PRIVATE_KEY"
-          fi
-          if [ "$HAS_DEPLOY_SIGNING_PUBLIC_KEY" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.DEPLOY_SIGNING_PUBLIC_KEY"
+            echo "::notice::DEPLOY_SIGNING_PRIVATE_KEY not set — using Pulumi-managed deploy signing keys generated during deployment."
+          elif [ "$HAS_DEPLOY_SIGNING_PUBLIC_KEY" != "true" ]; then
+            echo "::notice::DEPLOY_SIGNING_PUBLIC_KEY not set — deriving it from DEPLOY_SIGNING_PRIVATE_KEY during Worker secret configuration."
           fi
 
           if [ -n "$MISSING" ]; then

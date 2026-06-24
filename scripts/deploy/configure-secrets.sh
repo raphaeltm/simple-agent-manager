@@ -22,6 +22,42 @@ read_pulumi_secret() {
   ) || true
 }
 
+derive_deploy_signing_public_key() {
+  local private_key_b64="$1"
+
+  DEPLOY_SIGNING_PRIVATE_KEY_INPUT="$private_key_b64" node <<'NODE'
+const crypto = require('node:crypto');
+
+const privateKeyB64 = process.env.DEPLOY_SIGNING_PRIVATE_KEY_INPUT || '';
+const privateKeyBytes = Buffer.from(privateKeyB64, 'base64');
+if (privateKeyBytes.length !== 32 && privateKeyBytes.length !== 64) {
+  throw new Error(
+    `DEPLOY_SIGNING_PRIVATE_KEY has invalid length: got ${privateKeyBytes.length} bytes, expected 32 (seed) or 64 (seed+pubkey)`
+  );
+}
+
+const seed = privateKeyBytes.subarray(0, 32);
+const privateKey = crypto.createPrivateKey({
+  key: Buffer.concat([
+    Buffer.from('302e020100300506032b657004220420', 'hex'),
+    seed,
+  ]),
+  format: 'der',
+  type: 'pkcs8',
+});
+const publicDer = crypto.createPublicKey(privateKey).export({
+  format: 'der',
+  type: 'spki',
+});
+const publicPrefix = Buffer.from('302a300506032b6570032100', 'hex');
+if (!publicDer.subarray(0, publicPrefix.length).equals(publicPrefix)) {
+  throw new Error('derived DEPLOY_SIGNING_PUBLIC_KEY has unexpected Ed25519 SPKI prefix');
+}
+
+process.stdout.write(publicDer.subarray(publicPrefix.length).toString('base64'));
+NODE
+}
+
 # Function to set a secret with proper error handling
 set_worker_secret() {
   local secret_name="$1"
@@ -66,15 +102,29 @@ ENVIRONMENT="${1:-production}"
 PULUMI_ENCRYPTION_KEY="${PULUMI_ENCRYPTION_KEY:-}"
 PULUMI_JWT_PRIVATE_KEY="${PULUMI_JWT_PRIVATE_KEY:-}"
 PULUMI_JWT_PUBLIC_KEY="${PULUMI_JWT_PUBLIC_KEY:-}"
+PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="${PULUMI_DEPLOY_SIGNING_PRIVATE_KEY:-}"
+PULUMI_DEPLOY_SIGNING_PUBLIC_KEY="${PULUMI_DEPLOY_SIGNING_PUBLIC_KEY:-}"
 SECRET_ENCRYPTION_KEY="${SECRET_ENCRYPTION_KEY:-}"
 SECRET_JWT_PRIVATE_KEY="${SECRET_JWT_PRIVATE_KEY:-}"
 SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
 
-if [ -z "$PULUMI_ENCRYPTION_KEY" ] && [ -n "${PULUMI_STACK:-}" ]; then
+if [ -n "${PULUMI_STACK:-}" ]; then
   echo "Reading Pulumi-managed security keys from stack: $PULUMI_STACK"
-  PULUMI_ENCRYPTION_KEY="$(read_pulumi_secret encryptionKey)"
-  PULUMI_JWT_PRIVATE_KEY="$(read_pulumi_secret jwtPrivateKey)"
-  PULUMI_JWT_PUBLIC_KEY="$(read_pulumi_secret jwtPublicKey)"
+  if [ -z "$PULUMI_ENCRYPTION_KEY" ]; then
+    PULUMI_ENCRYPTION_KEY="$(read_pulumi_secret encryptionKey)"
+  fi
+  if [ -z "$PULUMI_JWT_PRIVATE_KEY" ]; then
+    PULUMI_JWT_PRIVATE_KEY="$(read_pulumi_secret jwtPrivateKey)"
+  fi
+  if [ -z "$PULUMI_JWT_PUBLIC_KEY" ]; then
+    PULUMI_JWT_PUBLIC_KEY="$(read_pulumi_secret jwtPublicKey)"
+  fi
+  if [ -z "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]; then
+    PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="$(read_pulumi_secret deploySigningPrivateKey)"
+  fi
+  if [ -z "$PULUMI_DEPLOY_SIGNING_PUBLIC_KEY" ]; then
+    PULUMI_DEPLOY_SIGNING_PUBLIC_KEY="$(read_pulumi_secret deploySigningPublicKey)"
+  fi
 fi
 
 echo "Configuring secrets for environment: $ENVIRONMENT"
@@ -96,6 +146,36 @@ elif [ -n "$PULUMI_ENCRYPTION_KEY" ]; then
 else
   echo -e "${RED}ERROR: No security keys available from GitHub Secrets or Pulumi state${NC}"
   echo "This should not happen - Pulumi should have created the keys."
+  exit 1
+fi
+
+# Deployment apply signing keys use a separate Ed25519 keypair from JWTs.
+# Existing GitHub secrets remain supported as explicit overrides. Fresh installs
+# use the Pulumi-persisted seed/public key generated with the rest of the
+# platform-owned security material.
+if [ -n "${DEPLOY_SIGNING_PRIVATE_KEY:-}" ]; then
+  echo "Using deploy signing key from GitHub Secrets (backwards compatibility)"
+  DERIVED_DEPLOY_SIGNING_PUBLIC_KEY="$(derive_deploy_signing_public_key "$DEPLOY_SIGNING_PRIVATE_KEY")"
+  if [ -z "${DEPLOY_SIGNING_PUBLIC_KEY:-}" ]; then
+    DEPLOY_SIGNING_PUBLIC_KEY="$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY"
+  elif [ "$DEPLOY_SIGNING_PUBLIC_KEY" != "$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY" ]; then
+    echo -e "${RED}ERROR: DEPLOY_SIGNING_PUBLIC_KEY does not match DEPLOY_SIGNING_PRIVATE_KEY${NC}"
+    exit 1
+  fi
+elif [ -n "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]; then
+  echo "Using deploy signing keys from Pulumi state (auto-persisted)"
+  DEPLOY_SIGNING_PRIVATE_KEY="$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY"
+  DEPLOY_SIGNING_PUBLIC_KEY="$PULUMI_DEPLOY_SIGNING_PUBLIC_KEY"
+  DERIVED_DEPLOY_SIGNING_PUBLIC_KEY="$(derive_deploy_signing_public_key "$DEPLOY_SIGNING_PRIVATE_KEY")"
+  if [ -z "$DEPLOY_SIGNING_PUBLIC_KEY" ]; then
+    DEPLOY_SIGNING_PUBLIC_KEY="$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY"
+  elif [ "$DEPLOY_SIGNING_PUBLIC_KEY" != "$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY" ]; then
+    echo -e "${RED}ERROR: Pulumi deploySigningPublicKey does not match deploySigningPrivateKey${NC}"
+    exit 1
+  fi
+else
+  echo -e "${RED}ERROR: No deploy signing key available from GitHub Secrets or Pulumi state${NC}"
+  echo "This should not happen - Pulumi should have created the key."
   exit 1
 fi
 echo ""

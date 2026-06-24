@@ -388,7 +388,8 @@ The project uses a deliberate separation of concerns between two tools:
 - All infrastructure changes go through PR review (no manual console changes)
 - Infrastructure drift is checked quarterly (compare deployed state vs config)
 - Never use `--force` or bypass flags without documented justification
-- Pulumi state bucket is the ONE manual prerequisite for deployment
+- Pulumi state bucket and provider/app credentials are the manual prerequisites for deployment
+- Platform-owned security material MUST be generated automatically and persisted in Pulumi state when practical; users should supply as little deployment configuration as possible
 
 ### Environment Management
 
@@ -798,43 +799,45 @@ a realistic local environment is impractical. Instead, we deploy frequently and 
 
 ### Continuous Deployment
 
-**Philosophy:** Merge to main = deploy to production. Configuration lives in GitHub, visible and editable.
+**Philosophy:** Merge to main = deploy to production. User-supplied configuration lives in GitHub, visible and editable; platform-owned generated secrets live in encrypted Pulumi state.
 
-**Rationale:** Deployment should be automatic and predictable. Configuration should be visible in the GitHub UI,
-not buried in one-time scripts or hidden state files. This enables easy auditing and modification.
+**Rationale:** Deployment should be automatic and predictable. User-provided credentials should be visible in the GitHub UI,
+while generated signing/encryption material should not become manual setup work. This enables easy auditing and modification without making users paste values SAM can create itself.
 
 **Rules:**
 
 - Push/merge to `main` automatically deploys to production
-- All configuration lives in **GitHub Environments** (Settings → Environments → production)
+- User-supplied configuration lives in **GitHub Environments** (Settings → Environments → production)
+- Platform-owned generated secrets live in encrypted Pulumi state and are copied to Worker secrets during deployment
 - Environment **variables** (visible) for non-sensitive config: `BASE_DOMAIN`, `RESOURCE_PREFIX`
 - Environment **secrets** (hidden) for sensitive values: API tokens, keys, credentials
+- Do not add a manual GitHub Environment prerequisite when the deployment can generate and persist the value safely
 - Deployment is idempotent: safe to re-run, only updates changed resources
 - Concurrent deployments are queued, not cancelled
 
 **GitHub Environment Configuration:**
 
-| Type     | Name                       | Description                                              |
-| -------- | -------------------------- | -------------------------------------------------------- |
-| Variable | `BASE_DOMAIN`              | Base domain for deployment (e.g., `example.com`)         |
-| Variable | `RESOURCE_PREFIX`          | Prefix for resources (default: `sam`)                    |
-| Variable | `PULUMI_STATE_BUCKET`      | R2 bucket for Pulumi state (default: `sam-pulumi-state`) |
-| Secret   | `CF_API_TOKEN`             | Cloudflare API token                                     |
-| Secret   | `CF_ACCOUNT_ID`            | Cloudflare account ID                                    |
-| Secret   | `CF_ZONE_ID`               | Cloudflare zone ID                                       |
-| Secret   | `R2_ACCESS_KEY_ID`         | R2 access key for Pulumi state                           |
-| Secret   | `R2_SECRET_ACCESS_KEY`     | R2 secret key for Pulumi state                           |
-| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Encryption passphrase for Pulumi state                   |
-| Secret   | `GH_CLIENT_ID`             | GitHub OAuth client ID                                   |
-| Secret   | `GH_CLIENT_SECRET`         | GitHub OAuth client secret                               |
-| Secret   | `GH_APP_ID`                | GitHub App ID                                            |
-| Secret   | `GH_APP_PRIVATE_KEY`       | GitHub App private key                                   |
-| Secret   | `GH_APP_SLUG`              | GitHub App slug                                          |
-| Secret   | `ENCRYPTION_KEY`           | AES-256 key (optional, auto-generated)                   |
-| Secret   | `JWT_PRIVATE_KEY`          | JWT signing key (optional, auto-generated)               |
-| Secret   | `JWT_PUBLIC_KEY`           | JWT verification key (optional, auto-generated)          |
-| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | Deploy payload signing key                             |
-| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | Deploy payload verification key                        |
+| Type     | Name                         | Description                                                         |
+| -------- | ---------------------------- | ------------------------------------------------------------------- |
+| Variable | `BASE_DOMAIN`                | Base domain for deployment (e.g., `example.com`)                    |
+| Variable | `RESOURCE_PREFIX`            | Prefix for resources (default: `sam`)                               |
+| Variable | `PULUMI_STATE_BUCKET`        | R2 bucket for Pulumi state (default: `sam-pulumi-state`)            |
+| Secret   | `CF_API_TOKEN`               | Cloudflare API token                                                |
+| Secret   | `CF_ACCOUNT_ID`              | Cloudflare account ID                                               |
+| Secret   | `CF_ZONE_ID`                 | Cloudflare zone ID                                                  |
+| Secret   | `R2_ACCESS_KEY_ID`           | R2 access key for Pulumi state                                      |
+| Secret   | `R2_SECRET_ACCESS_KEY`       | R2 secret key for Pulumi state                                      |
+| Secret   | `PULUMI_CONFIG_PASSPHRASE`   | Encryption passphrase for Pulumi state                              |
+| Secret   | `GH_CLIENT_ID`               | GitHub OAuth client ID                                              |
+| Secret   | `GH_CLIENT_SECRET`           | GitHub OAuth client secret                                          |
+| Secret   | `GH_APP_ID`                  | GitHub App ID                                                       |
+| Secret   | `GH_APP_PRIVATE_KEY`         | GitHub App private key                                              |
+| Secret   | `GH_APP_SLUG`                | GitHub App slug                                                     |
+| Secret   | `ENCRYPTION_KEY`             | AES-256 key (optional override; auto-generated)                     |
+| Secret   | `JWT_PRIVATE_KEY`            | JWT signing key (optional override; auto-generated)                 |
+| Secret   | `JWT_PUBLIC_KEY`             | JWT verification key (optional override; auto-generated)            |
+| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | Deploy payload signing key (optional override; auto-generated)      |
+| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | Deploy payload verification key (optional override; auto-generated) |
 
 **Naming Convention**: GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow (`configure-secrets.sh`) maps these to `GITHUB_*` Cloudflare Worker secrets (e.g., `GH_CLIENT_ID` → `GITHUB_CLIENT_ID`, `GH_WEBHOOK_SECRET` → `GITHUB_WEBHOOK_SECRET`).
 

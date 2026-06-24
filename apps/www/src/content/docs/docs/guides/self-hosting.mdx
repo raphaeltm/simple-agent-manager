@@ -105,8 +105,6 @@ In your fork: Settings → Environments → New environment → name it `product
 | `GH_APP_PRIVATE_KEY`       | GitHub App private key (PEM or base64)                                         |
 | `GH_APP_SLUG`              | GitHub App URL slug                                                            |
 | `GH_WEBHOOK_SECRET`        | GitHub App webhook secret; mapped to the Worker secret `GITHUB_WEBHOOK_SECRET` |
-| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 deploy payload signing private key                                   |
-| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 deploy payload signing public key                                    |
 | `GOOGLE_CLIENT_ID`         | Optional Google OAuth client ID for GCP provider setup                         |
 | `GOOGLE_CLIENT_SECRET`     | Optional Google OAuth client secret for GCP provider setup                     |
 
@@ -115,7 +113,7 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`), Origin CA credentials (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`), and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated and persisted via Pulumi. No manual setup required.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`), Origin CA credentials (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`), and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated and persisted via Pulumi. No manual setup required.
 :::
 
 ## Step 7: Deploy

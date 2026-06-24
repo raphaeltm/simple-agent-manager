@@ -32,6 +32,7 @@ GH_WEBHOOK_SECRET      ->  GITHUB_WEBHOOK_SECRET
 3. **Local `.env` files** -> Use `GITHUB_*` prefix (same as Worker)
 4. ALWAYS specify which context you're documenting
 5. NEVER mix prefixes in the same table without explanation
+6. Distinguish manual GitHub Environment prerequisites from generated Worker secrets
 
 ### Quick Reference
 
@@ -39,6 +40,16 @@ GH_WEBHOOK_SECRET      ->  GITHUB_WEBHOOK_SECRET
 - **Code reading from env**: Use `env.GITHUB_CLIENT_ID`
 - **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
 - **GitHub webhook secret**: Tell them to use `GH_WEBHOOK_SECRET` in GitHub and `GITHUB_WEBHOOK_SECRET` in Worker/local env
+
+## Generated Platform Secrets
+
+Do not ask users to supply platform-owned signing/encryption material when SAM can safely generate and persist it during deployment.
+
+Examples:
+
+- `ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`, and `TRIAL_CLAIM_TOKEN_SECRET` are Worker runtime secrets, not required manual GitHub Environment secrets for fresh installs.
+- These values are generated/persisted by Pulumi state and copied into Cloudflare Worker secrets by `scripts/deploy/configure-secrets.sh`.
+- GitHub Environment secrets with the same names are compatibility/rotation overrides only. When adding new deployment-owned secrets, prefer Pulumi generation plus an explicit override path over a new manual prerequisite.
 
 ## Wrangler Environment Sections (Generated at Deploy Time)
 

@@ -21,6 +21,8 @@ import {
 } from './resources/dns';
 import {
   encryptionKey,
+  deploySigningPrivateKey,
+  deploySigningPublicKey,
   jwtPrivateKey,
   jwtPublicKey,
   trialClaimTokenSecret,
@@ -57,7 +59,14 @@ export const hostnames = dnsHostnames;
 
 // Export security keys (persisted in Pulumi state, encrypted in R2)
 // These are marked as secrets - use `pulumi stack output --show-secrets` to view
-export { encryptionKey, jwtPrivateKey, jwtPublicKey, trialClaimTokenSecret };
+export {
+  encryptionKey,
+  deploySigningPrivateKey,
+  deploySigningPublicKey,
+  jwtPrivateKey,
+  jwtPublicKey,
+  trialClaimTokenSecret,
+};
 
 // Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)
 export { originCaCertPem, originCaKeyPem };

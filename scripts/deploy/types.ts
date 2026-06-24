@@ -294,6 +294,11 @@ export interface CloudflareWorker {
 
 // Note: Resource naming is centralized in config.ts (DEPLOYMENT_CONFIG.resources)
 // Do NOT add resource naming constants here - use DEPLOYMENT_CONFIG instead.
+//
+// These are required Cloudflare Worker secrets after deployment configuration
+// runs. Do not treat this list as the manual GitHub Environment prerequisite
+// list: several platform-owned secrets are generated and persisted in Pulumi
+// state, then copied to Worker secrets by scripts/deploy/configure-secrets.sh.
 
 export const REQUIRED_SECRETS = [
   'GITHUB_CLIENT_ID',

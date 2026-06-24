@@ -32,6 +32,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `ENCRYPTION_KEY`           | No (auto-generated)                     |
 | Secret   | `JWT_PRIVATE_KEY`          | No (auto-generated)                     |
 | Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated)                     |
+| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | No (auto-generated; override only)    |
+| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | No (auto-generated; override only)    |
 | Secret   | `ORIGIN_CA_CERT`           | No (auto-generated)                     |
 | Secret   | `ORIGIN_CA_KEY`            | No (auto-generated)                     |
 | Secret   | `TRIAL_CLAIM_TOKEN_SECRET` | No (auto-generated)                     |

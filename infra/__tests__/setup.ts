@@ -218,15 +218,22 @@ pulumi.runtime.setMocks({
             hostname: `${args.inputs.name}.example.com`,
           },
         };
-      case 'random:index/randomId:RandomId':
+      case 'random:index/randomId:RandomId': {
+        const byteLength = Number(args.inputs.byteLength ?? 32);
+        const bytes = Buffer.alloc(byteLength);
+        for (let index = 0; index < byteLength; index += 1) {
+          bytes[index] = (args.name.charCodeAt(index % args.name.length) + index) % 256;
+        }
+
         return {
           id,
           state: {
             ...args.inputs,
             id,
-            b64Std: `${args.name}-mock-secret`,
+            b64Std: bytes.toString('base64'),
           },
         };
+      }
       case 'tls:index/privateKey:PrivateKey':
         return {
           id,
