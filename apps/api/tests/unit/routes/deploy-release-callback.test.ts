@@ -17,12 +17,24 @@ const mockLoadDeploymentInterpolationEnv = vi.fn().mockResolvedValue({ values: {
 const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
+let customDomainRows: Array<{ hostname: string; service: string; port: number }> = [];
+
+function createWhereResult() {
+  return {
+    limit: mockLimit,
+    orderBy: mockOrderBy,
+    then: (
+      resolve: (value: typeof customDomainRows) => unknown,
+      reject?: (reason: unknown) => unknown
+    ) => Promise.resolve(customDomainRows).then(resolve, reject),
+  };
+}
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
       from: () => ({
-        where: () => ({ limit: mockLimit, orderBy: mockOrderBy }),
+        where: createWhereResult,
         innerJoin: () => ({
           where: () => ({ limit: mockLimit }),
         }),
@@ -201,6 +213,7 @@ describe('deploy release callback route', () => {
     mockLoadDeploymentInterpolationEnv.mockResolvedValue({ values: {} });
     mockOrderBy.mockReset();
     mockOrderBy.mockResolvedValue([]);
+    customDomainRows = [];
     mockSignDeployPayload.mockResolvedValue('signed-payload');
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
@@ -287,6 +300,45 @@ describe('deploy release callback route', () => {
       content: '203.0.113.10',
       proxied: false,
     });
+  });
+
+  it('adds verified custom domains to the signed apply payload without creating user DNS records', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    stubHappyPathDb();
+    customDomainRows = [{ hostname: 'App.Customer.Example.com', service: 'web', port: 3000 }];
+    const fetchMock = stubDnsFetch();
+
+    const response = await requestDeployRelease();
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+
+    const parentRoute = body.routes.find(
+      (route: { hostname: string }) => route.hostname === 'r1-web-3000-env-1.apps.sammy.party'
+    );
+    expect(parentRoute).toBeDefined();
+    expect(body.routes).toContainEqual({
+      hostname: 'app.customer.example.com',
+      service: 'web',
+      containerPort: 3000,
+      hostPort: parentRoute.hostPort,
+    });
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ routes: body.routes }),
+      expect.anything()
+    );
+
+    // Two SAM-owned public routes still perform list+create DNS calls. The
+    // custom hostname is user-owned DNS, so it must not be upserted by SAM.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const createBodies = fetchMock.mock.calls
+      .slice(2)
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string));
+    expect(createBodies.map((body) => body.name)).toEqual([
+      'r1-web-3000-env-1.apps.sammy.party',
+      'r2-web-3001-env-1.apps.sammy.party',
+    ]);
+    expect(JSON.stringify(createBodies)).not.toContain('app.customer.example.com');
   });
 
   it('serves distinct payloads for two environments placed on the same node', async () => {

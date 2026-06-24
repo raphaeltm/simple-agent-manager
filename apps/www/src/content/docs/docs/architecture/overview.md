@@ -70,11 +70,20 @@ Every request to `*.domain` passes through the same Cloudflare Worker. The `Host
 | `api.{domain}` | Worker API routes | Direct handling by Hono router |
 | `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via `{nodeId}.vm.{domain}` backend hostname |
 | `ws-{id}--{port}.{domain}` | Workspace port proxy | Worker proxies to dev server running on `{port}` |
+| `r{N}-{service}-{port}-{env}.apps.{domain}` | Deployment public route | DNS-only A record points at the deployment node; node-local Caddy terminates TLS |
 | `*.{domain}` (other) | 404 | No matching route |
 
 :::note[Why backend hostnames?]
 Cloudflare Workers can't fetch IP addresses directly (Error 1003). Node backend DNS records (`{nodeId}.vm.{domain}` → VM IP) are created so the Worker can proxy through hostnames, with `*.vm.{domain}` excluded from the Worker route.
 :::
+
+Deployment public routes do not pass through the Worker proxy. The API derives a
+stable hostname and loopback host port for each public route in a release,
+creates the SAM-owned DNS-only A record, and sends those route targets inside
+the signed deployment apply payload. The deployment node's Caddy instance then
+terminates TLS and reverse-proxies to `127.0.0.1:{hostPort}`. User-owned custom
+subdomains reuse the same signed route-target path after DNS verification, but
+SAM does not create those user DNS records.
 
 ## Control Plane — API Worker
 

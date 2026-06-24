@@ -59,3 +59,27 @@ Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It do
 `x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
 For compose-publish releases, SAM preserves safe named volumes declared in the Compose file. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are rejected.
+
+## Custom domains
+
+Each public route gets a SAM-owned hostname such as
+`r1-web-3000-env.apps.example.com`. You can attach your own subdomain to that
+route from the deployment environment. SAM returns the exact CNAME target to
+create, verifies the hostname through DNS-over-HTTPS, and adds the custom
+hostname to the next signed deployment apply payload.
+
+Custom domains in this first version are intentionally simple:
+
+- Use a concrete subdomain such as `app.example.com`.
+- Create a CNAME from your subdomain to the SAM-owned route hostname shown by
+  the environment.
+- Run verification after the DNS record propagates.
+- Redeploy or reapply the release so the deployment node receives the custom
+  hostname and Caddy can provision TLS for it.
+
+SAM does not create or manage your DNS record. Verification succeeds when the
+custom hostname resolves to the SAM route hostname, or to the deployment node IP
+for DNS providers that flatten CNAMEs to A records.
+
+Root/apex domains, wildcard domains, TXT-record ownership challenges, and
+on-demand TLS authorization are out of scope for this version.

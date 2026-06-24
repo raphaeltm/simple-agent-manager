@@ -16,9 +16,15 @@
       "service": "api",
       "containerPort": 8080,
       "hostPort": 35001
+    },
+    {
+      "hostname": "app.customer.example.com",
+      "service": "web",
+      "containerPort": 3000,
+      "hostPort": 35000
     }
   ],
-  "signature": "tda9XCn1nv8gtvuDGCb19niBjaqIA2TwTo18rL1pSCJbLEFtOqF9cAnX9gfWJQojRSu7Y2alKKIagnN6770eBA==",
+  "signature": "fWbe344usk1WGTpcwH6s7o4Taxm3x+PxGjKS6UxFHSIyDts4XBJ12LU/YnEaPqHjsfzKWufiS7ruC6DoHcm/CA==",
   "registryCredentials": {
     "server": "registry.cloudflare.com",
     "username": "cf-mint-user",

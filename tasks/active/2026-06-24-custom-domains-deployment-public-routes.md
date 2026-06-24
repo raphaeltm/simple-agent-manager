@@ -39,6 +39,7 @@ applied to every deployment node, not just tested ones.
 ## Research findings (key files / injection points)
 
 ### Routing derivation — `apps/api/src/services/deployment-routing.ts`
+
 - `buildRouteHostname(environmentId, service, port, routeIndex, baseDomain)` →
   `r${routeIndex+1}-${servicePart}-${port}-${envPart}.apps.${baseDomain}` (the
   CNAME target users will point at).
@@ -48,11 +49,13 @@ applied to every deployment node, not just tested ones.
 - `collectEnvironmentRouteHostnames(manifests, opts)` → used for stale DNS teardown.
 
 ### Signed payload boundary — `apps/api/src/services/deploy-signing.ts`
+
 - `signDeployPayload(payload, env)`; `buildSignableBytes` computes
   `routesHash = SHA-256 hex of JSON.stringify(routes ?? [])`. Custom hostnames MUST
   be appended to `routes` BEFORE signing so they ride inside `routesHash`.
 
 ### Injection point — `apps/api/src/routes/deploy-release-callback.ts`
+
 - `GET /:id/deploy-release` handler. Two release shapes share the apply path,
   discriminated by `release.source`:
   - `compose-publish` branch (≈219–264): `routes = buildComposePublishApplyPayload(...).routes`.
@@ -67,46 +70,56 @@ applied to every deployment node, not just tested ones.
   `verifyCallbackToken(token, env, { expectedScope: 'node' })`.
 
 ### DNS / verification — `apps/api/src/services/dns.ts`
+
 - `upsertAppRouteDNSRecord` / `deleteAppRouteDNSRecord` / `cleanupAppRouteDNSRecords`
   manage SAM-owned grey-cloud records. **No** Cloudflare DoH resolver exists — must
   write one (Worker `fetch` to `https://cloudflare-dns.com/dns-query` with
   `accept: application/dns-json`) for hostname verification.
 
 ### VM agent — `packages/vm-agent/internal/deploy/`
+
 - `types.go`: `ApplyPayload.Routes []RouteTarget`; `RouteTarget { Hostname, Service, ContainerPort, HostPort }`; `SignablePayload.RoutesHash`.
 - `caddy.go`: `GenerateCaddySnippet(routes)` renders per-hostname `reverse_proxy 127.0.0.1:{HostPort}`; `validateRouteTarget` already guards hostname chars (`^[A-Za-z0-9.-]+$`) and port ranges. Custom hostname reuses this exactly — **no Go changes expected** beyond a unit test proving a custom hostname renders a valid site block.
 
 ### Data model
+
 - No `deployment_domains` table exists. Latest migration is `0075`; new migration is **`0076`**.
 - `deployment_environments` is a CASCADE parent (Rule 31) — additive only, never DROP/recreate.
 
 ## Implementation checklist
 
 ### Migration + schema
-- [ ] `apps/api/src/db/migrations/0076_deployment_custom_domains.sql` — `CREATE TABLE deployment_custom_domains` (id, environment_id FK→deployment_environments ON DELETE CASCADE, service, port, route_index, hostname, verification_status TEXT DEFAULT 'pending', verification_error TEXT, verified_at TEXT, created_by FK→users ON DELETE SET NULL, created_at). Unique index on `hostname`. Index on `environment_id`.
-- [ ] Add `deploymentCustomDomains` table to `apps/api/src/db/schema.ts`.
+
+- [x] `apps/api/src/db/migrations/0076_deployment_custom_domains.sql` — `CREATE TABLE deployment_custom_domains` (id, environment_id FK→deployment_environments ON DELETE CASCADE, service, port, route_index, hostname, verification_status TEXT DEFAULT 'pending', verification_error TEXT, verified_at TEXT, created_by FK→users ON DELETE SET NULL, created_at). Unique index on `hostname`. Index on `environment_id`.
+- [x] Add `deploymentCustomDomains` table to `apps/api/src/db/schema.ts`.
 
 ### DoH verification helper
-- [ ] New `apps/api/src/services/deployment-domain-verify.ts` (or add to dns.ts): `resolveHostnameTarget(hostname): Promise<{ cname?: string; a?: string[] }>` via Cloudflare DoH. `verifyCustomDomainTarget(hostname, expectedCnameTarget, expectedNodeIp)` → boolean (matches CNAME to route hostname OR A to node IP).
-- [ ] Unit tests: matching CNAME answer → verified; non-matching answer → failed; A-record-to-node-ip → verified.
+
+- [x] New `apps/api/src/services/deployment-domain-verify.ts` (or add to dns.ts): `resolveHostnameTarget(hostname): Promise<{ cname?: string; a?: string[] }>` via Cloudflare DoH. `verifyCustomDomainTarget(hostname, expectedCnameTarget, expectedNodeIp)` → boolean (matches CNAME to route hostname OR A to node IP).
+- [x] Unit tests: matching CNAME answer → verified; non-matching answer → failed; A-record-to-node-ip → verified.
 
 ### API CRUD
-- [ ] Routes under `/api/projects/:projectId/environments/:environmentId/custom-domains` (reuse `requireAuth` + `requireApproved` + `requireOwnedProject`). POST (attach: validate hostname maps to a real public route of the env — reject private/nonexistent; persist pending; return the exact CNAME target). POST `/:domainId/verify` (run DoH, set verified/failed). GET (list). DELETE (remove).
-- [ ] Integration tests for each route incl. reject-private-route and reject-nonexistent-route.
+
+- [x] Routes under `/api/projects/:projectId/environments/:environmentId/custom-domains` (reuse `requireAuth` + `requireApproved` + `requireOwnedProject`). POST (attach: validate hostname maps to a real public route of the env — reject private/nonexistent; persist pending; return the exact CNAME target). POST `/:domainId/verify` (run DoH, set verified/failed). GET (list). DELETE (remove).
+- [x] Integration tests for each route incl. reject-private-route and reject-nonexistent-route.
 
 ### Signed payload injection
-- [ ] In `deploy-release-callback.ts`, after the release-shape branch, load verified custom domains for the env and append a `DeploymentRouteTarget` for each (hostname = custom hostname; service/containerPort = parent route; hostPort = parent route's hostPort matched by service+containerPort). Skip if no matching parent route in current `routes`. Do NOT call `upsertAppRouteDNSRecord` for them.
-- [ ] Vertical-slice test (Rule 35): attach→verify→apply. Mock DoH (realistic CNAME + non-matching), mock the signed-payload boundary; assert the custom hostname rides in `routes` with the parent's `hostPort` and is covered by `routesHash`.
+
+- [x] In `deploy-release-callback.ts`, after the release-shape branch, load verified custom domains for the env and append a `DeploymentRouteTarget` for each (hostname = custom hostname; service/containerPort = parent route; hostPort = parent route's hostPort matched by service+containerPort). Skip if no matching parent route in current `routes`. Do NOT call `upsertAppRouteDNSRecord` for them.
+- [x] Vertical-slice test (Rule 35): attach→verify→apply. Mock DoH (realistic CNAME + non-matching), mock the signed-payload boundary; assert the custom hostname rides in `routes` with the parent's `hostPort` and is covered by `routesHash`.
 
 ### Cross-boundary + Go
-- [ ] Cross-boundary contract test (Rule 23): the hostname/hostPort the API emits matches what `caddy.go` `GenerateCaddySnippet` renders.
-- [ ] Go unit test in `packages/vm-agent/internal/deploy/caddy_test.go`: `GenerateCaddySnippet` emits a valid site block for a custom hostname.
+
+- [x] Cross-boundary contract test (Rule 23): the hostname/hostPort the API emits matches what `caddy.go` `GenerateCaddySnippet` renders.
+- [x] Go unit test in `packages/vm-agent/internal/deploy/caddy_test.go`: `GenerateCaddySnippet` emits a valid site block for a custom hostname.
 
 ### Docs (Rule 01 — same PR)
-- [ ] Update `apps/www/src/content/docs/docs/guides/app-deployments.md` with a custom-domains section (CNAME setup, verify flow, what's out of scope).
-- [ ] Update any deployment architecture/spec docs touching routing.
+
+- [x] Update `apps/www/src/content/docs/docs/guides/app-deployments.md` with a custom-domains section (CNAME setup, verify flow, what's out of scope).
+- [x] Update any deployment architecture/spec docs touching routing.
 
 ## Acceptance criteria
+
 - [ ] A user can attach a custom subdomain to an existing public route; private/nonexistent routes are rejected.
 - [ ] Verification resolves the hostname via Cloudflare DoH and only marks `verified` when it points at our route target (CNAME) or node IP (A). Non-matching → `failed` with the exact CNAME target surfaced.
 - [ ] On verified, the custom hostname rides as an additional `RouteTarget` (same `hostPort` as its parent public route) in the next signed `ApplyPayload`, covered by `routesHash`.
@@ -115,12 +128,14 @@ applied to every deployment node, not just tested ones.
 - [ ] SAM never creates the user's DNS record (no `upsertAppRouteDNSRecord` for custom hostnames).
 
 ## Out of scope (v2 — note in spec)
+
 - Apex / root domains; node-IP / apex ALIAS handling.
 - Wildcards.
 - TXT ownership proof.
 - On-demand TLS + `ask` authorization endpoint.
 
 ## References
+
 - Rule 31 (migration safety — additive only on CASCADE parents)
 - Rule 34 (VM agent callback routes — callback JWT auth; mount before projectsRoutes)
 - Rule 23 (cross-boundary contract tests), Rule 35 (vertical-slice tests)

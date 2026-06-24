@@ -102,14 +102,15 @@ function findParentRoute(
   if (routeIndex < 0) {
     return null;
   }
-  return { route: routes[routeIndex]!, routeIndex };
+  const route = routes[routeIndex];
+  if (!route) {
+    return null;
+  }
+  return { route, routeIndex };
 }
 
 /** Resolve the node IP backing an environment (used as a flattened A-record match). */
-async function resolveNodeIp(
-  db: DeploymentDb,
-  nodeId: string | null
-): Promise<string | undefined> {
+async function resolveNodeIp(db: DeploymentDb, nodeId: string | null): Promise<string | undefined> {
   if (!nodeId) {
     return undefined;
   }
@@ -204,6 +205,9 @@ deploymentCustomDomainRoutes.post(
       .from(schema.deploymentCustomDomains)
       .where(eq(schema.deploymentCustomDomains.id, id))
       .limit(1);
+    if (!created) {
+      throw errors.internal('Custom domain was not persisted');
+    }
 
     log.info('deployment_custom_domain.attached', {
       projectId,
@@ -214,7 +218,7 @@ deploymentCustomDomainRoutes.post(
       port,
     });
 
-    return c.json(toCustomDomainResponse(created!, routes), 201);
+    return c.json(toCustomDomainResponse(created, routes), 201);
   }
 );
 
@@ -315,6 +319,9 @@ deploymentCustomDomainRoutes.post(
       .from(schema.deploymentCustomDomains)
       .where(eq(schema.deploymentCustomDomains.id, domainId))
       .limit(1);
+    if (!updated) {
+      throw errors.internal('Custom domain verification update was not persisted');
+    }
 
     log.info('deployment_custom_domain.verified', {
       projectId,
@@ -324,7 +331,7 @@ deploymentCustomDomainRoutes.post(
       verified: ok,
     });
 
-    return c.json(toCustomDomainResponse(updated!, routes));
+    return c.json(toCustomDomainResponse(updated, routes));
   }
 );
 

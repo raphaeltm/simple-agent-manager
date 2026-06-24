@@ -84,6 +84,26 @@ func TestGenerateCaddySnippet_RoundTripsMultiRouteConfig(t *testing.T) {
 	}
 }
 
+func TestGenerateCaddySnippet_EmitsCustomDomainSiteBlock(t *testing.T) {
+	caddyfile, err := GenerateCaddySnippet([]RouteTarget{
+		{Hostname: "app.customer.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
+	})
+	if err != nil {
+		t.Fatalf("GenerateCaddySnippet: %v", err)
+	}
+
+	parsed := parseGeneratedCaddyfile(caddyfile)
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 parsed route, got %d: %#v\n%s", len(parsed), parsed, caddyfile)
+	}
+	if parsed[0].Hostname != "app.customer.example.com" {
+		t.Fatalf("unexpected custom hostname %q", parsed[0].Hostname)
+	}
+	if parsed[0].Upstream != "127.0.0.1:35000" {
+		t.Fatalf("custom hostname should reuse parent route hostPort, got upstream %q", parsed[0].Upstream)
+	}
+}
+
 func TestGenerateRootCaddyfile_EmitsGlobalOptionsForACME(t *testing.T) {
 	withOpts := GenerateRootCaddyfile(CaddyfileOptions{
 		ACMEEmail: "ops@example.com",

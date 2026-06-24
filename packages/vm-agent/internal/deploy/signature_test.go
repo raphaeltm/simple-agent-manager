@@ -373,14 +373,20 @@ func TestVerifier_AcceptsSharedApiRoutePayloadFixture(t *testing.T) {
 		t.Fatalf("decode contract fixture: %v", err)
 	}
 
-	if len(payload.Routes) != 2 {
-		t.Fatalf("expected 2 route targets, got %d", len(payload.Routes))
+	if len(payload.Routes) != 3 {
+		t.Fatalf("expected 3 route targets, got %d", len(payload.Routes))
 	}
 	if payload.Routes[0].Hostname != "r1-web-3000-env-1.apps.sammy.party" {
 		t.Fatalf("unexpected first route: %#v", payload.Routes[0])
 	}
 	if payload.Routes[0].HostPort != 35000 || payload.Routes[1].HostPort != 35001 {
 		t.Fatalf("unexpected host ports: %#v", payload.Routes)
+	}
+	if payload.Routes[2].Hostname != "app.customer.example.com" {
+		t.Fatalf("unexpected custom domain route: %#v", payload.Routes[2])
+	}
+	if payload.Routes[2].HostPort != payload.Routes[0].HostPort {
+		t.Fatalf("custom domain should reuse parent host port: %#v", payload.Routes)
 	}
 
 	verifier, err := NewVerifier("ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=")
