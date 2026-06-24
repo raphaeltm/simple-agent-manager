@@ -38,14 +38,15 @@ export const ThemeSwitcher: FC<{ className?: string }> = ({ className }) => {
             type="button"
             onClick={() => setTheme(value)}
             aria-pressed={active}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-sm border px-2 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
+            aria-label={label}
+            className={`flex items-center justify-center gap-1.5 rounded-sm border py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
               active
-                ? 'bg-accent text-fg-on-accent border-accent'
-                : 'border-border-default text-fg-muted hover:bg-surface-hover hover:text-fg-primary'
+                ? 'bg-accent text-fg-on-accent border-accent flex-1 px-2'
+                : 'border-border-default text-fg-muted hover:bg-surface-hover hover:text-fg-primary px-2'
             }`}
           >
             <Icon size={14} aria-hidden="true" />
-            <span>{label}</span>
+            {active && <span>{label}</span>}
           </button>
         );
       })}

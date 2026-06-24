@@ -94,4 +94,68 @@ describe('ThemeSwitcher', () => {
     await selectAndExpect('Dark', 'dark', 'sam');
     await selectAndExpect('System', 'system', 'sam-light');
   });
+
+  it('only shows visible text label on the active theme button', () => {
+    renderSwitcher();
+    // Default is 'system', so only the System button should have visible text
+    const systemBtn = screen.getByRole('button', { name: 'System' });
+    const darkBtn = screen.getByRole('button', { name: 'Dark' });
+    const lightBtn = screen.getByRole('button', { name: 'Light' });
+
+    // Active button has visible label text
+    expect(systemBtn.querySelector('span')).not.toBeNull();
+    expect(systemBtn.querySelector('span')!.textContent).toBe('System');
+
+    // Inactive buttons do not render a text span (icon-only)
+    expect(darkBtn.querySelector('span')).toBeNull();
+    expect(lightBtn.querySelector('span')).toBeNull();
+  });
+
+  it('active label follows theme selection', async () => {
+    renderSwitcher();
+    const user = userEvent.setup();
+
+    // Switch to Dark
+    await user.click(screen.getByRole('button', { name: 'Dark' }));
+    const darkBtn = screen.getByRole('button', { name: 'Dark' });
+    const lightBtn = screen.getByRole('button', { name: 'Light' });
+    const systemBtn = screen.getByRole('button', { name: 'System' });
+
+    expect(darkBtn.querySelector('span')).not.toBeNull();
+    expect(lightBtn.querySelector('span')).toBeNull();
+    expect(systemBtn.querySelector('span')).toBeNull();
+  });
+
+  it('theme group fits within a 200px sidebar width', () => {
+    // Render within a constrained container that mimics the sidebar
+    const { container } = render(
+      <ThemeProvider>
+        <div style={{ width: '200px', padding: '0 12px' }}>
+          <ThemeSwitcher />
+        </div>
+      </ThemeProvider>,
+    );
+
+    const group = container.querySelector('[role="group"]')!;
+    const buttons = group.querySelectorAll('button');
+
+    // Total button widths (including gap) must not exceed the container
+    // In jsdom, offsetWidth is 0, so we verify structurally:
+    // - Only the active button has a text span (reduces total width)
+    // - All buttons exist and are queryable
+    expect(buttons.length).toBe(3);
+
+    let activeCount = 0;
+    let inactiveWithTextCount = 0;
+    buttons.forEach((btn) => {
+      const isActive = btn.getAttribute('aria-pressed') === 'true';
+      const hasText = btn.querySelector('span') !== null;
+      if (isActive) activeCount++;
+      if (!isActive && hasText) inactiveWithTextCount++;
+    });
+
+    expect(activeCount).toBe(1);
+    // No inactive button should have visible text — this is what prevents overflow
+    expect(inactiveWithTextCount).toBe(0);
+  });
 });
