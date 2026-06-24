@@ -25,6 +25,7 @@ import { encrypt } from '../../src/services/encryption';
 
 const TEST_PREFIX = `cc-snap-${Date.now()}`;
 const USER = `${TEST_PREFIX}-user`;
+const USER_RAW_HETZNER = `${TEST_PREFIX}-user-raw-hetzner`;
 const ADMIN = `${TEST_PREFIX}-admin`;
 const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
 const AGENT_SECRET = 'sk-test-anthropic-key-resilience';
@@ -34,7 +35,7 @@ let db: ReturnType<typeof drizzle>;
 beforeAll(async () => {
   db = drizzle(env.DATABASE, { schema });
 
-  for (const userId of [USER, ADMIN]) {
+  for (const userId of [USER, USER_RAW_HETZNER, ADMIN]) {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
        VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
@@ -74,6 +75,22 @@ async function seedPlatformCloudProvider(opts: {
     .run();
 }
 
+async function seedLegacyCloudProvider(opts: {
+  id: string;
+  userId: string;
+  provider: string;
+  secret: string;
+}) {
+  const { ciphertext, iv } = await encrypt(opts.secret, ENCRYPTION_KEY);
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO credentials
+     (id, user_id, project_id, credential_type, credential_kind, agent_type, provider, encrypted_token, iv, is_active, created_at, updated_at)
+     VALUES (?, ?, NULL, 'cloud-provider', 'api-key', NULL, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+  )
+    .bind(opts.id, opts.userId, opts.provider, ciphertext, iv)
+    .run();
+}
+
 describe('snapshot resilience to raw cloud-provider platform defaults', () => {
   it('raw (non-JSON) hetzner platform token does not crash the snapshot', async () => {
     // Hetzner tokens are stored raw — not JSON. This is the exact row that
@@ -103,6 +120,53 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
       // provider never reaches the compute assembler (which throws on '').
       expect(hetznerDefault.credential.secret.provider).toBe('hetzner');
     }
+  });
+
+  it('raw migrated user Hetzner token hydrates provider from its compute configuration', async () => {
+    await seedLegacyCloudProvider({
+      id: `${TEST_PREFIX}-cred-user-raw-hetzner`,
+      userId: USER_RAW_HETZNER,
+      provider: 'hetzner',
+      secret: 'raw-user-hetzner-token-not-json-1234567890abcdef',
+    });
+
+    const { runBackfill } = await import(
+      '../../src/services/composable-credentials/backfill-service'
+    );
+    await runBackfill(db, { userId: USER_RAW_HETZNER });
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    const snapshot = await buildSnapshot(db, USER_RAW_HETZNER, ENCRYPTION_KEY);
+    const computeConfig = snapshot.configurations.find(
+      (configuration) =>
+        configuration.consumer.kind === 'compute' &&
+        configuration.consumer.provider === 'hetzner',
+    );
+    expect(computeConfig).toBeDefined();
+
+    const credential = snapshot.credentials.find(
+      (candidate) => candidate.id === computeConfig?.credentialId,
+    );
+    expect(credential?.secret.kind).toBe('cloud-provider');
+    if (credential?.secret.kind === 'cloud-provider') {
+      expect(credential.secret.provider).toBe('hetzner');
+      expect(credential.secret.token).toBe(
+        'raw-user-hetzner-token-not-json-1234567890abcdef',
+      );
+    }
+
+    const { resolveComputeConfig } = await import(
+      '../../src/services/composable-credentials/resolve'
+    );
+    await expect(
+      resolveComputeConfig(db, USER_RAW_HETZNER, ENCRYPTION_KEY, 'hetzner'),
+    ).resolves.toMatchObject({
+      provider: 'hetzner',
+      token: 'raw-user-hetzner-token-not-json-1234567890abcdef',
+      isPlatform: false,
+    });
   });
 
   it('agent resolution still succeeds despite the raw cloud-provider default', async () => {
