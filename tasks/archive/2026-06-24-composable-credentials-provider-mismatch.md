@@ -58,6 +58,7 @@ Review notes:
 - Test engineer: flagged that the API worker regression is realistic but not reliably enforced by the default test command; fixed by adding a normal-runner `resolveComputeConfig` API resolver-service regression.
 - Constitution validator: PASS; no hardcoded business/config values introduced.
 - Cloudflare specialist: no blocking Worker findings; local `workerd` signal 11 appears to be runtime/environment startup instability, with CI/alternate worker runtime verification still desirable.
+- Final task-completion validator: PASS after the security fix and normal-runner API regression were pushed.
 
 ## Acceptance Criteria
 
