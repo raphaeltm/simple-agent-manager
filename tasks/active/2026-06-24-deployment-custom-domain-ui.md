@@ -20,13 +20,13 @@ Deployment custom-domain CRUD exists in the API, but the production environment 
 
 - [x] Add production public-route metadata support for a deployment environment, preferably `GET /api/projects/:projectId/environments/:envId/public-routes`.
 - [x] Add backend tests for the public-route response and access/error behavior.
-- [ ] Add typed web API wrappers for public-route listing and custom-domain CRUD in `apps/web/src/lib/api/deployment.ts`.
-- [ ] Add a production Domains tab to `ProjectDeploymentEnvironmentDetail.tsx` using real API data.
-- [ ] Implement route selector, add-domain form, DNS record display, copy/verify/delete/open actions, failure states, route-missing state, and no-route/no-domain states.
-- [ ] Make activation copy accurate: verified domains become active on the next deployment apply unless route re-apply behavior is actually implemented.
-- [ ] Add focused frontend tests if practical.
-- [ ] Add or extend Playwright visual audit coverage for the Domains tab at mobile 375x667 and desktop 1280x800 with overflow assertions.
-- [ ] Run relevant API tests, web tests, typecheck/build/lint as feasible.
+- [x] Add typed web API wrappers for public-route listing and custom-domain CRUD in `apps/web/src/lib/api/deployment.ts`.
+- [x] Add a production Domains tab to `ProjectDeploymentEnvironmentDetail.tsx` using real API data.
+- [x] Implement route selector, add-domain form, DNS record display, copy/verify/delete/open actions, failure states, route-missing state, and no-route/no-domain states.
+- [x] Make activation copy accurate: verified domains become active on the next deployment apply unless route re-apply behavior is actually implemented.
+- [x] Add focused frontend tests if practical.
+- [x] Add or extend Playwright visual audit coverage for the Domains tab at mobile 375x667 and desktop 1280x800 with overflow assertions.
+- [x] Run relevant API tests, web tests, typecheck/build/lint as feasible.
 - [ ] Open PR from the SAM output branch, run required checks, deploy/verify staging, and merge only when gates pass.
 
 ## Acceptance Criteria

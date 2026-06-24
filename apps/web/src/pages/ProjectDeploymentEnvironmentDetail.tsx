@@ -1,13 +1,6 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Alert, Button, SkeletonCard, StatusBadge } from '@simple-agent-manager/ui';
-import {
-  ArrowLeft,
-  ExternalLink,
-  ScrollText,
-  Server,
-  ShieldCheck,
-  Trash2,
-} from 'lucide-react';
+import { ArrowLeft, ExternalLink, ScrollText, Server, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -20,11 +13,9 @@ import {
   ReleaseAttribution,
   StatusDimensions,
 } from '../components/deployments/deployment-status';
+import { DeploymentCustomDomainsPanel } from '../components/deployments/DeploymentCustomDomainsPanel';
 import { DeploymentEnvironmentConfigPanel } from '../components/deployments/DeploymentEnvironmentConfigPanel';
-import {
-  type DeploymentLogState,
-  LogsPanel,
-} from '../components/deployments/DeploymentLogsPanel';
+import { type DeploymentLogState, LogsPanel } from '../components/deployments/DeploymentLogsPanel';
 import {
   DeploymentMetricsPanel,
   type DeploymentMetricsState,
@@ -43,10 +34,11 @@ import {
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
-type TabKey = 'overview' | 'logs' | 'config' | 'policy' | 'node';
+type TabKey = 'overview' | 'domains' | 'logs' | 'config' | 'policy' | 'node';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'overview', label: 'Overview' },
+  { key: 'domains', label: 'Domains' },
   { key: 'logs', label: 'Logs' },
   { key: 'config', label: 'Configuration' },
   { key: 'policy', label: 'Policy' },
@@ -383,6 +375,10 @@ export function ProjectDeploymentEnvironmentDetail() {
             onRefreshFiltered={(opts) => void refreshLogs(opts)}
           />
         </section>
+      )}
+
+      {activeTab === 'domains' && (
+        <DeploymentCustomDomainsPanel projectId={projectId} environmentId={env.id} />
       )}
 
       {activeTab === 'config' && (

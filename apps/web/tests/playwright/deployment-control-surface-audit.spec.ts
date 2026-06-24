@@ -32,7 +32,8 @@ const MOCK_PROJECT = {
   updatedAt: '2026-06-18T10:15:00.000Z',
 };
 
-const LONG_PROFILE_NAME = 'Deployment-Builder-Extended-Production-Release-Candidate-Profile-With-Very-Long-Name';
+const LONG_PROFILE_NAME =
+  'Deployment-Builder-Extended-Production-Release-Candidate-Profile-With-Very-Long-Name';
 
 const MOCK_PROFILES = [
   {
@@ -114,7 +115,11 @@ const MOCK_NODE_STALE = {
     diskPercent: undefined,
   },
   deploymentEnvironments: [
-    { id: ENV_FAIL_ID, projectId: PROJECT_ID, name: 'production-us-east-very-long-environment-name-that-should-truncate-properly' },
+    {
+      id: ENV_FAIL_ID,
+      projectId: PROJECT_ID,
+      name: 'production-us-east-very-long-environment-name-that-should-truncate-properly',
+    },
   ],
 };
 
@@ -196,7 +201,8 @@ const MOCK_ENV_FAILING = {
   observedDeployment: {
     appliedSeq: 3,
     status: 'error',
-    errorMessage: 'compose pull failed: image registry.sam.local/deploy-audit:3 not found in registry — verify the image was pushed before submitting the release',
+    errorMessage:
+      'compose pull failed: image registry.sam.local/deploy-audit:3 not found in registry — verify the image was pushed before submitting the release',
     services: null,
     deployStatus: {
       appHealth: 'unhealthy',
@@ -258,13 +264,15 @@ const MOCK_LOGS = {
       timestamp: '2026-06-18T10:12:00.000Z',
       level: 'error',
       source: 'agent',
-      message: 'ThisIsAnExtremelyLongLogMessageWithoutAnySpacesOrBreakPointsThatShouldNotCauseHorizontalOverflowInTheLogsPanel_ErrorCode_DEPLOY_COMPOSE_PULL_TIMEOUT_REGISTRY_UNREACHABLE_0xDEADBEEF',
+      message:
+        'ThisIsAnExtremelyLongLogMessageWithoutAnySpacesOrBreakPointsThatShouldNotCauseHorizontalOverflowInTheLogsPanel_ErrorCode_DEPLOY_COMPOSE_PULL_TIMEOUT_REGISTRY_UNREACHABLE_0xDEADBEEF',
     },
     {
       timestamp: '2026-06-18T10:11:00.000Z',
       level: 'warn',
       source: 'agent',
-      message: 'TLS ACME HTTP-01 challenge timed out for staging.deploy-audit.sammy.party — port 80 may be unreachable from the public internet',
+      message:
+        'TLS ACME HTTP-01 challenge timed out for staging.deploy-audit.sammy.party — port 80 may be unreachable from the public internet',
     },
   ],
   nextCursor: null,
@@ -295,7 +303,8 @@ const MOCK_RUNTIME_CONFIG = {
   envVars: [
     {
       key: 'PUBLIC_APP_DOMAIN',
-      value: 'staging.deploy-audit-with-a-very-long-hostname-that-must-wrap-without-overflow.sammy.party',
+      value:
+        'staging.deploy-audit-with-a-very-long-hostname-that-must-wrap-without-overflow.sammy.party',
       isSecret: false,
       updatedAt: '2026-06-18T10:01:00.000Z',
     },
@@ -307,10 +316,109 @@ const MOCK_RUNTIME_CONFIG = {
   ],
 };
 
+const MOCK_PUBLIC_ROUTES = [
+  {
+    id: 'web:8080:0',
+    service: 'web',
+    port: 8080,
+    hostname: 'r1-web-8080-env-staging.apps.sammy.party',
+    hostPort: 36120,
+    routeIndex: 0,
+  },
+  {
+    id: 'api:3000:1',
+    service: 'api',
+    port: 3000,
+    hostname: 'r2-api-3000-env-staging.apps.sammy.party',
+    hostPort: 36121,
+    routeIndex: 1,
+  },
+  {
+    id: 'docs:5173:2',
+    service: 'docs-with-a-very-long-service-name-that-wraps',
+    port: 5173,
+    hostname: 'r3-docs-with-a-very-long-service-name-that-wraps-5173-env-staging.apps.sammy.party',
+    hostPort: 36122,
+    routeIndex: 2,
+  },
+];
+
+const MOCK_CUSTOM_DOMAINS = [
+  {
+    id: 'domain-pending',
+    environmentId: ENV_ID,
+    service: 'web',
+    port: 8080,
+    routeIndex: 0,
+    hostname: 'preview.customer.example.com',
+    verificationStatus: 'pending',
+    verificationError: null,
+    verifiedAt: null,
+    createdBy: 'user-deploy-audit',
+    createdAt: '2026-06-18T10:10:00.000Z',
+    cnameTarget: 'r1-web-8080-env-staging.apps.sammy.party',
+  },
+  {
+    id: 'domain-long',
+    environmentId: ENV_ID,
+    service: 'web',
+    port: 8080,
+    routeIndex: 0,
+    hostname:
+      'staging-for-a-very-large-enterprise-customer-with-an-overly-specific-subdomain.customer-portal.example-services.dev',
+    verificationStatus: 'failed',
+    verificationError:
+      'staging-for-a-very-large-enterprise-customer-with-an-overly-specific-subdomain.customer-portal.example-services.dev does not resolve to r1-web-8080-env-staging.apps.sammy.party.',
+    verifiedAt: null,
+    createdBy: 'user-deploy-audit',
+    createdAt: '2026-06-18T10:12:00.000Z',
+    cnameTarget: 'r1-web-8080-env-staging.apps.sammy.party',
+  },
+  {
+    id: 'domain-verified',
+    environmentId: ENV_ID,
+    service: 'api',
+    port: 3000,
+    routeIndex: 1,
+    hostname: 'api.customer.example.com',
+    verificationStatus: 'verified',
+    verificationError: null,
+    verifiedAt: '2026-06-18T10:20:00.000Z',
+    createdBy: 'user-deploy-audit',
+    createdAt: '2026-06-18T10:15:00.000Z',
+    cnameTarget: 'r2-api-3000-env-staging.apps.sammy.party',
+  },
+  {
+    id: 'domain-missing-route',
+    environmentId: ENV_ID,
+    service: 'legacy-worker',
+    port: 7000,
+    routeIndex: 4,
+    hostname: 'old-worker.ops.customer.example.com',
+    verificationStatus: 'verified',
+    verificationError: 'The legacy-worker:7000 public route is not present in the current release.',
+    verifiedAt: '2026-06-17T10:20:00.000Z',
+    createdBy: 'user-deploy-audit',
+    createdAt: '2026-06-17T10:15:00.000Z',
+    cnameTarget: null,
+  },
+];
+
 const MOCK_SYSTEM_INFO = {
   cpu: { numCpu: 4, model: 'AMD EPYC', loadAvg1: 0.42, loadAvg5: 0.38, loadAvg15: 0.31 },
-  memory: { totalBytes: 8_000_000_000, usedBytes: 3_600_000_000, availableBytes: 4_400_000_000, usedPercent: 45 },
-  disk: { totalBytes: 120_000_000_000, usedBytes: 37_000_000_000, availableBytes: 83_000_000_000, usedPercent: 31, mountPath: '/' },
+  memory: {
+    totalBytes: 8_000_000_000,
+    usedBytes: 3_600_000_000,
+    availableBytes: 4_400_000_000,
+    usedPercent: 45,
+  },
+  disk: {
+    totalBytes: 120_000_000_000,
+    usedBytes: 37_000_000_000,
+    availableBytes: 83_000_000_000,
+    usedPercent: 31,
+    mountPath: '/',
+  },
   network: { interface: 'eth0', rxBytes: 1234, txBytes: 5678 },
   uptime: { seconds: 3600, humanFormat: '1h' },
   docker: {
@@ -365,7 +473,8 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
 
     if (path === '/api/auth/get-session') return respond(route, 200, MOCK_USER);
     if (path === '/api/github/installations') return respond(route, 200, []);
-    if (path === '/api/projects') return respond(route, 200, { projects: [MOCK_PROJECT], total: 1 });
+    if (path === '/api/projects')
+      return respond(route, 200, { projects: [MOCK_PROJECT], total: 1 });
     if (path === '/api/agents') return respond(route, 200, { agents: [] });
     if (path === '/api/credentials') return respond(route, 200, []);
     if (path === '/api/credentials/agent') return respond(route, 200, { credentials: [] });
@@ -382,14 +491,57 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
       return respond(route, 200, { items: MOCK_PROFILES });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments` && method === 'GET') {
-      const envs = includeFailingEnv ? [MOCK_ENV, MOCK_ENV_PREVIEW, MOCK_ENV_FAILING] : [MOCK_ENV, MOCK_ENV_PREVIEW];
+      const envs = includeFailingEnv
+        ? [MOCK_ENV, MOCK_ENV_PREVIEW, MOCK_ENV_FAILING]
+        : [MOCK_ENV, MOCK_ENV_PREVIEW];
       return respond(route, 200, { environments: envs });
     }
-    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/runtime-config` && method === 'GET') {
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/runtime-config` &&
+      method === 'GET'
+    ) {
       return respond(route, 200, MOCK_RUNTIME_CONFIG);
     }
-    if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/runtime-config` && method === 'GET') {
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/public-routes` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { publicRoutes: MOCK_PUBLIC_ROUTES });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/custom-domains` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { customDomains: MOCK_CUSTOM_DOMAINS });
+    }
+    if (
+      path ===
+        `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/custom-domains/domain-pending/verify` &&
+      method === 'POST'
+    ) {
+      return respond(route, 200, {
+        ...MOCK_CUSTOM_DOMAINS[0],
+        verificationStatus: 'verified',
+        verifiedAt: '2026-06-18T10:30:00.000Z',
+      });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/runtime-config` &&
+      method === 'GET'
+    ) {
       return respond(route, 200, { environmentId: ENV_FAIL_ID, updatedAt: null, envVars: [] });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/public-routes` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { publicRoutes: [] });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/custom-domains` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { customDomains: [] });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/logs`) {
       return respond(route, 200, { ...MOCK_LOGS, source: 'node', nodeId: NODE_ID });
@@ -405,10 +557,18 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
       });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/logs`) {
-      return respond(route, 200, { entries: [], nextCursor: null, unavailableReason: 'node_stale' });
+      return respond(route, 200, {
+        entries: [],
+        nextCursor: null,
+        unavailableReason: 'node_stale',
+      });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/containers`) {
-      return respond(route, 200, { containers: [], nodeId: NODE_STALE_ID, unavailableReason: 'node_stale' });
+      return respond(route, 200, {
+        containers: [],
+        nodeId: NODE_STALE_ID,
+        unavailableReason: 'node_stale',
+      });
     }
     if (path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/metrics`) {
       return respond(route, 200, {
@@ -424,13 +584,18 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
     if (path === `/api/nodes/${NODE_ID}`) return respond(route, 200, MOCK_NODE);
     if (path === `/api/nodes/${NODE_STALE_ID}`) return respond(route, 200, MOCK_NODE_STALE);
     if (path === `/api/nodes/${NODE_ID}/system-info`) return respond(route, 200, MOCK_SYSTEM_INFO);
-    if (path === `/api/nodes/${NODE_STALE_ID}/system-info`) return respond(route, 500, { error: 'Node unreachable' });
-    if (path === `/api/nodes/${NODE_ID}/events`) return respond(route, 200, { events: [], nextCursor: null });
-    if (path === `/api/nodes/${NODE_STALE_ID}/events`) return respond(route, 200, { events: [], nextCursor: null });
+    if (path === `/api/nodes/${NODE_STALE_ID}/system-info`)
+      return respond(route, 500, { error: 'Node unreachable' });
+    if (path === `/api/nodes/${NODE_ID}/events`)
+      return respond(route, 200, { events: [], nextCursor: null });
+    if (path === `/api/nodes/${NODE_STALE_ID}/events`)
+      return respond(route, 200, { events: [], nextCursor: null });
     if (path === `/api/nodes/${NODE_ID}/logs`) return respond(route, 200, MOCK_LOGS);
     if (path === `/api/nodes/${NODE_ID}/containers`) return respond(route, 200, MOCK_CONTAINERS);
-    if (path === `/api/nodes/${NODE_STALE_ID}/logs`) return respond(route, 200, { entries: [], nextCursor: null });
-    if (path === `/api/nodes/${NODE_STALE_ID}/containers`) return respond(route, 200, { containers: [] });
+    if (path === `/api/nodes/${NODE_STALE_ID}/logs`)
+      return respond(route, 200, { entries: [], nextCursor: null });
+    if (path === `/api/nodes/${NODE_STALE_ID}/containers`)
+      return respond(route, 200, { containers: [] });
     if (path === '/api/workspaces') return respond(route, 200, []);
 
     return respond(route, 200, {});
@@ -439,7 +604,10 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
 
 // Summary cards on the list page are <Link> anchors, not <article>.
 function environmentCard(page: Page, name: string) {
-  return page.getByRole('link').filter({ has: page.getByRole('heading', { name, exact: true }) }).first();
+  return page
+    .getByRole('link')
+    .filter({ has: page.getByRole('heading', { name, exact: true }) })
+    .first();
 }
 
 // The failing env name is long and truncated; match on a stable substring.
@@ -603,6 +771,34 @@ test.describe('Deployment control surface audit — detail page', () => {
     await assertNoOverflow(page);
   });
 
+  test('domains tab renders route selector, DNS records and failure states', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=domains`);
+
+    await expect(page.getByText('Public routes')).toBeVisible();
+    await expect(page.getByRole('button', { name: /web:8080/ })).toBeVisible();
+    await expect(page.getByText('preview.customer.example.com').first()).toBeVisible();
+    await expect(page.getByText('DNS mismatch')).toBeVisible();
+    await expect(page.getByText('Domains with missing routes')).toBeVisible();
+    await expect(page.getByText('old-worker.ops.customer.example.com').first()).toBeVisible();
+    await expect(page.getByText('Add pending domain')).toBeVisible();
+    await expect(page.getByText('r1-web-8080-env-staging.apps.sammy.party').first()).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-domains');
+    await assertNoOverflow(page);
+  });
+
+  test('domains tab shows no-route state', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_FAIL_ID}?tab=domains`);
+
+    await expect(page.getByText('No public routes')).toBeVisible();
+    await expect(page.getByText('Submit a release with a public route')).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-domains-empty');
+    await assertNoOverflow(page);
+  });
+
   test('policy tab renders agent policy controls', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=policy`);
@@ -660,7 +856,9 @@ test.describe('Deployment node pages', () => {
     await expect(page.getByText('Deployment', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Deployment environments (2)').first()).toBeVisible();
     await expect(page.getByText('preview').first()).toBeVisible();
-    await expect(page.getByText('Managed from the project deployment environment.').first()).toBeVisible();
+    await expect(
+      page.getByText('Managed from the project deployment environment.').first()
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create Workspace' })).toHaveCount(0);
 
     // Stale deployment node
@@ -670,7 +868,9 @@ test.describe('Deployment node pages', () => {
     await assertNoOverflow(page);
   });
 
-  test('deployment node detail suppresses workspace creation and explains management surface', async ({ page }) => {
+  test('deployment node detail suppresses workspace creation and explains management surface', async ({
+    page,
+  }) => {
     await setupMocks(page);
     await page.goto(`/nodes/${NODE_ID}`);
 
@@ -709,7 +909,9 @@ test.describe('Deployment control surface — mobile', () => {
 
     await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
-    await expect(environmentCard(page, 'staging').getByText('Serving', { exact: true })).toBeVisible();
+    await expect(
+      environmentCard(page, 'staging').getByText('Serving', { exact: true })
+    ).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-list');
     await assertNoOverflow(page);
@@ -776,6 +978,18 @@ test.describe('Deployment control surface — mobile', () => {
     await expect(panel.getByText('Hidden after save')).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-config-panel');
+    await assertNoOverflow(page);
+  });
+
+  test('domains panel on mobile — no overflow', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}?tab=domains`);
+
+    await expect(page.getByText('Public routes')).toBeVisible();
+    await expect(page.getByText('preview.customer.example.com').first()).toBeVisible();
+    await expect(page.getByText('DNS mismatch')).toBeVisible();
+
+    await screenshot(page, 'deployment-mobile-domains');
     await assertNoOverflow(page);
   });
 });

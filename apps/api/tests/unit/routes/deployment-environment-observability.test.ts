@@ -102,7 +102,10 @@ function createApp() {
   app.onError((err, c) => {
     const appError = err as { statusCode?: number; error?: string; message?: string };
     if (typeof appError.statusCode === 'number') {
-      return c.json({ error: appError.error, message: appError.message }, appError.statusCode as any);
+      return c.json(
+        { error: appError.error, message: appError.message },
+        appError.statusCode as any
+      );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: String(err) }, 500);
   });
@@ -130,12 +133,16 @@ describe('deployment environment observability routes', () => {
   });
 
   it('forwards docker log queries to the deployment node agent', async () => {
-    mockSelectRows(
-      [{ id: 'env-1', nodeId: 'node-1' }],
-      [{ id: 'node-1', status: 'running' }],
-    );
+    mockSelectRows([{ id: 'env-1', nodeId: 'node-1' }], [{ id: 'node-1', status: 'running' }]);
     mockGetNodeLogsFromNode.mockResolvedValue({
-      entries: [{ timestamp: '2026-06-18T10:00:00Z', level: 'info', source: 'docker:web-1', message: 'ready' }],
+      entries: [
+        {
+          timestamp: '2026-06-18T10:00:00Z',
+          level: 'info',
+          source: 'docker:web-1',
+          message: 'ready',
+        },
+      ],
       nextCursor: null,
       hasMore: false,
     });
@@ -143,7 +150,7 @@ describe('deployment environment observability routes', () => {
     const response = await createApp().request(
       '/api/projects/project-1/environments/env-1/logs?source=docker&container=web-1&limit=80',
       {},
-      createEnv(),
+      createEnv()
     );
 
     expect(response.status).toBe(200);
@@ -154,44 +161,57 @@ describe('deployment environment observability routes', () => {
       'node-1',
       expect.anything(),
       'user-1',
-      'source=docker&container=web-1&limit=80',
+      'source=docker&container=web-1&limit=80'
     );
   });
 
   it('returns deployment-node system and container metrics', async () => {
     mockSelectRows(
       [{ id: 'env-1', nodeId: 'node-1' }],
-      [{ id: 'node-1', status: 'running', lastMetrics: '{"memoryPercent":42}' }],
+      [{ id: 'node-1', status: 'running', lastMetrics: '{"memoryPercent":42}' }]
     );
     mockGetNodeSystemInfoFromNode.mockResolvedValue({
       cpu: { loadAvg1: 0.12, loadAvg5: 0.2, loadAvg15: 0.3, numCpu: 2 },
       memory: { totalBytes: 1000, usedBytes: 420, availableBytes: 580, usedPercent: 42 },
-      disk: { totalBytes: 2000, usedBytes: 500, availableBytes: 1500, usedPercent: 25, mountPath: '/' },
+      disk: {
+        totalBytes: 2000,
+        usedBytes: 500,
+        availableBytes: 1500,
+        usedPercent: 25,
+        mountPath: '/',
+      },
       network: { interface: 'eth0', rxBytes: 1, txBytes: 2 },
       uptime: { seconds: 60, humanFormat: '1m' },
       docker: {
         version: '25.0.0',
         containers: 1,
-        containerList: [{
-          id: 'abc',
-          name: 'web-1',
-          image: 'nginx',
-          status: 'Up',
-          state: 'running',
-          cpuPercent: 1.5,
-          memUsage: '3.5MiB / 256MiB',
-          memPercent: 1.36,
-          createdAt: '2026-06-18T10:00:00Z',
-        }],
+        containerList: [
+          {
+            id: 'abc',
+            name: 'web-1',
+            image: 'nginx',
+            status: 'Up',
+            state: 'running',
+            cpuPercent: 1.5,
+            memUsage: '3.5MiB / 256MiB',
+            memPercent: 1.36,
+            createdAt: '2026-06-18T10:00:00Z',
+          },
+        ],
       },
-      software: { goVersion: 'go1.25', nodeVersion: 'v22', dockerVersion: '25', devcontainerCliVersion: 'n/a' },
+      software: {
+        goVersion: 'go1.25',
+        nodeVersion: 'v22',
+        dockerVersion: '25',
+        devcontainerCliVersion: 'n/a',
+      },
       agent: { version: 'test', uptime: '1m' },
     });
 
     const response = await createApp().request(
       '/api/projects/project-1/environments/env-1/metrics',
       {},
-      createEnv(),
+      createEnv()
     );
 
     expect(response.status).toBe(200);
@@ -204,7 +224,11 @@ describe('deployment environment observability routes', () => {
       memPercent: 1.36,
       state: 'running',
     });
-    expect(mockGetNodeSystemInfoFromNode).toHaveBeenCalledWith('node-1', expect.anything(), 'user-1');
+    expect(mockGetNodeSystemInfoFromNode).toHaveBeenCalledWith(
+      'node-1',
+      expect.anything(),
+      'user-1'
+    );
   });
 
   it('lists public route metadata for custom-domain attach', async () => {
@@ -227,7 +251,7 @@ describe('deployment environment observability routes', () => {
     const response = await createApp().request(
       '/api/projects/project-1/environments/env-1/public-routes',
       {},
-      createEnv(),
+      createEnv()
     );
 
     const body = await response.json<any>();
@@ -254,7 +278,7 @@ describe('deployment environment observability routes', () => {
     expect(mockGetEnvironmentPublicRouteTargets).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      'env-1',
+      'env-1'
     );
   });
 
@@ -264,11 +288,13 @@ describe('deployment environment observability routes', () => {
     const response = await createApp().request(
       '/api/projects/project-1/environments/missing-env/public-routes',
       {},
-      createEnv(),
+      createEnv()
     );
 
     expect(response.status).toBe(404);
-    expect(await response.json<any>()).toMatchObject({ message: 'Deployment environment not found' });
+    expect(await response.json<any>()).toMatchObject({
+      message: 'Deployment environment not found',
+    });
     expect(mockGetEnvironmentPublicRouteTargets).not.toHaveBeenCalled();
   });
 });

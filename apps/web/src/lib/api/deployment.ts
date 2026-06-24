@@ -79,6 +79,38 @@ export interface DeploymentEnvironment {
   node: DeploymentEnvironmentNodeSummary | null;
 }
 
+export interface DeploymentPublicRoute {
+  id: string;
+  service: string;
+  port: number;
+  hostname: string;
+  hostPort: number;
+  routeIndex: number;
+}
+
+export type DeploymentCustomDomainVerificationStatus = 'pending' | 'verified' | 'failed';
+
+export interface DeploymentCustomDomain {
+  id: string;
+  environmentId: string;
+  service: string;
+  port: number;
+  routeIndex: number;
+  hostname: string;
+  verificationStatus: DeploymentCustomDomainVerificationStatus;
+  verificationError: string | null;
+  verifiedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  cnameTarget: string | null;
+}
+
+export interface CreateDeploymentCustomDomainRequest {
+  service: string;
+  port: number;
+  hostname: string;
+}
+
 export interface DeploymentEnvironmentConfigVar {
   key: string;
   value: string | null;
@@ -147,6 +179,57 @@ export async function deleteDeploymentEnvironment(
 ): Promise<DeleteDeploymentEnvironmentResponse> {
   return request<DeleteDeploymentEnvironmentResponse>(
     `/api/projects/${projectId}/environments/${envId}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function listDeploymentPublicRoutes(
+  projectId: string,
+  envId: string
+): Promise<{ publicRoutes: DeploymentPublicRoute[] }> {
+  return request<{ publicRoutes: DeploymentPublicRoute[] }>(
+    `/api/projects/${projectId}/environments/${envId}/public-routes`
+  );
+}
+
+export async function listDeploymentCustomDomains(
+  projectId: string,
+  envId: string
+): Promise<{ customDomains: DeploymentCustomDomain[] }> {
+  return request<{ customDomains: DeploymentCustomDomain[] }>(
+    `/api/projects/${projectId}/environments/${envId}/custom-domains`
+  );
+}
+
+export async function createDeploymentCustomDomain(
+  projectId: string,
+  envId: string,
+  data: CreateDeploymentCustomDomainRequest
+): Promise<DeploymentCustomDomain> {
+  return request<DeploymentCustomDomain>(
+    `/api/projects/${projectId}/environments/${envId}/custom-domains`,
+    { method: 'POST', body: JSON.stringify(data) }
+  );
+}
+
+export async function verifyDeploymentCustomDomain(
+  projectId: string,
+  envId: string,
+  domainId: string
+): Promise<DeploymentCustomDomain> {
+  return request<DeploymentCustomDomain>(
+    `/api/projects/${projectId}/environments/${envId}/custom-domains/${domainId}/verify`,
+    { method: 'POST' }
+  );
+}
+
+export async function deleteDeploymentCustomDomain(
+  projectId: string,
+  envId: string,
+  domainId: string
+): Promise<{ id: string; deleted: boolean }> {
+  return request<{ id: string; deleted: boolean }>(
+    `/api/projects/${projectId}/environments/${envId}/custom-domains/${domainId}`,
     { method: 'DELETE' }
   );
 }

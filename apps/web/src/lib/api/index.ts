@@ -143,21 +143,27 @@ export {
 } from './credentials';
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
 export type {
+  CreateDeploymentCustomDomainRequest,
   DeleteDeploymentEnvironmentResponse,
   DeploymentAgentPolicy,
+  DeploymentCustomDomain,
+  DeploymentCustomDomainVerificationStatus,
   DeploymentEnvironment,
   DeploymentEnvironmentConfigResponse,
   DeploymentEnvironmentConfigVar,
   DeploymentEnvironmentMetricsResponse,
   DeploymentEnvironmentNodeSummary,
   DeploymentObservedState,
+  DeploymentPublicRoute,
   DeploymentReleaseSummary,
   DeploymentSecretEntry,
   ProjectDeploymentGcpResponse,
   UpsertDeploymentEnvironmentConfigVarRequest,
 } from './deployment';
 export {
+  createDeploymentCustomDomain,
   createDeploymentEnvironment,
+  deleteDeploymentCustomDomain,
   deleteDeploymentEnvironment,
   deleteDeploymentEnvironmentConfigVar,
   deleteDeploymentSecret,
@@ -167,14 +173,17 @@ export {
   getDeploymentEnvironmentMetrics,
   getDeployOAuthResult,
   getProjectDeploymentGcp,
+  listDeploymentCustomDomains,
   listDeploymentEnvironmentContainers,
   listDeploymentEnvironments,
+  listDeploymentPublicRoutes,
   listDeploymentSecrets,
   listGcpProjectsForDeploy,
   setDeploymentSecret,
   setupProjectDeploymentGcp,
   updateDeploymentEnvironmentPolicy,
   upsertDeploymentEnvironmentConfigVar,
+  verifyDeploymentCustomDomain,
 } from './deployment';
 export type {
   FileEntry,
