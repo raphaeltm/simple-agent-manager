@@ -124,11 +124,16 @@ applied to every deployment node, not just tested ones.
 - [x] A user can attach a custom subdomain to an existing public route; private/nonexistent routes are rejected.
 - [x] Verification resolves the hostname via Cloudflare DoH and only marks `verified` when it points at our route target (CNAME) or node IP (A). Non-matching → `failed` with the exact CNAME target surfaced.
 - [x] On verified, the custom hostname rides as an additional `RouteTarget` (same `hostPort` as its parent public route) in the next signed `ApplyPayload`, covered by `routesHash`.
-- [ ] Node Caddy provisions TLS + reverse-proxies the custom hostname (verified on staging serving valid HTTPS).
+- [x] Node Caddy provisions TLS + reverse-proxies the custom hostname (verified on staging serving valid HTTPS).
 - [x] Deleting a custom domain drops its site block on next apply.
 - [x] SAM never creates the user's DNS record (no `upsertAppRouteDNSRecord` for custom hostnames).
 
-Staging note: the live TLS/reverse-proxy criterion intentionally remains open until Phase 6 staging verification produces evidence from a real deployment node and custom hostname. Do not archive this task before that evidence is recorded.
+Staging evidence: on 2026-06-24, staging environment
+`01KVWBXQZ3QZV8EKW7WFHTGTDM` (`sam-cd-20260624082835`) applied release v2 on
+deployment node `01KVT1KVGZ8S9NZHKHKAV0QFP6`. Custom hostname
+`sam-custom-01kvwbxqz3.138-199-146-229.sslip.io` verified via A-record-to-node-IP
+and served HTTPS 200 with `ssl_verify_result=0`, `remote_ip=138.199.146.229`,
+`server: nginx/1.31.2`, and `via: 1.1 Caddy`.
 
 ## Out of scope (v2 — note in spec)
 
