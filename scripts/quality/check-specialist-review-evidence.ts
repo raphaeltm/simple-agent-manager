@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
  * CI quality check: validates the Specialist Review Evidence table in PR bodies.
  *
  * Fails if:
- * 1. Any reviewer has DISPATCHED or FAILED status (incomplete reviews)
+ * 1. Any reviewer has PENDING or FAILED status (incomplete reviews)
  * 2. The `needs-human-review` label is present on the PR
  * 3. The review evidence table is missing/empty on agent-authored PRs
  *
@@ -19,7 +19,7 @@ const AGENT_AUTHORED_PATTERN = /Co-Authored-By:\s*Claude/i;
 const NEEDS_HUMAN_REVIEW_LABEL = 'needs-human-review';
 
 // Blocking statuses — reviews that have not completed
-const BLOCKING_STATUSES = ['DISPATCHED', 'FAILED'] as const;
+const BLOCKING_STATUSES = ['PENDING', 'FAILED'] as const;
 
 // Acceptable statuses — reviews that are complete
 const ACCEPTABLE_STATUSES = ['PASS', 'ADDRESSED', 'DEFERRED'] as const;
@@ -235,7 +235,7 @@ export function validateReviewEvidence(
       result.pass = false;
       result.failures.push(
         'Agent-authored PR has an empty Specialist Review Evidence table. ' +
-          'All dispatched reviewers must be listed with their status.'
+          'All local reviewers must be listed with their status.'
       );
     }
     return result;

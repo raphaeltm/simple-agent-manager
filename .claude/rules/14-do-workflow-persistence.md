@@ -40,7 +40,7 @@ Phase 1: Research & Task Creation
 - [ ] Phase 7: Pull Request & Post-Merge Deploy Monitoring
 
 ## Phase 5: Review Tracker
-<populated when Phase 5 starts — one line per dispatched reviewer>
+<populated when Phase 5 starts — one line per local reviewer>
 <Phase 5 is NOT complete until every entry shows PASS or ADDRESSED>
 
 ## Implementation Progress
@@ -59,7 +59,7 @@ Before starting any new phase, update `.do-state.md`:
 
 ### Update It During Long Phases
 
-During Phase 3 (Implementation) and Phase 5 (Review), update the file after every significant unit of work — every commit, every test run, every reviewer dispatched.
+During Phase 3 (Implementation) and Phase 5 (Review), update the file after every significant unit of work — every commit, every test run, every local reviewer started.
 
 ### Re-Read It Regularly
 
@@ -98,17 +98,17 @@ Before advancing past Phase 5, you MUST:
 
 1. Re-read `.do-state.md`
 2. Check the "Phase 5: Review Tracker" section
-3. If ANY reviewer shows `DISPATCHED`, **STOP** — you are not done with Phase 5
+3. If ANY reviewer shows `PENDING`, **STOP** — you are not done with Phase 5
 4. Wait for the outstanding reviewer(s) to complete, then update their status
 5. Only after every reviewer shows `PASS` or `ADDRESSED` may you check off Phase 5
 
-**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See the retained incident lesson in this rule.
+**Why this exists:** PR #409's security auditor was started during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See the retained incident lesson in this rule.
 
 ### Updating the Review Tracker
 
-When dispatching a reviewer agent, immediately write:
+When starting a local reviewer subagent, immediately write:
 ```markdown
-- [ ] security-auditor — DISPATCHED (agent-id: <id>)
+- [ ] security-auditor — PENDING (local subagent running)
 ```
 
 When the reviewer completes with no blockers:

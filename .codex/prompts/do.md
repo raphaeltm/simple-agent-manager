@@ -65,7 +65,7 @@ Statements like "it probably won't work" or "credentials seem unavailable" are n
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
-   If the user explicitly asks for local subagents to critique proposed changes before implementation, do that after research and before file edits. Send the concrete proposal to bounded local reviewer agents, wait for their critique, reconcile disagreements, and record the consensus or remaining dissent in the task file or `.do-state.md` before implementing.
+   If the user explicitly asks for local subagents to critique proposed changes before implementation, do that after research and before file edits. Send the concrete proposal to bounded local subagents, wait for their critique, reconcile disagreements, and record the consensus or remaining dissent in the task file or `.do-state.md` before implementing.
 
 3. **Create a task file** in `tasks/backlog/` using the format `YYYY-MM-DD-descriptive-name.md`:
    - Problem statement (what and why)
@@ -182,7 +182,7 @@ Before creating the PR, ensure everything is solid:
 2. **Verify documentation sync** — grep for references to anything you changed and update stale docs.
 
 3. **Run task completion validation** (BLOCKING — do not skip):
-   Dispatch the `$task-completion-validator` agent with the active task file and current branch. This agent cross-references:
+   Invoke the local `$task-completion-validator` skill or local subagent with the active task file and current branch. This reviewer cross-references:
    - Research findings against the implementation checklist (did every identified problem get a checklist item?)
    - Checklist items against the git diff (did every checked item produce real code changes?)
    - Acceptance criteria against the test suite (does every criterion have test or manual verification?)
@@ -201,7 +201,7 @@ Before creating the PR, ensure everything is solid:
 
 > **Checkpoint**: Re-read `.do-state.md`. Confirm Phases 1-4 are complete. Update "Current Phase" to Phase 5.
 
-Dispatch review based on what the PR touches. **Always include** `$task-completion-validator` in addition to the domain-specific reviewers:
+Run local subagent review based on what the PR touches. **Always include** `$task-completion-validator` in addition to the domain-specific local reviewers. Do **not** create SAM child tasks for routine `/do` Phase 5 review; SAM child tasks are only for explicit user-requested SAM subtasks or visible delegated SAM work:
 
 | PR touches | Skill | What it checks |
 |------------|-------|----------------|
@@ -217,15 +217,15 @@ Dispatch review based on what the PR touches. **Always include** `$task-completi
 
 Address every bug or correctness issue raised. Push fixes and re-run quality checks.
 
-**STOP: Wait for all review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
+**STOP: Wait for all local subagents to complete before proceeding.** If local reviewers are running in the background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
 
-**Update `.do-state.md`**: When dispatching reviewers, immediately add each one to the "Phase 5: Review Tracker" section with status `DISPATCHED`. Update each reviewer's status as results arrive. **Phase 5 CANNOT be checked off until every dispatched reviewer shows `PASS` or `ADDRESSED`.** If you re-read the state file and any reviewer is still `DISPATCHED`, you are NOT done with Phase 5 — wait for it.
+**Update `.do-state.md`**: When starting local reviewers, immediately add each one to the "Phase 5: Review Tracker" section with status `PENDING`. Update each reviewer's status as results arrive. **Phase 5 CANNOT be checked off until every local reviewer shows `PASS` or `ADDRESSED`.** If you re-read the state file and any reviewer is still `PENDING`, you are NOT done with Phase 5 — wait for it.
 
 Example state file entries:
 ```markdown
 ## Phase 5: Review Tracker
 - [x] task-completion-validator — PASS, no critical findings
-- [ ] security-auditor — DISPATCHED (agent-id: abc123)
+- [ ] security-auditor — PENDING (local subagent running)
 - [x] cloudflare-specialist — ADDRESSED, 1 medium fixed in commit def456
 ```
 
@@ -233,7 +233,7 @@ Example state file entries:
 
 ## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
 
-> **Checkpoint**: Re-read `.do-state.md`. Confirm Phases 1-5 are complete. **Specifically for Phase 5**: verify the "Phase 5: Review Tracker" section has ZERO reviewers with status `DISPATCHED`. Every reviewer must show `PASS` or `ADDRESSED`. If any reviewer is still outstanding, STOP — go back to Phase 5 and wait for it. Update "Current Phase" to Phase 6.
+> **Checkpoint**: Re-read `.do-state.md`. Confirm Phases 1-5 are complete. **Specifically for Phase 5**: verify the "Phase 5: Review Tracker" section has ZERO reviewers with status `PENDING`. Every reviewer must show `PASS` or `ADDRESSED`. If any reviewer is still outstanding, STOP — go back to Phase 5 and wait for it. Update "Current Phase" to Phase 6.
 
 If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
 

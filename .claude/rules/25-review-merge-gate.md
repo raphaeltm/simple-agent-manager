@@ -1,8 +1,8 @@
 # Merge-Blocking Review Gate
 
-## Rule: All Dispatched Reviewers Must Complete Before Merge
+## Rule: All Local Reviewers Must Complete Before Merge
 
-If you dispatch specialist review agents during Phase 5 of the `/do` workflow, **every single reviewer must return results and have its findings addressed before you may merge the PR.** There are no exceptions. Filing findings as backlog tasks does not satisfy this requirement for CRITICAL or HIGH severity issues.
+If you run specialist local subagents during Phase 5 of the `/do` workflow, **every single reviewer must return results and have its findings addressed before you may merge the PR.** There are no exceptions. Filing findings as backlog tasks does not satisfy this requirement for CRITICAL or HIGH severity issues.
 
 ### Why This Rule Exists
 
@@ -10,9 +10,9 @@ PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and 
 
 ### Hard Requirements
 
-1. **Every dispatched reviewer must appear in the PR description's "Specialist Review Evidence" table** with a status of `PASS` or `ADDRESSED` before merge is allowed.
+1. **Every local reviewer must appear in the PR description's "Specialist Review Evidence" table** with a status of `PASS` or `ADDRESSED` before merge is allowed.
 
-2. **If any reviewer shows `DISPATCHED` (launched but not returned):** You MUST NOT merge. Wait for it. If the workspace is being killed or you are running out of time, push the branch, add the `needs-human-review` label to the PR, and stop. The human will handle it.
+2. **If any reviewer shows `PENDING` (started but not returned):** You MUST NOT merge. Wait for it. If the workspace is being killed or you are running out of time, push the branch, add the `needs-human-review` label to the PR, and stop. The human will handle it.
 
 3. **If any reviewer shows `FAILED` (errored or timed out):** You MUST NOT self-merge. Add the `needs-human-review` label and stop. The human must decide whether to proceed without that review.
 
@@ -25,7 +25,7 @@ PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and 
 ### When to Add `needs-human-review`
 
 Add this label and stop (do NOT merge) when ANY of:
-- A dispatched reviewer has not returned results
+- A local reviewer has not returned results
 - A reviewer errored or timed out
 - You cannot confirm whether all reviewers completed (e.g., after context compaction you've lost track)
 - A reviewer raised CRITICAL findings you cannot fix within the current session
@@ -44,8 +44,8 @@ gh label create needs-human-review --description "Agent could not complete all r
 
 Before merging any agent-authored PR:
 - [ ] PR description has "Specialist Review Evidence" table
-- [ ] Every dispatched reviewer has a row in the table
-- [ ] Every row shows `PASS` or `ADDRESSED` (not `DISPATCHED` or `FAILED`)
+- [ ] Every local reviewer has a row in the table
+- [ ] Every row shows `PASS` or `ADDRESSED` (not `PENDING` or `FAILED`)
 - [ ] All CRITICAL/HIGH findings are fixed in the branch (not deferred to backlog)
 - [ ] If any of the above are false: `needs-human-review` label added and merge deferred
 

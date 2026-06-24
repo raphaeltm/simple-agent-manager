@@ -140,11 +140,11 @@ The PR description must include a "Post-Mortem" section summarizing the root cau
 
 ## Pre-Merge PR Review (Required)
 
-Before merging ANY pull request, dispatch a team of skeptical subagents to review the PR. Each reviewer should be adversarial — their job is to find problems, not confirm the code works.
+Before merging ANY pull request, run a team of skeptical local subagents to review the PR. Each reviewer should be adversarial — their job is to find problems, not confirm the code works.
 
 ### Review Team Composition
 
-Dispatch reviewers **in parallel** covering each language and discipline touched by the PR:
+Run local subagents **in parallel** covering each language and discipline touched by the PR:
 
 | PR touches | Required reviewer agent |
 |------------|----------------------|
