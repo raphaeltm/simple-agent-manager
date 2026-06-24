@@ -18,8 +18,8 @@ Deployment custom-domain CRUD exists in the API, but the production environment 
 
 ## Implementation Checklist
 
-- [ ] Add production public-route metadata support for a deployment environment, preferably `GET /api/projects/:projectId/environments/:envId/public-routes`.
-- [ ] Add backend tests for the public-route response and access/error behavior.
+- [x] Add production public-route metadata support for a deployment environment, preferably `GET /api/projects/:projectId/environments/:envId/public-routes`.
+- [x] Add backend tests for the public-route response and access/error behavior.
 - [ ] Add typed web API wrappers for public-route listing and custom-domain CRUD in `apps/web/src/lib/api/deployment.ts`.
 - [ ] Add a production Domains tab to `ProjectDeploymentEnvironmentDetail.tsx` using real API data.
 - [ ] Implement route selector, add-domain form, DNS record display, copy/verify/delete/open actions, failure states, route-missing state, and no-route/no-domain states.

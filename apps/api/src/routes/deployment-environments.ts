@@ -23,6 +23,7 @@ import {
   uniqueDeployProfileIds,
   validateAllowedDeployProfiles,
 } from '../services/deployment-control';
+import { getEnvironmentPublicRouteTargets } from '../services/deployment-custom-domains';
 import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
 import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
 import {
@@ -73,6 +74,33 @@ function parseLastMetrics(value: string | null): unknown {
 }
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
+
+async function requireDeploymentEnvironment(
+  db: DeploymentDb,
+  projectId: string,
+  envId: string
+): Promise<schema.DeploymentEnvironmentRow> {
+  const rows = await db
+    .select()
+    .from(schema.deploymentEnvironments)
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        eq(schema.deploymentEnvironments.projectId, projectId)
+      )
+    )
+    .limit(1);
+
+  const environment = rows[0];
+  if (!environment) {
+    throw errors.notFound('Deployment environment');
+  }
+  return environment;
+}
+
+function publicRouteId(service: string, port: number, routeIndex: number): string {
+  return `${service}:${port}:${routeIndex}`;
+}
 
 /**
  * Result of resolving the deployment node backing an environment, used by the
@@ -284,22 +312,39 @@ deploymentEnvironmentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
 
-    const rows = await db
-      .select()
-      .from(schema.deploymentEnvironments)
-      .where(
-        and(
-          eq(schema.deploymentEnvironments.id, envId),
-          eq(schema.deploymentEnvironments.projectId, projectId)
-        )
-      )
-      .limit(1);
+    const environment = await requireDeploymentEnvironment(db, projectId, envId);
 
-    if (rows.length === 0) {
-      throw errors.notFound('Deployment environment');
-    }
+    return c.json(await buildDeploymentEnvironmentResponse(db, c.env, environment));
+  }
+);
 
-    return c.json(await buildDeploymentEnvironmentResponse(db, c.env, rows[0]!));
+/**
+ * GET /api/projects/:projectId/environments/:envId/public-routes
+ * List the current release's public route metadata for custom-domain attach.
+ */
+deploymentEnvironmentRoutes.get(
+  '/:projectId/environments/:envId/public-routes',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('projectId');
+    const envId = c.req.param('envId');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireOwnedProject(db, projectId, userId);
+    await requireDeploymentEnvironment(db, projectId, envId);
+
+    const targets = await getEnvironmentPublicRouteTargets(db, c.env, envId);
+    return c.json({
+      publicRoutes: targets.map((route, index) => ({
+        id: publicRouteId(route.service, route.containerPort, index),
+        service: route.service,
+        port: route.containerPort,
+        hostname: route.hostname,
+        hostPort: route.hostPort,
+        routeIndex: index,
+      })),
+    });
   }
 );
 

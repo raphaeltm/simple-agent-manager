@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 
 const mockRequireOwnedProject = vi.fn();
+const mockGetEnvironmentPublicRouteTargets = vi.fn();
 const mockGetNodeLogsFromNode = vi.fn();
 const mockGetNodeSystemInfoFromNode = vi.fn();
 const mockListNodeContainersFromNode = vi.fn();
@@ -57,6 +58,11 @@ vi.mock('../../../src/services/deployment-control', () => ({
   encodeAllowedDeployProfileIds: vi.fn(() => null),
   uniqueDeployProfileIds: vi.fn((ids) => ids ?? []),
   validateAllowedDeployProfiles: vi.fn(),
+}));
+
+vi.mock('../../../src/services/deployment-custom-domains', () => ({
+  getEnvironmentPublicRouteTargets: (...args: unknown[]) =>
+    mockGetEnvironmentPublicRouteTargets(...args),
 }));
 
 vi.mock('../../../src/services/deployment-environment-summary', () => ({
@@ -116,6 +122,7 @@ describe('deployment environment observability routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireOwnedProject.mockResolvedValue(undefined);
+    mockGetEnvironmentPublicRouteTargets.mockResolvedValue([]);
     mockLimit.mockImplementation(() => Promise.resolve(selectRows.shift() ?? []));
     mockWhere.mockReturnValue({ limit: mockLimit });
     mockFrom.mockReturnValue({ where: mockWhere });
@@ -198,5 +205,70 @@ describe('deployment environment observability routes', () => {
       state: 'running',
     });
     expect(mockGetNodeSystemInfoFromNode).toHaveBeenCalledWith('node-1', expect.anything(), 'user-1');
+  });
+
+  it('lists public route metadata for custom-domain attach', async () => {
+    mockSelectRows([{ id: 'env-1', projectId: 'project-1', nodeId: 'node-1' }]);
+    mockGetEnvironmentPublicRouteTargets.mockResolvedValue([
+      {
+        hostname: 'r1-web-8080-env-1.apps.sammy.party',
+        service: 'web',
+        containerPort: 8080,
+        hostPort: 36120,
+      },
+      {
+        hostname: 'r2-api-3000-env-1.apps.sammy.party',
+        service: 'api',
+        containerPort: 3000,
+        hostPort: 36121,
+      },
+    ]);
+
+    const response = await createApp().request(
+      '/api/projects/project-1/environments/env-1/public-routes',
+      {},
+      createEnv(),
+    );
+
+    const body = await response.json<any>();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.publicRoutes).toEqual([
+      {
+        id: 'web:8080:0',
+        service: 'web',
+        port: 8080,
+        hostname: 'r1-web-8080-env-1.apps.sammy.party',
+        hostPort: 36120,
+        routeIndex: 0,
+      },
+      {
+        id: 'api:3000:1',
+        service: 'api',
+        port: 3000,
+        hostname: 'r2-api-3000-env-1.apps.sammy.party',
+        hostPort: 36121,
+        routeIndex: 1,
+      },
+    ]);
+    expect(mockRequireOwnedProject).toHaveBeenCalledWith(expect.anything(), 'project-1', 'user-1');
+    expect(mockGetEnvironmentPublicRouteTargets).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'env-1',
+    );
+  });
+
+  it('returns 404 for public routes when the environment is missing', async () => {
+    mockSelectRows([]);
+
+    const response = await createApp().request(
+      '/api/projects/project-1/environments/missing-env/public-routes',
+      {},
+      createEnv(),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json<any>()).toMatchObject({ message: 'Deployment environment not found' });
+    expect(mockGetEnvironmentPublicRouteTargets).not.toHaveBeenCalled();
   });
 });
