@@ -15,9 +15,27 @@ import {
   type CCCredential,
   type CCPlatformDefault,
   type CCResolutionContext,
+  type CCResolvedEnvironment,
   resolveEnvironment,
 } from '@simple-agent-manager/shared';
-import { describe, expect,it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { resolveComputeConfig } from '../../src/services/composable-credentials/resolve';
+import { buildSnapshot } from '../../src/services/composable-credentials/snapshot';
+
+vi.mock('../../src/services/composable-credentials/snapshot', () => ({
+  buildSnapshot: vi.fn(),
+}));
+
+const mockBuildSnapshot = vi.mocked(buildSnapshot);
+
+function expectResolved(
+  resolved: CCResolvedEnvironment | null,
+  message = 'expected composable credential resolution to produce a result',
+): CCResolvedEnvironment {
+  expect(resolved, message).not.toBeNull();
+  return resolved as CCResolvedEnvironment;
+}
 
 function makeCredential(overrides: Partial<CCCredential> & { id: string }): CCCredential {
   return {
@@ -57,6 +75,10 @@ function makeAttachment(
 const consumer: CCConsumerRef = { kind: 'agent', agentType: 'claude-code' };
 
 describe('composable-credentials resolver', () => {
+  beforeEach(() => {
+    mockBuildSnapshot.mockReset();
+  });
+
   describe('Rule 28: inactive project attachment HALTS', () => {
     it('returns null for inactive project attachment (does NOT fall through to user)', () => {
       const cred = makeCredential({ id: 'cred-1' });
@@ -109,9 +131,9 @@ describe('composable-credentials resolver', () => {
       const ctx: CCResolutionContext = { userId: 'user-1', projectId: 'proj-1' };
       const result = resolveEnvironment(snapshot, consumer, ctx);
 
-      expect(result).not.toBeNull();
-      expect(result!.source).toBe('project-attachment');
-      expect(result!.credential?.secret).toEqual({ kind: 'api-key', apiKey: 'sk-test-123' });
+      const resolved = expectResolved(result);
+      expect(resolved.source).toBe('project-attachment');
+      expect(resolved.credential?.secret).toEqual({ kind: 'api-key', apiKey: 'sk-test-123' });
     });
   });
 
@@ -135,8 +157,7 @@ describe('composable-credentials resolver', () => {
       const ctx: CCResolutionContext = { userId: 'user-1', projectId: 'proj-1' };
       const result = resolveEnvironment(snapshot, consumer, ctx);
 
-      expect(result).not.toBeNull();
-      expect(result!.source).toBe('user-attachment');
+      expect(expectResolved(result).source).toBe('user-attachment');
     });
   });
 
@@ -215,8 +236,7 @@ describe('composable-credentials resolver', () => {
       const ctx: CCResolutionContext = { userId: 'user-1' };
       const result = resolveEnvironment(snapshot, consumer, ctx);
 
-      expect(result).not.toBeNull();
-      expect(result!.source).toBe('platform');
+      expect(expectResolved(result).source).toBe('platform');
     });
   });
 
@@ -262,6 +282,44 @@ describe('composable-credentials resolver', () => {
       // Ask for claude-code but only openai-codex is attached
       const result = resolveEnvironment(snapshot, consumer, ctx);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('API compute resolver service boundary', () => {
+    it('rejects a cloud-provider secret for a different provider before returning provider config', async () => {
+      const credential = makeCredential({
+        id: 'cred-mismatch',
+        kind: 'cloud-provider',
+        secret: { kind: 'cloud-provider', provider: 'scaleway', token: 'scaleway-secret' },
+      });
+      const configuration = makeConfiguration({
+        id: 'cfg-mismatch',
+        credentialId: credential.id,
+        consumer: { kind: 'compute', provider: 'hetzner' },
+      });
+      const attachment = makeAttachment({
+        id: 'att-mismatch',
+        configurationId: configuration.id,
+        consumer: { kind: 'compute', provider: 'hetzner' },
+        target: { scope: 'user', userId: 'user-1' },
+      });
+
+      mockBuildSnapshot.mockResolvedValueOnce({
+        credentials: [credential],
+        configurations: [configuration],
+        attachments: [attachment],
+        platform: {},
+      });
+
+      await expect(
+        resolveComputeConfig({} as never, 'user-1', 'test-key', 'hetzner'),
+      ).rejects.toThrow('compute provider mismatch: requested hetzner, credential is scaleway');
+      expect(mockBuildSnapshot).toHaveBeenCalledWith(
+        {},
+        'user-1',
+        'test-key',
+        undefined,
+      );
     });
   });
 });

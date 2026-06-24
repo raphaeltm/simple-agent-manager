@@ -20,20 +20,45 @@ In the API path, `createProviderForUser(..., targetProvider)` constructs provide
 
 ## Implementation Checklist
 
-- [ ] Add a shared regression proving `computeAssembler` rejects a `cloud-provider` credential whose `secret.provider` differs from the requested `resolved.consumer.provider`.
-- [ ] Update `computeAssembler` to enforce provider consistency and throw a clear error containing both the requested consumer provider and credential provider.
-- [ ] Preserve existing `computeAssembler` behavior for non-compute consumers, null credentials, and non-cloud-provider credentials.
-- [ ] Add a vertical-ish API/shared regression around `createProviderForUser` or `resolveComputeConfig` proving a mismatched CC provider cannot flow into provider creation.
-- [ ] Reframe touched `composable-credentials-*` tests away from `EXPERIMENT`/`E*` naming and comments.
-- [ ] Remove impossible manually-cast `ResolvedEnvironment` objects from touched shared tests.
-- [ ] Replace non-null assertions in touched shared composable-credentials tests with focused helper assertions where reasonable.
-- [ ] Add a process-fix rule/checklist update for provider-name consistency at composable-credentials compute boundaries.
-- [ ] Run focused validation:
+- [x] Add a shared regression proving `computeAssembler` rejects a `cloud-provider` credential whose `secret.provider` differs from the requested `resolved.consumer.provider`.
+- [x] Update `computeAssembler` to enforce provider consistency and throw a clear error containing both the requested consumer provider and credential provider.
+- [x] Preserve existing `computeAssembler` behavior for non-compute consumers, null credentials, and non-cloud-provider credentials.
+- [x] Add a vertical-ish API/shared regression around `createProviderForUser` or `resolveComputeConfig` proving a mismatched CC provider cannot flow into provider creation.
+- [x] Reframe touched `composable-credentials-*` tests away from `EXPERIMENT`/`E*` naming and comments.
+- [x] Remove impossible manually-cast `ResolvedEnvironment` objects from touched shared tests.
+- [x] Replace non-null assertions in touched shared composable-credentials tests with focused helper assertions where reasonable.
+- [x] Add a process-fix rule/checklist update for provider-name consistency at composable-credentials compute boundaries.
+- [x] Address security review finding by restricting `auth-json` assembly to the `openai-codex` agent consumer.
+- [x] Run focused validation:
   - `pnpm --filter @simple-agent-manager/shared test -- composable-credentials`
   - `pnpm --filter @simple-agent-manager/shared typecheck`
   - `pnpm --filter @simple-agent-manager/shared lint`
   - focused API worker/unit test if API tests are touched
-- [ ] Run required specialist validation for credential/security/test changes before PR.
+- [x] Run required specialist validation for credential/security/test changes before PR.
+
+Validation notes:
+
+- `pnpm --filter @simple-agent-manager/shared test -- composable-credentials` passed: 4 files, 108 tests.
+- `pnpm --filter @simple-agent-manager/shared typecheck` passed.
+- `pnpm --filter @simple-agent-manager/shared lint` passed with pre-existing warnings outside the touched composable-credentials files.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with pre-existing warnings.
+- `pnpm --filter @simple-agent-manager/api test -- composable-credentials-resolver` passed, including a normal-runner API resolver-service regression for provider mismatch rejection.
+- `pnpm --filter @simple-agent-manager/api test -- composable-credentials-wiring` is not the right API command because the default API test script excludes worker tests.
+- `pnpm --filter @simple-agent-manager/api test:workers -- composable-credentials-wiring` could not complete locally because `workerd` repeatedly segfaulted during runtime startup before Vitest reported assertions; the run was terminated after confirming repeated signal 11 startup crashes.
+- `pnpm lint` passed with pre-existing warnings.
+- `pnpm typecheck` passed.
+- `pnpm test` passed.
+- `pnpm build` passed.
+
+Review notes:
+
+- Task-completion validator: WARN/FAIL before final cleanup because API worker validation could not run locally and specialist validation was not yet checked off.
+- Security auditor: found one MEDIUM adjacent boundary issue where `auth-json` credentials could be assembled for non-Codex agents; fixed by making `agentAssembler` reject `auth-json` unless `resolved.consumer.agentType === 'openai-codex'`.
+- Test engineer: flagged that the API worker regression is realistic but not reliably enforced by the default test command; fixed by adding a normal-runner `resolveComputeConfig` API resolver-service regression.
+- Constitution validator: PASS; no hardcoded business/config values introduced.
+- Cloudflare specialist: no blocking Worker findings; local `workerd` signal 11 appears to be runtime/environment startup instability, with CI/alternate worker runtime verification still desirable.
+- Final task-completion validator: PASS after the security fix and normal-runner API regression were pushed.
 
 ## Acceptance Criteria
 

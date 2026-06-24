@@ -70,6 +70,9 @@ export const agentAssembler: Assembler<EnvInjection> = {
         return { env: oauthEnvVar(agentType, secret.token), files: [] };
 
       case 'auth-json':
+        if (agentType !== 'openai-codex') {
+          throw new Error(`agent ${agentType} does not support auth-json credentials`);
+        }
         return { env: { CODEX_AUTH_JSON: secret.authJson }, files: [] };
 
       case 'openai-compatible': {
@@ -137,6 +140,11 @@ export const computeAssembler: Assembler<ProviderConfig> = {
     const secret = resolved.credential.secret;
     if (secret.kind !== 'cloud-provider') {
       throw new Error(`compute consumer requires a cloud-provider credential, got ${secret.kind}`);
+    }
+    if (secret.provider !== resolved.consumer.provider) {
+      throw new Error(
+        `compute provider mismatch: requested ${resolved.consumer.provider}, credential is ${secret.provider}`
+      );
     }
     return {
       provider: secret.provider,

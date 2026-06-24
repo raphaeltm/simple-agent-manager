@@ -1,15 +1,15 @@
 /**
- * EXPERIMENT (E1 parity + E2 demonstration).
+ * Composable credential resolver and assembler contracts.
  *
- * Two things proven here:
+ * Two production contracts are proven here:
  *
- *  E2 — three very different consumers (OpenCode+z.ai, Codex auth.json, Hetzner
- *       compute) all fit the SAME resolver + the same primitive shapes, and the
- *       consumer-specific assemblers reproduce today's vm-agent injection bytes.
+ *  - Three very different consumers (OpenCode+z.ai, Codex auth.json, Hetzner
+ *    compute) all fit the SAME resolver + the same primitive shapes, and the
+ *    consumer-specific assemblers reproduce today's vm-agent injection bytes.
  *
- *  E1 — the single generalized resolver reproduces the DECISIONS of today's two
- *       parallel resolvers across a scenario matrix, including the Rule 28
- *       invariant (inactive project-scoped row HALTS, does not fall through).
+ *  - The single generalized resolver reproduces the DECISIONS of today's two
+ *    parallel resolvers across a scenario matrix, including the Rule 28
+ *    invariant (inactive project-scoped row HALTS, does not fall through).
  *
  * The "oracles" below are faithful reference implementations of the documented
  * precedence in:
@@ -27,6 +27,7 @@ import type {
   CompositionSnapshot,
   Credential,
   ResolutionSource,
+  ResolvedEnvironment,
 } from '../../src/composable-credentials/types';
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,14 @@ function sourceToOracle(source: ResolutionSource | null): OracleResult {
 
 let idSeq = 0;
 const nextId = (p: string) => `${p}-${++idSeq}`;
+
+function expectResolved(
+  resolved: ResolvedEnvironment | null,
+  message = 'expected composable credential resolution to produce a result',
+): ResolvedEnvironment {
+  expect(resolved, message).not.toBeNull();
+  return resolved as ResolvedEnvironment;
+}
 
 function apiKeyCred(ownerId: string, name: string, isActive = true): Credential {
   return {
@@ -142,7 +151,7 @@ function buildAgentSnapshot(
   return { credentials, configurations, attachments, platform: platformRec };
 }
 
-describe('E1 — agent resolution parity vs getDecryptedAgentKey', () => {
+describe('agent resolution contract vs getDecryptedAgentKey', () => {
   const userId = 'user-1';
   const projectId = 'proj-1';
 
@@ -191,10 +200,10 @@ function describeRow(r: AgentRow | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// E1 — compute resolution parity vs createProviderForUser
+// Compute resolution parity vs createProviderForUser
 // ---------------------------------------------------------------------------
 
-describe('E1 — compute resolution parity vs createProviderForUser', () => {
+describe('compute resolution contract vs createProviderForUser', () => {
   const userId = 'user-1';
 
   function buildComputeSnapshot(
@@ -257,15 +266,56 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
     );
     const resolved = resolveEnvironment(snap, { kind: 'compute', provider: 'hetzner' }, { userId });
     expect(resolved?.source).toBe('user-attachment');
-    const cfg = computeAssembler.assemble(resolved!);
+    const cfg = computeAssembler.assemble(expectResolved(resolved));
     expect(cfg).toEqual({ provider: 'hetzner', token: 'user-token', isPlatform: false });
+  });
+
+  it('rejects a cloud-provider secret for a different provider than the compute consumer', () => {
+    idSeq = 0;
+    const credential: Credential = {
+      id: nextId('cred'),
+      ownerId: userId,
+      name: 'mismatched cloud',
+      kind: 'cloud-provider',
+      secret: { kind: 'cloud-provider', provider: 'scaleway', token: 'scaleway-token' },
+      isActive: true,
+    };
+    const configuration: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'hetzner compute using wrong credential',
+      consumer: { kind: 'compute', provider: 'hetzner' },
+      credentialId: credential.id,
+      settings: {},
+      isActive: true,
+    };
+    const snapshot: CompositionSnapshot = {
+      credentials: [credential],
+      configurations: [configuration],
+      attachments: [
+        {
+          id: nextId('att'),
+          configurationId: configuration.id,
+          consumer: { kind: 'compute', provider: 'hetzner' },
+          target: { scope: 'user', userId },
+          isActive: true,
+        },
+      ],
+      platform: {},
+    };
+
+    const resolved = resolveEnvironment(snapshot, { kind: 'compute', provider: 'hetzner' }, { userId });
+
+    expect(() => computeAssembler.assemble(expectResolved(resolved))).toThrow(
+      'compute provider mismatch: requested hetzner, credential is scaleway'
+    );
   });
 
   it('falls back to platform when no user credential', () => {
     const snap = buildComputeSnapshot(null, { provider: 'hetzner' });
     const resolved = resolveEnvironment(snap, { kind: 'compute', provider: 'hetzner' }, { userId });
     expect(resolved?.source).toBe('platform');
-    expect(computeAssembler.assemble(resolved!).isPlatform).toBe(true);
+    expect(computeAssembler.assemble(expectResolved(resolved)).isPlatform).toBe(true);
   });
 
   it('inactive user credential falls through to platform (compute has no halt rule)', () => {
@@ -285,10 +335,10 @@ describe('E1 — compute resolution parity vs createProviderForUser', () => {
 });
 
 // ---------------------------------------------------------------------------
-// E2 — three consumers, one shape; assembler byte fidelity
+// Three consumers, one shape; assembler byte fidelity
 // ---------------------------------------------------------------------------
 
-describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection', () => {
+describe('heterogeneous consumers assemble to faithful vm-agent injection', () => {
   const userId = 'user-1';
 
   it('OpenCode + z.ai (openai-compatible) → proxy sentinel + custom provider config', () => {
@@ -333,7 +383,7 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
       platform: {},
     };
     const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'opencode' }, { userId });
-    const injection = agentAssembler.assemble(resolved!);
+    const injection = agentAssembler.assemble(expectResolved(resolved));
 
     expect(injection.env).toEqual({ OPENCODE_API_KEY: '__platform_proxy__' });
     expect(JSON.stringify(injection)).not.toContain('zai-secret');
@@ -393,7 +443,50 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
       { kind: 'agent', agentType: 'openai-codex' },
       { userId }
     );
-    expect(agentAssembler.assemble(resolved!).env).toEqual({ CODEX_AUTH_JSON: authBlob });
+    expect(agentAssembler.assemble(expectResolved(resolved)).env).toEqual({
+      CODEX_AUTH_JSON: authBlob,
+    });
+  });
+
+  it('auth.json credentials are rejected for non-Codex agent consumers', () => {
+    idSeq = 0;
+    const authBlob = '{"OPENAI_API_KEY":"x","tokens":{"access_token":"y"}}';
+    const cred: Credential = {
+      id: nextId('cred'),
+      ownerId: userId,
+      name: 'Codex auth.json',
+      kind: 'auth-json',
+      secret: { kind: 'auth-json', authJson: authBlob },
+      isActive: true,
+    };
+    const cfg: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'Claude with wrong auth shape',
+      consumer: { kind: 'agent', agentType: 'claude-code' },
+      credentialId: cred.id,
+      settings: {},
+      isActive: true,
+    };
+    const snap: CompositionSnapshot = {
+      credentials: [cred],
+      configurations: [cfg],
+      attachments: [
+        {
+          id: nextId('att'),
+          configurationId: cfg.id,
+          consumer: { kind: 'agent', agentType: 'claude-code' },
+          target: { scope: 'user', userId },
+          isActive: true,
+        },
+      ],
+      platform: {},
+    };
+
+    const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'claude-code' }, { userId });
+    expect(() => agentAssembler.assemble(expectResolved(resolved))).toThrow(
+      'agent claude-code does not support auth-json credentials'
+    );
   });
 
   it('platform proxy → __platform_proxy__ sentinel, no real key', () => {
@@ -410,7 +503,7 @@ describe('E2 — heterogeneous consumers assemble to faithful vm-agent injection
       { userId }
     );
     expect(resolved?.source).toBe('platform-proxy');
-    expect(agentAssembler.assemble(resolved!).env).toEqual({
+    expect(agentAssembler.assemble(expectResolved(resolved)).env).toEqual({
       ANTHROPIC_API_KEY: '__platform_proxy__',
     });
   });

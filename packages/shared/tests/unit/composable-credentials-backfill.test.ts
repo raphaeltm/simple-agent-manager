@@ -1,7 +1,7 @@
 /**
- * EXPERIMENT (E3) — migration backfill dry-run.
+ * Migration backfill contract coverage.
  *
- * Proves the pathway from today's single-table credential model into the E2
+ * Proves the pathway from today's single-table credential model into the
  * three-primitive model is deterministic and NON-DESTRUCTIVE: every source row
  * fans out into Credential + Configuration + Attachment without changing the
  * runtime resolution decision.
@@ -11,7 +11,7 @@
  *   2. Secret dedup   — identical secrets collapse to ONE Credential (the
  *                       decoupling), while per-consumer Configurations stay wired.
  *   3. Rule 28        — an inactive project row becomes an inactive project
- *                       Attachment; the E2 resolver HALTS on it (no fall-through).
+ *                       Attachment; the resolver HALTS on it (no fall-through).
  *   4. Platform rows  — become PlatformDefaults keyed by consumer.
  *   5. Round-trip     — feeding the backfilled snapshot into resolveEnvironment
  *                       reproduces the OLD resolver's decision for a matrix.
@@ -83,7 +83,7 @@ function platformAgentRow(over: Partial<SourcePlatformRow> = {}): SourcePlatform
 // 1. Fan-out shape
 // ---------------------------------------------------------------------------
 
-describe('E3 backfill — fan-out shape', () => {
+describe('backfill fan-out shape', () => {
   it('maps N agent rows to N credentials, configs, and user attachments', () => {
     const rows = [
       agentRow({ agentType: 'claude-code' }),
@@ -111,7 +111,7 @@ describe('E3 backfill — fan-out shape', () => {
 // 2. Secret dedup — the decoupling
 // ---------------------------------------------------------------------------
 
-describe('E3 backfill — secret dedup', () => {
+describe('backfill secret dedup', () => {
   it('collapses identical secrets into ONE credential, keeps both configurations', () => {
     // One OpenAI auth.json feeding BOTH Codex and OpenCode — same fingerprint.
     const shared = 'shared-openai-secret';
@@ -145,7 +145,7 @@ describe('E3 backfill — secret dedup', () => {
 // 3. Rule 28 — inactive project row halts (no fall-through)
 // ---------------------------------------------------------------------------
 
-describe('E3 backfill — Rule 28 preserved through migration', () => {
+describe('backfill preserves Rule 28 through migration', () => {
   it('an inactive project row becomes an inactive project attachment that HALTS', () => {
     const rows = [
       // active user default for claude-code
@@ -188,7 +188,7 @@ describe('E3 backfill — Rule 28 preserved through migration', () => {
 // 4. Platform rows → PlatformDefaults
 // ---------------------------------------------------------------------------
 
-describe('E3 backfill — platform defaults', () => {
+describe('backfill platform defaults', () => {
   it('registers enabled platform rows as defaults; skips disabled ones', () => {
     const platform = [
       platformAgentRow({ agentType: 'claude-code', isEnabled: true }),
@@ -253,7 +253,7 @@ function newToOld(source: ResolutionSource | null | undefined): OldDecision {
   }
 }
 
-describe('E3 backfill — round-trip parity', () => {
+describe('backfill round-trip parity', () => {
   const scenarios: {
     name: string;
     rows: SourceCredentialRow[];
@@ -322,7 +322,7 @@ describe('E3 backfill — round-trip parity', () => {
 // 6. No silent drops
 // ---------------------------------------------------------------------------
 
-describe('E3 backfill — malformed rows reported, never dropped silently', () => {
+describe('backfill reports malformed rows without silent drops', () => {
   it('reports an agent row missing agent_type', () => {
     const { report } = backfill([agentRow({ agentType: null })], []);
     expect(report.skipped).toHaveLength(1);
@@ -342,8 +342,8 @@ describe('E3 backfill — malformed rows reported, never dropped silently', () =
 // kind mapping unit
 // ---------------------------------------------------------------------------
 
-describe('E3 backfill — mapKind', () => {
-  it('maps today kinds to E2 kinds', () => {
+describe('backfill mapKind', () => {
+  it('maps legacy kinds to composable credential kinds', () => {
     expect(mapKind('agent-api-key', 'api-key')).toBe('api-key');
     expect(mapKind('agent-api-key', 'oauth-token')).toBe('oauth-token');
     expect(mapKind('cloud-provider', 'api-key')).toBe('cloud-provider');
