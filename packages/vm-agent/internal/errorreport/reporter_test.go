@@ -171,6 +171,73 @@ func TestShutdownFlushesRemaining(t *testing.T) {
 	}
 }
 
+func TestShutdownIsIdempotentBeforeStart(t *testing.T) {
+	var mu sync.Mutex
+	var received []ErrorEntry
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Errors []ErrorEntry `json:"errors"`
+		}
+		json.Unmarshal(body, &payload)
+
+		mu.Lock()
+		received = append(received, payload.Errors...)
+		mu.Unlock()
+
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+
+	r := New(srv.URL, "node-1", "token", Config{
+		FlushInterval: time.Hour,
+		MaxBatchSize:  100,
+		MaxQueueSize:  50,
+		HTTPTimeout:   5 * time.Second,
+	})
+	r.Report(ErrorEntry{Message: "queued-before-start", Source: "test"})
+
+	r.Shutdown()
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected queued entry to flush on Shutdown before Start, got %d", len(received))
+	}
+}
+
+func TestShutdownIsConcurrentSafe(t *testing.T) {
+	r := New("http://localhost", "node-1", "token", Config{
+		FlushInterval: time.Hour,
+		MaxBatchSize:  100,
+		MaxQueueSize:  50,
+	})
+	r.Start()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.Shutdown()
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Shutdown calls did not complete")
+	}
+}
+
 func TestSendIncludesAuthHeader(t *testing.T) {
 	var authHeader string
 

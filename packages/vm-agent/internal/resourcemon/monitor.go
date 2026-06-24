@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,10 +37,12 @@ type Snapshot struct {
 
 // Monitor collects and stores resource metrics.
 type Monitor struct {
-	db     *sql.DB
-	dbPath string
-	cancel context.CancelFunc
-	done   chan struct{}
+	db        *sql.DB
+	dbPath    string
+	cancel    context.CancelFunc
+	done      chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // New creates a resource monitor that writes metrics to the given SQLite path.
@@ -222,7 +225,10 @@ func (m *Monitor) DBPath() string {
 
 // Close stops the collection loop and closes the database.
 func (m *Monitor) Close() error {
-	m.cancel()
-	<-m.done
-	return m.db.Close()
+	m.closeOnce.Do(func() {
+		m.cancel()
+		<-m.done
+		m.closeErr = m.db.Close()
+	})
+	return m.closeErr
 }

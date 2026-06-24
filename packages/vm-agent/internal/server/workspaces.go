@@ -20,17 +20,10 @@ import (
 )
 
 func (s *Server) stopSessionHost(workspaceID, sessionID string) {
-	hostKey := workspaceID + ":" + sessionID
-	s.sessionHostMu.Lock()
-	existing := s.sessionHosts[hostKey]
+	existing := s.removeSessionHost(workspaceID, sessionID)
 	if existing != nil {
 		existing.Stop()
-		delete(s.sessionHosts, hostKey)
 	}
-	delete(s.sessionMcpServers, hostKey)
-	delete(s.sessionProfileOvr, hostKey)
-	delete(s.sessionTaskCtx, hostKey)
-	s.sessionHostMu.Unlock()
 
 	// Clean up persisted MCP servers (best-effort).
 	if s.store != nil {
@@ -39,6 +32,19 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 				"workspace", workspaceID, "session", sessionID, "error", err)
 		}
 	}
+}
+
+func (s *Server) removeSessionHost(workspaceID, sessionID string) *acp.SessionHost {
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	defer s.sessionHostMu.Unlock()
+
+	existing := s.sessionHosts[hostKey]
+	delete(s.sessionHosts, hostKey)
+	delete(s.sessionMcpServers, hostKey)
+	delete(s.sessionProfileOvr, hostKey)
+	delete(s.sessionTaskCtx, hostKey)
+	return existing
 }
 
 // removeWorkspaceContainer stops and removes the Docker container associated with
@@ -77,20 +83,12 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 }
 
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
-	prefix := workspaceID + ":"
-
-	s.sessionHostMu.Lock()
-	for key, host := range s.sessionHosts {
-		if !strings.HasPrefix(key, prefix) {
-			continue
+	hosts := s.removeSessionHostsForWorkspace(workspaceID)
+	for _, host := range hosts {
+		if host != nil {
+			host.Stop()
 		}
-		host.Stop()
-		delete(s.sessionHosts, key)
-		delete(s.sessionMcpServers, key)
-		delete(s.sessionProfileOvr, key)
-		delete(s.sessionTaskCtx, key)
 	}
-	s.sessionHostMu.Unlock()
 
 	// Clean up all persisted MCP servers for this workspace (best-effort).
 	if s.store != nil {
@@ -99,6 +97,29 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 				"workspace", workspaceID, "error", err)
 		}
 	}
+}
+
+func (s *Server) removeSessionHostsForWorkspace(workspaceID string) map[string]*acp.SessionHost {
+	prefix := workspaceID + ":"
+	hosts := make(map[string]*acp.SessionHost)
+
+	s.sessionHostMu.Lock()
+	defer s.sessionHostMu.Unlock()
+
+	for key, host := range s.sessionHosts {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if host != nil {
+			hosts[key] = host
+		}
+		delete(s.sessionHosts, key)
+		delete(s.sessionMcpServers, key)
+		delete(s.sessionProfileOvr, key)
+		delete(s.sessionTaskCtx, key)
+	}
+
+	return hosts
 }
 
 func (s *Server) requireNodeManagementAuth(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
