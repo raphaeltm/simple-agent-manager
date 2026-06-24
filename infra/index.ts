@@ -19,14 +19,6 @@ import {
   dnsRecordIds,
   dnsHostnames,
 } from './resources/dns';
-import {
-  encryptionKey,
-  deploySigningPrivateKey,
-  deploySigningPublicKey,
-  jwtPrivateKey,
-  jwtPublicKey,
-  trialClaimTokenSecret,
-} from './resources/secrets';
 import { originCaCertPem, originCaKeyPem } from './resources/origin-ca';
 import { pagesProject, pagesProjectName, pagesCustomDomain } from './resources/pages';
 import { accountId, baseDomain } from './resources/config';
@@ -60,13 +52,12 @@ export const hostnames = dnsHostnames;
 // Export security keys (persisted in Pulumi state, encrypted in R2)
 // These are marked as secrets - use `pulumi stack output --show-secrets` to view
 export {
-  encryptionKey,
   deploySigningPrivateKey,
-  deploySigningPublicKey,
+  encryptionKey,
   jwtPrivateKey,
   jwtPublicKey,
   trialClaimTokenSecret,
-};
+} from './resources/secrets';
 
 // Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)
 export { originCaCertPem, originCaKeyPem };

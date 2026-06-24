@@ -1,9 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import * as crypto from 'node:crypto';
 import { findRegisteredResource, getOutputValue, getSecretStatus } from './setup';
-
-const ED25519_PKCS8_SEED_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
-const ED25519_SPKI_PUBLIC_KEY_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 describe('Security Key Resources', () => {
   let secretsModule: typeof import('../resources/secrets');
@@ -51,30 +47,11 @@ describe('Security Key Resources', () => {
     await expect(getSecretStatus(secretsModule.jwtPublicKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.trialClaimTokenSecret)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.deploySigningPrivateKey)).resolves.toBe(true);
-    await expect(getSecretStatus(secretsModule.deploySigningPublicKey)).resolves.toBe(true);
   });
 
-  it('derives the raw Ed25519 deploy signing public key from the persisted seed', async () => {
+  it('exports a 32-byte Ed25519 seed for deploy signing', async () => {
     const privateKeySeed = await getOutputValue(secretsModule.deploySigningPrivateKey);
-    const publicKey = await getOutputValue(secretsModule.deploySigningPublicKey);
     const privateKeyBytes = Buffer.from(privateKeySeed, 'base64');
-    const publicKeyBytes = Buffer.from(publicKey, 'base64');
     expect(privateKeyBytes).toHaveLength(32);
-    expect(publicKeyBytes).toHaveLength(32);
-
-    const privateKey = crypto.createPrivateKey({
-      key: Buffer.concat([ED25519_PKCS8_SEED_PREFIX, privateKeyBytes]),
-      format: 'der',
-      type: 'pkcs8',
-    });
-    const publicKeyObject = crypto.createPublicKey({
-      key: Buffer.concat([ED25519_SPKI_PUBLIC_KEY_PREFIX, publicKeyBytes]),
-      format: 'der',
-      type: 'spki',
-    });
-    const message = Buffer.from('sam deploy signing compatibility');
-    const signature = crypto.sign(null, message, privateKey);
-
-    expect(crypto.verify(null, message, publicKeyObject, signature)).toBe(true);
   });
 });

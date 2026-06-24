@@ -19,40 +19,6 @@
 import * as pulumi from '@pulumi/pulumi';
 import * as random from '@pulumi/random';
 import * as tls from '@pulumi/tls';
-import * as crypto from 'node:crypto';
-
-const ED25519_PKCS8_SEED_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
-const ED25519_SPKI_PUBLIC_KEY_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
-
-function deriveDeploySigningPublicKey(privateKeyB64: string): string {
-  const privateKeyBytes = Buffer.from(privateKeyB64, 'base64');
-  if (privateKeyBytes.length !== 32 && privateKeyBytes.length !== 64) {
-    throw new Error(
-      `deploy signing private key has invalid length: got ${privateKeyBytes.length} bytes, expected 32 (seed) or 64 (seed+pubkey)`
-    );
-  }
-
-  const seed = privateKeyBytes.subarray(0, 32);
-  const privateKey = crypto.createPrivateKey({
-    key: Buffer.concat([ED25519_PKCS8_SEED_PREFIX, seed]),
-    format: 'der',
-    type: 'pkcs8',
-  });
-  const publicDer = crypto.createPublicKey(privateKey).export({
-    format: 'der',
-    type: 'spki',
-  }) as Buffer;
-
-  if (
-    !publicDer
-      .subarray(0, ED25519_SPKI_PUBLIC_KEY_PREFIX.length)
-      .equals(ED25519_SPKI_PUBLIC_KEY_PREFIX)
-  ) {
-    throw new Error('derived deploy signing public key has unexpected Ed25519 SPKI prefix');
-  }
-
-  return publicDer.subarray(ED25519_SPKI_PUBLIC_KEY_PREFIX.length).toString('base64');
-}
 
 /**
  * Encryption key for user credentials stored in D1.
@@ -101,8 +67,9 @@ const trialClaimTokenResource = new random.RandomId(
  * 32 bytes (256 bits), base64-encoded.
  *
  * The VM agent verifier consumes the derived raw 32-byte public key, also
- * base64-encoded. Both values persist in Pulumi state so fresh deployments do
- * not need manual GitHub Environment secrets for platform-owned signing keys.
+ * base64-encoded. The seed persists in Pulumi state; deployment secret
+ * configuration derives the public key so fresh deployments do not need manual
+ * GitHub Environment secrets for platform-owned signing keys.
  */
 const deploySigningPrivateKeyResource = new random.RandomId(
   'deploy-signing-private-key',
@@ -120,6 +87,3 @@ export const jwtPrivateKey = pulumi.secret(jwtKeyResource.privateKeyPemPkcs8);
 export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
 export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);
 export const deploySigningPrivateKey = deploySigningPrivateKeySeed;
-export const deploySigningPublicKey = deploySigningPrivateKeySeed.apply(
-  deriveDeploySigningPublicKey
-);

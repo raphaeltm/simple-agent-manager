@@ -48,7 +48,7 @@ Do not ask users to supply platform-owned signing/encryption material when SAM c
 Examples:
 
 - `ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`, and `TRIAL_CLAIM_TOKEN_SECRET` are Worker runtime secrets, not required manual GitHub Environment secrets for fresh installs.
-- These values are generated/persisted by Pulumi state and copied into Cloudflare Worker secrets by `scripts/deploy/configure-secrets.sh`.
+- Pulumi persists the generated source key material; `scripts/deploy/configure-secrets.sh` derives any runtime public keys and copies the resulting values into Cloudflare Worker secrets.
 - GitHub Environment secrets with the same names are compatibility/rotation overrides only. When adding new deployment-owned secrets, prefer Pulumi generation plus an explicit override path over a new manual prerequisite.
 
 ## Wrangler Environment Sections (Generated at Deploy Time)

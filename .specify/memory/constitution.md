@@ -837,7 +837,7 @@ while generated signing/encryption material should not become manual setup work.
 | Secret   | `JWT_PRIVATE_KEY`            | JWT signing key (optional override; auto-generated)                 |
 | Secret   | `JWT_PUBLIC_KEY`             | JWT verification key (optional override; auto-generated)            |
 | Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | Deploy payload signing key (optional override; auto-generated)      |
-| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | Deploy payload verification key (optional override; auto-generated) |
+| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | Deploy payload verification key (optional override; derived)        |
 
 **Naming Convention**: GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow (`configure-secrets.sh`) maps these to `GITHUB_*` Cloudflare Worker secrets (e.g., `GH_CLIENT_ID` → `GITHUB_CLIENT_ID`, `GH_WEBHOOK_SECRET` → `GITHUB_WEBHOOK_SECRET`).
 
