@@ -43,18 +43,21 @@ Desired product behavior:
 - [x] Add/update route-target reconstruction tests in `apps/api/tests/unit/services/deployment-routing.test.ts` so stale DNS/custom-domain consumers also honor stored compose-publish `x-sam-routes`.
 - [x] Clarify docs/tool guide wording: use `ports:` for normal public routes; use `x-sam-routes` for explicit public routes without `ports:` or to mark a matching port private.
 - [x] Run focused tests and API typecheck/lint.
-- [ ] Run full quality suite, specialist review, staging verification, PR, CI, merge, and production deploy monitoring per `/do`.
+- [x] Run full local quality suite before review.
+- [ ] Run specialist review, staging verification, PR, CI, merge, and production deploy monitoring per `/do`.
+
+The remaining unchecked item is the `/do` lifecycle after implementation validation. It is tracked in `.do-state.md`; it is not an unimplemented code or documentation requirement.
 
 ## Acceptance criteria
 
-- [ ] Agent-first `build_and_publish` releases support the same route precedence as normalized Compose releases for public/private `x-sam-routes` versus `ports:` hints.
-- [ ] A service with `ports:` and no explicit route still exposes a public app route.
-- [ ] A service with `x-sam-routes: [{ service, port, mode: public }]` and no `ports:` still exposes a public app route.
-- [ ] A service with matching `ports:` and `x-sam-routes: [{ service, port, mode: private }]` is not publicly exposed.
-- [ ] Duplicate explicit/public and `ports:` hints for the same service/port do not create duplicate route targets or duplicate loopback bindings.
-- [ ] Invalid `x-sam-routes` entries in compose-publish releases fail before apply with clear error messages.
-- [ ] Public docs and the MCP deployment guide match the implemented behavior.
-- [ ] Local tests and staging verification prove the route behavior before merge.
+- [x] Agent-first `build_and_publish` releases support the same route precedence as normalized Compose releases for public/private `x-sam-routes` versus `ports:` hints.
+- [x] A service with `ports:` and no explicit route still exposes a public app route.
+- [x] A service with `x-sam-routes: [{ service, port, mode: public }]` and no `ports:` still exposes a public app route.
+- [x] A service with matching `ports:` and `x-sam-routes: [{ service, port, mode: private }]` is not publicly exposed.
+- [x] Duplicate explicit/public and `ports:` hints for the same service/port do not create duplicate route targets or duplicate loopback bindings.
+- [x] Invalid `x-sam-routes` entries in compose-publish releases fail before apply with clear error messages.
+- [x] Public docs and the MCP deployment guide match the implemented behavior.
+- [x] Local tests prove the route behavior before PR review; staging verification remains the `/do` merge gate before merge.
 
 ## References
 
