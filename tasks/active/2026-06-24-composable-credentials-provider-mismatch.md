@@ -28,16 +28,17 @@ In the API path, `createProviderForUser(..., targetProvider)` constructs provide
 - [x] Remove impossible manually-cast `ResolvedEnvironment` objects from touched shared tests.
 - [x] Replace non-null assertions in touched shared composable-credentials tests with focused helper assertions where reasonable.
 - [x] Add a process-fix rule/checklist update for provider-name consistency at composable-credentials compute boundaries.
+- [x] Address security review finding by restricting `auth-json` assembly to the `openai-codex` agent consumer.
 - [x] Run focused validation:
   - `pnpm --filter @simple-agent-manager/shared test -- composable-credentials`
   - `pnpm --filter @simple-agent-manager/shared typecheck`
   - `pnpm --filter @simple-agent-manager/shared lint`
   - focused API worker/unit test if API tests are touched
-- [ ] Run required specialist validation for credential/security/test changes before PR.
+- [x] Run required specialist validation for credential/security/test changes before PR.
 
 Validation notes:
 
-- `pnpm --filter @simple-agent-manager/shared test -- composable-credentials` passed: 4 files, 107 tests.
+- `pnpm --filter @simple-agent-manager/shared test -- composable-credentials` passed: 4 files, 108 tests.
 - `pnpm --filter @simple-agent-manager/shared typecheck` passed.
 - `pnpm --filter @simple-agent-manager/shared lint` passed with pre-existing warnings outside the touched composable-credentials files.
 - `pnpm --filter @simple-agent-manager/api typecheck` passed.
@@ -49,6 +50,14 @@ Validation notes:
 - `pnpm typecheck` passed.
 - `pnpm test` passed.
 - `pnpm build` passed.
+
+Review notes:
+
+- Task-completion validator: WARN/FAIL before final cleanup because API worker validation could not run locally and specialist validation was not yet checked off.
+- Security auditor: found one MEDIUM adjacent boundary issue where `auth-json` credentials could be assembled for non-Codex agents; fixed by making `agentAssembler` reject `auth-json` unless `resolved.consumer.agentType === 'openai-codex'`.
+- Test engineer: flagged that the API worker regression is realistic but not reliably enforced by the default test command; fixed by adding a normal-runner `resolveComputeConfig` API resolver-service regression.
+- Constitution validator: PASS; no hardcoded business/config values introduced.
+- Cloudflare specialist: no blocking Worker findings; local `workerd` signal 11 appears to be runtime/environment startup instability, with CI/alternate worker runtime verification still desirable.
 
 ## Acceptance Criteria
 

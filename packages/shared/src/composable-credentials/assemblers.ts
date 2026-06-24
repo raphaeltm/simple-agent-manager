@@ -70,6 +70,9 @@ export const agentAssembler: Assembler<EnvInjection> = {
         return { env: oauthEnvVar(agentType, secret.token), files: [] };
 
       case 'auth-json':
+        if (agentType !== 'openai-codex') {
+          throw new Error(`agent ${agentType} does not support auth-json credentials`);
+        }
         return { env: { CODEX_AUTH_JSON: secret.authJson }, files: [] };
 
       case 'openai-compatible': {

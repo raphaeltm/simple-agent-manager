@@ -448,6 +448,47 @@ describe('heterogeneous consumers assemble to faithful vm-agent injection', () =
     });
   });
 
+  it('auth.json credentials are rejected for non-Codex agent consumers', () => {
+    idSeq = 0;
+    const authBlob = '{"OPENAI_API_KEY":"x","tokens":{"access_token":"y"}}';
+    const cred: Credential = {
+      id: nextId('cred'),
+      ownerId: userId,
+      name: 'Codex auth.json',
+      kind: 'auth-json',
+      secret: { kind: 'auth-json', authJson: authBlob },
+      isActive: true,
+    };
+    const cfg: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'Claude with wrong auth shape',
+      consumer: { kind: 'agent', agentType: 'claude-code' },
+      credentialId: cred.id,
+      settings: {},
+      isActive: true,
+    };
+    const snap: CompositionSnapshot = {
+      credentials: [cred],
+      configurations: [cfg],
+      attachments: [
+        {
+          id: nextId('att'),
+          configurationId: cfg.id,
+          consumer: { kind: 'agent', agentType: 'claude-code' },
+          target: { scope: 'user', userId },
+          isActive: true,
+        },
+      ],
+      platform: {},
+    };
+
+    const resolved = resolveEnvironment(snap, { kind: 'agent', agentType: 'claude-code' }, { userId });
+    expect(() => agentAssembler.assemble(expectResolved(resolved))).toThrow(
+      'agent claude-code does not support auth-json credentials'
+    );
+  });
+
   it('platform proxy → __platform_proxy__ sentinel, no real key', () => {
     idSeq = 0;
     const snap: CompositionSnapshot = {
