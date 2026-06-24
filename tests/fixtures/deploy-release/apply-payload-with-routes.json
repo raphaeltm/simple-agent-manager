@@ -2,7 +2,7 @@
   "environmentId": "env-1",
   "nodeId": "node-1",
   "seq": 7,
-  "expiresAt": 1800000000,
+  "expiresAt": 4102444800,
   "composeYaml": "services:\n  web:\n    image: docker.io/example/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    ports:\n      - 127.0.0.1:35000:3000\n",
   "routes": [
     {
@@ -24,7 +24,7 @@
       "hostPort": 35000
     }
   ],
-  "signature": "fWbe344usk1WGTpcwH6s7o4Taxm3x+PxGjKS6UxFHSIyDts4XBJ12LU/YnEaPqHjsfzKWufiS7ruC6DoHcm/CA==",
+  "signature": "Q+dVlMgKM8RrrNc6mrtvTgC/vPWVAqNCjjzlv2BoTo98hVo9WGYn1hNy/uyIsES40PbZX6FKwQPHTz2kjfKKCg==",
   "registryCredentials": {
     "server": "registry.cloudflare.com",
     "username": "cf-mint-user",
