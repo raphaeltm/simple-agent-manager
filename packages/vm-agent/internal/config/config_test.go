@@ -817,6 +817,57 @@ func TestLoadACPPromptRetryConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDeployArtifactAndApplyTimeouts(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ID", "node-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() default error = %v", err)
+	}
+	if cfg.DeployArtifactDialTimeout != DefaultDeployArtifactDialTimeout {
+		t.Fatalf("DeployArtifactDialTimeout = %v, want %v", cfg.DeployArtifactDialTimeout, DefaultDeployArtifactDialTimeout)
+	}
+	if cfg.DeployArtifactTLSHandshakeTimeout != DefaultDeployArtifactTLSHandshakeTimeout {
+		t.Fatalf("DeployArtifactTLSHandshakeTimeout = %v, want %v", cfg.DeployArtifactTLSHandshakeTimeout, DefaultDeployArtifactTLSHandshakeTimeout)
+	}
+	if cfg.DeployArtifactResponseHeaderTimeout != DefaultDeployArtifactResponseHeaderTimeout {
+		t.Fatalf("DeployArtifactResponseHeaderTimeout = %v, want %v", cfg.DeployArtifactResponseHeaderTimeout, DefaultDeployArtifactResponseHeaderTimeout)
+	}
+	if cfg.DeployArtifactIdleTimeout != DefaultDeployArtifactIdleTimeout {
+		t.Fatalf("DeployArtifactIdleTimeout = %v, want %v", cfg.DeployArtifactIdleTimeout, DefaultDeployArtifactIdleTimeout)
+	}
+	if cfg.DeployApplyIdleTimeout != DefaultDeployApplyIdleTimeout {
+		t.Fatalf("DeployApplyIdleTimeout = %v, want %v", cfg.DeployApplyIdleTimeout, DefaultDeployApplyIdleTimeout)
+	}
+
+	t.Setenv("DEPLOY_ARTIFACT_DIAL_TIMEOUT", "7s")
+	t.Setenv("DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT", "8s")
+	t.Setenv("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", "9s")
+	t.Setenv("DEPLOY_ARTIFACT_IDLE_TIMEOUT", "10s")
+	t.Setenv("DEPLOY_APPLY_IDLE_TIMEOUT", "11s")
+
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() override error = %v", err)
+	}
+	if cfg.DeployArtifactDialTimeout != 7*time.Second {
+		t.Fatalf("DeployArtifactDialTimeout override = %v, want 7s", cfg.DeployArtifactDialTimeout)
+	}
+	if cfg.DeployArtifactTLSHandshakeTimeout != 8*time.Second {
+		t.Fatalf("DeployArtifactTLSHandshakeTimeout override = %v, want 8s", cfg.DeployArtifactTLSHandshakeTimeout)
+	}
+	if cfg.DeployArtifactResponseHeaderTimeout != 9*time.Second {
+		t.Fatalf("DeployArtifactResponseHeaderTimeout override = %v, want 9s", cfg.DeployArtifactResponseHeaderTimeout)
+	}
+	if cfg.DeployArtifactIdleTimeout != 10*time.Second {
+		t.Fatalf("DeployArtifactIdleTimeout override = %v, want 10s", cfg.DeployArtifactIdleTimeout)
+	}
+	if cfg.DeployApplyIdleTimeout != 11*time.Second {
+		t.Fatalf("DeployApplyIdleTimeout override = %v, want 11s", cfg.DeployApplyIdleTimeout)
+	}
+}
+
 // --- NewControlPlaneClient tests ---
 
 func TestNewControlPlaneClientTimeout(t *testing.T) {

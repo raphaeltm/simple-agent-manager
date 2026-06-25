@@ -14,6 +14,7 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
+	"github.com/workspace/vm-agent/internal/persistence"
 )
 
 // newTestErrorReporter creates a minimal error reporter for tests.
@@ -88,6 +89,73 @@ func TestCallbackTokenRefresh(t *testing.T) {
 
 	if heartbeatCount != 2 {
 		t.Fatalf("expected 2 heartbeats, got %d", heartbeatCount)
+	}
+}
+
+func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
+	releaseRequested := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/deploy-release") {
+			close(releaseRequested)
+			<-r.Context().Done()
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	store, err := persistence.Open(filepath.Join(t.TempDir(), "vm-agent.db"))
+	if err != nil {
+		t.Fatalf("Open persistence store: %v", err)
+	}
+	defer store.Close()
+
+	s := &Server{
+		config: &config.Config{
+			NodeID:                 "node-1",
+			ControlPlaneURL:        ts.URL,
+			CallbackToken:          "callback-token",
+			DeployApplyIdleTimeout: 40 * time.Millisecond,
+		},
+		store:          store,
+		applyWatchdogs: make(map[string]chan struct{}),
+	}
+	disk, err := deploy.NewDiskState(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	engine := deploy.NewEngine(disk, nil, deploy.EngineConfig{
+		EnvironmentID:   "env-1",
+		NodeID:          "node-1",
+		ControlPlaneURL: ts.URL,
+		CallbackToken:   "callback-token",
+		HTTPClient:      deploy.NewArtifactHTTPClient(deploy.ArtifactHTTPClientConfig{}),
+		ApplyProgress:   s.persistApplyProgress,
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.runDetachedDeploymentApply("env-1", 7, engine)
+		close(done)
+	}()
+
+	select {
+	case <-releaseRequested:
+	case <-time.After(time.Second):
+		t.Fatal("deploy-release endpoint was not requested")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("apply watchdog did not cancel stalled apply")
+	}
+
+	job, err := store.GetJob(applyJobID("env-1", 7))
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if job == nil || job.Status != vmJobStatusFailed || !strings.Contains(job.ErrorMessage, "no progress") {
+		t.Fatalf("expected durable stalled apply failure, got %+v", job)
 	}
 }
 

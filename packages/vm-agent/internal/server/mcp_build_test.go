@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/publish"
 )
 
@@ -118,6 +119,12 @@ func TestMcpBuildAndPublishJobStart_RequestCancelDoesNotCancelBackgroundJob(t *t
 	s, key := mcpBuildTestServer(t)
 	tmp := t.TempDir()
 	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, "", true))
+	store, err := persistence.Open(filepath.Join(tmp, "vm-agent.db"))
+	if err != nil {
+		t.Fatalf("Open persistence store: %v", err)
+	}
+	defer store.Close()
+	s.store = store
 
 	callbacks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "/deployment-publish-jobs/job-1/events") {
@@ -186,6 +193,30 @@ func TestMcpBuildAndPublishJobStart_RequestCancelDoesNotCancelBackgroundJob(t *t
 		}
 	case <-time.After(time.Second):
 		t.Fatal("background job did not finish after release")
+	}
+
+	var job *persistence.JobRecord
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var getErr error
+		job, getErr = store.GetJob("job-1")
+		if getErr != nil {
+			t.Fatalf("GetJob: %v", getErr)
+		}
+		if job != nil && job.Status == vmJobStatusSucceeded && job.CurrentStep == "succeeded" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if job == nil || job.Status != vmJobStatusSucceeded || job.CurrentStep != "succeeded" {
+		t.Fatalf("expected durable succeeded publish job, got %+v", job)
+	}
+	events, err := store.ListJobEvents("job-1")
+	if err != nil {
+		t.Fatalf("ListJobEvents: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected durable publish job events")
 	}
 }
 

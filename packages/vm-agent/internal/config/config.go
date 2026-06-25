@@ -45,6 +45,30 @@ const (
 	DefaultACPRestartDecayWindow = 5 * time.Minute
 )
 
+const (
+	// DefaultDeployArtifactDialTimeout bounds TCP connection establishment for
+	// artifact downloads without imposing a total body-read deadline. Override
+	// via DEPLOY_ARTIFACT_DIAL_TIMEOUT.
+	DefaultDeployArtifactDialTimeout = 30 * time.Second
+
+	// DefaultDeployArtifactTLSHandshakeTimeout bounds TLS handshakes for
+	// artifact downloads. Override via DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT.
+	DefaultDeployArtifactTLSHandshakeTimeout = 15 * time.Second
+
+	// DefaultDeployArtifactResponseHeaderTimeout bounds waiting for the first
+	// response headers. Override via DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT.
+	DefaultDeployArtifactResponseHeaderTimeout = 60 * time.Second
+
+	// DefaultDeployArtifactIdleTimeout bounds lack of body-read progress. Slow
+	// transfers that keep yielding bytes are allowed to continue. Override via
+	// DEPLOY_ARTIFACT_IDLE_TIMEOUT.
+	DefaultDeployArtifactIdleTimeout = 2 * time.Minute
+
+	// DefaultDeployApplyIdleTimeout bounds deployment apply goroutines only when
+	// no progress events have been emitted. Override via DEPLOY_APPLY_IDLE_TIMEOUT.
+	DefaultDeployApplyIdleTimeout = 15 * time.Minute
+)
+
 // Node role constants.
 const (
 	RoleWorkspace  = "workspace"
@@ -253,6 +277,13 @@ type Config struct {
 	DeployComposeCmd     string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
 	DeployACMEEmail      string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
 	DeployACMECA         string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
+
+	// Deployment artifact/apply watchdog settings - configurable per constitution principle XI.
+	DeployArtifactDialTimeout           time.Duration // TCP dial timeout for artifact downloads (env: DEPLOY_ARTIFACT_DIAL_TIMEOUT)
+	DeployArtifactTLSHandshakeTimeout   time.Duration // TLS handshake timeout for artifact downloads (env: DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT)
+	DeployArtifactResponseHeaderTimeout time.Duration // Response-header timeout for artifact downloads (env: DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT)
+	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
+	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
 }
 
 // Load reads configuration from environment variables.
@@ -473,6 +504,12 @@ func Load() (*Config, error) {
 		DeployComposeCmd:     getEnv("DEPLOY_COMPOSE_CMD", "docker compose"),
 		DeployACMEEmail:      getEnv("DEPLOY_ACME_EMAIL", ""),
 		DeployACMECA:         getEnv("DEPLOY_ACME_CA", ""),
+
+		DeployArtifactDialTimeout:           getEnvDuration("DEPLOY_ARTIFACT_DIAL_TIMEOUT", DefaultDeployArtifactDialTimeout),
+		DeployArtifactTLSHandshakeTimeout:   getEnvDuration("DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT", DefaultDeployArtifactTLSHandshakeTimeout),
+		DeployArtifactResponseHeaderTimeout: getEnvDuration("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", DefaultDeployArtifactResponseHeaderTimeout),
+		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
+		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
 	}
 
 	// Derive TLS enabled state from cert/key paths

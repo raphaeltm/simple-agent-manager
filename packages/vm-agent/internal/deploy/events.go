@@ -21,7 +21,7 @@ type releaseEvent struct {
 }
 
 func (e *Engine) reportApplyEvent(ctx context.Context, payload *ApplyPayload, level, eventType, step, message string, detail map[string]any) {
-	if e == nil || payload == nil || strings.TrimSpace(e.cfg.ControlPlaneURL) == "" || strings.TrimSpace(e.getCallbackToken()) == "" {
+	if e == nil || payload == nil {
 		return
 	}
 	if level == "" {
@@ -35,6 +35,21 @@ func (e *Engine) reportApplyEvent(ctx context.Context, payload *ApplyPayload, le
 		Step:           step,
 		Message:        message,
 		Detail:         detail,
+	}
+	if e.cfg.ApplyProgress != nil {
+		e.cfg.ApplyProgress(ctx, ApplyProgressEvent{
+			EnvironmentID: payload.EnvironmentID,
+			NodeID:        payload.NodeID,
+			Seq:           payload.Seq,
+			Level:         level,
+			EventType:     eventType,
+			Step:          step,
+			Message:       message,
+			Detail:        detail,
+		})
+	}
+	if strings.TrimSpace(e.cfg.ControlPlaneURL) == "" || strings.TrimSpace(e.getCallbackToken()) == "" {
+		return
 	}
 	raw, err := json.Marshal(ev)
 	if err != nil {

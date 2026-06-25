@@ -165,8 +165,13 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 		StartedAt:   time.Now().UTC(),
 	}
 	s.publishJobsMu.Unlock()
+	s.persistVMJobStart(jobID, vmJobKindPublish, prepared.WorkspaceID, vmJobStatusStarting, "starting")
 
-	reporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(buildPublishTimeout), prepared.Log)
+	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(buildPublishTimeout), prepared.Log)
+	reporter := publish.EventFunc(func(ctx context.Context, event publish.Event) {
+		s.persistPublishEvent(jobID, event)
+		controlPlaneReporter.Event(ctx, event)
+	})
 	go s.runAcceptedPublishJob(jobCtx, jobID, prepared, reporter)
 
 	writeJSON(w, http.StatusAccepted, McpBuildAndPublishJobStartResponse{
@@ -286,11 +291,13 @@ func (s *Server) runAcceptedPublishJob(ctx context.Context, jobID string, prepar
 	s.publishJobs[jobID] = state
 	s.publishJobsMu.Unlock()
 	if err != nil {
+		s.persistVMJobComplete(jobID, vmJobStatusFailed, "failed", err.Error(), nil)
 		prepared.Log.Error("async publish failed", "publishJobId", jobID, "error", err)
 		reporter.Event(context.Background(), publish.Event{Status: "failed", CurrentStep: "failed", Level: "error", EventType: "publish.job.failed", Message: "publish job failed", ErrorMessage: err.Error(), ErrorCode: "publish_failed", Terminal: true, Retryable: true})
 		return
 	}
 	prepared.Log.Info("async publish complete", "publishJobId", jobID, "releaseId", result.ReleaseID, "version", result.Version)
+	s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", result)
 	reporter.Event(context.Background(), publish.Event{Status: "succeeded", CurrentStep: "succeeded", EventType: "publish.job.succeeded", Message: "publish job succeeded", ReleaseID: result.ReleaseID, ReleaseVersion: result.Version, ReleaseStatus: result.Status, Terminal: true})
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -284,12 +285,7 @@ func (s *Server) sendNodeHeartbeat() {
 				"pendingSeq", pending.Seq,
 				"appliedSeq", observed.AppliedSeq)
 			go func(environmentID string, seq int64, engine *deploy.Engine) {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-				defer cancel()
-				if err := engine.FetchAndApply(ctx, seq); err != nil {
-					slog.Error("deploy: fetch and apply failed",
-						"environmentId", environmentID, "seq", seq, "error", err)
-				}
+				s.runDetachedDeploymentApply(environmentID, seq, engine)
 			}(environmentID, pending.Seq, engine)
 		}
 	}
@@ -304,6 +300,62 @@ func (s *Server) sendNodeHeartbeat() {
 		defer s.readyRetryMu.Unlock()
 		s.retryPendingReadyCallbacks()
 	}()
+}
+
+func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, engine *deploy.Engine) {
+	jobID := applyJobID(environmentID, seq)
+	s.persistVMJobStart(jobID, vmJobKindApply, environmentID, vmJobStatusStarting, "accepted")
+	cleanup := s.registerApplyWatchdog(jobID)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	progress := s.applyProgressChannel(jobID)
+	idleTimeout := s.config.DeployApplyIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = config.DefaultDeployApplyIdleTimeout
+	}
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- engine.FetchAndApply(ctx, seq)
+	}()
+
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				s.persistVMJobComplete(jobID, vmJobStatusFailed, "failed", err.Error(), nil)
+				slog.Error("deploy: fetch and apply failed",
+					"environmentId", environmentID, "seq", seq, "error", err)
+				return
+			}
+			s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"seq": seq})
+			return
+		case <-progress:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idleTimeout)
+		case <-timer.C:
+			err := fmt.Errorf("deployment apply stalled: no progress for %s", idleTimeout)
+			cancel(err)
+			applyErr := <-done
+			if applyErr != nil {
+				err = applyErr
+			}
+			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", err.Error(), nil)
+			slog.Error("deploy: fetch and apply stalled",
+				"environmentId", environmentID, "seq", seq, "error", err)
+			return
+		}
+	}
 }
 
 // retryPendingReadyCallbacks checks for workspaces whose ready callback was not

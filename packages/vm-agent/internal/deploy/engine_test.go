@@ -47,8 +47,16 @@ func TestEngine_ApplyLoadsArtifactsAndSkipsComposePull(t *testing.T) {
 		t.Fatalf("NewDiskState: %v", err)
 	}
 
-	archive := []byte("docker archive bytes")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	archives := map[string][]byte{
+		"/web.tar":    []byte("web docker archive bytes"),
+		"/worker.tar": []byte("worker docker archive bytes"),
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		archive, ok := archives[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
 		_, _ = w.Write(archive)
 	}))
 	defer server.Close()
@@ -90,7 +98,7 @@ exit 0
 		NodeID:        "node-1",
 		Seq:           1,
 		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
-		ComposeYAML:   "services:\n  web:\n    image: sam-env-1-web:release\n    pull_policy: never\n",
+		ComposeYAML:   "services:\n  web:\n    image: sam-env-1-web:release\n    pull_policy: never\n  worker:\n    image: sam-env-1-worker:release\n    pull_policy: never\n",
 		Routes: []RouteTarget{{
 			Hostname:      "r1-web-env.apps.example.com",
 			Service:       "web",
@@ -102,11 +110,22 @@ exit 0
 			SourceRef:         "workspace-web",
 			LocalImageRef:     "sam-env-1-web:release",
 			R2Key:             "compose-image-artifacts/proj/env/ws/upload/web.tar",
-			SizeBytes:         int64(len(archive)),
-			ArchiveSHA256:     shaForBytes(archive),
+			SizeBytes:         int64(len(archives["/web.tar"])),
+			ArchiveSHA256:     shaForBytes(archives["/web.tar"]),
 			ArchiveType:       "docker-save",
 			MediaType:         "application/vnd.docker.image.rootfs.diff.tar",
-			DownloadURL:       server.URL,
+			DownloadURL:       server.URL + "/web.tar",
+			DownloadExpiresIn: 900,
+		}, {
+			ServiceName:       "worker",
+			SourceRef:         "workspace-worker",
+			LocalImageRef:     "sam-env-1-worker:release",
+			R2Key:             "compose-image-artifacts/proj/env/ws/upload/worker.tar",
+			SizeBytes:         int64(len(archives["/worker.tar"])),
+			ArchiveSHA256:     shaForBytes(archives["/worker.tar"]),
+			ArchiveType:       "docker-save",
+			MediaType:         "application/vnd.docker.image.rootfs.diff.tar",
+			DownloadURL:       server.URL + "/worker.tar",
 			DownloadExpiresIn: 900,
 		}},
 	}
@@ -125,13 +144,105 @@ exit 0
 		t.Fatalf("read command log: %v", err)
 	}
 	log := string(logBytes)
-	for _, expected := range []string{"load -i", "tag workspace-web sam-env-1-web:release", "config -q", "up -d --remove-orphans"} {
+	for _, expected := range []string{"load -i", "tag workspace-web sam-env-1-web:release", "tag workspace-worker sam-env-1-worker:release", "config -q", "up -d --remove-orphans"} {
 		if !strings.Contains(log, expected) {
 			t.Fatalf("command log missing %q: %s", expected, log)
 		}
 	}
+	if got := strings.Count(log, "load -i"); got != 2 {
+		t.Fatalf("expected two artifact loads, got %d: %s", got, log)
+	}
 	if strings.Contains(log, " pull") {
 		t.Fatalf("compose pull should be skipped for artifact-backed payload: %s", log)
+	}
+}
+
+func TestEngine_DownloadArtifactAllowsSlowProgressingBody(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(filepath.Join(dir, "state"))
+	chunks := [][]byte{
+		[]byte(strings.Repeat("a", 1024)),
+		[]byte(strings.Repeat("b", 1024)),
+		[]byte(strings.Repeat("c", 1024)),
+		[]byte(strings.Repeat("d", 1024)),
+	}
+	var archive []byte
+	for _, chunk := range chunks {
+		archive = append(archive, chunk...)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, _ := w.(http.Flusher)
+		for _, chunk := range chunks {
+			_, _ = w.Write(chunk)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:       "env-1",
+		NodeID:              "node-1",
+		HTTPClient:          NewArtifactHTTPClient(ArtifactHTTPClientConfig{}),
+		ArtifactIdleTimeout: 200 * time.Millisecond,
+	})
+	path := filepath.Join(dir, "archive.tar")
+	err := engine.downloadArtifact(context.Background(), ImageArtifact{
+		ServiceName:   "web",
+		SourceRef:     "workspace-web",
+		LocalImageRef: "sam-env-1-web:release",
+		R2Key:         "compose-image-artifacts/proj/env/ws/upload/web.tar",
+		SizeBytes:     int64(len(archive)),
+		ArchiveSHA256: shaForBytes(archive),
+		ArchiveType:   "docker-save",
+		DownloadURL:   server.URL,
+	}, path)
+	if err != nil {
+		t.Fatalf("downloadArtifact should allow slow progress: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read downloaded artifact: %v", err)
+	}
+	if string(got) != string(archive) {
+		t.Fatalf("downloaded archive mismatch")
+	}
+}
+
+func TestEngine_DownloadArtifactCancelsStalledBody(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(filepath.Join(dir, "state"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("partial"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(" after stall"))
+	}))
+	defer server.Close()
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:       "env-1",
+		NodeID:              "node-1",
+		HTTPClient:          NewArtifactHTTPClient(ArtifactHTTPClientConfig{}),
+		ArtifactIdleTimeout: 50 * time.Millisecond,
+	})
+	err := engine.downloadArtifact(context.Background(), ImageArtifact{
+		ServiceName:   "web",
+		SourceRef:     "workspace-web",
+		LocalImageRef: "sam-env-1-web:release",
+		R2Key:         "compose-image-artifacts/proj/env/ws/upload/web.tar",
+		SizeBytes:     int64(len("partial after stall")),
+		ArchiveSHA256: shaForBytes([]byte("partial after stall")),
+		ArchiveType:   "docker-save",
+		DownloadURL:   server.URL,
+	}, filepath.Join(dir, "archive.tar"))
+	if err == nil || !strings.Contains(err.Error(), "download stalled") {
+		t.Fatalf("expected stalled download error, got: %v", err)
 	}
 }
 
@@ -176,6 +287,70 @@ func TestEngine_ApplyRejectsArtifactHashMismatch(t *testing.T) {
 	err := engine.Apply(context.Background(), payload)
 	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
 		t.Fatalf("expected hash mismatch failure, got: %v", err)
+	}
+}
+
+func TestEngine_DownloadArtifactRejectsSizeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(filepath.Join(dir, "state"))
+	archive := []byte("archive bytes plus extra")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		EnvironmentID:       "env-1",
+		NodeID:              "node-1",
+		ArtifactIdleTimeout: time.Second,
+	})
+	err := engine.downloadArtifact(context.Background(), ImageArtifact{
+		ServiceName:   "web",
+		SourceRef:     "workspace-web",
+		LocalImageRef: "sam-env-1-web:release",
+		R2Key:         "compose-image-artifacts/proj/env/ws/upload/web.tar",
+		SizeBytes:     int64(len(archive) - 1),
+		ArchiveSHA256: shaForBytes(archive),
+		ArchiveType:   "docker-save",
+		DownloadURL:   server.URL,
+	}, filepath.Join(dir, "archive.tar"))
+	if err == nil || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("expected size mismatch, got: %v", err)
+	}
+}
+
+func TestEngine_ApplyRejectsTamperedArtifactSignature(t *testing.T) {
+	dir := t.TempDir()
+	disk, _ := NewDiskState(filepath.Join(dir, "state"))
+	pub, priv := generateTestKeys(t)
+	verifier, _ := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		ComposeCmd:    "true",
+	})
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "services:\n  web:\n    image: sam-env-1-web:release\n",
+		Artifacts: []ImageArtifact{{
+			ServiceName:   "web",
+			SourceRef:     "workspace-web",
+			LocalImageRef: "sam-env-1-web:release",
+			R2Key:         "compose-image-artifacts/proj/env/ws/upload/web.tar",
+			SizeBytes:     12,
+			ArchiveSHA256: shaForBytes([]byte("signed bytes")),
+			ArchiveType:   "docker-save",
+			DownloadURL:   "https://example.invalid/signed",
+		}},
+	}
+	payload.Signature, _ = SignPayload(payload, priv)
+	payload.Artifacts[0].ArchiveSHA256 = shaForBytes([]byte("tampered bytes"))
+	err := engine.Apply(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "signature verification failed") {
+		t.Fatalf("expected signature failure for tampered artifact metadata, got: %v", err)
 	}
 }
 

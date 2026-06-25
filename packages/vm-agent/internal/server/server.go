@@ -99,6 +99,8 @@ type Server struct {
 	publishJobsMu       sync.Mutex
 	publishJobs         map[string]publishJobState
 	buildPublishRunner  func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	applyWatchdogMu     sync.Mutex
+	applyWatchdogs      map[string]chan struct{}
 
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
@@ -376,6 +378,9 @@ func New(cfg *config.Config) (*Server, error) {
 			return nil, fmt.Errorf("configure persistence token encryption: %w", err)
 		}
 	}
+	if err := store.MarkActiveJobsInterrupted(); err != nil {
+		return nil, fmt.Errorf("mark interrupted vm jobs: %w", err)
+	}
 
 	// Per-workspace message reporters for chat message persistence.
 	// Each workspace gets its own reporter instance with isolated outbox DB,
@@ -469,6 +474,7 @@ func New(cfg *config.Config) (*Server, error) {
 		httpClient:          config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 		done:                make(chan struct{}),
 		publishJobs:         make(map[string]publishJobState),
+		applyWatchdogs:      make(map[string]chan struct{}),
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
 	}
@@ -593,8 +599,15 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 		ComposeCmd:         s.config.DeployComposeCmd,
 		ComposeProjectName: "sam-env-" + deploy.SafeEnvironmentFilePart(environmentID),
 		HealthTimeout:      s.config.DeployHealthTimeout,
-		ACMEEmail:          s.config.DeployACMEEmail,
-		ACMECA:             s.config.DeployACMECA,
+		HTTPClient: deploy.NewArtifactHTTPClient(deploy.ArtifactHTTPClientConfig{
+			DialTimeout:           s.config.DeployArtifactDialTimeout,
+			TLSHandshakeTimeout:   s.config.DeployArtifactTLSHandshakeTimeout,
+			ResponseHeaderTimeout: s.config.DeployArtifactResponseHeaderTimeout,
+		}),
+		ArtifactIdleTimeout: s.config.DeployArtifactIdleTimeout,
+		ApplyProgress:       s.persistApplyProgress,
+		ACMEEmail:           s.config.DeployACMEEmail,
+		ACMECA:              s.config.DeployACMECA,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

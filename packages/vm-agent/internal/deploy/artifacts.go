@@ -77,7 +77,16 @@ func (e *Engine) loadImageArtifact(ctx context.Context, dir string, artifact Ima
 }
 
 func (e *Engine) downloadArtifact(ctx context.Context, artifact ImageArtifact, path string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, artifact.DownloadURL, nil)
+	downloadCtx := ctx
+	cancel := func(error) {}
+	if e.cfg.ArtifactIdleTimeout > 0 {
+		var cancelCause context.CancelCauseFunc
+		downloadCtx, cancelCause = context.WithCancelCause(ctx)
+		cancel = cancelCause
+	}
+	defer cancel(nil)
+
+	req, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, artifact.DownloadURL, nil)
 	if err != nil {
 		return fmt.Errorf("create artifact download request: %w", err)
 	}
@@ -98,7 +107,13 @@ func (e *Engine) downloadArtifact(ctx context.Context, artifact ImageArtifact, p
 	defer file.Close()
 
 	hasher := sha256.New()
-	written, err := io.Copy(file, io.TeeReader(io.LimitReader(resp.Body, artifact.SizeBytes+1), hasher))
+	body := io.Reader(resp.Body)
+	if e.cfg.ArtifactIdleTimeout > 0 {
+		watchdog := newIdleProgressReader(downloadCtx, cancel, body, e.cfg.ArtifactIdleTimeout, artifact.ServiceName)
+		defer watchdog.Stop()
+		body = watchdog
+	}
+	written, err := io.Copy(file, io.TeeReader(io.LimitReader(body, artifact.SizeBytes+1), hasher))
 	if err != nil {
 		return fmt.Errorf("write artifact %s: %w", artifact.ServiceName, err)
 	}
