@@ -40,6 +40,7 @@ import {
   getMaxDirectoriesPerProject,
   getMaxFilesPerProject,
   getMaxTagsPerFile,
+  getTagQueryBatchSize,
   getUploadMaxBytes,
   validateDirectory,
   validateFilename,
@@ -58,6 +59,7 @@ export {
   getMaxFilesPerProject,
   getMaxTagLength,
   getMaxTagsPerFile,
+  getTagQueryBatchSize,
   getUploadMaxBytes,
   resolvePageSize,
   validateDirectory,
@@ -309,7 +311,12 @@ export async function replaceFile(
     .where(eq(schema.projectFiles.id, fileId))
     .limit(1);
 
-  return rowToProjectFile(updated[0]!);
+  const updatedRow = updated[0];
+  if (!updatedRow) {
+    throw errors.internal('File metadata disappeared after replace');
+  }
+
+  return rowToProjectFile(updatedRow);
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +328,14 @@ function getListDefaultPageSize(env: Env): number {
   if (!val) return 50;
   const parsed = parseInt(val, 10);
   return isNaN(parsed) || parsed <= 0 ? 50 : parsed;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 export async function listFiles(
@@ -417,12 +432,16 @@ export async function listFiles(
 
   // Fetch tags for result files
   const resultFileIds = resultFiles.map((f) => f.id);
-  let allTags: schema.ProjectFileTagRow[] = [];
+  const allTags: schema.ProjectFileTagRow[] = [];
   if (resultFileIds.length > 0) {
-    allTags = await db
-      .select()
-      .from(schema.projectFileTags)
-      .where(inArray(schema.projectFileTags.fileId, resultFileIds));
+    const tagQueryBatchSize = getTagQueryBatchSize(env);
+    for (const batch of chunk(resultFileIds, tagQueryBatchSize)) {
+      const batchTags = await db
+        .select()
+        .from(schema.projectFileTags)
+        .where(inArray(schema.projectFileTags.fileId, batch));
+      allTags.push(...batchTags);
+    }
   }
 
   const tagsByFile = new Map<string, ProjectFileTag[]>();

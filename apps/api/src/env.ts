@@ -559,6 +559,7 @@ export interface Env {
   LIBRARY_DOWNLOAD_TIMEOUT_MS?: string; // Download timeout (default: 60000)
   LIBRARY_LIST_DEFAULT_PAGE_SIZE?: string; // Default page size for list (default: 50)
   LIBRARY_LIST_MAX_PAGE_SIZE?: string; // Max page size for list (default: 200)
+  LIBRARY_TAG_QUERY_BATCH_SIZE?: string; // File IDs per tag lookup query (default: 80, capped at D1 bind limit)
   LIBRARY_KEY_VERSION?: string; // KEK version stamped on new encryptions (default: 1)
   LIBRARY_MCP_DOWNLOAD_DIR?: string; // Workspace directory for library downloads (default: .library)
   LIBRARY_MCP_TRANSFER_TIMEOUT_MS?: string; // Timeout for VM agent file transfers (default: 60000)
