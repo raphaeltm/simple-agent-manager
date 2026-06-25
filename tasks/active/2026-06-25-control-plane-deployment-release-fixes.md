@@ -33,18 +33,18 @@ Staging deployment and live Playwright verification are explicitly skipped for t
 
 ## Implementation Checklist
 
-- [ ] Move this task to `tasks/active/` in the feature worktree.
-- [ ] Fix `reconcileDeploymentReleaseStatuses` so terminal failure only marks the specific release sequence the node actually reported as failed, not every release newer than `appliedSeq`.
-- [ ] Preserve recovery behavior: a node in `failed-initial` with `appliedSeq=0` must be advertised a newer `created` release.
-- [ ] Add regression coverage proving a reported failed seq 1 does not poison seq 2, and seq 2 is advertised by the heartbeat gate.
-- [ ] Add coverage proving only the reported failed release is marked failed.
-- [ ] Extract `deployment-release-events` into a dedicated callback-JWT route file mounted before `nodesRoutes` in `apps/api/src/index.ts`.
-- [ ] Remove the extracted handler from `node-lifecycle.ts` or otherwise ensure the callback route is not dependent on session-auth wildcard allowlists.
-- [ ] Add positive and negative callback auth coverage for `POST /api/nodes/:id/deployment-release-events`.
-- [ ] Add or update route-order coverage to catch future callback routes mounted after session-auth node routes.
-- [ ] Add Miniflare vertical-slice/capability tests for both fixes using realistic D1 state.
-- [ ] Update `.claude/rules/34-vm-agent-callback-auth.md` reference table for the extracted route and strengthen it against allowlist-based regressions.
-- [ ] Add a process-rule improvement for over-broad reconcile/sweep mutations.
+- [x] Move this task to `tasks/active/` in the feature worktree.
+- [x] Fix `reconcileDeploymentReleaseStatuses` so terminal failure only marks the specific release sequence the node actually reported as failed, not every release newer than `appliedSeq`.
+- [x] Preserve recovery behavior: a node in `failed-initial` with `appliedSeq=0` must be advertised a newer `created` release.
+- [x] Add regression coverage proving a reported failed seq 1 does not poison seq 2, and seq 2 is advertised by the heartbeat gate.
+- [x] Add coverage proving only the reported failed release is marked failed.
+- [x] Extract `deployment-release-events` into a dedicated callback-JWT route file mounted before `nodesRoutes` in `apps/api/src/index.ts`.
+- [x] Remove the extracted handler from `node-lifecycle.ts` or otherwise ensure the callback route is not dependent on session-auth wildcard allowlists.
+- [x] Add positive and negative callback auth coverage for `POST /api/nodes/:id/deployment-release-events`.
+- [x] Add or update route-order coverage to catch future callback routes mounted after session-auth node routes.
+- [x] Add Miniflare vertical-slice/capability tests for both fixes using realistic D1 state.
+- [x] Update `.claude/rules/34-vm-agent-callback-auth.md` reference table for the extracted route and strengthen it against allowlist-based regressions.
+- [x] Add a process-rule improvement for over-broad reconcile/sweep mutations.
 - [ ] Add rule-02 post-mortem sections to this task before archiving.
 - [ ] Run full quality gates: lint, typecheck, tests, build, and CI.
 - [ ] Run specialist review: cloudflare-specialist, security-auditor, task-completion-validator, plus test-engineer/constitution-validator as applicable.

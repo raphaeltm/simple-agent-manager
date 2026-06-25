@@ -8,13 +8,18 @@ describe('deployment release callback route ordering', () => {
     const source = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf8');
 
     const deployReleaseIndex = source.indexOf("app.route('/api/nodes', deployReleaseCallbackRoute)");
+    const deploymentReleaseEventsIndex = source.indexOf(
+      "app.route('/api/nodes', deploymentReleaseEventsCallbackRoute)"
+    );
     const nodesIndex = source.indexOf("app.route('/api/nodes', nodesRoutes)");
     const nodeLifecycleIndex = source.indexOf("app.route('/api/nodes', nodeLifecycleRoutes)");
 
     expect(deployReleaseIndex).toBeGreaterThan(-1);
+    expect(deploymentReleaseEventsIndex).toBeGreaterThan(-1);
     expect(nodesIndex).toBeGreaterThan(-1);
     expect(nodeLifecycleIndex).toBeGreaterThan(-1);
     expect(deployReleaseIndex).toBeLessThan(nodesIndex);
+    expect(deploymentReleaseEventsIndex).toBeLessThan(nodesIndex);
     expect(nodesIndex).toBeLessThan(nodeLifecycleIndex);
   });
 
@@ -22,5 +27,6 @@ describe('deployment release callback route ordering', () => {
     const source = readFileSync(join(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
 
     expect(source).toContain("path.endsWith('/deploy-release')");
+    expect(source).not.toContain("path.endsWith('/deployment-release-events')");
   });
 });

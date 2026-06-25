@@ -55,24 +55,29 @@ function createPolicyDb(opts: {
   };
 }
 
-function createReleaseDb(latestRows: Array<{ id: string; version: number; status: string }>) {
-  const updates: Array<Record<string, unknown>> = [];
+function createReleaseDb(releaseRows: Array<{ id: string; version: number; status: string }>) {
+  const updates: Array<{ values: Record<string, unknown>; where: unknown }> = [];
+  const sortedLatest = [...releaseRows].sort((a, b) => b.version - a.version);
+  const sortedFailedCandidates = [...releaseRows].sort((a, b) => a.version - b.version);
   return {
     updates,
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
           orderBy: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue(latestRows),
+            limit: vi.fn().mockResolvedValue(sortedLatest.slice(0, 1)),
           }),
+          limit: vi.fn().mockResolvedValue(sortedFailedCandidates.slice(0, 1)),
         }),
       }),
     }),
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
-        updates.push(values);
         return {
-          where: vi.fn().mockResolvedValue(undefined),
+          where: vi.fn().mockImplementation((where: unknown) => {
+            updates.push({ values, where });
+            return Promise.resolve();
+          }),
         };
       }),
     }),
@@ -243,7 +248,7 @@ describe('reconcileDeploymentReleaseStatuses', () => {
       status: 'applying',
     });
 
-    expect(db.updates).toEqual([{ status: 'applying' }]);
+    expect(db.updates.map((update) => update.values)).toEqual([{ status: 'applying' }]);
   });
 
   it('marks applied release applied and newer failed release failed after revert', async () => {
@@ -254,6 +259,23 @@ describe('reconcileDeploymentReleaseStatuses', () => {
       status: 'reverted',
     });
 
-    expect(db.updates).toEqual([{ status: 'applied' }, { status: 'failed' }]);
+    expect(db.updates.map((update) => update.values)).toEqual([
+      { status: 'applied' },
+      { status: 'failed' },
+    ]);
+  });
+
+  it('marks only the reported failed release and does not sweep newer releases', async () => {
+    const db = createReleaseDb([
+      { id: 'rel-2', version: 2, status: 'created' },
+      { id: 'rel-1', version: 1, status: 'applying' },
+    ]);
+
+    await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+      appliedSeq: 0,
+      status: 'failed-initial',
+    });
+
+    expect(db.updates.map((update) => update.values)).toEqual([{ status: 'failed' }]);
   });
 });

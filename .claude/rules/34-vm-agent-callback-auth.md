@@ -8,12 +8,13 @@ This is the Hono middleware scoping leak described in `.claude/rules/06-api-patt
 
 ## Incident History
 
-This exact class of bug has caused production failures **four times**:
+This exact class of bug has caused production failures **five times**:
 
 1. **2026-03-12**: Workspace callback routes leaked into session auth middleware (post-mortem exists)
 2. **2026-03-25**: Deployment identity token route leaked (post-mortem exists)
 3. **2026-05-12**: Task callback route leaked (post-mortem exists)
 4. **2026-05-14**: Agent activity route — `reportActivity()` from the VM agent silently failed with 401 for every prompt cycle since the feature was introduced in PR #1002. The "Agent is working..." indicator in the UI never showed the real-time signal; it fell back to a 30-second message-based heuristic.
+5. **2026-06-25**: Deployment release apply event route was left under the `/api/nodes` session-auth wildcard. VM agent apply-event callbacks used node callback JWTs and returned 401, leaving the deployment release event timeline empty.
 
 ## Hard Rule: VM Agent HTTP Callbacks NEVER Go Inside `projectsRoutes`
 
@@ -40,6 +41,7 @@ A route is a VM agent callback if ANY of these are true:
 | `agent-activity-callback.ts` | `POST /:id/acp-sessions/:sessionId/activity` | `session_host_reporting.go:reportActivity()` |
 | `node-acp-heartbeat.ts` | `POST /:id/node-acp-heartbeat` | VM agent heartbeat loop |
 | `../tasks/callback.ts` | `POST /:projectId/tasks/:taskId/status/callback` | `server.go:notifyTaskCallback()` |
+| `../deployment-release-events-callback.ts` | `POST /api/nodes/:id/deployment-release-events` | `deploy/events.go:reportApplyEvent()` |
 
 ### Mounting Order in `index.ts`
 
@@ -52,6 +54,18 @@ app.route('/api/projects', taskCallbackRoute);
 // Session cookie routes
 app.route('/api/projects', projectsRoutes);
 ```
+
+For `/api/nodes` callback routes, use the same ordering rule:
+
+```typescript
+// Callback JWT routes — MUST be before session-auth node routes
+app.route('/api/nodes', deployReleaseCallbackRoute);
+app.route('/api/nodes', deploymentReleaseEventsCallbackRoute);
+// Session cookie routes
+app.route('/api/nodes', nodesRoutes);
+```
+
+Do not add new callback endpoints by extending a session-auth wildcard allowlist. Extract the route instead; allowlists are fragile and have repeatedly missed new VM-agent callback paths.
 
 ## How to Detect This Bug
 
