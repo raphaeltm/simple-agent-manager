@@ -61,16 +61,8 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
 
   const cursorRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const mountedRef = useRef(true);
   const pausedRef = useRef(false);
   const pauseBufferRef = useRef<NodeLogEntry[]>([]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   // Keep pausedRef in sync
   useEffect(() => {
@@ -91,7 +83,7 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
   }), [filter]);
 
   // Fetch initial logs
-  const fetchLogs = useCallback(async (append = false) => {
+  const fetchLogs = useCallback(async (append = false, signal?: AbortSignal) => {
     if (!nodeId || nodeStatus !== 'running') return;
 
     try {
@@ -104,7 +96,7 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
       }
 
       const result = await getNodeLogs(nodeId, f);
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
 
       const newEntries = result.entries ?? [];
       if (append) {
@@ -115,18 +107,19 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
       cursorRef.current = result.nextCursor ?? null;
       setHasMore(result.hasMore);
     } catch (err) {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setError(err instanceof Error ? err.message : 'Failed to load logs');
       }
     } finally {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setLoading(false);
       }
     }
   }, [nodeId, nodeStatus, buildFilter]);
 
-  // Connect WebSocket for streaming
-  const connectStream = useCallback(() => {
+  // Connect WebSocket for streaming. The caller passes a signal so that
+  // WebSocket event handlers become no-ops after the effect is cleaned up.
+  const connectStream = useCallback((signal?: AbortSignal) => {
     if (!nodeId || nodeStatus !== 'running') return;
 
     // Close existing connection
@@ -146,13 +139,13 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (mountedRef.current) {
+        if (!signal?.aborted) {
           setStreaming(true);
         }
       };
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current) return;
+        if (signal?.aborted) return;
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'log' && msg.entry) {
@@ -170,14 +163,14 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
       };
 
       ws.onclose = () => {
-        if (mountedRef.current) {
+        if (!signal?.aborted) {
           setStreaming(false);
         }
         wsRef.current = null;
       };
 
       ws.onerror = () => {
-        if (mountedRef.current) {
+        if (!signal?.aborted) {
           setStreaming(false);
         }
       };
@@ -194,12 +187,14 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
       return;
     }
 
+    const controller = new AbortController();
     cursorRef.current = null;
     pauseBufferRef.current = [];
-    fetchLogs(false);
-    connectStream();
+    fetchLogs(false, controller.signal);
+    connectStream(controller.signal);
 
     return () => {
+      controller.abort();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

@@ -80,8 +80,12 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
     }
   }, [workspaceUrl, workspaceId, token, filePath, staged, worktree]);
 
+  // Track the identity of the cached full content so stale content is cleared
+  // when the file/worktree/staged context changes.
+  const [fullContentKey, setFullContentKey] = useState('');
+  const currentFullKey = `${filePath}:${worktree ?? ''}:${staged}`;
+
   const fetchFullFile = useCallback(async () => {
-    if (fullContent !== null) return; // already loaded
     setFullLoading(true);
     try {
       const result = await getGitFile(
@@ -93,6 +97,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
         worktree ?? undefined
       );
       setFullContent(result.content);
+      setFullContentKey(currentFullKey);
     } catch {
       // Fallback: just show diff if full file fails
       setFullContent(null);
@@ -100,17 +105,19 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
     } finally {
       setFullLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token, filePath, fullContent, worktree]);
+  }, [workspaceUrl, workspaceId, token, filePath, worktree, staged, currentFullKey]);
+
+  const handleToggleFull = useCallback(() => {
+    setViewMode('full');
+    // Fetch if we don't have content or it's for a different file/worktree/staged
+    if (fullContent === null || fullContentKey !== currentFullKey) {
+      fetchFullFile();
+    }
+  }, [fullContent, fullContentKey, currentFullKey, fetchFullFile]);
 
   useEffect(() => {
     fetchDiff();
   }, [fetchDiff]);
-
-  useEffect(() => {
-    if (viewMode === 'full') {
-      fetchFullFile();
-    }
-  }, [viewMode, fetchFullFile]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -183,7 +190,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           <ToggleButton
             label="Full"
             active={viewMode === 'full'}
-            onClick={() => setViewMode('full')}
+            onClick={handleToggleFull}
           />
         </div>
 

@@ -67,7 +67,9 @@ export function Workspace() {
   );
 
   // ── UI state ──
-  const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    viewOverride ?? (sessionIdParam ? 'conversation' : 'terminal')
+  );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -76,11 +78,12 @@ export function Workspace() {
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [paletteFileIndex, setPaletteFileIndex] = useState<string[]>([]);
   const [paletteFileIndexLoading, setPaletteFileIndexLoading] = useState(false);
+  const paletteFileIndexCacheKeyRef = useRef<string | null>(null);
 
   const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
-  const paletteFileIndexLoaded = useRef(false);
+  // paletteFileIndexCacheKeyRef declared above with palette state
 
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
@@ -92,10 +95,6 @@ export function Workspace() {
   );
 
   // ── View mode auto-selection ──
-  useEffect(() => {
-    if (sessionIdParam && viewMode !== 'conversation') setViewMode('conversation');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const initialViewResolvedRef = useRef(false);
   useEffect(() => {
     if (initialViewResolvedRef.current) return;
@@ -263,6 +262,30 @@ export function Workspace() {
     document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h);
   }, [mobileMenuOpen]);
 
+  const fetchPaletteFileIndex = useCallback(() => {
+    if (!core.workspace?.url || !core.terminalToken || !id || !core.isRunning) return;
+    const cacheKey = `${core.workspace.url}|${core.terminalToken}|${nav.activeWorktree ?? ''}`;
+    if (paletteFileIndexCacheKeyRef.current === cacheKey) return; // already loaded for this key
+    paletteFileIndexCacheKeyRef.current = cacheKey;
+    setPaletteFileIndexLoading(true);
+    let stale = false;
+    getFileIndex(core.workspace.url, id, core.terminalToken, nav.activeWorktree ?? undefined)
+      .then((f) => { if (!stale) setPaletteFileIndex(f); })
+      .catch((e) => { if (!stale) { console.warn('[palette] Failed:', e); paletteFileIndexCacheKeyRef.current = null; } })
+      .finally(() => { if (!stale) setPaletteFileIndexLoading(false); });
+    // Return cleanup to guard stale responses
+    return () => { stale = true; };
+  }, [core.workspace?.url, core.terminalToken, id, core.isRunning, nav.activeWorktree]);
+
+  const handleToggleCommandPalette = useCallback(() => {
+    setShowCommandPalette((prev) => {
+      const next = !prev;
+      if (next) fetchPaletteFileIndex();
+      return next;
+    });
+    setShowShortcutsHelp(false);
+  }, [fetchPaletteFileIndex]);
+
   const shortcutHandlers = {
     'toggle-file-browser': () => { if (core.isRunning && core.terminalToken) { filesParam ? nav.handleCloseFileBrowser() : nav.handleOpenFileBrowser(); } },
     'toggle-git-changes': () => { if (core.isRunning && core.terminalToken) { gitParam ? nav.handleCloseGitPanel() : nav.handleOpenGitChanges(); } },
@@ -274,20 +297,10 @@ export function Workspace() {
     ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`tab-${i + 1}`, () => { if (i < workspaceTabs.length) handleSelectWorkspaceTab(workspaceTabs[i]!); }])),
     'new-chat': () => { if (core.isRunning) void sessions.handleCreateSession(sessions.defaultAgentId ?? undefined); },
     'new-terminal': () => { if (core.isRunning) handleCreateTerminalTab(); },
-    'command-palette': () => { setShowCommandPalette((p) => !p); setShowShortcutsHelp(false); },
+    'command-palette': () => { handleToggleCommandPalette(); },
     'show-shortcuts': () => setShowShortcutsHelp((p) => !p),
   };
   useKeyboardShortcuts(shortcutHandlers, core.isRunning);
-
-  useEffect(() => {
-    if (!showCommandPalette || paletteFileIndexLoaded.current) return;
-    if (!core.workspace?.url || !core.terminalToken || !id || !core.isRunning) return;
-    paletteFileIndexLoaded.current = true;
-    setPaletteFileIndexLoading(true);
-    getFileIndex(core.workspace.url, id, core.terminalToken, nav.activeWorktree ?? undefined)
-      .then((f) => setPaletteFileIndex(f)).catch((e) => console.warn('[palette] Failed:', e))
-      .finally(() => setPaletteFileIndexLoading(false));
-  }, [showCommandPalette, core.workspace?.url, core.terminalToken, id, core.isRunning, nav.activeWorktree]);
 
   const handlePaletteSelectTab = useCallback(
     (tab: WorkspaceTabItem) => { const wt = workspaceTabs.find((t) => t.id === tab.id); if (wt) { handleSelectWorkspaceTab(wt); if (wt.kind === 'terminal') multiTerminalRef.current?.focus?.(); else chatSessionRefs.current.get(wt.sessionId)?.focusInput?.(); } },
@@ -311,7 +324,7 @@ export function Workspace() {
         remoteBranches={nav.remoteBranches} remoteBranchesLoading={nav.remoteBranchesLoading}
         onBack={() => core.workspace?.projectId ? navigate(`/projects/${core.workspace.projectId}`) : navigate('/dashboard')}
         onClearError={() => core.setError(null)} onOpenFileBrowser={nav.handleOpenFileBrowser}
-        onOpenGitChanges={nav.handleOpenGitChanges} onOpenCommandPalette={() => setShowCommandPalette(true)}
+        onOpenGitChanges={nav.handleOpenGitChanges} onOpenCommandPalette={() => { setShowCommandPalette(true); fetchPaletteFileIndex(); }}
         onOpenMobileMenu={() => setMobileMenuOpen(true)} onSelectWorktree={nav.handleSelectWorktree}
         onCreateWorktree={nav.handleCreateWorktree} onRemoveWorktree={nav.handleRemoveWorktree} onRequestBranches={nav.fetchRemoteBranches} />
 

@@ -1,3 +1,4 @@
+import { useMediaQuery } from '@simple-agent-manager/ui';
 import {
   createContext,
   type ReactNode,
@@ -90,39 +91,21 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => readStoredTheme());
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
-    resolveEffectiveTheme(readStoredTheme()),
-  );
+  const prefersDark = useMediaQuery(PREFERS_DARK_QUERY);
 
-  // Apply the resolved attribute and persist the preference whenever it changes.
+  // Derive resolved theme from preference + media query during render
+  const resolvedTheme: ResolvedTheme =
+    theme === 'system' ? (prefersDark ? 'dark' : 'light') : theme;
+
+  // Sync DOM attribute and persist preference
   useEffect(() => {
-    const resolved = resolveEffectiveTheme(theme);
-    setResolvedTheme(resolved);
-    document.documentElement.setAttribute('data-ui-theme', THEME_ATTRIBUTE[resolved]);
+    document.documentElement.setAttribute('data-ui-theme', THEME_ATTRIBUTE[resolvedTheme]);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {
       // Persistence is best-effort; ignore storage failures.
     }
-  }, [theme]);
-
-  // While following the OS, react live to color-scheme changes (no reload).
-  useEffect(() => {
-    if (theme !== 'system') return;
-    let media: MediaQueryList;
-    try {
-      media = window.matchMedia(PREFERS_DARK_QUERY);
-    } catch {
-      return;
-    }
-    const handleChange = () => {
-      const resolved = systemPrefersDark() ? 'dark' : 'light';
-      setResolvedTheme(resolved);
-      document.documentElement.setAttribute('data-ui-theme', THEME_ATTRIBUTE[resolved]);
-    };
-    media.addEventListener('change', handleChange);
-    return () => media.removeEventListener('change', handleChange);
-  }, [theme]);
+  }, [theme, resolvedTheme]);
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);

@@ -138,12 +138,8 @@ export function AppShell({ children }: AppShellProps) {
     setShowGlobalNav(false);
   }, [location.pathname]);
 
-  // Clear project name when leaving project context
-  useEffect(() => {
-    if (!projectId) {
-      setProjectNameState(undefined);
-    }
-  }, [projectId]);
+  // Derive display project name — clear when leaving project context
+  const displayProjectName = projectId ? projectName : undefined;
 
   const handleSignOut = async () => {
     try {
@@ -214,7 +210,7 @@ export function AppShell({ children }: AppShellProps) {
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}
-            projectName={projectId ? (projectName || 'Project') : undefined}
+            projectName={projectId ? (displayProjectName || 'Project') : undefined}
             infraSection={mobileInfraSection}
             projectListSection={mobileProjectListSection}
             showGlobalNav={showGlobalNav}
@@ -257,7 +253,7 @@ export function AppShell({ children }: AppShellProps) {
           </kbd>
         </button>
         <NavSidebar
-          projectName={projectName}
+          projectName={displayProjectName}
           showGlobalNav={showGlobalNav}
           onToggleGlobalNav={handleToggleGlobalNav}
           projectListSection={desktopProjectListSection}

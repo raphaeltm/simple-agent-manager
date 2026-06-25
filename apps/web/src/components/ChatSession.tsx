@@ -73,7 +73,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     useImperativeHandle(ref, () => ({
       focusInput: () => agentPanelRef.current?.focusInput(),
     }));
-    const wsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
+    const wsUrlCacheRef = useRef<{ key: string; url: string; resolvedAt: number } | null>(null);
 
     // Resolve transcription API URL once (stable across renders)
     const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
@@ -114,15 +114,13 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       [workspaceId, sessionId]
     );
 
-    useEffect(() => {
-      wsUrlCacheRef.current = null;
-    }, [wsHostInfo, workspaceId, sessionId, worktreePath]);
-
     const resolveWsUrl = useCallback(async (): Promise<string | null> => {
       if (!wsHostInfo) return null;
 
+      // Key the cache by inputs so stale session/worktree URLs cannot be reused
+      const cacheKey = `${wsHostInfo}|${workspaceId}|${sessionId}|${worktreePath ?? ''}`;
       const cached = wsUrlCacheRef.current;
-      if (cached && Date.now() - cached.resolvedAt < 15_000) {
+      if (cached && cached.key === cacheKey && Date.now() - cached.resolvedAt < 15_000) {
         return cached.url;
       }
 
@@ -138,7 +136,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
         const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
         const worktreeQuery = worktreePath ? `&worktree=${encodeURIComponent(worktreePath)}` : '';
         const url = `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${worktreeQuery}`;
-        wsUrlCacheRef.current = { url, resolvedAt: Date.now() };
+        wsUrlCacheRef.current = { key: cacheKey, url, resolvedAt: Date.now() };
         return url;
       } catch (err) {
         reportError({

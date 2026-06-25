@@ -10,7 +10,7 @@ import {
   type ScalingParamMeta,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
 import { listCredentials,updateProject } from '../lib/api';
@@ -93,32 +93,9 @@ export function ScalingSettings({
   project: Project;
   reload: () => Promise<void>;
 }) {
-  const toast = useToast();
-
-  // Provider & Location state
-  const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
-    project.defaultProvider ?? null
-  );
-  const [selectedLocation, setSelectedLocation] = useState<string | null>(
-    project.defaultLocation ?? null
-  );
   const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
-  const [savingLocation, setSavingLocation] = useState(false);
 
-  // Scaling params state
-  const [scalingValues, setScalingValues] = useState<Record<string, number | null>>(() => {
-    const initial: Record<string, number | null> = {};
-    for (const p of SCALING_PARAMS) {
-      initial[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
-    }
-    return initial;
-  });
-  const [nodeIdleTimeoutMs, setNodeIdleTimeoutMs] = useState<number | null>(
-    project.nodeIdleTimeoutMs ?? null
-  );
-  const [savingScaling, setSavingScaling] = useState(false);
-
-  // Fetch configured providers
+  // Fetch configured providers (legitimate data-fetch effect)
   useEffect(() => {
     listCredentials()
       .then((creds) => {
@@ -132,17 +109,53 @@ export function ScalingSettings({
       .catch((err: unknown) => { console.error('Failed to load credentials', err); });
   }, []);
 
-  // Sync from project prop
-  useEffect(() => {
-    setSelectedProvider(project.defaultProvider ?? null);
-    setSelectedLocation(project.defaultLocation ?? null);
-    const updated: Record<string, number | null> = {};
+  // Key the form by project.updatedAt so it remounts with fresh state
+  // when the project is reloaded after a save, removing the prop-sync effect.
+  return (
+    <ScalingSettingsForm
+      key={project.updatedAt}
+      projectId={projectId}
+      project={project}
+      reload={reload}
+      configuredProviders={configuredProviders}
+    />
+  );
+}
+
+function ScalingSettingsForm({
+  projectId,
+  project,
+  reload,
+  configuredProviders,
+}: {
+  projectId: string;
+  project: Project;
+  reload: () => Promise<void>;
+  configuredProviders: CredentialProvider[];
+}) {
+  const toast = useToast();
+
+  // State initialized from props; no sync effect needed because the parent
+  // keys this component by project.updatedAt.
+  const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
+    project.defaultProvider ?? null
+  );
+  const [selectedLocation, setSelectedLocation] = useState<string | null>(
+    project.defaultLocation ?? null
+  );
+  const [savingLocation, setSavingLocation] = useState(false);
+
+  const [scalingValues, setScalingValues] = useState<Record<string, number | null>>(() => {
+    const initial: Record<string, number | null> = {};
     for (const p of SCALING_PARAMS) {
-      updated[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
+      initial[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
     }
-    setScalingValues(updated);
-    setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? null);
-  }, [project]);
+    return initial;
+  });
+  const [nodeIdleTimeoutMs, setNodeIdleTimeoutMs] = useState<number | null>(
+    project.nodeIdleTimeoutMs ?? null
+  );
+  const [savingScaling, setSavingScaling] = useState(false);
 
   const handleSaveProviderLocation = useCallback(async () => {
     setSavingLocation(true);

@@ -31,7 +31,6 @@ export function Terminal({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   const { socket, state, retryCount, retry } = useWebSocket({
@@ -42,17 +41,27 @@ export function Terminal({
 
   const connected = state === 'connected';
 
+  // Latest-callback refs so effects don't need to re-run when these change (UE336/UE337/UE338)
+  const onActivityRef = useRef(onActivity);
+  onActivityRef.current = onActivity;
+  const socketRef = useRef(socket);
+  socketRef.current = socket;
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
   const sendMessage = useCallback((payload: string) => {
-    const ws = wsRef.current;
+    const ws = socketRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(payload);
   }, []);
 
   const sendResize = useCallback(() => {
     const term = terminalRef.current;
-    if (!connected || !sessionId || !term) return;
+    if (!connectedRef.current || !sessionIdRef.current || !term) return;
     sendMessage(encodeTerminalWsResize(term.rows, term.cols));
-  }, [connected, sessionId, sendMessage]);
+  }, [sendMessage]);
 
   const handleResize = useCallback(() => {
     const fitAddon = fitAddonRef.current;
@@ -63,9 +72,10 @@ export function Terminal({
     sendResize();
   }, [sendResize]);
 
-  // Initialize terminal
+  // UE336: Mount-only xterm initialization.
+  // Uses refs for callbacks so this effect runs only once (on mount).
   useEffect(() => {
-    if (!containerRef.current || terminalRef.current) return;
+    if (!containerRef.current) return;
 
     const terminal = new XTerm({
       cursorBlink: true,
@@ -105,55 +115,50 @@ export function Terminal({
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // Handle input
+    // Handle input — read latest callbacks via refs
     terminal.onData((data) => {
-      onActivity?.();
-      sendMessage(encodeTerminalWsInput(data));
+      onActivityRef.current?.();
+      const ws = socketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(encodeTerminalWsInput(data));
+      }
     });
-
-    // Handle window resize
-    window.addEventListener('resize', handleResize);
-
-    // Handle container resize
-    const resizeObserver = new ResizeObserver(() => {
-      handleResize();
-    });
-    resizeObserver.observe(containerRef.current);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      resizeObserver.disconnect();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [onActivity, handleResize, sendMessage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Mount-only: callbacks accessed via refs
 
-  // Track the current active WebSocket instance for sending messages.
+  // UE336: Separate resize observer effect
   useEffect(() => {
-    if (!connected || !socket) {
-      wsRef.current = null;
-      setSessionId(null);
-      return;
-    }
+    const container = containerRef.current;
+    if (!container) return;
 
-    wsRef.current = socket;
+    const onResize = () => handleResize();
+
+    window.addEventListener('resize', onResize);
+    const resizeObserver = new ResizeObserver(onResize);
+    resizeObserver.observe(container);
+
     return () => {
-      if (wsRef.current === socket) {
-        wsRef.current = null;
-      }
+      window.removeEventListener('resize', onResize);
+      resizeObserver.disconnect();
     };
-  }, [socket, connected]);
+  }, [handleResize]);
 
-  // Handle VM Agent terminal protocol messages.
+  // UE338: WebSocket message subscription.
+  // Uses refs for protocol handling so connection changes don't cause resubscription.
   useEffect(() => {
-    const term = terminalRef.current;
-    if (!connected || !socket || !term) return;
+    if (!socket) return;
 
     const onMessage = (event: MessageEvent) => {
-      // VM Agent currently sends JSON messages as text frames.
-      if (typeof event.data !== 'string') return;
+      const term = terminalRef.current;
+      if (!term) return;
 
+      if (typeof event.data !== 'string') return;
       const msg = parseTerminalWsServerMessage(event.data);
       if (!msg) return;
 
@@ -189,7 +194,7 @@ export function Terminal({
     return () => {
       socket.removeEventListener('message', onMessage);
     };
-  }, [socket, connected, sendResize]);
+  }, [socket, sendResize]);
 
   // Heartbeat (keeps intermediaries from idling out the WS; also supported by VM Agent).
   useEffect(() => {

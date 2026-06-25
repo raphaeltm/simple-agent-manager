@@ -1,5 +1,5 @@
 import type { DetectedPort } from '@simple-agent-manager/shared';
-import { useEffect, useRef,useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { listWorkspacePorts } from '../lib/api';
 
@@ -20,15 +20,7 @@ export function useWorkspacePorts(
 ) {
   const [ports, setPorts] = useState<DetectedPort[]>([]);
   const [loading, setLoading] = useState(false);
-  const mountedRef = useRef(true);
   const consecutiveFailuresRef = useRef(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!workspaceUrl || !workspaceId || !token || !isRunning) {
@@ -43,14 +35,14 @@ export function useWorkspacePorts(
       try {
         setLoading(true);
         const result = await listWorkspacePorts(workspaceUrl!, workspaceId!, token!);
-        if (!cancelled && mountedRef.current) {
+        if (!cancelled) {
           consecutiveFailuresRef.current = 0;
           setPorts(result);
         }
       } catch (err) {
         // Preserve stale ports on transient failures — only clear after
         // MAX_CONSECUTIVE_FAILURES so the UI doesn't flicker on brief hiccups.
-        if (!cancelled && mountedRef.current) {
+        if (!cancelled) {
           consecutiveFailuresRef.current += 1;
           console.warn('useWorkspacePorts: fetch failed', {
             workspaceId: workspaceId!,
@@ -62,7 +54,7 @@ export function useWorkspacePorts(
           }
         }
       } finally {
-        if (mountedRef.current) {
+        if (!cancelled) {
           setLoading(false);
         }
       }

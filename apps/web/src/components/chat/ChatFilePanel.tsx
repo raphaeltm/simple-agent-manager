@@ -223,14 +223,14 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     [fileIndex, searchQuery]
   );
 
-  // Initial load based on mode
+  // Initial load on mount based on initialMode/initialPath
   useEffect(() => {
-    if (mode === 'browse') loadListing(currentPath);
-    else if (mode === 'view' && filePath && !isImageFile(filePath)) loadFile(filePath);
-    else if (mode === 'git-status') loadGitStatus();
-    else if (mode === 'diff' && filePath) loadDiff(filePath);
+    if (initialMode === 'browse') loadListing(initialPath ?? '.');
+    else if (initialMode === 'view' && initialPath && !isImageFile(initialPath)) loadFile(initialPath);
+    else if (initialMode === 'git-status') loadGitStatus();
+    else if (initialMode === 'diff' && initialPath) loadDiff(initialPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, []);
 
   const navigateDir = (path: string) => {
     setCurrentPath(path);

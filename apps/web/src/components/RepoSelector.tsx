@@ -1,6 +1,6 @@
 import type { Repository } from '@simple-agent-manager/shared';
 import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useRef, useState } from 'react';
+import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { listRepositories } from '../lib/api';
@@ -29,7 +29,6 @@ export function RepoSelector({
   placeholder = 'https://github.com/user/repo or select from list',
 }: RepoSelectorProps) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [filteredRepos, setFilteredRepos] = useState<Repository[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,16 +66,14 @@ export function RepoSelector({
     fetchRepos();
   }, [installationId]);
 
-  // Filter repositories based on input
-  useEffect(() => {
+  // Filter repositories based on input (derived at render time)
+  const filteredRepos = useMemo(() => {
     if (value.startsWith('http') || value.startsWith('git@')) {
-      setFilteredRepos([]);
-      return;
+      return [];
     }
 
     if (!value) {
-      setFilteredRepos(repositories.slice(0, 25));
-      return;
+      return repositories.slice(0, 25);
     }
 
     const searchTerm = value.toLowerCase();
@@ -85,7 +82,7 @@ export function RepoSelector({
     );
 
     // Show more results (25) to help users with many repos find what they need
-    setFilteredRepos(filtered.slice(0, 25));
+    return filtered.slice(0, 25);
   }, [value, repositories]);
 
   // Handle clicks outside dropdown

@@ -241,36 +241,43 @@ export function useSessionLifecycle(
 
   useEffect(() => { void loadSession(); }, [loadSession]);
 
-  // Fetch workspace and node details
+  // Fetch workspace and node details — keyed by workspaceId
   useEffect(() => {
     const wsId = session?.workspaceId;
     if (!wsId) return;
     if (workspace?.id === wsId) return;
 
-    let cancelled = false;
+    // Clear stale workspace/node immediately when the key changes
+    setWorkspace(null);
+    setNode(null);
+
+    const controller = new AbortController();
+    const { signal } = controller;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 
     async function attemptFetch(attempt = 0) {
       try {
         const ws = await getWorkspace(wsId!);
-        if (cancelled) return;
+        if (signal.aborted) return;
         setWorkspace(ws);
         if (ws.nodeId) {
           const nd = await getNode(ws.nodeId);
-          if (!cancelled) setNode(nd);
+          if (!signal.aborted) setNode(nd);
         }
       } catch {
-        if (cancelled) return;
+        if (signal.aborted) return;
         if (attempt < RETRY_DELAYS_MS.length) {
-          retryTimer = setTimeout(() => attemptFetch(attempt + 1), RETRY_DELAYS_MS[attempt]);
+          retryTimer = setTimeout(() => {
+            if (!signal.aborted) attemptFetch(attempt + 1);
+          }, RETRY_DELAYS_MS[attempt]);
         }
       }
     }
 
     attemptFetch();
     return () => {
-      cancelled = true;
+      controller.abort();
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [session?.workspaceId, workspace?.id]);

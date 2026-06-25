@@ -18,7 +18,7 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, type ReactNode, useEffect, useState } from 'react';
+import { type FC, type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { getProject, getProviderCatalog } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
@@ -240,68 +240,74 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   onSave,
   projectId,
 }) => {
+  // Key the form body so React remounts it with fresh state when the
+  // profile changes or the dialog re-opens, eliminating the prop-sync effect.
+  const formKey = useMemo(
+    () => (isOpen ? `${profile?.id ?? 'new'}-${Date.now()}` : 'closed'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: remount on each open
+    [isOpen, profile?.id],
+  );
+
+  return (
+    <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
+      {isOpen && (
+        <ProfileFormBody
+          key={formKey}
+          profile={profile ?? null}
+          onSave={onSave}
+          onClose={onClose}
+          projectId={projectId}
+        />
+      )}
+    </Dialog>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Inner form body — keyed by the parent so it remounts with fresh state
+// ---------------------------------------------------------------------------
+
+interface ProfileFormBodyProps {
+  profile: AgentProfile | null;
+  onSave: (data: CreateAgentProfileRequest | UpdateAgentProfileRequest) => Promise<void>;
+  onClose: () => void;
+  projectId: string;
+}
+
+function ProfileFormBody({ profile, onSave, onClose, projectId }: ProfileFormBodyProps) {
   const isEdit = !!profile;
 
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [agentType, setAgentType] = useState<string>(DEFAULT_AGENT_TYPE);
-  const [model, setModel] = useState('');
-  const [effort, setEffort] = useState<AgentEffort>(DEFAULT_AGENT_EFFORT);
-  const [permissionMode, setPermissionMode] = useState('');
-  const [systemPromptAppend, setSystemPromptAppend] = useState('');
-  const [maxTurns, setMaxTurns] = useState('');
-  const [timeoutMinutes, setTimeoutMinutes] = useState('');
-  const [vmSizeOverride, setVmSizeOverride] = useState('');
-  const [workspaceProfile, setWorkspaceProfile] = useState('');
-  const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
-  const [taskMode, setTaskMode] = useState('');
-  const [githubCliPolicy, setGithubCliPolicy] =
-    useState<GitHubCliPolicy>(DEFAULT_GITHUB_CLI_POLICY);
+  // All state initialized from the profile prop; no sync effect needed.
+  const [name, setName] = useState(profile?.name ?? '');
+  const [description, setDescription] = useState(profile?.description ?? '');
+  const [agentType, setAgentType] = useState<string>(profile?.agentType ?? DEFAULT_AGENT_TYPE);
+  const [model, setModel] = useState(profile?.model ?? '');
+  const [effort, setEffort] = useState<AgentEffort>(profile?.effort ?? DEFAULT_AGENT_EFFORT);
+  const [permissionMode, setPermissionMode] = useState(profile?.permissionMode ?? '');
+  const [systemPromptAppend, setSystemPromptAppend] = useState(profile?.systemPromptAppend ?? '');
+  const [maxTurns, setMaxTurns] = useState(
+    profile?.maxTurns != null ? String(profile.maxTurns) : '',
+  );
+  const [timeoutMinutes, setTimeoutMinutes] = useState(
+    profile?.timeoutMinutes != null ? String(profile.timeoutMinutes) : '',
+  );
+  const [vmSizeOverride, setVmSizeOverride] = useState(profile?.vmSizeOverride ?? '');
+  const [workspaceProfile, setWorkspaceProfile] = useState(profile?.workspaceProfile ?? '');
+  const [devcontainerConfigName, setDevcontainerConfigName] = useState(
+    profile?.devcontainerConfigName ?? '',
+  );
+  const [taskMode, setTaskMode] = useState(profile?.taskMode ?? '');
+  const [githubCliPolicy, setGithubCliPolicy] = useState<GitHubCliPolicy>(
+    profile?.githubCliPolicy ?? DEFAULT_GITHUB_CLI_POLICY,
+  );
   const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
   const [projectProvider, setProjectProvider] = useState<string | null>(null);
   const [projectLocation, setProjectLocation] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset form when opening/closing or when profile changes
+  // Fetch provider catalog and project defaults (legitimate data-fetch effect)
   useEffect(() => {
-    if (isOpen && profile) {
-      setName(profile.name);
-      setDescription(profile.description ?? '');
-      setAgentType(profile.agentType);
-      setModel(profile.model ?? '');
-      setEffort(profile.effort ?? DEFAULT_AGENT_EFFORT);
-      setPermissionMode(profile.permissionMode ?? '');
-      setSystemPromptAppend(profile.systemPromptAppend ?? '');
-      setMaxTurns(profile.maxTurns != null ? String(profile.maxTurns) : '');
-      setTimeoutMinutes(profile.timeoutMinutes != null ? String(profile.timeoutMinutes) : '');
-      setVmSizeOverride(profile.vmSizeOverride ?? '');
-      setWorkspaceProfile(profile.workspaceProfile ?? '');
-      setDevcontainerConfigName(profile.devcontainerConfigName ?? '');
-      setTaskMode(profile.taskMode ?? '');
-      setGithubCliPolicy(profile.githubCliPolicy ?? DEFAULT_GITHUB_CLI_POLICY);
-    } else if (isOpen) {
-      setName('');
-      setDescription('');
-      setAgentType(DEFAULT_AGENT_TYPE);
-      setModel('');
-      setEffort(DEFAULT_AGENT_EFFORT);
-      setPermissionMode('');
-      setSystemPromptAppend('');
-      setMaxTurns('');
-      setTimeoutMinutes('');
-      setVmSizeOverride('');
-      setWorkspaceProfile('');
-      setDevcontainerConfigName('');
-      setTaskMode('');
-      setGithubCliPolicy(DEFAULT_GITHUB_CLI_POLICY);
-    }
-    setError(null);
-  }, [isOpen, profile]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
     let cancelled = false;
     Promise.all([getProviderCatalog(), getProject(projectId)])
       .then(([catalogResponse, project]) => {
@@ -321,7 +327,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, projectId]);
+  }, [projectId]);
 
   const effectiveProvider = profile?.provider ?? projectProvider;
   const activeCatalog = selectProviderCatalog(catalogs, effectiveProvider);
@@ -383,270 +389,268 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   };
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void handleSubmit();
-        }}
-      >
-        <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary mb-4">
-          {isEdit ? 'Edit Profile' : 'Create Agent Profile'}
-        </h2>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void handleSubmit();
+      }}
+    >
+      <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary mb-4">
+        {isEdit ? 'Edit Profile' : 'Create Agent Profile'}
+      </h2>
 
-        {error && (
-          <div
-            role="alert"
-            className="py-2 px-3 mb-3 rounded-sm bg-danger-tint text-danger text-sm"
-          >
-            {error}
-          </div>
-        )}
-
-        {/* Name & Description — always visible */}
-        <div className="grid gap-3">
-          <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">
-              Name <span className="text-danger">*</span>
-            </span>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.currentTarget.value)}
-              placeholder="e.g. Fast Implementer"
-              disabled={saving}
-            />
-          </label>
-
-          <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Description</span>
-            <Input
-              value={description}
-              onChange={(e) => setDescription(e.currentTarget.value)}
-              placeholder="What this profile is for..."
-              disabled={saving}
-            />
-          </label>
+      {error && (
+        <div
+          role="alert"
+          className="py-2 px-3 mb-3 rounded-sm bg-danger-tint text-danger text-sm"
+        >
+          {error}
         </div>
+      )}
 
-        {/* --- Accordion sections --- */}
+      {/* Name & Description — always visible */}
+      <div className="grid gap-3">
+        <label className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">
+            Name <span className="text-danger">*</span>
+          </span>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+            placeholder="e.g. Fast Implementer"
+            disabled={saving}
+          />
+        </label>
 
-        <Section
-          title="Agent Settings"
-          defaultOpen
-          summary={agentSettingsSummary(agentType, model, effort, permissionMode, timeoutMinutes)}
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SelectField
-              label="Agent Type"
-              value={agentType}
-              onChange={(v) => {
-                setAgentType(v);
-                setModel('');
-                setEffort((current) =>
-                  isAgentEffortSupported(v, current) ? current : DEFAULT_AGENT_EFFORT,
-                );
-              }}
-              options={AGENT_CATALOG.map((a) => ({ value: a.id, label: a.name }))}
-              disabled={saving}
-            />
+        <label className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">Description</span>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.currentTarget.value)}
+            placeholder="What this profile is for..."
+            disabled={saving}
+          />
+        </label>
+      </div>
 
-            <div className="grid gap-1.5">
-              <label htmlFor="profile-model" className="text-sm text-fg-muted">
-                Model
-              </label>
-              <ModelSelect
-                id="profile-model"
-                agentType={agentType}
-                value={model}
-                onChange={setModel}
-                disabled={saving}
-                placeholder="Select or type a model..."
-              />
-            </div>
+      {/* --- Accordion sections --- */}
 
-            <SelectField
-              label="Effort"
-              value={effort}
-              onChange={(v) => setEffort(v as AgentEffort)}
-              options={effortOptions}
-              disabled={saving}
-            />
+      <Section
+        title="Agent Settings"
+        defaultOpen
+        summary={agentSettingsSummary(agentType, model, effort, permissionMode, timeoutMinutes)}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SelectField
+            label="Agent Type"
+            value={agentType}
+            onChange={(v) => {
+              setAgentType(v);
+              setModel('');
+              setEffort((current) =>
+                isAgentEffortSupported(v, current) ? current : DEFAULT_AGENT_EFFORT,
+              );
+            }}
+            options={AGENT_CATALOG.map((a) => ({ value: a.id, label: a.name }))}
+            disabled={saving}
+          />
 
-            <SelectField
-              label="Permission Mode"
-              value={permissionMode}
-              onChange={setPermissionMode}
-              options={PERMISSION_MODES}
-              disabled={saving}
-            />
-
-            <label className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Timeout (minutes)</span>
-              <Input
-                type="number"
-                value={timeoutMinutes}
-                onChange={(e) => setTimeoutMinutes(e.currentTarget.value)}
-                placeholder="Default"
-                disabled={saving}
-              />
+          <div className="grid gap-1.5">
+            <label htmlFor="profile-model" className="text-sm text-fg-muted">
+              Model
             </label>
-          </div>
-        </Section>
-
-        <Section
-          title="Platform Policy"
-          summary={policySummary(githubCliPolicy)}
-        >
-          <div className="grid gap-3">
-            <SelectField
-              label="GitHub CLI access"
-              value={githubCliPolicy.mode}
-              onChange={(mode) =>
-                setGithubCliPolicy((current) => ({
-                  ...(current ?? DEFAULT_GITHUB_CLI_POLICY),
-                  mode: mode as GitHubCliPolicy['mode'],
-                  repositoryScope: 'project',
-                }))
-              }
-              options={[
-                { value: 'inherit', label: 'Inherit GitHub App installation permissions' },
-                { value: 'custom', label: 'Restrict token minted for this profile' },
-              ]}
+            <ModelSelect
+              id="profile-model"
+              agentType={agentType}
+              value={model}
+              onChange={setModel}
               disabled={saving}
+              placeholder="Select or type a model..."
             />
-
-            {githubCliPolicy.mode === 'custom' && (
-              <fieldset className="grid gap-2 rounded-md border border-border-default p-3">
-                <legend className="px-1 text-sm font-medium text-fg-primary">
-                  Project repository token permissions
-                </legend>
-                <p className="m-0 text-xs text-fg-muted">
-                  These permissions apply to the project&rsquo;s selected repository set &mdash; the
-                  primary repository plus any additional repositories added under Repository Access
-                  &mdash; not only the primary repo. The token is narrowed to that set before each
-                  mint. Code contents must stay readable so the workspace can clone and fetch the
-                  repositories.
-                </p>
-                {GITHUB_PERMISSION_ROWS.map((row) => (
-                  <label
-                    key={row.key}
-                    className="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-center"
-                  >
-                    <span className="text-sm text-fg-primary">{row.label}</span>
-                    <select
-                      value={githubCliPolicy.permissions[row.key]}
-                      onChange={(e) =>
-                        updateGitHubPermission(row.key, e.target.value as GitHubCliPermissionLevel)
-                      }
-                      disabled={saving}
-                      className={SELECT_CLASSES}
-                    >
-                      {row.options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
-              </fieldset>
-            )}
           </div>
-        </Section>
 
-        <Section
-          title="Execution"
-          summary={executionSummary(maxTurns, systemPromptAppend)}
-        >
+          <SelectField
+            label="Effort"
+            value={effort}
+            onChange={(v) => setEffort(v as AgentEffort)}
+            options={effortOptions}
+            disabled={saving}
+          />
+
+          <SelectField
+            label="Permission Mode"
+            value={permissionMode}
+            onChange={setPermissionMode}
+            options={PERMISSION_MODES}
+            disabled={saving}
+          />
+
           <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Max Turns</span>
+            <span className="text-sm text-fg-muted">Timeout (minutes)</span>
             <Input
               type="number"
-              value={maxTurns}
-              onChange={(e) => setMaxTurns(e.currentTarget.value)}
+              value={timeoutMinutes}
+              onChange={(e) => setTimeoutMinutes(e.currentTarget.value)}
               placeholder="Default"
               disabled={saving}
             />
           </label>
-
-          <label className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">System Prompt (append)</span>
-            <textarea
-              value={systemPromptAppend}
-              onChange={(e) => setSystemPromptAppend(e.target.value)}
-              placeholder="Additional instructions appended to the system prompt..."
-              rows={3}
-              disabled={saving}
-              className="w-full rounded-md text-fg-primary py-2.5 px-3 resize-y"
-            />
-          </label>
-        </Section>
-
-        <Section
-          title="Infrastructure"
-          summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode)}
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SelectField
-              label={<>VM Size{providerContext && <span className="font-normal ml-1">({providerContext})</span>}</>}
-              value={vmSizeOverride}
-              onChange={setVmSizeOverride}
-              options={VM_SIZES.map((vs) => ({
-                value: vs.value,
-                label: vs.value
-                  ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null)
-                  : vs.label,
-              }))}
-              disabled={saving}
-            />
-
-            <SelectField
-              label="Workspace Profile"
-              value={workspaceProfile}
-              onChange={setWorkspaceProfile}
-              options={WORKSPACE_PROFILES}
-              disabled={saving}
-            />
-
-            {workspaceProfile !== 'lightweight' && (
-              <label className="grid gap-1.5">
-                <span className="text-sm text-fg-muted">Devcontainer Config</span>
-                <Input
-                  value={devcontainerConfigName}
-                  onChange={(e) => setDevcontainerConfigName(e.target.value)}
-                  disabled={saving}
-                  placeholder="Auto-detect"
-                />
-              </label>
-            )}
-
-            <SelectField
-              label="Task Mode"
-              value={taskMode}
-              onChange={setTaskMode}
-              options={TASK_MODES}
-              disabled={saving}
-            />
-          </div>
-        </Section>
-
-        {/* Runtime Environment (edit mode only) */}
-        {isEdit && profile && (
-          <Section title="Runtime Environment" summary="Env vars and files">
-            <ProfileRuntimeSection projectId={projectId} profileId={profile.id} />
-          </Section>
-        )}
-
-        {/* Actions */}
-        <div className="flex gap-2 mt-4 pt-3 border-t border-border-default justify-end">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={saving} loading={saving}>
-            {isEdit ? 'Save Changes' : 'Create Profile'}
-          </Button>
         </div>
-      </form>
-    </Dialog>
+      </Section>
+
+      <Section
+        title="Platform Policy"
+        summary={policySummary(githubCliPolicy)}
+      >
+        <div className="grid gap-3">
+          <SelectField
+            label="GitHub CLI access"
+            value={githubCliPolicy.mode}
+            onChange={(mode) =>
+              setGithubCliPolicy((current) => ({
+                ...(current ?? DEFAULT_GITHUB_CLI_POLICY),
+                mode: mode as GitHubCliPolicy['mode'],
+                repositoryScope: 'project',
+              }))
+            }
+            options={[
+              { value: 'inherit', label: 'Inherit GitHub App installation permissions' },
+              { value: 'custom', label: 'Restrict token minted for this profile' },
+            ]}
+            disabled={saving}
+          />
+
+          {githubCliPolicy.mode === 'custom' && (
+            <fieldset className="grid gap-2 rounded-md border border-border-default p-3">
+              <legend className="px-1 text-sm font-medium text-fg-primary">
+                Project repository token permissions
+              </legend>
+              <p className="m-0 text-xs text-fg-muted">
+                These permissions apply to the project&rsquo;s selected repository set &mdash; the
+                primary repository plus any additional repositories added under Repository Access
+                &mdash; not only the primary repo. The token is narrowed to that set before each
+                mint. Code contents must stay readable so the workspace can clone and fetch the
+                repositories.
+              </p>
+              {GITHUB_PERMISSION_ROWS.map((row) => (
+                <label
+                  key={row.key}
+                  className="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-center"
+                >
+                  <span className="text-sm text-fg-primary">{row.label}</span>
+                  <select
+                    value={githubCliPolicy.permissions[row.key]}
+                    onChange={(e) =>
+                      updateGitHubPermission(row.key, e.target.value as GitHubCliPermissionLevel)
+                    }
+                    disabled={saving}
+                    className={SELECT_CLASSES}
+                  >
+                    {row.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </fieldset>
+          )}
+        </div>
+      </Section>
+
+      <Section
+        title="Execution"
+        summary={executionSummary(maxTurns, systemPromptAppend)}
+      >
+        <label className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">Max Turns</span>
+          <Input
+            type="number"
+            value={maxTurns}
+            onChange={(e) => setMaxTurns(e.currentTarget.value)}
+            placeholder="Default"
+            disabled={saving}
+          />
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">System Prompt (append)</span>
+          <textarea
+            value={systemPromptAppend}
+            onChange={(e) => setSystemPromptAppend(e.target.value)}
+            placeholder="Additional instructions appended to the system prompt..."
+            rows={3}
+            disabled={saving}
+            className="w-full rounded-md text-fg-primary py-2.5 px-3 resize-y"
+          />
+        </label>
+      </Section>
+
+      <Section
+        title="Infrastructure"
+        summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode)}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SelectField
+            label={<>VM Size{providerContext && <span className="font-normal ml-1">({providerContext})</span>}</>}
+            value={vmSizeOverride}
+            onChange={setVmSizeOverride}
+            options={VM_SIZES.map((vs) => ({
+              value: vs.value,
+              label: vs.value
+                ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null)
+                : vs.label,
+            }))}
+            disabled={saving}
+          />
+
+          <SelectField
+            label="Workspace Profile"
+            value={workspaceProfile}
+            onChange={setWorkspaceProfile}
+            options={WORKSPACE_PROFILES}
+            disabled={saving}
+          />
+
+          {workspaceProfile !== 'lightweight' && (
+            <label className="grid gap-1.5">
+              <span className="text-sm text-fg-muted">Devcontainer Config</span>
+              <Input
+                value={devcontainerConfigName}
+                onChange={(e) => setDevcontainerConfigName(e.target.value)}
+                disabled={saving}
+                placeholder="Auto-detect"
+              />
+            </label>
+          )}
+
+          <SelectField
+            label="Task Mode"
+            value={taskMode}
+            onChange={setTaskMode}
+            options={TASK_MODES}
+            disabled={saving}
+          />
+        </div>
+      </Section>
+
+      {/* Runtime Environment (edit mode only) */}
+      {isEdit && profile && (
+        <Section title="Runtime Environment" summary="Env vars and files">
+          <ProfileRuntimeSection projectId={projectId} profileId={profile.id} />
+        </Section>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 mt-4 pt-3 border-t border-border-default justify-end">
+        <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={saving} loading={saving}>
+          {isEdit ? 'Save Changes' : 'Create Profile'}
+        </Button>
+      </div>
+    </form>
   );
-};
+}

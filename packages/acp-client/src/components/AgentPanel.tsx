@@ -85,7 +85,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   onError,
 }, ref) {
   const [input, setInput] = useState('');
-  const [showPalette, setShowPalette] = useState(false);
+  const [paletteDismissedForFilter, setPaletteDismissedForFilter] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -130,10 +130,8 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
     return afterSlash;
   }, [input]);
 
-  // Show/hide palette based on slash filter
-  useEffect(() => {
-    setShowPalette(slashFilter !== null);
-  }, [slashFilter]);
+  // Derive showPalette from slashFilter; dismiss via Escape is tracked per-filter value
+  const showPalette = slashFilter !== null && paletteDismissedForFilter !== slashFilter;
 
   // Handle client-side command execution
   const handleClientCommand = useCallback(
@@ -165,7 +163,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   // Handle slash command selection from the palette
   const handleCommandSelect = useCallback(
     (cmd: SlashCommand) => {
-      setShowPalette(false);
+      setPaletteDismissedForFilter(slashFilter);
       // For client commands, execute immediately
       if (cmd.source === 'client') {
         handleClientCommand(cmd, `/${cmd.name}`);
@@ -185,7 +183,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
         },
       });
     },
-    [handleClientCommand, messages, session]
+    [handleClientCommand, messages, session, slashFilter]
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -379,7 +377,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
           commands={allCommands}
           filter={slashFilter ?? ''}
           onSelect={handleCommandSelect}
-          onDismiss={() => setShowPalette(false)}
+          onDismiss={() => setPaletteDismissedForFilter(slashFilter)}
           visible={showPalette}
         />
         <form onSubmit={handleSubmit} className="flex items-end space-x-2">
