@@ -155,6 +155,7 @@ describe('AgentsSection', () => {
   });
 
   it('calls saveAgentSettings when the Save Settings button is clicked', async () => {
+    const user = userEvent.setup();
     mocks.listAgentCredentials.mockResolvedValue({
       credentials: [
         {
@@ -185,7 +186,7 @@ describe('AgentsSection', () => {
       expect(planRadio.checked).toBe(true);
     });
 
-    fireEvent.click(screen.getByTestId('permission-mode-claude-code-acceptEdits'));
+    await user.click(screen.getByTestId('permission-mode-claude-code-acceptEdits'));
 
     // Wait for the save button to become enabled (hasChanges = true) before clicking,
     // since async state updates from loadData() can race with the radio click
@@ -195,7 +196,7 @@ describe('AgentsSection', () => {
       );
     });
 
-    fireEvent.click(screen.getByTestId('save-settings-claude-code'));
+    await user.click(screen.getByTestId('save-settings-claude-code'));
 
     await waitFor(() => {
       expect(mocks.saveAgentSettings).toHaveBeenCalledWith('claude-code', {
