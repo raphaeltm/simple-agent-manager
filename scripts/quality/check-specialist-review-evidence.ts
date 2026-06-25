@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import * as v from 'valibot';
 
 /**
  * CI quality check: validates the Specialist Review Evidence table in PR bodies.
@@ -42,9 +43,13 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const pullRequestPayloadSchema = v.object({
+  pull_request: v.object({
+    body: v.optional(v.nullable(v.string())),
+    html_url: v.optional(v.string()),
+    labels: v.optional(v.array(v.object({ name: v.string() }))),
+  }),
+});
 
 function parsePullRequestPayload(raw: string): {
   body: string;
@@ -52,42 +57,16 @@ function parsePullRequestPayload(raw: string): {
   htmlUrl?: string;
 } {
   const payload: unknown = JSON.parse(raw);
-  if (!isRecord(payload)) {
-    fail('GitHub event payload must be an object.');
+  const result = v.safeParse(pullRequestPayloadSchema, payload);
+  if (!result.success) {
+    fail('GitHub event payload must include pull_request with valid body, html_url, and labels.');
   }
-
-  const pullRequest = payload.pull_request;
-  if (!isRecord(pullRequest)) {
-    fail('GitHub event payload is missing pull_request.');
-  }
-
-  const body = pullRequest.body;
-  if (body !== undefined && body !== null && typeof body !== 'string') {
-    fail('GitHub event pull_request.body must be a string when present.');
-  }
-
-  const htmlUrl = pullRequest.html_url;
-  if (htmlUrl !== undefined && typeof htmlUrl !== 'string') {
-    fail('GitHub event pull_request.html_url must be a string when present.');
-  }
-
-  const rawLabels = pullRequest.labels;
-  if (rawLabels !== undefined && !Array.isArray(rawLabels)) {
-    fail('GitHub event pull_request.labels must be an array when present.');
-  }
-
-  const labels =
-    rawLabels?.map((label, index) => {
-      if (!isRecord(label) || typeof label.name !== 'string') {
-        fail(`GitHub event pull_request.labels[${index}].name must be a string.`);
-      }
-      return { name: label.name };
-    }) ?? [];
+  const pullRequest = result.output.pull_request;
 
   return {
-    body: body ?? '',
-    labels,
-    htmlUrl,
+    body: pullRequest.body ?? '',
+    labels: pullRequest.labels ?? [],
+    htmlUrl: pullRequest.html_url,
   };
 }
 
@@ -152,7 +131,10 @@ export function parseReviewTable(section: string): ReviewRow[] {
 
     rows.push({
       reviewer: reviewer.replace(/<!--.*?-->/g, '').trim(),
-      status: status.replace(/<!--.*?-->/g, '').trim().toUpperCase(),
+      status: status
+        .replace(/<!--.*?-->/g, '')
+        .trim()
+        .toUpperCase(),
       outcome: outcome.replace(/<!--.*?-->/g, '').trim(),
     });
   }
@@ -184,10 +166,7 @@ export function hasNeedsHumanReviewLabel(labels: Array<{ name: string }>): boole
 /**
  * Main validation logic — separated from I/O for testability.
  */
-export function validateReviewEvidence(
-  body: string,
-  labels: Array<{ name: string }>
-): CheckResult {
+export function validateReviewEvidence(body: string, labels: Array<{ name: string }>): CheckResult {
   const result: CheckResult = {
     pass: true,
     failures: [],

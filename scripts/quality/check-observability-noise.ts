@@ -31,6 +31,8 @@
  *   CF_ACCOUNT_ID=xxx OBSERVABILITY_DB_ID=yyy pnpm quality:observability-noise
  */
 
+import * as v from 'valibot';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -60,65 +62,64 @@ interface TelemetryResponse {
   errors?: Array<{ message: string }>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const jsonRecordSchema = v.record(v.string(), v.unknown());
+const errorListSchema = v.array(v.object({ message: v.string() }));
+const d1ResultItemSchema = v.object({
+  results: v.array(jsonRecordSchema),
+  meta: v.optional(v.unknown()),
+});
+const d1MetaSchema = v.object({
+  rows_read: v.optional(v.number()),
+});
+const d1QueryResponseSchema = v.object({
+  success: v.boolean(),
+  result: v.array(d1ResultItemSchema),
+  errors: v.optional(errorListSchema),
+});
+const telemetryResponseSchema = v.object({
+  success: v.boolean(),
+  result: v.optional(
+    v.object({
+      data: v.optional(v.array(jsonRecordSchema)),
+    })
+  ),
+  errors: v.optional(errorListSchema),
+});
 
 function requireErrorList(value: unknown, context: string): Array<{ message: string }> | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new Error(`${context}.errors must be an array when present`);
-  return value.map((item, index) => {
-    if (!isRecord(item) || typeof item.message !== 'string') {
-      throw new Error(`${context}.errors[${index}].message must be a string`);
-    }
-    return { message: item.message };
-  });
+  const result = v.safeParse(errorListSchema, value);
+  if (!result.success)
+    throw new Error(`${context}.errors must be an array of message objects when present`);
+  return result.output;
 }
 
 function parseD1QueryResponse(value: unknown): D1QueryResponse {
-  if (!isRecord(value)) throw new Error('D1 query response must be an object');
-  if (typeof value.success !== 'boolean') throw new Error('D1 query response success must be boolean');
-  if (!Array.isArray(value.result)) throw new Error('D1 query response result must be an array');
+  const result = v.safeParse(d1QueryResponseSchema, value);
+  if (!result.success)
+    throw new Error('D1 query response must match the expected Cloudflare D1 schema');
   return {
-    success: value.success,
-    result: value.result.map((item, index) => {
-      if (!isRecord(item)) throw new Error(`D1 query result[${index}] must be an object`);
-      if (!Array.isArray(item.results)) {
-        throw new Error(`D1 query result[${index}].results must be an array`);
-      }
+    success: result.output.success,
+    result: result.output.result.map((item) => {
+      const meta = v.safeParse(d1MetaSchema, item.meta);
       return {
-        results: item.results.map((row, rowIndex) => {
-          if (!isRecord(row)) {
-            throw new Error(`D1 query result[${index}].results[${rowIndex}] must be an object`);
-          }
-          return row;
-        }),
-        meta: isRecord(item.meta)
-          ? { rows_read: typeof item.meta.rows_read === 'number' ? item.meta.rows_read : undefined }
-          : undefined,
+        results: item.results,
+        meta: meta.success ? meta.output : undefined,
       };
     }),
-    errors: requireErrorList(value.errors, 'D1 query response'),
+    errors: requireErrorList(result.output.errors, 'D1 query response'),
   };
 }
 
 function parseTelemetryResponse(value: unknown): TelemetryResponse {
-  if (!isRecord(value)) throw new Error('Telemetry response must be an object');
-  if (typeof value.success !== 'boolean') throw new Error('Telemetry response success must be boolean');
-  let data: Array<Record<string, unknown>> | undefined;
-  if (isRecord(value.result) && value.result.data !== undefined) {
-    if (!Array.isArray(value.result.data)) {
-      throw new Error('Telemetry response result.data must be an array');
-    }
-    data = value.result.data.map((row, index) => {
-      if (!isRecord(row)) throw new Error(`Telemetry response result.data[${index}] must be an object`);
-      return row;
-    });
-  }
+  const result = v.safeParse(telemetryResponseSchema, value);
+  if (!result.success)
+    throw new Error('Telemetry response must match the expected Cloudflare telemetry schema');
+  const data = result.output.result?.data;
   return {
-    success: value.success,
+    success: result.output.success,
     result: data ? { data } : undefined,
-    errors: requireErrorList(value.errors, 'Telemetry response'),
+    errors: requireErrorList(result.output.errors, 'Telemetry response'),
   };
 }
 
@@ -147,7 +148,14 @@ function getConfig() {
     10
   );
 
-  return { cfToken, cfAccountId, observabilityDbId, lookbackHours, threshold, telemetryTimeframeSec };
+  return {
+    cfToken,
+    cfAccountId,
+    observabilityDbId,
+    lookbackHours,
+    threshold,
+    telemetryTimeframeSec,
+  };
 }
 
 // =============================================================================
@@ -197,7 +205,10 @@ async function queryWorkersTelemetry(
   if (!resp.ok) {
     // Non-fatal: telemetry API may not be available in all accounts
     if (resp.status === 403 || resp.status === 404) {
-      return { success: false, errors: [{ message: `Telemetry API unavailable (${resp.status})` }] };
+      return {
+        success: false,
+        errors: [{ message: `Telemetry API unavailable (${resp.status})` }],
+      };
     }
     throw new Error(`Telemetry query failed: ${resp.status} ${resp.statusText}`);
   }
@@ -248,8 +259,7 @@ export function analyzeRepeatedErrors(
     const count = Number(row.cnt ?? row.count ?? 0);
     const message = String(row.message ?? row.msg ?? '');
     if (count >= threshold) {
-      const isIngest401 =
-        message.includes('401') && message.includes('ingest');
+      const isIngest401 = message.includes('401') && message.includes('ingest');
       findings.push({
         category: isIngest401 ? 'ingest-401' : 'repeated-error',
         severity: isIngest401 ? 'high' : 'medium',
@@ -341,7 +351,9 @@ async function checkD1Noise(config: ReturnType<typeof getConfig>): Promise<Findi
       findings.push(...analyzeRepeatedErrors(repeatedResp.result[0].results, threshold));
     }
   } catch (err) {
-    console.warn(`  [warn] D1 repeated-errors query failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(
+      `  [warn] D1 repeated-errors query failed: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   // Check 2: Success-like messages at error level
@@ -351,10 +363,17 @@ async function checkD1Noise(config: ReturnType<typeof getConfig>): Promise<Findi
     const severitySql = `SELECT message, COUNT(*) as cnt FROM platform_errors WHERE timestamp >= ${sinceMs} AND level = 'error' AND (${successClause}) GROUP BY message HAVING cnt >= ${Math.max(1, Math.floor(threshold / 2))} ORDER BY cnt DESC LIMIT 20`;
     const severityResp = await queryD1(cfToken, cfAccountId, observabilityDbId, severitySql);
     if (severityResp.success && severityResp.result?.[0]?.results) {
-      findings.push(...analyzeSeverityMismatches(severityResp.result[0].results, Math.max(1, Math.floor(threshold / 2))));
+      findings.push(
+        ...analyzeSeverityMismatches(
+          severityResp.result[0].results,
+          Math.max(1, Math.floor(threshold / 2))
+        )
+      );
     }
   } catch (err) {
-    console.warn(`  [warn] D1 severity-mismatch query failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(
+      `  [warn] D1 severity-mismatch query failed: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   return findings;
@@ -368,7 +387,12 @@ async function checkTelemetryNoise(config: ReturnType<typeof getConfig>): Promis
   console.log('  Querying Workers telemetry for ingest 401s...');
   try {
     const telemetrySql = `SELECT COUNT(*) as cnt FROM events WHERE response.status = 401 AND $path LIKE '%/observability/logs/ingest%'`;
-    const resp = await queryWorkersTelemetry(cfToken, cfAccountId, telemetrySql, telemetryTimeframeSec);
+    const resp = await queryWorkersTelemetry(
+      cfToken,
+      cfAccountId,
+      telemetrySql,
+      telemetryTimeframeSec
+    );
 
     if (!resp.success) {
       const errMsg = resp.errors?.[0]?.message ?? 'unknown error';
@@ -390,7 +414,9 @@ async function checkTelemetryNoise(config: ReturnType<typeof getConfig>): Promis
       }
     }
   } catch (err) {
-    console.warn(`  [warn] Telemetry query failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(
+      `  [warn] Telemetry query failed: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   return findings;
@@ -426,7 +452,9 @@ async function main() {
   if (allFindings.length > 0) {
     console.log('');
     console.log('ACTION REQUIRED: Log noise detected. Review the findings above.');
-    console.log('See docs/guides/deployment-troubleshooting.md#observability-noise for remediation.');
+    console.log(
+      'See docs/guides/deployment-troubleshooting.md#observability-noise for remediation.'
+    );
     process.exit(1);
   }
 

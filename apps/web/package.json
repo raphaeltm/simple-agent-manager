@@ -42,7 +42,8 @@
     "react-virtuoso": "catalog:",
     "recharts": "3.8.1",
     "remark-gfm": "catalog:",
-    "tailwindcss": "4.2.3"
+    "tailwindcss": "4.2.3",
+    "valibot": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "1.59.1",

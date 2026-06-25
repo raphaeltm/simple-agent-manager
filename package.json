@@ -64,6 +64,7 @@
     "tsx": "catalog:",
     "turbo": "2.9.9",
     "typescript": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
   },

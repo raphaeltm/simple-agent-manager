@@ -15,15 +15,15 @@ The codebase has repeated local `isRecord` helpers that manually validate unknow
 
 ## Implementation Checklist
 
-- [ ] Replace `apps/api/src/durable-objects/project-orchestrator/scheduling.ts` local `isRecord` parsing.
-- [ ] Replace `apps/web/src/pages/sam-prototype/onboarding-cards.tsx` local `isRecord` parsing.
-- [ ] Replace `scripts/deploy/sync-wrangler-config.ts` local `isRecord` parsing.
-- [ ] Replace `scripts/quality/check-preflight-evidence.ts` local `isRecord` parsing.
-- [ ] Replace `scripts/quality/check-specialist-review-evidence.ts` local `isRecord` parsing.
-- [ ] Replace `scripts/quality/check-observability-noise.ts` local `isRecord` parsing.
-- [ ] Replace `experiments/ai-gateway-tool-call/experiment.ts` local `isRecord` parsing.
-- [ ] Replace `experiments/harness-eval/runner.ts` local `isRecord` parsing.
-- [ ] Confirm `rg -n "\bisRecord\b" .` has no remaining local helper usage.
+- [x] Replace `apps/api/src/durable-objects/project-orchestrator/scheduling.ts` local `isRecord` parsing.
+- [x] Replace `apps/web/src/pages/sam-prototype/onboarding-cards.tsx` local `isRecord` parsing.
+- [x] Replace `scripts/deploy/sync-wrangler-config.ts` local `isRecord` parsing.
+- [x] Replace `scripts/quality/check-preflight-evidence.ts` local `isRecord` parsing.
+- [x] Replace `scripts/quality/check-specialist-review-evidence.ts` local `isRecord` parsing.
+- [x] Replace `scripts/quality/check-observability-noise.ts` local `isRecord` parsing.
+- [x] Replace `experiments/ai-gateway-tool-call/experiment.ts` local `isRecord` parsing.
+- [x] Replace `experiments/harness-eval/runner.ts` local `isRecord` parsing.
+- [x] Confirm `rg -n "\bisRecord\b" apps scripts experiments packages` has no remaining local helper usage.
 - [ ] Run focused validation checks.
 
 ## Acceptance Criteria

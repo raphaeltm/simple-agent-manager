@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import * as v from 'valibot';
 
 const PREFLIGHT_START = '<!-- AGENT_PREFLIGHT_START -->';
 const PREFLIGHT_END = '<!-- AGENT_PREFLIGHT_END -->';
@@ -19,32 +20,26 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const pullRequestPayloadSchema = v.object({
+  pull_request: v.object({
+    body: v.optional(v.nullable(v.string())),
+    html_url: v.optional(v.string()),
+  }),
+});
 
-function parsePullRequestPayload(raw: string): { body: string } {
+function parsePullRequestPayload(raw: string): { body: string; htmlUrl?: string } {
   const payload: unknown = JSON.parse(raw);
-  if (!isRecord(payload)) {
-    fail('GitHub event payload must be an object.');
+  const result = v.safeParse(pullRequestPayloadSchema, payload);
+  if (!result.success) {
+    fail(
+      'GitHub event payload must include pull_request with a string body/html_url when present.'
+    );
   }
 
-  const pullRequest = payload.pull_request;
-  if (!isRecord(pullRequest)) {
-    fail('GitHub event payload is missing pull_request.');
-  }
-
-  const body = pullRequest.body;
-  if (body !== undefined && body !== null && typeof body !== 'string') {
-    fail('GitHub event pull_request.body must be a string when present.');
-  }
-
-  if (pullRequest.html_url !== undefined && typeof pullRequest.html_url !== 'string') {
-    fail('GitHub event pull_request.html_url must be a string when present.');
-  }
-
+  const pullRequest = result.output.pull_request;
   return {
-    body: body ?? '',
+    body: pullRequest.body ?? '',
+    ...(pullRequest.html_url ? { htmlUrl: pullRequest.html_url } : {}),
   };
 }
 
@@ -207,8 +202,8 @@ function main(): void {
 
   console.log('Preflight evidence check passed.');
   console.log(`Checked classes: ${checkedClasses.join(', ')}`);
-  if (payload.pull_request?.html_url) {
-    console.log(`PR: ${payload.pull_request.html_url}`);
+  if (payload.htmlUrl) {
+    console.log(`PR: ${payload.htmlUrl}`);
   }
 }
 
