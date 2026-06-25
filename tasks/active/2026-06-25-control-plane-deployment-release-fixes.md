@@ -47,10 +47,22 @@ Staging deployment and live Playwright verification are explicitly skipped for t
 - [x] Add a process-rule improvement for over-broad reconcile/sweep mutations.
 - [x] Add rule-02 post-mortem sections to this task before archiving.
 - [ ] Run full quality gates: lint, typecheck, tests, build, and CI.
-- [ ] Run specialist review: cloudflare-specialist, security-auditor, task-completion-validator, plus test-engineer/constitution-validator as applicable.
+- [x] Run specialist review: cloudflare-specialist, security-auditor, task-completion-validator, plus test-engineer/constitution-validator as applicable.
 - [ ] Archive this task only after task-completion-validator passes.
-- [ ] Create PR with explicit staging-skip justification, review evidence, test evidence, and post-mortem.
+- [x] Create PR with explicit staging-skip justification, review evidence, test evidence, and post-mortem.
 - [ ] Merge only after CI and all required non-staging gates are green.
+
+## Validation Evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1418
+- Local `pnpm --filter @simple-agent-manager/api typecheck`: passed.
+- Local `pnpm --filter @simple-agent-manager/api lint`: passed with existing warnings only.
+- Local focused API tests for reconcile, callback auth, and route ordering: passed.
+- Local `pnpm test`: passed, API 349 files / 5653 tests and web 197 files / 2427 tests.
+- Local `pnpm build`: passed.
+- CI before the task-evidence update: lint, typecheck, test, build, code quality, UI compliance, Pulumi, deploy-script validation, specialist evidence, benchmarks, and VM agent smoke checks passed. Preflight required a PR-body marker update and is rerunning on a new branch push.
+- Local Worker-pool execution caveat: `workerd` exits with signal 11 before importing tests for both the new Worker test and existing `tests/workers/deployment-routes.test.ts`, so CI is the authoritative Worker-pool runner.
+- Specialist review: cloudflare-specialist PASS; security-auditor PASS; test-engineer PASS with local Worker runtime caveat; constitution-validator PASS; task-completion-validator PASS/WARN with workflow-only items pending until final CI/archive/merge.
 
 ## Rule 02 Post-Mortem
 
