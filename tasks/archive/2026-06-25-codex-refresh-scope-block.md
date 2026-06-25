@@ -25,8 +25,8 @@ Critical constraints:
 - [x] Update tests that assert warn-and-persist to assert block-and-not-persist.
 - [x] Add or retain tests for expected-scope success and empty-allowlist opt-out success.
 - [x] Run local API unit tests for `codex-refresh-lock`.
-- [ ] Run local quality gates: lint, typecheck, tests, build as feasible.
-- [ ] Run local specialist review: security-auditor, cloudflare-specialist, test-engineer, constitution-validator, task-completion-validator.
+- [x] Run local quality gates: lint, typecheck, tests, build as feasible.
+- [x] Run local specialist review: security-auditor, cloudflare-specialist, test-engineer, constitution-validator, env-validator, task-completion-validator.
 
 ## Acceptance Criteria
 
