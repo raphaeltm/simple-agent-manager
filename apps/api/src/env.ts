@@ -472,7 +472,6 @@ export interface Env {
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string; // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string; // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
   CODEX_EXPECTED_SCOPES?: string; // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation
-  CODEX_SCOPE_VALIDATION_MODE?: string; // 'warn' (default) or 'block' — controls whether unexpected scopes block refresh (502) or just log a warning
   // Google OAuth (for GCP OIDC integration)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
