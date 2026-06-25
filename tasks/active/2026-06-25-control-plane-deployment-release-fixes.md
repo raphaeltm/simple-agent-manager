@@ -45,12 +45,32 @@ Staging deployment and live Playwright verification are explicitly skipped for t
 - [x] Add Miniflare vertical-slice/capability tests for both fixes using realistic D1 state.
 - [x] Update `.claude/rules/34-vm-agent-callback-auth.md` reference table for the extracted route and strengthen it against allowlist-based regressions.
 - [x] Add a process-rule improvement for over-broad reconcile/sweep mutations.
-- [ ] Add rule-02 post-mortem sections to this task before archiving.
+- [x] Add rule-02 post-mortem sections to this task before archiving.
 - [ ] Run full quality gates: lint, typecheck, tests, build, and CI.
 - [ ] Run specialist review: cloudflare-specialist, security-auditor, task-completion-validator, plus test-engineer/constitution-validator as applicable.
 - [ ] Archive this task only after task-completion-validator passes.
 - [ ] Create PR with explicit staging-skip justification, review evidence, test evidence, and post-mortem.
 - [ ] Merge only after CI and all required non-staging gates are green.
+
+## Rule 02 Post-Mortem
+
+### Bug 1: failed-initial release poisoning
+
+- **What broke**: A node reporting `failed-initial` with `appliedSeq=0` caused `reconcileDeploymentReleaseStatuses` to mark every release with `version > 0` as `failed`, including newly published releases the node had not attempted.
+- **Root cause**: The reconcile query treated terminal node status as a broad sweep over all releases newer than `appliedSeq` instead of scoping the write to the single release implied by the node's observed state. `git log -S reconcileDeploymentReleaseStatuses` traces the code path to `703b8b56 Add app deployment control surface and policy gate (#1356)`.
+- **Timeline**: Production D1 evidence in `sam-prod` confirmed the wedge on 2026-06-25. The task was created and fixed the same day on branch `sam/fix-two-independent-control-01kw0d`.
+- **Why existing gates missed it**: Tests covered the reconcile helper in isolation but did not assert the heartbeat ordering where reconcile runs before pending-release advertisement, and there was no vertical-slice D1 test for a node recovering from `failed-initial`.
+- **Bug class**: Reporter-scoped reconciliation failure. A control-plane reconcile loop mutated rows that were newer than the reporter's concrete evidence.
+- **Process fix**: `.claude/rules/02-quality-gates.md` now requires reporter-scoped reconciliation tests for broad update/delete/status-sweep code. Reconcile logic must prove it cannot mutate records that were not explicitly observed, listed, or derivable from the reporter payload.
+
+### Bug 2: deployment-release-events callback 401
+
+- **What broke**: The VM agent posts `POST /api/nodes/:id/deployment-release-events` with a node callback JWT, but the handler lived behind the `/api/nodes` session-auth wildcard. Because the wildcard allowlist omitted `/deployment-release-events`, valid agent callbacks received 401 before reaching callback JWT verification.
+- **Root cause**: A new VM-agent callback endpoint was added under the session-auth node route tree instead of being extracted as a dedicated callback-JWT route mounted before session-auth routers. `git log -S deployment-release-events` traces the route introduction to `082e9b71 Async compose publish jobs with polling (#1406)`.
+- **Timeline**: Production D1 evidence in `sam-prod` confirmed missing release event callbacks on 2026-06-25. This is the fifth recurrence of the rule-34 callback-auth class.
+- **Why existing gates missed it**: Existing route-order coverage protected the deploy-release callback route but did not enumerate every callback-JWT endpoint, and the rule-34 table did not yet include deployment release events.
+- **Bug class**: Callback JWT route hidden behind browser session middleware.
+- **Process fix**: `.claude/rules/34-vm-agent-callback-auth.md` now lists `deployment-release-events` as an extracted callback route, documents `/api/nodes` callback mounting order, and explicitly forbids fixing new callback routes by extending wildcard allowlists.
 
 ## Acceptance Criteria
 
