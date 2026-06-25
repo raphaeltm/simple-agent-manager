@@ -44,7 +44,7 @@ const MOCK_PROJECT = {
 // ---------------------------------------------------------------------------
 
 async function setupApiMocks(page: Page) {
-  await page.route('**/api/**', async (route: Route) => {
+  await page.route('http://localhost:8787/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
 
@@ -52,6 +52,7 @@ async function setupApiMocks(page: Page) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT] });
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/trial')) return respond(200, { available: false });
@@ -61,6 +62,11 @@ async function setupApiMocks(page: Page) {
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
       if (subPath.includes('/environments')) return respond(200, { environments: [] });
+      if (subPath.includes('/sessions')) return respond(200, { sessions: [], total: 0 });
+      if (subPath.includes('/tasks')) return respond(200, { tasks: [], total: 0 });
+      if (subPath.includes('/agent-profiles')) return respond(200, { items: [] });
+      if (subPath.includes('/skills')) return respond(200, { items: [] });
+      if (subPath.includes('/commands')) return respond(200, { commands: [] });
       if (!subPath) return respond(200, MOCK_PROJECT);
     }
 
@@ -81,6 +87,8 @@ for (const theme of ['dark', 'light'] as const) {
       // Desktop
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.goto('http://localhost:5173/projects/proj-test-1/deployments');
+      await page.getByRole('heading', { name: 'Deploy apps with your agents' }).waitFor();
+      await page.getByRole('link', { name: /Learn how deployments work/ }).waitFor();
       await page.waitForTimeout(1500);
       await screenshot(page, `deployments-empty-${theme}`);
       await assertNoOverflow(page);
@@ -88,6 +96,7 @@ for (const theme of ['dark', 'light'] as const) {
       // Mobile
       await page.setViewportSize({ width: 375, height: 667 });
       await page.waitForTimeout(800);
+      await page.getByRole('heading', { name: 'Deploy apps with your agents' }).waitFor();
       await screenshot(page, `deployments-empty-mobile-${theme}`);
       await assertNoOverflow(page);
     });
