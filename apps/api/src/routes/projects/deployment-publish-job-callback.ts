@@ -18,7 +18,7 @@ function optionalNumber(value: unknown): number | null {
 }
 
 deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/events', async (c) => {
-  const { projectId, workspaceId, db } = await verifyWorkspacePublishCallback(
+  const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
     c,
     'deployment_publish_job_event',
     'Invalid token scope for deployment publish job event'
@@ -31,7 +31,8 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
       and(
         eq(schema.deploymentPublishJobs.id, publishJobId),
         eq(schema.deploymentPublishJobs.projectId, projectId),
-        eq(schema.deploymentPublishJobs.workspaceId, workspaceId)
+        eq(schema.deploymentPublishJobs.workspaceId, workspaceId),
+        eq(schema.deploymentPublishJobs.requestedBy, userId)
       )
     )
     .limit(1);

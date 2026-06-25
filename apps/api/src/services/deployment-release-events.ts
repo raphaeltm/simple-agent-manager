@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -53,12 +53,16 @@ export async function appendDeploymentReleaseEvent(
     releaseId = release?.id ?? null;
   }
 
+  const seqWhere = releaseId
+    ? eq(schema.deploymentReleaseEvents.releaseId, releaseId)
+    : and(
+        eq(schema.deploymentReleaseEvents.environmentId, input.environmentId),
+        eq(schema.deploymentReleaseEvents.releaseVersion, releaseVersion ?? -1)
+      );
   const maxRows = await db
-    .select({ maxSeq: schema.deploymentReleaseEvents.seq })
+    .select({ maxSeq: sql<number>`coalesce(max(${schema.deploymentReleaseEvents.seq}), 0)` })
     .from(schema.deploymentReleaseEvents)
-    .where(eq(schema.deploymentReleaseEvents.nodeId, input.nodeId))
-    .orderBy(desc(schema.deploymentReleaseEvents.seq))
-    .limit(1);
+    .where(seqWhere);
   const seq = Number(maxRows[0]?.maxSeq ?? 0) + 1;
 
   await db.insert(schema.deploymentReleaseEvents).values({

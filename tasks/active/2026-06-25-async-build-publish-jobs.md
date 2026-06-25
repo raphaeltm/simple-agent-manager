@@ -39,7 +39,7 @@ SAM idea `01KVYWWTNB2808342VZYWR0NHB`, "Async build_and_publish jobs with pollin
 - [x] Add API tests for authorization, state transitions, callback persistence, polling output, and redaction.
 - [x] Add Go tests proving start-request cancellation after acceptance does not cancel background build/publish work.
 - [x] Add Go/API tests for deployment apply event emission/persistence.
-- [ ] Run normal TypeScript and Go validation workflows.
+- [x] Run normal TypeScript and Go validation workflows.
 
 ## Acceptance Criteria
 
