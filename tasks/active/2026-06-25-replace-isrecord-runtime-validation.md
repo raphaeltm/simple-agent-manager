@@ -24,7 +24,7 @@ The codebase has repeated local `isRecord` helpers that manually validate unknow
 - [x] Replace `experiments/ai-gateway-tool-call/experiment.ts` local `isRecord` parsing.
 - [x] Replace `experiments/harness-eval/runner.ts` local `isRecord` parsing.
 - [x] Confirm `rg -n "\bisRecord\b" apps scripts experiments packages` has no remaining local helper usage.
-- [ ] Run focused validation checks.
+- [x] Run focused validation checks.
 
 ## Acceptance Criteria
 
