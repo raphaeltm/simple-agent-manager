@@ -31,6 +31,7 @@ import (
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
+	"github.com/workspace/vm-agent/internal/publish"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
@@ -95,6 +96,9 @@ type Server struct {
 	callbackToken       string
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
+	publishJobsMu       sync.Mutex
+	publishJobs         map[string]publishJobState
+	buildPublishRunner  func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
 
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
@@ -464,6 +468,7 @@ func New(cfg *config.Config) (*Server, error) {
 		callbackToken:       cfg.CallbackToken,
 		httpClient:          config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 		done:                make(chan struct{}),
+		publishJobs:         make(map[string]publishJobState),
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
 	}
@@ -1019,6 +1024,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/expose-port", s.handleMcpExposePort)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish", s.handleMcpBuildAndPublish)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/start", s.handleMcpBuildAndPublishJobStart)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)

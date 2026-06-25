@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -47,6 +47,10 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	if err != nil {
 		return "", err
 	}
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
+	if err != nil {
+		return "", err
+	}
 
 	timeout := t.Timeout
 	if timeout == 0 {
@@ -57,9 +61,12 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	cmd.Dir = filepath.Clean(t.WorkDir)
+	cmd.Dir = boundary.root
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = 2 * time.Second
+	cmd.Cancel = func() error {
+		return killProcessGroup(cmd.Process)
+	}
 
 	stdout := &limitedBuffer{Limit: MaxBashOutputBytes}
 	stderr := &limitedBuffer{Limit: MaxBashOutputBytes}
@@ -67,11 +74,7 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	cmd.Stderr = stderr
 
 	err = cmd.Run()
-
-	// Kill the entire process group on context cancellation to prevent orphans.
-	if ctx.Err() != nil && cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	_ = killProcessGroup(cmd.Process)
 
 	var result strings.Builder
 	if stdout.Len() > 0 {
@@ -108,6 +111,17 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		return "(no output)", nil
 	}
 	return result.String(), nil
+}
+
+func killProcessGroup(process *os.Process) error {
+	if process == nil {
+		return nil
+	}
+	err := syscall.Kill(-process.Pid, syscall.SIGKILL)
+	if err == nil || err == syscall.ESRCH {
+		return nil
+	}
+	return err
 }
 
 type limitedBuffer struct {

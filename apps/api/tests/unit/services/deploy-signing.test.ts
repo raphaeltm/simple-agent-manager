@@ -2,13 +2,14 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { deriveDeploySigningPublicKey } from '../../../../../scripts/deploy/deploy-signing-keys';
 import { hashInterpolationEnv, signDeployPayload } from '../../../src/services/deploy-signing';
 
 const TEST_SEED_B64 = 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=';
 const TEST_PUBLIC_KEY_B64 = 'ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=';
 const CONTRACT_FIXTURE_URL = new URL(
   '../../../../../tests/fixtures/deploy-release/apply-payload-with-routes.json',
-  import.meta.url,
+  import.meta.url
 );
 
 function fromBase64(value: string): Uint8Array {
@@ -46,18 +47,32 @@ async function signableBytes(payload: {
 }
 
 describe('signDeployPayload', () => {
+  it('derives the Worker deploy signing public key from seed and Go-format private keys', () => {
+    const goPrivateKey = Buffer.concat([
+      Buffer.from(TEST_SEED_B64, 'base64'),
+      Buffer.from(TEST_PUBLIC_KEY_B64, 'base64'),
+    ]).toString('base64');
+
+    expect(deriveDeploySigningPublicKey(TEST_SEED_B64)).toBe(TEST_PUBLIC_KEY_B64);
+    expect(deriveDeploySigningPublicKey(goPrivateKey)).toBe(TEST_PUBLIC_KEY_B64);
+  });
+
   it('hashes interpolation env as sorted key-value entries', async () => {
     await expect(hashInterpolationEnv({ B: 'two', A: 'one' })).resolves.toBe(
       await hashInterpolationEnv({ A: 'one', B: 'two' })
     );
-    await expect(hashInterpolationEnv({
-      DATABASE_URL: 'postgres://user:pass@host/db',
-      MULTILINE_SECRET: 'line one\nline two',
-    })).resolves.toBe(
-      await sha256Hex(JSON.stringify([
-        ['DATABASE_URL', 'postgres://user:pass@host/db'],
-        ['MULTILINE_SECRET', 'line one\nline two'],
-      ]))
+    await expect(
+      hashInterpolationEnv({
+        DATABASE_URL: 'postgres://user:pass@host/db',
+        MULTILINE_SECRET: 'line one\nline two',
+      })
+    ).resolves.toBe(
+      await sha256Hex(
+        JSON.stringify([
+          ['DATABASE_URL', 'postgres://user:pass@host/db'],
+          ['MULTILINE_SECRET', 'line one\nline two'],
+        ])
+      )
     );
     await expect(hashInterpolationEnv(undefined)).resolves.toBe(
       await sha256Hex(JSON.stringify([]))
@@ -93,15 +108,17 @@ describe('signDeployPayload', () => {
       fromBase64(TEST_PUBLIC_KEY_B64),
       { name: 'Ed25519' },
       false,
-      ['verify'],
+      ['verify']
     );
 
-    await expect(crypto.subtle.verify(
-      'Ed25519',
-      publicKey,
-      fromBase64(signature),
-      await signableBytes(payload),
-    )).resolves.toBe(true);
+    await expect(
+      crypto.subtle.verify(
+        'Ed25519',
+        publicKey,
+        fromBase64(signature),
+        await signableBytes(payload)
+      )
+    ).resolves.toBe(true);
   });
 
   it('accepts Go-format private keys containing seed plus public key bytes', async () => {
@@ -110,17 +127,22 @@ describe('signDeployPayload', () => {
       Buffer.from(TEST_PUBLIC_KEY_B64, 'base64'),
     ]).toString('base64');
 
-    await expect(signDeployPayload({
-      environmentId: 'env-1',
-      nodeId: 'node-1',
-      seq: 1,
-      expiresAt: 1_800_000_000,
-      composeYaml: 'services: {}\n',
-      routes: [],
-      interpolationEnv: {},
-    }, {
-      DEPLOY_SIGNING_PRIVATE_KEY: goPrivateKey,
-    })).resolves.toEqual(expect.any(String));
+    await expect(
+      signDeployPayload(
+        {
+          environmentId: 'env-1',
+          nodeId: 'node-1',
+          seq: 1,
+          expiresAt: 1_800_000_000,
+          composeYaml: 'services: {}\n',
+          routes: [],
+          interpolationEnv: {},
+        },
+        {
+          DEPLOY_SIGNING_PRIVATE_KEY: goPrivateKey,
+        }
+      )
+    ).resolves.toEqual(expect.any(String));
   });
 
   it('includes artifact descriptors in the signed payload', async () => {
@@ -155,7 +177,7 @@ describe('signDeployPayload', () => {
       fromBase64(TEST_PUBLIC_KEY_B64),
       { name: 'Ed25519' },
       false,
-      ['verify'],
+      ['verify']
     );
     const mutated = {
       ...payload,
@@ -167,12 +189,14 @@ describe('signDeployPayload', () => {
       ],
     };
 
-    await expect(crypto.subtle.verify(
-      'Ed25519',
-      publicKey,
-      fromBase64(signature),
-      await signableBytes(mutated),
-    )).resolves.toBe(false);
+    await expect(
+      crypto.subtle.verify(
+        'Ed25519',
+        publicKey,
+        fromBase64(signature),
+        await signableBytes(mutated)
+      )
+    ).resolves.toBe(false);
   });
 
   it('matches the shared API-to-vm-agent route payload contract fixture', async () => {
@@ -186,8 +210,10 @@ describe('signDeployPayload', () => {
       signature: string;
     };
 
-    await expect(signDeployPayload(fixture, {
-      DEPLOY_SIGNING_PRIVATE_KEY: TEST_SEED_B64,
-    })).resolves.toBe(fixture.signature);
+    await expect(
+      signDeployPayload(fixture, {
+        DEPLOY_SIGNING_PRIVATE_KEY: TEST_SEED_B64,
+      })
+    ).resolves.toBe(fixture.signature);
   });
 });

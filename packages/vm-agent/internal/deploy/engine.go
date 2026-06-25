@@ -257,9 +257,11 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	if err := verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
 		return fmt.Errorf("payload verification failed: %w", err)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.payload_verified", "verify_payload", "deployment payload verified", map[string]any{"previousSeq": currentSeq})
 
 	slog.Info("deploy.apply: starting",
 		"seq", payload.Seq, "prevSeq", currentSeq)
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.started", "apply", "deployment apply started", map[string]any{"previousSeq": currentSeq, "artifactCount": len(payload.Artifacts)})
 	applyEnv := payload.InterpolationEnv
 	redactor := newEnvRedactor(applyEnv)
 
@@ -286,6 +288,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	if err := e.disk.WriteRelease(newState, payload.ComposeYAML, caddyfile); err != nil {
 		return fmt.Errorf("write release to disk: %w", err)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.release_written", "write_release", "release files written to disk", nil)
 
 	// Tear down the previous release's containers to free host ports.
 	// Each release renders as a distinct compose project, so consecutive releases
@@ -295,11 +298,15 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		prevComposeFile := e.disk.ComposeFilePath(currentSeq)
 		slog.Info("deploy.apply: tearing down previous release to free ports",
 			"prevSeq", currentSeq)
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.previous_down_started", "previous_down", "stopping previous release containers", map[string]any{"previousSeq": currentSeq})
 		if err := e.composeDown(ctx, prevComposeFile, applyEnv); err != nil {
 			slog.Warn("deploy.apply: failed to tear down previous release",
 				"prevSeq", currentSeq, "error", err)
+			e.reportApplyEvent(ctx, payload, "warn", "deployment.apply.previous_down_failed", "previous_down", "failed to stop previous release containers", map[string]any{"previousSeq": currentSeq, "error": err.Error()})
 			// Continue anyway — the port may still be free if the previous
 			// containers already exited or were removed externally.
+		} else {
+			e.reportApplyEvent(ctx, payload, "info", "deployment.apply.previous_down_completed", "previous_down", "previous release containers stopped", map[string]any{"previousSeq": currentSeq})
 		}
 	}
 
@@ -307,6 +314,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	if payload.RegistryCredentials != nil {
 		slog.Info("deploy.apply: authenticating to container registry",
 			"server", payload.RegistryCredentials.Server)
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.registry_login_started", "registry_login", "authenticating to container registry", map[string]any{"server": payload.RegistryCredentials.Server})
 		loginFn := e.cfg.DockerLogin
 		if loginFn == nil {
 			loginFn = cache.DockerLogin
@@ -318,6 +326,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		); err != nil {
 			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("docker login: %w", err)), applyEnv)
 		}
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.registry_login_completed", "registry_login", "container registry authentication completed", map[string]any{"server": payload.RegistryCredentials.Server})
 	}
 
 	// Volume mount guard: refuse to apply if required SAM volumes are not mounted.
@@ -330,42 +339,57 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	if err := verifyVolumeMounts(payload.ComposeYAML, mountChecker); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(err), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.volume_mounts_verified", "volume_mounts", "volume mounts verified", nil)
 
 	// Execute docker compose
 	composeFile := e.disk.ComposeFilePath(payload.Seq)
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.artifacts_load_started", "load_artifacts", "loading image artifacts", map[string]any{"artifactCount": len(payload.Artifacts)})
 	if err := e.loadImageArtifacts(ctx, payload.Artifacts); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("load image artifacts: %w", err)), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.artifacts_load_completed", "load_artifacts", "image artifacts loaded", map[string]any{"artifactCount": len(payload.Artifacts)})
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_config_started", "compose_config", "running compose config preflight", nil)
 	if err := e.composeConfigPreflight(ctx, composeFile, applyEnv); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose config: %w", err)), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_config_completed", "compose_config", "compose config preflight completed", nil)
 
 	if len(payload.Artifacts) == 0 {
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_pull_started", "compose_pull", "pulling compose images", nil)
 		if err := e.composePull(ctx, composeFile, applyEnv); err != nil {
 			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose pull: %w", err)), applyEnv)
 		}
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_pull_completed", "compose_pull", "compose images pulled", nil)
 	} else {
 		slog.Info("deploy.apply: skipping compose pull for artifact-backed release",
 			"seq", payload.Seq, "artifactCount", len(payload.Artifacts))
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_pull_skipped", "compose_pull", "skipped compose pull for artifact-backed release", map[string]any{"artifactCount": len(payload.Artifacts)})
 	}
 
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_up_started", "compose_up", "starting compose services", nil)
 	if err := e.composeUp(ctx, composeFile, applyEnv); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("compose up: %w", err)), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.compose_up_completed", "compose_up", "compose services started", nil)
 
 	// Wait for health checks
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.health_check_started", "health_check", "waiting for deployment health checks", nil)
 	if err := e.waitForHealth(ctx, payload.Seq, payload.Routes, applyEnv); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("health check: %w", err)), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.health_check_completed", "health_check", "deployment health checks passed", nil)
 
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.caddy_reload_started", "caddy_reload", "reloading Caddy configuration", nil)
 	if err := e.reloadCaddy(ctx, e.disk.CaddyfilePath(payload.Seq)); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("caddy reload: %w", err)), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.caddy_reload_completed", "caddy_reload", "Caddy configuration reloaded", nil)
 
 	newState.Status = StatusApplied
 	if err := e.disk.UpdateState(newState); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("update applied metadata: %w", err)), applyEnv)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.state_persisted", "persist_state", "applied state persisted", nil)
 
 	// Success: update current pointer only after metadata is durably applied.
 	if err := e.disk.SetCurrent(payload.Seq); err != nil {
@@ -380,6 +404,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	})
 
 	slog.Info("deploy.apply: success", "seq", payload.Seq)
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.succeeded", "succeeded", "deployment apply succeeded", nil)
 	return nil
 }
 
@@ -387,6 +412,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, previousSeq int64, applyErr error, applyEnv map[string]string) error {
 	slog.Error("deploy.apply: failed, reverting",
 		"seq", state.Seq, "prevSeq", previousSeq, "error", applyErr)
+	e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: state.EnvironmentID, NodeID: state.NodeID, Seq: state.Seq}, "error", "deployment.apply.failed", "failed", "deployment apply failed", map[string]any{"previousSeq": previousSeq, "error": applyErr.Error()})
 
 	state.FailedAt = time.Now().UTC()
 	state.ErrorMessage = applyErr.Error()
@@ -397,6 +423,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 		// Stop any containers that may have started
 		composeFile := e.disk.ComposeFilePath(state.Seq)
+		e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: state.EnvironmentID, NodeID: state.NodeID, Seq: state.Seq}, "info", "deployment.apply.cleanup_started", "cleanup_failed_initial", "stopping containers after failed initial apply", nil)
 		if err := e.composeDown(ctx, composeFile, applyEnv); err != nil {
 			slog.Warn("deploy.apply: failed to stop containers after failed-initial",
 				"error", err)
@@ -417,6 +444,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 			Status:       StatusFailedInitial,
 			ErrorMessage: applyErr.Error(),
 		})
+		e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: state.EnvironmentID, NodeID: state.NodeID, Seq: state.Seq}, "error", "deployment.apply.failed_initial", "failed_initial", "deployment apply failed with no previous release to revert to", map[string]any{"error": applyErr.Error()})
 		return errors.Join(
 			fmt.Errorf("apply failed (no previous release to revert): %w", applyErr),
 			errors.Join(persistenceErrs...),
@@ -426,6 +454,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 	// Revert to previous release
 	var recoveryErrs []error
 	state.Status = StatusFailed
+	e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: state.EnvironmentID, NodeID: state.NodeID, Seq: state.Seq}, "info", "deployment.apply.revert_started", "revert", "reverting to previous release", map[string]any{"previousSeq": previousSeq})
 	if err := e.disk.UpdateState(state); err != nil {
 		slog.Error("deploy.apply: failed to persist failed release state",
 			"seq", state.Seq, "error", err)
@@ -495,6 +524,7 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 
 	slog.Info("deploy.apply: reverted to previous release",
 		"failedSeq", state.Seq, "revertedTo", previousSeq)
+	e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: state.EnvironmentID, NodeID: state.NodeID, Seq: state.Seq}, "warn", "deployment.apply.reverted", "revert", "deployment reverted to previous release", map[string]any{"previousSeq": previousSeq, "error": applyErr.Error()})
 	return errors.Join(
 		fmt.Errorf("apply failed, reverted to seq %d: %w", previousSeq, applyErr),
 		errors.Join(recoveryErrs...),
@@ -516,10 +546,12 @@ func (e *Engine) setObserved(state ObservedState) {
 
 // FetchAndApply fetches the apply payload from the control plane and applies it.
 func (e *Engine) FetchAndApply(ctx context.Context, pendingSeq int64) error {
+	e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: e.cfg.EnvironmentID, NodeID: e.cfg.NodeID, Seq: pendingSeq}, "info", "deployment.apply.fetch_started", "fetch_release", "fetching pending deployment release", nil)
 	payload, err := e.fetchRelease(ctx, pendingSeq)
 	if err != nil {
 		return fmt.Errorf("fetch release seq=%d: %w", pendingSeq, err)
 	}
+	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.fetch_completed", "fetch_release", "pending deployment release fetched", map[string]any{"artifactCount": len(payload.Artifacts)})
 	return e.Apply(ctx, payload)
 }
 

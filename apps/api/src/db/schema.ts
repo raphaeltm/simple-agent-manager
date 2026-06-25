@@ -1088,7 +1088,10 @@ export const skillRuntimeFiles = sqliteTable(
     contentIv: text('content_iv'),
   },
   (table) => ({
-    skillPathUnique: uniqueIndex('idx_skill_runtime_files_skill_path').on(table.skillId, table.filePath),
+    skillPathUnique: uniqueIndex('idx_skill_runtime_files_skill_path').on(
+      table.skillId,
+      table.filePath
+    ),
     userSkillIdx: index('idx_skill_runtime_files_user_skill').on(table.userId, table.skillId),
   })
 );
@@ -1877,13 +1880,17 @@ export const deploymentEnvironments = sqliteTable(
   (table) => ({
     projectNameUnique: uniqueIndex('idx_deployment_environments_project_name').on(
       table.projectId,
-      table.name,
+      table.name
     ),
     projectIdIdx: index('idx_deployment_environments_project_id').on(table.projectId),
     nodeIdIdx: index('idx_deployment_environments_node_id').on(table.nodeId),
-    observedStatusIdx: index('idx_deployment_environments_observed_status').on(table.observedStatus),
-    agentDeployEnabledIdx: index('idx_deployment_environments_agent_deploy_enabled').on(table.agentDeployEnabled),
-  }),
+    observedStatusIdx: index('idx_deployment_environments_observed_status').on(
+      table.observedStatus
+    ),
+    agentDeployEnabledIdx: index('idx_deployment_environments_agent_deploy_enabled').on(
+      table.agentDeployEnabled
+    ),
+  })
 );
 
 export type DeploymentEnvironmentRow = typeof deploymentEnvironments.$inferSelect;
@@ -1913,10 +1920,10 @@ export const deploymentSecrets = sqliteTable(
   (table) => ({
     envNameUnique: uniqueIndex('idx_deployment_secrets_env_name').on(
       table.environmentId,
-      table.name,
+      table.name
     ),
     environmentIdIdx: index('idx_deployment_secrets_environment_id').on(table.environmentId),
-  }),
+  })
 );
 
 export type DeploymentSecretRow = typeof deploymentSecrets.$inferSelect;
@@ -1951,16 +1958,15 @@ export const deploymentEnvironmentConfigVars = sqliteTable(
   (table) => ({
     envKeyUnique: uniqueIndex('idx_deployment_environment_config_vars_env_key').on(
       table.environmentId,
-      table.envKey,
+      table.envKey
     ),
     environmentIdIdx: index('idx_deployment_environment_config_vars_environment_id').on(
-      table.environmentId,
+      table.environmentId
     ),
-  }),
+  })
 );
 
-export type DeploymentEnvironmentConfigVarRow =
-  typeof deploymentEnvironmentConfigVars.$inferSelect;
+export type DeploymentEnvironmentConfigVarRow = typeof deploymentEnvironmentConfigVars.$inferSelect;
 export type NewDeploymentEnvironmentConfigVarRow =
   typeof deploymentEnvironmentConfigVars.$inferInsert;
 
@@ -1994,14 +2000,178 @@ export const deploymentReleases = sqliteTable(
     environmentIdIdx: index('idx_deployment_releases_environment_id').on(table.environmentId),
     envVersionUnique: uniqueIndex('idx_deployment_releases_env_version').on(
       table.environmentId,
-      table.version,
+      table.version
     ),
     sourceIdx: index('idx_deployment_releases_source').on(table.source),
-  }),
+  })
 );
 
 export type DeploymentReleaseRow = typeof deploymentReleases.$inferSelect;
 export type NewDeploymentReleaseRow = typeof deploymentReleases.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT PUBLISH JOBS
+// =============================================================================
+
+export const deploymentPublishJobs = sqliteTable(
+  'deployment_publish_jobs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').notNull(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    taskId: text('task_id'),
+    agentProfileId: text('agent_profile_id'),
+    requestedBy: text('requested_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    environmentName: text('environment_name').notNull(),
+    reference: text('reference').notNull().default('latest'),
+    workingDir: text('working_dir'),
+    sourceDir: text('source_dir'),
+    status: text('status').notNull().default('queued'),
+    currentStep: text('current_step'),
+    releaseId: text('release_id').references(() => deploymentReleases.id, {
+      onDelete: 'set null',
+    }),
+    releaseVersion: integer('release_version'),
+    releaseStatus: text('release_status'),
+    errorMessage: text('error_message'),
+    errorCode: text('error_code'),
+    retryable: integer('retryable', { mode: 'boolean' }).notNull().default(false),
+    attempt: integer('attempt').notNull().default(1),
+    lastEventAt: text('last_event_at'),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectCreatedAtIdx: index('idx_deployment_publish_jobs_project_created_at').on(
+      table.projectId,
+      table.createdAt
+    ),
+    environmentCreatedAtIdx: index('idx_deployment_publish_jobs_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+    workspaceCreatedAtIdx: index('idx_deployment_publish_jobs_workspace_created_at').on(
+      table.workspaceId,
+      table.createdAt
+    ),
+    statusUpdatedAtIdx: index('idx_deployment_publish_jobs_status_updated_at').on(
+      table.status,
+      table.updatedAt
+    ),
+    releaseIdIdx: index('idx_deployment_publish_jobs_release_id').on(table.releaseId),
+  })
+);
+
+export type DeploymentPublishJobRow = typeof deploymentPublishJobs.$inferSelect;
+export type NewDeploymentPublishJobRow = typeof deploymentPublishJobs.$inferInsert;
+
+export const deploymentPublishJobEvents = sqliteTable(
+  'deployment_publish_job_events',
+  {
+    id: text('id').primaryKey(),
+    publishJobId: text('publish_job_id')
+      .notNull()
+      .references(() => deploymentPublishJobs.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').notNull(),
+    seq: integer('seq').notNull(),
+    level: text('level').notNull().default('info'),
+    eventType: text('event_type').notNull(),
+    step: text('step'),
+    message: text('message').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    jobSeqUnique: uniqueIndex('idx_deployment_publish_job_events_job_seq').on(
+      table.publishJobId,
+      table.seq
+    ),
+    projectCreatedAtIdx: index('idx_deployment_publish_job_events_project_created_at').on(
+      table.projectId,
+      table.createdAt
+    ),
+    environmentCreatedAtIdx: index('idx_deployment_publish_job_events_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+  })
+);
+
+export type DeploymentPublishJobEventRow = typeof deploymentPublishJobEvents.$inferSelect;
+export type NewDeploymentPublishJobEventRow = typeof deploymentPublishJobEvents.$inferInsert;
+
+export const deploymentReleaseEvents = sqliteTable(
+  'deployment_release_events',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    releaseId: text('release_id').references(() => deploymentReleases.id, {
+      onDelete: 'cascade',
+    }),
+    releaseVersion: integer('release_version'),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    level: text('level').notNull().default('info'),
+    eventType: text('event_type').notNull(),
+    step: text('step'),
+    message: text('message').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    releaseSeqIdx: index('idx_deployment_release_events_release_seq').on(
+      table.releaseId,
+      table.seq
+    ),
+    environmentCreatedAtIdx: index('idx_deployment_release_events_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+    nodeCreatedAtIdx: index('idx_deployment_release_events_node_created_at').on(
+      table.nodeId,
+      table.createdAt
+    ),
+  })
+);
+
+export type DeploymentReleaseEventRow = typeof deploymentReleaseEvents.$inferSelect;
+export type NewDeploymentReleaseEventRow = typeof deploymentReleaseEvents.$inferInsert;
 
 // =============================================================================
 // DEPLOYMENT VOLUMES
@@ -2032,10 +2202,10 @@ export const deploymentVolumes = sqliteTable(
   (table) => ({
     envNameUnique: uniqueIndex('idx_deployment_volumes_env_name').on(
       table.environmentId,
-      table.name,
+      table.name
     ),
     environmentIdIdx: index('idx_deployment_volumes_environment_id').on(table.environmentId),
-  }),
+  })
 );
 
 export type DeploymentVolumeRow = typeof deploymentVolumes.$inferSelect;
@@ -2077,10 +2247,8 @@ export const deploymentCustomDomains = sqliteTable(
   },
   (table) => ({
     hostnameUnique: uniqueIndex('idx_deployment_custom_domains_hostname').on(table.hostname),
-    environmentIdIdx: index('idx_deployment_custom_domains_environment_id').on(
-      table.environmentId,
-    ),
-  }),
+    environmentIdIdx: index('idx_deployment_custom_domains_environment_id').on(table.environmentId),
+  })
 );
 
 export type DeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferSelect;
@@ -2112,7 +2280,7 @@ export const ccCredentials = sqliteTable(
   (table) => ({
     ownerIdx: index('idx_cc_credentials_owner').on(table.ownerId),
     ownerKindIdx: index('idx_cc_credentials_owner_kind').on(table.ownerId, table.kind),
-  }),
+  })
 );
 
 export type CCCredentialRow = typeof ccCredentials.$inferSelect;
@@ -2128,7 +2296,9 @@ export const ccConfigurations = sqliteTable(
     name: text('name').notNull(),
     consumerKind: text('consumer_kind').notNull(), // 'agent' | 'compute'
     consumerTarget: text('consumer_target').notNull(), // 'claude-code' | 'hetzner' etc.
-    credentialId: text('credential_id').references(() => ccCredentials.id, { onDelete: 'set null' }),
+    credentialId: text('credential_id').references(() => ccCredentials.id, {
+      onDelete: 'set null',
+    }),
     settingsJson: text('settings_json'), // JSON blob
     isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
     createdAt: text('created_at')
@@ -2141,7 +2311,7 @@ export const ccConfigurations = sqliteTable(
   (table) => ({
     ownerIdx: index('idx_cc_configurations_owner').on(table.ownerId),
     credentialIdx: index('idx_cc_configurations_credential').on(table.credentialId),
-  }),
+  })
 );
 
 export type CCConfigurationRow = typeof ccConfigurations.$inferSelect;
@@ -2173,16 +2343,16 @@ export const ccAttachments = sqliteTable(
     userConsumerIdx: index('idx_cc_attachments_user_consumer').on(
       table.userId,
       table.consumerKind,
-      table.consumerTarget,
+      table.consumerTarget
     ),
     projectIdx: index('idx_cc_attachments_project').on(
       table.userId,
       table.projectId,
       table.consumerKind,
-      table.consumerTarget,
+      table.consumerTarget
     ),
     configIdx: index('idx_cc_attachments_config').on(table.configurationId),
-  }),
+  })
 );
 
 export type CCAttachmentRow = typeof ccAttachments.$inferSelect;

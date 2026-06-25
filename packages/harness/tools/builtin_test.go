@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -203,6 +205,64 @@ func TestBash_WorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestBash_RejectsEmptyWorkDir(t *testing.T) {
+	tool := &Bash{}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"command": "pwd",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty workdir")
+	}
+	if !strings.Contains(err.Error(), "workdir must not be empty") {
+		t.Errorf("error = %v, want empty workdir error", err)
+	}
+}
+
+func TestBash_RejectsInvalidWorkDir(t *testing.T) {
+	tool := &Bash{WorkDir: filepath.Join(t.TempDir(), "missing")}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"command": "pwd",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid workdir")
+	}
+	if !strings.Contains(err.Error(), "resolving workdir symlinks") && !strings.Contains(err.Error(), "stat workdir") {
+		t.Errorf("error = %v, want invalid workdir error", err)
+	}
+}
+
+func TestBash_CleansSuccessfulBackgroundChild(t *testing.T) {
+	dir := tmpDir(t)
+	pidFile := filepath.Join(dir, "bg.pid")
+	tool := &Bash{WorkDir: dir}
+
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": "sleep 30 </dev/null >/dev/null 2>&1 & printf '%s\n' \"$!\" > bg.pid; echo done",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "done") {
+		t.Fatalf("result = %q, want successful command output", result)
+	}
+
+	pidData, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("expected background pid file: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil {
+		t.Fatalf("invalid background pid %q: %v", pidData, err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	})
+
+	if !waitForProcessExit(pid, 1*time.Second) {
+		t.Fatalf("background child pid %d is still alive after Bash.Execute returned", pid)
+	}
+}
+
 func TestReadFile_PathTraversal(t *testing.T) {
 	dir := tmpDir(t)
 	tool := &ReadFile{WorkDir: dir}
@@ -364,4 +424,22 @@ func TestBash_TruncatesStdoutAndStderr(t *testing.T) {
 	if !strings.Contains(result, "truncated stderr") {
 		t.Fatalf("expected stderr truncation message")
 	}
+}
+
+func waitForProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !processExists(pid) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func processExists(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
 }
