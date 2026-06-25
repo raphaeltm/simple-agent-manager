@@ -83,8 +83,18 @@ for (const theme of ['dark', 'light'] as const) {
 
       // Assert real content rendered — not a blank Vite shell or ErrorBoundary
       await expect(page.getByRole('heading', { name: 'Deploy apps with your agents' })).toBeVisible();
-      await expect(page.getByText('Learn how deployments work')).toBeVisible();
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
+
+      // Docs link opens in new tab
+      const docsLink = page.getByRole('link', { name: /Learn how deployments work/ });
+      await expect(docsLink).toBeVisible();
+      await expect(docsLink).toHaveAttribute('target', '_blank');
+      await expect(docsLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+      // "Create first environment" button pre-fills name input
+      await page.getByRole('button', { name: 'Create first environment' }).click();
+      const nameInput = page.locator('#deployment-env-name');
+      await expect(nameInput).toHaveValue('staging');
 
       await screenshot(page, `deployments-empty-${theme}`);
       await assertNoOverflow(page);
