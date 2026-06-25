@@ -117,6 +117,13 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_VM_AGENT_ERROR_BODY_BYTES` — Max VM agent error request body (default: 32768)
 - `MAX_VM_AGENT_ERROR_BATCH_SIZE` — Max VM agent errors per request (default: 10)
 
+### Project File Library
+
+- `LIBRARY_LIST_DEFAULT_PAGE_SIZE` — Default file-list page size (default: 50)
+- `LIBRARY_LIST_MAX_PAGE_SIZE` — Maximum file-list page size (default: 200)
+- `LIBRARY_TAG_QUERY_BATCH_SIZE` — File IDs per tag metadata lookup query (default: 80, capped below D1 bind-variable limits)
+- Other library upload, directory, search, preview, and encryption settings are listed in `apps/api/.env.example`.
+
 ### Codex OAuth Refresh Proxy (`CodexRefreshLock` DO + `/api/auth/codex-refresh`)
 
 - `CODEX_REFRESH_PROXY_ENABLED` — Kill switch; set to `'false'` to disable the proxy entirely (default: enabled)

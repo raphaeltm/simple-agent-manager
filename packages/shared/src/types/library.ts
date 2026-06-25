@@ -159,6 +159,8 @@ export const LIBRARY_DEFAULTS = {
   LIST_DEFAULT_PAGE_SIZE: 50,
   /** Maximum page size for list queries (default: 200). Env: LIBRARY_LIST_MAX_PAGE_SIZE */
   LIST_MAX_PAGE_SIZE: 200,
+  /** File IDs per tag lookup query (default: 80). Env: LIBRARY_TAG_QUERY_BATCH_SIZE */
+  TAG_QUERY_BATCH_SIZE: 80,
   /** Maximum directory nesting depth (default: 10). Env: LIBRARY_MAX_DIRECTORY_DEPTH */
   MAX_DIRECTORY_DEPTH: 10,
   /** Maximum directory path length in chars (default: 500). Env: LIBRARY_MAX_DIRECTORY_PATH_LENGTH */
