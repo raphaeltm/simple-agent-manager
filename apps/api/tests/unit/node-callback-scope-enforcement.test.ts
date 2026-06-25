@@ -53,6 +53,11 @@ vi.mock('../../src/services/jwt', () => ({
   shouldRefreshCallbackToken: vi.fn().mockReturnValue(false),
 }));
 
+const mockIssueNodeOriginCertificate = vi.fn();
+vi.mock('../../src/services/origin-ca-certificates', () => ({
+  issueNodeOriginCertificate: (...args: unknown[]) => mockIssueNodeOriginCertificate(...args),
+}));
+
 // Mock other dependencies
 vi.mock('../../src/services/nodes', () => ({
   createNodeRecord: vi.fn(),
@@ -120,6 +125,13 @@ describe('node callback auth — scope enforcement', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockIssueNodeOriginCertificate.mockResolvedValue({
+      certificate: '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n',
+      certificateId: 'cert-123',
+      expiresOn: '2026-07-02T00:00:00Z',
+      hostnames: ['*.example.com', '*.vm.example.com', 'example.com'],
+      requestedValidity: 7,
+    });
     app = await createTestApp();
   });
 
@@ -251,5 +263,44 @@ describe('node callback auth — scope enforcement', () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.message).toBe('Callback token does not match node');
+  });
+
+  it('ACCEPTS same-node tokens on origin certificate endpoint and returns the signed certificate', async () => {
+    mockVerifyCallbackToken.mockResolvedValue({
+      workspace: 'node-test',
+      type: 'callback',
+      scope: 'node',
+    });
+
+    const csr = [
+      '-----BEGIN CERTIFICATE REQUEST-----',
+      'MIIBUzCB/QIBADAWMRQwEgYDVQQDEwtub2RlLXRlc3QwXDANBgkqhkiG9w0BAQEF',
+      'AANLADBIAkEA0HP1uR9jfnFvD6h9P5gQ2fVw0tZNNqYiT7WL4S2c5tqR0CkW3Jj3',
+      'o9C5zU3n+J8z9kA2q7dLa8YyMPpH6wIDAQABoAAwDQYJKoZIhvcNAQELBQADQQAF',
+      'y8QvVrrqzXK6yH9E8pFzj0yJrUiXjZk5GmQxG1c5M4n0Qv7YqgC6h8jYwKpR2sU',
+      '-----END CERTIFICATE REQUEST-----',
+    ].join('\n');
+
+    const env = { BASE_DOMAIN: 'example.com' };
+    const res = await app.request(
+      '/api/nodes/node-test/origin-ca-certificate',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer node-token',
+          'Content-Type': 'text/plain',
+        },
+        body: csr,
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/plain');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    await expect(res.text()).resolves.toBe(
+      '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n'
+    );
+    expect(mockIssueNodeOriginCertificate).toHaveBeenCalledWith(env, csr);
   });
 });

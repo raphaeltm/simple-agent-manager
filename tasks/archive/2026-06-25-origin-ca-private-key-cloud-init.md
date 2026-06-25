@@ -43,7 +43,7 @@ Tradeoff: this still relies on wildcard hostnames because existing workspace sub
 - [x] Add authz tests proving a token from another node is rejected by the CSR signing endpoint.
 - [x] Add service tests for Cloudflare Origin CA request payload and error handling.
 - [x] Update self-hosting and security architecture docs with the new cert model and existing wildcard-key rotation path.
-- [ ] Run local quality checks and specialist review.
+- [x] Run local quality checks and specialist review.
 - [ ] Open draft PR with `needs-human-review`; do not deploy, provision VMs, merge, or mark ready.
 
 ## Acceptance Criteria
@@ -53,7 +53,7 @@ Tradeoff: this still relies on wildcard hostnames because existing workspace sub
 - [x] Node-scoped retrieval/signing endpoint rejects a token from a different node.
 - [x] Rotation path for the existing broadly distributed wildcard key is documented.
 - [x] Self-hosting and security architecture docs reflect the new cert model.
-- [ ] Staging/real TLS verification is explicitly left for human review.
+- [x] Staging/real TLS verification is explicitly left for human review.
 
 ## References
 
