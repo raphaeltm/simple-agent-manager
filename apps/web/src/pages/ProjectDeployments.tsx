@@ -1,5 +1,5 @@
-import { Alert, Button, EmptyState, Input, SkeletonCard } from '@simple-agent-manager/ui';
-import { Plus, RefreshCw, Rocket } from 'lucide-react';
+import { Alert, Button, Input, SkeletonCard } from '@simple-agent-manager/ui';
+import { ExternalLink, Plus, RefreshCw, Rocket } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { DeploymentEnvironmentSummaryCard } from '../components/deployments/DeploymentEnvironmentSummaryCard';
@@ -149,12 +149,35 @@ export function ProjectDeployments() {
           <SkeletonCard lines={3} />
         </div>
       ) : sortedEnvironments.length === 0 ? (
-        <EmptyState
-          icon={<Rocket size={44} />}
-          heading="No deployment environments"
-          description="Create an environment before agents can build or deploy an app for this project."
-          action={{ label: 'Create staging', onClick: () => setNewName('staging') }}
-        />
+        <div className="glass-surface rounded-lg p-6 sm:p-8 max-w-lg mx-auto text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 text-accent mb-4">
+            <Rocket size={24} />
+          </div>
+          <h2 className="sam-type-section-heading text-fg-primary m-0">
+            Deploy apps with your agents
+          </h2>
+          <p className="sam-type-secondary text-fg-muted mt-2 mb-0 mx-auto max-w-sm">
+            Deployment environments let agents build and publish your app using Docker
+            Compose. Create an environment, configure its variables and secrets, then
+            let an agent handle the rest.
+          </p>
+          <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Button variant="primary" onClick={() => setNewName('staging')}>
+              <Plus size={15} />
+              Create first environment
+            </Button>
+            <a
+              href={`${import.meta.env.VITE_PUBLIC_WEBSITE_URL || 'https://simple-agent-manager.org'}/docs/guides/app-deployments/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
+            >
+              Learn how deployments work
+              <ExternalLink size={13} aria-hidden="true" />
+              <span className="sr-only">(opens in new tab)</span>
+            </a>
+          </div>
+        </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {sortedEnvironments.map((env) => (
