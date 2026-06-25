@@ -173,10 +173,39 @@ export class ProjectOrchestrator extends DurableObject<Env> {
       return false;
     }
 
+    const sql = this.ctx.storage.sql;
+    const tracked = sql.exec(
+      `SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId,
+    ).toArray();
+    if (tracked.length === 0) return false;
+
+    const targetTask = await this.env.DATABASE.prepare(
+      `SELECT project_id AS projectId
+       FROM tasks
+       WHERE id = ? AND mission_id = ?
+       LIMIT 1`,
+    ).bind(taskId, missionId).first<{ projectId: string }>();
+
+    if (!targetTask) return false;
+
+    if (targetTask.projectId !== projectId) {
+      log.warn('orchestrator.override_task_state.project_mismatch', {
+        projectId,
+        callerProjectId: projectId,
+        missionId,
+        taskId,
+        targetProjectId: targetTask.projectId,
+        expectedProjectId: projectId,
+        receivedProjectId: targetTask.projectId,
+        action: 'rejected',
+      });
+      return false;
+    }
+
     const now = new Date().toISOString();
     const result = await this.env.DATABASE.prepare(
-      'UPDATE tasks SET scheduler_state = ?, updated_at = ? WHERE id = ? AND mission_id = ?',
-    ).bind(newState, now, taskId, missionId).run();
+      'UPDATE tasks SET scheduler_state = ?, updated_at = ? WHERE id = ? AND mission_id = ? AND project_id = ?',
+    ).bind(newState, now, taskId, missionId, projectId).run();
 
     if (!result.meta.changes || result.meta.changes === 0) return false;
 

@@ -5,6 +5,7 @@ import type { SchedulerState } from '@simple-agent-manager/shared';
 import { OVERRIDABLE_SCHEDULER_STATES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import * as orchestratorService from '../../services/project-orchestrator';
 import {
   INVALID_PARAMS,
@@ -123,10 +124,35 @@ export async function handleOverrideTaskState(
       `Invalid state: ${newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`);
   }
 
+  const targetTask = await env.DATABASE.prepare(
+    `SELECT project_id AS projectId
+     FROM tasks
+     WHERE id = ? AND mission_id = ?
+     LIMIT 1`,
+  ).bind(taskId, missionId).first<{ projectId: string }>();
+
+  if (!targetTask) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found', { httpStatus: 404 });
+  }
+
+  if (targetTask.projectId !== tokenData.projectId) {
+    log.warn('mcp.override_task_state.project_mismatch', {
+      projectId: tokenData.projectId,
+      callerProjectId: tokenData.projectId,
+      missionId,
+      taskId,
+      targetProjectId: targetTask.projectId,
+      expectedProjectId: tokenData.projectId,
+      receivedProjectId: targetTask.projectId,
+      action: 'rejected',
+    });
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found', { httpStatus: 404 });
+  }
+
   const ok = await orchestratorService.overrideTaskState(
     env, tokenData.projectId, missionId, taskId, newState as SchedulerState, reason,
   );
-  if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found');
+  if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found', { httpStatus: 404 });
 
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify({ success: true, taskId, newState }) }],

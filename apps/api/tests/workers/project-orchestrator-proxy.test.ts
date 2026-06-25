@@ -206,14 +206,52 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     ).bind(missionId, taskId).run();
 
     await startOrchestration(env, projectId, missionId);
-    const result = await overrideTaskState(env, projectId, missionId, taskId, 'blocked', 'Waiting for dependency');
+    const result = await overrideTaskState(env, projectId, missionId, taskId, 'blocked_human', 'Waiting for dependency');
 
     expect(result).toBe(true);
 
     const dbTask = await env.DATABASE.prepare(
       'SELECT scheduler_state FROM tasks WHERE id = ?',
     ).bind(taskId).first<{ scheduler_state: string }>();
-    expect(dbTask!.scheduler_state).toBe('blocked');
+    expect(dbTask!.scheduler_state).toBe('blocked_human');
+  });
+
+  it('overrideTaskState rejects a task that belongs to another project and leaves it unchanged', async () => {
+    const callerProjectId = 'proj-po-override-caller-001';
+    const targetProjectId = 'proj-po-override-target-001';
+    const missionId = 'mission-override-target-001';
+    const taskId = 'task-override-target-001';
+
+    await seedTestProject(callerProjectId);
+    await seedTestProject(targetProjectId);
+    await seedMission(missionId, targetProjectId, TEST_USER_ID);
+    await seedTask(taskId, targetProjectId, TEST_USER_ID, { status: 'delegated' });
+
+    await env.DATABASE.prepare(
+      'UPDATE tasks SET mission_id = ?, scheduler_state = ? WHERE id = ?',
+    ).bind(missionId, 'schedulable', taskId).run();
+
+    // Defence-in-depth: even if the caller project's orchestrator is somehow
+    // tracking the target mission, the task row ownership must still reject.
+    await startOrchestration(env, callerProjectId, missionId);
+    const result = await overrideTaskState(
+      env,
+      callerProjectId,
+      missionId,
+      taskId,
+      'blocked_human',
+      'Cross-project attempt',
+    );
+
+    expect(result).toBe(false);
+
+    const dbTask = await env.DATABASE.prepare(
+      'SELECT project_id, scheduler_state FROM tasks WHERE id = ?',
+    ).bind(taskId).first<{ project_id: string; scheduler_state: string | null }>();
+    expect(dbTask).toEqual({
+      project_id: targetProjectId,
+      scheduler_state: 'schedulable',
+    });
   });
 
   it('overrideTaskState returns false for invalid state', async () => {
@@ -260,14 +298,14 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     await startOrchestration(env, projectId, missionB);
 
     // Attempt to override taskB via missionA — should fail
-    const result = await overrideTaskState(env, projectId, missionA, taskB, 'blocked', 'Cross-mission attempt');
+    const result = await overrideTaskState(env, projectId, missionA, taskB, 'blocked_human', 'Cross-mission attempt');
     expect(result).toBe(false);
 
     // Verify taskB's scheduler_state was not changed
     const dbTask = await env.DATABASE.prepare(
       'SELECT scheduler_state FROM tasks WHERE id = ?',
     ).bind(taskB).first<{ scheduler_state: string | null }>();
-    expect(dbTask!.scheduler_state).not.toBe('blocked');
+    expect(dbTask!.scheduler_state).not.toBe('blocked_human');
   });
 
   it('notifyTaskEvent triggers scheduling for active mission', async () => {
