@@ -13,7 +13,7 @@ Agents publish with a single tool:
 
 This tool requires the named deployment environment to be active, agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy.
 
-The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives public routes from either `x-sam-routes` or compose service `ports:`.
+The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives public routes from compose service `ports:` by default. Use `x-sam-routes` only when you need an explicit override, such as exposing a service port without `ports:` or marking a matching `ports:` entry as `private`.
 
 ```yaml
 services:
@@ -30,14 +30,20 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    ports:
+      - "3000"
 
 volumes:
   app-data: {}
+```
 
+To override route behavior explicitly:
+
+```yaml
 x-sam-routes:
   - service: web
     port: 3000
-    mode: public
+    mode: private
 ```
 
 Submit the file to the release endpoint with a YAML content type:

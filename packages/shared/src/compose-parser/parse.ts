@@ -139,7 +139,8 @@ export function parseCompose(yamlString: string): ComposeParseResult {
   if (routes.length === 0) {
     errors.push({
       path: 'x-sam-routes',
-      message: 'At least one route must be defined. Add an "x-sam-routes" entry to expose a service.',
+      message:
+        'At least one route must be defined. Add a service "ports:" or "expose:" entry, or an "x-sam-routes" route.',
     });
   }
 

@@ -181,6 +181,96 @@ describe('buildComposePublishApplyPayload', () => {
     expect(doc.services.worker.ports).toBeUndefined();
   });
 
+  it('publishes explicit x-sam-routes public routes even without service ports', () => {
+    const composeWithExplicitRoute = `services:
+  app:
+    image: example/app:1
+x-sam-routes:
+  - service: app
+    port: 8000
+    mode: public
+`;
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({ composeYaml: composeWithExplicitRoute, services: [] }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as { services: Record<string, { ports?: string[] }> };
+    const route = result.routes.at(0);
+
+    expect(result.routes).toHaveLength(1);
+    expect(route).toEqual(
+      expect.objectContaining({
+        hostname: `r1-app-8000-${ENVIRONMENT_ID}.apps.${BASE_DOMAIN}`,
+        service: 'app',
+        containerPort: 8000,
+      })
+    );
+    expect(doc.services.app?.ports).toEqual([`127.0.0.1:${route?.hostPort}:8000`]);
+  });
+
+  it('lets x-sam-routes private suppress a matching ports-derived public route', () => {
+    const composeWithPrivateOverride = `services:
+  app:
+    image: example/app:1
+    ports:
+      - "8000:8000"
+x-sam-routes:
+  - service: app
+    port: 8000
+    mode: private
+`;
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({ composeYaml: composeWithPrivateOverride, services: [] }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as { services: Record<string, { ports?: string[] }> };
+
+    expect(result.routes).toEqual([]);
+    expect(doc.services.app?.ports).toBeUndefined();
+  });
+
+  it('does not duplicate a route when x-sam-routes and ports cover the same public port', () => {
+    const composeWithDuplicateHints = `services:
+  app:
+    image: example/app:1
+    ports:
+      - "8000:8000"
+x-sam-routes:
+  - service: app
+    port: 8000
+    mode: public
+`;
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({ composeYaml: composeWithDuplicateHints, services: [] }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as { services: Record<string, { ports?: string[] }> };
+    const route = result.routes.at(0);
+
+    expect(result.routes).toHaveLength(1);
+    expect(route?.service).toBe('app');
+    expect(route?.containerPort).toBe(8000);
+    expect(doc.services.app?.ports).toEqual([`127.0.0.1:${route?.hostPort}:8000`]);
+  });
+
+  it('fails fast for invalid compose-publish x-sam-routes entries', () => {
+    const composeWithInvalidRoute = `services:
+  app:
+    image: example/app:1
+x-sam-routes:
+  - service: app
+    port: 8000
+    mode: external
+`;
+
+    expect(() =>
+      buildComposePublishApplyPayload(
+        makeSubmission({ composeYaml: composeWithInvalidRoute, services: [] }),
+        OPTS
+      )
+    ).toThrow(/x-sam-routes\[0\]\.mode.*public.*private/i);
+  });
+
   it('allows interpolated host ports because SAM rewrites host bindings', () => {
     const composeWithInterpolatedHostPort = `services:
   app:

@@ -276,6 +276,54 @@ describe('collectEnvironmentRouteHostnames', () => {
     ]);
   });
 
+  it('reconstructs compose-publish hostnames from x-sam-routes without ports', () => {
+    const composePublishSubmission = {
+      reference: 'v1',
+      composeYaml: `services:
+  web:
+    image: example/web
+x-sam-routes:
+  - service: web
+    port: 8000
+    mode: public
+`,
+      services: [{ serviceName: 'web', pushedRef: 'registry.example/web@sha256:aaa' }],
+    };
+
+    const hostnames = collectEnvironmentRouteHostnames(
+      [JSON.stringify(composePublishSubmission)],
+      opts
+    );
+
+    expect(hostnames).toEqual([
+      'r1-web-8000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+  });
+
+  it('lets compose-publish x-sam-routes private suppress captured ports during reconstruction', () => {
+    const composePublishSubmission = {
+      reference: 'v1',
+      composeYaml: `services:
+  web:
+    image: example/web
+    ports:
+      - "8000:8000"
+x-sam-routes:
+  - service: web
+    port: 8000
+    mode: private
+`,
+      services: [{ serviceName: 'web', pushedRef: 'registry.example/web@sha256:aaa' }],
+    };
+
+    const hostnames = collectEnvironmentRouteHostnames(
+      [JSON.stringify(composePublishSubmission)],
+      opts
+    );
+
+    expect(hostnames).toEqual([]);
+  });
+
   it('skips manifests whose route set exceeds the configured span', () => {
     const hostnames = collectEnvironmentRouteHostnames([JSON.stringify(manifest())], {
       ...opts,
