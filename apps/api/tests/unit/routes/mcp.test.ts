@@ -360,11 +360,12 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('override_task_state');
       // Compose build + publish (agent-first deployment) tool
       expect(toolNames).toContain('build_and_publish');
+      expect(toolNames).toContain('get_publish_status');
       expect(toolNames).toContain('list_deployment_environments');
       expect(toolNames).toContain('read_deployment_logs');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(92);
+      expect(body.result.tools).toHaveLength(93);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

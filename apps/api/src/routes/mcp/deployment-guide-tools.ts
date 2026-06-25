@@ -51,7 +51,8 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`list_deployment_environments()\` | List the active deployment environments this agent profile is allowed to target. |
 | \`list_deployment_environment_config(environment)\` | List the Variables (values visible) and Secret keys (values never returned) configured for an environment. |
 | \`set_deployment_environment_config(environment, key, value, isSecret?)\` | Create or update a Variable or Secret for an environment. |
-| \`build_and_publish(environment, reference?, workingDir?)\` | Build the workspace Compose stack server-side, push images with SAM-owned credentials, and record a release. This is the deploy action. |
+| \`build_and_publish(environment, reference?, workingDir?)\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
+| \`get_publish_status(publishJobId, sinceSeq?, limit?)\` | Poll the build/publish job for status, events, release details, and sanitized failure diagnostics. |
 | \`read_deployment_logs(environment, source?, level?, container?, since?, until?, search?, cursor?, limit?)\` | Read deployment-node logs for an environment to verify the release and debug failures. |
 | \`check_dns_status()\` | Check DNS propagation and TLS validity for **this workspace's own** \`ws-*\` URL. It verifies the workspace is reachable at the Cloudflare edge — it does NOT check a deployed app's public route. |
 
@@ -114,15 +115,21 @@ Call \`build_and_publish(environment, reference?, workingDir?)\`:
 - \`reference\` — optional release tag/identifier (defaults to "latest").
 - \`workingDir\` — optional absolute path under \`/workspaces\` if the Compose file is not at the workspace root.
 
-SAM builds the stack on the SAM VM, pushes images with its own credentials, and records the release. You do not run any docker or registry commands.
+SAM returns a \`publishJobId\` quickly after the VM accepts the job. The actual Docker Compose build, image export, artifact upload, and release recording continue in the background. You do not run any docker or registry commands.
+
+After \`build_and_publish\` returns, call \`get_publish_status({ publishJobId })\` every 10-20 seconds until the status is terminal:
+
+- \`succeeded\` means the release was recorded. Continue to Step 5 to verify deployment-node apply health.
+- \`failed\`, \`canceled\`, or \`unknown\` means publishing did not complete. Read the returned events and failed step before changing files or retrying.
+- While polling, pass \`sinceSeq\` from the previous response to receive only new events.
 
 This tool requires the named environment to be active, agent deployment to be enabled by a user, and your agent profile to satisfy that environment's policy. If it errors for one of those reasons, report it to the user — do not attempt to bypass the policy.
 
 ### Step 5 — Verify the release
 
-After publishing:
+After the publish job reaches \`succeeded\`:
 
-- Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Use the \`source\`, \`level\`, \`container\`, \`since\`, \`until\`, \`search\`, \`cursor\`, and \`limit\` filters to narrow down failures. Read the logs before guessing at fixes.
+- Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Deployment nodes also persist release-scoped apply events for phases such as fetch, compose config, artifact load, compose up, health check, Caddy reload, success, failure, and revert. Read the logs/events before guessing at fixes.
 - Call \`check_dns_status()\` to confirm **this workspace's** \`ws-*\` URL is reachable with valid TLS at the edge. Note this checks the workspace itself, not the deployed app's public route — use \`read_deployment_logs\` to confirm the deployed containers are serving.
 
 ---
@@ -132,7 +139,8 @@ After publishing:
 - **Trying to deploy through CI.** SAM is agent-first. Do not write or edit CI deploy jobs. Call \`build_and_publish\`.
 - **Looking for registry credentials.** You never need them; SAM mints them server-side.
 - **Putting a Secret in a build arg or image tag.** Secrets never reach build nodes — the value will be empty there. Use a Variable for anything the build needs.
-- **Skipping log verification.** A successful \`build_and_publish\` records a release; it does not prove the containers are healthy. Always read deployment logs to confirm.
+- **Treating job start as success.** \`build_and_publish\` starts a durable job. You must poll \`get_publish_status\` until terminal before claiming publish success.
+- **Skipping apply verification.** A successful publish job records a release; it does not prove the containers are healthy. Always read deployment logs/apply events to confirm.
 - **Guessing when an environment is missing.** If \`list_deployment_environments()\` is empty, the user must create/enable an environment. Tell them; do not improvise.
 - **Using rejected volume types.** Host bind mounts, Docker socket mounts, tmpfs, external volumes, and custom drivers are rejected. Use safe named volumes.
 
@@ -143,12 +151,11 @@ After publishing:
 1. \`list_deployment_environments()\` → pick the target.
 2. \`list_deployment_environment_config(environment)\` → review; \`set_deployment_environment_config(...)\` for anything missing (Secrets via \`isSecret: true\`).
 3. Author the Compose stack with \`\${VAR}\` placeholders and \`x-sam-routes\`.
-4. \`build_and_publish(environment)\` → SAM builds, pushes, and records the release.
-5. \`read_deployment_logs(environment)\` and \`check_dns_status()\` → verify it is actually running.`;
+4. \`build_and_publish(environment)\` → capture \`publishJobId\`.
+5. \`get_publish_status(publishJobId)\` until terminal.
+6. \`read_deployment_logs(environment)\` and \`check_dns_status()\` → verify it is actually running.`;
 
-export function handleGetDeploymentGuide(
-  requestId: string | number | null,
-): JsonRpcResponse {
+export function handleGetDeploymentGuide(requestId: string | number | null): JsonRpcResponse {
   return jsonRpcSuccess(requestId, {
     content: [
       {

@@ -89,11 +89,16 @@ import { orchestratorRoutes } from './routes/orchestrator';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
-import { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes } from './routes/project-deployment';
+import {
+  deploymentIdentityTokenRoute,
+  gcpDeployCallbackRoute,
+  projectDeploymentRoutes,
+} from './routes/project-deployment';
 import { projectsRoutes } from './routes/projects';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
 import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
+import { deploymentPublishJobCallbackRoute } from './routes/projects/deployment-publish-job-callback';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { registryPushCredentialsCallbackRoute } from './routes/projects/registry-push-credentials-callback';
 import { providersRoutes } from './routes/providers';
@@ -162,7 +167,10 @@ app.onError((err, c) => {
 app.use('*', async (c, next) => {
   const hostname = new URL(c.req.url).hostname;
   const baseDomain = c.env?.BASE_DOMAIN || '';
-  if (!baseDomain) { await next(); return; }
+  if (!baseDomain) {
+    await next();
+    return;
+  }
 
   // Proxy app.* to web UI Pages project
   if (hostname === `app.${baseDomain}`) {
@@ -243,7 +251,8 @@ app.use('*', async (c, next) => {
           if (payload.workspace === workspaceId && payload.port === targetPort) {
             // Set cookie and 302 redirect to strip token from URL
             const cookieMaxAge = c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS
-              ? parseInt(c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS, 10) : 14400;
+              ? parseInt(c.env.PORT_ACCESS_COOKIE_MAX_AGE_SECONDS, 10)
+              : 14400;
             const redirectUrl = new URL(url.toString());
             redirectUrl.searchParams.delete('port_token');
             portAccessRedirect = new Response(null, {
@@ -258,7 +267,11 @@ app.use('*', async (c, next) => {
             userId = payload.subject;
           }
         } catch (err) {
-          log.warn('ws_proxy_port_token_rejected', { workspaceId, targetPort, ...serializeError(err) });
+          log.warn('ws_proxy_port_token_rejected', {
+            workspaceId,
+            targetPort,
+            ...serializeError(err),
+          });
         }
       }
     }
@@ -292,7 +305,14 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 <p>Your access to this port has expired or is invalid.</p>
 <p>Ask the agent to run <code>expose_port</code> again for a fresh link.</p>
 </body></html>`,
-        { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } },
+        {
+          status: 401,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        }
       );
     }
 
@@ -373,11 +393,14 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     method: c.req.raw.method,
     path: url.pathname,
   });
-  recordNodeRoutingMetric({
-    metric: 'ws_proxy_route',
-    nodeId: workspace.nodeId || workspaceId,
-    workspaceId,
-  }, c.env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'ws_proxy_route',
+      nodeId: workspace.nodeId || workspaceId,
+      workspaceId,
+    },
+    c.env
+  );
   const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
   const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
   const vmUrl = new URL(c.req.url);
@@ -415,7 +438,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
-  headers.set('X-SAM-Node-Id', (workspace.nodeId || workspaceId));
+  headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
   // Preserve the original client-facing hostname (e.g., ws-abc123--3000.example.com)
@@ -468,36 +491,46 @@ app.use('*', async (c, next) => {
 // Analytics Engine — writes one data point per request (non-blocking, fire-and-forget)
 app.use('*', analyticsMiddleware());
 
-app.use('*', cors({
-  origin: (origin, c) => {
-    if (!origin) return null;
-    const baseDomain = c.env?.BASE_DOMAIN || '';
-    // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
-    const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
-    try {
-      const url = new URL(origin);
-      if (isDevEnvironment && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) return origin;
-    } catch {
-      // Malformed origin — reject
-      return null;
-    }
-    // Allow subdomains of the configured BASE_DOMAIN (e.g., app.example.com, api.example.com)
-    if (baseDomain) {
+app.use(
+  '*',
+  cors({
+    origin: (origin, c) => {
+      if (!origin) return null;
+      const baseDomain = c.env?.BASE_DOMAIN || '';
+      // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
+      const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
       try {
         const url = new URL(origin);
-        if (url.hostname === baseDomain || url.hostname.endsWith(`.${baseDomain}`)) return origin;
+        if (isDevEnvironment && (url.hostname === 'localhost' || url.hostname === '127.0.0.1'))
+          return origin;
       } catch {
+        // Malformed origin — reject
         return null;
       }
-    }
-    // Reject all other origins — returning null prevents Access-Control-Allow-Origin
-    // from being set, which blocks credentialed cross-origin requests from unknown sites.
-    return null;
-  },
-  credentials: true,
-  allowHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version', 'anthropic-beta'],
-  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-}));
+      // Allow subdomains of the configured BASE_DOMAIN (e.g., app.example.com, api.example.com)
+      if (baseDomain) {
+        try {
+          const url = new URL(origin);
+          if (url.hostname === baseDomain || url.hostname.endsWith(`.${baseDomain}`)) return origin;
+        } catch {
+          return null;
+        }
+      }
+      // Reject all other origins — returning null prevents Access-Control-Allow-Origin
+      // from being set, which blocks credentialed cross-origin requests from unknown sites.
+      return null;
+    },
+    credentials: true,
+    allowHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-api-key',
+      'anthropic-version',
+      'anthropic-beta',
+    ],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  })
+);
 
 // Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {
@@ -510,10 +543,13 @@ app.get('/health', (c) => {
     c.env.TASK_RUNNER
   );
 
-  return c.json({
-    status: hasCriticalBindings ? 'healthy' : 'degraded',
-    timestamp: new Date().toISOString(),
-  }, hasCriticalBindings ? 200 : 503);
+  return c.json(
+    {
+      status: hasCriticalBindings ? 'healthy' : 'degraded',
+      timestamp: new Date().toISOString(),
+    },
+    hasCriticalBindings ? 200 : 503
+  );
 });
 
 // Public config — exposes feature flags the UI needs before auth
@@ -553,7 +589,7 @@ app.route('/api/credentials', credentialsRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
-app.route('/api/nodes', deployReleaseCallbackRoute);  // Callback JWT auth — deploy node fetches signed release payload
+app.route('/api/nodes', deployReleaseCallbackRoute); // Callback JWT auth — deploy node fetches signed release payload
 app.route('/api/nodes', nodesRoutes);
 app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/workspaces', workspacesRoutes);
@@ -577,11 +613,12 @@ app.route('/api/t', analyticsIngestRoutes);
 // See .claude/rules/06-api-patterns.md (Hono middleware scoping)
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
-app.route('/api/projects', agentActivityCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
-app.route('/api/projects', taskCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
-app.route('/api/projects', registryPushCredentialsCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
-app.route('/api/projects', composeImageArtifactsCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
-app.route('/api/projects', composePublishReleaseCallbackRoute);  // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', agentActivityCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', taskCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
@@ -637,12 +674,15 @@ app.route('/auth/google', googleAuthRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
 // This must run after the global CORS middleware to overwrite its headers.
-app.use('/mcp/*', cors({
-  origin: '*',
-  credentials: false,
-  allowHeaders: ['Content-Type', 'Authorization'],
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
-}));
+app.use(
+  '/mcp/*',
+  cors({
+    origin: '*',
+    credentials: false,
+    allowHeaders: ['Content-Type', 'Authorization'],
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+  })
+);
 // Explicitly remove Access-Control-Allow-Credentials set by the global CORS middleware.
 // origin: '*' + credentials: true is invalid in the CORS spec and browsers reject it.
 app.use('/mcp/*', async (c, next) => {
@@ -655,10 +695,13 @@ app.route('/mcp', mcpRoutes);
 
 // 404 handler
 app.notFound((c) => {
-  return c.json({
-    error: 'NOT_FOUND',
-    message: 'Endpoint not found',
-  }, 404);
+  return c.json(
+    {
+      error: 'NOT_FOUND',
+      message: 'Endpoint not found',
+    },
+    404
+  );
 });
 
 // Export handler with scheduled (cron) support
@@ -674,11 +717,7 @@ export default {
    * - Daily at 04:00 UTC (configurable via TRIAL_CRON_WAITLIST_CLEANUP): trial waitlist purge
    * - Monthly at 03:00 UTC on the 1st (configurable via TRIAL_CRON_ROLLOVER_CRON): trial counter rollover audit
    */
-  async scheduled(
-    controller: ScheduledController,
-    env: Env,
-    ctx: ExecutionContext
-  ): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 5 1 * *';
     const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
 
@@ -704,62 +743,70 @@ export default {
 
     // Hourly: aggregate per-user monthly AI cost from Gateway logs → KV cache.
     if (isMonthlyCostAggregation) {
-      ctx.waitUntil((async () => {
-        const result = await runMonthlyCostAggregation(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'monthly-cost-aggregation',
-          monthlyCostEnabled: result.enabled,
-          monthlyCostUsersUpdated: result.usersUpdated,
-          monthlyCostTotalEntries: result.totalEntries,
-          monthlyCostErrors: result.errors,
-        });
-      })());
+      ctx.waitUntil(
+        (async () => {
+          const result = await runMonthlyCostAggregation(env);
+          log.info('cron.completed', {
+            cron: controller.cron,
+            type: 'monthly-cost-aggregation',
+            monthlyCostEnabled: result.enabled,
+            monthlyCostUsersUpdated: result.usersUpdated,
+            monthlyCostTotalEntries: result.totalEntries,
+            monthlyCostErrors: result.errors,
+          });
+        })()
+      );
       return;
     }
 
     // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
     // isolate alive for the full duration of multi-step external API calls.
     if (isDailyForward) {
-      ctx.waitUntil((async () => {
-        const forward = await runAnalyticsForwardJob(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'daily-forward',
-          forwardEnabled: forward.enabled,
-          forwardEventsQueried: forward.eventsQueried,
-          forwardSegmentSent: forward.segment.sent,
-          forwardGA4Sent: forward.ga4.sent,
-          forwardCursorUpdated: forward.cursorUpdated,
-        });
-      })());
+      ctx.waitUntil(
+        (async () => {
+          const forward = await runAnalyticsForwardJob(env);
+          log.info('cron.completed', {
+            cron: controller.cron,
+            type: 'daily-forward',
+            forwardEnabled: forward.enabled,
+            forwardEventsQueried: forward.eventsQueried,
+            forwardSegmentSent: forward.segment.sent,
+            forwardGA4Sent: forward.ga4.sent,
+            forwardCursorUpdated: forward.cursorUpdated,
+          });
+        })()
+      );
       return;
     }
 
     // Monthly trial counter rollover audit (prune old DO counter rows, verify month-key drift).
     if (isTrialRollover) {
-      ctx.waitUntil((async () => {
-        const rollover = await runTrialRolloverAudit(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'trial-rollover',
-          trialRolloverMonthKey: rollover.monthKey,
-          trialRolloverPruned: rollover.pruned,
-        });
-      })());
+      ctx.waitUntil(
+        (async () => {
+          const rollover = await runTrialRolloverAudit(env);
+          log.info('cron.completed', {
+            cron: controller.cron,
+            type: 'trial-rollover',
+            trialRolloverMonthKey: rollover.monthKey,
+            trialRolloverPruned: rollover.pruned,
+          });
+        })()
+      );
       return;
     }
 
     // Daily trial waitlist cleanup (purge notified-and-aged rows).
     if (isTrialWaitlistCleanup) {
-      ctx.waitUntil((async () => {
-        const waitlist = await runTrialWaitlistCleanup(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'trial-waitlist-cleanup',
-          trialWaitlistPurged: waitlist.purged,
-        });
-      })());
+      ctx.waitUntil(
+        (async () => {
+          const waitlist = await runTrialWaitlistCleanup(env);
+          log.info('cron.completed', {
+            cron: controller.cron,
+            type: 'trial-waitlist-cleanup',
+            trialWaitlistPurged: waitlist.purged,
+          });
+        })()
+      );
       return;
     }
 

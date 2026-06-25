@@ -26,20 +26,20 @@ SAM idea `01KVYWWTNB2808342VZYWR0NHB`, "Async build_and_publish jobs with pollin
 
 ## Checklist
 
-- [ ] Add D1 schema and migration for `deployment_publish_jobs`, `deployment_publish_job_events`, and `deployment_release_events`.
-- [ ] Add API service support for publish job creation, state transitions, events, polling read model, and redaction.
-- [ ] Change MCP `build_and_publish` to create a durable job, call a short VM start endpoint, and return `publishJobId` immediately.
-- [ ] Add MCP `get_publish_status` tool and dispatcher.
-- [ ] Add authenticated VM callback route for publish job progress and terminal persistence.
-- [ ] Add authenticated node callback route/service for deployment release apply events.
-- [ ] Change the VM agent to accept publish jobs and run build/publish in a job-owned background context independent of the start HTTP request context.
-- [ ] Thread publish progress events through build/export/upload/release submission without leaking signed URLs, callback tokens, registry credentials, or secret values.
-- [ ] Emit deployment-node apply events during release apply success/failure paths.
-- [ ] Update deployment guide/tool descriptions and durable agent rules for async long-running MCP work.
-- [ ] Add API tests for authorization, state transitions, callback persistence, polling output, and redaction.
-- [ ] Add Go tests proving start-request cancellation after acceptance does not cancel background build/publish work.
-- [ ] Add Go/API tests for deployment apply event emission/persistence.
-- [ ] Run normal TypeScript and Go validation workflows.
+- [x] Add D1 schema and migration for `deployment_publish_jobs`, `deployment_publish_job_events`, and `deployment_release_events`.
+- [x] Add API service support for publish job creation, state transitions, events, polling read model, and redaction.
+- [x] Change MCP `build_and_publish` to create a durable job, call a short VM start endpoint, and return `publishJobId` immediately.
+- [x] Add MCP `get_publish_status` tool and dispatcher.
+- [x] Add authenticated VM callback route for publish job progress and terminal persistence.
+- [x] Add authenticated node callback route/service for deployment release apply events.
+- [x] Change the VM agent to accept publish jobs and run build/publish in a job-owned background context independent of the start HTTP request context.
+- [x] Thread publish progress events through build/export/upload/release submission without leaking signed URLs, callback tokens, registry credentials, or secret values.
+- [x] Emit deployment-node apply events during release apply success/failure paths.
+- [x] Update deployment guide/tool descriptions and durable agent rules for async long-running MCP work.
+- [x] Add API tests for authorization, state transitions, callback persistence, polling output, and redaction.
+- [x] Add Go tests proving start-request cancellation after acceptance does not cancel background build/publish work.
+- [x] Add Go/API tests for deployment apply event emission/persistence.
+- [x] Run normal TypeScript and Go validation workflows.
 
 ## Acceptance Criteria
 

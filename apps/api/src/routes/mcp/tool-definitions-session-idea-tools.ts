@@ -221,7 +221,7 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'build_and_publish',
     description:
-      "Build your project's Docker Compose stack and publish it to SAM as a deployment release for a specific deployment environment. This is the publish path for compose-based projects. SAM builds your compose services on the host Docker daemon, re-pushes the built service images into your project-scoped registry namespace, and records a deployment release — entirely server-side. You run ZERO docker or registry commands and never receive a credential. Ensure all buildable services define a `build:` section and the stack builds cleanly first. Requires agent deployment to be enabled on the named deployment environment and this agent profile to be allowed by that environment policy.",
+      "Start an asynchronous build/publish job for your project's Docker Compose stack and return a durable publishJobId immediately. This is the publish path for compose-based projects. SAM builds services on the host Docker daemon, uploads scoped image artifacts, and records a deployment release server-side. You run ZERO docker or registry commands and never receive credentials. After this tool returns, call get_publish_status with the publishJobId every 10-20 seconds until the status is succeeded, failed, canceled, or unknown. Do not treat the initial response as deployment success.",
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -241,6 +241,31 @@ export const SESSION_IDEA_TOOLS = [
         },
       },
       required: ['environment'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_publish_status',
+    description:
+      'Poll a durable build_and_publish job. Returns current status, current step, recent events, terminal release details on success, and sanitized failure diagnostics on failure. Use sinceSeq to fetch only new events after an earlier poll.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        publishJobId: {
+          type: 'string',
+          description: 'The publishJobId returned by build_and_publish.',
+        },
+        sinceSeq: {
+          type: 'number',
+          description:
+            'Optional last seen event sequence. Only events with seq greater than this value are returned.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Optional maximum number of events to return (default 50, max 100).',
+        },
+      },
+      required: ['publishJobId'],
       additionalProperties: false,
     },
   },

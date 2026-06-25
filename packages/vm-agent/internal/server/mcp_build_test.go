@@ -13,6 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/workspace/vm-agent/internal/publish"
 )
 
 // ---------- POST /workspaces/{workspaceId}/mcp/build-and-publish ----------
@@ -66,6 +69,35 @@ func mcpBuildPOST(
 	return rec
 }
 
+func mcpBuildJobStartPOST(
+	t *testing.T,
+	s *Server,
+	key *rsa.PrivateKey,
+	workspaceID string,
+	jobID string,
+	body interface{},
+	ctx context.Context,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("mcpBuildJobStartPOST: marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/"+workspaceID+"/mcp/build-and-publish-jobs/"+jobID+"/start", bytes.NewReader(bodyBytes)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, s.config.NodeID, workspaceID))
+	req.Header.Set("X-SAM-Node-Id", s.config.NodeID)
+	req.Header.Set("X-SAM-Workspace-Id", workspaceID)
+	req.SetPathValue("workspaceId", workspaceID)
+	req.SetPathValue("jobId", jobID)
+
+	rec := httptest.NewRecorder()
+	s.handleMcpBuildAndPublishJobStart(rec, req)
+	return rec
+}
+
 func TestMcpBuildAndPublish_MissingWorkspaceID(t *testing.T) {
 	t.Parallel()
 	s := mcpTestServer(t, "https://api.example.com")
@@ -79,6 +111,81 @@ func TestMcpBuildAndPublish_MissingWorkspaceID(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty workspaceId, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMcpBuildAndPublishJobStart_RequestCancelDoesNotCancelBackgroundJob(t *testing.T) {
+	s, key := mcpBuildTestServer(t)
+	tmp := t.TempDir()
+	t.Setenv("SAM_DOCKER_CLI_PATH", fakeDockerCLI(t, tmp, "", true))
+
+	callbacks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/deployment-publish-jobs/job-1/events") {
+			t.Errorf("unexpected callback path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer callbacks.Close()
+	s.config.ControlPlaneURL = callbacks.URL
+	s.workspaces["ws-001"] = &WorkspaceRuntime{
+		ID:            "ws-001",
+		Status:        "running",
+		WorkspaceDir:  "/workspace/WS_001",
+		ProjectID:     "proj-1",
+		CallbackToken: "callback-token",
+	}
+
+	started := make(chan context.Context, 1)
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	s.buildPublishRunner = func(ctx context.Context, _ *preparedBuildPublish, _ publish.EventSink) (*publish.ReleaseResult, error) {
+		started <- ctx
+		select {
+		case <-ctx.Done():
+			done <- ctx.Err()
+			return nil, ctx.Err()
+		case <-release:
+			done <- nil
+			return &publish.ReleaseResult{ReleaseID: "rel-1", Version: 1, Status: "created"}, nil
+		}
+	}
+
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	rec := mcpBuildJobStartPOST(t, s, key, "ws-001", "job-1", McpBuildAndPublishRequest{
+		PublishJobID:  "job-1",
+		Environment:   "staging",
+		EnvironmentID: "env-1",
+	}, reqCtx)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var jobCtx context.Context
+	select {
+	case jobCtx = <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background publish runner did not start")
+	}
+
+	cancelReq()
+	select {
+	case err := <-done:
+		t.Fatalf("background job stopped after request cancellation: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := jobCtx.Err(); err != nil {
+		t.Fatalf("job context should not inherit request cancellation, got %v", err)
+	}
+
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("background job returned unexpected error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background job did not finish after release")
 	}
 }
 
