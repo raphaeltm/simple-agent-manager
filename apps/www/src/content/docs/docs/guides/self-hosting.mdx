@@ -87,7 +87,11 @@ In your fork: Settings → Environments → New environment → name it `product
 | Variable          | Description                           | Example       |
 | ----------------- | ------------------------------------- | ------------- |
 | `BASE_DOMAIN`     | Your domain                           | `example.com` |
-| `RESOURCE_PREFIX` | Cloudflare resource prefix (optional) | `sam`         |
+| `RESOURCE_PREFIX` | Domain-derived Cloudflare resource prefix | `sa379a6` |
+
+The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
+first six hex characters of the domain's SHA-256 hash. Use that generated value
+instead of choosing a generic prefix.
 
 **Environment secrets:**
 

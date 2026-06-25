@@ -49,8 +49,12 @@ Set in GitHub Settings → Environments → production:
 | Variable              | Description                     | Example            |
 | --------------------- | ------------------------------- | ------------------ |
 | `BASE_DOMAIN`         | Deployment domain               | `example.com`      |
-| `RESOURCE_PREFIX`     | Cloudflare resource name prefix | `sam`              |
-| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state      | `sam-pulumi-state` |
+| `RESOURCE_PREFIX`     | Domain-derived Cloudflare resource name prefix | `sa379a6` |
+| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state      | `sa379a6-pulumi-state` |
+
+`RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
+characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
+in for you.
 
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, and `GH_APP_SLUG`. `GH_WEBHOOK_SECRET` is strongly recommended for webhook signature verification. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 

@@ -38,7 +38,6 @@
   // Non-secret fields persisted to localStorage.
   var FIELD_IDS = [
     'sh-domain',
-    'sh-prefix',
     'sh-app-name',
     'sh-org',
     'sh-cf-account',
@@ -157,6 +156,7 @@
 
   // --- Domain logic ---
   var DOMAIN_RE = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/i;
+  var derivedPrefixCache = { domain: '', prefix: '' };
 
   function getDomain() {
     return getField('sh-domain').toLowerCase();
@@ -164,6 +164,27 @@
 
   function isValidDomain(d) {
     return DOMAIN_RE.test(d);
+  }
+
+  function deriveResourcePrefix(domain) {
+    domain = (domain || '').trim().toLowerCase();
+    if (!domain) return Promise.resolve('');
+    if (derivedPrefixCache.domain === domain) {
+      return Promise.resolve(derivedPrefixCache.prefix);
+    }
+    if (!window.crypto || !window.crypto.subtle || !window.TextEncoder) {
+      return Promise.reject(new Error('Web Crypto SHA-256 is unavailable in this browser.'));
+    }
+    return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(domain))
+      .then(function (buffer) {
+        var bytes = Array.prototype.slice.call(new Uint8Array(buffer));
+        var hex = bytes.map(function (byte) {
+          return byte.toString(16).padStart(2, '0');
+        }).join('');
+        var prefix = 's' + hex.slice(0, 6);
+        derivedPrefixCache = { domain: domain, prefix: prefix };
+        return prefix;
+      });
   }
 
   function updateDomainDerived() {
@@ -180,6 +201,14 @@
         setDerived('app', 'https://app.' + d);
         setDerived('api', 'https://api.' + d);
         setDerived('ws', 'https://ws-<id>.' + d);
+        setDerived('prefix', 'Generating...');
+        deriveResourcePrefix(d)
+          .then(function (prefix) {
+            if (getDomain() === d) setDerived('prefix', prefix);
+          })
+          .catch(function () {
+            if (getDomain() === d) setDerived('prefix', 'Unavailable');
+          });
       } else {
         derived.hidden = true;
       }
@@ -273,13 +302,12 @@
   // --- Step 7: vars + secrets output ---
   // Single source of truth for the GitHub Environment vars/secrets, shared by
   // the row renderer and the gh CLI script generator.
-  function getEnvData() {
+  function getEnvData(resourcePrefix) {
     var domain = getDomain();
-    var prefix = getField('sh-prefix');
 
     var vars = [
       { key: 'BASE_DOMAIN', value: domain, required: true },
-      { key: 'RESOURCE_PREFIX', value: prefix, required: false, fallback: 'sam' },
+      { key: 'RESOURCE_PREFIX', value: resourcePrefix, required: true, note: 'derived from BASE_DOMAIN' },
     ];
 
     var privateKey = getField('sh-private-key');
@@ -302,10 +330,33 @@
   }
 
   function renderEnvOutputs() {
-    var data = getEnvData();
-    renderRows(document.getElementById('sh-vars-output'), data.vars);
-    renderRows(document.getElementById('sh-secrets-output'), data.secrets);
-    renderGhCli(data);
+    var domain = getDomain();
+    var varsOutput = document.getElementById('sh-vars-output');
+    var secretsOutput = document.getElementById('sh-secrets-output');
+    var ghOut = document.getElementById('sh-gh-cli-output');
+    if (varsOutput) varsOutput.textContent = 'Generating resource prefix...';
+    if (secretsOutput) secretsOutput.textContent = '';
+    if (ghOut) {
+      ghOut.setAttribute('data-script', '');
+      var code = ghOut.querySelector('code');
+      if (code) code.textContent = '# Generating resource prefix...';
+    }
+
+    deriveResourcePrefix(domain)
+      .then(function (resourcePrefix) {
+        if (domain !== getDomain() || STEP_IDS[state.step] !== 'github-env') return;
+        var data = getEnvData(resourcePrefix);
+        renderRows(varsOutput, data.vars);
+        renderRows(secretsOutput, data.secrets);
+        renderGhCli(data);
+      })
+      .catch(function (err) {
+        if (varsOutput) {
+          varsOutput.textContent = err && err.message
+            ? err.message
+            : 'Could not generate RESOURCE_PREFIX.';
+        }
+      });
   }
 
   function maskValue(value) {
@@ -434,7 +485,6 @@
   }
 
   function renderGhCli(data) {
-    data = data || getEnvData();
     var repo = getField('sh-repo').trim();
     var out = document.getElementById('sh-gh-cli-output');
     if (!out) return;
@@ -444,8 +494,19 @@
     // while the on-screen lines are masked.
     out.setAttribute('data-script', script);
 
-    // Mask anything after a --body flag for on-screen display.
-    var masked = script
+    var code = out.querySelector('code');
+    if (code) {
+      code.textContent = renderMaskedGhScript(script)
+        || '# Fill in the earlier steps to generate the command.';
+    }
+    out.setAttribute('data-revealed', 'false');
+
+    var note = document.getElementById('sh-gh-cli-repo-note');
+    if (note) note.hidden = !!repo;
+  }
+
+  function renderMaskedGhScript(script) {
+    return script
       .split('\n')
       .map(function (line) {
         return line.replace(/(--body )('.*')$/, function (m, p1) {
@@ -453,13 +514,6 @@
         });
       })
       .join('\n');
-
-    var code = out.querySelector('code');
-    if (code) code.textContent = masked || '# Fill in the earlier steps to generate the command.';
-    out.setAttribute('data-revealed', 'false');
-
-    var note = document.getElementById('sh-gh-cli-repo-note');
-    if (note) note.hidden = !!repo;
   }
 
   // --- Step 8: deploy ---
@@ -590,6 +644,11 @@
 
   function next() {
     if (state.step >= LAST) return;
+    if (STEP_IDS[state.step] === 'domain' && !isValidDomain(getDomain())) {
+      updateDomainDerived();
+      flash(fieldEl('sh-domain'));
+      return;
+    }
     goTo(state.step + 1);
   }
 
@@ -628,7 +687,7 @@
       el.addEventListener('input', function () {
         persistField(fid);
         if (fid === 'sh-domain') updateDomainDerived();
-        if (fid === 'sh-repo' && STEP_IDS[state.step] === 'github-env') renderGhCli();
+        if (fid === 'sh-repo' && STEP_IDS[state.step] === 'github-env') renderEnvOutputs();
       });
     });
 
@@ -659,7 +718,8 @@
           if (revealed) {
             code.textContent = script || '# Fill in the earlier steps to generate the command.';
           } else {
-            renderGhCli();
+            code.textContent = renderMaskedGhScript(script)
+              || '# Fill in the earlier steps to generate the command.';
           }
         }
         ghReveal.innerHTML = revealed ? eyeOffIcon() : eyeIcon();

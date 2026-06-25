@@ -111,17 +111,13 @@ const cfOptionalPermissions = [
           <h2 class="sh-h2">Your domain</h2>
           <p class="sh-lead">
             Enter the domain you'll use for SAM. This becomes your <code>BASE_DOMAIN</code> and powers
-            every URL and secret we generate from here on.
+            every URL and secret we generate from here on. We also derive a short resource prefix
+            from this domain so your Cloudflare resources do not collide with other SAM installs.
           </p>
           <div class="sh-field">
             <label for="sh-domain">Base domain</label>
             <input type="text" id="sh-domain" placeholder="example.com" autocomplete="off" spellcheck="false" />
             <span class="sh-hint" id="sh-domain-error" hidden>Enter a valid top-level domain, e.g. <code>example.com</code>.</span>
-          </div>
-          <div class="sh-field">
-            <label for="sh-prefix">Resource prefix <span class="sh-opt">(optional)</span></label>
-            <input type="text" id="sh-prefix" placeholder="sam" autocomplete="off" spellcheck="false" />
-            <span class="sh-hint">Prefixes your Cloudflare resource names. Defaults to <code>sam</code> if left blank.</span>
           </div>
           <div class="sh-callout sh-callout-warn">
             <strong>Use a top-level domain.</strong> Cloudflare's free Universal SSL covers <code>*.example.com</code>
@@ -134,6 +130,7 @@ const cfOptionalPermissions = [
               <dt>App</dt><dd data-derived="app"></dd>
               <dt>API</dt><dd data-derived="api"></dd>
               <dt>Workspaces</dt><dd data-derived="ws"></dd>
+              <dt>Resource prefix</dt><dd data-derived="prefix"></dd>
             </dl>
           </div>
           <details class="sh-why">
