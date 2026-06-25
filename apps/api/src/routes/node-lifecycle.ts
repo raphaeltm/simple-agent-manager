@@ -21,6 +21,7 @@ import {
   buildObservedDeploymentUpdate,
   reconcileDeploymentReleaseStatuses,
 } from '../services/deployment-control';
+import { appendDeploymentReleaseEvent } from '../services/deployment-release-events';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
@@ -30,7 +31,6 @@ import {
   verifyCallbackToken,
 } from '../services/jwt';
 import { createWorkspaceOnNode } from '../services/node-agent';
-import { appendDeploymentReleaseEvent } from '../services/deployment-release-events';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 
