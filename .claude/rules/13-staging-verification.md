@@ -62,7 +62,7 @@ If the deployment fails:
 - Inspect the deployment logs: `gh run view <RUN_ID> --log-failed`
 - **Distinguish code failures from configuration failures:**
   - **Code failure** (build error, type error, test failure): Fix the issue in your branch, push, and re-trigger
-  - **Configuration failure** (missing secrets, missing environment variables, permissions errors): **Alert the user immediately.** You cannot fix missing GitHub Environment secrets or Cloudflare configuration. Tell the user exactly what is missing and what action they need to take. Do NOT skip staging verification because of a config failure — do NOT merge without it.
+  - **Configuration failure** (missing secrets, missing environment variables, permissions errors): first distinguish manual prerequisites from generated platform secrets. Generated platform secrets should come from Pulumi/configure-secrets and should be fixed in code/config when that path is broken. For true missing user-owned GitHub Environment secrets or Cloudflare credentials, **alert the user immediately** with the exact missing item and action required. Do NOT skip staging verification because of a config failure — do NOT merge without it.
 - **Check for pre-existing deploy failures** before assuming your code broke it:
   ```bash
   gh run list --workflow=deploy-staging.yml --limit=5 --json conclusion,createdAt,displayTitle

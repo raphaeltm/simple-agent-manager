@@ -77,6 +77,7 @@ Merge to `main` automatically deploys to production via GitHub Actions.
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
 - **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
+- **Generated platform secrets**: deployment-owned signing/encryption keys are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
 
 ### Staging Deployment is a Merge Gate
 
@@ -150,7 +151,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 
 1. **BYOC (Bring-Your-Own-Cloud)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
 2. **User credentials encrypted per-user** in the database — NOT stored as env vars or Worker secrets. Public security architecture documentation lives in `apps/www/src/content/docs/docs/architecture/security.md`.
-3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
+3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, deploy signing keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment. SAM-owned generated keys should be Pulumi-managed by default, with GitHub secret overrides only when manual rotation is explicitly needed.
 4. **Canonical IDs for identity** — use `workspaceId`, `nodeId`, `sessionId` for all machine-critical operations (storage, routing, lifecycle). Human-readable labels are for UX/logging only and MUST be treated as mutable and non-unique.
 5. **Hybrid D1 + Durable Object storage** — D1 for cross-project queries (dashboard, tasks, users); per-project DOs for write-heavy data (chat sessions, messages, activity events). See `apps/www/src/content/docs/docs/architecture/overview.md`.
 
