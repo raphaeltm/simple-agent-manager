@@ -16,4 +16,16 @@ describe('teardown workflow', () => {
     expect(stepMatch?.[0]).toContain("steps.pulumi_destroy.outputs.status == 'deleted'");
     expect(stepMatch?.[0]).toContain('pulumi stack rm "$STACK" --yes --force');
   });
+
+  it('defaults AI Gateway teardown to the resolved deployment prefix, not sam', () => {
+    const stepMatch = workflow.match(
+      /- name: Resolve Resource Names[\s\S]*?(?=\n      - name: Checkout)/
+    );
+
+    expect(stepMatch?.[0]).toBeDefined();
+    expect(stepMatch?.[0]).toContain('AI_GATEWAY_ID="${{ vars.AI_GATEWAY_ID }}"');
+    expect(stepMatch?.[0]).toContain('AI_GATEWAY_ID="$PREFIX"');
+    expect(stepMatch?.[0]).toContain('echo "ai_gateway=$AI_GATEWAY_ID"');
+    expect(stepMatch?.[0]).not.toContain("vars.AI_GATEWAY_ID || 'sam'");
+  });
 });

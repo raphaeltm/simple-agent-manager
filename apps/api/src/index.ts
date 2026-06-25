@@ -26,6 +26,7 @@ import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
 import { log, serializeError } from './lib/logger';
+import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
 import { AppError } from './middleware/error';
@@ -172,24 +173,25 @@ app.use('*', async (c, next) => {
     return;
   }
 
-  // Proxy app.* to web UI Pages project
-  if (hostname === `app.${baseDomain}`) {
+  const pagesTarget = resolvePagesProxyTarget(hostname, {
+    baseDomain,
+    appPagesProjectName: c.env.PAGES_PROJECT_NAME,
+    wwwPagesProjectName: c.env.WWW_PAGES_PROJECT_NAME,
+  });
+
+  if (pagesTarget.type === 'missing-config') {
+    return c.text(pagesTarget.message, 503);
+  }
+
+  if (pagesTarget.type === 'proxy') {
     const pagesUrl = new URL(c.req.url);
-    pagesUrl.hostname = `${c.env.PAGES_PROJECT_NAME || 'sam-web-prod'}.pages.dev`;
+    pagesUrl.hostname = pagesTarget.hostname;
     return fetch(new Request(pagesUrl.toString(), c.req.raw));
   }
 
-  // Proxy www.* to marketing site Pages project
-  if (hostname === `www.${baseDomain}`) {
-    const pagesUrl = new URL(c.req.url);
-    pagesUrl.hostname = `${c.env.WWW_PAGES_PROJECT_NAME || 'sam-www'}.pages.dev`;
-    return fetch(new Request(pagesUrl.toString(), c.req.raw));
-  }
-
-  // Redirect apex domain to www
-  if (hostname === baseDomain) {
+  if (pagesTarget.type === 'redirect') {
     const wwwUrl = new URL(c.req.url);
-    wwwUrl.hostname = `www.${baseDomain}`;
+    wwwUrl.hostname = pagesTarget.hostname;
     return c.redirect(wwwUrl.toString(), 301);
   }
 

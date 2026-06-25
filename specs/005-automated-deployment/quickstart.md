@@ -11,6 +11,7 @@ Deploy your own Simple Agent Manager instance using GitHub Actions. **Deployment
 ## Prerequisites
 
 **Cloudflare Account**:
+
 - Account at [cloudflare.com](https://cloudflare.com)
 - **Workers Paid plan** ($5/month) — required for Durable Objects. Go to **Workers & Pages** → upgrade to the Paid plan.
 - Domain added to Cloudflare with nameservers configured (see [Domain Setup](#domain-setup) below)
@@ -18,6 +19,7 @@ Deploy your own Simple Agent Manager instance using GitHub Actions. **Deployment
 - API token with required permissions
 
 **GitHub Repository**:
+
 - Fork of the Simple Agent Manager repository
 - Access to repository Environments configuration
 
@@ -62,18 +64,18 @@ Create a token with permissions for all Cloudflare resources.
 2. Click **Create Token** → **Custom token**
 3. Add these permissions:
 
-| Permission | Access |
-|------------|--------|
-| Account - D1 | Edit |
-| Account - Workers KV Storage | Edit |
-| Account - Workers R2 Storage | Edit |
-| Account - Workers Scripts | Edit |
-| Account - Cloudflare Pages | Edit |
-| Account - Containers | Edit |
-| Zone - DNS | Edit |
-| Zone - SSL and Certificates | Edit |
-| Zone - Workers Routes | Edit |
-| Zone - Zone | Read |
+| Permission                   | Access |
+| ---------------------------- | ------ |
+| Account - D1                 | Edit   |
+| Account - Workers KV Storage | Edit   |
+| Account - Workers R2 Storage | Edit   |
+| Account - Workers Scripts    | Edit   |
+| Account - Cloudflare Pages   | Edit   |
+| Account - Containers         | Edit   |
+| Zone - DNS                   | Edit   |
+| Zone - SSL and Certificates  | Edit   |
+| Zone - Workers Routes        | Edit   |
+| Zone - Zone                  | Read   |
 
 4. Zone Resources: Include your domain's zone
 5. Click **Create Token** and save it
@@ -101,34 +103,35 @@ Configuration lives in a **GitHub Environment** (not repository secrets). This m
 
 Add these **Environment variables** (visible in UI):
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `BASE_DOMAIN` | Your base domain | `example.com` |
-| `RESOURCE_PREFIX` | Resource naming prefix (optional) | `sam` |
-| `PULUMI_STATE_BUCKET` | State bucket name (optional) | `sam-pulumi-state` |
+| Variable              | Description                                               | Example                |
+| --------------------- | --------------------------------------------------------- | ---------------------- |
+| `BASE_DOMAIN`         | Your base domain                                          | `example.com`          |
+| `RESOURCE_PREFIX`     | Domain-derived resource naming prefix (optional override) | `sa379a6`              |
+| `PULUMI_STATE_BUCKET` | State bucket name (optional)                              | `sa379a6-pulumi-state` |
 
 ### Step 6: Configure Environment Secrets
 
 Add these **Environment secrets**:
 
-| Secret Name | Value |
-|-------------|-------|
-| `CF_API_TOKEN` | Your Cloudflare API token |
-| `CF_ACCOUNT_ID` | Your Cloudflare account ID (32-char hex) |
-| `CF_ZONE_ID` | Your domain's zone ID (32-char hex) |
-| `R2_ACCESS_KEY_ID` | R2 API token access key |
-| `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
-| `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase |
-| `GH_CLIENT_ID` | GitHub OAuth App client ID |
-| `GH_CLIENT_SECRET` | GitHub OAuth App client secret |
-| `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
-| `GH_APP_SLUG` | GitHub App slug (URL name) |
-| `GH_WEBHOOK_SECRET` | GitHub webhook secret (see Step 7) |
+| Secret Name                | Value                                    |
+| -------------------------- | ---------------------------------------- |
+| `CF_API_TOKEN`             | Your Cloudflare API token                |
+| `CF_ACCOUNT_ID`            | Your Cloudflare account ID (32-char hex) |
+| `CF_ZONE_ID`               | Your domain's zone ID (32-char hex)      |
+| `R2_ACCESS_KEY_ID`         | R2 API token access key                  |
+| `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                  |
+| `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase                |
+| `GH_CLIENT_ID`             | GitHub OAuth App client ID               |
+| `GH_CLIENT_SECRET`         | GitHub OAuth App client secret           |
+| `GH_APP_ID`                | GitHub App ID                            |
+| `GH_APP_PRIVATE_KEY`       | GitHub App private key (base64 encoded)  |
+| `GH_APP_SLUG`              | GitHub App slug (URL name)               |
+| `GH_WEBHOOK_SECRET`        | GitHub webhook secret (see Step 7)       |
 
 > **Naming Convention**: GitHub secrets use `GH_*` prefix because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
 
 **Where to find Cloudflare IDs**:
+
 - Account ID: Cloudflare Dashboard sidebar (right side)
 - Zone ID: Domain overview page (right sidebar)
 
@@ -147,6 +150,7 @@ Add these **Environment secrets**:
 3. Go to **Actions** → **"Deploy"** → **"Run workflow"** for manual trigger
 
 The workflow will:
+
 1. ✅ Validate all required configuration exists
 2. ✅ Provision infrastructure via Pulumi (D1, KV, R2, DNS)
 3. ✅ Sync configuration to wrangler.toml
@@ -199,7 +203,7 @@ To remove all deployed resources:
 3. Type `DELETE` to confirm
 4. Click **"Run workflow"**
 
-**Note**: The state bucket (`sam-pulumi-state`) is NOT deleted. Delete it manually if no longer needed.
+**Note**: The state bucket (`{prefix}-pulumi-state`) is NOT deleted. Delete it manually if no longer needed.
 
 ### Teardown Options
 
@@ -267,6 +271,7 @@ Add all these values to your GitHub Environment secrets (see Step 6 above).
 **Error**: `error: could not load backend state`
 
 **Solution**: Verify R2 credentials:
+
 - Check `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are correct
 - Verify the state bucket exists
 - Ensure R2 token has Object Read & Write permissions
@@ -276,6 +281,7 @@ Add all these values to your GitHub Environment secrets (see Step 6 above).
 **Error**: `error: failed to decrypt secrets`
 
 **Solution**: The `PULUMI_CONFIG_PASSPHRASE` doesn't match the one used previously. If you've lost it, you'll need to:
+
 1. Delete the state bucket contents (or create new bucket)
 2. Re-run deployment (creates fresh infrastructure)
 
@@ -339,6 +345,7 @@ dig app.example.com
 ### Resource Already Exists
 
 Pulumi tracks state and handles existing resources. If you see conflicts:
+
 1. Check if resources were created manually in Cloudflare dashboard
 2. Import existing resources: `pulumi import ...`
 3. Or delete conflicting resources and re-run
@@ -349,51 +356,51 @@ Pulumi tracks state and handles existing resources. If you see conflicts:
 
 ### Environment Variables (Visible)
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `BASE_DOMAIN` | Yes | Your base domain (e.g., `example.com`) |
-| `RESOURCE_PREFIX` | No | Prefix for resources (default: `sam`) |
-| `PULUMI_STATE_BUCKET` | No | State bucket name (default: `sam-pulumi-state`) |
+| Variable              | Required | Description                                                                                         |
+| --------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `BASE_DOMAIN`         | Yes      | Your base domain (e.g., `example.com`)                                                              |
+| `RESOURCE_PREFIX`     | No       | Prefix for resources (defaults to `s` plus the first six hex chars of `BASE_DOMAIN`'s SHA-256 hash) |
+| `PULUMI_STATE_BUCKET` | No       | State bucket name (defaults to `{prefix}-pulumi-state`)                                             |
 
 ### Required Secrets
 
-| Secret | Description |
-|--------|-------------|
-| `CF_API_TOKEN` | Cloudflare API token with full permissions |
-| `CF_ACCOUNT_ID` | 32-character Cloudflare account ID |
-| `CF_ZONE_ID` | 32-character zone ID for your domain |
-| `R2_ACCESS_KEY_ID` | R2 S3-compatible access key |
-| `R2_SECRET_ACCESS_KEY` | R2 S3-compatible secret key |
-| `PULUMI_CONFIG_PASSPHRASE` | Passphrase for state encryption |
-| `GH_CLIENT_ID` | GitHub OAuth App client ID |
-| `GH_CLIENT_SECRET` | GitHub OAuth App client secret |
-| `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
-| `GH_APP_SLUG` | GitHub App slug (URL name) |
-| `GH_WEBHOOK_SECRET` | Webhook signature verification secret |
+| Secret                     | Description                                |
+| -------------------------- | ------------------------------------------ |
+| `CF_API_TOKEN`             | Cloudflare API token with full permissions |
+| `CF_ACCOUNT_ID`            | 32-character Cloudflare account ID         |
+| `CF_ZONE_ID`               | 32-character zone ID for your domain       |
+| `R2_ACCESS_KEY_ID`         | R2 S3-compatible access key                |
+| `R2_SECRET_ACCESS_KEY`     | R2 S3-compatible secret key                |
+| `PULUMI_CONFIG_PASSPHRASE` | Passphrase for state encryption            |
+| `GH_CLIENT_ID`             | GitHub OAuth App client ID                 |
+| `GH_CLIENT_SECRET`         | GitHub OAuth App client secret             |
+| `GH_APP_ID`                | GitHub App ID                              |
+| `GH_APP_PRIVATE_KEY`       | GitHub App private key (base64 encoded)    |
+| `GH_APP_SLUG`              | GitHub App slug (URL name)                 |
+| `GH_WEBHOOK_SECRET`        | Webhook signature verification secret      |
 
 ### Auto-Generated Secrets
 
 These security keys are **automatically generated** on first deployment and stored in Cloudflare Worker secrets:
 
-| Secret | Description |
-|--------|-------------|
-| `ENCRYPTION_KEY` | AES-256 key for encrypting stored credentials |
+| Secret            | Description                                      |
+| ----------------- | ------------------------------------------------ |
+| `ENCRYPTION_KEY`  | AES-256 key for encrypting stored credentials    |
 | `JWT_PRIVATE_KEY` | RSA-2048 private key for signing terminal tokens |
-| `JWT_PUBLIC_KEY` | RSA-2048 public key for token verification |
+| `JWT_PUBLIC_KEY`  | RSA-2048 public key for token verification       |
 
 You do not need to add these to GitHub Secrets. For persistence across fresh deployments, copy them from Cloudflare Worker secrets to GitHub Secrets after first deployment.
 
 ### Resources Created
 
-| Resource | Name Pattern | Purpose |
-|----------|--------------|---------|
-| D1 Database | `sam-prod` | Workspace metadata |
-| KV Namespace | `sam-prod-sessions` | Sessions, tokens |
-| R2 Bucket | `sam-prod-assets` | VM Agent binaries |
-| DNS (API) | `api.{domain}` | API endpoint |
-| DNS (App) | `app.{domain}` | Web UI |
-| DNS (Wildcard) | `*.{domain}` | Workspace routing |
+| Resource       | Name Pattern             | Purpose            |
+| -------------- | ------------------------ | ------------------ |
+| D1 Database    | `{prefix}-prod`          | Workspace metadata |
+| KV Namespace   | `{prefix}-prod-sessions` | Sessions, tokens   |
+| R2 Bucket      | `{prefix}-prod-assets`   | VM Agent binaries  |
+| DNS (API)      | `api.{domain}`           | API endpoint       |
+| DNS (App)      | `app.{domain}`           | Web UI             |
+| DNS (Wildcard) | `*.{domain}`             | Workspace routing  |
 
 ---
 

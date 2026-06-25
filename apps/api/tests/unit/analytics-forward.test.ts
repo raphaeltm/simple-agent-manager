@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   type AnalyticsEvent,
@@ -34,7 +34,7 @@ function makeEnv(overrides: Record<string, unknown> = {}): any {
   return {
     CF_ACCOUNT_ID: 'test-account',
     CF_API_TOKEN: 'test-token',
-    ANALYTICS_DATASET: 'sam_analytics',
+    ANALYTICS_DATASET: 'sa379a6_analytics',
     ANALYTICS_SQL_API_URL: 'https://api.cloudflare.com/client/v4/accounts',
     KV: {
       get: vi.fn().mockResolvedValue(null),
@@ -65,7 +65,9 @@ describe('queryConversionEvents', () => {
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, options] = mockFetch.mock.calls[0];
-    expect(url).toBe('https://api.cloudflare.com/client/v4/accounts/test-account/analytics_engine/sql');
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/test-account/analytics_engine/sql'
+    );
     expect(options.method).toBe('POST');
     expect(options.headers['Authorization']).toBe('Bearer test-token');
     expect(options.body).toContain("'signup'");
@@ -76,8 +78,23 @@ describe('queryConversionEvents', () => {
 
   it('throws when CF_ACCOUNT_ID is missing', async () => {
     const env = makeEnv({ CF_ACCOUNT_ID: undefined });
-    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup']))
-      .rejects.toThrow('CF_ACCOUNT_ID is not configured');
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup'])).rejects.toThrow(
+      'CF_ACCOUNT_ID is not configured'
+    );
+  });
+
+  it('throws when ANALYTICS_DATASET is missing', async () => {
+    const env = makeEnv({ ANALYTICS_DATASET: '' });
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup'])).rejects.toThrow(
+      'ANALYTICS_DATASET is not configured'
+    );
+  });
+
+  it('throws when ANALYTICS_DATASET contains invalid characters', async () => {
+    const env = makeEnv({ ANALYTICS_DATASET: 'bad-dataset' });
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup'])).rejects.toThrow(
+      'ANALYTICS_DATASET contains invalid characters'
+    );
   });
 
   it('throws on non-ok response', async () => {
@@ -89,8 +106,9 @@ describe('queryConversionEvents', () => {
     vi.stubGlobal('fetch', mockFetch);
 
     const env = makeEnv();
-    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup']))
-      .rejects.toThrow('Analytics Engine query failed: 500');
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup'])).rejects.toThrow(
+      'Analytics Engine query failed: 500'
+    );
   });
 
   it('returns empty array when no data', async () => {
@@ -107,8 +125,9 @@ describe('queryConversionEvents', () => {
 
   it('rejects invalid ISO timestamps to prevent SQL injection', async () => {
     const env = makeEnv();
-    await expect(queryConversionEvents(env, "'; DROP TABLE --", ['signup']))
-      .rejects.toThrow('Invalid ISO timestamp for cursor');
+    await expect(queryConversionEvents(env, "'; DROP TABLE --", ['signup'])).rejects.toThrow(
+      'Invalid ISO timestamp for cursor'
+    );
   });
 
   it('accepts valid ISO timestamps', async () => {
@@ -125,32 +144,37 @@ describe('queryConversionEvents', () => {
 
   it('rejects event names containing SQL comment sequences', async () => {
     const env = makeEnv();
-    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup--']))
-      .rejects.toThrow('Invalid event name');
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup--'])).rejects.toThrow(
+      'Invalid event name'
+    );
   });
 
   it('rejects event names with semicolons', async () => {
     const env = makeEnv();
-    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup;DROP']))
-      .rejects.toThrow('Invalid event name');
+    await expect(
+      queryConversionEvents(env, '2026-03-26T00:00:00Z', ['signup;DROP'])
+    ).rejects.toThrow('Invalid event name');
   });
 
   it('rejects event names starting with uppercase', async () => {
     const env = makeEnv();
-    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['Signup']))
-      .rejects.toThrow('Invalid event name');
+    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ['Signup'])).rejects.toThrow(
+      'Invalid event name'
+    );
   });
 
   it('rejects semantically invalid ISO timestamps', async () => {
     const env = makeEnv();
-    await expect(queryConversionEvents(env, '2026-99-99T99:99:99Z', ['signup']))
-      .rejects.toThrow('Invalid ISO timestamp for cursor');
+    await expect(queryConversionEvents(env, '2026-99-99T99:99:99Z', ['signup'])).rejects.toThrow(
+      'Invalid ISO timestamp for cursor'
+    );
   });
 
   it('rejects event names with special characters (single quotes)', async () => {
     const env = makeEnv();
-    await expect(queryConversionEvents(env, '2026-03-26T00:00:00Z', ["event'name"]))
-      .rejects.toThrow('Invalid event name');
+    await expect(
+      queryConversionEvents(env, '2026-03-26T00:00:00Z', ["event'name"])
+    ).rejects.toThrow('Invalid event name');
   });
 });
 
@@ -226,7 +250,9 @@ describe('forwardToSegment', () => {
       SEGMENT_WRITE_KEY: 'test-key',
       SEGMENT_API_URL: 'https://evil.example.com/steal-key',
     });
-    await expect(forwardToSegment(env, [makeEvent()])).rejects.toThrow('Disallowed segment API URL');
+    await expect(forwardToSegment(env, [makeEvent()])).rejects.toThrow(
+      'Disallowed segment API URL'
+    );
   });
 
   it('returns error on API failure', async () => {
@@ -332,7 +358,11 @@ describe('forwardToGA4', () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);
 
-    const env = makeEnv({ GA4_MEASUREMENT_ID: 'G-123', GA4_API_SECRET: 'secret', GA4_MAX_BATCH_SIZE: '2' });
+    const env = makeEnv({
+      GA4_MEASUREMENT_ID: 'G-123',
+      GA4_API_SECRET: 'secret',
+      GA4_MAX_BATCH_SIZE: '2',
+    });
     const events = [
       makeEvent({ userId: 'user-1', event: 'a' }),
       makeEvent({ userId: 'user-1', event: 'b' }),
@@ -361,7 +391,9 @@ describe('forwardToGA4', () => {
     });
     await forwardToGA4(env, [makeEvent()]);
 
-    expect(mockFetch.mock.calls[0][0]).toContain('https://www.google-analytics.com/debug/mp/collect');
+    expect(mockFetch.mock.calls[0][0]).toContain(
+      'https://www.google-analytics.com/debug/mp/collect'
+    );
   });
 
   it('rejects disallowed GA4_API_URL to prevent SSRF', async () => {
@@ -413,7 +445,8 @@ describe('runAnalyticsForward', () => {
     const events = [makeEvent(), makeEvent({ timestamp: '2026-03-27T11:00:00Z', event: 'login' })];
 
     // First call: Analytics Engine query; second call: Segment batch
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: events }),
@@ -509,7 +542,8 @@ describe('runAnalyticsForward', () => {
     const events = [makeEvent()];
 
     // First call: Analytics Engine query; second call: Segment succeeds; third: GA4 fails
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: events }),

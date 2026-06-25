@@ -35,7 +35,7 @@ describe('admin-costs routes', () => {
   let mockFetch: ReturnType<typeof vi.fn>;
   const CF_ACCOUNT_ID = 'test-account-123';
   const CF_API_TOKEN = 'test-token-abc';
-  const AI_GATEWAY_ID = 'sam';
+  const AI_GATEWAY_ID = 'sa379a6';
 
   function makeGatewayResponse(entries: unknown[] = [], totalPages = 1) {
     return new Response(
@@ -51,7 +51,7 @@ describe('admin-costs routes', () => {
         success: true,
         errors: [],
       }),
-      { status: 200 },
+      { status: 200 }
     );
   }
 
@@ -103,12 +103,12 @@ describe('admin-costs routes', () => {
           id: 'log-2',
           model: 'claude-haiku-4-5-20251001',
           provider: 'anthropic',
-          cost: 0.10,
+          cost: 0.1,
           tokens_in: 2000,
           tokens_out: 1000,
           metadata: { userId: 'user-2', projectId: 'proj-2' },
         }),
-      ]),
+      ])
     );
 
     const app = createApp();
@@ -126,7 +126,7 @@ describe('admin-costs routes', () => {
     // By model — sorted by cost desc
     expect(body.llm.byModel).toHaveLength(2);
     expect(body.llm.byModel[0].model).toBe('claude-haiku-4-5-20251001');
-    expect(body.llm.byModel[0].costUsd).toBeCloseTo(0.10);
+    expect(body.llm.byModel[0].costUsd).toBeCloseTo(0.1);
 
     // By user
     expect(body.llm.byUser).toHaveLength(2);
@@ -172,8 +172,8 @@ describe('admin-costs routes', () => {
           },
           success: true,
         }),
-        { status: 200 },
-      ),
+        { status: 200 }
+      )
     );
 
     const app = createApp();
@@ -234,8 +234,8 @@ describe('admin-costs routes', () => {
     mockFetch.mockResolvedValue(
       makeGatewayResponse([
         makeLogEntry({ cost: 0.05, metadata: { userId: 'user-1', trialId: 'trial-1' } }),
-        makeLogEntry({ id: 'log-2', cost: 0.10, metadata: { userId: 'user-2' } }),
-      ]),
+        makeLogEntry({ id: 'log-2', cost: 0.1, metadata: { userId: 'user-2' } }),
+      ])
     );
 
     const app = createApp();
@@ -254,17 +254,15 @@ describe('admin-costs routes', () => {
     const body = await res.json();
 
     // 40 vCPU-hrs * $0.01 = $0.40
-    expect(body.compute.estimatedCostUsd).toBeCloseTo(0.40);
+    expect(body.compute.estimatedCostUsd).toBeCloseTo(0.4);
     expect(body.compute.vcpuHourCostUsd).toBe(0.01);
   });
 
   it('aggregates across multiple pages', async () => {
     const page1Entries = Array.from({ length: 50 }, (_, i) =>
-      makeLogEntry({ id: `log-p1-${i}`, cost: 0.01 }),
+      makeLogEntry({ id: `log-p1-${i}`, cost: 0.01 })
     );
-    const page2Entries = [
-      makeLogEntry({ id: 'log-p2-0', cost: 0.05 }),
-    ];
+    const page2Entries = [makeLogEntry({ id: 'log-p2-0', cost: 0.05 })];
 
     mockFetch
       .mockResolvedValueOnce(
@@ -275,8 +273,8 @@ describe('admin-costs routes', () => {
             success: true,
             errors: [],
           }),
-          { status: 200 },
-        ),
+          { status: 200 }
+        )
       )
       .mockResolvedValueOnce(
         new Response(
@@ -286,8 +284,8 @@ describe('admin-costs routes', () => {
             success: true,
             errors: [],
           }),
-          { status: 200 },
-        ),
+          { status: 200 }
+        )
       );
 
     const app = createApp();
@@ -300,9 +298,7 @@ describe('admin-costs routes', () => {
   });
 
   it('returns 500 when AI Gateway API returns an error', async () => {
-    mockFetch.mockResolvedValue(
-      new Response('Gateway error', { status: 502 }),
-    );
+    mockFetch.mockResolvedValue(new Response('Gateway error', { status: 502 }));
 
     const app = createApp();
     const res = await app.request('/api/admin/costs');
@@ -310,16 +306,12 @@ describe('admin-costs routes', () => {
   });
 
   it('returns LLM data even when compute query fails', async () => {
-    const { getAllUsersNodeUsageSummary } = await import(
-      '../../../src/services/node-usage'
-    );
+    const { getAllUsersNodeUsageSummary } = await import('../../../src/services/node-usage');
     (getAllUsersNodeUsageSummary as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('D1 unavailable'),
+      new Error('D1 unavailable')
     );
 
-    mockFetch.mockResolvedValue(
-      makeGatewayResponse([makeLogEntry({ cost: 0.05 })]),
-    );
+    mockFetch.mockResolvedValue(makeGatewayResponse([makeLogEntry({ cost: 0.05 })]));
 
     const app = createApp();
     const res = await app.request('/api/admin/costs');
@@ -337,8 +329,8 @@ describe('admin-costs routes', () => {
     mockFetch.mockResolvedValue(
       makeGatewayResponse([
         makeLogEntry({ cost: 0.05, metadata: null }),
-        makeLogEntry({ id: 'log-2', cost: 0.10, metadata: {} }),
-      ]),
+        makeLogEntry({ id: 'log-2', cost: 0.1, metadata: {} }),
+      ])
     );
 
     const app = createApp();
@@ -358,7 +350,7 @@ describe('admin-costs routes', () => {
         makeLogEntry({ cost: 0.01, cached: true }),
         makeLogEntry({ id: 'log-2', cost: 0.02, success: false }),
         makeLogEntry({ id: 'log-3', cost: 0.03 }),
-      ]),
+      ])
     );
 
     const app = createApp();
@@ -373,9 +365,9 @@ describe('admin-costs routes', () => {
     mockFetch.mockResolvedValue(
       makeGatewayResponse([
         makeLogEntry({ cost: 0.05, created_at: '2026-04-15T10:00:00Z' }),
-        makeLogEntry({ id: 'log-2', cost: 0.10, created_at: '2026-04-15T14:00:00Z' }),
+        makeLogEntry({ id: 'log-2', cost: 0.1, created_at: '2026-04-15T14:00:00Z' }),
         makeLogEntry({ id: 'log-3', cost: 0.03, created_at: '2026-04-16T09:00:00Z' }),
-      ]),
+      ])
     );
 
     const app = createApp();

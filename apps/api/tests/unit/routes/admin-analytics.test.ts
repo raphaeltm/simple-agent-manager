@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { adminAnalyticsRoutes } from '../../../src/routes/admin-analytics';
 
@@ -22,6 +22,7 @@ describe('admin-analytics routes', () => {
       (c.env as Record<string, unknown>) = {
         CF_ACCOUNT_ID,
         CF_API_TOKEN,
+        ANALYTICS_DATASET: 'sa379a6_analytics',
         ...envOverrides,
       };
       await next();
@@ -50,7 +51,7 @@ describe('admin-analytics routes', () => {
     expect(opts.method).toBe('POST');
     expect(opts.headers.Authorization).toBe(`Bearer ${CF_API_TOKEN}`);
     expect(opts.body).toContain('count(DISTINCT index1)');
-    expect(opts.body).toContain('sam_analytics');
+    expect(opts.body).toContain('sa379a6_analytics');
   });
 
   it('GET /events accepts period query param', async () => {
@@ -98,6 +99,16 @@ describe('admin-analytics routes', () => {
     expect(res.status).toBe(500);
   });
 
+  it('returns 500 when ANALYTICS_DATASET is missing', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+
+    const app = createApp({ ANALYTICS_DATASET: '' });
+
+    const res = await app.request('/api/admin/analytics/dau');
+    expect(res.status).toBe(500);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('returns 500 when Analytics Engine API returns error', async () => {
     mockFetch.mockResolvedValue(new Response('Bad request', { status: 400 }));
 
@@ -114,7 +125,7 @@ describe('admin-analytics routes', () => {
 
     const [, opts] = mockFetch.mock.calls[0];
     expect(opts.body).toContain('custom_dataset');
-    expect(opts.body).not.toContain('sam_analytics');
+    expect(opts.body).not.toContain('sa379a6_analytics');
   });
 
   it('uses custom SQL API URL from env', async () => {
@@ -138,11 +149,15 @@ describe('admin-analytics routes', () => {
   });
 
   it('GET /dau returns correct JSON shape with data array', async () => {
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ date: '2026-03-27', unique_users: 5 }] }), { status: 200 }));
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ date: '2026-03-27', unique_users: 5 }] }), {
+        status: 200,
+      })
+    );
 
     const app = createApp();
     const res = await app.request('/api/admin/analytics/dau');
-    const json = await res.json() as { dau: unknown[]; periodDays: number };
+    const json = (await res.json()) as { dau: unknown[]; periodDays: number };
 
     expect(json).toHaveProperty('dau');
     expect(json).toHaveProperty('periodDays');
@@ -155,7 +170,7 @@ describe('admin-analytics routes', () => {
 
     const app = createApp();
     const res = await app.request('/api/admin/analytics/events');
-    const json = await res.json() as { events: unknown[]; period: string };
+    const json = (await res.json()) as { events: unknown[]; period: string };
 
     expect(json).toHaveProperty('events');
     expect(json).toHaveProperty('period');
@@ -167,7 +182,7 @@ describe('admin-analytics routes', () => {
 
     const app = createApp();
     const res = await app.request('/api/admin/analytics/funnel');
-    const json = await res.json() as { funnel: unknown[]; periodDays: number };
+    const json = (await res.json()) as { funnel: unknown[]; periodDays: number };
 
     expect(json).toHaveProperty('funnel');
     expect(json).toHaveProperty('periodDays');
@@ -198,16 +213,21 @@ describe('admin-analytics routes', () => {
 
   describe('numeric conversion from Analytics Engine string values', () => {
     it('GET /dau converts unique_users from string to number', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({
-        data: [
-          { date: '2026-03-27', unique_users: '5' },
-          { date: '2026-03-28', unique_users: '12' },
-        ],
-      }), { status: 200 }));
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              { date: '2026-03-27', unique_users: '5' },
+              { date: '2026-03-28', unique_users: '12' },
+            ],
+          }),
+          { status: 200 }
+        )
+      );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/dau');
-      const json = await res.json() as { dau: Array<{ unique_users: number }> };
+      const json = (await res.json()) as { dau: Array<{ unique_users: number }> };
 
       expect(typeof json.dau[0].unique_users).toBe('number');
       expect(json.dau[0].unique_users).toBe(5);
@@ -215,16 +235,28 @@ describe('admin-analytics routes', () => {
     });
 
     it('GET /events converts count, unique_users, avg_response_ms from string to number', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({
-        data: [
-          { event_name: 'signup', count: '100', unique_users: '42', avg_response_ms: '123.456' },
-          { event_name: 'login', count: '200', unique_users: '38', avg_response_ms: '89.1' },
-        ],
-      }), { status: 200 }));
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                event_name: 'signup',
+                count: '100',
+                unique_users: '42',
+                avg_response_ms: '123.456',
+              },
+              { event_name: 'login', count: '200', unique_users: '38', avg_response_ms: '89.1' },
+            ],
+          }),
+          { status: 200 }
+        )
+      );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/events');
-      const json = await res.json() as { events: Array<{ count: number; unique_users: number; avg_response_ms: number }> };
+      const json = (await res.json()) as {
+        events: Array<{ count: number; unique_users: number; avg_response_ms: number }>;
+      };
 
       expect(typeof json.events[0].count).toBe('number');
       expect(json.events[0].count).toBe(100);
@@ -237,16 +269,21 @@ describe('admin-analytics routes', () => {
     });
 
     it('GET /funnel converts unique_users from string to number', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({
-        data: [
-          { event_name: 'signup', unique_users: '50' },
-          { event_name: 'task_submitted', unique_users: '10' },
-        ],
-      }), { status: 200 }));
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              { event_name: 'signup', unique_users: '50' },
+              { event_name: 'task_submitted', unique_users: '10' },
+            ],
+          }),
+          { status: 200 }
+        )
+      );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/funnel');
-      const json = await res.json() as { funnel: Array<{ unique_users: number }> };
+      const json = (await res.json()) as { funnel: Array<{ unique_users: number }> };
 
       expect(typeof json.funnel[0].unique_users).toBe('number');
       expect(json.funnel[0].unique_users).toBe(50);
@@ -266,7 +303,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/feature-adoption');
-      const json = await res.json() as {
+      const json = (await res.json()) as {
         totals: Array<{ count: number; unique_users: number }>;
         trend: Array<{ count: number }>;
       };
@@ -279,16 +316,23 @@ describe('admin-analytics routes', () => {
     });
 
     it('GET /geo converts event_count and unique_users from string to number', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({
-        data: [
-          { country: 'US', event_count: '100', unique_users: '20' },
-          { country: 'DE', event_count: '50', unique_users: '10' },
-        ],
-      }), { status: 200 }));
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              { country: 'US', event_count: '100', unique_users: '20' },
+              { country: 'DE', event_count: '50', unique_users: '10' },
+            ],
+          }),
+          { status: 200 }
+        )
+      );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/geo');
-      const json = await res.json() as { geo: Array<{ event_count: number; unique_users: number }> };
+      const json = (await res.json()) as {
+        geo: Array<{ event_count: number; unique_users: number }>;
+      };
 
       expect(typeof json.geo[0].event_count).toBe('number');
       expect(json.geo[0].event_count).toBe(100);
@@ -302,19 +346,35 @@ describe('admin-analytics routes', () => {
         const sql = (init as { body?: string }).body ?? '';
         if (sql.includes('toDate(timestamp)')) {
           // trend query
-          return new Response(JSON.stringify({
-            data: [{ host: 'example.com', date: '2026-03-28', views: '55' }],
-          }), { status: 200 });
+          return new Response(
+            JSON.stringify({
+              data: [{ host: 'example.com', date: '2026-03-28', views: '55' }],
+            }),
+            { status: 200 }
+          );
         } else if (sql.includes('blob3 AS page')) {
           // top pages query
-          return new Response(JSON.stringify({
-            data: [{ host: 'example.com', page: '/', views: '30', unique_visitors: '10' }],
-          }), { status: 200 });
+          return new Response(
+            JSON.stringify({
+              data: [{ host: 'example.com', page: '/', views: '30', unique_visitors: '10' }],
+            }),
+            { status: 200 }
+          );
         } else {
           // sections (host totals) query
-          return new Response(JSON.stringify({
-            data: [{ host: 'example.com', total_views: '80', unique_visitors: '25', unique_sessions: '18' }],
-          }), { status: 200 });
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  host: 'example.com',
+                  total_views: '80',
+                  unique_visitors: '25',
+                  unique_sessions: '18',
+                },
+              ],
+            }),
+            { status: 200 }
+          );
         }
       });
 
@@ -322,7 +382,7 @@ describe('admin-analytics routes', () => {
       const res = await app.request('/api/admin/analytics/website-traffic');
       expect(res.status).toBe(200);
 
-      const json = await res.json() as {
+      const json = (await res.json()) as {
         hosts: Array<{ totalViews: number; uniqueVisitors: number; uniqueSessions: number }>;
         trend: Array<{ views: number }>;
       };
@@ -361,7 +421,7 @@ describe('admin-analytics routes', () => {
       const res = await app.request('/api/admin/analytics/feature-adoption');
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { totals: unknown[]; trend: unknown[]; period: string };
+      const body = (await res.json()) as { totals: unknown[]; trend: unknown[]; period: string };
       expect(body.period).toBe('30d');
       expect(body.totals).toHaveLength(1);
       expect(body.trend).toHaveLength(1);
@@ -377,7 +437,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/feature-adoption?period=7d');
-      const body = await res.json() as { period: string };
+      const body = (await res.json()) as { period: string };
       expect(body.period).toBe('7d');
       expect(capturedSql.every((sql) => sql.includes("INTERVAL '7' DAY"))).toBe(true);
     });
@@ -429,13 +489,13 @@ describe('admin-analytics routes', () => {
     });
 
     it('returns empty totals and trend for no matching data', async () => {
-      mockFetch.mockImplementation(async () =>
-        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/feature-adoption');
-      const body = await res.json() as { totals: unknown[]; trend: unknown[] };
+      const body = (await res.json()) as { totals: unknown[]; trend: unknown[] };
       expect(body.totals).toEqual([]);
       expect(body.trend).toEqual([]);
     });
@@ -451,10 +511,16 @@ describe('admin-analytics routes', () => {
       await app.request('/api/admin/analytics/feature-adoption');
 
       const expectedEvents = [
-        'workspace_created', 'workspace_started', 'workspace_stopped',
-        'task_completed', 'task_failed',
-        'node_created', 'node_deleted',
-        'credential_saved', 'session_created', 'settings_changed',
+        'workspace_created',
+        'workspace_started',
+        'workspace_stopped',
+        'task_completed',
+        'task_failed',
+        'node_created',
+        'node_deleted',
+        'credential_saved',
+        'session_created',
+        'settings_changed',
       ];
       for (const event of expectedEvents) {
         for (const sql of capturedSql) {
@@ -472,7 +538,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/feature-adoption?period=90d');
-      const body = await res.json() as { period: string };
+      const body = (await res.json()) as { period: string };
       expect(body.period).toBe('90d');
       expect(capturedSql.every((sql) => sql.includes("INTERVAL '90' DAY"))).toBe(true);
     });
@@ -499,18 +565,26 @@ describe('admin-analytics routes', () => {
 
   describe('GET /api/admin/analytics/geo', () => {
     it('returns country distribution data', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({
-        data: [
-          { country: 'US', event_count: 100, unique_users: 20 },
-          { country: 'DE', event_count: 50, unique_users: 10 },
-        ],
-      }), { status: 200 }));
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              { country: 'US', event_count: 100, unique_users: 20 },
+              { country: 'DE', event_count: 50, unique_users: 10 },
+            ],
+          }),
+          { status: 200 }
+        )
+      );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/geo');
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { geo: Array<{ country: string; unique_users: number }>; period: string };
+      const body = (await res.json()) as {
+        geo: Array<{ country: string; unique_users: number }>;
+        period: string;
+      };
       expect(body.period).toBe('30d');
       expect(body.geo).toHaveLength(2);
       expect(body.geo[0].country).toBe('US');
@@ -542,7 +616,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/geo?period=7d');
-      const body = await res.json() as { period: string };
+      const body = (await res.json()) as { period: string };
       expect(body.period).toBe('7d');
 
       const [, opts] = mockFetch.mock.calls[0];
@@ -554,7 +628,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/geo');
-      const body = await res.json() as { geo: unknown[] };
+      const body = (await res.json()) as { geo: unknown[] };
       expect(body.geo).toEqual([]);
     });
 
@@ -632,7 +706,7 @@ describe('admin-analytics routes', () => {
       const res = await app.request('/api/admin/analytics/retention');
       expect(res.status).toBe(200);
 
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         weeks: number;
         retention: Array<{
           cohortWeek: string;
@@ -656,13 +730,13 @@ describe('admin-analytics routes', () => {
     });
 
     it('uses custom weeks from query param', async () => {
-      mockFetch.mockImplementation(async () =>
-        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention?weeks=8');
-      const body = await res.json() as { weeks: number };
+      const body = (await res.json()) as { weeks: number };
       expect(body.weeks).toBe(8);
 
       const [, opts] = mockFetch.mock.calls[0];
@@ -670,24 +744,24 @@ describe('admin-analytics routes', () => {
     });
 
     it('uses env var for default retention weeks', async () => {
-      mockFetch.mockImplementation(async () =>
-        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       );
 
       const app = createApp({ ANALYTICS_RETENTION_WEEKS: '6' });
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as { weeks: number };
+      const body = (await res.json()) as { weeks: number };
       expect(body.weeks).toBe(6);
     });
 
     it('returns empty retention for no data', async () => {
-      mockFetch.mockImplementation(async () =>
-        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as { retention: unknown[] };
+      const body = (await res.json()) as { retention: unknown[] };
       expect(body.retention).toEqual([]);
     });
 
@@ -702,7 +776,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         retention: Array<{ cohortSize: number; weeks: Array<{ week: number; rate: number }> }>;
       };
       expect(body.retention[0].cohortSize).toBe(1);
@@ -724,7 +798,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         retention: Array<{ cohortSize: number }>;
       };
       // Only user-1 cohort, size 1 — orphan is not double-counted
@@ -750,7 +824,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         retention: Array<{ cohortWeek: string }>;
       };
       expect(body.retention[0].cohortWeek).toBe('2026-03-10');
@@ -775,7 +849,7 @@ describe('admin-analytics routes', () => {
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention?weeks=4');
-      const body = await res.json() as {
+      const body = (await res.json()) as {
         retention: Array<{ cohortWeek: string; weeks: Array<{ week: number }> }>;
       };
       expect(body.retention).toHaveLength(1);
@@ -784,13 +858,13 @@ describe('admin-analytics routes', () => {
     });
 
     it('default weeks is 12 when env var is absent', async () => {
-      mockFetch.mockImplementation(async () =>
-        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       );
 
       const app = createApp();
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as { weeks: number };
+      const body = (await res.json()) as { weeks: number };
       expect(body.weeks).toBe(12);
 
       const [, opts] = mockFetch.mock.calls[0];
@@ -798,13 +872,13 @@ describe('admin-analytics routes', () => {
     });
 
     it('ignores non-positive ANALYTICS_RETENTION_WEEKS and falls back to 12', async () => {
-      mockFetch.mockImplementation(async () =>
-        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
       );
 
       const app = createApp({ ANALYTICS_RETENTION_WEEKS: '-5' });
       const res = await app.request('/api/admin/analytics/retention');
-      const body = await res.json() as { weeks: number };
+      const body = (await res.json()) as { weeks: number };
       expect(body.weeks).toBe(12);
     });
 

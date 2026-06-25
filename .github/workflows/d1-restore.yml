@@ -98,6 +98,10 @@ jobs:
             echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
           else
             DOMAIN="${{ vars.BASE_DOMAIN }}"
+            if [ -z "$DOMAIN" ]; then
+              echo "::error::BASE_DOMAIN is required when RESOURCE_PREFIX is not set."
+              exit 1
+            fi
             HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
             echo "value=s${HASH}" >> $GITHUB_OUTPUT
           fi
