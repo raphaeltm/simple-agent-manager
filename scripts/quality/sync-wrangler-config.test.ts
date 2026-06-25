@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   checkTailWorkerExists,
   detectArtifactsAvailable,
+  ensureTomlMap,
   generateApiWorkerEnv,
   resolveArtifactsBindingEnabled,
 } from '../deploy/sync-wrangler-config.js';
@@ -221,5 +222,24 @@ describe('resolveArtifactsBindingEnabled (auto-detect + override)', () => {
     vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'false');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
     await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(false);
+  });
+});
+
+describe('ensureTomlMap', () => {
+  it('returns the original TOML map so generated env sections are persisted', () => {
+    const config: { env: Record<string, unknown> } = { env: {} };
+
+    const envConfig = ensureTomlMap(config.env, 'tail worker env config');
+    envConfig.staging = { name: 'sam-tail-worker-staging' };
+
+    expect(config.env).toEqual({
+      staging: { name: 'sam-tail-worker-staging' },
+    });
+  });
+
+  it('rejects non-table values', () => {
+    expect(() => ensureTomlMap([], 'tail worker env config')).toThrow(
+      'tail worker env config must be a TOML table'
+    );
   });
 });

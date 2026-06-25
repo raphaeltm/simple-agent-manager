@@ -44,7 +44,10 @@ const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
 
-const recordSchema = v.record(v.string(), v.unknown());
+const recordSchema = v.custom<Record<string, unknown>>(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  'Expected an object'
+);
 
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
   const result = v.safeParse(recordSchema, value);
@@ -61,12 +64,12 @@ function requireString(value: unknown, path: string): string {
   return value;
 }
 
-function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
+export function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
   const result = v.safeParse(recordSchema, value);
   if (!result.success) {
     throw new Error(`${path} must be a TOML table`);
   }
-  return result.output as TOML.JsonMap;
+  return value as TOML.JsonMap;
 }
 
 function generateSetupToken(): string {
