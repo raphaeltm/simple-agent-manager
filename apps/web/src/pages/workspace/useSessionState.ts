@@ -219,20 +219,20 @@ export function useSessionState(
   const attemptedOrphanResumeRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!id || orphanedSessions.length === 0) return;
+    // Clear the attempted-resume set when there are no more orphans
+    if (orphanedSessions.length === 0) {
+      if (attemptedOrphanResumeRef.current.size > 0) {
+        attemptedOrphanResumeRef.current.clear();
+      }
+      return;
+    }
+    if (!id) return;
     for (const session of orphanedSessions) {
       if (attemptedOrphanResumeRef.current.has(session.id)) continue;
       attemptedOrphanResumeRef.current.add(session.id);
       void resumeAgentSession(id, session.id).catch(() => {});
     }
   }, [id, orphanedSessions]);
-
-  // Clean up attempted set when sessions are no longer orphaned
-  useEffect(() => {
-    if (orphanedSessions.length === 0 && attemptedOrphanResumeRef.current.size > 0) {
-      attemptedOrphanResumeRef.current.clear();
-    }
-  }, [orphanedSessions.length]);
 
   // Ref for loadWorkspaceState to avoid putting it in callback deps
   const loadWorkspaceStateRef = useRef(loadWorkspaceState);
@@ -267,6 +267,8 @@ export function useSessionState(
     }, 10_000);
   }, [id, orphanedSessions]);
 
+  // Reset dismissedOrphans banner when orphan list clears — derived from orphan count
+  // (kept as a separate effect because it touches unrelated UI state)
   useEffect(() => {
     if (orphanedSessions.length === 0) setDismissedOrphans(false);
   }, [orphanedSessions.length]);

@@ -209,11 +209,6 @@ export function useWorkspaceCore(
     [workspace?.url, multiTerminalEnabled]
   );
 
-  // Clear cache when URL changes
-  useEffect(() => {
-    terminalWsUrlCacheRef.current = null;
-  }, [workspace?.url, id, multiTerminalEnabled]);
-
   // Resolve terminal WS URL (cached)
   const resolveTerminalWsUrl = useCallback(async (): Promise<string | null> => {
     if (!id) return null;

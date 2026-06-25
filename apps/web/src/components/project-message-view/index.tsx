@@ -195,10 +195,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     setShowTimeline(false);
   }, []);
 
-  // Close plan modal when agent transitions to idle
-  useEffect(() => {
-    if (lc.agentActivity === 'idle') setShowPlanModal(false);
-  }, [lc.agentActivity]);
+  // UE120: Plan modal is only meaningful while the agent is working.
+  // Derive effective visibility at render time instead of syncing via useEffect.
+  const effectiveShowPlanModal = showPlanModal && lc.agentActivity !== 'idle';
 
   // Derive animation-eligible optimistic user message IDs at render time.
   // An optimistic message is eligible for animation if it is a recent user message
@@ -414,7 +413,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {planItem && (
         <PlanModal
           plan={planItem}
-          isOpen={showPlanModal}
+          isOpen={effectiveShowPlanModal}
           onClose={() => setShowPlanModal(false)}
         />
       )}

@@ -1,5 +1,5 @@
 import type { NodeContainerLogTarget, NodeLogLevel,NodeLogSource } from '@simple-agent-manager/shared';
-import { type FC, useEffect, useRef,useState } from 'react';
+import { type FC, useRef,useState } from 'react';
 
 interface LogFiltersProps {
   source: NodeLogSource;
@@ -30,20 +30,19 @@ export const LogFilters: FC<LogFiltersProps> = ({
 }) => {
   const [localSearch, setLocalSearch] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Sync external search changes into local state
-  useEffect(() => {
+  // Track the last search prop we synced so we can update localSearch when the
+  // parent resets it externally (e.g. a clear button) without running an Effect.
+  const prevSearchPropRef = useRef(search);
+  if (prevSearchPropRef.current !== search) {
+    prevSearchPropRef.current = search;
     setLocalSearch(search);
-  }, [search]);
+  }
 
   const handleSearchChange = (value: string) => {
     setLocalSearch(value);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => onSearchChange(value), SEARCH_DEBOUNCE_MS);
   };
-
-  // Cleanup timer on unmount
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
 
   return (
     <div className="flex gap-3 items-end flex-wrap">

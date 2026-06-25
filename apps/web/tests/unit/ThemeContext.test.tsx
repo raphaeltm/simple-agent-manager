@@ -173,38 +173,46 @@ describe('ThemeProvider / useTheme', () => {
     expect(currentAttribute()).toBe('sam');
   });
 
-  it('removes the media listener when leaving system mode', () => {
+  it('ignores OS changes when an explicit theme is set (listener stays for useSyncExternalStore)', () => {
     const media = installMatchMedia(true);
     const { result } = renderHook(() => useTheme(), { wrapper });
-    expect(media.listenerCount).toBe(1);
+    // useMediaQuery always subscribes via useSyncExternalStore
+    expect(media.listenerCount).toBeGreaterThanOrEqual(1);
 
     act(() => {
       result.current.setTheme('dark');
     });
-    expect(media.listenerCount).toBe(0);
-  });
-
-  it('re-subscribes to the OS preference when returning to system mode', () => {
-    const media = installMatchMedia(true);
-    const { result } = renderHook(() => useTheme(), { wrapper });
-    expect(media.listenerCount).toBe(1);
-
-    // Leave system mode for an explicit preference — listener detaches.
-    act(() => {
-      result.current.setTheme('dark');
-    });
-    expect(media.listenerCount).toBe(0);
+    // With useSyncExternalStore, the listener stays attached but the theme
+    // derivation ignores it when not in system mode.
+    expect(result.current.resolvedTheme).toBe('dark');
     expect(currentAttribute()).toBe('sam');
 
-    // Return to system mode — exactly one listener must be re-attached
-    // (no leaks from the previous subscription).
+    // OS flips — but since theme is 'dark' (not 'system'), resolved stays dark.
+    act(() => {
+      media.setPrefersDark(false);
+    });
+    expect(result.current.resolvedTheme).toBe('dark');
+    expect(currentAttribute()).toBe('sam');
+  });
+
+  it('re-responds to OS preference when returning to system mode', () => {
+    const media = installMatchMedia(true);
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(media.listenerCount).toBeGreaterThanOrEqual(1);
+
+    // Leave system mode for an explicit preference.
+    act(() => {
+      result.current.setTheme('dark');
+    });
+    expect(currentAttribute()).toBe('sam');
+
+    // Return to system mode — theme should reflect OS again.
     act(() => {
       result.current.setTheme('system');
     });
-    expect(media.listenerCount).toBe(1);
     expect(result.current.resolvedTheme).toBe('dark'); // OS still prefers dark
 
-    // A live OS change after re-subscribing must update the resolved theme.
+    // A live OS change after returning to system mode must update the resolved theme.
     act(() => {
       media.setPrefersDark(false);
     });

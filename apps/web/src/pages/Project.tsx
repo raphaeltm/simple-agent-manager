@@ -35,12 +35,23 @@ export function Project() {
     }
   }, [projectId]);
 
-  useEffect(() => { void loadProject(); }, [loadProject]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadProject();
+    return () => controller.abort();
+  }, [loadProject]);
 
   useEffect(() => {
-    void listGitHubInstallations()
-      .then((response) => setInstallations(response))
-      .catch(() => setInstallations([]));
+    const controller = new AbortController();
+    listGitHubInstallations()
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setInstallations(response);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setInstallations([]);
+      });
+    return () => controller.abort();
   }, []);
 
   // Push project name up to AppShell for sidebar display

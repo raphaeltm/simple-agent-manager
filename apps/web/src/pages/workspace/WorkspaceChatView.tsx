@@ -104,8 +104,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     }, []),
   });
 
-  // ── Load session data ──
+  // ── Load session data — also resets scroll state for the new session ──
   const loadSession = useCallback(async () => {
+    // Reset scroll state when loading a new session
+    setFirstItemIndex(VIRTUAL_START);
+    setShowScrollButton(false);
     try {
       setError(null);
       setLoading(true);
@@ -121,12 +124,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   }, [projectId, sessionId]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
-
-  // Reset scroll on session change
-  useEffect(() => {
-    setFirstItemIndex(VIRTUAL_START);
-    setShowScrollButton(false);
-  }, [sessionId]);
 
   // Cleanup idle timer on unmount
   useEffect(() => {

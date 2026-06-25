@@ -42,20 +42,25 @@ export function useNotifications(): UseNotificationsReturn {
   const pingTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
+  const fetchAbortRef = useRef<AbortController | null>(null);
 
   // Initial fetch of notifications
   const fetchNotifications = useCallback(async () => {
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     try {
       setLoading(true);
       const result = await listNotifications({ limit: 50 });
-      if (!mountedRef.current) return;
+      if (controller.signal.aborted) return;
       setNotifications(result.notifications);
       setUnreadCount(result.unreadCount);
       setNextCursor(result.nextCursor);
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error('Failed to fetch notifications:', err);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
@@ -107,6 +112,7 @@ export function useNotifications(): UseNotificationsReturn {
       const { count } = await getNotificationUnreadCount();
       if (mountedRef.current) setUnreadCount(count);
     } catch (err) {
+      if (!mountedRef.current) return;
       console.error('Failed to dismiss notification:', err);
     }
   }, []);
@@ -239,6 +245,8 @@ export function useNotifications(): UseNotificationsReturn {
 
     return () => {
       mountedRef.current = false;
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = null;
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

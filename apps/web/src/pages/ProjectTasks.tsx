@@ -82,12 +82,23 @@ export function ProjectTasks() {
     }
   }, [projectId, filters.status, filters.minPriority, filters.sort, toast]);
 
-  useEffect(() => { void loadTasks(); }, [loadTasks]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadTasks();
+    return () => controller.abort();
+  }, [loadTasks]);
 
   useEffect(() => {
-    void listWorkspaces('running')
-      .then((response) => setWorkspaces(response))
-      .catch(() => setWorkspaces([]));
+    const controller = new AbortController();
+    listWorkspaces('running')
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setWorkspaces(response);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setWorkspaces([]);
+      });
+    return () => controller.abort();
   }, []);
 
   const handleTaskCreate = async (values: TaskFormValues) => {

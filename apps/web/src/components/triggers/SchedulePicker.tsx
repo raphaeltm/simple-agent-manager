@@ -4,7 +4,7 @@
  */
 import { ChevronDown } from 'lucide-react';
 import type { FC } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -242,13 +242,6 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
     },
     [onChange, onDescriptionChange],
   );
-
-  // Emit on initial render
-  useEffect(() => {
-    const cron = buildCron(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron);
-    onDescriptionChange?.(describeCron(cron));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function handleModeChange(newMode: ScheduleMode) {
     setMode(newMode);

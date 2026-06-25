@@ -25,13 +25,14 @@ export function useSessionTimeline(
   const [loading, setLoading] = useState(false);
   const [showContext, setShowContext] = useState(false);
 
-  const fetchTimeline = useCallback(async () => {
+  const fetchTimeline = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     try {
       const messagePages: ChatMessageResponse[][] = [];
       let before: number | undefined;
 
       for (;;) {
+        if (signal.aborted) return;
         const result = await listChatMessages(projectId, sessionId, {
           before,
           roles: ['user'],
@@ -48,21 +49,28 @@ export function useSessionTimeline(
         if (!result.hasMore) break;
       }
 
-      setTimelineMessages(messagePages.flat());
+      if (!signal.aborted) {
+        setTimelineMessages(messagePages.flat());
+      }
     } catch {
       // Silently handle — timeline is supplementary
     }
 
     try {
+      if (signal.aborted) return;
       const eventsResult = await listActivityEvents(projectId, {
         sessionId,
         limit: 100,
       });
-      setActivityEvents(eventsResult.events);
+      if (!signal.aborted) {
+        setActivityEvents(eventsResult.events);
+      }
     } catch {
       // Silently handle — timeline is supplementary
     } finally {
-      setLoading(false);
+      if (!signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [projectId, sessionId]);
 
@@ -74,7 +82,9 @@ export function useSessionTimeline(
   // Fetch server-backed timeline data when drawer opens
   useEffect(() => {
     if (!enabled) return;
-    fetchTimeline().catch(() => undefined);
+    const controller = new AbortController();
+    fetchTimeline(controller.signal).catch(() => undefined);
+    return () => { controller.abort(); };
   }, [enabled, fetchTimeline]);
 
   const messagesForTimeline = useMemo(

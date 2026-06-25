@@ -319,19 +319,21 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
 
   useEffect(() => {
     if (!expanded || detail) return;
-    let cancelled = false;
+    const controller = new AbortController();
     setLoadingDetail(true);
     getKnowledgeEntity(projectId, entity.id)
       .then((result) => {
-        if (!cancelled) setDetail({ ...result.entity, observations: result.observations, relations: result.relations });
+        if (controller.signal.aborted) return;
+        setDetail({ ...result.entity, observations: result.observations, relations: result.relations });
       })
       .catch((error) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Failed to load observations');
+        if (controller.signal.aborted) return;
+        toast.error(error instanceof Error ? error.message : 'Failed to load observations');
       })
       .finally(() => {
-        if (!cancelled) setLoadingDetail(false);
+        if (!controller.signal.aborted) setLoadingDetail(false);
       });
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [detail, entity.id, expanded, projectId, toast]);
 
   const handleSavedEntity = async () => {

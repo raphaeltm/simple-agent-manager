@@ -43,11 +43,16 @@ export function useActiveTasks(options: UseActiveTasksOptions = {}): UseActiveTa
   }, []);
 
   useEffect(() => {
-    fetchTasks();
+    const controller = new AbortController();
+    void fetchTasks();
     if (pollInterval > 0) {
-      const interval = setInterval(fetchTasks, pollInterval);
-      return () => clearInterval(interval);
+      const interval = setInterval(() => void fetchTasks(), pollInterval);
+      return () => {
+        clearInterval(interval);
+        controller.abort();
+      };
     }
+    return () => controller.abort();
   }, [fetchTasks, pollInterval]);
 
   return { tasks, loading, isRefreshing, error, refresh: fetchTasks };

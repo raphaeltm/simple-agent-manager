@@ -95,10 +95,12 @@ export function ProjectChatComposer({
     !showSlashPalette &&
     dismissedMentionFilterRef.current !== mentionFilter;
 
+  // Mount-only focus — no deps needed, this is intentional one-shot DOM sync
   useEffect(() => {
     textareaRef.current?.focus();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Resize textarea to fit content whenever value changes (DOM sync)
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
