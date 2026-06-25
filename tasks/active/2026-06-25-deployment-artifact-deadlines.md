@@ -24,7 +24,7 @@ Deployment-node image artifact loading is bound to an undersized total HTTP clie
 - [x] Add regression tests for slow but progressing downloads, stalled downloads, multi-artifact apply, integrity enforcement, and job durability across restart.
 - [x] Add the required bug-fix process rule/checklist change for long-running VM work bound to request-scoped or undersized deadlines.
 - [x] Run quality gates: `pnpm lint`, `pnpm typecheck`, `go test ./...`, and VM agent build.
-- [ ] Run specialist review: `go-specialist`, `cloudflare-specialist`, and `task-completion-validator`.
+- [x] Run specialist review: `go-specialist`, `cloudflare-specialist`, and `task-completion-validator`.
 - [ ] Create PR with Post-Mortem section, wait for CI, merge, and monitor production deploy.
 
 ## Acceptance Criteria
