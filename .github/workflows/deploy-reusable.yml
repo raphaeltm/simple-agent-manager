@@ -367,6 +367,8 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
@@ -494,6 +496,8 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
