@@ -1,40 +1,27 @@
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, screenshot, seedTheme } from './audit-helpers';
+import { assertNoOverflow, makeMockUser, screenshot, seedTheme } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+  sessionId: 'session-deploy-1',
+  userId: 'user-deploy-1',
+});
 
 const MOCK_PROJECT = {
-  id: 'proj-test-1',
-  name: 'My App',
-  repository: 'demo/my-app',
+  id: 'proj-deploy-1',
+  name: 'Deploy Audit Project',
+  repository: 'testuser/deploy-audit',
   defaultBranch: 'main',
-  userId: 'user-test-1',
+  userId: 'user-deploy-1',
   githubInstallationId: 'inst-1',
+  defaultVmSize: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -44,20 +31,26 @@ const MOCK_PROJECT = {
 // ---------------------------------------------------------------------------
 
 async function setupApiMocks(page: Page) {
-  await page.route('http://localhost:8787/**', async (route: Route) => {
+  await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
 
     const respond = (status: number, body: unknown) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+    // Auth
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT] });
+
+    // Global endpoints
+    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
+    if (path === '/api/github/installations') return respond(200, []);
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/trial')) return respond(200, { available: false });
+    if (path === '/api/agents') return respond(200, { agents: [] });
 
-    // Project
+    // Project subresources (required by project layout)
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
@@ -80,23 +73,28 @@ async function setupApiMocks(page: Page) {
 
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Deployments empty state — ${theme}`, () => {
-    test('renders friendly explanation', async ({ page }) => {
+    test('renders friendly empty-state guidance', async ({ page }) => {
       await seedTheme(page, theme);
       await setupApiMocks(page);
 
       // Desktop
       await page.setViewportSize({ width: 1280, height: 800 });
-      await page.goto('http://localhost:5173/projects/proj-test-1/deployments');
-      await page.getByRole('heading', { name: 'Deploy apps with your agents' }).waitFor();
-      await page.getByRole('link', { name: /Learn how deployments work/ }).waitFor();
-      await page.waitForTimeout(1500);
+      await page.goto(`/projects/${MOCK_PROJECT.id}/deployments`);
+
+      // Assert real content rendered — not a blank Vite shell or ErrorBoundary
+      await expect(page.getByRole('heading', { name: 'Deploy apps with your agents' })).toBeVisible();
+      await expect(page.getByText('Learn how deployments work')).toBeVisible();
+      await expect(page.getByText('Something went wrong')).toHaveCount(0);
+
       await screenshot(page, `deployments-empty-${theme}`);
       await assertNoOverflow(page);
 
       // Mobile
       await page.setViewportSize({ width: 375, height: 667 });
-      await page.waitForTimeout(800);
-      await page.getByRole('heading', { name: 'Deploy apps with your agents' }).waitFor();
+      await page.waitForTimeout(600);
+
+      await expect(page.getByRole('heading', { name: 'Deploy apps with your agents' })).toBeVisible();
+
       await screenshot(page, `deployments-empty-mobile-${theme}`);
       await assertNoOverflow(page);
     });
