@@ -97,6 +97,15 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 
 When a workflow deletes state, metadata, lock files, Pulumi stacks, or other recovery handles after deleting external resources, the state-deletion step MUST be gated on an explicit successful cleanup output from the preceding deletion step. Do not gate state deletion only on setup or discovery success. A failed external cleanup must leave state intact so the next run can retry or reconcile resources safely.
 
+### Reporter-Scoped Reconciliation
+
+When a heartbeat, callback, webhook, cron sweep, or reconcile operation converts observed external state into database mutations, updates MUST be scoped to the specific entity or sequence the reporter actually identified. Do not use broad predicates such as "all rows newer than the reported cursor" for terminal failure handling unless the reporter explicitly attested to every affected row.
+
+Required coverage for reconcile/sweep changes:
+- At least one regression test with a newer unrelated row that must remain unchanged.
+- At least one assertion that only the reported entity/sequence receives the terminal status.
+- For ordered state machines, a test where a newer row is created before the same reconcile tick evaluates pending work.
+
 ### Post-Allocation Cleanup Tests
 
 When a workflow allocates a paid or externally visible resource before later setup steps complete, regression tests MUST cover cleanup after each post-allocation failure. The tests must assert the cleanup request targets the allocated resource directly, preserves the original failure as the primary error, tolerates already-deleted resources when the provider contract allows it, and exposes cleanup failures through structured diagnostics without leaking secrets.

@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -216,15 +216,27 @@ export async function reconcileDeploymentReleaseStatuses(
   }
 
   if (TERMINAL_FAILURE_STATUSES.has(status) && latest.version > appliedSeq) {
-    await db
-      .update(schema.deploymentReleases)
-      .set({ status: 'failed' })
+    const failedVersion = appliedSeq + 1;
+    const failedRows = await db
+      .select({
+        id: schema.deploymentReleases.id,
+        status: schema.deploymentReleases.status,
+      })
+      .from(schema.deploymentReleases)
       .where(
         and(
           eq(schema.deploymentReleases.environmentId, environmentId),
-          gt(schema.deploymentReleases.version, appliedSeq)
+          eq(schema.deploymentReleases.version, failedVersion)
         )
-      );
+      )
+      .limit(1);
+    const failedRelease = failedRows[0];
+    if (!failedRelease || failedRelease.status === 'failed') return;
+
+    await db
+      .update(schema.deploymentReleases)
+      .set({ status: 'failed' })
+      .where(eq(schema.deploymentReleases.id, failedRelease.id));
   }
 }
 

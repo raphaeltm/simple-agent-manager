@@ -21,16 +21,15 @@ import {
   buildObservedDeploymentUpdate,
   reconcileDeploymentReleaseStatuses,
 } from '../services/deployment-control';
-import { appendDeploymentReleaseEvent } from '../services/deployment-release-events';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
   signCallbackToken,
   signNodeCallbackToken,
   signNodeManagementToken,
-  verifyCallbackToken,
 } from '../services/jwt';
 import { createWorkspaceOnNode } from '../services/node-agent';
+import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 
@@ -568,79 +567,5 @@ nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), asy
 
   return c.body(null, 204);
 });
-
-nodeLifecycleRoutes.post('/:id/deployment-release-events', async (c) => {
-  const nodeId = c.req.param('id');
-  await verifyNodeCallbackAuth(c, nodeId);
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json().catch(() => null);
-  if (!body || typeof body !== 'object') {
-    throw errors.badRequest('Invalid deployment release event body');
-  }
-  const event = body as Record<string, unknown>;
-  const environmentId = typeof event.environmentId === 'string' ? event.environmentId.trim() : '';
-  const eventType = typeof event.eventType === 'string' ? event.eventType.trim() : '';
-  const message = typeof event.message === 'string' ? event.message.trim() : '';
-  if (!environmentId || !eventType || !message) {
-    throw errors.badRequest(
-      'Deployment release event requires environmentId, eventType, and message'
-    );
-  }
-
-  const [environment] = await db
-    .select({
-      projectId: schema.deploymentEnvironments.projectId,
-      nodeId: schema.deploymentEnvironments.nodeId,
-    })
-    .from(schema.deploymentEnvironments)
-    .where(eq(schema.deploymentEnvironments.id, environmentId))
-    .limit(1);
-  if (!environment || environment.nodeId !== nodeId) {
-    throw errors.forbidden('Deployment environment is not assigned to this node');
-  }
-
-  await appendDeploymentReleaseEvent(db, {
-    projectId: environment.projectId,
-    environmentId,
-    nodeId,
-    releaseId: typeof event.releaseId === 'string' ? event.releaseId.trim() : null,
-    releaseVersion:
-      typeof event.releaseVersion === 'number' && Number.isFinite(event.releaseVersion)
-        ? Math.trunc(event.releaseVersion)
-        : null,
-    level: typeof event.level === 'string' ? event.level : undefined,
-    eventType,
-    step: typeof event.step === 'string' ? event.step : null,
-    message,
-    detail: event.detail,
-  });
-
-  return c.json({ ok: true });
-});
-
-// --- Internal helpers ---
-
-async function verifyNodeCallbackAuth(
-  c: import('hono').Context<{ Bindings: Env }>,
-  nodeId: string
-): Promise<void> {
-  const token = extractBearerToken(c.req.header('Authorization'));
-  const payload = await verifyCallbackToken(token, c.env);
-
-  // Workspace-scoped tokens CANNOT be used for node-level endpoints.
-  if (payload.scope === 'workspace') {
-    log.error('node_auth.rejected_workspace_scoped_token', {
-      tokenWorkspace: payload.workspace,
-      nodeId,
-      scope: payload.scope,
-      action: 'rejected',
-    });
-    throw errors.forbidden('Insufficient token scope');
-  }
-
-  if (payload.workspace !== nodeId) {
-    throw errors.unauthorized('Callback token does not match node');
-  }
-}
 
 export { nodeLifecycleRoutes };

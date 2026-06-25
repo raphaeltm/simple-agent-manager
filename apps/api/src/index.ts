@@ -70,6 +70,7 @@ import { deployReleaseCallbackRoute } from './routes/deploy-release-callback';
 import { deploymentCustomDomainRoutes } from './routes/deployment-custom-domains';
 import { deploymentEnvironmentConfigRoutes } from './routes/deployment-environment-config';
 import { deploymentEnvironmentRoutes } from './routes/deployment-environments';
+import { deploymentReleaseEventsCallbackRoute } from './routes/deployment-release-events-callback';
 import { deploymentReleaseRoutes } from './routes/deployment-releases';
 import { deploymentSecretRoutes } from './routes/deployment-secrets';
 import { deploymentVolumeRoutes } from './routes/deployment-volumes';
@@ -591,7 +592,9 @@ app.route('/api/credentials', credentialsRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
-app.route('/api/nodes', deployReleaseCallbackRoute); // Callback JWT auth — deploy node fetches signed release payload
+// Callback JWT routes — MUST be before session-auth node routes.
+app.route('/api/nodes', deployReleaseCallbackRoute); // Deploy node fetches signed release payload.
+app.route('/api/nodes', deploymentReleaseEventsCallbackRoute); // Deploy node reports apply events.
 app.route('/api/nodes', nodesRoutes);
 app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/workspaces', workspacesRoutes);
