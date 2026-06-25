@@ -9,7 +9,12 @@ import type { DecisionAction } from '@simple-agent-manager/shared';
 import type { HandoffFact } from '@simple-agent-manager/shared';
 import type { HandoffPacket } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
-import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  VMLocation,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
 import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
@@ -17,6 +22,7 @@ import {
   getDefaultLocationForProvider,
   isValidProvider,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -41,6 +47,20 @@ type RoutableHandoff = Pick<
   'id' | 'summary' | 'facts' | 'openQuestions' | 'suggestedActions'
 >;
 
+const handoffFactObjectSchema = v.object({
+  key: v.optional(v.string()),
+  value: v.optional(v.string()),
+  fact: v.optional(v.string()),
+});
+
+const routableHandoffSchema = v.object({
+  id: v.string(),
+  summary: v.string(),
+  facts: v.optional(v.array(v.union([v.string(), handoffFactObjectSchema]))),
+  openQuestions: v.optional(v.array(v.string())),
+  suggestedActions: v.optional(v.array(v.string())),
+});
+
 interface TaskSessionRow extends Record<string, unknown> {
   id: string;
   taskId: string;
@@ -57,14 +77,14 @@ export async function runSchedulingCycle(
   sql: SqlStorage,
   env: Env,
   projectId: string,
-  config: OrchestratorConfig,
+  config: OrchestratorConfig
 ): Promise<void> {
   const now = Date.now();
 
   // Load active missions (raw snake_case from SQLite)
-  const missions = sql.exec(
-    `SELECT mission_id FROM orchestrator_missions WHERE status = 'active'`,
-  ).toArray() as unknown as Array<{ mission_id: string }>;
+  const missions = sql
+    .exec(`SELECT mission_id FROM orchestrator_missions WHERE status = 'active'`)
+    .toArray() as unknown as Array<{ mission_id: string }>;
 
   if (missions.length === 0) return;
 
@@ -82,7 +102,8 @@ export async function runSchedulingCycle(
     // Update last_checked_at
     sql.exec(
       'UPDATE orchestrator_missions SET last_checked_at = ? WHERE mission_id = ?',
-      now, mission.mission_id,
+      now,
+      mission.mission_id
     );
   }
 }
@@ -96,13 +117,15 @@ async function processMission(
   projectId: string,
   missionId: string,
   config: OrchestratorConfig,
-  now: number,
+  now: number
 ): Promise<void> {
   // 1. Fetch all tasks for this mission from D1
   const tasksResult = await env.DATABASE.prepare(
     `SELECT id, status, scheduler_state, mission_id, updated_at
-     FROM tasks WHERE mission_id = ?`,
-  ).bind(missionId).all<TaskRow>();
+     FROM tasks WHERE mission_id = ?`
+  )
+    .bind(missionId)
+    .all<TaskRow>();
 
   const tasks = tasksResult.results ?? [];
   if (tasks.length === 0) return;
@@ -124,25 +147,31 @@ async function processMission(
 
   // 7. Check if mission is complete (all tasks terminal)
   const allTerminal = tasks.every(
-    (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled',
+    (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'
   );
   if (allTerminal) {
     const anyFailed = tasks.some((t) => t.status === 'failed');
     const newMissionStatus = anyFailed ? 'failed' : 'completed';
 
     // Update D1 mission status
-    await env.DATABASE.prepare(
-      'UPDATE missions SET status = ?, updated_at = ? WHERE id = ?',
-    ).bind(newMissionStatus, new Date().toISOString(), missionId).run();
+    await env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+      .bind(newMissionStatus, new Date().toISOString(), missionId)
+      .run();
 
     // Remove from orchestrator tracking
     sql.exec(
       `UPDATE orchestrator_missions SET status = 'completing' WHERE mission_id = ?`,
-      missionId,
+      missionId
     );
 
-    logDecision(sql, missionId, null, anyFailed ? 'skip' : 'dispatch', // 'dispatch' is semantic for "completed"
-      `Mission ${anyFailed ? 'failed' : 'completed'}: all ${tasks.length} tasks are terminal`, now);
+    logDecision(
+      sql,
+      missionId,
+      null,
+      anyFailed ? 'skip' : 'dispatch', // 'dispatch' is semantic for "completed"
+      `Mission ${anyFailed ? 'failed' : 'completed'}: all ${tasks.length} tasks are terminal`,
+      now
+    );
 
     log.info('orchestrator.mission_completed', { projectId, missionId, status: newMissionStatus });
   }
@@ -172,7 +201,7 @@ async function autoDispatchSchedulableTasks(
   projectId: string,
   missionId: string,
   config: OrchestratorConfig,
-  now: number,
+  now: number
 ): Promise<void> {
   // Re-read task states from D1 (fresh after recompute)
   const schedulableResult = await env.DATABASE.prepare(
@@ -180,8 +209,10 @@ async function autoDispatchSchedulableTasks(
      FROM tasks
      WHERE mission_id = ? AND scheduler_state = 'schedulable' AND status = 'queued'
      ORDER BY priority DESC, created_at ASC
-     LIMIT ?`,
-  ).bind(missionId, config.maxDispatchesPerCycle).all<DispatchableTaskRow>();
+     LIMIT ?`
+  )
+    .bind(missionId, config.maxDispatchesPerCycle)
+    .all<DispatchableTaskRow>();
 
   const schedulable = schedulableResult.results ?? [];
   if (schedulable.length === 0) return;
@@ -189,20 +220,25 @@ async function autoDispatchSchedulableTasks(
   // Check concurrency limit: count currently active tasks in this mission
   const activeCountResult = await env.DATABASE.prepare(
     `SELECT COUNT(*) as cnt FROM tasks
-     WHERE mission_id = ? AND status IN ('in_progress', 'delegated', 'provisioning', 'running')`,
-  ).bind(missionId).first<{ cnt: number }>();
+     WHERE mission_id = ? AND status IN ('in_progress', 'delegated', 'provisioning', 'running')`
+  )
+    .bind(missionId)
+    .first<{ cnt: number }>();
 
   const activeCount = activeCountResult?.cnt ?? 0;
 
   // Resolve max active tasks from mission budget_config
-  const missionRow = await env.DATABASE.prepare(
-    'SELECT budget_config FROM missions WHERE id = ?',
-  ).bind(missionId).first<{ budget_config: string | null }>();
+  const missionRow = await env.DATABASE.prepare('SELECT budget_config FROM missions WHERE id = ?')
+    .bind(missionId)
+    .first<{ budget_config: string | null }>();
 
   let maxActive = config.maxActiveTasksPerMission;
   if (missionRow?.budget_config) {
     try {
-      const budget = expectJsonRecord(JSON.parse(missionRow.budget_config), 'mission.budget_config');
+      const budget = expectJsonRecord(
+        JSON.parse(missionRow.budget_config),
+        'mission.budget_config'
+      );
       if (typeof budget.maxActiveTasks === 'number' && budget.maxActiveTasks > 0) {
         maxActive = budget.maxActiveTasks;
       }
@@ -213,8 +249,14 @@ async function autoDispatchSchedulableTasks(
 
   const slotsAvailable = Math.max(0, maxActive - activeCount);
   if (slotsAvailable === 0) {
-    logDecision(sql, missionId, null, 'skip',
-      `${schedulable.length} schedulable task(s) held: concurrency limit reached (${activeCount}/${maxActive} active)`, now);
+    logDecision(
+      sql,
+      missionId,
+      null,
+      'skip',
+      `${schedulable.length} schedulable task(s) held: concurrency limit reached (${activeCount}/${maxActive} active)`,
+      now
+    );
     return;
   }
 
@@ -224,23 +266,25 @@ async function autoDispatchSchedulableTasks(
             default_location, default_agent_type, default_workspace_profile, default_devcontainer_config_name,
             task_execution_timeout_ms, max_workspaces_per_node, node_cpu_threshold_percent,
             node_memory_threshold_percent, warm_node_timeout_ms
-     FROM projects WHERE id = ?`,
-  ).bind(projectId).first<{
-    repository: string;
-    installation_id: string;
-    default_branch: string;
-    default_vm_size: string | null;
-    default_provider: string | null;
-    default_location: string | null;
-    default_agent_type: string | null;
-    default_workspace_profile: string | null;
-    default_devcontainer_config_name: string | null;
-    task_execution_timeout_ms: number | null;
-    max_workspaces_per_node: number | null;
-    node_cpu_threshold_percent: number | null;
-    node_memory_threshold_percent: number | null;
-    warm_node_timeout_ms: number | null;
-  }>();
+     FROM projects WHERE id = ?`
+  )
+    .bind(projectId)
+    .first<{
+      repository: string;
+      installation_id: string;
+      default_branch: string;
+      default_vm_size: string | null;
+      default_provider: string | null;
+      default_location: string | null;
+      default_agent_type: string | null;
+      default_workspace_profile: string | null;
+      default_devcontainer_config_name: string | null;
+      task_execution_timeout_ms: number | null;
+      max_workspaces_per_node: number | null;
+      node_cpu_threshold_percent: number | null;
+      node_memory_threshold_percent: number | null;
+      warm_node_timeout_ms: number | null;
+    }>();
 
   if (!projectRow) {
     logDecision(sql, missionId, null, 'skip', 'Project not found — cannot dispatch', now);
@@ -254,37 +298,60 @@ async function autoDispatchSchedulableTasks(
     try {
       // Resolve user info for git config
       const userRow = await env.DATABASE.prepare(
-        'SELECT name, email, github_id FROM users WHERE id = ?',
-      ).bind(task.user_id).first<{ name: string | null; email: string | null; github_id: string | null }>();
+        'SELECT name, email, github_id FROM users WHERE id = ?'
+      )
+        .bind(task.user_id)
+        .first<{ name: string | null; email: string | null; github_id: string | null }>();
 
       // Resolve VM config from project defaults
       const resolvedProvider: CredentialProvider | null =
-        typeof projectRow.default_provider === 'string' && isValidProvider(projectRow.default_provider)
+        typeof projectRow.default_provider === 'string' &&
+        isValidProvider(projectRow.default_provider)
           ? projectRow.default_provider
           : null;
-      const resolvedVmSize: VMSize = (projectRow.default_vm_size as VMSize | null) ?? DEFAULT_VM_SIZE;
-      const resolvedVmLocation: VMLocation = (projectRow.default_location as VMLocation | null)
-        ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-        ?? DEFAULT_VM_LOCATION;
+      const resolvedVmSize: VMSize =
+        (projectRow.default_vm_size as VMSize | null) ?? DEFAULT_VM_SIZE;
+      const resolvedVmLocation: VMLocation =
+        (projectRow.default_location as VMLocation | null) ??
+        (resolvedProvider
+          ? (getDefaultLocationForProvider(resolvedProvider) as VMLocation | null)
+          : null) ??
+        DEFAULT_VM_LOCATION;
       const resolvedWorkspaceProfile: WorkspaceProfile =
-        (projectRow.default_workspace_profile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
-      const resolvedDevcontainerConfig: string | null = resolvedWorkspaceProfile === 'lightweight'
-        ? null
-        : (projectRow.default_devcontainer_config_name ?? null);
+        (projectRow.default_workspace_profile as WorkspaceProfile | null) ??
+        DEFAULT_WORKSPACE_PROFILE;
+      const resolvedDevcontainerConfig: string | null =
+        resolvedWorkspaceProfile === 'lightweight'
+          ? null
+          : (projectRow.default_devcontainer_config_name ?? null);
 
       // Create chat session for the task
       const sessionId = await projectDataService.createSession(
-        env, projectId, null, task.title, task.id, task.user_id,
+        env,
+        projectId,
+        null,
+        task.title,
+        task.id,
+        task.user_id
       );
 
       if (task.description) {
-        await projectDataService.persistMessage(env, projectId, sessionId, 'user', task.description, null);
+        await projectDataService.persistMessage(
+          env,
+          projectId,
+          sessionId,
+          'user',
+          task.description,
+          null
+        );
       }
 
       // Transition task to queued → provisioning via status update
       await env.DATABASE.prepare(
-        `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ?`,
-      ).bind(new Date().toISOString(), task.id).run();
+        `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ?`
+      )
+        .bind(new Date().toISOString(), task.id)
+        .run();
 
       // Start the TaskRunner DO
       await startTaskRunnerDO(env, {
@@ -324,24 +391,47 @@ async function autoDispatchSchedulableTasks(
       sql.exec(
         `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ulid(), missionId, task.id, now, now, 'auto-dispatch: task became schedulable',
+        ulid(),
+        missionId,
+        task.id,
+        now,
+        now,
+        'auto-dispatch: task became schedulable'
       );
 
-      logDecision(sql, missionId, task.id, 'dispatch',
-        `Auto-dispatched schedulable task (slot ${dispatched + 1}/${slotsAvailable})`, now);
+      logDecision(
+        sql,
+        missionId,
+        task.id,
+        'dispatch',
+        `Auto-dispatched schedulable task (slot ${dispatched + 1}/${slotsAvailable})`,
+        now
+      );
 
       dispatched++;
 
       log.info('orchestrator.task_dispatched', {
-        projectId, missionId, taskId: task.id, slot: dispatched, slotsAvailable,
+        projectId,
+        missionId,
+        taskId: task.id,
+        slot: dispatched,
+        slotsAvailable,
       });
     } catch (err) {
       log.error('orchestrator.auto_dispatch_failed', {
-        projectId, missionId, taskId: task.id,
+        projectId,
+        missionId,
+        taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      logDecision(sql, missionId, task.id, 'skip',
-        `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`, now);
+      logDecision(
+        sql,
+        missionId,
+        task.id,
+        'skip',
+        `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`,
+        now
+      );
     }
   }
 
@@ -349,7 +439,8 @@ async function autoDispatchSchedulableTasks(
     // Update last_dispatch_at
     sql.exec(
       'UPDATE orchestrator_missions SET last_dispatch_at = ? WHERE mission_id = ?',
-      now, missionId,
+      now,
+      missionId
     );
   }
 }
@@ -366,19 +457,26 @@ async function routeHandoffsForTask(
   missionId: string,
   completedTaskId: string,
   allTasks: TaskRow[],
-  now: number,
+  now: number
 ): Promise<void> {
   // Check if we already routed handoffs for this task in this mission
-  const alreadyRouted = sql.exec(
-    `SELECT 1 FROM decision_log WHERE mission_id = ? AND task_id = ? AND action = 'handoff_routed' LIMIT 1`,
-    missionId, completedTaskId,
-  ).toArray();
+  const alreadyRouted = sql
+    .exec(
+      `SELECT 1 FROM decision_log WHERE mission_id = ? AND task_id = ? AND action = 'handoff_routed' LIMIT 1`,
+      missionId,
+      completedTaskId
+    )
+    .toArray();
   if (alreadyRouted.length > 0) return;
 
   // Get handoff packets from the completed task
   let handoffs: RoutableHandoff[];
   try {
-    const rawHandoffs = await projectDataService.getHandoffPacketsForTask(env, projectId, completedTaskId);
+    const rawHandoffs = await projectDataService.getHandoffPacketsForTask(
+      env,
+      projectId,
+      completedTaskId
+    );
     handoffs = rawHandoffs
       .map(parseRoutableHandoff)
       .filter((handoff): handoff is RoutableHandoff => handoff !== null);
@@ -391,13 +489,19 @@ async function routeHandoffsForTask(
   const depsResult = await env.DATABASE.prepare(
     `SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ? AND task_id IN (
        SELECT id FROM tasks WHERE mission_id = ?
-     )`,
-  ).bind(completedTaskId, missionId).all<{ task_id: string }>();
+     )`
+  )
+    .bind(completedTaskId, missionId)
+    .all<{ task_id: string }>();
 
   const dependentTaskIds = (depsResult.results ?? []).map((r) => r.task_id);
   if (dependentTaskIds.length === 0) return;
 
-  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(env, projectId, dependentTaskIds);
+  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(
+    env,
+    projectId,
+    dependentTaskIds
+  );
   let routeIncomplete = false;
 
   // Route each handoff to dependent tasks via durable messages
@@ -440,8 +544,11 @@ async function routeHandoffsForTask(
       } catch (err) {
         routeIncomplete = true;
         log.warn('orchestrator.handoff_route_failed', {
-          projectId, missionId, fromTaskId: completedTaskId,
-          toTaskId: depTaskId, handoffId: handoff.id,
+          projectId,
+          missionId,
+          fromTaskId: completedTaskId,
+          toTaskId: depTaskId,
+          handoffId: handoff.id,
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -449,26 +556,41 @@ async function routeHandoffsForTask(
   }
 
   if (routeIncomplete) {
-    logDecision(sql, missionId, completedTaskId, 'retry',
-      `Handoff routing deferred: one or more dependent task sessions were unavailable`, now, {
+    logDecision(
+      sql,
+      missionId,
+      completedTaskId,
+      'retry',
+      `Handoff routing deferred: one or more dependent task sessions were unavailable`,
+      now,
+      {
         handoffCount: handoffs.length,
         dependentTaskCount: dependentTaskIds.length,
         reason: 'handoff_route_incomplete',
-      });
+      }
+    );
     return;
   }
 
-  logDecision(sql, missionId, completedTaskId, 'handoff_routed',
-    `Routed ${handoffs.length} handoff(s) to ${dependentTaskIds.length} dependent task(s)`, now);
+  logDecision(
+    sql,
+    missionId,
+    completedTaskId,
+    'handoff_routed',
+    `Routed ${handoffs.length} handoff(s) to ${dependentTaskIds.length} dependent task(s)`,
+    now
+  );
 }
 
 /** Build a readable content string from a handoff packet for durable message delivery. */
 function buildHandoffContent(fromTaskId: string, handoff: RoutableHandoff): string {
-  const parts: string[] = [`Handoff from task ${fromTaskId}:`, '', `**Summary:** ${handoff.summary}`];
+  const parts: string[] = [
+    `Handoff from task ${fromTaskId}:`,
+    '',
+    `**Summary:** ${handoff.summary}`,
+  ];
   if (handoff.facts.length > 0) {
-    const facts = handoff.facts
-      .map((fact) => `- ${fact.key}: ${fact.value}`)
-      .join('\n');
+    const facts = handoff.facts.map((fact) => `- ${fact.key}: ${fact.value}`).join('\n');
     parts.push('', `**Key Facts:**\n${facts}`);
   }
   if (handoff.openQuestions.length > 0) {
@@ -483,49 +605,35 @@ function buildHandoffContent(fromTaskId: string, handoff: RoutableHandoff): stri
 }
 
 function parseRoutableHandoff(value: unknown): RoutableHandoff | null {
-  if (!isRecord(value)) return null;
-  const id = typeof value.id === 'string' ? value.id : null;
-  const summary = typeof value.summary === 'string' ? value.summary : null;
-  if (!id || !summary) return null;
+  const parsed = v.safeParse(routableHandoffSchema, value);
+  if (!parsed.success) return null;
 
   return {
-    id,
-    summary,
-    facts: readHandoffFacts(value.facts),
-    openQuestions: readStringArray(value.openQuestions),
-    suggestedActions: readStringArray(value.suggestedActions),
+    id: parsed.output.id,
+    summary: parsed.output.summary,
+    facts: readHandoffFacts(parsed.output.facts),
+    openQuestions: parsed.output.openQuestions ?? [],
+    suggestedActions: parsed.output.suggestedActions ?? [],
   };
 }
 
-function readHandoffFacts(value: unknown): HandoffFact[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item): HandoffFact[] => {
+function readHandoffFacts(
+  value: NonNullable<v.InferOutput<typeof routableHandoffSchema>['facts']> | undefined
+): HandoffFact[] {
+  return (value ?? []).flatMap((item): HandoffFact[] => {
     if (typeof item === 'string') {
       return [{ key: 'fact', value: item }];
     }
-    if (!isRecord(item)) return [];
-    const key = typeof item.key === 'string'
-      ? item.key
-      : (typeof item.fact === 'string' ? 'fact' : null);
-    const factValue = typeof item.value === 'string'
-      ? item.value
-      : (typeof item.fact === 'string' ? item.fact : null);
+    const key = item.key ? item.key : item.fact ? 'fact' : null;
+    const factValue = item.value ? item.value : (item.fact ?? null);
     return key && factValue ? [{ key, value: factValue }] : [];
   });
-}
-
-function readStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function resolveActiveSessionIdsForTaskIds(
   env: Env,
   projectId: string,
-  taskIds: string[],
+  taskIds: string[]
 ): Promise<Map<string, string>> {
   const uniqueTaskIds = [...new Set(taskIds)];
   const sessions = await projectDataService.getSessionsByTaskIds(env, projectId, uniqueTaskIds);
@@ -543,11 +651,11 @@ async function resolveActiveSessionIdsForTaskIds(
 
 function isActiveSessionForTask(
   candidate: Record<string, unknown>,
-  taskId: string,
+  taskId: string
 ): candidate is TaskSessionRow {
-  return candidate.taskId === taskId
-    && candidate.status === 'active'
-    && typeof candidate.id === 'string';
+  return (
+    candidate.taskId === taskId && candidate.status === 'active' && typeof candidate.id === 'string'
+  );
 }
 
 // ── Stall Detection ───────────────────────────────────────────────────────────
@@ -562,29 +670,34 @@ async function detectStalls(
   missionId: string,
   tasks: TaskRow[],
   config: OrchestratorConfig,
-  now: number,
+  now: number
 ): Promise<void> {
   const stallThreshold = now - config.stallTimeoutMs;
 
-  const runningTasks = tasks.filter(
-    (t) => t.status === 'running' || t.status === 'delegated',
-  );
+  const runningTasks = tasks.filter((t) => t.status === 'running' || t.status === 'delegated');
 
   const runningTaskIds = runningTasks.map((task) => task.id);
-  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(env, projectId, runningTaskIds);
+  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(
+    env,
+    projectId,
+    runningTaskIds
+  );
 
   for (const task of runningTasks) {
     const updatedAt = new Date(task.updated_at).getTime();
     if (updatedAt > stallThreshold) continue;
 
     // Check if we already sent a stall interrupt recently
-    const recentStall = sql.exec(
-      `SELECT 1 FROM decision_log
+    const recentStall = sql
+      .exec(
+        `SELECT 1 FROM decision_log
        WHERE task_id = ? AND action = 'stall_detected'
        AND created_at > ?
        LIMIT 1`,
-      task.id, stallThreshold,
-    ).toArray();
+        task.id,
+        stallThreshold
+      )
+      .toArray();
     if (recentStall.length > 0) continue;
 
     // Send interrupt message to the stalled task
@@ -611,21 +724,32 @@ async function detectStalls(
         senderType: 'orchestrator' as const,
         senderId: `orchestrator:${projectId}`,
         messageClass: 'interrupt' as const,
-        content: `[Orchestrator] This task has not reported progress for ${Math.round(config.stallTimeoutMs / 60000)} minutes. ` +
+        content:
+          `[Orchestrator] This task has not reported progress for ${Math.round(config.stallTimeoutMs / 60000)} minutes. ` +
           `Please provide a status update. If you are blocked, update your task status or request human input.`,
         metadata: { reason: 'stall_detection', stallDurationMs: now - updatedAt },
       });
 
-      logDecision(sql, missionId, task.id, 'stall_detected',
-        `Task stalled for ${Math.round((now - updatedAt) / 60000)}min — interrupt sent`, now);
+      logDecision(
+        sql,
+        missionId,
+        task.id,
+        'stall_detected',
+        `Task stalled for ${Math.round((now - updatedAt) / 60000)}min — interrupt sent`,
+        now
+      );
 
       log.info('orchestrator.stall_detected', {
-        projectId, missionId, taskId: task.id,
+        projectId,
+        missionId,
+        taskId: task.id,
         stallDurationMs: now - updatedAt,
       });
     } catch (err) {
       log.warn('orchestrator.stall_interrupt_failed', {
-        projectId, missionId, taskId: task.id,
+        projectId,
+        missionId,
+        taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -641,14 +765,18 @@ export function logDecision(
   action: DecisionAction,
   reason: string,
   now: number,
-  metadata?: Record<string, unknown>,
+  metadata?: Record<string, unknown>
 ): void {
   sql.exec(
     `INSERT INTO decision_log (id, mission_id, task_id, action, reason, metadata, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ulid(), missionId, taskId, action, reason,
+    ulid(),
+    missionId,
+    taskId,
+    action,
+    reason,
     metadata ? JSON.stringify(metadata) : null,
-    now,
+    now
   );
 }
 
@@ -660,6 +788,6 @@ export function pruneDecisionLog(sql: SqlStorage, maxEntries: number): void {
     `DELETE FROM decision_log WHERE id NOT IN (
        SELECT id FROM decision_log ORDER BY created_at DESC LIMIT ?
      )`,
-    maxEntries,
+    maxEntries
   );
 }

@@ -17,6 +17,8 @@
  *   CF_AIG_TOKEN   — Dedicated AI Gateway billing token (preferred over CF_API_TOKEN)
  */
 
+import * as v from 'valibot';
+
 // ---------------------------------------------------------------------------
 // Tool definitions (OpenAI format)
 // ---------------------------------------------------------------------------
@@ -35,7 +37,8 @@ const TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_weather',
-      description: 'Get current weather for a city. Returns temperature in Fahrenheit and condition.',
+      description:
+        'Get current weather for a city. Returns temperature in Fahrenheit and condition.',
       parameters: {
         type: 'object',
         properties: {
@@ -144,126 +147,56 @@ interface ExperimentResult {
   durationMs: number;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const jsonRecordSchema = v.record(v.string(), v.unknown());
+const usageSchema = v.object({
+  prompt_tokens: v.pipe(v.number(), v.finite()),
+  completion_tokens: v.pipe(v.number(), v.finite()),
+  total_tokens: v.pipe(v.number(), v.finite()),
+});
+const toolCallSchema = v.object({
+  id: v.string(),
+  type: v.literal('function'),
+  function: v.object({
+    name: v.string(),
+    arguments: v.string(),
+  }),
+});
+const chatMessageSchema = v.object({
+  role: v.string(),
+  content: v.optional(v.nullable(v.string())),
+  tool_calls: v.optional(v.array(toolCallSchema)),
+  tool_call_id: v.optional(v.string()),
+});
+const chatCompletionResponseSchema = v.object({
+  id: v.string(),
+  choices: v.array(
+    v.object({
+      message: chatMessageSchema,
+      finish_reason: v.string(),
+    })
+  ),
+  model: v.string(),
+  usage: v.optional(usageSchema),
+});
 
-function requireString(value: unknown, path: string): string {
-  if (typeof value !== 'string') {
-    throw new Error(`${path} must be a string`);
-  }
-  return value;
-}
-
-function requireNumber(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`${path} must be a finite number`);
-  }
-  return value;
+function maybeJsonRecord(value: unknown): Record<string, unknown> | undefined {
+  const result = v.safeParse(jsonRecordSchema, value);
+  return result.success ? result.output : undefined;
 }
 
 function parseToolArguments(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
+  const result = v.safeParse(jsonRecordSchema, parsed);
+  if (!result.success) {
     throw new Error('tool_call arguments must be a JSON object');
   }
-  return parsed;
-}
-
-function parseUsage(value: unknown): ChatCompletionResponse['usage'] {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!isRecord(value)) {
-    throw new Error('usage must be an object when present');
-  }
-  return {
-    prompt_tokens: requireNumber(value.prompt_tokens, 'usage.prompt_tokens'),
-    completion_tokens: requireNumber(value.completion_tokens, 'usage.completion_tokens'),
-    total_tokens: requireNumber(value.total_tokens, 'usage.total_tokens'),
-  };
-}
-
-function parseChatMessage(value: unknown, path: string): ChatMessage {
-  if (!isRecord(value)) {
-    throw new Error(`${path} must be an object`);
-  }
-
-  const role = requireString(value.role, `${path}.role`);
-  const content =
-    value.content === undefined || value.content === null
-      ? value.content
-      : requireString(value.content, `${path}.content`);
-  const toolCallId =
-    value.tool_call_id === undefined
-      ? undefined
-      : requireString(value.tool_call_id, `${path}.tool_call_id`);
-
-  let toolCalls: ChatMessage['tool_calls'];
-  if (value.tool_calls !== undefined) {
-    if (!Array.isArray(value.tool_calls)) {
-      throw new Error(`${path}.tool_calls must be an array when present`);
-    }
-    toolCalls = value.tool_calls.map((toolCall, index) => {
-      if (!isRecord(toolCall)) {
-        throw new Error(`${path}.tool_calls[${index}] must be an object`);
-      }
-      if (toolCall.type !== 'function') {
-        throw new Error(`${path}.tool_calls[${index}].type must be "function"`);
-      }
-      if (!isRecord(toolCall.function)) {
-        throw new Error(`${path}.tool_calls[${index}].function must be an object`);
-      }
-      return {
-        id: requireString(toolCall.id, `${path}.tool_calls[${index}].id`),
-        type: 'function',
-        function: {
-          name: requireString(
-            toolCall.function.name,
-            `${path}.tool_calls[${index}].function.name`,
-          ),
-          arguments: requireString(
-            toolCall.function.arguments,
-            `${path}.tool_calls[${index}].function.arguments`,
-          ),
-        },
-      };
-    });
-  }
-
-  return {
-    role,
-    ...(content !== undefined ? { content } : {}),
-    ...(toolCalls ? { tool_calls: toolCalls } : {}),
-    ...(toolCallId ? { tool_call_id: toolCallId } : {}),
-  };
+  return result.output;
 }
 
 function parseChatCompletionResponse(value: unknown): ChatCompletionResponse {
-  if (!isRecord(value)) {
-    throw new Error('chat completion response must be an object');
-  }
-  if (!Array.isArray(value.choices)) {
-    throw new Error('chat completion response choices must be an array');
-  }
-
-  return {
-    id: requireString(value.id, 'chat completion response.id'),
-    model: requireString(value.model, 'chat completion response.model'),
-    choices: value.choices.map((choice, index) => {
-      if (!isRecord(choice)) {
-        throw new Error(`chat completion response.choices[${index}] must be an object`);
-      }
-      return {
-        message: parseChatMessage(choice.message, `chat completion response.choices[${index}].message`),
-        finish_reason: requireString(
-          choice.finish_reason,
-          `chat completion response.choices[${index}].finish_reason`,
-        ),
-      };
-    }),
-    usage: parseUsage(value.usage),
-  };
+  const result = v.safeParse(chatCompletionResponseSchema, value);
+  if (!result.success) throw new Error('chat completion response must match the expected schema');
+  return result.output;
 }
 
 function buildUnifiedApiUrl(accountId: string, gatewayId: string): string {
@@ -285,7 +218,7 @@ async function callUnifiedApi(
   authToken: string,
   model: string,
   messages: ChatMessage[],
-  tools: ToolDefinition[],
+  tools: ToolDefinition[]
 ): Promise<ChatCompletionResponse> {
   const body = {
     model,
@@ -323,13 +256,14 @@ async function runTwoToolLoop(
   url: string,
   authToken: string,
   unifiedModelId: string,
-  displayName: string,
+  displayName: string
 ): Promise<ExperimentResult> {
   const start = Date.now();
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: 'You are a helpful assistant. Use the provided tools to answer questions. When you need to convert temperature, use the calculate tool.',
+      content:
+        'You are a helpful assistant. Use the provided tools to answer questions. When you need to convert temperature, use the calculate tool.',
     },
     {
       role: 'user',
@@ -358,7 +292,7 @@ async function runTwoToolLoop(
           totalTurns,
           failureCategory: 'tool-call-shape-mismatch',
           failureDetail: 'No choices in response',
-          responseShape: isRecord(response) ? response : undefined,
+          responseShape: maybeJsonRecord(response),
           durationMs: Date.now() - start,
         };
       }
@@ -375,7 +309,10 @@ async function runTwoToolLoop(
           toolCallsCompleted,
           totalTurns,
           failureCategory: toolCallsCompleted < 2 ? 'model-quality' : undefined,
-          failureDetail: toolCallsCompleted < 2 ? `Only ${toolCallsCompleted} tool calls made (need 2)` : undefined,
+          failureDetail:
+            toolCallsCompleted < 2
+              ? `Only ${toolCallsCompleted} tool calls made (need 2)`
+              : undefined,
           finalAnswer: msg.content ?? undefined,
           usage: response.usage,
           durationMs: Date.now() - start,
@@ -427,9 +364,17 @@ async function runTwoToolLoop(
     let category: FailureCategory = 'unknown';
     if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('authentication')) {
       category = 'credential-config';
-    } else if (errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('not supported')) {
+    } else if (
+      errMsg.includes('404') ||
+      errMsg.includes('not found') ||
+      errMsg.includes('not supported')
+    ) {
       category = 'provider-unsupported';
-    } else if (errMsg.includes('fetch') || errMsg.includes('network') || errMsg.includes('ECONNREFUSED')) {
+    } else if (
+      errMsg.includes('fetch') ||
+      errMsg.includes('network') ||
+      errMsg.includes('ECONNREFUSED')
+    ) {
       category = 'network-error';
     }
 
@@ -455,14 +400,15 @@ async function runWorkersAiToolLoop(
   gatewayId: string,
   authToken: string,
   modelId: string,
-  displayName: string,
+  displayName: string
 ): Promise<ExperimentResult> {
   const url = `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/workers-ai/v1/chat/completions`;
   const start = Date.now();
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: 'You are a helpful assistant. Use the provided tools to answer questions. When you need to convert temperature, use the calculate tool.',
+      content:
+        'You are a helpful assistant. Use the provided tools to answer questions. When you need to convert temperature, use the calculate tool.',
     },
     {
       role: 'user',
@@ -501,7 +447,7 @@ async function runWorkersAiToolLoop(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
+          Authorization: `Bearer ${authToken}`,
           'cf-aig-metadata': buildAigMetadata(modelId),
         },
         body: JSON.stringify(body),
@@ -515,7 +461,10 @@ async function runWorkersAiToolLoop(
           success: false,
           toolCallsCompleted,
           totalTurns,
-          failureCategory: resp.status === 401 || resp.status === 403 ? 'credential-config' : 'provider-unsupported',
+          failureCategory:
+            resp.status === 401 || resp.status === 403
+              ? 'credential-config'
+              : 'provider-unsupported',
           failureDetail: `Workers AI ${resp.status}: ${errText.slice(0, 300)}`,
           durationMs: Date.now() - start,
         };
@@ -533,7 +482,7 @@ async function runWorkersAiToolLoop(
           totalTurns,
           failureCategory: 'tool-call-shape-mismatch',
           failureDetail: 'No choices in Workers AI response',
-          responseShape: isRecord(response) ? response : undefined,
+          responseShape: maybeJsonRecord(response),
           durationMs: Date.now() - start,
         };
       }
@@ -549,7 +498,10 @@ async function runWorkersAiToolLoop(
           toolCallsCompleted,
           totalTurns,
           failureCategory: toolCallsCompleted < 2 ? 'model-quality' : undefined,
-          failureDetail: toolCallsCompleted < 2 ? `Only ${toolCallsCompleted} tool calls made (need 2)` : undefined,
+          failureDetail:
+            toolCallsCompleted < 2
+              ? `Only ${toolCallsCompleted} tool calls made (need 2)`
+              : undefined,
           finalAnswer: msg.content ?? undefined,
           usage: response.usage,
           durationMs: Date.now() - start,
@@ -613,10 +565,18 @@ async function runWorkersAiToolLoop(
 // ---------------------------------------------------------------------------
 
 const MODELS_TO_TEST = [
-  { unifiedApiId: 'anthropic/claude-haiku-4-5-20251001', display: 'Claude Haiku 4.5', path: 'unified' },
+  {
+    unifiedApiId: 'anthropic/claude-haiku-4-5-20251001',
+    display: 'Claude Haiku 4.5',
+    path: 'unified',
+  },
   { unifiedApiId: 'openai/gpt-4.1-mini', display: 'GPT-4.1 Mini', path: 'unified' },
   { unifiedApiId: '@cf/google/gemma-4-26b-a4b-it', display: 'Gemma 4 26B', path: 'workers-ai' },
-  { unifiedApiId: '@cf/qwen/qwen2.5-coder-32b-instruct', display: 'Qwen 2.5 Coder 32B', path: 'workers-ai' },
+  {
+    unifiedApiId: '@cf/qwen/qwen2.5-coder-32b-instruct',
+    display: 'Qwen 2.5 Coder 32B',
+    path: 'workers-ai',
+  },
   { unifiedApiId: '@cf/qwen/qwen3-30b-a3b-fp8', display: 'Qwen 3 30B', path: 'workers-ai' },
 ] as const;
 
@@ -626,7 +586,9 @@ async function main(): Promise<void> {
   const gatewayId = process.env.AI_GATEWAY_ID;
 
   if (!accountId || !authToken || !gatewayId) {
-    console.error('Missing required env vars: CF_ACCOUNT_ID, CF_API_TOKEN (or CF_AIG_TOKEN), AI_GATEWAY_ID');
+    console.error(
+      'Missing required env vars: CF_ACCOUNT_ID, CF_API_TOKEN (or CF_AIG_TOKEN), AI_GATEWAY_ID'
+    );
     console.error('Current state:');
     console.error(`  CF_ACCOUNT_ID: ${accountId ? 'set' : 'MISSING'}`);
     console.error(`  CF_API_TOKEN: ${process.env.CF_API_TOKEN ? 'set' : 'MISSING'}`);
@@ -648,7 +610,13 @@ async function main(): Promise<void> {
 
     let result: ExperimentResult;
     if (model.path === 'workers-ai') {
-      result = await runWorkersAiToolLoop(accountId, gatewayId, authToken, model.unifiedApiId, model.display);
+      result = await runWorkersAiToolLoop(
+        accountId,
+        gatewayId,
+        authToken,
+        model.unifiedApiId,
+        model.display
+      );
     } else {
       result = await runTwoToolLoop(unifiedUrl, authToken, model.unifiedApiId, model.display);
     }
@@ -656,16 +624,22 @@ async function main(): Promise<void> {
     results.push(result);
 
     if (result.success) {
-      console.log(`  SUCCESS: ${result.toolCallsCompleted} tool calls in ${result.totalTurns} turns (${result.durationMs}ms)`);
+      console.log(
+        `  SUCCESS: ${result.toolCallsCompleted} tool calls in ${result.totalTurns} turns (${result.durationMs}ms)`
+      );
       if (result.finalAnswer) {
         console.log(`  Answer: ${result.finalAnswer.slice(0, 200)}`);
       }
       if (result.usage) {
-        console.log(`  Tokens: ${result.usage.prompt_tokens} in / ${result.usage.completion_tokens} out`);
+        console.log(
+          `  Tokens: ${result.usage.prompt_tokens} in / ${result.usage.completion_tokens} out`
+        );
       }
     } else {
       console.log(`  FAILED: [${result.failureCategory}] ${result.failureDetail}`);
-      console.log(`  Tool calls completed: ${result.toolCallsCompleted}, turns: ${result.totalTurns} (${result.durationMs}ms)`);
+      console.log(
+        `  Tool calls completed: ${result.toolCallsCompleted}, turns: ${result.totalTurns} (${result.durationMs}ms)`
+      );
     }
   }
 
