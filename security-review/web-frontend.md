@@ -15,22 +15,22 @@ Three SAM sub-subagents were dispatched via `dispatch_task` (profile `01KTS0KEQ3
 | `01KVZ8SQ3CMBG7QHYPJE35FEAT` | CSRF/CORS/CSP + cookie/token | Failed (Hetzner 403: server limit) |
 | `01KVZ8T5H7F1B7KCWXG37KN8X5` | Secret-in-bundle + redirect/iframe | Failed (Hetzner 403: server limit) |
 
-All SAM dispatches failed due to infrastructure limits. Three local background subagents were launched as backup (XSS deep audit, CORS/CSRF/CSP cookie audit, Secret/redirect/iframe audit). Findings below are synthesized from all sources.
+All SAM dispatches failed due to infrastructure limits. Three local background subagents were launched as backup (XSS deep audit, CORS/CSRF/CSP cookie audit, Secret/redirect/iframe audit). All three local subagents completed successfully. Findings below are synthesized from all sources.
 
 ## Summary
 
-The web frontend exhibits strong security posture overall: the React SPA uses safe rendering patterns (no raw `innerHTML` in app code), BetterAuth cookie-based sessions are well-configured (`HttpOnly`, `Secure`, `SameSite=Lax`, `__Secure-` prefix), CORS is properly scoped with default-deny, and the `apps/www/` marketing site has a CSP meta tag. However, the **marketing site's mermaid rendering scripts inject unsanitized SVG via `innerHTML`** without DOMPurify -- a significant gap compared to the control plane which uses DOMPurify. The main SPA (`apps/web/`) has **no Content-Security-Policy** at all, session cookie material is leaked in JSON response bodies, and WebSocket authentication tokens are passed as URL query parameters.
+The web frontend exhibits strong security posture overall: the React SPA uses safe rendering patterns (no raw `innerHTML` in app code), BetterAuth cookie-based sessions are well-configured (`HttpOnly`, `Secure`, `SameSite=Lax`, `__Secure-` prefix), CORS is properly scoped with default-deny, and the `apps/www/` marketing site has a CSP meta tag. However, the **marketing site's mermaid rendering scripts inject unsanitized SVG via `innerHTML`** without DOMPurify -- a significant gap compared to the control plane which uses DOMPurify. The main SPA (`apps/web/`) has **no Content-Security-Policy** at all, production source maps expose full TypeScript source, session cookie material is leaked in JSON response bodies, and authentication tokens are passed as URL query parameters.
 
 ## Severity Count
 
 | Severity | Count |
 |----------|-------|
 | Critical | 2 |
-| High | 2 |
-| Medium | 4 |
-| Low | 3 |
+| High | 4 |
+| Medium | 5 |
+| Low | 4 |
 | Info | 3 |
-| **Total** | **14** |
+| **Total** | **18** |
 
 ---
 
@@ -138,27 +138,70 @@ The web frontend exhibits strong security posture overall: the React SPA uses sa
 - **Remediation:** Remove `sessionCookie` from the JSON response body for browser-facing flows. The CLI use-case should use the `Set-Cookie` header directly (curl and HTTP clients surface this) or receive a dedicated short-lived opaque bearer token instead of raw session cookie material.
 - **Confidence:** High
 
+#### WEB-015: Production Source Maps Enabled -- Full TypeScript Source Exposed
+
+- **Severity:** High
+- **CWE:** CWE-540 (Inclusion of Sensitive Information in Source Code)
+- **Location:** `apps/web/vite.config.ts:35`
+- **Description:** `sourcemap: true` in the production build configuration generates full `.js.map` files that are deployed alongside the production bundle. These source maps contain the complete original TypeScript source code, including all component logic, API endpoint patterns, internal variable names, auth flow structure, and security-related code paths. Any visitor to the deployed app can retrieve the original source by fetching the `.map` URL referenced in the bundle.
+- **Impact/Exploit:** Attackers gain complete visibility into the application's internal structure: auth flow logic, redirect validation patterns, API call patterns, error handling, and security checks. This significantly reduces the effort required to find and exploit any other vulnerability. While "security through obscurity" is not a defense, source maps remove all obscurity and provide a clear roadmap for attack.
+- **Evidence:**
+  ```typescript
+  // vite.config.ts:33-36
+  build: {
+    outDir: 'dist',
+    sourcemap: true,  // full source maps deployed to production
+  },
+  ```
+- **Remediation:** Change to `sourcemap: false` for production. If source maps are needed for error tracking (e.g., Sentry), use `sourcemap: 'hidden'` which generates maps but does not embed a reference in the deployed bundle, and upload them privately to the error tracking service.
+- **Confidence:** High
+
+#### WEB-016: Unvalidated notification.actionUrl in ProjectNotifications.tsx
+
+- **Severity:** High
+- **CWE:** CWE-601 (URL Redirection to Untrusted Site)
+- **Location:** `apps/web/src/pages/ProjectNotifications.tsx:133-136`
+- **Description:** `ProjectNotifications.tsx` passes `notification.actionUrl` directly to `navigate()` without validating that the value is a safe relative internal path. If `actionUrl` contains `//evil.com/phish` or `javascript:alert(1)`, React Router's `navigate()` will follow it. Compare with the correct pattern in `NotificationCenter.tsx:112` which checks `notification.actionUrl.startsWith('/')` before calling `navigate()`.
+- **Impact/Exploit:** If an attacker can control or inject `actionUrl` values in notification records (via API, database manipulation, or a vulnerability in notification creation), clicking the notification would redirect the authenticated user to an attacker-controlled site. This enables phishing attacks where the user trusts the redirect because it originates from within the app.
+- **Evidence:**
+  ```typescript
+  // ProjectNotifications.tsx:133-136 -- no validation
+  const handleNotificationClick = (notification: NotificationResponse) => {
+    if (notification.actionUrl) {
+      navigate(notification.actionUrl);  // no startsWith('/') check
+    }
+  };
+
+  // NotificationCenter.tsx:112-113 -- correct pattern
+  if (notification.actionUrl && notification.actionUrl.startsWith('/')) {
+    navigate(notification.actionUrl);
+  }
+  ```
+- **Remediation:** Apply the same guard used in `NotificationCenter.tsx`: only call `navigate(actionUrl)` if `actionUrl.startsWith('/')` and `!actionUrl.startsWith('//')`.
+- **Confidence:** High
+
 ---
 
 ### Medium
 
-#### WEB-005: WebSocket Authentication Token in URL Query Parameter
+#### WEB-005: WebSocket and HTTP Authentication Tokens in URL Query Parameters
 
 - **Severity:** Medium
 - **CWE:** CWE-598 (Use of GET Request Method With Sensitive Query Strings)
-- **Location:** `apps/web/src/hooks/useProjectAgentSession.ts:145`, `apps/web/src/pages/workspace/useWorkspaceCore.ts:210`, `apps/api/src/index.ts:331`, `apps/api/src/routes/projects/files.ts:470`
-- **Description:** WebSocket connections to the VM agent and file upload URLs pass authentication tokens as URL query parameters (`?token=...`). While WebSocket upgrade requests do not support custom headers (making query params the common workaround), tokens in URLs are logged by web servers, proxy servers, load balancers, and may appear in browser history or `Referer` headers. The port-access token flow correctly strips the token via a 302 redirect with `Referrer-Policy: no-referrer`, but the terminal/WebSocket token does not receive this treatment.
-- **Impact/Exploit:** If the VM agent or any intermediate proxy (Cloudflare edge) logs the full WebSocket URL, the callback JWT token would be visible in log files. The token is scoped (callback JWT with limited permissions) and typically short-lived, which limits the blast radius. However, token leakage in logs is a persistent exposure.
+- **Location:** `apps/web/src/hooks/useProjectAgentSession.ts:145`, `apps/web/src/pages/workspace/useWorkspaceCore.ts:210`, `apps/web/src/lib/api/files.ts:124,172,229,269,284,300,324,401`, `apps/web/src/hooks/useBootLogStream.ts:78`
+- **Description:** Authentication tokens are passed as URL query parameters (`?token=...`) for both WebSocket connections (where custom headers cannot be sent) and **plain HTTP `fetch()` calls** to the VM agent (git status, git diff, file operations, worktrees, tabs). For the HTTP calls, `Authorization: Bearer` headers would be appropriate but are not used. The VM agent code (`workspace_routing.go:88`) explicitly notes "Server-to-server calls MUST use Bearer header" but the browser client uses query params for all calls. Additionally, `<img src>` tags embed tokens in the URL for file preview (`FileViewerPanel.tsx:218`).
+- **Impact/Exploit:** Tokens in URLs are logged by web servers, proxy servers, Cloudflare edge, appear in browser history for HTTP calls, and are visible in VM agent debug packages downloadable by platform admins. The port-access token flow correctly strips the token via a 302 redirect, but the terminal/file tokens do not get this treatment.
 - **Evidence:**
   ```typescript
   // useProjectAgentSession.ts:145
   const url = `${wsHost}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`;
-  // useWorkspaceCore.ts:210
-  return `${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`;
-  // files.ts:470
-  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
+  // files.ts:124 -- plain HTTP GET, not WebSocket
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/.../git/status?${params.toString()}`;
+  // useBootLogStream.ts:78
+  const wsUrl = `${wsProtocol}//${url.host}/boot-log/ws?token=${encodeURIComponent(token)}&workspace=...`;
   ```
-- **Remediation:** Consider using the first message after WebSocket connection establishment to pass the token (connect unauthenticated, then send auth message). For file uploads, prefer an `Authorization: Bearer` header. Alternatively, ensure VM agent and proxy access logs redact query parameters, and that callback JWTs have short TTLs.
+- **Remediation:** For all non-WebSocket HTTP calls, replace `?token=` with `Authorization: Bearer <token>` in fetch headers. Retain `?token=` only for WebSocket connections and `<img src>` where headers cannot be set. Ensure callback JWTs have short TTLs and that VM agent logs redact query parameters.
 - **Confidence:** High
 
 #### WEB-006: No Explicit CSRF Token Mechanism
@@ -225,6 +268,28 @@ The web frontend exhibits strong security posture overall: the React SPA uses sa
 - **Remediation:** Serve PDFs from a sandboxed origin separate from the API (R2 presigned URL, dedicated subdomain with no auth cookies). If PDF serving must remain on the API origin, tighten the CSP to remove `script-src 'unsafe-inline'` -- modern browsers render PDFs natively without inline script support. Consider adding `Content-Disposition: attachment` as a fallback to force download instead of inline rendering.
 - **Confidence:** Medium (depends on browser PDF rendering behavior)
 
+#### WEB-017: window.open() Calls Missing noopener/noreferrer
+
+- **Severity:** Medium
+- **CWE:** CWE-1021 (Improper Restriction of Rendered UI Layers)
+- **Location:** `apps/web/src/components/WorkspaceCard.tsx:67-70`, `apps/web/src/lib/api/library.ts:172`, `apps/web/src/components/onboarding/choose-path/StepExecution.tsx:136`
+- **Description:** Multiple `window.open()` calls open URLs in new tabs without specifying `noopener` and/or `noreferrer`. `WorkspaceCard.tsx` uses `window.open(path, '_blank')` and attempts `opened.opener = null` as a workaround (unreliable cross-browser). `library.ts` downloads files via `window.open(url, '_blank')` without either flag. `StepExecution.tsx` uses `'noopener'` but omits `'noreferrer'`, leaking the current page URL in the `Referer` header. Other components like `NodeWorkspaceMiniCard.tsx:24` correctly use `'noopener,noreferrer'`.
+- **Impact/Exploit:** Without `noopener`, the opened page can access `window.opener` and manipulate the parent tab (reverse tabnapping). Without `noreferrer`, the current page URL is sent in the `Referer` header. While the targets are internal paths, consistent use of both flags is defense-in-depth.
+- **Evidence:**
+  ```typescript
+  // WorkspaceCard.tsx:67-70
+  const opened = window.open(path, '_blank');  // missing noopener
+  if (opened) {
+    try { opened.opener = null; } catch { /* ignore */ }
+  }
+  // library.ts:172
+  window.open(url, '_blank');  // missing both
+  // StepExecution.tsx:136
+  window.open(url, '_blank', 'noopener');  // missing noreferrer
+  ```
+- **Remediation:** Replace all with `window.open(url, '_blank', 'noopener,noreferrer')` and remove the `opener = null` workaround.
+- **Confidence:** High
+
 ---
 
 ### Low
@@ -272,6 +337,27 @@ The web frontend exhibits strong security posture overall: the React SPA uses sa
 - **Remediation:** Add `X-Frame-Options: DENY` to the API Worker's global middleware and to a `_headers` file in `apps/web/public/`. The CSP `frame-ancestors 'none'` directive (recommended in WEB-003) would also address this.
 - **Confidence:** High
 
+#### WEB-018: Unvalidated href in Prototype onboarding-cards.tsx
+
+- **Severity:** Low
+- **CWE:** CWE-601 (URL Redirection to Untrusted Site)
+- **Location:** `apps/web/src/pages/sam-prototype/onboarding-cards.tsx:342-348`
+- **Description:** The `ActionCard` component uses `globalThis.location.href = data.href` for `navigate` actions without validating the URL is a safe relative path. Per `.claude/rules/37-prototype-development.md`, prototype routes should be removed before merge to main, but the `/sam` route and its dependencies currently exist on the `main` branch.
+- **Impact/Exploit:** If `data.href` originates from API responses or user-controlled data, it could redirect to an attacker-controlled site. Currently `data.href` comes from hardcoded card data in the prototype, limiting exploitability. The `open` action path correctly uses `'noopener,noreferrer'`.
+- **Evidence:**
+  ```typescript
+  // onboarding-cards.tsx:342-348
+  const handleClick = useCallback(() => {
+    if (data.action === 'navigate') {
+      globalThis.location.href = data.href;  // unvalidated href
+    } else {
+      globalThis.open(data.href, '_blank', 'noopener,noreferrer');
+    }
+  }, [data.action, data.href]);
+  ```
+- **Remediation:** If this prototype remains in production: validate `data.href` with `startsWith('/') && !startsWith('//')`. If this is leftover prototype code, remove it and its route per the project's prototype development rules.
+- **Confidence:** Medium (currently uses hardcoded data, so exploitability is low)
+
 ---
 
 ### Informational
@@ -306,13 +392,13 @@ The web frontend exhibits strong security posture overall: the React SPA uses sa
 - **Severity:** Info
 - **CWE:** N/A
 - **Location:** `apps/web/src/components/library/FilePreviewModal.tsx:280-283`
-- **Description:** The file preview modal's iframe uses `sandbox="allow-same-origin"` without `allow-scripts`, preventing script execution in previewed content. SVG files are explicitly excluded from inline preview (`file-utils.ts:6`), and the API sets `Content-Security-Policy: "default-src 'none'; style-src 'unsafe-inline'"` on SVG responses (`files.ts:437`).
-- **Impact/Exploit:** None. Defense-in-depth is well-implemented for file preview.
+- **Description:** The file preview modal's iframe uses `sandbox="allow-same-origin"` without `allow-scripts`, preventing script execution in previewed content. SVG files are explicitly excluded from inline preview (`file-utils.ts:6`), and the API sets `Content-Security-Policy: "default-src 'none'; style-src 'unsafe-inline'"` on SVG responses (`files.ts:437`). Note: `allow-same-origin` on the API-origin iframe is partially mitigated by the app/API being on different subdomains, but removal of `allow-same-origin` would be more robust (see WEB-008 for the related PDF CSP concern).
+- **Impact/Exploit:** None with current subdomain separation. Defense-in-depth is well-implemented for file preview.
 - **Evidence:**
   ```tsx
   <iframe sandbox="allow-same-origin" src={previewUrl} ... />
   ```
-- **Remediation:** None required.
+- **Remediation:** Consider removing `allow-same-origin` from the sandbox attribute for maximum isolation.
 - **Confidence:** High
 
 ---
@@ -326,19 +412,20 @@ The following security practices were observed and merit recognition:
 3. **URL sanitization** -- `apps/web/src/lib/url-utils.ts` sanitizes URLs to allowlist only `http:` and `https:` protocols. The `isFilePathHref()` function in MessageBubble explicitly blocks `javascript:`, `data:`, and `blob:` protocols.
 4. **CORS default-deny** -- the API CORS configuration (`apps/api/src/index.ts:496-522`) uses proper subdomain checking with `new URL()` parsing (`hostname === baseDomain || hostname.endsWith(\`.${baseDomain}\`)`) and `return null` as the default for unrecognized origins. Separate `/mcp/*` CORS uses `origin: '*'` with `credentials: false`.
 5. **Cookie security** -- session cookies use `__Secure-` prefix, `HttpOnly`, `Secure`, `SameSite=Lax`, and `Domain=.${baseDomain}` scoping. Port-access cookies correctly use `SameSite=Strict`.
-6. **Open redirect protection** -- `Landing.tsx:29-33` validates redirect paths with `startsWith('/') && !startsWith('//')` and falls back to `/dashboard`. OAuth callbacks use hardcoded `callbackURL` paths.
+6. **Open redirect protection** -- `Landing.tsx:29-33` validates redirect paths with `startsWith('/') && !startsWith('//')` and falls back to `/dashboard`. `NotificationCenter.tsx:112` validates `actionUrl` before navigation. OAuth callbacks use hardcoded `callbackURL` paths.
 7. **No `postMessage` usage** -- no `postMessage` or `addEventListener('message')` handlers found in `apps/web/src/`, eliminating an entire class of cross-origin messaging vulnerabilities.
 8. **No `eval()` or `new Function()`** -- no dynamic code execution patterns found in the SPA codebase.
 9. **Image `<img>` tag for image rendering** -- ImageViewer uses `<img src>` which prevents SVG script execution (browsers block scripts in `<img>` elements).
 10. **Marketing site CSP** -- `apps/www/` has a comprehensive CSP meta tag: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https:; connect-src 'self' ${apiUrl}; frame-src 'none'; object-src 'none'; base-uri 'self'`.
+11. **OAuth state security** -- OAuth flows use `crypto.randomUUID()` for state, store it in KV, validate it single-use, and check `storedState.userId === c.userId` on callback.
 
 ---
 
 ## Methodology
 
 - Static analysis of all files in `apps/web/`, `apps/www/`, `packages/ui/`, `packages/terminal/`, `packages/acp-client/`
-- Grep-based sweeps for: `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `eval`, `Function(`, `postMessage`, `addEventListener.*message`, `localStorage`, `sessionStorage`, `document.cookie`, `VITE_`, `sandbox`, `iframe`, `Content-Security-Policy`, `X-Frame-Options`, `SameSite`, `HttpOnly`, `credentials`, `cors`, `origin`, `href`, `javascript:`, `data:`, `securityLevel`
-- Manual code review of all markdown rendering paths, auth flows, CORS configuration, cookie settings, redirect handling, mermaid rendering, and file preview pipelines
-- Three SAM sub-subagents dispatched (all failed due to infrastructure limits); three local background subagents launched as backup covering XSS, CORS/CSRF/CSP, and secret/redirect/iframe audit areas
+- Grep-based sweeps for: `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `eval`, `Function(`, `postMessage`, `addEventListener.*message`, `localStorage`, `sessionStorage`, `document.cookie`, `VITE_`, `sandbox`, `iframe`, `Content-Security-Policy`, `X-Frame-Options`, `SameSite`, `HttpOnly`, `credentials`, `cors`, `origin`, `href`, `javascript:`, `data:`, `securityLevel`, `sourcemap`, `window.open`, `navigate`, `location.href`, `noopener`, `noreferrer`
+- Manual code review of all markdown rendering paths, auth flows, CORS configuration, cookie settings, redirect handling, mermaid rendering, file preview pipelines, and notification action URLs
+- Three SAM sub-subagents dispatched (all failed due to infrastructure limits); three local background subagents launched as backup covering XSS, CORS/CSRF/CSP, and secret/redirect/iframe audit areas. All three local subagents completed successfully and their findings were synthesized.
 - Cross-reference between control plane (apps/web/) and marketing site (apps/www/) security patterns to identify gaps
 - API-side review of session-factory, trial cookies, file serving CSP, and CORS middleware for findings that impact the frontend security posture
