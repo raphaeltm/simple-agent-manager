@@ -9,11 +9,11 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 ## Prerequisites
 
-| Requirement              | Purpose                   | Tier          |
-| ------------------------ | ------------------------- | ------------- |
+| Requirement              | Purpose                   | Tier                 |
+| ------------------------ | ------------------------- | -------------------- |
 | **Cloudflare account**   | API hosting, DNS, storage | Workers Paid ($5/mo) |
-| **GitHub account**       | Authentication, CI/CD     | Free tier     |
-| **Domain on Cloudflare** | Workspace URLs            | Any registrar |
+| **GitHub account**       | Authentication, CI/CD     | Free tier            |
+| **Domain on Cloudflare** | Workspace URLs            | Any registrar        |
 
 **Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
@@ -84,10 +84,10 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable          | Description                           | Example       |
-| ----------------- | ------------------------------------- | ------------- |
-| `BASE_DOMAIN`     | Your domain                           | `example.com` |
-| `RESOURCE_PREFIX` | Domain-derived Cloudflare resource prefix | `sa379a6` |
+| Variable          | Description                               | Example       |
+| ----------------- | ----------------------------------------- | ------------- |
+| `BASE_DOMAIN`     | Your domain                               | `example.com` |
+| `RESOURCE_PREFIX` | Domain-derived Cloudflare resource prefix | `sa379a6`     |
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -95,22 +95,25 @@ instead of choosing a generic prefix.
 
 **Environment secrets:**
 
-| Secret                     | Description                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------ |
-| `CF_API_TOKEN`             | Cloudflare API token                                                           |
-| `CF_ACCOUNT_ID`            | Cloudflare account ID (32-char hex)                                            |
-| `CF_ZONE_ID`               | Domain zone ID (32-char hex)                                                   |
-| `R2_ACCESS_KEY_ID`         | R2 API token access key                                                        |
-| `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                                                        |
-| `PULUMI_CONFIG_PASSPHRASE` | Generated passphrase                                                           |
-| `GH_CLIENT_ID`             | GitHub App client ID                                                           |
-| `GH_CLIENT_SECRET`         | GitHub App client secret                                                       |
-| `GH_APP_ID`                | GitHub App ID                                                                  |
-| `GH_APP_PRIVATE_KEY`       | GitHub App private key (PEM or base64)                                         |
-| `GH_APP_SLUG`              | GitHub App URL slug                                                            |
-| `GH_WEBHOOK_SECRET`        | GitHub App webhook secret; mapped to the Worker secret `GITHUB_WEBHOOK_SECRET` |
-| `GOOGLE_CLIENT_ID`         | Optional Google OAuth client ID for GCP provider setup                         |
-| `GOOGLE_CLIENT_SECRET`     | Optional Google OAuth client secret for GCP provider setup                     |
+| Secret                                     | Description                                                                        |
+| ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `CF_API_TOKEN`                             | Cloudflare API token                                                               |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                |
+| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                       |
+| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                            |
+| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                            |
+| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                               |
+| `GH_CLIENT_ID`                             | GitHub App client ID                                                               |
+| `GH_CLIENT_SECRET`                         | GitHub App client secret                                                           |
+| `GH_APP_ID`                                | GitHub App ID                                                                      |
+| `GH_APP_PRIVATE_KEY`                       | GitHub App private key (PEM or base64)                                             |
+| `GH_APP_SLUG`                              | GitHub App URL slug                                                                |
+| `GH_WEBHOOK_SECRET`                        | GitHub App webhook secret; mapped to the Worker secret `GITHUB_WEBHOOK_SECRET`     |
+| `GOOGLE_CLIENT_ID`                         | Optional Google OAuth client ID for GCP provider setup                             |
+| `GOOGLE_CLIENT_SECRET`                     | Optional Google OAuth client secret for GCP provider setup                         |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                      |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials   |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials |
 
 :::note
 GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. `GH_WEBHOOK_SECRET` becomes the Worker secret `GITHUB_WEBHOOK_SECRET` and must match the GitHub App webhook secret.

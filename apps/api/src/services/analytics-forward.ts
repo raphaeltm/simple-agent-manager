@@ -9,14 +9,18 @@
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { getAnalyticsDataset } from '../lib/analytics-config';
 import { log } from '../lib/logger';
 import { expectJsonRecord, readResponseJson } from '../lib/runtime-validation';
 
 // ─── Defaults (configurable via env vars per constitution Principle XI) ───
 
 const DEFAULT_FORWARD_EVENTS = [
-  'signup', 'login', 'project_created',
-  'workspace_created', 'task_submitted',
+  'signup',
+  'login',
+  'project_created',
+  'workspace_created',
+  'task_submitted',
 ].join(',');
 
 const DEFAULT_LOOKBACK_HOURS = 25; // Overlap to catch late-arriving events
@@ -26,7 +30,6 @@ const DEFAULT_SEGMENT_MAX_BATCH = 100;
 const DEFAULT_GA4_API_URL = 'https://www.google-analytics.com/mp/collect';
 const DEFAULT_GA4_MAX_BATCH = 25;
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
-const DEFAULT_DATASET = 'sam_analytics';
 const DEFAULT_FORWARD_SQL_LIMIT = 10_000;
 const DEFAULT_FORWARD_FETCH_TIMEOUT_MS = 30_000;
 
@@ -94,8 +97,10 @@ const ALLOWED_URL_PREFIXES: Record<string, string[]> = {
 
 function assertAllowedUrl(url: string, service: keyof typeof ALLOWED_URL_PREFIXES): void {
   const prefixes = ALLOWED_URL_PREFIXES[service]!;
-  if (!prefixes.some(prefix => url.startsWith(prefix))) {
-    throw new Error(`Disallowed ${service} API URL: ${url}. Must start with one of: ${prefixes.join(', ')}`);
+  if (!prefixes.some((prefix) => url.startsWith(prefix))) {
+    throw new Error(
+      `Disallowed ${service} API URL: ${url}. Must start with one of: ${prefixes.join(', ')}`
+    );
   }
 }
 
@@ -105,12 +110,12 @@ function assertAllowedUrl(url: string, service: keyof typeof ALLOWED_URL_PREFIXE
 export async function queryConversionEvents(
   env: Env,
   sinceIso: string,
-  eventNames: string[],
+  eventNames: string[]
 ): Promise<AnalyticsEvent[]> {
   const baseUrl = env.ANALYTICS_SQL_API_URL ?? DEFAULT_ANALYTICS_SQL_API_URL;
   assertAllowedUrl(baseUrl, 'analytics_sql');
   const accountId = env.CF_ACCOUNT_ID;
-  const dataset = env.ANALYTICS_DATASET ?? DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(env);
 
   if (!accountId) {
     throw new Error('CF_ACCOUNT_ID is not configured');
@@ -125,10 +130,13 @@ export async function queryConversionEvents(
   }
 
   // Build IN clause for event names (already validated — single-quote escape is defense-in-depth)
-  const eventList = eventNames.map(e => `'${e.replace(/'/g, "''")}'`).join(', ');
+  const eventList = eventNames.map((e) => `'${e.replace(/'/g, "''")}'`).join(', ');
   // SQL LIMIT is the memory-safety guard for downstream in-memory grouping (GA4 Map)
   const sqlLimit = parsePositiveInt(env.ANALYTICS_FORWARD_SQL_LIMIT, DEFAULT_FORWARD_SQL_LIMIT);
-  const fetchTimeoutMs = parsePositiveInt(env.ANALYTICS_SQL_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
+  const fetchTimeoutMs = parsePositiveInt(
+    env.ANALYTICS_SQL_FETCH_TIMEOUT_MS,
+    DEFAULT_FORWARD_FETCH_TIMEOUT_MS
+  );
 
   const sql = `
     SELECT
@@ -156,7 +164,7 @@ export async function queryConversionEvents(
     method: 'POST',
     signal: AbortSignal.timeout(fetchTimeoutMs),
     headers: {
-      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'text/plain',
     },
     body: sql,
@@ -171,7 +179,11 @@ export async function queryConversionEvents(
     throw new Error(`Analytics Engine query failed: ${response.status}`);
   }
 
-  const body = await readResponseJson(response, analyticsSqlResponseSchema, 'analytics_forward.sql');
+  const body = await readResponseJson(
+    response,
+    analyticsSqlResponseSchema,
+    'analytics_forward.sql'
+  );
   const rows = body.data ?? [];
 
   // Validate shape: first row must have the expected fields
@@ -200,7 +212,7 @@ interface SegmentTrackCall {
 }
 
 function formatSegmentBatch(events: AnalyticsEvent[]): SegmentTrackCall[] {
-  return events.map(e => ({
+  return events.map((e) => ({
     type: 'track' as const,
     userId: e.userId,
     event: e.event,
@@ -224,7 +236,7 @@ function formatSegmentBatch(events: AnalyticsEvent[]): SegmentTrackCall[] {
 
 export async function forwardToSegment(
   env: Env,
-  events: AnalyticsEvent[],
+  events: AnalyticsEvent[]
 ): Promise<{ sent: number; batches: number; error?: string }> {
   const writeKey = env.SEGMENT_WRITE_KEY;
   if (!writeKey) {
@@ -234,7 +246,10 @@ export async function forwardToSegment(
   const apiUrl = env.SEGMENT_API_URL ?? DEFAULT_SEGMENT_API_URL;
   assertAllowedUrl(apiUrl, 'segment');
   const maxBatch = parsePositiveInt(env.SEGMENT_MAX_BATCH_SIZE, DEFAULT_SEGMENT_MAX_BATCH);
-  const fetchTimeoutMs = parsePositiveInt(env.SEGMENT_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
+  const fetchTimeoutMs = parsePositiveInt(
+    env.SEGMENT_FETCH_TIMEOUT_MS,
+    DEFAULT_FORWARD_FETCH_TIMEOUT_MS
+  );
   // Note: authHeader contains Base64-encoded write key — NEVER log this value
   const authHeader = `Basic ${btoa(writeKey + ':')}`;
 
@@ -249,7 +264,7 @@ export async function forwardToSegment(
       method: 'POST',
       signal: AbortSignal.timeout(fetchTimeoutMs),
       headers: {
-        'Authorization': authHeader,
+        Authorization: authHeader,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ batch }),
@@ -283,7 +298,9 @@ interface GA4Event {
   params: Record<string, string | number>;
 }
 
-function formatGA4Events(events: AnalyticsEvent[]): { clientId: string; userId: string; events: GA4Event[] }[] {
+function formatGA4Events(
+  events: AnalyticsEvent[]
+): { clientId: string; userId: string; events: GA4Event[] }[] {
   // GA4 requires grouping by client_id (we use userId)
   // Each request can have max 25 events, all sharing the same client_id
   const byUser = new Map<string, AnalyticsEvent[]>();
@@ -295,7 +312,7 @@ function formatGA4Events(events: AnalyticsEvent[]): { clientId: string; userId: 
 
   const requests: { clientId: string; userId: string; events: GA4Event[] }[] = [];
   for (const [userId, userEvents] of byUser) {
-    const ga4Events: GA4Event[] = userEvents.map(e => ({
+    const ga4Events: GA4Event[] = userEvents.map((e) => ({
       name: e.event,
       params: {
         project_id: e.projectId,
@@ -316,7 +333,7 @@ function formatGA4Events(events: AnalyticsEvent[]): { clientId: string; userId: 
 
 export async function forwardToGA4(
   env: Env,
-  events: AnalyticsEvent[],
+  events: AnalyticsEvent[]
 ): Promise<{ sent: number; batches: number; error?: string }> {
   const measurementId = env.GA4_MEASUREMENT_ID;
   const apiSecret = env.GA4_API_SECRET;
@@ -327,7 +344,10 @@ export async function forwardToGA4(
   const baseUrl = env.GA4_API_URL ?? DEFAULT_GA4_API_URL;
   assertAllowedUrl(baseUrl, 'ga4');
   const maxBatch = parsePositiveInt(env.GA4_MAX_BATCH_SIZE, DEFAULT_GA4_MAX_BATCH);
-  const fetchTimeoutMs = parsePositiveInt(env.GA4_FETCH_TIMEOUT_MS, DEFAULT_FORWARD_FETCH_TIMEOUT_MS);
+  const fetchTimeoutMs = parsePositiveInt(
+    env.GA4_FETCH_TIMEOUT_MS,
+    DEFAULT_FORWARD_FETCH_TIMEOUT_MS
+  );
   // Note: api_secret is a query parameter per GA4 Measurement Protocol spec — NEVER log the assembled URL
   const url = `${baseUrl}?measurement_id=${encodeURIComponent(measurementId)}&api_secret=${encodeURIComponent(apiSecret)}`;
 
@@ -402,10 +422,13 @@ export async function runAnalyticsForward(env: Env): Promise<ForwardResult> {
   }
 
   const cursorKey = env.ANALYTICS_FORWARD_CURSOR_KEY ?? DEFAULT_CURSOR_KEY;
-  const lookbackHours = parsePositiveInt(env.ANALYTICS_FORWARD_LOOKBACK_HOURS, DEFAULT_LOOKBACK_HOURS);
+  const lookbackHours = parsePositiveInt(
+    env.ANALYTICS_FORWARD_LOOKBACK_HOURS,
+    DEFAULT_LOOKBACK_HOURS
+  );
   const eventNames = (env.ANALYTICS_FORWARD_EVENTS ?? DEFAULT_FORWARD_EVENTS)
     .split(',')
-    .map(e => e.trim())
+    .map((e) => e.trim())
     .filter(Boolean);
 
   // Read cursor — fall back to lookback window if no cursor exists
@@ -439,7 +462,7 @@ export async function runAnalyticsForward(env: Env): Promise<ForwardResult> {
   // Segment may receive duplicate events on retry (idempotent for analytics).
   const segmentOk = !segmentEnabled || !segmentResult.error;
   const ga4Ok = !ga4Enabled || !ga4Result.error;
-  const allEnabledSucceeded = (segmentOk && ga4Ok) && (segmentResult.sent > 0 || ga4Result.sent > 0);
+  const allEnabledSucceeded = segmentOk && ga4Ok && (segmentResult.sent > 0 || ga4Result.sent > 0);
   let newCursor = sinceIso;
   if (allEnabledSucceeded) {
     // Use the timestamp of the last event as the new cursor
@@ -485,7 +508,7 @@ export async function getForwardStatus(env: Env): Promise<{
   }
   const events = (env.ANALYTICS_FORWARD_EVENTS ?? DEFAULT_FORWARD_EVENTS)
     .split(',')
-    .map(e => e.trim())
+    .map((e) => e.trim())
     .filter(Boolean);
 
   return {

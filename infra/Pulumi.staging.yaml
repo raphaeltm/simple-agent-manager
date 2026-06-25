@@ -1,4 +1,1 @@
-config:
-  # Staging stack configuration
-  # Resource naming uses the stack name (staging) to avoid conflicts with production
-  sam-infra:resourcePrefix: sam
+config: {}

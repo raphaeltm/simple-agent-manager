@@ -64,6 +64,10 @@ jobs:
             echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
           else
             DOMAIN="${{ vars.BASE_DOMAIN }}"
+            if [ -z "$DOMAIN" ]; then
+              echo "::error::BASE_DOMAIN is required when RESOURCE_PREFIX is not set."
+              exit 1
+            fi
             HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
             PREFIX="s${HASH}"
             echo "value=$PREFIX" >> $GITHUB_OUTPUT
@@ -115,7 +119,7 @@ jobs:
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
 
       # ---- Action: Export State ----
-      - name: "Export current state"
+      - name: 'Export current state'
         if: inputs.action == 'export-state' || inputs.action == 'full-repair'
         working-directory: infra
         run: |
@@ -138,7 +142,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       # ---- Action: Remove Broken Resources ----
-      - name: "Remove broken resources from state"
+      - name: 'Remove broken resources from state'
         if: inputs.action == 'remove-broken-resources' || inputs.action == 'full-repair'
         working-directory: infra
         run: |
@@ -180,7 +184,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       # ---- Action: Refresh and Preview ----
-      - name: "Refresh (re-discover resources)"
+      - name: 'Refresh (re-discover resources)'
         if: (inputs.action == 'refresh-and-preview' || inputs.action == 'full-repair') && inputs.dry_run == false
         working-directory: infra
         run: |
@@ -196,7 +200,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
-      - name: "Preview (show what Pulumi would do)"
+      - name: 'Preview (show what Pulumi would do)'
         if: inputs.action == 'refresh-and-preview' || inputs.action == 'full-repair'
         working-directory: infra
         run: |
@@ -212,7 +216,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       # ---- Full Repair: Apply ----
-      - name: "Apply (pulumi up)"
+      - name: 'Apply (pulumi up)'
         if: inputs.action == 'full-repair' && inputs.dry_run == false
         working-directory: infra
         run: |
@@ -230,7 +234,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       # ---- Import Existing Resources & Apply ----
-      - name: "Cancel stale Pulumi locks"
+      - name: 'Cancel stale Pulumi locks'
         if: inputs.action == 'import-and-up'
         working-directory: infra
         run: |
@@ -241,7 +245,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
-      - name: "Import existing resources into Pulumi state"
+      - name: 'Import existing resources into Pulumi state'
         if: inputs.action == 'import-and-up' && inputs.dry_run == false
         working-directory: infra
         run: |
@@ -331,7 +335,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
-      - name: "Refresh after import"
+      - name: 'Refresh after import'
         if: inputs.action == 'import-and-up' && inputs.dry_run == false
         working-directory: infra
         run: |
@@ -347,7 +351,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
-      - name: "Apply after import (pulumi up)"
+      - name: 'Apply after import (pulumi up)'
         if: inputs.action == 'import-and-up' && inputs.dry_run == false
         working-directory: infra
         run: |
@@ -364,7 +368,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
-      - name: "Post-repair state summary"
+      - name: 'Post-repair state summary'
         if: (inputs.action == 'full-repair' || inputs.action == 'import-and-up') && inputs.dry_run == false
         working-directory: infra
         run: |

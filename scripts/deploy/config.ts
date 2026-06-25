@@ -2,13 +2,13 @@
  * Centralized deployment configuration
  */
 
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // Read version from package.json
-const packageJsonPath = resolve(import.meta.dirname, "../../package.json");
-const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+const packageJsonPath = resolve(import.meta.dirname, '../../package.json');
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
 
 /**
  * Derive a short, DNS-safe prefix from a domain name.
@@ -16,9 +16,24 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
  * with a letter. Must match the derivation in infra/resources/config.ts.
  */
 function derivePrefix(domain: string): string {
-  if (!domain) return "sam";
-  const hash = createHash("sha256").update(domain).digest("hex");
+  const hash = createHash('sha256').update(domain).digest('hex');
   return `s${hash.slice(0, 6)}`;
+}
+
+function getDeploymentPrefix(): string {
+  const explicitPrefix = process.env.RESOURCE_PREFIX?.trim();
+  if (explicitPrefix) {
+    return explicitPrefix;
+  }
+
+  const baseDomain = process.env.BASE_DOMAIN?.trim();
+  if (!baseDomain) {
+    throw new Error(
+      'RESOURCE_PREFIX or BASE_DOMAIN is required to derive deployment resource names'
+    );
+  }
+
+  return derivePrefix(baseDomain);
 }
 
 export const DEPLOYMENT_CONFIG = {
@@ -27,15 +42,17 @@ export const DEPLOYMENT_CONFIG = {
    * Explicit RESOURCE_PREFIX takes precedence; otherwise derived from
    * BASE_DOMAIN so forks get unique names without extra configuration.
    */
-  prefix: process.env.RESOURCE_PREFIX || derivePrefix(process.env.BASE_DOMAIN || ""),
+  get prefix(): string {
+    return getDeploymentPrefix();
+  },
 
   /**
    * Stack name mappings
    */
   stackMapping: {
-    production: "prod",
-    staging: "staging",
-    development: "dev",
+    production: 'prod',
+    staging: 'staging',
+    development: 'dev',
   } as const,
 
   /**
@@ -51,7 +68,9 @@ export const DEPLOYMENT_CONFIG = {
    * Get stack name from environment
    */
   getStackFromEnvironment(env: string): string {
-    return DEPLOYMENT_CONFIG.stackMapping[env as keyof typeof DEPLOYMENT_CONFIG.stackMapping] || env;
+    return (
+      DEPLOYMENT_CONFIG.stackMapping[env as keyof typeof DEPLOYMENT_CONFIG.stackMapping] || env
+    );
   },
 
   /**
@@ -64,8 +83,8 @@ export const DEPLOYMENT_CONFIG = {
    */
   cloudflare: {
     r2Endpoint: (accountId: string) => `${accountId}.r2.cloudflarestorage.com`,
-    r2Region: "auto",
-    defaultPort: parseInt(process.env.WRANGLER_PORT || "8787"),
+    r2Region: 'auto',
+    defaultPort: parseInt(process.env.WRANGLER_PORT || '8787'),
   },
 
   /**
@@ -73,7 +92,7 @@ export const DEPLOYMENT_CONFIG = {
    */
   getPulumiStateBucket: (environment?: string) => {
     const prefix = DEPLOYMENT_CONFIG.prefix;
-    const env = environment ? `-${environment}` : "";
+    const env = environment ? `-${environment}` : '';
     return `${prefix}-pulumi-state${env}`;
   },
 
@@ -93,17 +112,17 @@ export const DEPLOYMENT_CONFIG = {
    * DNS subdomain configuration
    */
   dns: {
-    api: "api",
-    app: "app",
-    wildcard: "*",
+    api: 'api',
+    app: 'app',
+    wildcard: '*',
   },
 
   /**
    * Development environment defaults
    */
   development: {
-    baseDomain: "localhost:8787",
-    apiUrl: "http://localhost:8787",
+    baseDomain: 'localhost:8787',
+    apiUrl: 'http://localhost:8787',
   },
 } as const;
 

@@ -13,25 +13,28 @@ This reference covers the most important configuration variables. For the comple
 
 These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generates security keys on first deploy.
 
-| Secret                       | Description                                                                                   |
-| ---------------------------- | --------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`             | AES-256-GCM key for credential encryption (auto-generated)                                    |
-| `JWT_PRIVATE_KEY`            | RSA-2048 private key for signing tokens (auto-generated)                                      |
-| `JWT_PUBLIC_KEY`             | RSA-2048 public key for token verification (auto-generated)                                   |
-| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 private key for signing deployment apply payloads (auto-generated)                    |
-| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 public key derived during deployment for deployment node verification (auto-generated) |
-| `CF_API_TOKEN`               | Cloudflare API token for infrastructure, DNS, observability, AI Gateway, and admin log access |
-| `CF_ZONE_ID`                 | Cloudflare zone ID for DNS record management                                                  |
-| `CF_ACCOUNT_ID`              | Cloudflare account ID                                                                         |
-| `GITHUB_CLIENT_ID`           | GitHub App client ID for OAuth                                                                |
-| `GITHUB_CLIENT_SECRET`       | GitHub App client secret for OAuth                                                            |
-| `GITHUB_APP_ID`              | GitHub App ID for installation tokens                                                         |
-| `GITHUB_APP_PRIVATE_KEY`     | GitHub App private key (PEM or base64)                                                        |
-| `GITHUB_APP_SLUG`            | GitHub App URL slug                                                                           |
-| `GITHUB_WEBHOOK_SECRET`      | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`            |
-| `ORIGIN_CA_CERT`             | Cloudflare Origin CA certificate for VM-agent TLS (auto-generated)                            |
-| `ORIGIN_CA_KEY`              | Cloudflare Origin CA private key for VM-agent TLS (auto-generated)                            |
-| `TRIAL_CLAIM_TOKEN_SECRET`   | Trial onboarding HMAC secret (auto-generated)                                                 |
+| Secret                                     | Description                                                                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                     |
+| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                       |
+| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (auto-generated)                                    |
+| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                     |
+| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated) |
+| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, observability, AI Gateway, and admin log access  |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                  |
+| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                   |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                          |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials               |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials             |
+| `GITHUB_CLIENT_ID`                         | GitHub App client ID for OAuth                                                                 |
+| `GITHUB_CLIENT_SECRET`                     | GitHub App client secret for OAuth                                                             |
+| `GITHUB_APP_ID`                            | GitHub App ID for installation tokens                                                          |
+| `GITHUB_APP_PRIVATE_KEY`                   | GitHub App private key (PEM or base64)                                                         |
+| `GITHUB_APP_SLUG`                          | GitHub App URL slug                                                                            |
+| `GITHUB_WEBHOOK_SECRET`                    | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`             |
+| `ORIGIN_CA_CERT`                           | Cloudflare Origin CA certificate for VM-agent TLS (auto-generated)                             |
+| `ORIGIN_CA_KEY`                            | Cloudflare Origin CA private key for VM-agent TLS (auto-generated)                             |
+| `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                  |
 
 ## Worker Variables
 
@@ -46,17 +49,17 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 
 Set in GitHub Settings → Environments → production:
 
-| Variable              | Description                     | Example            |
-| --------------------- | ------------------------------- | ------------------ |
-| `BASE_DOMAIN`         | Deployment domain               | `example.com`      |
-| `RESOURCE_PREFIX`     | Domain-derived Cloudflare resource name prefix | `sa379a6` |
-| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state      | `sa379a6-pulumi-state` |
+| Variable              | Description                                    | Example                |
+| --------------------- | ---------------------------------------------- | ---------------------- |
+| `BASE_DOMAIN`         | Deployment domain                              | `example.com`          |
+| `RESOURCE_PREFIX`     | Domain-derived Cloudflare resource name prefix | `sa379a6`              |
+| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state                     | `sa379a6-pulumi-state` |
 
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
-Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, and `GH_APP_SLUG`. `GH_WEBHOOK_SECRET` is strongly recommended for webhook signature verification. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, and `GH_WEBHOOK_SECRET`. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. The deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets.
@@ -167,19 +170,19 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Idea Execution Timeouts
 
-| Variable                           | Default            | Description                                |
-| ---------------------------------- | ------------------ | ------------------------------------------ |
-| `TASK_RUN_MAX_EXECUTION_MS`        | `14400000` (4 hr)  | Max task execution time                    |
-| `TASK_STUCK_QUEUED_TIMEOUT_MS`     | `600000` (10 min)  | Timeout for tasks stuck in queued state    |
-| `TASK_STUCK_DELEGATED_TIMEOUT_MS`  | `1860000` (31 min) | Timeout for tasks stuck in delegated state |
-| `TASK_CALLBACK_TIMEOUT_MS`         | `10000`            | Callback response timeout                  |
-| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS` | `3`                | Max callback retry attempts                |
-| `TASK_RUN_CLEANUP_DELAY_MS`        | `5000`             | Delay before task cleanup                  |
-| `TASK_RECONCILIATION_IDLE_MS`      | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in |
-| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS` | `60000` (1 min) | Response deadline after a visible task check-in |
+| Variable                                   | Default            | Description                                                                           |
+| ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------- |
+| `TASK_RUN_MAX_EXECUTION_MS`                | `14400000` (4 hr)  | Max task execution time                                                               |
+| `TASK_STUCK_QUEUED_TIMEOUT_MS`             | `600000` (10 min)  | Timeout for tasks stuck in queued state                                               |
+| `TASK_STUCK_DELEGATED_TIMEOUT_MS`          | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
+| `TASK_CALLBACK_TIMEOUT_MS`                 | `10000`            | Callback response timeout                                                             |
+| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`         | `3`                | Max callback retry attempts                                                           |
+| `TASK_RUN_CLEANUP_DELAY_MS`                | `5000`             | Delay before task cleanup                                                             |
+| `TASK_RECONCILIATION_IDLE_MS`              | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in                               |
+| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS` | `60000` (1 min)    | Response deadline after a visible task check-in                                       |
 | `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
-| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` | `7200000` (2 hr) | In-flight prompt hard-stall threshold before SAM requests prompt cancellation |
-| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` | `10000` (10 sec) | Minimum delay before the next reconciliation alarm can fire |
+| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` | `7200000` (2 hr)   | In-flight prompt hard-stall threshold before SAM requests prompt cancellation         |
+| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`   | `10000` (10 sec)   | Minimum delay before the next reconciliation alarm can fire                           |
 
 ## Node & Workspace Readiness
 
@@ -242,16 +245,16 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Runtime Config Limits
 
-| Variable                                   | Default  | Description                 |
-| ------------------------------------------ | -------- | --------------------------- |
-| `MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT` | `150`    | Max env vars per project    |
-| `MAX_PROJECT_RUNTIME_FILES_PER_PROJECT`    | `50`     | Max files per project       |
-| `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES`      | `8192`   | Max bytes per env var value |
-| `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES`   | `131072` | Max bytes per file content  |
-| `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | `256`    | Max file path length        |
-| `MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT` | `100`    | Max deployment config vars per environment |
-| `MAX_DEPLOYMENT_ENV_VALUE_BYTES`           | `65536`  | Max bytes per deployment config value |
-| `MAX_DEPLOYMENT_ENV_TOTAL_BYTES`           | `262144` | Max aggregate deployment config env size |
+| Variable                                   | Default  | Description                                |
+| ------------------------------------------ | -------- | ------------------------------------------ |
+| `MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT` | `150`    | Max env vars per project                   |
+| `MAX_PROJECT_RUNTIME_FILES_PER_PROJECT`    | `50`     | Max files per project                      |
+| `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES`      | `8192`   | Max bytes per env var value                |
+| `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES`   | `131072` | Max bytes per file content                 |
+| `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH`     | `256`    | Max file path length                       |
+| `MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT`  | `100`    | Max deployment config vars per environment |
+| `MAX_DEPLOYMENT_ENV_VALUE_BYTES`           | `65536`  | Max bytes per deployment config value      |
+| `MAX_DEPLOYMENT_ENV_TOTAL_BYTES`           | `262144` | Max aggregate deployment config env size   |
 
 ## External API Timeouts
 

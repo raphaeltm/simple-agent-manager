@@ -9,8 +9,6 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  # Pages project name — must match deploy-www.yml and teardown-www.yml
-  PAGES_PROJECT: ${{ vars.RESOURCE_PREFIX || 'sam' }}-www
 
 jobs:
   provision:
@@ -47,10 +45,19 @@ jobs:
             echo "::error::BASE_DOMAIN is not set in environment variables."
             exit 1
           fi
+          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
+          if [ -n "$EXPLICIT" ]; then
+            PREFIX="$EXPLICIT"
+          else
+            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
+            PREFIX="s${HASH}"
+          fi
           echo "base=$DOMAIN" >> "$GITHUB_OUTPUT"
           echo "www=www.$DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "pages_project=${PREFIX}-www" >> "$GITHUB_OUTPUT"
           echo "Base domain: $DOMAIN"
           echo "WWW domain: www.$DOMAIN"
+          echo "Pages project: ${PREFIX}-www"
 
       # ========================================
       # Phase 1: Cloudflare Pages Project
@@ -63,6 +70,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PAGES_PROJECT: ${{ steps.domain.outputs.pages_project }}
 
       # ========================================
       # Phase 2: DNS Records
@@ -71,6 +79,7 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          PAGES_PROJECT: ${{ steps.domain.outputs.pages_project }}
         run: |
           BASE_DOMAIN="${{ steps.domain.outputs.base }}"
           API="https://api.cloudflare.com/client/v4"
@@ -156,6 +165,7 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PAGES_PROJECT: ${{ steps.domain.outputs.pages_project }}
         run: |
           WWW_DOMAIN="${{ steps.domain.outputs.www }}"
           API="https://api.cloudflare.com/client/v4"
@@ -256,6 +266,7 @@ jobs:
         run: |
           BASE_DOMAIN="${{ steps.domain.outputs.base }}"
           WWW_DOMAIN="${{ steps.domain.outputs.www }}"
+          PAGES_PROJECT="${{ steps.domain.outputs.pages_project }}"
 
           if [ "${{ job.status }}" = "success" ]; then
             cat >> "$GITHUB_STEP_SUMMARY" <<EOF

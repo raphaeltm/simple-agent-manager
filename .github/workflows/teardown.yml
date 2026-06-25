@@ -82,7 +82,12 @@ jobs:
           echo "tail_worker=${PREFIX}-tail-worker-${STACK}" >> "$GITHUB_OUTPUT"
           echo "pages_project=${PREFIX}-web-${STACK}" >> "$GITHUB_OUTPUT"
           echo "www_project=${PREFIX}-www" >> "$GITHUB_OUTPUT"
-          echo "ai_gateway=${{ vars.AI_GATEWAY_ID || 'sam' }}" >> "$GITHUB_OUTPUT"
+          echo "analytics_dataset=${PREFIX}_analytics" >> "$GITHUB_OUTPUT"
+          AI_GATEWAY_ID="${{ vars.AI_GATEWAY_ID }}"
+          if [ -z "$AI_GATEWAY_ID" ]; then
+            AI_GATEWAY_ID="$PREFIX"
+          fi
+          echo "ai_gateway=$AI_GATEWAY_ID" >> "$GITHUB_OUTPUT"
 
           echo "### Resource Names"
           echo "- Stack: $STACK"
@@ -90,7 +95,7 @@ jobs:
           echo "- Tail Worker: ${PREFIX}-tail-worker-${STACK}"
           echo "- Pages Project: ${PREFIX}-web-${STACK}"
           echo "- WWW Project: ${PREFIX}-www"
-          echo "- AI Gateway: ${{ vars.AI_GATEWAY_ID || 'sam' }}"
+          echo "- AI Gateway: $AI_GATEWAY_ID"
           echo "- Base Domain: $BASE_DOMAIN"
 
       - name: Checkout
@@ -816,7 +821,7 @@ jobs:
           echo "- **GitHub environment secrets** — stored in GitHub Settings, not Cloudflare. Remove via Settings > Environments." >> "$GITHUB_STEP_SUMMARY"
           echo "- **Cloudflare account and zone** — the DNS zone, account, and subscription are not deleted." >> "$GITHUB_STEP_SUMMARY"
           echo "- **Workers.dev subdomain** — account-level setting shared across all Workers. Remove manually in Cloudflare dashboard only when decommissioning the entire account." >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Analytics Engine data** — \`sam_analytics\` dataset data persists for up to 90 days per Cloudflare retention policy." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Analytics Engine data** — \`${{ steps.names.outputs.analytics_dataset }}\` dataset data persists for up to 90 days per Cloudflare retention policy." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           # Troubleshooting section if any failures
